@@ -91,7 +91,6 @@ TOTAL                          2341    622    73%
 - Sign in with GitHub
 - Add repository
 - Copy upload token
-- ee52661e-f2a2-4166-be39-8e5214b68af4
 
 **2. Add to GitHub:**
 
