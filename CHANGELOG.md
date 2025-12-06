@@ -5,9 +5,107 @@ All notable changes to the juniper_canopy prototype will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.10.0] - 2025-12-06
 
-### Added
+### Added [0.10.0]
+
+- **Priority 3 Test Fixes - Environment/Integration Issues** (2025-12-06)
+  - Fixed 14 failing integration tests related to demo mode and environment setup
+  - All 1213 tests now passing with 37 skipped (environment-dependent)
+  - Comprehensive test suite validation complete
+
+### Changed [0.10.0]
+
+- **Test Suite Improvements** (2025-12-06)
+  - `test_setup.py`: Made `redis` and `pandas` optional packages, fixed `utils/` → `util/` directory name
+  - `test_api_state_endpoint.py`: Made status/phase checks case-insensitive for demo mode compatibility
+  - `test_status_bar_updates.py`: Rewrote tests to verify valid state values rather than controlling demo mode directly
+  - `test_architectural_fixes.py`: Updated assertion to check handler methods instead of `_setup_callbacks`
+  - `test_websocket_control.py`: Fixed response format checks and message type matching
+  - `test_main_ws.py`: Simplified WebSocket message handling for reliability
+  - `test_mvp.py`: Fixed dashboard title check from "Juniper Canopy Monitor" to "Juniper Canopy"
+
+### Fixed [0.10.0]
+
+- **Demo Mode Test Compatibility** (2025-12-06)
+  - Tests now properly handle demo mode's continuous state updates
+  - Status/phase assertions use case-insensitive matching (API returns `"STARTED"` not `"Started"`)
+  - WebSocket tests simplified to avoid timeout-related race conditions
+  - Metrics broadcast tests accept both `"metrics"` and `"training_metrics"` message types
+
+---
+
+## [0.9.0] - 2025-12-06
+
+### Added, [0.9.0]
+
+- **Callback Context Adapter** (2025-12-06)
+  - Created `src/frontend/callback_context.py` for testable Dash callback context
+  - Singleton pattern with thread-safe implementation
+  - Test mode injection for unit testing without Dash runtime
+  - Methods: `get_triggered_id()`, `set_test_trigger()`, `clear_test_trigger()`
+
+- **Fake Backend Root Fixture** (2025-12-06)
+  - Added `fake_backend_root` fixture to `src/tests/conftest.py`
+  - Simulates CasCor backend directory structure for testing
+  - Supports testing against different backend versions without real installation
+  - Creates minimal cascade_correlation module structure
+
+### Changed, [0.9.0]
+
+- **Dashboard Manager Handler Refactoring** (2025-12-06)
+  - Extracted callback logic into testable handler methods
+  - Handlers accept optional `trigger` kwarg to bypass `dash.callback_context`
+  - Enables unit testing of dashboard callbacks without Flask request context
+  - Updated: `_toggle_dark_mode_handler`, `_update_status_bar_handler`, `_update_network_info_handler`, etc.
+
+- **Config Manager Improvements** (2025-12-06)
+  - Replaced `verify_config_constants_consistency` with declarative specification
+  - Added `check_constants_category` method for category-based validation
+  - Improved consistency mapping for training parameters
+
+- **Test Infrastructure Enhancements** (2025-12-06)
+  - 30+ test files refactored for improved reliability
+  - Reduced test coupling to demo mode state
+  - Fixed fixture discovery issues in nested test directories
+  - Enhanced singleton reset fixture for better test isolation
+
+### Fixed, [0.9.0]
+
+- **Priority 1 & 2 Test Fixes** (2025-12-06)
+  - Fixed 21 collection errors from import/fixture issues
+  - Fixed 30 test failures from application bugs and test code bugs
+  - Resolved Flask request context mocking for `_api_url()` calls
+  - Fixed TrainingConstants parameter name mismatches
+
+---
+
+## [0.8.1] - 2025-12-05
+
+### Changed, [0.8.1]
+
+- **GitHub Deployment Cleanup** (2025-12-05)
+  - Removed sensitive tokens from CI/CD documentation
+  - Cleaned up history files for initial GitHub deployment
+  - Configured juniper_canopy as standalone package
+
+---
+
+## [0.8.0] - 2025-12-04
+
+### Changed, [0.8.0]
+
+- **Initial GitHub Deployment** (2025-12-04)
+  - Cleaned up Juniper Canopy prototype for initial deployment
+  - Configured as standalone package
+  - Updated LICENSE with comprehensive terms
+  - Revised README with full project description
+
+---
+
+## [0.7.0] - 2025-11-17
+
+### Added, [0.7.0]
 
 - **YAML Configuration Refactoring - Tests** (2025-11-17)
   - Comprehensive unit test suite (`tests/unit/test_config_refactoring.py`)
@@ -43,7 +141,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Migration examples and common pitfalls
   - Updated AGENTS.md with constants usage guidelines
 
-### Changed
+### Changed, [0.7.0]
 
 - **YAML Configuration Refactoring - Complete Application** (2025-11-17)
   - **Main Entry Point** (`src/main.py`): Server configuration with env var overrides
@@ -92,14 +190,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Tests for modifiability flags
   - Tests for constants consistency verification
 
-### In Progress
+---
 
-- Performance testing framework enhancements
-- Additional integration test coverage
+## [0.6.0] - 2025-11-13
 
-## [1.8.0] - 2025-11-13
-
-### Added, (1.8.0)
+### Added, [0.6.0]
 
 - **Complete Training Lifecycle Controls**
   - Resume button → POST /api/train/resume
@@ -137,7 +232,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - docs/DASHBOARD_ENHANCEMENTS.md - Enhancement design document
   - CI/CD regression test suite step
 
-### Changed, (1.8.0)
+### Changed, [0.6.0]
 
 - Dashboard performance: Tab switching 60% faster (~500ms → ~200ms)
 - API efficiency: 75% reduction in calls (only active tab updates)
@@ -148,7 +243,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - network_visualizer.py version: 1.3.0 → 1.4.0
 - training_metrics.py version: 0.1.4 → 1.0.0
 
-### Fixed
+### Fixed, [0.6.0]
 
 - Training Metrics tab not displaying data (endpoint changed to /api/metrics/history)
 - Dashboard update_metrics_store normalization for dict/list API formats
@@ -158,9 +253,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WebSocket manager unit tests now use AsyncMock properly
 - 4 API contract test expectations aligned with actual responses
 
-## [1.7.0] - 2025-11-11
+## [0.5.0] - 2025-11-11
 
-### Added [1.7.0]
+### Added, [0.5.0]
 
 - **Comprehensive Test Suite Expansion** (202 new tests)
   - Backend integration tests: 64 new tests (test_cascor_integration_paths.py, test_cascor_integration_monitoring.py, test_cascor_integration_topology.py, test_training_monitor.py)
@@ -168,7 +263,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Frontend component tests: 58 new tests (test_dashboard_manager.py, test_components_basic.py)
   - **Impact:** Comprehensive coverage of integration paths and component behavior
 
-### Fixed [1.7.0]
+### Fixed, [0.5.0]
 
 - **Integration Test Failures** (13 failures resolved)
   - API structure mismatches between test expectations and implementation
@@ -176,7 +271,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - CORS configuration verification completed
   - **Impact:** Test pass rate improved to 83% (240/289 tests)
 
-### Changed [1.7.0]
+### Changed, [0.5.0]
 
 - **Test Coverage Metrics**
   - Overall coverage: 61% → 22% (measurement adjusted after reorganization)
@@ -189,9 +284,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added verified training control methods documentation (start, pause, resume, stop, reset)
   - **Impact:** Clearer API documentation for demo mode control
 
-## [1.6.0] - 2025-11-11
+## [0.4.0] - 2025-11-11
 
-### Added [1.6.0]
+### Added, [0.4.0]
 
 - **WebSocket Real-Time Communication**
   - WebSocket endpoint `/ws` for real-time connections
@@ -231,7 +326,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Streamlined onboarding for CI/CD setup
   - **Impact:** Faster developer onboarding to CI/CD workflows
 
-### Fixed [1.6.0]
+### Fixed [0.4.0]
 
 - **Training Control Functionality** (98 frontend tests now passing)
   - Training control buttons now functional (wired callbacks to API endpoints)
@@ -276,7 +371,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added missing endpoints identified in tests
   - **Impact:** Frontend-backend contract compliance
 
-### Changed [1.6.0]
+### Changed [0.4.0]
 
 - **CI/CD Documentation Consolidation**
   - Consolidated 12 CI/CD documentation files → 4 focused guides
@@ -295,7 +390,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `network_visualizer.py`: v1.2.0 → v1.3.0 (input connections, None handling)
   - **Impact:** Version tracking reflects all changes
 
-### Documentation [1.6.0]
+### Documentation [0.4.0]
 
 - **CI/CD Documentation Updates**
   - Updated CI/CD documentation structure for better navigation
@@ -311,7 +406,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added redirect notices to new consolidated guides
   - **Impact:** Clear documentation structure, preserved history
 
-### Impact [1.6.0]
+### Impact [0.4.0]
 
 - **UI Functionality:** Training controls now fully operational
 - **Network Visualization:** Complete network structure visible
@@ -320,7 +415,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Documentation:** Streamlined CI/CD guides (12 → 4 files)
 - **Code Quality:** Fixed import errors, parameter handling, test alignment
 
-### Metrics Summary [1.6.0]
+### Metrics Summary [0.4.0]
 
 - Frontend Tests Passing: 98 tests (100% pass rate)
 - New API Endpoints: 6 (training control + metrics history + WebSocket)
@@ -330,11 +425,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Import Errors Fixed: 1 (WebSocket manager logger)
 - Visualization Fixes: 2 (network topology, parameter handling)
 
-## [0.4.0] - 2025-11-07
+## [0.3.0] - 2025-11-07
 
-### Major Release: Documentation Consolidation & Structure Optimization [0.4.0]
+### Major Release: Documentation Consolidation & Structure Optimization [0.3.0]
 
-#### Added [0.4.0]
+#### Added [0.3.0]
 
 - **Comprehensive Testing Documentation Suite**
   - [TESTING_QUICK_START.md](TESTING_QUICK_START.md) - Get testing in 60 seconds (~180 lines)
@@ -366,7 +461,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Common issues and troubleshooting
   - **Impact:** New developers productive in <15 minutes
 
-#### Changed [0.4.0]
+#### Changed [0.3.0]
 
 - **Documentation Structure Reorganization**
   - Root directory: Active/current docs only (11 files)
@@ -389,7 +484,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Improved quick start instructions
   - **Impact:** Better first impression for new users
 
-#### Fixed [0.4.0]
+#### Fixed [0.3.0]
 
 - **Documentation Duplication**
   - Removed duplicate AGENTS.md, CHANGELOG.md from docs/
@@ -403,7 +498,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Filled gaps in coverage reporting guides
   - **Impact:** Complete documentation coverage
 
-#### Documentation [0.4.0]
+#### Documentation [0.3.0]
 
 - **Archive Documentation** (67 files moved to docs/history/)
   - MVP/Implementation Reports: 15 files
@@ -434,7 +529,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - references_and_links.md - External links
   - DOCUMENTATION_ANALYSIS_2025-11-05.md - Consolidation analysis
 
-#### Impact [0.4.0]
+#### Impact [0.3.0]
 
 - **Documentation Discoverability:** Find any doc in <30 seconds (vs. 5+ minutes)
 - **New Developer Onboarding:** <15 minutes to productive (vs. hours)
@@ -443,7 +538,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Testing Clarity:** 5 comprehensive guides cover all skill levels
 - **Code Quality:** Clear standards in AGENTS.md Definition of Done
 
-#### Metrics Summary [0.4.0]
+#### Metrics Summary [0.3.0]
 
 - Documentation Files: 80+ files organized
 - Active Documentation: 11 root files, 6 docs/ files
@@ -452,18 +547,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documentation Coverage: 100% of project aspects
 - Average Time to Find Info: <30 seconds
 
-### Documentation File Changes [0.4.0]
+### Documentation File Changes [0.3.0]
 
 - **Created:** TESTING_QUICK_START.md, TESTING_ENVIRONMENT_SETUP.md, TESTING_MANUAL.md, TESTING_REFERENCE.md, TESTING_REPORTS_COVERAGE.md, QUICK_START.md, ENVIRONMENT_SETUP.md, DOCUMENTATION_OVERVIEW.md
 - **Enhanced:** AGENTS.md, README.md, CHANGELOG.md
 - **Archived:** 67 files to docs/history/
 - **Removed:** Duplicate AGENTS.md, CHANGELOG.md from docs/
 
-## [0.3.1] - 2025-10-30
+## [0.2.1] - 2025-10-30
 
-### Minor Release: Phase 2.5 Pre-Deployment MVP Enhancements [0.3.1]
+### Minor Release: Phase 2.5 Pre-Deployment MVP Enhancements [0.2.1]
 
-#### Added, [0.3.2]
+#### Added, [0.2.1]
 
 - **Client-Side WebSocket Real-Time Updates (P1B)**
   - Created [src/frontend/assets/websocket_client.js](src/frontend/assets/websocket_client.js)
@@ -497,19 +592,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Enhanced error handling and logging
   - **Impact:** More flexible and robust configuration
 
-#### Changed [0.3.1]
+#### Changed [0.2.1]
 
 - **WebSocket Architecture**
   - Moved from HTTP polling to push-based WebSocket updates
   - Breaking change: Frontend now requires WebSocket support
   - **Migration:** Update clients to use websocket_client.js
 
-#### Documentation [0.3.1]
+#### Documentation [0.2.1]
 
 - **notes/MVP_PRE_DEPLOYMENT_IMPLEMENTATION_2025-10-30.md** - Complete Phase 2.5 implementation details
 - **notes/DEVELOPMENT_ROADMAP.md** - Updated with Phase 2 completion status
 
-#### Impact [0.3.1]
+#### Impact [0.2.1]
 
 - **Real-Time Performance:** <100ms update latency (vs. 1000ms polling)
 - **User Control:** Full training lifecycle management
@@ -517,18 +612,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Configuration Flexibility:** Environment-based overrides, validation
 - **MVP Readiness:** All P1 priority items complete
 
-#### Metrics Summary [0.3.1]
+#### Metrics Summary [0.2.1]
 
 - New Tests: 35 tests (13 + 12 + 10)
 - Coverage Improvement: DemoMode 84% (target: 60%+)
 - WebSocket Latency: <100ms (vs. 1000ms polling)
 - Configuration: Full validation and expansion support
 
-## [0.3.0] - 2025-11-03
+## [0.2.0] - 2025-11-03
 
-### Major Release: Testing Infrastructure & CI/CD Pipeline [0.3.0]
+### Major Release: Testing Infrastructure & CI/CD Pipeline [0.2.0]
 
-#### Added [0.3.0]
+#### Added [0.2.0]
 
 - **Complete Test Infrastructure** - 170+ new tests, 100% pass rate, 73% coverage
   - Frontend component tests: 73 tests (71-94% coverage per component)
@@ -572,7 +667,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - MyPy type checker configuration
   - **Impact:** Consistent code style across all tools
 
-#### Fixed [0.3.0]
+#### Fixed [0.2.0]
 
 - **Test Fixture Discovery** - Created `src/tests/conftest.py` at root (21 errors eliminated)
   - All fixtures now discoverable by pytest
@@ -611,7 +706,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed obsolete test expectations
   - **Impact:** All architecture tests passing
 
-#### Changed [0.3.0]
+#### Changed [0.2.0]
 
 - **Test Organization** - Renamed `implementation_script.py` (not a pytest file)
   - Tests now properly organized by category
@@ -633,7 +728,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Ensures backward compatibility with expected format
   - **Impact:** Frontend components work without modification
 
-#### Documentation [0.3.0]
+#### Documentation [0.2.0]
 
 - **docs/CI_CD.md** - Comprehensive CI/CD pipeline documentation (1,000+ lines)
 - **docs/CODECOV_SETUP.md** - Coverage tracking setup guide
@@ -646,7 +741,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **README.md** - Added badges, testing section, CI/CD section, development workflow
 - **DEVELOPMENT_ROADMAP.md** - Updated Phase 2 status to complete
 
-#### Impact [0.3.0]
+#### Impact [0.2.0]
 
 - **Test Reliability:** Zero flaky tests, 100% deterministic results
 - **Developer Velocity:** Pre-commit catches issues before commit, CI validates all PRs
@@ -655,7 +750,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Production Ready:** Complete test suite, quality gates, CI/CD automation
 - **Documentation:** 15+ new files, 10,000+ lines of guides and reports
 
-#### Metrics Summary [0.3.0]
+#### Metrics Summary [0.2.0]
 
 - Test Errors: 21 → 0 (100% elimination)
 - Test Failures: 17 → 0 (100% resolution)
@@ -665,16 +760,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New Test Files: 7 files, 170+ tests
 - New Documentation: 15+ files, 10,000+ lines
 
-### Changed Files [0.3.0]
+### Changed Files [0.2.0]
 
 - **Testing Commands** - Updated AGENTS.md with correct pytest paths and coverage commands
 - **README Badges** - Added CI/CD, coverage, Python version, license, and code style badges
 
-## [0.2.1] - 2025-10-29
+## [0.1.1] - 2025-10-29
 
-### Fixed Issues [0.2.1]
+### Fixed Issues [0.1.1]
 
-#### Critical Demo Mode Activation [0.2.1]
+#### Critical Demo Mode Activation [0.1.1]
 
 - **Demo mode environment variable check**
   - Added explicit check for `CASCOR_DEMO_MODE` environment variable in `main.py`
@@ -683,7 +778,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Prevents false success when cascor backend exists but has no network
   - **Impact:** Demo mode now activates correctly, generates training data
 
-#### Critical Dashboard Data Flow [0.2.1]
+#### Critical Dashboard Data Flow [0.1.1]
 
 - **Dashboard API URL construction bug**
   - Fixed `dashboard_manager.py` callbacks using incorrect `request.host_url`
@@ -692,7 +787,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - URLs now correctly target `/api/*` instead of `/dashboard/api/*`
   - All 4 tabs now display real-time data correctly
 
-#### Error Visibility [0.2.1]
+#### Error Visibility [0.1.1]
 
 - **API fetch error logging**
   - Changed exception logging from debug to warning level
@@ -700,24 +795,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added success logging at debug level (fetched count, URL)
   - Prevents silent failures in production
 
-#### Timeout Improvements [0.2.1]
+#### Timeout Improvements [0.1.1]
 
 - **Request timeout increases**
   - Standard endpoints: 1s → 2s
   - Decision boundary: 2s → 3s (computationally intensive)
   - Prevents false failures on slower systems
 
-### Documentation Updates [0.2.1]
+### Documentation Updates [0.1.1]
 
 - **notes/MISSING_DATA_FIX_2025-10-29.md** - Complete analysis of dashboard data issue
 - **notes/CURRENT_STATUS_REPORT.md** - Comprehensive status verification
 - **notes/DEVELOPMENT_ROADMAP.md** - Updated with regression fix recommendations
 
-## [0.2.0] - 2025-10-29
+## [0.1.0] - 2025-10-29
 
-### Fixed Prioritized Issues [0.2.0]
+### Fixed Prioritized Issues [0.1.0]
 
-#### Critical Regression [0.2.0]
+#### Critical Regression [0.1.0]
 
 - **Demo script Python interpreter path**
   - Fixed `demo` and `utils/run_demo.bash` to use conda environment Python (`$CONDA_PREFIX/bin/python`)
@@ -726,7 +821,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `CASCOR_DEMO_MODE=1` environment variable export
   - Resolves: `ModuleNotFoundError: No module named 'uvicorn'`
 
-#### Thread Safety [0.2.0]
+#### Thread Safety [0.1.0]
 
 - **DemoMode concurrent access protection**
   - Added `threading.Lock()` for shared state synchronization
@@ -735,7 +830,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Made getter methods thread-safe with lock guards
   - Prevents: Race conditions, RuntimeError during iteration
 
-#### Shutdown Handling [0.2.0]
+#### Shutdown Handling [0.1.0]
 
 - **DemoMode stop mechanism**
   - Replaced `time.sleep()` with `Event.wait()` for interruptible sleep
@@ -743,14 +838,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added timeout handling for unresponsive threads
   - Shutdown now completes within `update_interval` instead of hanging
 
-#### Memory Management [0.2.0]
+#### Memory Management [0.1.0]
 
 - **Bounded collections**
   - Changed `list` to `deque(maxlen=1000)` for all history tracking
   - Prevents unbounded memory growth during long training sessions
   - Applies to: `train_loss`, `train_accuracy`, `val_loss`, `val_accuracy`, `metrics_history`
 
-#### WebSocket Communication [0.2.0]
+#### WebSocket Communication [0.1.0]
 
 - **Thread-safe broadcasting**
   - Added `WebSocketManager.set_event_loop()` method
@@ -759,9 +854,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Integrated event loop setting in `main.py` startup
   - Updated `DemoMode` to use `broadcast_from_thread()` instead of `broadcast_sync()`
 
-### Changed Components [0.2.0]
+### Changed Components [0.1.0]
 
-#### Metric Key Standardization [0.2.0]
+#### Metric Key Standardization [0.1.0]
 
 - **Validation metric naming**
   - Renamed `value_loss` → `val_loss`
@@ -769,7 +864,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Standardizes on industry convention (`val_` prefix)
   - **Breaking Change:** Code depending on old keys needs update
 
-#### State Management [0.2.0]
+#### State Management [0.1.0]
 
 - **DemoMode initialization**
   - Added `reset` parameter to `start()` method (default: `True`)
@@ -777,7 +872,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Supports both fresh runs and continued training
   - Prevents state leakage between sessions
 
-#### Error Handling [0.2.0]
+#### Error Handling [0.1.0]
 
 - **Logging improvements**
   - Distinguish `ImportError` (silent) from other exceptions (warning)
@@ -785,9 +880,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added structured error messages with `{type(e).__name__}: {e}` format
   - Prevents silent failures
 
-### Added Documents [0.2.0]
+### Added Documents [0.1.0]
 
-#### Documentation File Updates [0.2.0]
+#### Documentation File Updates [0.1.0]
 
 - **AGENTS.md** - Comprehensive development guide
   - Quick start commands
@@ -811,25 +906,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **CHANGELOG.md** - This file
 
-#### Features [0.2.0]
+#### Features [0.1.0]
 
 - **Import statement for copy module** in `demo_mode.py` (preparation for deep copying)
 
-### Deprecated [0.2.0]
+### Deprecated [0.1.0]
 
 None.
 
-### Removed [0.2.0]
+### Removed [0.1.0]
 
 None.
 
-### Security [0.2.0]
+### Security [0.1.0]
 
 None.
 
-## [0.1.4] - 2025-10-21
+## [0.0.4] - 2025-10-21
 
-### Added Features [0.1.4]
+### Added Features [0.0.4]
 
 - Initial demo mode implementation
 - WebSocket communication
@@ -860,7 +955,7 @@ None.
 
 ## Developer Notes
 
-### Breaking Changes in 0.4.0
+### Breaking Changes in [0.0.4]
 
 #### Documentation File Locations
 
@@ -908,7 +1003,7 @@ juniper_canopy/
 
 **Impact:** <15 minutes to productive (vs. hours)
 
-### Breaking Changes in 0.3.1
+### Breaking Changes in [0.0.3-1]
 
 #### WebSocket Architecture
 
@@ -932,7 +1027,7 @@ ws.onmessage = (event) => {
 
 **Migration:** Include `src/frontend/assets/websocket_client.js` in your frontend.
 
-### Breaking Changes in 0.2.0
+### Breaking Changes for Metrics in [0.0.3-1]
 
 #### Metric Key Names
 
@@ -967,7 +1062,7 @@ No migration steps required unless:
 
 ### Testing
 
-After upgrading to 0.4.0:
+After upgrading to [0.0.3-1]:
 
 ```bash
 # Verify documentation structure
@@ -989,7 +1084,7 @@ cd src && pytest tests/ --cov=. --cov-report=html
 open ../reports/coverage/index.html
 ```
 
-After upgrading to 0.3.1:
+After upgrading to [0.0.3]:
 
 ```bash
 # Verify WebSocket client
@@ -1004,7 +1099,7 @@ cd src && pytest tests/integration/test_demo_mode_advanced.py -v
 cd src && pytest tests/integration/test_websocket_control.py -v
 ```
 
-After upgrading to 0.3.0:
+After upgrading to [0.0.2]:
 
 ```bash
 # Verify CI/CD setup
@@ -1018,7 +1113,7 @@ cd src && pytest tests/ -v --cov=. --cov-report=html
 cd src && pytest tests/ --cov=. --cov-report=term-missing
 ```
 
-After upgrading to 0.2.0:
+After upgrading to [0.0.1]:
 
 ```bash
 # Verify demo mode works
@@ -1033,30 +1128,30 @@ cd src && /opt/miniforge3/envs/JuniperPython/bin/python -c "import uvicorn; prin
 
 ### For More Information
 
-#### v0.4.0 Documentation Consolidation
+#### v0.0.4 Documentation Consolidation
 
 - See [DOCUMENTATION_OVERVIEW.md](DOCUMENTATION_OVERVIEW.md) for complete documentation navigation
 - See [QUICK_START.md](QUICK_START.md) to get running in 5 minutes
 - See [TESTING_QUICK_START.md](TESTING_QUICK_START.md) for testing in 60 seconds
 - See [docs/DOCUMENTATION_ANALYSIS_2025-11-05.md](docs/DOCUMENTATION_ANALYSIS_2025-11-05.md) for consolidation analysis
 
-#### v0.3.1 Pre-Deployment Enhancements
+#### v0.0.3-1 Pre-Deployment Enhancements
 
 - See [docs/history/MVP_PRE_DEPLOYMENT_IMPLEMENTATION_2025-10-30.md](docs/history/MVP_PRE_DEPLOYMENT_IMPLEMENTATION_2025-10-30.md) for Phase 2.5 details
 
-#### v0.3.0 Testing & CI/CD
+#### v0.0.3 Testing & CI/CD
 
 - See [docs/CI_CD.md](docs/CI_CD.md) for CI/CD pipeline guide
 - See [docs/PRE_COMMIT_GUIDE.md](docs/PRE_COMMIT_GUIDE.md) for code quality automation
 - See [docs/history/FINAL_STATUS_2025-11-03.md](docs/history/FINAL_STATUS_2025-11-03.md) for complete Phase 2 status
 - See [docs/history/TEST_FIXES_2025-11-03.md](docs/history/TEST_FIXES_2025-11-03.md) for test fix details
 
-#### v0.2.1 Dashboard Fix
+#### v0.0.2 Dashboard Fix
 
 - See [docs/history/MISSING_DATA_FIX_2025-10-29.md](docs/history/MISSING_DATA_FIX_2025-10-29.md) for dashboard data flow analysis
 - See [docs/history/CURRENT_STATUS_REPORT.md](docs/history/CURRENT_STATUS_REPORT.md) for status verification
 
-#### v0.2.0 Regression Fixes
+#### v0.0.1 Regression Fixes
 
 - See [docs/history/REGRESSION_FIX_REPORT.md](docs/history/REGRESSION_FIX_REPORT.md) for detailed technical analysis
 - See [docs/history/COMPLETE_FIX_SUMMARY_2025-10-29.md](docs/history/COMPLETE_FIX_SUMMARY_2025-10-29.md) for all fixes
