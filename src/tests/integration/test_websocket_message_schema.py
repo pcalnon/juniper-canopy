@@ -16,6 +16,8 @@
 #    Integration tests verifying WebSocket messages follow standardized schema.
 #
 #####################################################################################################################################################################################################
+import contextlib
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -131,7 +133,7 @@ class TestWebSocketMessageSchema:
 
             # Check next several messages
             for _ in range(10):
-                try:
+                with contextlib.suppress(Exception):
                     message = websocket.receive_json(timeout=2.0)
 
                     # Skip connection-related messages
@@ -141,8 +143,6 @@ class TestWebSocketMessageSchema:
                     # All data messages must have timestamp
                     assert "timestamp" in message
                     assert isinstance(message["timestamp"], (int, float))
-                except Exception:
-                    pass
 
 
 class TestControlWebSocketSchema:
@@ -182,7 +182,7 @@ class TestMessageFormatConsistency:
             websocket.receive_json()
 
             for _ in range(10):
-                try:
+                with contextlib.suppress(Exception):
                     message = websocket.receive_json(timeout=2.0)
 
                     # Skip special messages
@@ -193,8 +193,6 @@ class TestMessageFormatConsistency:
                     if message.get("type") in ["state", "metrics", "topology", "event"]:
                         assert set(message.keys()) == {"type", "timestamp", "data"}
                         break
-                except Exception:
-                    pass
 
             # If no data messages found, that's okay (demo mode might not be active)
 
@@ -208,7 +206,7 @@ class TestMessageFormatConsistency:
             current_time = time.time()
 
             for _ in range(10):
-                try:
+                with contextlib.suppress(Exception):
                     message = websocket.receive_json(timeout=2.0)
 
                     if "timestamp" in message:
@@ -217,5 +215,3 @@ class TestMessageFormatConsistency:
                         # (within last hour to next hour)
                         assert current_time - 3600 < ts < current_time + 3600
                         break
-                except Exception:
-                    pass

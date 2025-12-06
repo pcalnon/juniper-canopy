@@ -12,6 +12,8 @@
 # Description:   Comprehensive coverage tests for NetworkVisualizer component
 #####################################################################
 """Comprehensive coverage tests for NetworkVisualizer (69% -> 80%+)."""
+
+import itertools
 import sys
 from pathlib import Path
 
@@ -65,14 +67,14 @@ def simple_topology():
 @pytest.fixture
 def large_topology():
     """Large network topology for stress testing."""
-    connections = []
-    for i in range(10):
-        for h in range(5):
-            connections.append({"from": f"input_{i}", "to": f"hidden_{h}", "weight": 0.1 * i})
-    for h in range(5):
-        for o in range(3):
-            connections.append({"from": f"hidden_{h}", "to": f"output_{o}", "weight": 0.2 * h})
-
+    connections = [
+        {"from": f"input_{i}", "to": f"hidden_{h}", "weight": 0.1 * i}
+        for i, h in itertools.product(range(10), range(5))
+    ]
+    connections.extend(
+        {"from": f"hidden_{h}", "to": f"output_{o}", "weight": 0.2 * h}
+        for h, o in itertools.product(range(5), range(3))
+    )
     return {
         "input_units": 10,
         "hidden_units": 5,

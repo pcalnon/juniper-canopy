@@ -233,4 +233,4 @@ class TestTrainingStateThreadSafety:
         for t in threads:
             t.join()
 
-        assert len(errors) == 0
+        assert not errors

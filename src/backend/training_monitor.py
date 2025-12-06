@@ -298,48 +298,6 @@ class TrainingState:
             if "timestamp" not in kwargs:
                 self.__timestamp = time.time()
 
-        # with self.__lock:
-        #     if "status" in kwargs:
-        #         self.__status = kwargs["status"]
-        #     if "phase" in kwargs:
-        #         self.__phase = kwargs["phase"]
-        #     if "learning_rate" in kwargs:
-        #         self.__learning_rate = kwargs["learning_rate"]
-        #     if "max_hidden_units" in kwargs:
-        #         self.__max_hidden_units = kwargs["max_hidden_units"]
-        #     if "current_epoch" in kwargs:
-        #         self.__current_epoch = kwargs["current_epoch"]
-        #     if "current_step" in kwargs:
-        #         self.__current_step = kwargs["current_step"]
-        #     if "network_name" in kwargs:
-        #         self.__network_name = kwargs["network_name"]
-        #     if "dataset_name" in kwargs:
-        #         self.__dataset_name = kwargs["dataset_name"]
-        #     if "threshold_function" in kwargs:
-        #         self.__threshold_function = kwargs["threshold_function"]
-        #     if "optimizer_name" in kwargs:
-        #         self.__optimizer_name = kwargs["optimizer_name"]
-        #     if "candidate_pool_status" in kwargs:
-        #         self.__candidate_pool_status = kwargs["candidate_pool_status"]
-        #     if "candidate_pool_phase" in kwargs:
-        #         self.__candidate_pool_phase = kwargs["candidate_pool_phase"]
-        #     if "candidate_pool_size" in kwargs:
-        #         self.__candidate_pool_size = kwargs["candidate_pool_size"]
-        #     if "top_candidate_id" in kwargs:
-        #         self.__top_candidate_id = kwargs["top_candidate_id"]
-        #     if "top_candidate_score" in kwargs:
-        #         self.__top_candidate_score = kwargs["top_candidate_score"]
-        #     if "second_candidate_id" in kwargs:
-        #         self.__second_candidate_id = kwargs["second_candidate_id"]
-        #     if "second_candidate_score" in kwargs:
-        #         self.__second_candidate_score = kwargs["second_candidate_score"]
-        #     if "pool_metrics" in kwargs:
-        #         self.__pool_metrics = kwargs["pool_metrics"]
-        #     if "timestamp" in kwargs:
-        #         self.__timestamp = kwargs["timestamp"]
-        #     else:
-        #         self.__timestamp = time.time()
-
     def to_json(self) -> str:
         """
         Serialize state to JSON string.

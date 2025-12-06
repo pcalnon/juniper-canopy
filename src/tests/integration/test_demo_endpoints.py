@@ -17,6 +17,7 @@
 #    endpoints are accessible and functional when running in demo mode.
 #
 #####################################################################################################################################################################################################
+import contextlib
 import os
 import time
 
@@ -97,16 +98,13 @@ class TestWebSocketTrainingEndpoint:
             # Wait for state messages
             state_received = False
             for _ in range(10):
-                try:
+                with contextlib.suppress(Exception):
                     message = websocket.receive_json(timeout=2.0)
                     if message.get("type") == "state":
                         state_received = True
                         assert "data" in message
                         assert "timestamp" in message
                         break
-                except Exception:
-                    pass
-
             assert state_received, "No state messages received from demo mode"
 
     @pytest.mark.requires_server
@@ -118,16 +116,13 @@ class TestWebSocketTrainingEndpoint:
 
             metrics_received = False
             for _ in range(15):
-                try:
+                with contextlib.suppress(Exception):
                     message = websocket.receive_json(timeout=2.0)
                     if message.get("type") == "metrics":
                         metrics_received = True
                         assert "data" in message
                         assert "timestamp" in message
                         break
-                except Exception:
-                    pass
-
             assert metrics_received, "No metrics messages received from demo mode"
 
 
@@ -294,7 +289,7 @@ class TestDataFlowIntegration:
                     break
 
             # Should receive multiple types of messages
-            assert len(message_types) > 0, "No messages received from demo mode"
+            assert message_types, "No messages received from demo mode"
 
     def test_state_updates_are_consistent(self, test_client):
         """Test state updates are consistent over time."""

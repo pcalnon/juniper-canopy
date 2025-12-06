@@ -14,7 +14,7 @@
 #
 # -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # Notes:
-#     
+#
 #
 #
 #######################################################################################################################################################################################
@@ -22,35 +22,11 @@
 #####################################################################################################
 # Specify the Python script to run:
 ####################################################################################################
-#PYTHON_SCRIPT_NAME="binary_classifier.py"
-#PYTHON_SCRIPT_NAME="mnist_classifier.py"
-#PYTHON_SCRIPT_NAME="mnist_dynamic_classifier.py"
-#PYTHON_SCRIPT_NAME="dynamic_classifier.py"
-#PYTHON_SCRIPT_NAME="full_dynamic_classifier.py"
-#PYTHON_SCRIPT_NAME="static_nn.py"
-#PYTHON_SCRIPT_NAME="dynamic_layer_nn-00.py"
-#PYTHON_SCRIPT_NAME="dynamic_layer_nn-01.py"
-#PYTHON_SCRIPT_NAME="dynamic_layer_nn-02.py"
-#PYTHON_SCRIPT_NAME="dynamic_nodes_nn-00.py"
-
-
 PARAMS="$@"
-
-# SCRIPT="/home/pcalnon/Development/python/dynamic_nn/src/prototypes/auto_grad_test.py"
-# SCRIPT="/home/pcalnon/Development/python/dynamic_nn/src/prototypes/torchexplorer_test-0.py"
-# SCRIPT="/home/pcalnon/Development/python/dynamic_nn/src/prototypes/torchexplorer_test-1.py"
-# SCRIPT="/home/pcalnon/Development/python/dynamic_nn/src/prototypes/torchexplorer_test-2.py"
-# SCRIPT="/home/pcalnon/Development/python/dynamic_nn/src/prototypes/torchexplorer_test-3.py"
-# SCRIPT="/home/pcalnon/Development/python/dynamic_nn/src/prototypes/torchexplorer_test-3a.py"
-# SCRIPT="/home/pcalnon/Development/python/dynamic_nn/src/prototypes/torchexplorer_test-4.py"
-# SCRIPT="/home/pcalnon/Development/python/dynamic_nn/src/prototypes/torchexplorer_test-4a.py"
-# SCRIPT="/home/pcalnon/Development/python/dynamic_nn/src/prototypes/claude_sonnet_3.7_0.py"
 SCRIPT="claude_sonnet_3.7_0.py"
 
 
-#export PYTHON_SCRIPT_NAME="$(filename "${SCRIPT}")"
 export PYTHON_SCRIPT_NAME="$(basename "${SCRIPT}")"
-#export PYTHON_SCRIPT_DIR="$(dirname "${SCRIPT}")"
 export PYTHON_SCRIPT_DIR="prototypes"
 
 export PYTHON_SCRIPT_PATH="${PYTHON_SCRIPT_DIR}/${PYTHON_SCRIPT_NAME}"
@@ -59,8 +35,6 @@ export PYTHON_SCRIPT_PATH="${PYTHON_SCRIPT_DIR}/${PYTHON_SCRIPT_NAME}"
 #####################################################################################################
 # Define Global Configuration File Constants
 ####################################################################################################
-# export ROOT_PROJ_NAME="dynamic_nn"
-# export ROOT_PROJ_NAME="juniper"
 export ROOT_PROJ_NAME="Juniper"
 export ROOT_CONF_NAME="conf"
 export ROOT_CONF_FILE_NAME="script_util.cfg"
@@ -73,12 +47,9 @@ source "${ROOT_CONF_FILE}"
 ####################################################################################################
 # Configure Script Environment
 ####################################################################################################
-# Determine Project Dir
-export BASE_DIR=$(${GET_PROJECT_SCRIPT} "${BASH_SOURCE}")
-# Determine Host OS
-export CURRENT_OS=$(${GET_OS_SCRIPT})
-# Define Script Functions
-source "${DATE_FUNCTIONS_SCRIPT}"
+export BASE_DIR=$(${GET_PROJECT_SCRIPT} "${BASH_SOURCE}")  # Determine Project Dir
+export CURRENT_OS=$(${GET_OS_SCRIPT})                      # Determine Host OS
+source "${DATE_FUNCTIONS_SCRIPT}"                          # Define Script Functions
 
 
 ####################################################################################################
@@ -91,7 +62,6 @@ export LOGGING_DIR="${BASE_DIR}/${LOGGING_DIR_NAME}"
 export UTILITY_DIR="${BASE_DIR}/${UTILITY_DIR_NAME}"
 
 export PYTHON="$(which python3)"
-
 export PYTHON_SCRIPT="${SOURCE_DIR}/${PYTHON_SCRIPT_PATH}"
 
 
@@ -99,7 +69,6 @@ export PYTHON_SCRIPT="${SOURCE_DIR}/${PYTHON_SCRIPT_PATH}"
 # Update the Python Path for the script
 ####################################################################################################
 PATH_DEL=":"
-#PATH_FOUND="$(grep "${SOURCE_DIR}" "${PYTHON_PATH}")"
 PATH_FOUND="$(echo "${PYTHONPATH}" | grep "${SOURCE_DIR}")"
 if [[ "${PATH_FOUND}" == "" ]]; then
     [[ ( "${PYTHON_PATH}" == "" ) || ( "${PYTHONPATH: -1}" == "${PATH_DEL}" ) ]] && PATH_DEL=""
@@ -121,8 +90,6 @@ echo " "
 ####################################################################################################
 # Execute Python script
 ####################################################################################################
-#echo "time ${PYTHON} ${PYTHON_SCRIPT} >./output.log"
 echo "time ${PYTHON} ${PYTHON_SCRIPT} ${PARAMS}"
 
-#time ${PYTHON} ${PYTHON_SCRIPT} >./output.log
 time ${PYTHON} ${PYTHON_SCRIPT} ${PARAMS}

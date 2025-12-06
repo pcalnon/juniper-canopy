@@ -374,7 +374,7 @@ frontend:
     resolution: 100        # Grid resolution
     opacity: 0.7           # Contour opacity
     contour_levels: 20     # Number of contour lines
-    color_scale: Viridis   # Colormap
+    color_scale: Viridis   # Colmar
     show_data_points: true
     show_misclassified: true
 ```

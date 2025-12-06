@@ -43,7 +43,7 @@ This guide explains how to use and extend the centralized constants infrastructu
 
 ### Location
 
-```
+```bash
 src/constants.py
 ```
 
@@ -82,44 +82,48 @@ class ServerConstants:
 | `DashboardConstants` | UI behavior and limits | Update intervals, timeouts, data limits |
 | `ServerConstants` | Server configuration | Host, port, WebSocket paths |
 
-## When to Use Constants
+## When to Use Constants, in Application
 
 ### Use Constants For
 
 ✅ **Application-wide values**
+
 - Default values used across multiple components
 - Configuration limits (min/max ranges)
 - Standard timeouts and intervals
 
 ✅ **Values that rarely change**
+
 - Network ports
 - Buffer sizes
 - Color schemes for visualizations
 
 ✅ **Values with semantic meaning**
+
 - Named constants that improve code clarity
 - Values that should remain consistent across the app
 
 ### Don't Use Constants For
 
 ❌ **Test-specific values**
+
 - Test timeouts and intervals (keep in test files)
 - Mock data values
 - Test-specific configurations
 
 ❌ **Runtime-derived values**
+
 - Calculated values
 - Environment-specific overrides (use config files)
 - User input or dynamic data
 
 ❌ **Local algorithm parameters**
+
 - Values specific to a single function
 - Temporary tuning parameters
 - Experimental values during development
 
 ## How to Add New Constants
-
-### Step 1: Identify the Need
 
 Before adding a constant, ask:
 
@@ -138,7 +142,7 @@ Determine which existing class best fits the constant:
 - **UI/Display-related** → `DashboardConstants`
 - **Server/Network-related** → `ServerConstants`
 
-If no class fits, consider creating a new class (see [Creating New Classes](#creating-new-classes)).
+If no class fits, consider creating a new class (see [Creating New Classes](#Example 2: Creating a New Constant Class)).
 
 ### Step 3: Name the Constant
 
@@ -282,6 +286,7 @@ ERROR_TEXT_COLOR_HEX: Final[str] = "#dc3545"
 ### When to Use Constants
 
 **Constants** are for values that:
+
 - Are the same across all environments
 - Define application behavior
 - Rarely or never change
@@ -296,6 +301,7 @@ WS_TRAINING_PATH: Final[str] = "/ws/training"  # API contract
 ### When to Use Configuration
 
 **Configuration** (in `conf/app_config.yaml`) is for values that:
+
 - Vary by environment (dev/test/prod)
 - Can be overridden by users
 - Change deployment-to-deployment
@@ -568,6 +574,7 @@ dcc.Interval(
 ```
 
 **Benefits:**
+
 - Clear semantic meaning ("fast" vs "slow" updates)
 - Single source of truth for intervals
 - Easy to change both intervals simultaneously
@@ -759,7 +766,7 @@ When migrating hard-coded values to constants:
 
 ### Decision Tree
 
-```
+```bash
 Is this a hard-coded value?
 ├─ Used in multiple places? → YES → Add to constants
 ├─ Has semantic meaning? → YES → Add to constants  

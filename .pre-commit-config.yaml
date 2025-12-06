@@ -7,7 +7,7 @@
 # Version:       1.0.0
 #
 # Date:          2025-11-03
-# Last Modified: 2025-12-03
+# Last Modified: 2025-12-06 08:49:25 CST
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-2025 Paul Calnon
@@ -31,7 +31,6 @@ repos:
         args: [--markdown-linebreak-ext=md]
       - id: end-of-file-fixer
       - id: check-yaml
-      # args: [--safe]
       - id: check-json
       - id: check-toml
       - id: check-added-large-files
@@ -93,7 +92,6 @@ repos:
     rev: 1.7.6
     hooks:
       - id: bandit
-        # args: ["-s", "B101,B104,B110,B112,B404,B601,B603,B607", "-r"]
         args: [-s, "B101,B104,B110,B112,B404,B601,B603,B607", -r]
         # Only run on Python files
         types: [python]

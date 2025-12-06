@@ -169,14 +169,14 @@ class TestMetricsPanelDataFormatting:
 
     def test_format_metrics_for_plotting(self, metrics_panel):
         """Should format metrics data for plotting."""
-        # If there's a formatting method, test it
-        sample_data = [
-            {"epoch": 1, "loss": 0.5, "accuracy": 0.8},
-            {"epoch": 2, "loss": 0.4, "accuracy": 0.85},
-        ]
-
         # Check if panel has a format method
         if hasattr(metrics_panel, "_format_for_plotting"):
+            # If there's a formatting method, test it
+            sample_data = [
+                {"epoch": 1, "loss": 0.5, "accuracy": 0.8},
+                {"epoch": 2, "loss": 0.4, "accuracy": 0.85},
+            ]
+
             formatted = metrics_panel._format_for_plotting(sample_data)
             assert formatted is not None
 

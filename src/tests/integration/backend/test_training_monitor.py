@@ -122,7 +122,7 @@ class TestTrainingMonitor:
 
         monitor.on_training_start()
 
-        assert monitor.metrics_buffer == []
+        assert not monitor.metrics_buffer
 
     def test_on_training_end(self):
         """Test on_training_end sets state and triggers callbacks."""
@@ -137,7 +137,7 @@ class TestTrainingMonitor:
 
         monitor.on_training_end(final_metrics)
 
-        assert monitor.is_training is False
+        assert not monitor.is_training
         callback.assert_called_once_with(final_metrics=final_metrics)
 
     def test_on_epoch_start(self):

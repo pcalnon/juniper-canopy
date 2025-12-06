@@ -494,9 +494,7 @@ class TestDecisionBoundaryEdgeCases:
 
         dataset = {"inputs": np.array([[-1e6, -1e6], [1e6, 1e6]]), "targets": [0, 1]}
 
-        result = component._compute_decision_boundary(dataset)
-
-        if result:
+        if result := component._compute_decision_boundary(dataset):
             assert "bounds" in result
 
     def test_callbacks_registration(self):

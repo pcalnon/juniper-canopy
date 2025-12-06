@@ -2,7 +2,7 @@
 #####################################################################################################################################################################################################
 # Application: Juniper
 # Script Name: __get_project_dir.bash
-# Script Path: ${HOME}/Development/rust/rustmodgeon/juniper/util/__get_project_dir.bash
+# Script Path: ${HOME}/Development/rust/rust_mudgeon/juniper/util/__get_project_dir.bash
 #
 # Description: This script returns the absolute path of the directory for the current project
 #
@@ -48,4 +48,3 @@ SCRIPT_DIR="$(cd -P "$(dirname -- "${SCRIPT_PATH}")" > /dev/null 2>&1 && pwd)"
 PROJECT_DIR="$(dirname -- ${SCRIPT_DIR})"
 BASE_DIR="${PROJECT_DIR}"
 echo "${BASE_DIR}"
-

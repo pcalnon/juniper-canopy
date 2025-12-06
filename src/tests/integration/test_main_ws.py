@@ -10,6 +10,8 @@ Tests WebSocket functionality:
 - Connection count in statistics
 - Multi-client scenarios
 """
+
+import contextlib
 import os
 import sys
 import time
@@ -317,12 +319,8 @@ class TestWebSocketEndpoints:
             websocket.receive_json()  # Initial status
 
             # Send invalid JSON
-            try:
+            with contextlib.suppress(Exception):
                 websocket.send_text("invalid json {{{")
-                # Should not crash - may receive error or be disconnected
-                # The important thing is the server doesn't crash
-            except Exception:
-                pass  # Connection might close, which is acceptable
 
     def test_ws_connection_after_disconnect(self, client):
         """Test can reconnect after disconnection."""
@@ -402,13 +400,10 @@ class TestWebSocketEndpoints:
             response = client.get("/api/statistics")
             data = response.json()
 
-            # Find our connection in the metadata
-            our_connection = None
-            for conn_info in data["connections_info"]:
-                if conn_info["client_id"] == client_id:
-                    our_connection = conn_info
-                    break
-
+            our_connection = next(
+                (conn_info for conn_info in data["connections_info"] if conn_info["client_id"] == client_id),
+                None,
+            )
             assert our_connection is not None
             assert "connected_at" in our_connection
             assert "messages_sent" in our_connection
@@ -431,11 +426,8 @@ class TestWebSocketEndpoints:
             response = client.get("/api/statistics")
             data = response.json()
 
-            our_connection = None
-            for conn_info in data["connections_info"]:
-                if conn_info["client_id"] == client_id:
-                    our_connection = conn_info
-                    break
-
-            if our_connection:
+            if our_connection := next(
+                (conn_info for conn_info in data["connections_info"] if conn_info["client_id"] == client_id),
+                None,
+            ):
                 assert our_connection["messages_sent"] >= 2  # Connection + initial status minimum

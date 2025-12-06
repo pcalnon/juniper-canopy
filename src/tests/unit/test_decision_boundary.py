@@ -12,6 +12,8 @@
 # Description:   Unit tests for DecisionBoundary component
 #####################################################################
 """Unit tests for DecisionBoundary component."""
+
+import contextlib
 import sys
 from pathlib import Path
 
@@ -174,13 +176,8 @@ class TestDecisionBoundaryPlotting:
     def test_create_empty_plot(self, boundary):
         """Should handle empty data."""
         if hasattr(boundary, "_create_contour_plot"):
-            try:
+            with contextlib.suppress(ValueError, IndexError):
                 _plot = boundary._create_contour_plot([], [])  # noqa: F841
-                # Should either return empty plot or handle gracefully
-                assert True
-            except (ValueError, IndexError):
-                # Expected for empty data
-                assert True
 
 
 class TestDecisionBoundaryDataHandling:
@@ -271,24 +268,16 @@ class TestDecisionBoundaryEdgeCases:
         if hasattr(boundary, "_create_contour_plot"):
             X = np.random.randn(100, 2)
             y = np.zeros(100)  # All same class
-            try:
+            with contextlib.suppress(Exception):
                 boundary._create_contour_plot(X, y)
-                assert True
-            except Exception:
-                # May not be able to create boundary with single class
-                assert True
 
     def test_collinear_data(self, boundary):
         """Should handle collinear data."""
         if hasattr(boundary, "_create_contour_plot"):
             X = np.array([[i, i] for i in range(100)])  # All on diagonal
             y = np.random.randint(0, 2, 100)
-            try:
+            with contextlib.suppress(Exception):
                 boundary._create_contour_plot(X, y)
-                assert True
-            except Exception:
-                # May have issues with collinear data
-                assert True
 
 
 if __name__ == "__main__":

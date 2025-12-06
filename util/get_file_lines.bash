@@ -23,8 +23,8 @@ PROJ_NAME="Juniper"
 
 HOME_DIR="${HOME}"
 
-DEVEOPMENT_DIR_NAME="Development"
-DEVELOPMENT_DIR="${HOME_DIR}/${DEVEOPMENT_DIR_NAME}"
+DEVELOPMENT_DIR_NAME="Development"
+DEVELOPMENT_DIR="${HOME_DIR}/${DEVELOPMENT_DIR_NAME}"
 
 #LANGUAGE_DIR_NAME="rust/rust_mudgeon"
 LANGUAGE_DIR_NAME="python"
@@ -180,7 +180,7 @@ source ${DATE_FUNCTIONS_SCRIPT}
 ################################################################################################################
 TOTAL_FILES=0
 TOTAL_LINES=0
-TOTOL_TODOS=0
+TOTAL_TODOS=0
 
 for i in $(${GET_FILENAMES_SCRIPT_NAME}); do
 
@@ -207,7 +207,7 @@ done
 #    #echo "Source File: \"${SOURCE_FILE}\""
 #    if [[ ${SOURCE_FILE} != "" ]]; then
 #        SOURCE_FILE=$(echo "${SOURCE_FILE}" | grep -v "${INIT_PYTHON_FILE}")
-#	if [[ ${SOURCE_FILE} != "" ]]; then 
+#	if [[ ${SOURCE_FILE} != "" ]]; then
 #            if [[ -f ${SOURCE_FILE} ]]; then
 #                FOUND=$(cat ${SOURCE_FILE} | grep "${SEARCH_TERM}")
 #                if [[ ${FOUND} != "" ]]; then
@@ -234,5 +234,3 @@ done
 echo "Search Term: \"${SEARCH_TERM}\""
 echo "Found in Files: ${FOUND_COUNT}"
 echo "Files Complete: ${DONE_COUNT}"
-
-

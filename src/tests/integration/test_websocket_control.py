@@ -121,6 +121,7 @@ class TestWebSocketControlIntegration:
         return result
 
     def test_control_stop_command(self, demo_app):
+        # sourcery skip: extract-method
         """Test stop command functionality."""
         import time
 
@@ -220,6 +221,7 @@ class TestWebSocketTrainingIntegration:
                 assert response.get("type") in ["pong", "initial_status"]
 
     def test_training_metrics_broadcast(self, demo_app):
+        # sourcery skip: extract-method
         """Test receiving training metrics via WebSocket."""
         import time
 
@@ -297,6 +299,7 @@ class TestEndToEndFlow:
                 self._test_client_training_commands(websocket, time)
 
     def _test_client_training_commands(self, websocket, time):
+        # sourcery skip: extract-duplicate-method
         # Start training
         start_resp = self._send_command_with_retry(websocket, "start", timeout_messages=15)
         assert start_resp["ok"]

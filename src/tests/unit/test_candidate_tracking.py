@@ -213,4 +213,4 @@ class TestThreadSafety:
         for t in threads:
             t.join()
 
-        assert len(errors) == 0  # No exceptions from concurrent access
+        assert not errors

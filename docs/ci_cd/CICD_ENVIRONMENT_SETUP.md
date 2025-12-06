@@ -175,13 +175,13 @@ debug = os.getenv('CASCOR_DEBUG', '0') == '1'
 **Location:** `conf/conda_environment.yaml`
 
 ```yaml
-name: JuniperPython-CI
+name: JuniperCanopy
 channels:
   - conda-forge
   - pytorch
   - plotly
 dependencies:
-  - python=3.13
+  - python=3.14
   - pip
   - numpy
   - pandas

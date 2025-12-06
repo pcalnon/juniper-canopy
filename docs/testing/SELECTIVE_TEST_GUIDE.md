@@ -50,6 +50,7 @@ pytest tests/
 ```
 
 This runs all tests **except**:
+
 - Tests requiring CasCor backend
 - Tests requiring live server
 - Display tests (in headless environments)
@@ -136,7 +137,7 @@ pytest tests/
 
 At test startup, you'll see the current configuration:
 
-```
+```bash
 === Test Environment Configuration ===
 CasCor Backend Tests: DISABLED (set CASCOR_BACKEND_AVAILABLE=1)
 Live Server Tests: DISABLED (set RUN_SERVER_TESTS=1)

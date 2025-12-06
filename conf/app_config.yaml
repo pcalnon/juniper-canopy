@@ -255,13 +255,6 @@ backend:
     enabled: true
     monitoring_hooks: true
     state_polling_interval_ms: 500
-    # backend_path: ../cascor
-    # backend_path:
-    #   /Users/pcalnon/Development/python/Juniper/src/prototypes/cascor
-    # backend_path:
-    #   ${HOME}/Development/python/Juniper/src/prototypes/cascor
-    # backend_path:
-    #   ~/Development/python/Juniper/src/prototypes/cascor
     backend_path: ~/Development/python/Juniper/src/prototypes/juniper_cascor
 
   # Communication settings
@@ -340,8 +333,6 @@ security:
   # CORS settings
   cors:
     enabled: true
-    # allowed_origins: [http://localhost:*, http://127.0.0.1:*]
-    # allowed_origins: [http\://localhost\:*, http\://127.0.0.1\:*]
     allowed_origins: >
       - http://localhost:*
       - http://127.0.0.1:*
