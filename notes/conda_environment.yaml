@@ -1,7 +1,7 @@
 ---
 #####################################################################################################################################################################################################
 # Project:       Juniper
-# Prototype:     juniper_canopy:  Monitoring and Diagnostic Frontend for CasCor Neural Network
+# Prototype:     juniper_canopy:  Monitoring and Diagnostics for CasCor NN
 # File Name:     conda_environment.py
 # Author:        Paul Calnon
 # Version:       0.1.4 (0.7.3)

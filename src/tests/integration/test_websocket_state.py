@@ -16,6 +16,7 @@
 #    Integration tests for WebSocket state message broadcasts.
 #
 #####################################################################################################################################################################################################
+import contextlib
 import time
 
 import pytest
@@ -44,7 +45,7 @@ class TestWebSocketStateMessages:
 
             # Wait for potential state messages
             # Note: This depends on demo mode being active and broadcasting
-            try:
+            with contextlib.suppress(Exception):
                 for _ in range(5):
                     message = websocket.receive_json(timeout=2.0)
                     if message.get("type") == "state":
@@ -54,9 +55,6 @@ class TestWebSocketStateMessages:
                         assert isinstance(message["timestamp"], (int, float))
                         assert isinstance(message["data"], dict)
                         break
-            except Exception:
-                # No state messages received (demo mode might not be active)
-                pass
 
     def test_state_message_format(self, test_client):
         """Test state message has correct format."""
@@ -135,7 +133,7 @@ class TestWebSocketStateMessages:
                 messages1 = []
                 messages2 = []
 
-                try:
+                with contextlib.suppress(Exception):
                     for _ in range(5):
                         msg1 = ws1.receive_json(timeout=2.0)
                         msg2 = ws2.receive_json(timeout=2.0)
@@ -147,13 +145,10 @@ class TestWebSocketStateMessages:
 
                         if messages1 and messages2:
                             break
-                except Exception:
-                    pass
-
                 # If state messages were received, both clients should have them
                 if messages1 or messages2:
-                    assert len(messages1) > 0
-                    assert len(messages2) > 0
+                    assert messages1
+                    assert messages2
 
 
 class TestWebSocketStateMessageContent:

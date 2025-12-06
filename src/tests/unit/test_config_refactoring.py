@@ -4,6 +4,8 @@ Unit tests for configuration refactoring across juniper_canopy components.
 
 Tests configuration hierarchy: Environment Variables > YAML > Constants
 """
+
+import contextlib
 import os
 from unittest.mock import patch
 
@@ -57,12 +59,12 @@ class TestServerConfiguration:
         with patch.dict(os.environ, {"CASCOR_SERVER_DEBUG": "1"}):
             debug_env = os.getenv("CASCOR_SERVER_DEBUG")
             debug = debug_env.lower() in ("1", "true", "yes")
-            assert debug is True
+            assert debug
 
         with patch.dict(os.environ, {"CASCOR_SERVER_DEBUG": "false"}):
             debug_env = os.getenv("CASCOR_SERVER_DEBUG")
             debug = debug_env.lower() in ("1", "true", "yes")
-            assert debug is False
+            assert not debug
 
 
 class TestDashboardConfiguration:
@@ -117,8 +119,7 @@ class TestMetricsPanelConfiguration:
         config_mgr = ConfigManager()
         metrics_config = config_mgr.config.get("frontend", {}).get("training_metrics", {})
 
-        update_freq_hz = metrics_config.get("update_frequency_hz")
-        if update_freq_hz:
+        if update_freq_hz := metrics_config.get("update_frequency_hz"):
             update_interval = int(1000 / update_freq_hz)
             assert update_interval > 0
             assert update_interval <= 1000
@@ -249,9 +250,7 @@ class TestConfigurationHierarchy:
     def test_hierarchy_config_over_constant(self):
         """Test YAML config takes precedence over constant."""
         config_mgr = ConfigManager()
-        port_config = config_mgr.config.get("application", {}).get("server", {}).get("port")
-
-        if port_config:
+        if port_config := config_mgr.config.get("application", {}).get("server", {}).get("port"):
             # If config has value, it should be used over constant
             assert port_config != ServerConstants.DEFAULT_PORT or port_config == ServerConstants.DEFAULT_PORT
             # Either way, config is the source
@@ -271,31 +270,25 @@ class TestConfigValidation:
         """Test training parameter validation."""
         config_mgr = ConfigManager()
 
-        try:
+        with contextlib.suppress(KeyError):
             # Should have epochs parameter config
             epochs_config = config_mgr.get_training_param_config("epochs")
             assert "min" in epochs_config
             assert "max" in epochs_config
             assert "default" in epochs_config
             assert epochs_config["min"] <= epochs_config["default"] <= epochs_config["max"]
-        except KeyError:
-            # If not in config, that's okay - will use constants
-            pass
 
     def test_training_param_value_validation(self):
         """Test training parameter value validation."""
         config_mgr = ConfigManager()
 
-        try:
+        with contextlib.suppress(KeyError):
             # Valid value should pass
             assert config_mgr.validate_training_param_value("epochs", 100)
 
             # Out of range should fail
             with pytest.raises(ValueError):
                 config_mgr.validate_training_param_value("epochs", 10000)
-        except KeyError:
-            # If param not in config, skip this test
-            pass
 
 
 class TestConstantsConsistency:

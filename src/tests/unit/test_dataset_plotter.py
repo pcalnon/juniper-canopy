@@ -12,6 +12,8 @@
 # Description:   Unit tests for DatasetPlotter component
 #####################################################################
 """Unit tests for DatasetPlotter component."""
+
+import contextlib
 import sys
 from pathlib import Path
 
@@ -156,13 +158,8 @@ class TestDatasetPlotterDataParsing:
         """Should handle empty dataset."""
         if hasattr(plotter, "_parse_dataset"):
             data = {"X": [], "y": []}
-            try:
+            with contextlib.suppress(ValueError, IndexError):
                 _parsed = plotter._parse_dataset(data)  # noqa: F841
-                # Should either return empty or handle gracefully
-                assert True
-            except (ValueError, IndexError):
-                # Expected for empty data
-                assert True
 
 
 class TestDatasetPlotterColorMapping:
@@ -215,12 +212,9 @@ class TestDatasetPlotterEdgeCases:
         """Should handle single point."""
         if hasattr(plotter, "_create_scatter_plot"):
             dataset = {"inputs": [[0, 0]], "targets": [0]}
-            try:
+            with contextlib.suppress(Exception):
                 plot = plotter._create_scatter_plot(dataset)
                 assert plot is not None
-            except Exception:
-                # May have issues with single point
-                assert True
 
     def test_many_classes(self, plotter):
         """Should handle many classes."""
@@ -229,12 +223,9 @@ class TestDatasetPlotterEdgeCases:
                 "inputs": np.random.randn(100, 2).tolist(),
                 "targets": np.random.randint(0, 20, 100).tolist(),  # 20 classes
             }
-            try:
+            with contextlib.suppress(Exception):
                 plot = plotter._create_scatter_plot(dataset)
                 assert plot is not None
-            except Exception:
-                # May have color mapping issues
-                assert True
 
     def test_high_dimensional_data(self, plotter):
         """Should handle high-dimensional data."""
@@ -243,12 +234,10 @@ class TestDatasetPlotterEdgeCases:
                 "inputs": np.random.randn(100, 10)[:, :2].tolist(),  # 10 dimensions reduced to 2
                 "targets": np.random.randint(0, 2, 100).tolist(),
             }
-            try:
+            with contextlib.suppress(Exception):
                 # Should either project to 2D or handle gracefully
                 plot = plotter._create_scatter_plot(dataset)
                 assert plot is not None
-            except Exception:
-                assert True
 
 
 if __name__ == "__main__":

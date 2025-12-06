@@ -30,8 +30,6 @@ def test_imports():
         except ImportError:
             print(f"  ⊘ {package} (optional, not installed)")
 
-    assert True
-
 
 def test_logging():
     """Test the logging framework."""
@@ -61,7 +59,6 @@ def _validate_logging_framework():
     training_logger.info("Training logger test message")
 
     print("  ✓ Logging framework functional")
-    assert True
 
 
 def test_directories():
@@ -80,8 +77,6 @@ def test_directories():
         else:
             print(f"  ✗ {dir_name}/ (missing)")
             raise AssertionError(f"{dir_name}/ missing")
-
-    assert True
 
 
 def main():

@@ -41,7 +41,7 @@ get_script_path() {
 
 
 ####################################################################################################
-# Define Global Environment DirectporyConfiguration Constants
+# Define Global Environment DirectoryConfiguration Constants
 ####################################################################################################
 SCRIPT_NAME="$(basename $BASH_SOURCE)"
 SCRIPT_PATH="$(dirname "$(get_script_path)")"
@@ -53,12 +53,10 @@ SCRIPT_DEVELOPMENT_PATH="$(dirname "${SCRIPT_LANG_PATH}")"
 ROOT_DEV_DIR_NAME="$(basename "${SCRIPT_DEVELOPMENT_PATH}")"
 SCRIPT_ROOT_PATH="$(dirname "${SCRIPT_DEVELOPMENT_PATH}")"
 
-# ROOT_PROJ_NAME="juniper"
 ROOT_PROJ_NAME="${ROOT_PROJ_DIR_NAME}"
 ROOT_CONF_NAME="conf"
 ROOT_CONF_FILE_NAME="script_util.cfg"
 
-# ROOT_PROJ_DIR="${HOME}/Development/rust/rust_mudgeon/${ROOT_PROJ_NAME}"
 ROOT_PROJ_DIR="${SCRIPT_PROJ_PATH}"
 ROOT_CONF_DIR="${ROOT_PROJ_DIR}/${ROOT_CONF_NAME}"
 ROOT_CONF_FILE="${ROOT_CONF_DIR}/${ROOT_CONF_FILE_NAME}"

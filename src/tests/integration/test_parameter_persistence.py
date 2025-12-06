@@ -203,6 +203,7 @@ class TestParameterPersistence:
         assert updates[0]["learning_rate"] == 0.04
 
     def test_multiple_parameters_update_atomically(self):
+        # sourcery skip: extract-duplicate-method
         """Test that multiple parameters update together atomically."""
         state = TrainingState()
 

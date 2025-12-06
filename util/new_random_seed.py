@@ -11,8 +11,7 @@
 #
 ############################################################################################################################################################
 # Description:
-#   generate a new, crytographically secure random valule for use as seed in psuedo random functions
-#
+#   generate a new, cryptographically secure random value for use as seed in psuedo random functions
 #
 ############################################################################################################################################################
 # Notes:
@@ -22,37 +21,38 @@
 #
 ############################################################################################################################################################
 import os
-import sys
 import secrets
-#import numpy as np
+import sys
 
-_BIT_SIZE=128
+# import numpy as np
 
-_OS_LINUX="Linux"
-_OS_POSIX="posix"
-_OS_MACOS="Darwin"
-_OS_WINDOWS="Windows"
-_OS_UNKNOWN="Unknown"
+_BIT_SIZE = 128
 
-_HOME_MACOS="/Users/pcalnon"
-_HOME_LINUX="/home/pcalnon"
+_OS_LINUX = "Linux"
+_OS_POSIX = "posix"
+_OS_MACOS = "Darwin"
+_OS_WINDOWS = "Windows"
+_OS_UNKNOWN = "Unknown"
 
-_CONDA_MACOS="opt/anaconda3"
-_CONDA_LINUX="anaconda3"
+_HOME_MACOS = "/Users/pcalnon"
+_HOME_LINUX = "/home/pcalnon"
 
-_PYTHON_LOC="envs/pytorch_cuda/bin/python"
+_CONDA_MACOS = "opt/anaconda3"
+_CONDA_LINUX = "anaconda3"
+
+_PYTHON_LOC = "envs/pytorch_cuda/bin/python"
 
 
 # Define the Main function
 if __name__ == "__main__":
 
     os_name = os.name
-    #print(f"Running on {os_name} OS")
+    # print(f"Running on {os_name} OS")
 
     if os_name in [_OS_LINUX, _OS_POSIX]:
-        python_cmd=f"{_HOME_LINUX}/{_CONDA_LINUX}/{_PYTHON_LOC}"
+        python_cmd = f"{_HOME_LINUX}/{_CONDA_LINUX}/{_PYTHON_LOC}"
     elif os_name == _OS_MACOS:
-        python_cmd=f"{_HOME_MACOS}/{_CONDA_MACOS}/{_PYTHON_LOC}"
+        python_cmd = f"{_HOME_MACOS}/{_CONDA_MACOS}/{_PYTHON_LOC}"
     elif os_name == _OS_WINDOWS:
         print(f"Error: Why the hell are you running {_OS_WINDOWS}??")
         sys.exit(1)
@@ -60,7 +60,7 @@ if __name__ == "__main__":
         print(f"Error: You are running an {_OS_UNKNOWN} OS.  Shamelessly giving up,")
         sys.exit(2)
 
-    #print(f"Python Command: {python_cmd}")
+    # print(f"Python Command: {python_cmd}")
 
 print("\nGenerating New Random Seed")
 seed = secrets.randbits(_BIT_SIZE)

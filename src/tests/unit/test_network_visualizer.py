@@ -12,6 +12,8 @@
 # Description:   Unit tests for NetworkVisualizer component
 #####################################################################
 """Unit tests for NetworkVisualizer component."""
+
+import contextlib
 import sys
 from pathlib import Path
 
@@ -142,32 +144,27 @@ class TestNetworkVisualizerTopologyParsing:
 
     def test_parse_simple_topology(self, visualizer):
         """Should parse simple topology."""
-        topology = {"input_size": 2, "output_size": 1, "hidden_units": 0}
-
         if hasattr(visualizer, "_parse_topology"):
+            topology = {"input_size": 2, "output_size": 1, "hidden_units": 0}
+
             result = visualizer._parse_topology(topology)
             assert result is not None
 
     def test_parse_topology_with_hidden_units(self, visualizer):
         """Should parse topology with hidden units."""
-        topology = {"input_size": 2, "output_size": 1, "hidden_units": 3}
-
         if hasattr(visualizer, "_parse_topology"):
+            topology = {"input_size": 2, "output_size": 1, "hidden_units": 3}
+
             result = visualizer._parse_topology(topology)
             assert result is not None
 
     def test_parse_empty_topology(self, visualizer):
         """Should handle empty topology."""
-        topology = {}
-
         if hasattr(visualizer, "_parse_topology"):
-            try:
+            topology = {}
+
+            with contextlib.suppress(KeyError, ValueError):
                 visualizer._parse_topology(topology)
-                # Should either return default or raise appropriate error
-                assert True
-            except (KeyError, ValueError):
-                # Expected for invalid topology
-                assert True
 
 
 class TestNetworkVisualizerGraphGeneration:
@@ -240,28 +237,20 @@ class TestNetworkVisualizerEdgeCases:
 
     def test_very_large_network(self, visualizer):
         """Should handle very large network topology."""
-        topology = {"input_size": 100, "output_size": 50, "hidden_units": 200}
-
         # Should not crash with large topology
         if hasattr(visualizer, "_parse_topology"):
-            try:
+            topology = {"input_size": 100, "output_size": 50, "hidden_units": 200}
+
+            with contextlib.suppress(Exception):
                 visualizer._parse_topology(topology)
-                assert True
-            except Exception:
-                # Even if it fails, it shouldn't crash the app
-                assert True
 
     def test_zero_size_network(self, visualizer):
         """Should handle zero-size network."""
-        topology = {"input_size": 0, "output_size": 0, "hidden_units": 0}
-
         if hasattr(visualizer, "_parse_topology"):
-            try:
+            topology = {"input_size": 0, "output_size": 0, "hidden_units": 0}
+
+            with contextlib.suppress(ValueError, KeyError):
                 visualizer._parse_topology(topology)
-                assert True
-            except (ValueError, KeyError):
-                # Expected for invalid topology
-                assert True
 
 
 if __name__ == "__main__":

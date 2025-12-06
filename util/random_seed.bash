@@ -11,7 +11,7 @@
 #
 ############################################################################################################################################################
 # Description:
-#   Call a python script to generate a new, crytographically secure random valule for use as seed in psuedo random functions
+#   Call a python script to generate a new, cryptographically secure random value for use as seed in psuedo random functions
 #
 #
 ############################################################################################################################################################
@@ -62,7 +62,7 @@ source ${CONF_FILE}
 
 
 ####################################################################################################
-# Define Enviornment constants for determinig active python binary
+# Define Environment constants for determining active python binary
 ####################################################################################################
 OS_LINUX="Linux"
 OS_MACOS="Darwin"
@@ -116,5 +116,3 @@ else
     echo -ne "\nFailure :(  "
 fi
 echo "Python Script: ${NEW_RANDOM_SEED_FILE_NAME}, returned: ${RESULT}"
-
-

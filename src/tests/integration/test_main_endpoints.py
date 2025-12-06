@@ -65,6 +65,7 @@ class TestMainEndpointsIntegration:
     # ========== Status Endpoint ==========
 
     def test_get_status_demo_mode(self, client):
+        # sourcery skip: extract-duplicate-method
         """Test /api/status returns demo mode training status."""
         response = client.get("/api/status")
         assert response.status_code == 200
@@ -109,6 +110,7 @@ class TestMainEndpointsIntegration:
     # ========== Topology Endpoint ==========
 
     def test_get_topology(self, client):
+        # sourcery skip: extract-duplicate-method
         """Test /api/topology returns network structure."""
         response = client.get("/api/topology")
         assert response.status_code == 200

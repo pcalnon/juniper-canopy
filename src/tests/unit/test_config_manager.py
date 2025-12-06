@@ -5,16 +5,11 @@ Tests configuration loading, nested access, environment overrides,
 and the singleton pattern.
 """
 
-# import os
 import pytest
-
-# import tempfile
 import yaml
 
 # Import the module under test
 from config_manager import ConfigManager, get_config
-
-# from pathlib import Path
 
 
 @pytest.mark.unit

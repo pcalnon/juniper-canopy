@@ -320,7 +320,7 @@ class TestNetworkInfoTable:
         table = metrics_panel._create_network_info_table(stats)
         from dash import html
 
-        assert isinstance(table, html.Div) or isinstance(table, html.Table)
+        assert isinstance(table, (html.Div, html.Table))
 
     def test_create_network_info_table_empty_stats(self, metrics_panel):
         """Should handle empty stats gracefully."""
@@ -366,6 +366,7 @@ class TestEdgeCases:
         assert isinstance(fig, go.Figure)
 
     def test_add_metrics_with_none(self, metrics_panel):
+        # sourcery skip: remove-assert-true
         """Should handle None metrics gracefully."""
         metrics_panel.add_metrics(None)
         # Should either skip or handle gracefully

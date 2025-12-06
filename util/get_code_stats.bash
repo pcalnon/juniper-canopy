@@ -55,7 +55,7 @@ source "${CONF_FILE}"
 
 
 #######################################################################################################################################################################################
-# Configure Script Environment 
+# Configure Script Environment
 #######################################################################################################################################################################################
 SRC_DIR_NAME="src"
 SRC_DIR="${PROJ_DIR}/${SRC_DIR_NAME}"
@@ -102,10 +102,10 @@ FULL_OUTPUT="true"
 FILENAMES_SCRIPT_PARAMS="--full ${FULL_OUTPUT}"
 
 SEARCH_TERM_DEFAULT="TODO"
-TODO_SEARCH_SCRIPT_PARAMS="--search ${SEARCH_TERM_DEFAULT} --file" 
+TODO_SEARCH_SCRIPT_PARAMS="--search ${SEARCH_TERM_DEFAULT} --file"
 
 FIND_METHOD_REGEX='^[[:space:]]+(def)[[:space:]]+'
-FIND_METHOD_PARAMS="-E --" 
+FIND_METHOD_PARAMS="-E --"
 
 EXIT_COND_DEFAULT="1"
 
@@ -212,7 +212,7 @@ printf "${TABLE_FORMAT}" "----------------------------" "------" "--------" "---
 TOTAL_FILES=0
 TOTAL_LINES=0
 TOTAL_METHODS=0
-TOTOL_TODOS=0
+TOTAL_TODOS=0
 TOTAL_SIZE=0
 
 MOST_LINES=0
@@ -230,7 +230,7 @@ for i in $(${GET_FILENAMES_SCRIPT} ${FILENAMES_SCRIPT_PARAMS}); do
     # Get current filename and absolute path
     FILE_PATH="$(echo "${i}" | xargs)"
     FILE_NAME="$(echo "${FILE_PATH##*/}" | xargs)"
-    [[ ${DEBUG} == "${TRUE}" ]] && echo "Filenane: ${FILE_NAME}"
+    [[ ${DEBUG} == "${TRUE}" ]] && echo "Filename: ${FILE_NAME}"
 
     # Calculate stats for current file
     TOTAL_FILES=$(( TOTAL_FILES + 1 ))
@@ -260,7 +260,7 @@ for i in $(${GET_FILENAMES_SCRIPT} ${FILENAMES_SCRIPT_PARAMS}); do
     if (( $(echo "${CURRENT_TODOS} > ${MOST_TODOS}" | bc -l) )); then
         MOST_TODOS="$(echo "${CURRENT_TODOS}" | xargs)"
 	ROUGH_FILE="$(echo "${FILE_NAME}" | xargs)"
-	[[ ${DEBUG} == ${TRUE} ]] && echo "Current TODOs: ${MOST_TODOS}, for Fiile: ${ROUGH_FILE}"
+	[[ ${DEBUG} == ${TRUE} ]] && echo "Current TODOs: ${MOST_TODOS}, for File: ${ROUGH_FILE}"
     elif (( $(echo "${CURRENT_TODOS} == ${MOST_TODOS}" | bc -l) )); then
         ROUGH_FILE="${ROUGH_FILE}, $(echo "${FILE_NAME}" | xargs)"
     fi

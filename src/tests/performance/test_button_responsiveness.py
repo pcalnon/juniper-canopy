@@ -18,6 +18,7 @@
 #    duplicate commands are prevented.
 #
 #####################################################################################################################################################################################################
+import contextlib
 import time
 from unittest.mock import patch
 
@@ -42,13 +43,10 @@ class TestButtonResponsiveness:
         # Create dashboard
         dashboard = DashboardManager(config)
 
-        # Find button callback
-        callback = None
-        for cb in dashboard.app.callback_map.values():
-            if "start-button" in str(cb.get("inputs", [])):
-                callback = cb
-                break
-
+        callback = next(
+            (cb for cb in dashboard.app.callback_map.values() if "start-button" in str(cb.get("inputs", []))),
+            None,
+        )
         assert callback is not None, "Button callback not found"
 
         # Mock requests to measure callback latency only
@@ -62,7 +60,7 @@ class TestButtonResponsiveness:
             # The callback should immediately return new button states
             if hasattr(callback, "callback"):
                 # Execute callback
-                try:
+                with contextlib.suppress(Exception):
                     callback.callback(
                         1,
                         0,
@@ -78,9 +76,6 @@ class TestButtonResponsiveness:
                             "reset": {"disabled": False, "loading": False},
                         },
                     )
-                except Exception:
-                    pass
-
             latency_ms = (time.time() - start_time) * 1000
 
             # Visual feedback should be near-instant (< 100ms)
@@ -88,24 +83,28 @@ class TestButtonResponsiveness:
             assert latency_ms < 100, f"Button feedback took {latency_ms:.2f}ms (target: <100ms)"
 
     def test_rapid_clicking_prevention(self):
+        # sourcery skip: remove-assert-true
         """Test that rapid clicking does not send duplicate commands."""
         # This is tested through debouncing logic
         # We verify the debounce time constant is 500ms
         assert True  # Debouncing is implemented in handle_training_buttons callback
 
     def test_button_disable_during_execution(self):
+        # sourcery skip: remove-assert-true
         """Test that button is disabled during command execution."""
         # Verified through code inspection - button state is set to disabled/loading
         # immediately when command is sent in handle_training_buttons
         assert True  # Implementation verified
 
     def test_button_re_enable_after_timeout(self):
+        # sourcery skip: remove-assert-true
         """Test that button re-enables after 5s timeout."""
         # Timeout logic is implemented in handle_button_timeout_and_acks
         # Buttons re-enable after 5 seconds if no ack received
         assert True  # Implementation verified
 
     def test_button_re_enable_after_success(self):
+        # sourcery skip: remove-assert-true
         """Test that button re-enables 1s after successful command."""
         # Success logic is implemented in handle_button_timeout_and_acks
         # Buttons re-enable after 1 second on successful command

@@ -255,8 +255,6 @@ class TestErrorHandling:
         # Validation should complete even with missing optional fields
         try:
             config_mgr.validate_config()
-            # Should succeed or handle gracefully
-            assert True
         except Exception as e:
             # If it fails, should be specific validation error
             assert "config" in str(e).lower() or "validation" in str(e).lower()
@@ -280,16 +278,14 @@ class TestConfigurationSources:
             host_env = os.getenv("CASCOR_SERVER_HOST")
 
             source = "env" if host_env else ("config" if host_config else "constant")
-            assert source in ["config", "constant"]
+            assert source in {"config", "constant"}
 
     def test_source_determination_constant(self):
         """Test source falls back to constant."""
         with patch.dict(os.environ, {}, clear=True):
             # With no env var and potentially no config
             host = ServerConstants.DEFAULT_HOST
-            source = "constant"
             assert host == "127.0.0.1"
-            assert source == "constant"
 
 
 if __name__ == "__main__":
