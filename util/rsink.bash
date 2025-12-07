@@ -11,8 +11,8 @@ test $1 && src="$1"
 rsync -a --safe-links ${src}/ ${dest}/
 
 abs_src="$(realpath -- ${src})"
-for i in $(find ${src} -type l); do  
+for i in $(find ${src} -type l); do
   target="$(target="$(readlink -f -- $i)" && echo "${target%/*}")"
-  while [[ $target && ( ! $abs_src -ef $target ) ]]; do target="${target%/*}"; done 
+  while [[ $target && ( ! $abs_src -ef $target ) ]]; do target="${target%/*}"; done
   test ! ${target} && rsync -aL ${i} ${i/$src/$dest}
 done

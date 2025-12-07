@@ -9,5 +9,3 @@ git for-each-ref --sort='committerdate:iso8601' --color --format="%(color:green)
 
 echo -ne "\nRemote Branches:\n"
 git for-each-ref --sort='committerdate:iso8601' --color --format="%(color:green)%(committerdate:iso8601)|%(color:blue)%(committerdate:relative)|%(color:reset)%09%(refname)" refs/remotes | awk -F "refs/remotes/" '{print $1 $2;}' | column -s '|' -t
-
-

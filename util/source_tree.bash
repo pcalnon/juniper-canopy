@@ -71,7 +71,7 @@ source ${DATE_FUNCTIONS_SCRIPT}
 ##################################################################################
 # Define Script Constants
 ##################################################################################
-if [[ $@ == "" ]]; then 
+if [[ $@ == "" ]]; then
   echo "Warning: No Input Parameters Provided"
   #DIR_LIST="./conf ./data ./src ./util"
   DIR_LIST="${CONFIG_DIR_NAME} ${DATA_DIR_NAME} ${DOCUMENT_DIR_NAME} ${SOURCE_DIR_NAME} ${UTILITY_DIR_NAME}"

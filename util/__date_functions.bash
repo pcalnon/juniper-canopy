@@ -153,6 +153,3 @@ function get_week() {
     WEEK_NUMBER=$(( (FINAL_WEEK_MILIS - END_DATE_MILIS) / (60 * 60 * 24 * 7) ))
     echo "${WEEK_NUMBER}"
 }
-
-
-
