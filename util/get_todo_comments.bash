@@ -140,7 +140,7 @@ for i in $(find ${SRC_DIR}); do
     #echo "Source File: \"${SOURCE_FILE}\""
     if [[ ${SOURCE_FILE} != "" ]]; then
         SOURCE_FILE=$(echo "${SOURCE_FILE}" | grep -v "${INIT_PYTHON_FILE}")
-	if [[ ${SOURCE_FILE} != "" ]]; then 
+	if [[ ${SOURCE_FILE} != "" ]]; then
             if [[ -f ${SOURCE_FILE} ]]; then
                 FOUND=$(cat ${SOURCE_FILE} | grep "${SEARCH_TERM}")
                 if [[ ${FOUND} != "" ]]; then

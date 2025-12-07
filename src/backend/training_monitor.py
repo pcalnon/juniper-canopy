@@ -228,6 +228,28 @@ class TrainingState:
     All state modifications are protected by threading.Lock for thread safety.
     """
 
+    _STATE_FIELDS = {
+        "status",
+        "phase",
+        "learning_rate",
+        "max_hidden_units",
+        "current_epoch",
+        "current_step",
+        "network_name",
+        "dataset_name",
+        "threshold_function",
+        "optimizer_name",
+        "timestamp",
+        "candidate_pool_status",
+        "candidate_pool_phase",
+        "candidate_pool_size",
+        "top_candidate_id",
+        "top_candidate_score",
+        "second_candidate_id",
+        "second_candidate_score",
+        "pool_metrics",
+    }
+
     def __init__(self):
         """Initialize TrainingState with default values."""
         self.__lock = threading.Lock()
@@ -282,20 +304,32 @@ class TrainingState:
                 "pool_metrics": self.__pool_metrics,
             }
 
-    # TODO: this method is flagged by pre-commit script for being too complex
     def update_state(self, **kwargs) -> None:
         """
         Update state fields atomically.
 
+        Accepts keyword arguments using public field names
+        (e.g., status="Started", phase="Output", ...).
+        Unknown fields are ignored. Passing None leaves the field unchanged.
+
         Args:
             **kwargs: State fields to update (status, phase, learning_rate, etc.)
         """
+        cls_name = self.__class__.__name__
+        updated = False
 
         with self.__lock:
-            for element in kwargs:
-                if element in self.__dict__:
-                    self.__dict__[element] = kwargs[element]
-            if "timestamp" not in kwargs:
+            for key, value in kwargs.items():
+                if value is None or key not in self._STATE_FIELDS:
+                    continue
+
+                mangled_name = f"_{cls_name}__{key}"
+
+                if mangled_name in self.__dict__:
+                    self.__dict__[mangled_name] = value
+                    updated = True
+
+            if updated and "timestamp" not in kwargs:
                 self.__timestamp = time.time()
 
     def to_json(self) -> str:
