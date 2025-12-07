@@ -56,7 +56,7 @@ git --version
 
 ```bash
 # Navigate to your workspace
-cd ~/Development/python/Juniper/src/prototypes
+cd ~/Development/python/JuniperCanopy
 
 # Repository should already be cloned
 # If not, clone from your repository

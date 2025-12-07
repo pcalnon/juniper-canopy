@@ -3,7 +3,7 @@
 
 **Date**: November 18, 2025  
 **Project**: juniper_canopy prototype  
-**Location**: /home/pcalnon/Development/python/Juniper/src/prototypes/juniper_canopy
+**Location**: /home/pcalnon/Development/python/JuniperCanopy/juniper_canopy
 
 ## Executive Summary
 

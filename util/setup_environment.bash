@@ -37,7 +37,7 @@
 # Configuration
 PROJECT_NAME="Juniper Canopy"
 ENV_NAME="JuniperPython"
-PROJECT_DIR="${HOME}/Development/python/Juniper/src/prototypes/juniper_canopy"
+PROJECT_DIR="${HOME}/Development/python/JuniperCanopy/juniper_canopy"
 
 # Colors for output
 RED='\033[0;31m'

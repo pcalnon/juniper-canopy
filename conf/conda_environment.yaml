@@ -1,3 +1,4 @@
+---
 #######################################################################################
 # project: Juniper
 # prototype: juniper_canopy
@@ -7,9 +8,11 @@
 # platform: linux-64
 # python: 3.14
 #######################################################################################
-# This file may be used to create the Juniper Canopy environment with conda using:
+# This file may be used to create the Juniper Canopy environment
+#     with conda and miniforge3 using:
 # create:  $ conda list -e > <this file: requirements-conda.txt>
-# install: $ conda create --name <env: juniper_canopy> --file <this file: requirements-conda.txt>
+# install: $ conda create --name <env> --file <file>
+#     e.g. $ conda create --name JuniperCanopy --file requirements-conda.txt
 #######################################################################################
 _libgcc_mutex=0.1=conda_forge
 _openmp_mutex=4.5=2_gnu

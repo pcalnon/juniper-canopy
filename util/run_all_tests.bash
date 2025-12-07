@@ -14,7 +14,7 @@ USERNAME="$(whoami)"
 # trunk-ignore(shellcheck/SC2312)
 [[ "$(uname)" == "${OS_NAME_LINUX}" ]]  && HOME_DIR="/home/${USERNAME}" || { [[ "$(uname)" == "${OS_NAME_MACOS}"  ]] && HOME_DIR="/Users/${USERNAME}" || { echo "Error: Invalid OS Type! Exiting..."  && set -e && exit 1; }; }
 
-JUNIPER_CANOPY_DIR="${HOME_DIR}}/Development/python/Juniper/src/prototypes/juniper_canopy"
+JUNIPER_CANOPY_DIR="${HOME_DIR}}/Development/python/JuniperCanopy/juniper_canopy"
 cd "${JUNIPER_CANOPY_DIR}"
 
 echo "pytest -v --cov ./src/tests"

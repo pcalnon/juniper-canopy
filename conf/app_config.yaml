@@ -255,7 +255,7 @@ backend:
     enabled: true
     monitoring_hooks: true
     state_polling_interval_ms: 500
-    backend_path: ~/Development/python/Juniper/src/prototypes/juniper_cascor
+    backend_path: ~/Development/python/JuniperCanopy/juniper_cascor
 
   # Communication settings
   communication:

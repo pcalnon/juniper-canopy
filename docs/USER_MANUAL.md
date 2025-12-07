@@ -49,7 +49,7 @@ Juniper Canopy is a real-time monitoring and diagnostic frontend for Cascade Cor
 1. **Clone the repository:**
 
    ```bash
-   cd ~/Development/python/Juniper/src/prototypes/juniper_canopy
+   cd ~/Development/python/JuniperCanopy/juniper_canopy
    ```
 
 2. **Activate the conda environment:**

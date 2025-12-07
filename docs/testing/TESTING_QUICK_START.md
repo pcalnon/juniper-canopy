@@ -16,7 +16,7 @@ pytest --version
 
 ```bash
 # From project root
-cd /home/pcalnon/Development/python/Juniper/src/prototypes/juniper_canopy
+cd /home/pcalnon/Development/python/JuniperCanopy/juniper_canopy
 
 # Run all tests
 pytest
@@ -93,7 +93,7 @@ which python
 
 ```bash
 # Run from project root
-cd /home/pcalnon/Development/python/Juniper/src/prototypes/juniper_canopy
+cd /home/pcalnon/Development/python/JuniperCanopy/juniper_canopy
 
 # Check pytest configuration
 cat src/tests/pytest.ini
