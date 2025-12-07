@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="15" failures="0" skipped="0" tests="15" time="2.935" timestamp="2025-12-05T18:40:35.264498-06:00" hostname="yamaguchi"><testcase classname="" name="src.tests.integration.test_api_contracts" time="0.000"><error message="collection failure">integration/test_api_contracts.py:22: in &lt;module&gt;
+    from main import app  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^
+../main.py:65: in &lt;module&gt;
+    from communication.websocket_manager import websocket_manager
+../communication/websocket_manager.py:761: in &lt;module&gt;
+    websocket_manager = WebSocketManager()
+                        ^^^^^^^^^^^^^^^^^^
+../communication/websocket_manager.py:183: in __init__
+    config_mgr = ConfigManager()
+                 ^^^^^^^^^^^^^^^
+../config_manager.py:89: in __init__
+    self._validate_config()
+../config_manager.py:204: in _validate_config
+    self.logger.warning(f"Missing required config key {key_path.repr()}, using default: {default_value}")
+                                                       ^^^^^^^^^^^^^
+E   AttributeError: 'str' object has no attribute 'repr'</error></testcase><testcase classname="" name="src.tests.integration.test_button_layout" time="0.000"><error message="collection failure">integration/test_button_layout.py:13: in &lt;module&gt;
+    from main import app  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^
+../main.py:65: in &lt;module&gt;
+    from communication.websocket_manager import websocket_manager
+../communication/websocket_manager.py:761: in &lt;module&gt;
+    websocket_manager = WebSocketManager()
+                        ^^^^^^^^^^^^^^^^^^
+../communication/websocket_manager.py:183: in __init__
+    config_mgr = ConfigManager()
+                 ^^^^^^^^^^^^^^^
+../config_manager.py:89: in __init__
+    self._validate_config()
+../config_manager.py:204: in _validate_config
+    self.logger.warning(f"Missing required config key {key_path.repr()}, using default: {default_value}")
+                                                       ^^^^^^^^^^^^^
+E   AttributeError: 'str' object has no attribute 'repr'</error></testcase><testcase classname="" name="src.tests.integration.test_cascor_backend_integration" time="0.000"><error message="collection failure">integration/test_cascor_backend_integration.py:33: in &lt;module&gt;
+    from communication.websocket_manager import WebSocketManager  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../communication/websocket_manager.py:761: in &lt;module&gt;
+    websocket_manager = WebSocketManager()
+                        ^^^^^^^^^^^^^^^^^^
+../communication/websocket_manager.py:183: in __init__
+    config_mgr = ConfigManager()
+                 ^^^^^^^^^^^^^^^
+../config_manager.py:89: in __init__
+    self._validate_config()
+../config_manager.py:204: in _validate_config
+    self.logger.warning(f"Missing required config key {key_path.repr()}, using default: {default_value}")
+                                                       ^^^^^^^^^^^^^
+E   AttributeError: 'str' object has no attribute 'repr'</error></testcase><testcase classname="" name="src.tests.integration.test_config" time="0.000"><error message="collection failure">integration/test_config.py:11: in &lt;module&gt;
+    config = get_config()
+             ^^^^^^^^^^^^
+../config_manager.py:556: in get_config
+    _config_instance = ConfigManager(config_path)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^
+../config_manager.py:89: in __init__
+    self._validate_config()
+../config_manager.py:204: in _validate_config
+    self.logger.warning(f"Missing required config key {key_path.repr()}, using default: {default_value}")
+                                                       ^^^^^^^^^^^^^
+E   AttributeError: 'str' object has no attribute 'repr'</error></testcase><testcase classname="" name="src.tests.integration.test_dark_mode" time="0.000"><error message="collection failure">integration/test_dark_mode.py:14: in &lt;module&gt;
+    from main import app  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^
+../main.py:65: in &lt;module&gt;
+    from communication.websocket_manager import websocket_manager
+../communication/websocket_manager.py:761: in &lt;module&gt;
+    websocket_manager = WebSocketManager()
+                        ^^^^^^^^^^^^^^^^^^
+../communication/websocket_manager.py:183: in __init__
+    config_mgr = ConfigManager()
+                 ^^^^^^^^^^^^^^^
+../config_manager.py:89: in __init__
+    self._validate_config()
+../config_manager.py:204: in _validate_config
+    self.logger.warning(f"Missing required config key {key_path.repr()}, using default: {default_value}")
+                                                       ^^^^^^^^^^^^^
+E   AttributeError: 'str' object has no attribute 'repr'</error></testcase><testcase classname="" name="src.tests.integration.test_dashboard_e2e" time="0.000"><error message="collection failure">integration/test_dashboard_e2e.py:12: in &lt;module&gt;
+    from main import app  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^
+../main.py:65: in &lt;module&gt;
+    from communication.websocket_manager import websocket_manager
+../communication/websocket_manager.py:761: in &lt;module&gt;
+    websocket_manager = WebSocketManager()
+                        ^^^^^^^^^^^^^^^^^^
+../communication/websocket_manager.py:183: in __init__
+    config_mgr = ConfigManager()
+                 ^^^^^^^^^^^^^^^
+../config_manager.py:89: in __init__
+    self._validate_config()
+../config_manager.py:204: in _validate_config
+    self.logger.warning(f"Missing required config key {key_path.repr()}, using default: {default_value}")
+                                                       ^^^^^^^^^^^^^
+E   AttributeError: 'str' object has no attribute 'repr'</error></testcase><testcase classname="" name="src.tests.integration.test_dashboard_title" time="0.000"><error message="collection failure">integration/test_dashboard_title.py:10: in &lt;module&gt;
+    from main import app  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^
+../main.py:65: in &lt;module&gt;
+    from communication.websocket_manager import websocket_manager
+../communication/websocket_manager.py:761: in &lt;module&gt;
+    websocket_manager = WebSocketManager()
+                        ^^^^^^^^^^^^^^^^^^
+../communication/websocket_manager.py:183: in __init__
+    config_mgr = ConfigManager()
+                 ^^^^^^^^^^^^^^^
+../config_manager.py:89: in __init__
+    self._validate_config()
+../config_manager.py:204: in _validate_config
+    self.logger.warning(f"Missing required config key {key_path.repr()}, using default: {default_value}")
+                                                       ^^^^^^^^^^^^^
+E   AttributeError: 'str' object has no attribute 'repr'</error></testcase><testcase classname="" name="src.tests.integration.test_main_api_endpoints" time="0.000"><error message="collection failure">integration/test_main_api_endpoints.py:32: in &lt;module&gt;
+    from main import app  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^
+../main.py:65: in &lt;module&gt;
+    from communication.websocket_manager import websocket_manager
+../communication/websocket_manager.py:761: in &lt;module&gt;
+    websocket_manager = WebSocketManager()
+                        ^^^^^^^^^^^^^^^^^^
+../communication/websocket_manager.py:183: in __init__
+    config_mgr = ConfigManager()
+                 ^^^^^^^^^^^^^^^
+../config_manager.py:89: in __init__
+    self._validate_config()
+../config_manager.py:204: in _validate_config
+    self.logger.warning(f"Missing required config key {key_path.repr()}, using default: {default_value}")
+                                                       ^^^^^^^^^^^^^
+E   AttributeError: 'str' object has no attribute 'repr'</error></testcase><testcase classname="" name="src.tests.integration.test_main_endpoints" time="0.000"><error message="collection failure">integration/test_main_endpoints.py:30: in &lt;module&gt;
+    from main import app  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^
+../main.py:65: in &lt;module&gt;
+    from communication.websocket_manager import websocket_manager
+../communication/websocket_manager.py:761: in &lt;module&gt;
+    websocket_manager = WebSocketManager()
+                        ^^^^^^^^^^^^^^^^^^
+../communication/websocket_manager.py:183: in __init__
+    config_mgr = ConfigManager()
+                 ^^^^^^^^^^^^^^^
+../config_manager.py:89: in __init__
+    self._validate_config()
+../config_manager.py:204: in _validate_config
+    self.logger.warning(f"Missing required config key {key_path.repr()}, using default: {default_value}")
+                                                       ^^^^^^^^^^^^^
+E   AttributeError: 'str' object has no attribute 'repr'</error></testcase><testcase classname="" name="src.tests.integration.test_main_ws" time="0.000"><error message="collection failure">integration/test_main_ws.py:29: in &lt;module&gt;
+    from main import app  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^
+../main.py:65: in &lt;module&gt;
+    from communication.websocket_manager import websocket_manager
+../communication/websocket_manager.py:761: in &lt;module&gt;
+    websocket_manager = WebSocketManager()
+                        ^^^^^^^^^^^^^^^^^^
+../communication/websocket_manager.py:183: in __init__
+    config_mgr = ConfigManager()
+                 ^^^^^^^^^^^^^^^
+../config_manager.py:89: in __init__
+    self._validate_config()
+../config_manager.py:204: in _validate_config
+    self.logger.warning(f"Missing required config key {key_path.repr()}, using default: {default_value}")
+                                                       ^^^^^^^^^^^^^
+E   AttributeError: 'str' object has no attribute 'repr'</error></testcase><testcase classname="" name="src.tests.integration.test_status_bar_updates" time="0.000"><error message="collection failure">integration/test_status_bar_updates.py:43: in &lt;module&gt;
+    from main import app, training_state  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../main.py:65: in &lt;module&gt;
+    from communication.websocket_manager import websocket_manager
+../communication/websocket_manager.py:761: in &lt;module&gt;
+    websocket_manager = WebSocketManager()
+                        ^^^^^^^^^^^^^^^^^^
+../communication/websocket_manager.py:183: in __init__
+    config_mgr = ConfigManager()
+                 ^^^^^^^^^^^^^^^
+../config_manager.py:89: in __init__
+    self._validate_config()
+../config_manager.py:204: in _validate_config
+    self.logger.warning(f"Missing required config key {key_path.repr()}, using default: {default_value}")
+                                                       ^^^^^^^^^^^^^
+E   AttributeError: 'str' object has no attribute 'repr'</error></testcase><testcase classname="" name="src.tests.unit.test_loggers" time="0.000"><error message="collection failure">unit/test_loggers.py:10: in &lt;module&gt;
+    config = get_config()
+             ^^^^^^^^^^^^
+../config_manager.py:556: in get_config
+    _config_instance = ConfigManager(config_path)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^
+../config_manager.py:89: in __init__
+    self._validate_config()
+../config_manager.py:204: in _validate_config
+    self.logger.warning(f"Missing required config key {key_path.repr()}, using default: {default_value}")
+                                                       ^^^^^^^^^^^^^
+E   AttributeError: 'str' object has no attribute 'repr'</error></testcase><testcase classname="" name="src.tests.unit.test_message_builders" time="0.000"><error message="collection failure">unit/test_message_builders.py:23: in &lt;module&gt;
+    from communication.websocket_manager import (
+../communication/websocket_manager.py:761: in &lt;module&gt;
+    websocket_manager = WebSocketManager()
+                        ^^^^^^^^^^^^^^^^^^
+../communication/websocket_manager.py:183: in __init__
+    config_mgr = ConfigManager()
+                 ^^^^^^^^^^^^^^^
+../config_manager.py:89: in __init__
+    self._validate_config()
+../config_manager.py:204: in _validate_config
+    self.logger.warning(f"Missing required config key {key_path.repr()}, using default: {default_value}")
+                                                       ^^^^^^^^^^^^^
+E   AttributeError: 'str' object has no attribute 'repr'</error></testcase><testcase classname="" name="src.tests.unit.test_plot_rendering" time="0.000"><error message="collection failure">unit/test_plot_rendering.py:14: in &lt;module&gt;
+    mp = MetricsPanel({})
+         ^^^^^^^^^^^^^^^^
+../frontend/components/metrics_panel.py:82: in __init__
+    self.config_mgr = ConfigManager()
+                      ^^^^^^^^^^^^^^^
+../config_manager.py:89: in __init__
+    self._validate_config()
+../config_manager.py:204: in _validate_config
+    self.logger.warning(f"Missing required config key {key_path.repr()}, using default: {default_value}")
+                                                       ^^^^^^^^^^^^^
+E   AttributeError: 'str' object has no attribute 'repr'</error></testcase><testcase classname="" name="src.tests.unit.test_websocket_manager_unit" time="0.000"><error message="collection failure">unit/test_websocket_manager_unit.py:30: in &lt;module&gt;
+    from communication.websocket_manager import WebSocketManager  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../communication/websocket_manager.py:761: in &lt;module&gt;
+    websocket_manager = WebSocketManager()
+                        ^^^^^^^^^^^^^^^^^^
+../communication/websocket_manager.py:183: in __init__
+    config_mgr = ConfigManager()
+                 ^^^^^^^^^^^^^^^
+../config_manager.py:89: in __init__
+    self._validate_config()
+../config_manager.py:204: in _validate_config
+    self.logger.warning(f"Missing required config key {key_path.repr()}, using default: {default_value}")
+                                                       ^^^^^^^^^^^^^
+E   AttributeError: 'str' object has no attribute 'repr'</error></testcase></testsuite></testsuites>

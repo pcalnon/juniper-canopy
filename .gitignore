@@ -13,15 +13,15 @@ cuda/*
 temp/*
 logs/*
 images/*
-dynet-base/*/
-dynet-base/*.tgz
-dynet-base/*.zip
-dynet-base/*.tar.gz
-boost*/*
-src/pytorch_static/data/*
-torchexplorer_standalone/*
-**/reports
-**/reports/*
+# dynet-base/*/
+# dynet-base/*.tgz
+# dynet-base/*.zip
+# dynet-base/*.tar.gz
+# boost*/*
+# src/pytorch_static/data/*
+# torchexplorer_standalone/*
+# **/reports
+# **/reports/*
 **/backup
 **/backups
 **/resources/*
@@ -47,6 +47,7 @@ dist/
 
 # Data dirs
 data/
+data/*
 data/MNIST/
 data/MNIST/raw/
 
@@ -127,3 +128,6 @@ Thumbs.db
 
 # Package Files
 *.deb
+*.rpm
+*.whl
+*.tar.gz
