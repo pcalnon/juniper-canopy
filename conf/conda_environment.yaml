@@ -31,11 +31,16 @@ dependencies:
   #  - python=3.13
   - python=3.14.0=h32b2ec7_103_cp314
   # - python=3.14
+
   # add other dependencies
   # - _libgcc_mutex=0.1=conda_forge
   - _libgcc_mutex=0.1
+  # - _libgcc_mutex
+
   # - _openmp_mutex=4.5=2_gnu
   - _openmp_mutex=4.5
+  # - _openmp_mutex
+
   - a2wsgi=1.10.10=pyhcf101f3_1
   - annotated-doc=0.0.4=pyhcf101f3_0
   - annotated-types=0.7.0=pyhd8ed1ab_1
@@ -53,14 +58,23 @@ dependencies:
   - click=8.3.1=pyh8f84b5b_1
   - colorama=0.4.6=pyhd8ed1ab_1
   - coverage=7.12.0=py314h67df5f8_0
-  - __cuda=12.2
-  - cuda-cupti=12.2
+
+  # - __cuda=12.2=pypi_0
+  # - __cuda=12.2
+  - __cuda
+
+  # - cuda-cupti=12.2=pypi_0
+  # - cuda-cupti=12.2
+  - cuda-cupti
+
   - dash=3.3.0=pyhd8ed1ab_0
+
   # - dash-bootstrap-components=2.0.4=pypi_0
   # - dash-bootstrap-components=2.0.4=py314h67df5f8_0
   # - dash-bootstrap-components=2.0.4=conda_forge
   - dash-bootstrap-components=2.0.4
   # - dash-bootstrap-components
+
   - distlib=0.4.0=pyhd8ed1ab_0
   - dnspython=2.8.0=pyhcf101f3_0
   - email-validator=2.3.0=pyhd8ed1ab_0
@@ -71,8 +85,11 @@ dependencies:
   - fastapi-core=0.123.9=pyhcf101f3_0
   - filelock=3.20.0=pyhd8ed1ab_0
   - flask=3.1.2=pyhd8ed1ab_0
+
   # - fsspec=2025.12.0=pypi_0
-  - fsspec=2025.12.0
+  # - fsspec=2025.12.0
+  - fsspec
+
   - h11=0.16.0=pyhd8ed1ab_0
   - h2=4.3.0=pyhcf101f3_0
   - hpack=4.1.0=pyhd8ed1ab_0
@@ -120,6 +137,7 @@ dependencies:
   # - nvidia-cublas-cu12
   # - nvidia-cuda-cupti-cu12=12.8.90=pypi_0
   # - nvidia-cuda-cupti-cu12=12.8.90
+  - nvidia-cuda-cupti-cu12
   # - nvidia-cuda-nvrtc-cu12=12.8.93=pypi_0
   # - nvidia-cuda-nvrtc-cu12=12.8.93
   # - nvidia-cuda-runtime-cu12=12.8.90=pypi_0
@@ -172,26 +190,40 @@ dependencies:
   - rich=14.2.0=pyhcf101f3_0
   - rich-toolkit=0.17.0=pyhcf101f3_0
   - scipy=1.16.3=py314he7377e1_1
+
   # - setuptools=80.9.0=pypi_0
   - setuptools=80.9.0
+
   - shellingham=1.5.4=pyhd8ed1ab_2
   - sniffio=1.3.1=pyhd8ed1ab_2
   - starlette=0.50.0=pyhfdc7a7d_0
+
   # - sympy=1.14.0=pypi_0
   - sympy=1.14.0
+
   - tk=8.6.13=noxft_ha0e22de_103
   - tomli=2.3.0=pyhcf101f3_0
+
   # - torch=2.9.1=pypi_0
-  - torch=2.9.1
-  # - torch
-  - torch-cuda=12.1
-  # - torch-cuda
-  - pytorch=2.9.1
-  # - pytorch
-  - pytorch-cuda=12.1
-  # - pytorch-cuda
+  # - torch=2.9.1
+  - torch
+
+  # - torch-cuda=12.1=pypi_0
+  # - torch-cuda=12.1
+  - torch-cuda
+
+  # - pytorch=2.9.1=pypi_0
+  # - pytorch=2.9.1
+  - pytorch
+
+  # - pytorch-cuda=12.1=py314h5bd0f2a_1
+  # - pytorch-cuda=12.1
+  - pytorch-cuda
+
   # - triton=3.5.1=pypi_0
-  - triton=3.5.1
+  # - triton=3.5.1
+  - triton
+
   - typer=0.20.0=pyhefaf540_1
   - typer-slim=0.20.0=pyhcf101f3_1
   - typer-slim-standard=0.20.0=h4daf872_1
