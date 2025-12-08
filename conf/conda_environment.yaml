@@ -18,7 +18,9 @@ name: JuniperCanopy
 channels:
   - conda-forge
   - pytorch
+  - pytorch-cuda
   - nvidia
+  - plotly
   - RMG
   - numba
   - jasonb857
@@ -53,7 +55,8 @@ dependencies:
   - dash=3.3.0=pyhd8ed1ab_0
   # - dash-bootstrap-components=2.0.4=pypi_0
   # - dash-bootstrap-components=2.0.4=py314h67df5f8_0
-  - dash-bootstrap-components=2.0.4=conda_forge
+  # - dash-bootstrap-components=2.0.4=conda_forge
+  - dash-bootstrap-components=2.0.4=n025f998
   - distlib=0.4.0=pyhd8ed1ab_0
   - dnspython=2.8.0=pyhcf101f3_0
   - email-validator=2.3.0=pyhd8ed1ab_0
