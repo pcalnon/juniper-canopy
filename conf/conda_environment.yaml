@@ -178,7 +178,8 @@ dependencies:
   - tk=8.6.13=noxft_ha0e22de_103
   - tomli=2.3.0=pyhcf101f3_0
   # - torch=2.9.1=pypi_0
-  - torch=2.9.1
+  - torch
+  - pytorch
   # - triton=3.5.1=pypi_0
   - triton=3.5.1
   - typer=0.20.0=pyhefaf540_1
