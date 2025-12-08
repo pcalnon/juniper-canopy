@@ -113,7 +113,7 @@ dependencies:
   - numpy=2.3.5=py314h2b28147_0
   # - nvidia-cublas-cu12=12.8.4.1=pypi_0
   # - nvidia-cublas-cu12=12.8.4.1
-  - nvidia-cublas-cu12
+  # - nvidia-cublas-cu12
   # - nvidia-cuda-cupti-cu12=12.8.90=pypi_0
   - nvidia-cuda-cupti-cu12=12.8.90
   # - nvidia-cuda-nvrtc-cu12=12.8.93=pypi_0
