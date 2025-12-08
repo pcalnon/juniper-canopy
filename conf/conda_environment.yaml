@@ -54,6 +54,7 @@ dependencies:
   - colorama=0.4.6=pyhd8ed1ab_1
   - coverage=7.12.0=py314h67df5f8_0
   - __cuda=12.2
+  - cuda-cupti=12.2
   - dash=3.3.0=pyhd8ed1ab_0
   # - dash-bootstrap-components=2.0.4=pypi_0
   # - dash-bootstrap-components=2.0.4=py314h67df5f8_0
