@@ -18,7 +18,6 @@ name: JuniperCanopy
 channels:
   - conda-forge
   - pytorch
-  - pytorch-cuda
   - nvidia
   - plotly
   - RMG
