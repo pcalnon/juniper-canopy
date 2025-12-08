@@ -31,7 +31,8 @@ dependencies:
   - python=3.14.0=h32b2ec7_103_cp314
   - python=3.14
   # add other dependencies
-  - _libgcc_mutex=0.1=conda_forge
+  # - _libgcc_mutex=0.1=conda_forge
+  - _libgcc_mutex=0.1=conda-forge
   - _openmp_mutex=4.5=2_gnu
   - a2wsgi=1.10.10=pyhcf101f3_1
   - annotated-doc=0.0.4=pyhcf101f3_0
@@ -51,7 +52,9 @@ dependencies:
   - colorama=0.4.6=pyhd8ed1ab_1
   - coverage=7.12.0=py314h67df5f8_0
   - dash=3.3.0=pyhd8ed1ab_0
-  - dash-bootstrap-components=2.0.4=pypi_0
+  # - dash-bootstrap-components=2.0.4=pypi_0
+  # - dash-bootstrap-components=2.0.4=py314h67df5f8_0
+  - dash-bootstrap-components=2.0.4=conda-forge
   - distlib=0.4.0=pyhd8ed1ab_0
   - dnspython=2.8.0=pyhcf101f3_0
   - email-validator=2.3.0=pyhd8ed1ab_0
