@@ -114,7 +114,8 @@ This provides torch, yaml, h5py, and all ML dependencies. The project was develo
 `util/setup_environment.bash` uses conditional conda/mamba detection:
 
 ```bash
-USE_CONDA="${TRUE}"  # or USE_MAMBA="${TRUE}"
+USE_MAMBA="${TRUE}"  # or USE_MAMBA="${TRUE}"
+# USE_CONDA="${TRUE}"  # or USE_MAMBA="${TRUE}"
 CMD="${CONDA_CMD}"   # Automatically set based on flag
 ```
 
@@ -547,6 +548,7 @@ pytest -m "not slow"              # Exclude slow tests
 ```bash
 pytest --cov=src --cov-report=html
 # View: open src/tests/reports/coverage/index.html
+# Run `pytest --cov=src --cov-report=html` to generate the report
 ```
 
 **Parallel execution**:

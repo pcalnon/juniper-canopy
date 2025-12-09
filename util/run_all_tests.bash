@@ -48,9 +48,10 @@ elif [[ "${COVERAGE_REPORT}" == "${TRUE}" ]]; then
         --cov-report=term-missing \
         --cov-report=html:src/tests/reports/coverage \
         --junit-xml=src/tests/reports/junit/results.xml \
+        --continue-on-collection-errors \
+
         # --html=src/tests/reports/test_report.html \
         # --self-contained-html \
-        --continue-on-collection-errors \
 
 else
     echo "Coverate Report flag has an Invalid Value"
