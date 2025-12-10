@@ -7,7 +7,7 @@
 # Version:       1.0.0
 #
 # Date:          2025-10-22
-# Last Modified: 2025-12-03
+# Last Modified: 2025-12-09
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-2025 Paul Calnon
@@ -45,7 +45,7 @@ NC='\033[0m' # No Color
 # Banner
 echo -e "${BLUE}"
 echo "╔════════════════════════════════════════════════════════════╗"
-echo "║     Juniper Canopy - Demo Mode Quick Start                ║"
+echo "║      Juniper Canopy - Demo Mode Quick Start                ║"
 echo "╚════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -104,7 +104,7 @@ export CASCOR_DEMO_MODE=1
 # Start the application
 echo ""
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║  Starting Juniper Canopy in Demo Mode...                  ║${NC}"
+echo -e "${BLUE}║  Starting Juniper Canopy in Demo Mode...                   ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "${YELLOW}Dashboard URL: ${GREEN}http://localhost:8050/dashboard/${NC}"

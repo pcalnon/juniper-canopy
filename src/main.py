@@ -91,7 +91,9 @@ ui_logger = get_ui_logger()
 loop_holder = {"loop": None}
 
 # Demo mode tracking (global variables for startup/shutdown).
-# ***IMPORTANT NOTE: demo_mode_active is set in the CascorIntegration initialization above.***
+# ***IMPORTANT NOTE: demo_mode_active is set in the CascorIntegration initialization above.***  ????
+demo_mode_active = False
+
 # ***IMPORTANT NOTE: Do NOT reset it here or demo mode will not start!!!***
 demo_mode_instance = None
 training_state = TrainingState()  # Global TrainingState instance
@@ -114,6 +116,7 @@ async def lifespan(app: FastAPI):
 
     # Initialize demo mode or real backend
     global demo_mode_active, demo_mode_instance, cascor_integration, training_state
+
     if demo_mode_active:
         system_logger.info("Initializing demo mode")
         from demo_mode import get_demo_mode
