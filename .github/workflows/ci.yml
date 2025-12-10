@@ -51,22 +51,26 @@ jobs:
 
       - name: Install Linting Tools
         run: |
+          echo "Installing linting tools..."
           python -m pip install --upgrade pip
           pip install flake8 black isort mypy
           python3 -m pip install types-requests
 
       - name: Run Black (Format Check)
         run: |
+          echo "Running Black..."
           black --check --diff src/ || true
         continue-on-error: true
 
       - name: Run isort (Import Sort Check)
         run: |
+          echo "Running isort..."
           isort --check-only --diff src/ || true
         continue-on-error: true
 
       - name: Run Flake8 (Linter)
         run: |
+          echo "Running Flake8..."
           # Stop the build if there are Python syntax errors or undefined names
           flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics
           # Exit-zero, errors are warnings (warnings won't fail the build)
@@ -75,6 +79,7 @@ jobs:
 
       - name: Run MyPy (Type Checker)
         run: |
+          echo "Running MyPy..."
           mypy src/ --ignore-missing-imports --no-strict-optional || true
         continue-on-error: true
 
@@ -110,20 +115,48 @@ jobs:
       - name: Verify Conda Environment
         shell: bash -el {0}
         run: |
+          echo "Verifying Conda Environment..."
+          conda env list
           conda info
           conda list
+          conda list -n JuniperCanopy
           which python
           python --version
+          pip --version
+          df -h
+
+      - name: Display Directory Contents
+        run: |
+          echo "Displaying directory contents..."
+          ls -Flah /home
+          ls -Flah /home/runner/work/juniper_canopy/juniper_canopy
+          ls -Flah /opt
+          ls -Flah /usr
+          ls -Flah /usr/share
+          ls -Flah /usr/local
+          ls -Flah /usr/local/lib
+
+      - name: Free up disk space
+        run: |
+          echo "Freeing up disk space..."
+          df -h
+          conda clean --all
+          sudo rm -rf /usr/share/dotnet/
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          df -h
 
       - name: Install Dependencies
         shell: bash -el {0}
         run: |
+          echo "Installing dependencies..."
           python -m pip install --upgrade pip
           pip install -r conf/requirements.txt
 
       - name: Verify Test Files
         shell: bash -el {0}
         run: |
+          echo "Verifying test files..."
           echo "=== Test Directory Structure ==="
           ls -la src/tests/
           echo ""
@@ -251,12 +284,6 @@ jobs:
         with:
           # python-version: "3.13"
           python-version: "3.14"
-
-      - name: Free up disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet/
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
 
       - name: Check disk space
         run: df -h
