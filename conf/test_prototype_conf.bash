@@ -19,11 +19,11 @@ TEST_PROTOTYPE_CONF_FILE_NAME="$(basename "$(realpath "${0}")")"
 # Define functions for logging
 #####################################################################################################################################################################################################
 function log_debug() {
-    [[ "${DEBUG}" == "${TRUE}" ]] && echo -ne "${TEST_PROTOTYPE_CONF_FILE_NAME}: ($(date +%F_%T)): [DEBUG]: ${@}\n"
+    [[ "${DEBUG}" == "${TRUE}" ]] && echo -ne "${TEST_PROTOTYPE_CONF_FILE_NAME}: ($(date +%F_%T)): [DEBUG]: ${*}\n"
 }
 
 function log_info() {
-    echo -ne "${TEST_PROTOTYPE_CONF_FILE_NAME}: ($(date +%F_%T)): [INFO]: ${@}\n"
+    echo -ne "${TEST_PROTOTYPE_CONF_FILE_NAME}: ($(date +%F_%T)): [INFO]: ${*}\n"
 }
 
 
