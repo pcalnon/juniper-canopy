@@ -50,7 +50,8 @@ jobs:
 
       - name: Install Linting Tools
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Installing Linting Tools..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║       Juniper Canopy - Installing Linting Tools            ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           python -m pip install --upgrade pip
@@ -59,7 +60,8 @@ jobs:
 
       - name: Run Black (Format Check)
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Running Black..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║       Juniper Canopy - Running Black (Format Check)        ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           black --check --diff src/ || true
@@ -67,7 +69,8 @@ jobs:
 
       - name: Run isort (Import Sort Check)
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Running isort..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║       Juniper Canopy - Running isort (Import Sort Check)   ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           isort --check-only --diff src/ || true
@@ -75,7 +78,8 @@ jobs:
 
       - name: Run Flake8 (Linter)
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Running Flake8..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║       Juniper Canopy - Running Flake8 (Linter)             ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           # Stop the build if there are Python syntax errors or undefined names
@@ -86,7 +90,8 @@ jobs:
 
       - name: Run MyPy (Type Checker)
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Running MyPy..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║      Juniper Canopy - Running MyPy (Type Checker)          ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           mypy src/ --ignore-missing-imports --no-strict-optional || true
@@ -125,8 +130,8 @@ jobs:
         shell: bash -el {0}
         run: |
           echo "Verifying Conda Environment..."
-          echo "╔════════════════════════════════════════════════════════════╗"
-          echo "║       Juniper Canopy - Verifying Conda Environment         ║"
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
+          echo "║       Juniper Canopy - Verify Conda Environment            ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           conda list -n JuniperCanopy
           mamba activate JuniperCanopy
@@ -140,7 +145,8 @@ jobs:
 
       - name: Display Directory Contents
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Displaying directory contents..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║      Juniper Canopy - Display Directory Contents           ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           ls -Flah /opt
@@ -156,9 +162,10 @@ jobs:
           sudo lsblk
         continue-on-error: true
 
-      - name: Free up disk space
+      - name: Free disk space
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Freeing disk space..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║      Juniper Canopy - Free disk space                      ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           df -h
@@ -172,7 +179,8 @@ jobs:
       - name: Install Dependencies
         shell: bash -el {0}
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Installing dependencies..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║      Juniper Canopy - Install Dependencies                 ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           python -m pip install --upgrade pip
@@ -182,7 +190,8 @@ jobs:
       - name: Verify Test Files
         shell: bash -el {0}
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Verifying Test Files..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║      Juniper Canopy - Verify Test Files                    ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           echo -ne "\n========== Test Directory Structure ==========================\n"
@@ -203,7 +212,8 @@ jobs:
           ENABLE_SLOW_TESTS: 0  # Skip slow tests for fast feedback
 
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Running tests with coverage..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║      Juniper Canopy - Run Tests with Coverage              ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           cd src
@@ -233,7 +243,8 @@ jobs:
         # pytest tests/unit/test_metrics_panel.py::
         #     TestMetricsPanelDataFormatRegression -v
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Running regression tests..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║      Juniper Canopy - Run Regression Tests                 ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           cd src
@@ -272,7 +283,8 @@ jobs:
       - name: Check Coverage Threshold
         shell: bash -el {0}
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Checking coverage threshold..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║      Juniper Canopy - Check Coverage Threshold             ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           cd src
@@ -296,7 +308,8 @@ jobs:
       - name: Test Summary
         shell: bash -el {0}
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Compiling Test Summary..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║      Juniper Canopy - Test Summary                         ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           if [ -f reports/junit/results.xml ]; then
@@ -325,14 +338,16 @@ jobs:
 
       - name: Check disk space
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Checking disk space..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║      Juniper Canopy - Check Disk Space                     ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           df -h
 
       - name: Install Build Tools
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Installing build tools..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║      Juniper Canopy - Install Build Tools                  ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           python -m pip install --upgrade pip
@@ -340,7 +355,8 @@ jobs:
 
       - name: Verify Project Structure
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Verifying project structure..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║      Juniper Canopy - Verify Project Structure             ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           echo -ne "\n=========== Project Directory ================================\n"
@@ -352,7 +368,8 @@ jobs:
 
       - name: Check for Syntax Errors
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Checking for syntax errors..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║      Juniper Canopy - Check for Syntax Errors              ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           python -m py_compile src/**/*.py || true
@@ -360,7 +377,8 @@ jobs:
 
       - name: Build Summary
         run: |
-          printf "╔════════════════════════════════════════════════════════════╗"
+          echo "Building Summary..."
+          printf -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           printf "║      Juniper Canopy - Build Summary                        ║"
           printf "╠════════════════════════════════════════════════════════════╣"
           printf "║%6s%54s║\n"     " " "Build Information:"
@@ -396,8 +414,9 @@ jobs:
       - name: Install Dependencies
         shell: bash -el {0}
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
-          echo "║      Juniper Canopy - Check for Syntax Errors              ║"
+          echo "Installing Dependencies..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
+          echo "║      Juniper Canopy - Install Dependencies                 ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           python -m pip install --upgrade pip
           pip install -r conf/requirements.txt
@@ -409,8 +428,9 @@ jobs:
           RUN_SERVER_TESTS: 0
           ENABLE_SLOW_TESTS: 0
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
-          echo "║      Juniper Canopy - Check for Syntax Errors              ║"
+          echo "Running Integration Tests..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
+          echo "║      Juniper Canopy - Run Integration Tests                ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           cd src
           pytest tests/integration/ \
@@ -423,8 +443,9 @@ jobs:
       - name: Integration Test Summary
         shell: bash -el {0}
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
-          echo "║      Juniper Canopy - Check for Syntax Errors              ║"
+          echo "Compiling Summary for Integration Tests..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
+          echo "║      Juniper Canopy - Integration Test Summary             ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           echo -ne "\n=== Integration Tests Completed ===\n"
           echo "Note: Some tests may require external dependencies"
@@ -438,7 +459,8 @@ jobs:
     steps:
       - name: Check Quality Gate
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Checking Quality Gate..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║      Juniper Canopy - Quality Gate Status                  ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           echo " "
@@ -467,7 +489,8 @@ jobs:
     steps:
       - name: Build Status
         run: |
-          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "Building Status Notification..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║      Juniper Canopy - Build Status Notification            ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           echo -ne "\n====== CI/CD Pipeline Complete ===============================\n"
