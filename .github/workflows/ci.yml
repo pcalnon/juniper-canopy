@@ -213,6 +213,8 @@ jobs:
           find src/tests -name "test_*.py" -type f
           echo -ne "\n========== Conftest Files ====================================\n"
           find src/tests -name "conftest.py" -type f
+          echo -ne "\n========== Removing Logs Dir =================================\n"
+          rm -rf logs/
         continue-on-error: true
 
       - name: Run Tests with Coverage
