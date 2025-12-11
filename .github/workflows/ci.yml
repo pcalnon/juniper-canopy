@@ -46,31 +46,38 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          # python-version: 3.13
           python-version: 3.14
 
       - name: Install Linting Tools
         run: |
-          echo "Installing linting tools..."
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Installing Linting Tools            ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           python -m pip install --upgrade pip
           pip install flake8 black isort mypy
           python3 -m pip install types-requests
 
       - name: Run Black (Format Check)
         run: |
-          echo "Running Black..."
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Running Black (Format Check)        ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           black --check --diff src/ || true
         continue-on-error: true
 
       - name: Run isort (Import Sort Check)
         run: |
-          echo "Running isort..."
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Running isort (Import Sort Check)   ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           isort --check-only --diff src/ || true
         continue-on-error: true
 
       - name: Run Flake8 (Linter)
         run: |
-          echo "Running Flake8..."
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Running Flake8 (Linter)             ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           # Stop the build if there are Python syntax errors or undefined names
           flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics
           # Exit-zero, errors are warnings (warnings won't fail the build)
@@ -79,7 +86,9 @@ jobs:
 
       - name: Run MyPy (Type Checker)
         run: |
-          echo "Running MyPy..."
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Running MyPy (Type Checker)          ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           mypy src/ --ignore-missing-imports --no-strict-optional || true
         continue-on-error: true
 
@@ -116,55 +125,73 @@ jobs:
         shell: bash -el {0}
         run: |
           echo "Verifying Conda Environment..."
-          conda env list
-          conda info
-          conda list
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Verifying Conda Environment         ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           conda list -n JuniperCanopy
+          mamba activate JuniperCanopy
+          conda env list
           which python
           python --version
           pip --version
           df -h
+        continue-on-error: true
+
 
       - name: Display Directory Contents
         run: |
-          echo "Displaying directory contents..."
-          ls -Flah /home
-          ls -Flah /home/runner/work/juniper_canopy/juniper_canopy
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Display Directory Contents           ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           ls -Flah /opt
           ls -Flah /usr
           ls -Flah /usr/share
           ls -Flah /usr/local
           ls -Flah /usr/local/lib
+          ls -Flah /home
+          ls -Flah /home/runner
+          ls -Flah /home/runner/work
+          ls -Flah /home/runner/work/JuniperCanopy
+          ls -Flah /home/runner/work/JuniperCanopy/juniper_canopy
+          sudo lsblk
+        continue-on-error: true
 
       - name: Free up disk space
         run: |
-          echo "Freeing up disk space..."
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Free disk space                      ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           df -h
           conda clean --all
           sudo rm -rf /usr/share/dotnet/
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
           df -h
+        continue-on-error: true
 
       - name: Install Dependencies
         shell: bash -el {0}
         run: |
-          echo "Installing dependencies..."
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Install Dependencies                 ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           python -m pip install --upgrade pip
           pip install -r conf/requirements.txt
+        continue-on-error: true
 
       - name: Verify Test Files
         shell: bash -el {0}
         run: |
-          echo "Verifying test files..."
-          echo "=== Test Directory Structure ==="
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Verify Test Files                    ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          echo -ne "\n========== Test Directory Structure ==========================\n"
           ls -la src/tests/
-          echo ""
-          echo "=== Test Files ==="
+          echo -ne "\n========== Test Files ========================================\n"
           find src/tests -name "test_*.py" -type f
-          echo ""
-          echo "=== Conftest Files ==="
+          echo -ne "\n========== Conftest Files ====================================\n"
           find src/tests -name "conftest.py" -type f
+        continue-on-error: true
 
       - name: Run Tests with Coverage
         shell: bash -el {0}
@@ -176,6 +203,9 @@ jobs:
           ENABLE_SLOW_TESTS: 0  # Skip slow tests for fast feedback
 
         run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Run Tests with Coverage              ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           cd src
           # Run tests excluding external dependencies
           pytest tests/ \
@@ -203,7 +233,10 @@ jobs:
         # pytest tests/unit/test_metrics_panel.py::
         #     TestMetricsPanelDataFormatRegression -v
         run: |
-          cd sr
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Run Regression Tests                 ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          cd src
           pytest tests/unit/test_metrics_panel.py -v
           pytest tests/integration/test_api_contracts.py -v
           pytest tests/integration/test_dashboard_e2e.py -v
@@ -239,6 +272,9 @@ jobs:
       - name: Check Coverage Threshold
         shell: bash -el {0}
         run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Check Coverage Threshold             ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           cd src
           COVERAGE="$(pytest tests/ --cov=. --cov-report=term-missing)"
           COVERAGE="$(echo "${COVERAGE}" | grep "TOTAL")"
@@ -260,7 +296,9 @@ jobs:
       - name: Test Summary
         shell: bash -el {0}
         run: |
-          echo "=== Test Summary ==="
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Test Summary                         ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           if [ -f reports/junit/results.xml ]; then
             echo "Test results generated successfully"
             cat reports/junit/results.xml | grep -o 'tests="[0-9]*"'&& {
@@ -286,34 +324,52 @@ jobs:
           python-version: "3.14"
 
       - name: Check disk space
-        run: df -h
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Check Disk Space                     ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          df -h
 
       - name: Install Build Tools
         run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Install Build Tools                  ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           python -m pip install --upgrade pip
           pip install build wheel setuptools
 
       - name: Verify Project Structure
         run: |
-          echo "=== Project Structure ==="
-          ls -la
-          echo ""
-          echo "=== Source Directory ==="
-          ls -la src/
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Verify Project Structure             ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          echo -ne "\n=========== Project Directory ================================\n"
+          ls -Flah
+          echo -ne "\n=========== Source Directory =================================\n"
+          ls -Flah src/
+          echo -ne "\n=========== Project Directory Structure ======================\n"
+          tree .
 
       - name: Check for Syntax Errors
         run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Check for Syntax Errors              ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           python -m py_compile src/**/*.py || true
         continue-on-error: true
 
       - name: Build Summary
         run: |
-          echo "=== Build Information ==="
-          echo "Python Version: $(python --version)"
-          echo "Project: Juniper Canopy"
-          echo -ne "Version: "
-          echo "$(grep 'Version:' src/main.py | head -1 | awk '{print $3}')"
-          echo "Build Date: $(date -u)"
+          printf "╔════════════════════════════════════════════════════════════╗"
+          printf "║      Juniper Canopy - Build Summary                        ║"
+          printf "╠════════════════════════════════════════════════════════════╣"
+          printf "║%6s%54s║\n"     " " "Build Information:"
+          printf "║%6s%18s%36s║\n" " " "Operating System:"  "$(uname -a)"
+          printf "║%6s%16s%38s║\n" " " "Python Version:"    "$(python --version)"
+          printf "║%6s%9s%45s║\n"  " " "Project: "          "Juniper Canopy"
+          printf "║%6s%9s%45s║\n" " " "Version:" "$(grep 'Version:' src/main.py | head -1 | awk '{print $3}')"
+          printf "║%6s%12s%42s║\n" " " "Build Date: "       "$(date -u)"
+          printf "╚════════════════════════════════════════════════════════════╝"
 
   integration:
     name: Integration Tests
@@ -340,6 +396,9 @@ jobs:
       - name: Install Dependencies
         shell: bash -el {0}
         run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Check for Syntax Errors              ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           python -m pip install --upgrade pip
           pip install -r conf/requirements.txt
 
@@ -350,6 +409,9 @@ jobs:
           RUN_SERVER_TESTS: 0
           ENABLE_SLOW_TESTS: 0
         run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Check for Syntax Errors              ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
           cd src
           pytest tests/integration/ \
             --verbose \
@@ -361,7 +423,10 @@ jobs:
       - name: Integration Test Summary
         shell: bash -el {0}
         run: |
-          echo "=== Integration Tests Completed ==="
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Check for Syntax Errors              ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          echo -ne "\n=== Integration Tests Completed ===\n"
           echo "Note: Some tests may require external dependencies"
 
   quality-gate:
@@ -373,11 +438,13 @@ jobs:
     steps:
       - name: Check Quality Gate
         run: |
-          echo "=== Quality Gate Status ==="
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Quality Gate Status                  ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          echo " "
           echo "Lint: ${{ needs.lint.result }}"
           echo "Test: ${{ needs.test.result }}"
           echo "Build: ${{ needs.build.result }}"
-
           # Determine overall status
           if [[ "${{ needs.test.result }}" == "failure" ]]; then
             echo "::error::Tests failed - Quality gate FAILED"
@@ -400,7 +467,10 @@ jobs:
     steps:
       - name: Build Status
         run: |
-          echo "=== CI/CD Pipeline Complete ==="
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║      Juniper Canopy - Build Status Notification            ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          echo -ne "\n====== CI/CD Pipeline Complete ===============================\n"
           echo "Status: ${{ needs.quality-gate.result }}"
           echo "Workflow: ${{ github.workflow }}"
           echo "Branch: ${{ github.ref_name }}"
