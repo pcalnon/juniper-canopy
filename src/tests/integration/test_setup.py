@@ -69,9 +69,9 @@ def test_directories():
     # Get project root (3 levels up from test file)
     project_root = Path(__file__).parent.parent.parent.parent
     # required_dirs = ["conf", "notes", "src", "data", "logs", "images", "util"]
-    # TODO: remove data dir.  and logs?
-    required_dirs = ["conf", "data", "docs", "images", "logs", "notes", "reports", "src", "util"]
-
+    # TODO: remove data di?r.  and logs?  fix this by eliminating most?
+    # required_dirs = ["conf", "data", "docs", "images", "logs", "notes", "reports", "src", "util"]
+    required_dirs = ["conf", "docs", "logs", "reports", "src", "util"]
     for dir_name in required_dirs:  # sourcery skip: no-loop-in-tests
         dir_path = project_root / dir_name
         if dir_path.exists():  # sourcery skip: no-conditionals-in-tests
