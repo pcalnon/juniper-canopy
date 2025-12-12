@@ -237,7 +237,7 @@ class CascorLogger:
 
     def _config_logging_file(self):
         # Ensure log directory exists
-        os.makedirs(self.log_dir, exist_ok=True)
+        # os.makedirs(self.log_dir, exist_ok=True)
 
         # Create rotating file handler
         log_filename = os.path.join(self.log_dir, f"{self.name}.log")
