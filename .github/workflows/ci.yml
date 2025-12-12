@@ -7,7 +7,7 @@
 # Version:       0.10.0
 #
 # Date:          2025-11-03
-# Last Modified: 2025-12-11
+# Last Modified: 2025-12-12
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-2025 Paul Calnon
@@ -41,7 +41,20 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        # uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          # fetch-depth: 0
+          fetch-depth: 1
+
+      - name: Fix Default Branch Name
+        run: |
+          echo "Fixing Default Branch Name..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
+          echo "║       Juniper Canopy - Fix Default Branch Name             ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          git branch -m main
+          git config --global init.defaultBranch main
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -126,7 +139,21 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        # uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          # fetch-depth: 0
+          fetch-depth: 1
+
+      - name: Fix Default Branch Name
+        run: |
+          echo "Fixing Default Branch Name..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
+          echo "║       Juniper Canopy - Fix Default Branch Name             ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          # git branch -M main
+          git branch -m main
+          git config --global init.defaultBranch main
 
       - name: Set up Conda
         uses: conda-incubator/setup-miniconda@v3
@@ -159,7 +186,6 @@ jobs:
           pip --version
           df -h
         continue-on-error: true
-
 
       - name: Display Directory Contents
         run: |
@@ -252,6 +278,7 @@ jobs:
           echo "╚════════════════════════════════════════════════════════════╝"
           cd src
           # Run tests excluding external dependencies
+          # TODO: skip tests when calculating coverage
           pytest tests/ \
             --verbose \
             -m "not requires_cascor and not requires_server and not slow" \
@@ -318,6 +345,7 @@ jobs:
         shell: bash -el {0}
         run: |
           echo "Checking coverage threshold..."
+          # TODO: skip tests when calculating coverage
           echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║      Juniper Canopy - Check Coverage Threshold             ║"
           echo "╚════════════════════════════════════════════════════════════╝"
@@ -346,7 +374,7 @@ jobs:
           echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║      Juniper Canopy - Test Summary                         ║"
           echo "╚════════════════════════════════════════════════════════════╝"
-          if [ -f reports/junit/results.xml ]; then
+          if [[ -f reports/junit/results.xml ]]; then
             echo "Test results generated successfully"
             cat reports/junit/results.xml | grep -o 'tests="[0-9]*"'&& {
                 echo "Tests completed";
@@ -362,7 +390,21 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        # uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          # fetch-depth: 0
+          fetch-depth: 1
+
+      - name: Fix Default Branch Name
+        run: |
+          echo "Fixing Default Branch Name..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
+          echo "║       Juniper Canopy - Fix Default Branch Name             ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          # git branch -M main
+          git branch -m main
+          git config --global init.defaultBranch main
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -412,7 +454,7 @@ jobs:
       - name: Build Summary
         run: |
           echo "Building Summary..."
-          printf -ne "\n╔════════════════════════════════════════════════════════════╗\n"
+          printf "\n╔════════════════════════════════════════════════════════════╗\n"
           printf "║      Juniper Canopy - Build Summary                        ║"
           printf "╠════════════════════════════════════════════════════════════╣"
           printf "║%6s%54s║\n"     " " "Build Information:"
@@ -427,23 +469,107 @@ jobs:
     name: Integration Tests
     runs-on: ubuntu-latest
     needs: [test]
+
+    strategy:
+      matrix:
+        # python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.14"]
+
     if: github.event_name == 'pull_request'
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        # uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          # fetch-depth: 0
+          fetch-depth: 1
+
+      - name: Fix Default Branch Name
+        run: |
+          echo "Fixing Default Branch Name..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
+          echo "║       Juniper Canopy - Fix Default Branch Name             ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          # git branch -M main
+          git branch -m main
+          git config --global init.defaultBranch main
 
       - name: Set up Conda
         uses: conda-incubator/setup-miniconda@v3
         with:
-          # python-version: "3.13"
-          python-version: "3.14"
+          python-version: ${{ matrix.python-version }}
           # channels: conda-forge,pytorch,plotly,defaults
           channels: conda-forge,pytorch,nvidia,RMG,numba,jasonb857,ehmoussi,konstantin-orangeqs
+          conda-remove-defaults: true
+          miniforge-version: latest
+          use-mamba: true
           channel-priority: flexible
           activate-environment: JuniperCanopy
           environment-file: conf/conda_environment.yaml
           auto-activate-base: false
+
+      - name: Verify Conda Environment
+        shell: bash -el {0}
+        run: |
+          echo "Verifying Conda Environment..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
+          echo "║       Juniper Canopy - Verify Conda Environment            ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          conda list -n JuniperCanopy
+          eval "$(mamba shell hook --shell bash)"
+          mamba shell init --shell bash --root-prefix=~/.local/share/mamba
+          mamba activate JuniperCanopy
+          conda env list
+          which python
+          python --version
+          pip --version
+          df -h
+        continue-on-error: true
+
+      - name: Display Directory Contents
+        run: |
+          echo "Displaying directory contents..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
+          echo "║      Juniper Canopy - Display Directory Contents           ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          echo "ls -Flah /opt" && ls -Flah /opt
+          echo "ls -Flah /usr" && ls -Flah /usr
+          echo "ls -Flah /usr/share" && ls -Flah /usr/share
+          echo "ls -Flah /usr/local" && ls -Flah /usr/local
+          echo "ls -Flah /usr/local/lib" && ls -Flah /usr/local/lib
+          echo "ls -Flah /home" && ls -Flah /home
+          echo "ls -Flah /home/runner" && ls -Flah /home/runner
+          echo "ls -Flah /home/runner/work" && ls -Flah /home/runner/work
+          echo "ls -Flah /home/runner/work/Juniper" && ls -Flah /home/runner/work/Juniper
+          echo "ls -Flah /home/runner/work/Juniper/Juniper" && ls -Flah /home/runner/work/Juniper/Juniper
+          echo "lsblk" && sudo lsblk
+        continue-on-error: true
+
+      - name: Free disk space
+        run: |
+          echo "Freeing disk space..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
+          echo "║      Juniper Canopy - Free disk space                      ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          df -h
+          conda clean --all
+          sudo rm -rf /usr/games
+          sudo rm -rf /usr/share/php*
+          sudo rm -rf /usr/share/julia*
+
+          sudo rm -rf /usr/local/julia*
+          sudo rm -rf /usr/local/gradle*
+          sudo rm -rf /usr/local/apache-maven*
+          sudo rm -rf /usr/local/kotlinc
+          sudo rm -rf /usr/local/bison
+
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/microsoft
+          sudo rm -rf /opt/ghc
+          df -h
+        continue-on-error: true
 
       - name: Install Dependencies
         shell: bash -el {0}
@@ -455,12 +581,33 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r conf/requirements.txt
 
+      - name: Verify Test Files
+        shell: bash -el {0}
+        run: |
+          echo "Verifying Test Files..."
+          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
+          echo "║      Juniper Canopy - Verify Test Files                    ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          echo -ne "\n========== Test Directory Structure ==========================\n"
+          ls -la src/tests/
+          echo -ne "\n========== Test Files ========================================\n"
+          find src/tests -name "test_*.py" -type f
+          echo -ne "\n========== Conftest Files ====================================\n"
+          find src/tests -name "conftest.py" -type f
+          echo -ne "\n========== Creating Required Directories =====================\n"
+          mkdir -p logs
+          mkdir -p src/logs
+          mkdir -p reports/junit
+          echo "Created logs/, src/logs/, reports/junit/"
+        continue-on-error: true
+
       - name: Run Integration Tests Only
         shell: bash -el {0}
         env:
           CASCOR_BACKEND_AVAILABLE: 0
           RUN_SERVER_TESTS: 0
           ENABLE_SLOW_TESTS: 0
+
         run: |
           echo "Running Integration Tests..."
           echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
