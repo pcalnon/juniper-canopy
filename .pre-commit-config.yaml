@@ -86,7 +86,6 @@ repos:
           - --max-complexity=15
           - --select=B,C,E,F,W,T4,B9
           - --exit-zero
-          - --require-plugins
           - --require-plugins=flake8-bugbear,flake8-comprehensions,flake8-simplify
         additional_dependencies:
           - flake8-bugbear
