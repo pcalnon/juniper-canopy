@@ -44,7 +44,7 @@ from logger.logger import (  # noqa: E402
 def tmp_log_dir(tmp_path):
     """Create temporary log directory."""
     log_dir = tmp_path / "logs"
-    # log_dir.mkdir(exist_ok=True)
+    log_dir.mkdir(exist_ok=True)
     return str(log_dir)
 
 

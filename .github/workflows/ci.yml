@@ -229,11 +229,11 @@ jobs:
           find src/tests -name "test_*.py" -type f
           echo -ne "\n========== Conftest Files ====================================\n"
           find src/tests -name "conftest.py" -type f
-          echo -ne "\n========== Removing Logs Dir =================================\n"
-          # # echo "rm -rf logs/" && rm -rf logs/
-          # echo "rm -rf src/logs/" && rm -rf src/logs/
-          # echo "rm -rf src/tests/logs/" && rm -rf src/tests/logs/
-          # echo "rm -rf src/tests/integration/logs/" && rm -rf src/tests/integration/logs/
+          echo -ne "\n========== Creating Required Directories =====================\n"
+          mkdir -p logs
+          mkdir -p src/logs
+          mkdir -p reports/junit
+          echo "Created logs/, src/logs/, reports/junit/"
         continue-on-error: true
 
       - name: Run Tests with Coverage

@@ -19,7 +19,7 @@ handlers:
     # level: DEBUG
     level: INFO
     formatter: formatter_file
-    filename: logs/dynamic_nn.log
+    filename: logs/juniper_canopy.log
     mode: w
 loggers:
   juniper:

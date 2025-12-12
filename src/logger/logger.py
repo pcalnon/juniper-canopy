@@ -237,7 +237,7 @@ class CascorLogger:
 
     def _config_logging_file(self):
         # Ensure log directory exists
-        # os.makedirs(self.log_dir, exist_ok=True)
+        os.makedirs(self.log_dir, exist_ok=True)
 
         # Create rotating file handler
         print(f"Configuring file handler for {self.name}, at log dir: {self.log_dir}")
