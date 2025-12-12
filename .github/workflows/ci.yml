@@ -456,15 +456,15 @@ jobs:
         run: |
           echo "Building Summary..."
           printf "\n╔════════════════════════════════════════════════════════════╗\n"
-          printf "║      Juniper Canopy - Build Summary                        ║"
-          printf "╠════════════════════════════════════════════════════════════╣"
-          printf "║%6s%54s║\n"     " " "Build Information:"
-          printf "║%6s%18s%36s║\n" " " "Operating System:"  "$(uname -a)"
-          printf "║%6s%16s%38s║\n" " " "Python Version:"    "$(python --version)"
-          printf "║%6s%9s%45s║\n"  " " "Project: "          "Juniper Canopy"
-          printf "║%6s%9s%45s║\n" " " "Version:" "$(grep 'Version:' src/main.py | head -1 | awk '{print $3}')"
-          printf "║%6s%12s%42s║\n" " " "Build Date: "       "$(date -u)"
-          printf "╚════════════════════════════════════════════════════════════╝"
+          printf "║      Juniper Canopy - Build Summary                        ║\n"
+          printf "╠════════════════════════════════════════════════════════════╣\n"
+          printf "║%4s%-54s║\n"     " " "Build Information:"
+          printf "║%4s%-18s%36s║\n" " " "Operating System:"  "$(echo \"$(uname -a)\" | awk -F \  '{print $1,$2,$3;}')"
+          printf "║%4s%-16s%38s║\n" " " "Python Version:"    "$(python --version)"
+          printf "║%4s%-9s%45s║\n"  " " "Project: "          "Juniper Canopy"
+          printf "║%4s%-9s%45s║\n" " " "Version:" "$(grep 'Version:' src/main.py | head -1 | awk '{print $3}')"
+          printf "║%4s%-12s%42s║\n" " " "Build Date: "       "$(date -u)"
+          printf "╚════════════════════════════════════════════════════════════╝\n"
 
   integration:
     name: Integration Tests
