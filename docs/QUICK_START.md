@@ -77,7 +77,7 @@ cd juniper_canopy
 conda activate JuniperPython
 ```
 
-#### **Option B: Let the demo script handle it
+#### **Option B: Let the demo script handle it**
 
 The `./demo` script automatically activates the conda environment.
 
