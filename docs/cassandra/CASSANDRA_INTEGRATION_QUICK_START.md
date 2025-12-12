@@ -107,7 +107,7 @@ ps aux | grep cassandra
 
 ```bash
 # Add Cassandra repository
-echo "deb https://debian.cassandra.apache.org 40x main" | \
+echo "deb https://debian.cassandra.apache.org 41x main" | \
   sudo tee /etc/apt/sources.list.d/cassandra.sources.list
 
 curl https://downloads.apache.org/cassandra/KEYS | sudo apt-key add -
