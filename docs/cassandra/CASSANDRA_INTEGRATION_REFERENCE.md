@@ -1,6 +1,6 @@
 # Cassandra Integration Reference
 
-## Technical reference for Cassandra integration in Juniper Canopy*
+## Technical reference for Cassandra integration in Juniper Canopy
 
 **Version:** 0.1.0 - PLANNED FEATURE  
 **Status:** ⚠️ NOT YET IMPLEMENTED  
