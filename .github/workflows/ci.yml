@@ -53,7 +53,8 @@ jobs:
           echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
           echo "║       Juniper Canopy - Fix Default Branch Name             ║"
           echo "╚════════════════════════════════════════════════════════════╝"
-          git branch -m main
+          # git branch -M main
+          # git branch -m main
           git config --global init.defaultBranch main
 
       - name: Set up Python
@@ -152,7 +153,7 @@ jobs:
           echo "║       Juniper Canopy - Fix Default Branch Name             ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           # git branch -M main
-          git branch -m main
+          # git branch -m main
           git config --global init.defaultBranch main
 
       - name: Set up Conda
@@ -403,7 +404,7 @@ jobs:
           echo "║       Juniper Canopy - Fix Default Branch Name             ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           # git branch -M main
-          git branch -m main
+          # git branch -m main
           git config --global init.defaultBranch main
 
       - name: Set up Python
@@ -492,7 +493,7 @@ jobs:
           echo "║       Juniper Canopy - Fix Default Branch Name             ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           # git branch -M main
-          git branch -m main
+          # git branch -m main
           git config --global init.defaultBranch main
 
       - name: Set up Conda
