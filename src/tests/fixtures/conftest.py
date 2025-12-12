@@ -39,7 +39,10 @@ def test_config() -> Dict[str, Any]:
         "server": {"host": "127.0.0.1", "port": 8050, "debug": False},
         "logging": {"console": {"enabled": True, "level": "DEBUG"}, "file": {"enabled": False, "level": "INFO"}},
         "frontend": {"update_interval": 1000, "max_data_points": 1000},
-        "backend": {"cascor_prototype_path": "../cascor", "cache": {"enabled": False, "type": "memory"}},
+        "backend": {
+            "cascor_prototype_path": "../../JuniperCascor/juniper_cascor",
+            "cache": {"enabled": False, "type": "memory"},
+        },
         "communication": {"websocket": {"max_connections": 10, "heartbeat_interval": 30}},
     }
 
@@ -128,6 +131,7 @@ def sample_dataset() -> Dict[str, Any]:
 
 @pytest.fixture
 def temp_test_directory(tmp_path):
+    # sourcery skip: inline-immediately-returned-variable
     """
     Create temporary directory structure for testing.
 
@@ -137,13 +141,14 @@ def temp_test_directory(tmp_path):
     Returns:
         Path to temporary test directory
     """
-    test_dir = tmp_path / "cascor_test"
-    test_dir.mkdir(exist_ok=True)
+    # test_dir = tmp_path / "cascor_test"
+    test_dir = tmp_path / "juniper_canopy_test"
+    # test_dir.mkdir(exist_ok=True)
 
     # Create subdirectories
-    (test_dir / "logs").mkdir(exist_ok=True)
-    (test_dir / "data").mkdir(exist_ok=True)
-    (test_dir / "images").mkdir(exist_ok=True)
+    # (test_dir / "logs").mkdir(exist_ok=True)
+    # (test_dir / "data").mkdir(exist_ok=True)
+    # (test_dir / "images").mkdir(exist_ok=True)
 
     return test_dir
 
@@ -188,7 +193,7 @@ logging:
 def ensure_test_data_directory():
     """Ensure test data directory exists."""
     test_data_dir = Path(__file__).parent / "data"
-    test_data_dir.mkdir(exist_ok=True)
+    # test_data_dir.mkdir(exist_ok=True)
 
     # Create sample data files if they don't exist
     sample_metrics_file = test_data_dir / "sample_metrics.json"
@@ -209,6 +214,7 @@ def cleanup_test_environment():
     yield
     # Cleanup code runs after test
     # Clear any test-specific environment variables
-    test_env_vars = [k for k in os.environ if k.startswith("CASCOR_TEST_")]
+    # test_env_vars = [k for k in os.environ if k.startswith("CASCOR_TEST_")]
+    test_env_vars = [k for k in os.environ if k.startswith("JUNIPER_CANOPY_TEST_")]
     for var in test_env_vars:
         del os.environ[var]
