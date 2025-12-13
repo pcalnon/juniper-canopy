@@ -75,7 +75,7 @@
    - The Save and Load buttons should be disabled when the training process is running.
    - The Save and Load buttons should be enabled when the training process is Paused, Stopped, Completed, or Failed.
    - Save functionality should write the current state of the training process to a file.
-     - The saved file should include but not limited to:
+     - The saved file should include, but not be limited to:
        - Current training metrics data
        - Current model parameters
        - Current training meta-parameters
