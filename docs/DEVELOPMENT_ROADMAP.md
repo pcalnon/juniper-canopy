@@ -65,9 +65,9 @@
      - The replay functionality should allow various replay speeds:
        - Step through the training process one iteration at a time.
        - Replay at normal speed.
-       - Fast forward - 1X to play through the entire process at a faster speed.
-       - Fast forward - 2X to play through the entire process at an even faster speed.
+       - Fast forward - 2X to play through the entire process at a faster speed.
        - Fast forward - 4X to play through the entire process at an even faster speed.
+       - Fast forward - 8X to play through the entire process at the fastest speed.
 
 4. Feat: Add Save and Load buttons to the Training Metrics tab.
    - The Save and Load buttons should be visible and properly colored in both "light mode" and "dark mode".
