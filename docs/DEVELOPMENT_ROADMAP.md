@@ -163,7 +163,7 @@
 7. Feat: The "Download as an Image File" function should have a unique name suggestion.
    - Provide a default name suggestion based on the current date and time.
 
-8. Feat: Modify the Cascade Correlation Network Architecture display to be an interactive, simulated 3D view of the network topology.
+8. Feat: Modify the CasCor Network Architecture display to be an interactive, simulated 3D view of the network topology.
    - Allow for rotation, zooming, and panning of the network topology in 3D space.
    - Provide visual depth cues to enhance the 3D effect.
    - Allow for selection and interaction with nodes in the 3D view.
