@@ -225,4 +225,15 @@
 
 ### Status per Feature
 
-1. Not Started
+| Feature / Fix                                                                 | Status       |
+|-------------------------------------------------------------------------------|--------------|
+| Top Status Bar: Status/Phase fields not updating                             | Not Started  |
+| Training Controls: Buttons not resetting                                      | Not Started  |
+| Training Controls: Meta-parameters not applied after change                   | Not Started  |
+| Training Metrics Tab: Add new tab and display metrics                        | Not Started  |
+| Training Data Tab: Add new tab and display data                              | Not Started  |
+| Model Architecture Tab: Add new tab and display architecture                  | Not Started  |
+| About Tab for Juniper Cascor backend                                          | Not Started  |
+| Cassandra Integration and Monitoring Tab                                      | Not Started  |
+| Redis Integration and Monitoring Tab                                          | Not Started  |
+| HDF5 Snapshot Functionality Tab                                               | Not Started  |
