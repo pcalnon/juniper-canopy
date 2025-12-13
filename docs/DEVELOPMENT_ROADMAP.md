@@ -153,7 +153,7 @@
      - The edge highlight should be more muted than the New Node highlight.
      - The edge highlights should remain as long as the node highlight is visible.
      - The edge highlights should be removed when the node highlight is removed.
-   - The visual indicator should continue to remain visible after the node is added.
+   - The visual indicator should remain visible after the node is added.
      - If the user selects a different node while the indicator is still active, the indicator should remain on.
      - The visual indicator should remain until the user selects and moves a different node or until a new hidden node is added.
      - The visual indicator should fade out smoothly over 2 seconds.
