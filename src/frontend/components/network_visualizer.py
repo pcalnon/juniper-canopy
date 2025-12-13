@@ -575,7 +575,7 @@ class NetworkVisualizer(BaseComponent):
         n_input: int,
         n_hidden: int,
         n_output: int,
-        scale: float = DEFAULT_SCALE,
+        scale: float = DashboardConstants.DEFAULT_SCALE,
     ) -> Dict[str, Tuple[float, float]]:
         """
         Calculate node positions based on layout algorithm.

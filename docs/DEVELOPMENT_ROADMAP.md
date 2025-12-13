@@ -1,7 +1,7 @@
 # Juniper Canopy Fixes and Enhancements
 
-**Last Updated:** 2025-12-12  
-**Version:** 2.0.0  
+**Last Updated:** 2025-12-13  
+**Version:** 2.0.1  
 **Status:** Active Development
 
 ## Implementation Plan

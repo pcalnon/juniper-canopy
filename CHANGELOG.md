@@ -5,6 +5,38 @@ All notable changes to the juniper_canopy prototype will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] - 2025-12-13
+
+### Fixed [0.13.1]
+
+- **DEFAULT_SCALE NameError in NetworkVisualizer** (Critical)
+  - Fixed undefined `DEFAULT_SCALE` constant that blocked all test collection
+  - Changed default parameter to use `DashboardConstants.DEFAULT_SCALE`
+  - All 20 test collection errors resolved
+  - See [FIX_DEFAULT_SCALE_2025-12-13.md](notes/FIX_DEFAULT_SCALE_2025-12-13.md) for details
+
+### Added [0.13.1]
+
+- **Comprehensive Test Suite Expansion** (453 new tests)
+  - `test_callback_context_coverage.py` - 29 tests for callback adapter
+  - `test_dashboard_helpers_coverage.py` - 48 tests for dashboard helpers
+  - `test_network_visualizer_layout_coverage.py` - 43 tests for layout methods
+  - `test_metrics_panel_helpers_coverage.py` - 74 tests for metrics helpers  
+  - `test_main_api_coverage.py` - 36 tests for API endpoints
+  - `test_demo_mode_comprehensive.py` - 72 tests for demo mode
+  - `test_websocket_comprehensive.py` - 51 tests for WebSocket
+  - `test_config_manager_comprehensive.py` - 42 tests for config
+  - `test_cascor_integration_comprehensive.py` - 49 tests for backend
+  - `test_base_component_coverage.py` - 9 tests for base component
+
+### Changed [0.13.1]
+
+- **Test Results**
+  - 1666 tests passing, 37 skipped
+  - **90% overall coverage achieved** (up from 84%)
+
+---
+
 ## [0.13.0] - 2025-12-13
 
 ### Added [0.13.0]
