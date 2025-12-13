@@ -27,7 +27,7 @@
 #### Training Metrics Tab
 
 1. Fix: The Candidate Node detailed information section of the Training Metrics tab is not displaying correctly.
-   - This candidate data section should always be visible, but it's only visible Intermittently.
+   - This candidate data section should always be visible, but it's only visible intermittently.
    - This section should be collapsible into its heading.
    - This candidate information area should retain data from previous, completed candidate pools.
      - Previous candidate pool data should be collapsed into its sub-heading.
