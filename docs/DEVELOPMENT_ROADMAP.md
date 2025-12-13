@@ -62,7 +62,6 @@
          - Training Loss Over Time graph
          - Training Accuracy Over Time graph
        - If the user has not selected a starting point or playback range when the replay button is clicked, the user should be prompted to select one.
-     - The replay button should be disabled when the training process is running.
      - The replay functionality should allow various replay speeds:
        - Step through the training process one iteration at a time.
        - Replay at normal speed.
