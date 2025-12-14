@@ -1,0 +1,45 @@
+/* <link href="happy_dance.css" rel="stylesheet" /> <link href="markdown.css" rel="stylesheet" /> */
+@import url("happy_dance.css");
+
+
+img[alt$=">"] {
+    float: right;
+}
+
+img[alt$="<"] {
+    float: left;
+}
+
+img[alt$="><"] {
+    display: block;
+    /* max-width: 100%; */
+    height: auto;
+    margin: auto;
+    float: none!important;
+}
+
+img[alt^="Juniper"] { width: 200px; }
+
+h1 {
+    font-size: 2.75rem;
+    height: 220px;
+	line-height: 1;
+	margin: 0;
+    /* margin-right: 3.5rem;
+	margin-top: 1.5rem;
+    margin-bottom: 2.5rem; */
+	text-rendering: optimizeLegibility;
+}
+
+img[src*='#left'] {
+    float: left;
+}
+
+img[src*='#right'] {
+    float: right;
+}
+
+img[src*='#center'] {
+    display: block;
+    margin: auto;
+}

@@ -1,16 +1,43 @@
 #!/usr/bin/env python
-"""
-Callback Context Adapter for Dash Applications
-
-Provides a testable abstraction layer over dash.callback_context.triggered_id.
-In production, reads from the real Dash callback context.
-In tests, allows injection of a fake trigger value.
-
-This design supports:
-- Multiple environments (production, test, headless)
-- Easy mocking for unit tests
-- Future extensibility for different callback context providers
-"""
+#####################################################################################################################################################################################################
+# Project:       Juniper
+# Prototype:     Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
+# File Name:     callback_context.py
+# Author:        Paul Calnon
+# Version:       0.0.1
+#
+# Date:          2025-12-12
+# Last Modified: 2025-12-12
+#
+# License:       MIT License
+# Copyright:     Copyright (c) 2024-2025 Paul Calnon
+#
+# Description:   Callback Context Adapter for Juniper Canopy Dash Application
+#
+#####################################################################################################################################################################################################
+# Notes:
+#
+#     Callback Context Adapter for Dash Applications
+#
+#     Provides a testable abstraction layer over dash.callback_context.triggered_id.
+#     In production, reads from the real Dash callback context.
+#     In tests, allows injection of a fake trigger value.
+#
+#     This design supports:
+#     - Multiple environments (production, test, headless)
+#     - Easy mocking for unit tests
+#     - Future extensibility for different callback context providers
+#
+#####################################################################################################################################################################################################
+# References:
+#
+#####################################################################################################################################################################################################
+# TODO :
+#
+#####################################################################################################################################################################################################
+# COMPLETED:
+#
+#####################################################################################################################################################################################################
 import threading
 
 # from typing import Any, Optional
