@@ -1,142 +1,76 @@
 #!/usr/bin/env bash
 #####################################################################################################################################################################################################
-# Application: Juniper
-# Script Name: get_code_stats.bash
-# Script Path: <Project>/util/get_code_stats.bash
+# Project:       Juniper
+# Sub-Project:   JuniperCanopy
+# Application:   juniper_canopy
+# Purpose:       Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
 #
-# Description: This script files in the source directory of the current project for a specific search term and then displays the number of files that do and do not contain the search term.
+# Script Name:   get_code_stats.bash
+# Script Path:   <Project>/<Application>/util/get_code_stats.bash
+# Conf File:     get_code_stats.conf
+# Conf Path:     <Project>/<Sub-Project>/<Application>/conf/  # TODO: Add parent project dir
 #
-# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# Author:        Paul Calnon
+# Version:       1.0.0
+#
+# Date:          2025-12-15
+# Last Modified: 2025-12-15
+#
+# License:       MIT License
+# Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
+#
+# Description:
+#     This file is the sourced conf file for the get_code_stats.bash script. The conf file defines all script constnats.
+#
+#####################################################################################################################################################################################################
 # Notes:
 #
-# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-# Examples:
+#####################################################################################################################################################################################################
+# References:
+#
+#     SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
+#     CONF_PATH="$(dirname "$(dirname "${SCRIPT_PATH}")")/conf"
+#     CONF_FILENAME="$(basename -s ".bash" "${SCRIPT_PATH}").conf"
+#     CONF_FILE="${SCRIPT_PATH}/${SCRIPT_FILENAME}"
+#
+#     CONF_PATH="$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")/conf"
+#     CONF_FILENAME="$(basename -s ".bash" "$(realpath "${BASH_SOURCE[0]}")").conf"
+#     CONF_FILE="${CONF_PATH}/${CONF_FILENAME}"
+#
+#     CONF_FILE="$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")/conf/$(basename -s ".bash" "$(realpath "${BASH_SOURCE[0]}")").conf"
+#
+#     source "${CONF_FILE}";  SUCCESS="$?"
+#
+#####################################################################################################################################################################################################
+# TODO :
+#
+#####################################################################################################################################################################################################
+# COMPLETED:
 #
 #####################################################################################################################################################################################################
 
-#######################################################################################################################################################################################
-# Define Debug Constants
-#######################################################################################################################################################################################
-TRUE="TRUE"
-FALSE="FALSE"
 
-# DEBUG="${TRUE}"
-DEBUG="${FALSE}"
+#####################################################################################################################################################################################################
+# Source script config file
+#####################################################################################################################################################################################################
+set -eE -o functrace
+source "$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")/conf/$(basename -s ".bash" "$(realpath "${BASH_SOURCE[0]}")").conf"; SUCCESS="$?"
+[[ "${SUCCESS}" != "0" ]] && printf "%b%-21s %-28s %-21s %-11s %s%b\n" "\033[1;31m" "($(date +%F_%T))" "$(basename "${SCRIPT_PATH}"):(${LINENO})" "main:" "[CRITICAL]" "Config load Failed: \"${CONF_FILE}\"" "\033[0m" | tee -a "${LOG_FILE}" 2>&1 && set -e && exit 1
+log_debug "Successfully Sourced Current Script: ${SCRIPT_NAME}, Config File: ${CONF_FILE}, Success: ${SUCCESS}"
 
-
-#######################################################################################################################################################################################
-# Define Global Project Constants
-#######################################################################################################################################################################################
-HOME_DIR="${HOME}"
-
-FUNCTION_NAME="${0##*/}"
-
-# PROJ_NAME="dynamic_nn"
-# PROJ_NAME="juniper"
-PROJ_NAME="Juniper"
-
-#PROJ_LANG_DIR_NAME="rust/rust_mudgeon"
-PROJ_LANG_DIR_NAME="python"
-
-DEV_DIR_NAME="Development"
-DEV_DIR="${HOME_DIR}/${DEV_DIR_NAME}"
-PROJ_ROOT_DIR="${DEV_DIR}/${PROJ_LANG_DIR_NAME}"
-PROJ_DIR="${PROJ_ROOT_DIR}/${PROJ_NAME}"
-
-UTIL_DIR_NAME="util"
-UTIL_DIR="${PROJ_DIR}/${UTIL_DIR_NAME}"
-
-CONF_DIR_NAME="conf"
-CONF_DIR="${PROJ_DIR}/${CONF_DIR_NAME}"
-CONF_FILE_NAME="script_util.cfg"
-CONF_FILE="${CONF_DIR}/${CONF_FILE_NAME}"
-
-source "${CONF_FILE}"
-
-
-#######################################################################################################################################################################################
-# Configure Script Environment
-#######################################################################################################################################################################################
-SRC_DIR_NAME="src"
-SRC_DIR="${PROJ_DIR}/${SRC_DIR_NAME}"
-LOG_DIR_NAME="logs"
-LOG_DIR="${PROJ_DIR}/${LOG_DIR_NAME}"
-UTIL_DIR_NAME="util"
-UTIL_DIR="${PROJ_DIR}/${UTIL_DIR_NAME}"
-DATA_DIR_NAME="data"
-DATA_DIR="${PROJ_DIR}/${DATA_DIR_NAME}"
-VIZ_DIR_NAME="viz"
-VIZ_DIR="${PROJ_DIR}/${VIZ_DIR_NAME}"
-CONF_DIR_NAME="conf"
-CONF_DIR="${PROJ_DIR}/${CONF_DIR_NAME}"
-TEST_DIR_NAME="tests"
-TEST_DIR="${PROJ_DIR}/${TEST_DIR_NAME}"
-
-
-#######################################################################################################################################################################################
-# Define the Script Environment File Constants
-#######################################################################################################################################################################################
-CONF_FILE_NAME="logging_config.yaml"
-CONF_FILE="${CONF_DIR}/${CONF_FILE_NAME}"
-GET_FILENAMES_SCRIPT_NAME="get_module_filenames.bash"
-GET_FILENAMES_SCRIPT="${UTIL_DIR}/${GET_FILENAMES_SCRIPT_NAME}"
-GET_SOURCETREE_SCRIPT_NAME="source_tree.bash"
-GET_SOURCETREE_SCRIPT="${UTIL_DIR}/${GET_SOURCETREE_SCRIPT_NAME}"
-GET_TODO_COMMENTS_SCRIPT_NAME="get_todo_comments.bash"
-GET_TODO_COMMENTS_SCRIPT="${UTIL_DIR}/${GET_TODO_COMMENTS_SCRIPT_NAME}"
-GET_FILE_TODO_SCRIPT_NAME="get_file_todo.bash"
-GET_FILE_TODO_SCRIPT="${UTIL_DIR}/${GET_FILE_TODO_SCRIPT_NAME}"
-GIT_LOG_WEEKS_SCRIPT_NAME="__git_log_weeks.bash"
-GIT_LOG_WEEKS_SCRIPT="${UTIL_DIR}/${GIT_LOG_WEEKS_SCRIPT_NAME}"
-
-
-#######################################################################################################################################################################################
-# Define the Script Constants
-#######################################################################################################################################################################################
-#DEBUG="true"
-DEBUG="false"
-
-FULL_OUTPUT="true"
-#FULL_OUTPUT="false"
-
-FILENAMES_SCRIPT_PARAMS="--full ${FULL_OUTPUT}"
-
-SEARCH_TERM_DEFAULT="TODO"
-TODO_SEARCH_SCRIPT_PARAMS="--search ${SEARCH_TERM_DEFAULT} --file"
-
-FIND_METHOD_REGEX='^[[:space:]]+(def)[[:space:]]+'
-FIND_METHOD_PARAMS="-E --"
-
-EXIT_COND_DEFAULT="1"
-
-INIT_PYTHON_FILE="__init__"
-
-GIT_LOG_WEEKS="0"
-
-SIZE_LABEL_MAG="1024"
-SIZE_LABELS=("B" "K" "M" "G" "T" "P" "E" "Z" "Y")
-
-TABLE_FORMAT="%-28s %8s %9s %7s %9s\n"
-SUMMARY_FORMAT="%-14s %-10s\n"
-FILE_SUMMARY_FORMAT="%-17s %-12s %-3s %-40s\n"
-
-# Longest File(s):  (    1999 lines) --  NeuralNetwork.py
-# Methods File(s):  (      76 methods) --  EvolveState.py
-# Largest File(s):  (108 KB)     --  NeuralNetwork.py
-# Roughest File(s): (      24 TODOs) --  DNA.py
-
-
-####################################################################################################
-# Define command line parameter switches
-####################################################################################################
-HELP_SHOR="-h"
-HELP_LONG="--help"
-
-SEARCH_SHORT="-s"
-SEARCH_LONG="--search"
-
-OUTPUT_SHORT="-f"
-OUTPUT_LONG="--full"
+#
+# SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
+# CONF_PATH="$(dirname "$(dirname "${SCRIPT_PATH}")")/conf"
+# CONF_FILENAME="$(basename -s ".bash" "${SCRIPT_PATH}").conf"
+# CONF_FILE="${SCRIPT_PATH}/${SCRIPT_FILENAME}"
+#
+# CONF_PATH="$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")/conf"
+# CONF_FILENAME="$(basename -s ".bash" "$(realpath "${BASH_SOURCE[0]}")").conf"
+# CONF_FILE="${CONF_PATH}/${CONF_FILENAME}"
+#
+# CONF_FILE="$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")/conf/$(basename -s ".bash" "$(realpath "${BASH_SOURCE[0]}")").conf"
+#
+# source "${CONF_FILE}";  SUCCESS="$?"
 
 
 ####################################################################################################
@@ -146,7 +80,12 @@ BASE_DIR=$(${GET_PROJECT_SCRIPT} "${BASH_SOURCE}")
 # Determine Host OS
 CURRENT_OS=$(${GET_OS_SCRIPT})
 # Define Script Functions
-source "${DATE_FUNCTIONS_SCRIPT}"
+
+# TODO: This line is Borked:
+#   /home/pcalnon/Development/python/JuniperCanopy/juniper_canopy/conf/get_code_stats.conf:
+#   line 84
+#   /home/pcalnon/Development/python/JuniperCanopy/conf/script_util.cfg: No such file or directory
+source "${SCRIPT_PATH}/conf/script_util.cfg"
 
 
 ####################################################################################################

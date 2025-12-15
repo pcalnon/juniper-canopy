@@ -148,7 +148,10 @@ repos:
     rev: v0.38.0
     hooks:
       - id: markdownlint
-        args: [--fix]
+        args: [
+          --fix,
+          --config .markdownlist.json,
+        ]
         # Disable for now - adjust rules as needed
         stages: [manual]
 
