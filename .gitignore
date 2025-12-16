@@ -119,6 +119,7 @@ Thumbs.db
 *.jpeg
 *.gif
 *.pt
+*.xcf
 
 # Large media files
 *.mp4
