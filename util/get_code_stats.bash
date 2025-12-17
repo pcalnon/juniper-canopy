@@ -1,4 +1,6 @@
-#!/usr/bin/env bash
+#!/bin/bash
+
+#  \!/usr/bin/env bash
 #####################################################################################################################################################################################################
 # Project:       Juniper
 # Sub-Project:   JuniperCanopy
@@ -57,8 +59,17 @@
 # TODO: revert back to this line after debugging is complete
 # source "$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")/conf/$(basename -s ".bash" "$(realpath "${BASH_SOURCE[0]}")").conf"; SUCCESS="$?"
 
-export GET_CODE_STATS_CONF_SOURCED="${FALSE}"
-export CLOSE_LOGGING_CONF_SOURCED="${FALSE}"
+INIT_CONF="../conf/init.conf"
+source "${INIT_CONF}"; SUCCESS="$?"
+# ${INIT_CONF}; SUCCESS="$?"
+
+log_debug "Completed Sourcing Init Config File: ${INIT_CONF} returned value: ${SUCCESS}"
+
+exit 0
+
+
+# export GET_CODE_STATS_CONF_SOURCED="${FALSE}"
+# export CLOSE_LOGGING_CONF_SOURCED="${FALSE}"
 
 SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
 echo "SCRIPT_PATH: ${SCRIPT_PATH}"
