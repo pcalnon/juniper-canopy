@@ -57,17 +57,18 @@
 # COMPLETED:
 #
 #####################################################################################################################################################################################################
-set -eE -o functrace
 
 
 #####################################################################################################################################################################################################
 # Source script config file
 #####################################################################################################################################################################################################
-export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")"
-source "../conf/init.conf"; SUCCESS="$?"
+set -o functrace
+export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")" && INIT_CONF="../conf/init.conf"
+[[ -f "${INIT_CONF}" ]] && source "${INIT_CONF}" || { echo "Init Config File Not Found. Unable to Continue."; exit 1; }
 
-[[ "${SUCCESS}" != "0" ]] && { source "../conf/config_fail.conf"; log_error "${SUCCESS}" "${PARENT_PATH_PARAM}" "../conf/init.conf" "${LINENO}" "${LOG_FILE}"; }
-log_debug "Successfully Configured Current Script: $(basename "${PARENT_PATH_PARAM}"), by Sourcing the Init Config File: ${INIT_CONF}, Returned: \"${SUCCESS}\""
+# source "../conf/init.conf"
+# [[ "${SUCCESS}" != "0" ]] && { source "../conf/config_fail.conf"; log_error "${SUCCESS}" "${PARENT_PATH_PARAM}" "../conf/init.conf" "${LINENO}" "${LOG_FILE}"; }
+# log_debug "Successfully Configured Current Script: $(basename "${PARENT_PATH_PARAM}"), by Sourcing the Init Config File: ${INIT_CONF}, Returned: \"${SUCCESS}\""
 
 
 #####################################################################################################################################################################################################
@@ -78,53 +79,6 @@ BASE_DIR=$(${GET_PROJECT_SCRIPT} "${BASH_SOURCE}")
 log_debug "Base Dir: ${BASE_DIR}"
 CURRENT_OS=$(${GET_OS_SCRIPT})
 log_debug "Current OS: ${CURRENT_OS}"
-
-
-#####################################################################################################################################################################################################
-# Define Local Script Functions
-#####################################################################################################################################################################################################
-function round_size() {
-    SIZEF="${1}"
-    SIZE="${SIZEF%.*}"
-    DEC="0.${DIG}"
-    if (( $(echo "${DEC} >= 0.5" | bc -l) )); then
-        SIZE=$(( SIZE + 1 ))
-    fi
-    echo "${SIZE}"
-}
-
-function current_size() {
-    CURRENT_SIZE="${1}"
-    LABEL="${CURRENT_SIZE: -1}"
-    SIZEF="${CURRENT_SIZE: -1}"
-    for i in "${!SIZE_LABELS[@]}"; do
-        if [[ "${SIZE_LABELS[${i}]}" == "${LABEL}" ]]; then
-            break
-        else
-            #SIZE=$(( SIZE * SIZE_LABEL_MAG ))
-            #SIZEF=$(( SIZEF * SIZE_LABEL_MAG ))
-            SIZEF="$(echo "${SIZEF} * ${SIZE_LABEL_MAG}" | bc -l)"
-	fi
-    done
-    SIZE="$(round_size ${SIZEF})"
-    echo "${SIZE}"
-}
-
-function readable_size() {
-    CURRENT_SIZE="${1}"
-    LABEL_INDEX=0
-    BYTES_LABEL=""
-    while (( $(echo "${CURRENT_SIZE} >= ${SIZE_LABEL_MAG}" | bc -l) )); do
-        CURRENT_SIZE="$(echo "${CURRENT_SIZE} / ${SIZE_LABEL_MAG}" | bc -l)"
-        LABEL_INDEX=$(( LABEL_INDEX + 1 ))
-    done
-    SIZE="$(round_size ${CURRENT_SIZE})"
-    if (( LABEL_INDEX > 0 )); then
-        BYTE_LABEL="${SIZE_LABELS[0]}"
-    fi
-    READABLE="${SIZE} ${SIZE_LABELS[${LABEL_INDEX}]}${BYTE_LABEL}"
-    echo "${READABLE}"
-}
 
 
 #####################################################################################################################################################################################################

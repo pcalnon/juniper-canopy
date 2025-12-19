@@ -39,17 +39,23 @@
 # COMPLETED:
 #
 #####################################################################################################################################################################################################
-set -eE -o functrace
+# set -eE -o functrace
+# set -o functrace
 
 
 #####################################################################################################################################################################################################
 # Source script config file
 #####################################################################################################################################################################################################
-export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")"
-source "../conf/init.conf"; SUCCESS="$?"
+set -o functrace
+export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")" && INIT_CONF="../conf/init.conf"
+[[ -f "${INIT_CONF}" ]] && source "${INIT_CONF}" || { echo "Init Config File Not Found. Unable to Continue."; exit 1; }
 
-[[ "${SUCCESS}" != "0" ]] && { source "../conf/config_fail.conf"; log_error "${SUCCESS}" "${PARENT_PATH_PARAM}" "../conf/init.conf" "${LINENO}" "${LOG_FILE}"; }
-log_debug "Successfully Configured Current Script: $(basename "${PARENT_PATH_PARAM}"), by Sourcing the Init Config File: ${INIT_CONF}, Returned: \"${SUCCESS}\""
+
+# export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")"
+# source "../conf/init.conf"; SUCCESS="$?"
+
+# [[ "${SUCCESS}" != "0" ]] && { source "../conf/config_fail.conf"; log_error "${SUCCESS}" "${PARENT_PATH_PARAM}" "../conf/init.conf" "${LINENO}" "${LOG_FILE}"; }
+# log_debug "Successfully Configured Current Script: $(basename "${PARENT_PATH_PARAM}"), by Sourcing the Init Config File: ${INIT_CONF}, Returned: \"${SUCCESS}\""
 
 
 # # set -eE -o functrace
