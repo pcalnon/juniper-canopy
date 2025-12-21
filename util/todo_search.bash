@@ -50,7 +50,7 @@ CURRENT_OS=$(${GET_OS_SCRIPT})
 ####################################################################################################
 # Define Script Functions
 ####################################################################################################
-source ${DATE_FUNCTIONS_SCRIPT}
+# source ${DATE_FUNCTIONS_SCRIPT}
 
 function usage() {
     EXIT_COND="${EXIT_COND_DEFAULT}"

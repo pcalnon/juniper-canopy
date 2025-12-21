@@ -63,7 +63,7 @@ log_debug "Successfully Configured Current Script: $(basename "${PARENT_PATH_PAR
 #####################################################################################################################################################################################################
 # Run env info functions
 #####################################################################################################################################################################################################
-source "${DATE_FUNCTIONS_SCRIPT}"
+# source "${DATE_FUNCTIONS_SCRIPT}"
 log_debug "Run env info functions"
 BASE_DIR=$(${GET_PROJECT_SCRIPT} "${BASH_SOURCE}")
 CURRENT_OS=$(${GET_OS_SCRIPT})

@@ -49,7 +49,7 @@ source "${ROOT_CONF_FILE}"
 ####################################################################################################
 export BASE_DIR=$(${GET_PROJECT_SCRIPT} "${BASH_SOURCE}")  # Determine Project Dir
 export CURRENT_OS=$(${GET_OS_SCRIPT})                      # Determine Host OS
-source "${DATE_FUNCTIONS_SCRIPT}"                          # Define Script Functions
+# source "${DATE_FUNCTIONS_SCRIPT}"                          # Define Script Functions
 
 
 ####################################################################################################

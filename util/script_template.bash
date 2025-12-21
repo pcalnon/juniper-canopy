@@ -91,7 +91,7 @@ BASE_DIR=$(${GET_PROJECT_SCRIPT} "${BASH_SOURCE}")
 # Determine Host OS
 CURRENT_OS=$(${GET_OS_SCRIPT})
 # Define Script Functions
-source "${DATE_FUNCTIONS_SCRIPT}"
+# source "${DATE_FUNCTIONS_SCRIPT}"
 
 
 ####################################################################################################

@@ -56,24 +56,6 @@ export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")" && INIT_CONF="../conf
 
 
 #######################################################################################################################################################################################
-# Define functions for script
-# TODO: Need to add this to a fn config file
-#######################################################################################################################################################################################
-log_debug "Define functions for script"
-function usage() {
-    RET_VAL="$1"
-    shift
-    MESSAGE="$@"
-    USAGE="\n\tusage: ${FUNCTION_NAME} [-h|--help] [-f|--full <TRUE|FALSE> (Default: ${FALSE})]\n\n"
-    if [[ ${MESSAGE} != "" ]]; then
-        echo -ne "${MESSAGE}"
-    fi
-    echo -ne "${USAGE}"
-    exit $(( RET_VAL ))
-}
-
-
-#######################################################################################################################################################################################
 # Process Script's Command Line Argument(s)
 #######################################################################################################################################################################################
 log_debug "Process Script's Command Line Argument(s)"
@@ -84,8 +66,7 @@ while [[ "$1" != "" ]]; do
             usage 1
         ;;
         ${OUTPUT_SHORT} | ${OUTPUT_LONG})
-            shift
-            PARAM="$1"
+            shift; PARAM="$1"
             log_debug "Current Param Value: ${PARAM}"
             log_debug "Lowercase: ${PARAM,,*}"
             log_debug "Uppercase: ${PARAM^^}"
@@ -112,4 +93,4 @@ for MODULE_PATH in $(find "${SRC_DIR}" \( -name "${MODULE_EXT}" ! -name "${INIT_
         FILENAME="${MODULE_PATH//*\/}"
         echo "${FILENAME}"
     fi
-done
+echo "get_module_filenames.bash -26"
