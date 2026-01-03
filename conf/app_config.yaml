@@ -11,7 +11,7 @@
 # File Path:     <Project>/<Sub-Project>/<Application>/conf/
 #
 # Date:          2025-10-11
-# Last Modified: 2025-12-25
+# Last Modified: 2026-01-02
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -176,8 +176,7 @@ frontend:
   # Dashboard settings
   dashboard:
     title: CasCor Training Monitor
-    # plotly, plotly_white, plotly_dark, ggplot2, seaborn,
-    #   simple_white
+    # plotly, plotly_white, plotly_dark, ggplot2, seaborn, simple_white
     theme: plotly_dark
     update_interval_ms: 1000  # Milliseconds between automatic updates
     max_data_points: 10000  # Maximum data points to display
@@ -259,7 +258,8 @@ backend:
     enabled: true
     monitoring_hooks: true
     state_polling_interval_ms: 500
-    backend_path: ~/Development/python/JuniperCanopy/juniper_cascor
+    # backend_path: ~/Development/python/JuniperCanopy/juniper_cascor
+    backend_path: ~/Development/python/JuniperCascor/juniper_cascor
 
   # Communication settings
   communication:
@@ -397,8 +397,7 @@ features:
     cloud_integration: false
     custom_themes: true
 
-# Environment variable substitution patterns
-# Use ${VAR_NAME} or ${VAR_NAME:default_value} syntax
+# Environment variable substitution patterns.  Use ${VAR_NAME} or ${VAR_NAME:default_value} syntax
 environment_variables:
   - JWT_SECRET_KEY
   - LOG_API_KEY
