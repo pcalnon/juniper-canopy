@@ -66,63 +66,10 @@ export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")" && INIT_CONF="$(dirna
 [[ -f "${INIT_CONF}" ]] && source "${INIT_CONF}" || { echo "Init Config File Not Found. Unable to Continue."; exit 1; }
 
 
-# #####################################################################################################################################################################################################
-# # Source script config file
-# #####################################################################################################################################################################################################
-# set -o functrace
-
-# # shellcheck disable=SC2155
-# SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
-# SCRIPT_DIR="$(dirname "${SCRIPT_PATH}")"
-# export PARENT_PATH_PARAM="${SCRIPT_PATH}"
-# INIT_CONF="$(realpath "${SCRIPT_DIR}/../conf/init.conf")"
-# # echo "get_code_stats.bash: SCRIPT_PATH: ${SCRIPT_PATH}"
-# # echo "get_code_stats.bash: INIT_CONF: ${INIT_CONF}"
-# # shellcheck disable=SC2015,SC1091 source=conf/init.conf
-# [[ -f "${INIT_CONF}" ]] && source "${INIT_CONF}" || { echo "Init Config File Not Found at ${INIT_CONF}. Unable to Continue."; exit 1; }
-# # echo "get_code_stats.bash: Successfully Completed Sourcing Init Config File: ${INIT_CONF}"
-
-# # # export TRUE="0"
-# # # export FALSE="1"
-
-# # # export DEBUG="${TRUE}"
-# # # # export DEBUG="${FALSE}"
-
-# # # Use script's own path to find init.conf (works from any directory)
-# # SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
-# # echo "get_code_stats.bash: SCRIPT_PATH: ${SCRIPT_PATH}"
-# # SCRIPT_DIR="$(dirname "${SCRIPT_PATH}")"
-# # echo "get_code_stats.bash: SCRIPT_DIR: ${SCRIPT_DIR}"
-# # export PARENT_PATH_PARAM="${SCRIPT_PATH}"
-# # INIT_CONF="$(realpath "${SCRIPT_DIR}/../conf/init.conf")"
-# # echo "get_code_stats.bash: INIT_CONF: ${INIT_CONF}"
-
-# # # shellcheck disable=SC1090
-# # if [[ -f "${INIT_CONF}" ]]; then
-# #     echo "get_code_stats.bash: Found valid Init Config File: ${INIT_CONF}"
-# #     if [[ "${DEBUG}" == "${TRUE}" ]]; then
-# #         echo "get_code_stats.bash: Running Init Config File: ${INIT_CONF}"
-# #         bash "${INIT_CONF}"
-# #         echo "get_code_stats.bash: Completed Running Init Config File: ${INIT_CONF}"
-# #     elif [[ "${DEBUG}" == "${FALSE}" ]]; then
-# #         echo "get_code_stats.bash: Sourcing Init Config File: ${INIT_CONF}"
-# #         source "${INIT_CONF}"
-# #         echo "get_code_stats.bash: Completed Sourcing Init Config File: ${INIT_CONF}"
-# #     else
-# #         echo "get_code_stats.bash: Invalid DEBUG value: ${DEBUG}. Unable to Continue."
-# #         exit 1
-# #     fi
-# # else
-# #     echo "get_code_stats.bash: Init Config File Not Found at ${INIT_CONF}. Unable to Continue."
-# #     exit 1
-# # fi
-
-
 #####################################################################################################################################################################################################
 # Print Column Labels and Header data for Project source files
 #####################################################################################################################################################################################################
 log_debug "Print Column Labels and Header data for Project source files"
-
 # Print heading data
 log_debug "Print heading data"
 echo -ne "\nDisplay Stats for the ${PROJ_NAME} Project\n\n"
@@ -136,9 +83,9 @@ printf "${TABLE_FORMAT}" "----------------------------" "------" "--------" "---
 # Search project source files and retrieve stats
 #####################################################################################################################################################################################################
 log_debug "Search project source files and retrieve stats"
-
 # Initialize project summary counters
 log_debug "Initialize project summary counters"
+# TODO: Move these to config file.
 TOTAL_FILES=0
 TOTAL_LINES=0
 TOTAL_METHODS=0
@@ -329,4 +276,4 @@ echo -ne "\n\nProject ${PROJ_NAME} Git Log Summary\n\n"
 ${GIT_LOG_WEEKS_SCRIPT} "${GIT_LOG_WEEKS}"
 echo -ne "\n"
 
-exit 0  # Exit successfully
+exit $(( TRUE ))  # Exit successfully
