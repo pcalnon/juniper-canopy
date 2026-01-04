@@ -11,7 +11,7 @@
 # File Path:     <Project>/<Sub-Project>/<Application>/util/
 #
 # Date:          2025-12-03
-# Last Modified: 2026-01-03
+# Last Modified: 2026-01-04
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -46,42 +46,21 @@ export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")" && INIT_CONF="$(dirna
 
 
 #####################################################################################################################################################################################################
-# Define Script Functions
-# TODO: Move this to a fn config file
-#####################################################################################################################################################################################################
-function usage() {
-    EXIT_COND="${EXIT_COND_DEFAULT}"
-    if [[ "$1" != "" ]]; then
-        EXIT_COND="$1"
-    fi
-    MESSAGE="usage: ${SCRIPT_NAME} <SEARCH TERM> | [--help|-h]"
-    echo -ne "\n\t${MESSAGE}\n\n"
-    exit $(( EXIT_COND ))
-}
-
-
-#####################################################################################################################################################################################################
 # Process Script's Command Line Argument(s)
 #     usage 1 "Error: Invalid command line params: \"${@}\"\n"
 #####################################################################################################################################################################################################
+log_trace "Process Script's Command Line Argument(s)"
 if [[ "$1" != "" ]]; then
-    if [[ "$1" == "${HELP_SHORT}" || "$1" == "${HELP_LONG}" ]]; then
-        usage 0
-    else
-        SEARCH_TERM="$1"
-    fi
+    [[ "$1" == "${HELP_SHORT}" || "$1" == "${HELP_LONG}" ]] && usage $(( TRUE )) || SEARCH_TERM="$1"
 else
-    if [[ ${DEBUG} == "true" ]]; then
-        SEARCH_TERM="${SEARCH_TERM_DEFAULT}"
-    else
-        usage
-    fi
+    [[ "${DEBUG}" == "${TRUE}" ]] && SEARCH_TERM="${SEARCH_TERM_DEFAULT}" || usage
 fi
 
 
 #####################################################################################################################################################################################################
 # Sanitize Inputs
 #####################################################################################################################################################################################################
+log_trace "Sanitize Inputs"
 DASHES=$(echo "${SEARCH_TERM}" | grep -e '^-.*')
 if [[ ${DASHES} != "" ]]; then
     SEARCH_TERM="\\${SEARCH_TERM}"
@@ -92,23 +71,22 @@ fi
 #####################################################################################################################################################################################################
 # Search for a specific TODO reference in source code
 #####################################################################################################################################################################################################
+log_trace "Search for a specific TODO reference in source code"
 while read -r i; do
     SOURCE_FILE=$(echo "${i}" | grep "\.${SRC_FILE_SUFFIX}\$")
-    if [[ ${SOURCE_FILE} != "" ]]; then
-        SOURCE_FILE=$(echo "${SOURCE_FILE}" | grep -v "${INIT_PYTHON_FILE}")
-	if [[ ${SOURCE_FILE} != "" ]]; then
-            if [[ -f ${SOURCE_FILE} ]]; then
-                FOUND=$(cat "${SOURCE_FILE}" | grep "${SEARCH_TERM}")
-                if [[ ${FOUND} != "" ]]; then
-                    FOUND_COUNT=$((FOUND_COUNT + 1))
-                    if [[ ${DEBUG} == "true" || ${FULL_OUTPUT} == "true" ]]; then
-                        echo -ne "${SOURCE_FILE}\n${FOUND}\n\n"
-                    fi
-                else
-                    DONE_COUNT=$((DONE_COUNT + 1))
-                    if [[ ${FULL_OUTPUT} == "true" && ${DEBUG} == "true" ]]; then
-                        echo -ne "${SOURCE_FILE}\n\tNot Found: **********************\n\n"
-                    fi
+    [[ "${SOURCE_FILE}" != "" ]] && SOURCE_FILE=$(echo "${SOURCE_FILE}" | grep -v "${INIT_PYTHON_FILE}")
+	if [[ "${SOURCE_FILE}" != "" ]]; then
+        if [[ -f "${SOURCE_FILE}" ]]; then
+            FOUND=$(cat "${SOURCE_FILE}" | grep "${SEARCH_TERM}")
+            if [[ "${FOUND}" != "" ]]; then
+                FOUND_COUNT="$((FOUND_COUNT + 1))"
+                if [[ "${DEBUG}" == "${TRUE}" || "${FULL_OUTPUT}" == "${TRUE}" ]]; then
+                    echo -ne "${SOURCE_FILE}\n${FOUND}\n\n"
+                fi
+            else
+                DONE_COUNT="$((DONE_COUNT + 1))"
+                if [[ "${FULL_OUTPUT}" == "${TRUE}" && "${DEBUG}" == "${TRUE}" ]]; then
+                    echo -ne "${SOURCE_FILE}\n\tNot Found: **********************\n\n"
                 fi
             fi
         fi

@@ -44,41 +44,40 @@ export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")" && INIT_CONF="$(dirna
 
 
 #####################################################################################################################################################################################################
-#
+# Verify Operating System
 #####################################################################################################################################################################################################
+log_trace "Verify Operating System"
 # trunk-ignore(shellcheck/SC2015)
 # trunk-ignore(shellcheck/SC2312)
 # shellcheck disable=SC2015
 [[ "$(uname)" == "${OS_NAME_LINUX}" ]]  && export HOME_DIR="/home/${USERNAME}" || { [[ "$(uname)" == "${OS_NAME_MACOS}"  ]] && export HOME_DIR="/Users/${USERNAME}" || { echo "Error: Invalid OS Type! Exiting..."  && set -e && exit 1; }; }
-
+log_verbose "HOME_DIR: ${HOME_DIR}"
 cd "${PROJ_DIR}"
+log_verbose "Current Directory: $(pwd)"
 
+
+#####################################################################################################################################################################################################
+# Run Tests with designated reports
+#####################################################################################################################################################################################################
+log_trace "Run Tests with designated reports"
 if [[ "${COVERAGE_REPORT}" == "${FALSE}" ]]; then
-    echo "pytest -v src/tests"
-    pytest -v src/tests
+    RUN_TESTS_NO_COV_RPT="pytest -v src/tests"
+    log_verbose "RUN_TESTS_NO_COV_RPT: ${RUN_TESTS_NO_COV_RPT}"
+    eval "${RUN_TESTS_NO_COV_RPT}"; SUCCESS="$?"
 elif [[ "${COVERAGE_REPORT}" == "${TRUE}" ]]; then
-    echo -ne " \
-    pytest -v ./src/tests \n \
+    RUN_TESTS_WITH_COV_RPT="pytest -v ./src/tests \n \
         --cov=src \n \
         --cov-report=xml:src/tests/reports/coverage.xml \n \
         --cov-report=term-missing \n \
         --cov-report=html:src/tests/reports/coverage \n \
         --junit-xml=src/tests/reports/junit/results.xml \n \
         --continue-on-collection-errors \n \
-        \n"
-
-    pytest -v ./src/tests \
-        --cov=src \
-        --cov-report=xml:src/tests/reports/coverage.xml \
-        --cov-report=term-missing \
-        --cov-report=html:src/tests/reports/coverage \
-        --junit-xml=src/tests/reports/junit/results.xml \
-        --continue-on-collection-errors \
-
+    "
+    log_verbose "RUN_TESTS_WITH_COV_RPT: ${RUN_TESTS_WITH_COV_RPT}"
+    eval "${RUN_TESTS_WITH_COV_RPT}"; SUCCESS="$?"
 else
-    echo "Coverage Report flag has an Invalid Value"
-    exit 1
+    log_critical "Coverage Report flag has an Invalid Value"
 fi
+log_info "Running the Juniper Canopy project's Full Test Suite $( [[ "${SUCCESS}" == "${TRUE}" ]] && echo "Succeeded!" || echo "Failed." )"
 
-echo "Running the Juniper Canopy project's Full Test Suite $( [[ "$?" == "${TRUE}" ]] && echo "Succeeded!" || echo "Failed." )"
-exit 0
+exit $(( SUCCESS ))

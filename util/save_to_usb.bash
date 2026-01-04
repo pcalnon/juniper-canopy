@@ -45,55 +45,46 @@ export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")" && INIT_CONF="$(dirna
 [[ -f "${INIT_CONF}" ]] && source "${INIT_CONF}" || { echo "Init Config File Not Found. Unable to Continue."; exit 1; }
 
 
-#####################################################################################################
-# Define Global Functions
-####################################################################################################
-# Define local Functions
-get_script_path() {
-    local source="${BASH_SOURCE[0]}"
-    while [ -L "$source" ]; do
-        # shellcheck disable=SC2155
-        local dir="$(cd -P "$(dirname "$source")" && pwd)"
-        source="$(readlink "$source")"
-        [[ $source != /* ]] && source="$dir/$source"
-    done
-    echo "$(cd -P "$(dirname "$source")" && pwd)/$(basename "$source")"
-}
-
-
-####################################################################################################
+#####################################################################################################################################################################################################
 # Define Script Archive Constants
-####################################################################################################
+#####################################################################################################################################################################################################
 USB_ARCHIVE_DIR_NAME="${ROOT_PROJ_DIR_NAME}-${JUNIPER_APPLICATION_VERSION}_${ROOT_LANG_DIR_NAME}"
-log_debug "USB_ARCHIVE_DIR_NAME: ${USB_ARCHIVE_DIR_NAME}"
+log_verbose "USB_ARCHIVE_DIR_NAME: ${USB_ARCHIVE_DIR_NAME}"
+
 USB_ARCHIVE_DIR=""
 USB_ARCHIVE_ROOT_DIR=""
 for USB_ARCHIVE_DEVICE_NAME in ${USB_ARCHIVE_DEVICE_LINUX_LIST}; do
+    log_verbose "USB_ARCHIVE_DEVICE_NAME: ${USB_ARCHIVE_DEVICE_NAME}"
     USB_ARCHIVE_ROOT_DIR="${USB_ARCHIVE_MOUNT}/${USB_ARCHIVE_DEVICE_NAME}"
-    log_debug "USB_ARCHIVE_ROOT_DIR: ${USB_ARCHIVE_ROOT_DIR}"
+    log_verbose "USB_ARCHIVE_ROOT_DIR: ${USB_ARCHIVE_ROOT_DIR}"
 
     # NOTE: this logic means that if multiple valid usb drives are currently mounted, the first mounted drive appearing in the USB_ARCHIVE_DEVICE_LINUX_LIST wii be used.
+    log_warning "The logic used in this logic means that if multiple valid usb drives are currently mounted, the first mounted drive appearing in the USB_ARCHIVE_DEVICE_LINUX_LIST wii be used."
     if [[ -d ${USB_ARCHIVE_ROOT_DIR} ]]; then
         USB_ARCHIVE_DIR="${USB_ARCHIVE_ROOT_DIR}/${USB_ARCHIVE_DIR_NAME}"
-        log_debug "USB_ARCHIVE_DIR: ${USB_ARCHIVE_DIR}"
-        mkdir -p "${USB_ARCHIVE_DIR}" || exit 1
+        log_verbose "USB_ARCHIVE_DIR: ${USB_ARCHIVE_DIR}"
         log_debug "mkdir -p ${USB_ARCHIVE_DIR}"
+        mkdir -p "${USB_ARCHIVE_DIR}" || log_critical "Failed to create USB Archive Dir: ${USB_ARCHIVE_DIR}"
         break
     else
-        log_warning "Device: \"${USB_ARCHIVE_DEVICE_NAME}\",  Failed to find USB Archive Root Dir: \"${USB_ARCHIVE_ROOT_DIR}\""
+        log_fatal "Device: \"${USB_ARCHIVE_DEVICE_NAME}\",  Failed to find USB Archive Root Dir: \"${USB_ARCHIVE_ROOT_DIR}\""
     fi
 done
 
+
+#####################################################################################################################################################################################################
 # Verify valid usb device was found
+#####################################################################################################################################################################################################
+log_trace "Verifying valid usb device was found"
 if [[ ${USB_ARCHIVE_DIR} == "" ]]; then
-    echo "ERROR: No valid USB device found.  Exiting..."
-    exit 1
+    log_fatal "No valid USB device found.  Exiting..."
 fi
+log_info "Verified that a valid usb device was found"
 
 
-####################################################################################################
+#####################################################################################################################################################################################################
 # Define Excluded Dirs List
-####################################################################################################
+#####################################################################################################################################################################################################
 EXCLUDE_DIRS_LIST="${ROOT_BIN_PATH} ${ROOT_CUDA_PATH} ${ROOT_DATA_PATH} ${ROOT_DEBUG_PATH} ${ROOT_HDF5_PATH} ${ROOT_LIBRARY_PATH} ${ROOT_LOGS_PATH} ${ROOT_OUTPUT_PATH} ${ROOT_PYTEST_CACHE_PATH} ${ROOT_RELEASE_PATH} ${ROOT_RESOURCES_PATH} ${ROOT_TARGET_PATH} ${ROOT_TEMP_PATH} ${ROOT_TORCHEXPLORER_PATH} ${ROOT_TRUNK_PATH} ${ROOT_TRUNK_NEW_PATH} ${ROOT_VENV_PATH} ${ROOT_VIZ_PATH} ${ROOT_VSCODE_PATH}";
 log_debug "EXCLUDE_DIRS_LIST: ${EXCLUDE_DIRS_LIST}"
 
@@ -104,23 +95,26 @@ done
 log_debug "USB_ARCHIVE_EXCLUDED: ${USB_ARCHIVE_EXCLUDED}"
 
 
-####################################################################################################
+#####################################################################################################################################################################################################
 # Save the Jumper Rust project (excluding contents of libs & target dirs) to a USB drive
 #
 #    tar cvfz /media/pcalnon/DFF3-2782/Juniper_rust/juniper_rust_$(date +%F).tgz
 #    --exclude libs --exclude target --exclude data ~/Development/rust/rust_mudgeon/juniper
 #
-####################################################################################################
-echo -ne "\nSaving Archive file: ${USB_ARCHIVE_FILE}\n"
+#####################################################################################################################################################################################################
+log_debug "\nSaving Archive file: ${USB_ARCHIVE_FILE}\n"
 log_debug "tar -czvf ${USB_ARCHIVE_FILE} ${USB_ARCHIVE_EXCLUDED} ${SCRIPT_PROJ_PATH}"
+
 if [[ ${DEBUG} == "${TRUE}" ]]; then
     if tar -czvf "${USB_ARCHIVE_FILE}" "${USB_ARCHIVE_EXCLUDED}" "${SCRIPT_PROJ_PATH}"; then log_debug "Successfully Saved Archive file: ${USB_ARCHIVE_FILE}"; else log_error "Failed to Save Archive file: ${USB_ARCHIVE_FILE}"; fi
 else
     if tar -czf "${USB_ARCHIVE_FILE}" "${USB_ARCHIVE_EXCLUDED}" "${SCRIPT_PROJ_PATH}" >/dev/null 2>&1; then log_debug "Successfully Saved Archive file: ${USB_ARCHIVE_FILE}"; else log_error "Failed to Save Archive file: ${USB_ARCHIVE_FILE}"; fi
 fi
-echo -ne "\nls -Flah ${USB_ARCHIVE_DIR}\n"
+
+log_debug "\nls -Flah ${USB_ARCHIVE_DIR}\n"
 ls -Flah "${USB_ARCHIVE_DIR}"
 
-echo -ne "\nUSB Drive Space Remaining\n"
-echo "Filesystem      Size  Used Avail Use% Mounted on"
-df -h | grep "${USB_ARCHIVE_ROOT_DIR}"
+log_info "\nUSB Drive Space Remaining\n"
+log_info "Filesystem      Size  Used Avail Use% Mounted on: $( df -h | grep "${USB_ARCHIVE_ROOT_DIR}" )"
+
+exit $(( TRUE ))

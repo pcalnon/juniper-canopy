@@ -49,29 +49,40 @@ export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")" && INIT_CONF="$(dirna
 ####################################################################################################
 # Get the OS name and find active python binary
 ####################################################################################################
+log_trace "Get the OS name and find active python binary"
 OS_NAME=$(${OS_NAME_SCRIPT})
+log_verbose "OS_NAME: ${OS_NAME}"
 
-# Validate Local OS
+
+#####################################################################################################################################################################################################
+# Validate the Local OS
+#####################################################################################################################################################################################################
+log_trace "Validate the Local OS"
 if [[ "${OS_NAME}" == "${OS_LINUX}" ]]; then
     PYTHON_CMD="${HOME}/${CONDA_LINUX}/${PYTHON_LOC}"
+    log_verbose "PYTHON_CMD: ${PYTHON_CMD}"
 elif [[ "${OS_NAME}" == "${OS_MACOS}" ]]; then
     PYTHON_CMD="${HOME}/${CONDA_MACOS}/${PYTHON_LOC}"
+    log_verbose "PYTHON_CMD: ${PYTHON_CMD}"
 elif [[ "${OS_NAME}" == "${OS_WINDOWS}" ]]; then
-    echo "Error: Why the hell are you running ${OS_WINDOWS}??"
-    exit 1
+    log_critical "Why the hell are you running ${OS_WINDOWS}???"
 else
-    echo "Error: You are running an ${OS_UNKNOWN} OS. Cowardly not wading into this crazy."
-    exit 2
+    log_fatal "Error: You are running an ${OS_UNKNOWN} OS. Cowardly not wading into this crazy."
 fi
 
+
+#####################################################################################################################################################################################################
+# Run the Python script to initialize application randomness with a new seed
+#####################################################################################################################################################################################################
+log_debug "Run the Python script to initialize application randomness with a new seed"
+log_trace "Get Python Version"
 # shellcheck disable=SC2155
 export PYTHON_VER="$(${PYTHON_CMD} --version)"
-"${PYTHON_CMD}" "${RANDOM_SEED}"
+log_verbose "PYTHON_VER: ${PYTHON_VER}"
+log_trace "Call Python Script"
+"${PYTHON_CMD}" "${RANDOM_SEED}"; SUCCESS="$?"
+log_trace "Check Python Script Result"
+[[ "${SUCCESS}" == "${TRUE}" ]] && echo -ne "\nSuccess!!  " || echo -ne "\nFailure :(  "
+log_info "Python Script: ${NEW_RANDOM_SEED_FILE_NAME}, returned: ${SUCCESS}"
 
-RESULT="$?"
-if [[ "${RESULT}" == "0" ]]; then
-    echo -ne "\nSuccess!!  "
-else
-    echo -ne "\nFailure :(  "
-fi
-echo "Python Script: ${NEW_RANDOM_SEED_FILE_NAME}, returned: ${RESULT}"
+exit $(( SUCCESS ))
