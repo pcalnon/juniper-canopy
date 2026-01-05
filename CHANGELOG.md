@@ -5,6 +5,196 @@ All notable changes to the juniper_canopy prototype will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-01-05
+
+### Added [0.14.0]
+
+- **Comprehensive Bash Script Configuration Infrastructure**
+  - Created 25+ new `.conf` configuration files in `conf/` directory for modular script configuration
+  - New configuration files include:
+    - `__date_functions.conf` (202 lines) - Date manipulation utilities
+    - `__git_log_weeks.conf` (111 lines) - Git log week-based analysis
+    - `change_path.conf`, `common_functions.conf`, `conda_env_update.conf`
+    - `create_performance_profile.conf` with separate `_functions.conf` companion
+    - `get_code_stats_functions.conf`, `get_file_todo_functions.conf`
+    - `get_module_filenames_functions.conf`, `get_script_path.conf`
+    - `get_todo_comments_functions.conf`, `git_branch_ages.conf`
+    - `juniper_canopy-demo.conf`, `last_mod_update.conf`
+    - `logging.conf` (230 lines), `logging_colors.conf`, `logging_functions.conf` (352 lines)
+    - `main.conf`, `proto.conf`, `random_seed.conf`, `run_all_tests.conf`
+    - `save_to_usb.conf`, `setup_environment.conf` (286 lines)
+    - `setup_environment_functions.conf`, `setup_test.conf`
+    - `source_tree.conf`, `todo_search.conf`, `update_weekly.conf`
+
+- **New Utility Scripts**
+  - `util/color_display_codes.bash` - Terminal color code display utility
+  - `util/color_table.py` - Python color table generator (64 lines)
+  - `util/mv2_bash_n_back.bash` - Bash file backup utility
+
+### Changed [0.14.0]
+
+- **Major Bash Infrastructure Refactoring** (36 commits)
+  - Refactored all utility scripts for improved modularity and configuration-driven behavior
+  - Introduced `CALLING_PID` for accurate parent path resolution
+  - Enhanced date functions and logging mechanisms across scripts
+  - Improved environment constants handling and function config sourcing logic
+  - Streamlined debug handling and sourcing checks across configuration files
+  - Renamed config files: `test_common_conf.bash` → `test_common.conf`, `test_prototype_conf.bash` → `test_prototype.conf`
+
+- **Configuration File Updates**
+  - `conf/common.conf` expanded significantly (+488 lines)
+  - `conf/init.conf` improved validation for parent script and config file sourcing
+  - `conf/conda_environment.yaml` streamlined (-75 lines)
+  - `conf/logging_config.yaml` updated with new logging structure
+
+- **Utility Script Improvements**
+  - `util/get_code_stats.bash` - Major refactoring for cleaner output
+  - `util/create_performance_profile.bash` - Simplified architecture
+  - `util/get_todo_comments.bash` - Enhanced TODO extraction
+  - `util/save_to_usb.bash` - Streamlined backup process
+  - `util/juniper_canopy-demo.bash` - Improved demo mode handling
+
+### Fixed [0.14.0]
+
+- **Bash Script Logic Fixes**
+  - Fixed inverted logic in `is_defined` checks across multiple scripts
+  - Improved path resolution for `init.conf` sourcing
+  - Fixed method and TODO counting with proper whitespace handling
+
+### Removed [0.14.0]
+
+- `conf/script_util.conf` (329 lines) - Functionality absorbed into modular config files
+- `conf/util_logging.conf` (266 lines) - Replaced by `logging.conf` and `logging_functions.conf`
+- `util/__date_functions.bash` (155 lines) - Moved to `conf/__date_functions.conf`
+- `util/run_demo.bash`, `util/try.bash` - Removed obsolete scripts
+
+### Test Results [0.14.0]
+
+- Test suite requires attention: 58 collection errors detected
+- Infrastructure changes do not affect core Python test functionality
+
+---
+
+## [0.13.2] - 2025-12-16
+
+### Added [0.13.2]
+
+- **Project Branding Assets**
+  - Juniper logo images in `src/assets/` directory (`Juniper_Logo_150px.png`, `Juniper_Logo_200px.png`, 10 logo variants, 3 `.ico` files, `Juniper_Tree_3-widestance.png`)
+  - `markdown.css` for markdown-specific styling in documentation (95 lines)
+
+- **Markdown Tooling**
+  - `.markdownlint.json` configuration with relaxed rules (512-char lines, allowed HTML elements)
+  - Pre-commit integration for `markdownlint` with `docs/history/` excluded
+
+- **Utility Scripts and Configuration**
+  - `util/get_module_filenames.bash` for collecting codebase module statistics
+  - New config files for development tooling:
+    - `conf/get_code_stats.conf` - Source file reporting configuration
+    - `conf/get_file_lines.conf` - File line counting utility config
+    - `conf/get_file_todo.conf` - TODO extraction configuration
+    - `conf/get_module_filenames.conf` - Module filename collection config
+    - `conf/get_todo_comments.conf` - TODO comment extraction config
+    - `conf/util_logging.conf` - Leveled logging for utility scripts
+
+### Changed [0.13.2]
+
+- **Documentation and Presentation**
+  - Updated `README.md` with right-aligned Juniper logo and improved formatting
+
+- **Tooling and CI**
+  - Enabled `markdownlint` in pre-commit hooks (previously manual only)
+  - CI workflow updated to ignore markdown rules `MD033` and `MD041`
+
+- **Configuration and Utilities**
+  - Renamed `conf/script_util.cfg` → `conf/script_util.conf` with expanded functionality (+184 lines)
+  - Refactored utility scripts for improved modularity and configuration-driven behavior
+
+- **Versioning and Housekeeping**
+  - Standardized Python file headers with project metadata (e.g., `callback_context.py`)
+  - Reset internal version headers from `1.x.x` to `0.x.x` scheme for pre-1.0 semantic versioning
+  - Expanded `.gitignore` with vim swap file patterns (`*.swq`, `*.swn`, etc.), `*.xcf`, `*.tmp`
+
+### Removed [0.13.2]
+
+- Removed accidentally committed `happy_dance.css` that was not intended for the project
+
+### Test Results [0.13.2]
+
+- 1668 passed, 34 skipped, 1 warning in 97.15s (0:01:37)
+- **84.05% overall test coverage**
+
+---
+
+## [0.13.1] - 2025-12-13
+
+### Fixed [0.13.1]
+
+- **DEFAULT_SCALE NameError in NetworkVisualizer** (Critical)
+  - Fixed undefined `DEFAULT_SCALE` constant that blocked all test collection
+  - Changed default parameter to use `DashboardConstants.DEFAULT_SCALE`
+  - All 20 test collection errors resolved
+  - See [FIX_DEFAULT_SCALE_2025-12-13.md](notes/FIX_DEFAULT_SCALE_2025-12-13.md) for details
+
+### Added [0.13.1]
+
+- **Comprehensive Test Suite Expansion** (453 new tests)
+  - `test_callback_context_coverage.py` - 29 tests for callback adapter
+  - `test_dashboard_helpers_coverage.py` - 48 tests for dashboard helpers
+  - `test_network_visualizer_layout_coverage.py` - 43 tests for layout methods
+  - `test_metrics_panel_helpers_coverage.py` - 74 tests for metrics helpers  
+  - `test_main_api_coverage.py` - 36 tests for API endpoints
+  - `test_demo_mode_comprehensive.py` - 72 tests for demo mode
+  - `test_websocket_comprehensive.py` - 51 tests for WebSocket
+  - `test_config_manager_comprehensive.py` - 42 tests for config
+  - `test_cascor_integration_comprehensive.py` - 49 tests for backend
+  - `test_base_component_coverage.py` - 9 tests for base component
+
+### Changed [0.13.1]
+
+- **Test Results**
+  - 1666 tests passing, 37 skipped
+  - **90% overall coverage achieved** (up from 84%)
+
+---
+
+## [0.13.0] - 2025-12-13
+
+### Added [0.13.0]
+
+- **Training Metrics Replay Functionality** (P1-3)
+  - Transport controls: play/pause, step forward/backward, jump to start/end
+  - Speed controls: 1x, 2x, 4x playback speeds
+  - Progress slider with position display (current / total epochs)
+  - Automatic playback with configurable interval
+  - Controls only visible when training is Paused/Stopped/Completed/Failed
+
+- **Network Topology Staggered Layout** (P1-2)
+  - Added "Staggered" layout option to dropdown
+  - Hidden nodes now use zigzag pattern for better edge visibility
+  - Progressive horizontal spreading based on node count
+  - Maintains vertical spacing while improving edge clarity
+
+- **Node Selection Interactions** (P1-4)
+  - Click to select nodes with visual highlighting (yellow glow + orange ring)
+  - Box and lasso selection support via new mode bar buttons
+  - Selection info panel showing selected node details
+  - Toggle selection on re-click, clear on click elsewhere
+
+- **Candidate Node Info Section with History** (P1-1)
+  - Collapsible candidate pool section (toggle with header click)
+  - Historical pools stored and displayed (up to 10 entries)
+  - Previous pools shown as collapsed cards with epoch/candidate summary
+  - Section always visible with "No active candidate pool" placeholder
+
+### Changed [0.13.0]
+
+- **Test Coverage**
+  - 1213 tests passing, 37 skipped
+  - 84% overall coverage maintained
+
+---
+
 ## [0.12.0] - 2025-12-12
 
 ### Added [0.12.0]

@@ -1,4 +1,43 @@
 ---
+#####################################################################################################################################################################################################
+# Project:       Juniper
+# Sub-Project:   JuniperCanopy
+# Application:   juniper_canopy
+# Purpose:       Monitoring and Diagnostics for CasCor NN
+
+# Author:        Paul Calnon
+# Version:       0.1.4 (0.7.3)
+# File Name:     logging_config.yaml
+# File Path:     <Project>/<Sub-Project>/<Application>/conf/
+#
+# Date:          2025-10-11
+# Last Modified: 2026-01-02
+#
+# License:       MIT License
+# Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
+#
+# Description:
+#    This file contains the configuration settings for the Juniper prototype
+#    Frontend application logging.
+#
+#####################################################################################################################################################################################################
+# Notes:
+#
+#   Juniper Canopy Application Configuration
+#   This file contains all configuration parameters for the CasCor
+#   frontend application
+#
+#####################################################################################################################################################################################################
+# References:
+#
+#####################################################################################################################################################################################################
+# TODO :
+#
+#####################################################################################################################################################################################################
+# COMPLETED:
+#
+#####################################################################################################################################################################################################
+
 version: 1
 formatters:
   formatter_console:
@@ -15,20 +54,15 @@ handlers:
     stream: ext://sys.stdout
   handler_file:
     class: logging.FileHandler
-    # level: TRACE
-    # level: DEBUG
     level: INFO
     formatter: formatter_file
     filename: logs/juniper_canopy.log
     mode: w
 loggers:
   juniper:
-    # level: DEBUG
     level: INFO
     propagate: true
     handlers: [handler_console, handler_file]
 root:
   handlers: [handler_console, handler_file]
-  # level: TRACE
-  # level: DEBUG
   level: INFO

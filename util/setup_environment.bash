@@ -1,27 +1,30 @@
 #!/usr/bin/env bash
 #####################################################################################################################################################################################################
 # Project:       Juniper
-# Prototype:     Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
-# File Name:     setup_environment.bash
+# Sub-Project:   JuniperCanopy
+# Application:   juniper_canopy
+# Purpose:       Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
+#
 # Author:        Paul Calnon
 # Version:       0.1.4 (0.7.3)
+# File Name:     setup_environment.bash
+# File Path:     <Project>/<Sub-Project>/<Application>/util/
 #
 # Date:          2025-10-11
-# Last Modified: 2025-12-03
+# Last Modified: 2026-01-04
 #
 # License:       MIT License
-# Copyright:     Copyright (c) 2024-2025 Paul Calnon
+# Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
 #
 # Description:
 #    This script sets up the development environment for the Juniper Canopy application.
 #
 #####################################################################################################################################################################################################
 # Notes:
-#
 #     Juniper Canopy Environment Setup Script
 #     This script sets up the development environment for the Juniper Canopy application
 #
-#####################################################################################################################################################################################################
+########################################################################################################)#############################################################################################
 # References:
 #
 #####################################################################################################################################################################################################
@@ -32,106 +35,78 @@
 #
 #####################################################################################################################################################################################################
 
-# set -e  # Exit on any error
 
-# Configuration
-PROJECT_NAME="Juniper Canopy"
-ENV_NAME="JuniperPython"
-PROJECT_DIR="${HOME}/Development/python/JuniperCanopy/juniper_canopy"
+#####################################################################################################################################################################################################
+# Source script config file
+#####################################################################################################################################################################################################
+set -o functrace
+# shellcheck disable=SC2155
+export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")" && INIT_CONF="$(dirname "$(dirname "${PARENT_PATH_PARAM}")")/conf/init.conf"
+# shellcheck disable=SC2015,SC1090
+[[ -f "${INIT_CONF}" ]] && source "${INIT_CONF}" || { echo "Init Config File Not Found. Unable to Continue."; exit 1; }
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
 
-# Define Script Constants
-TRUE=0
-FALSE=1
-
-DEBUG="${TRUE}"
-# DEBUG="${FALSE}"
-
-BASH_CONFIG=""
-
-LINUX="Linux"
-MACOS="Darwin"
-
-COMMENT_REGEX="^[[:space:]]*#.*$"
-CONDA_CMD="conda"
-MAMBA_CMD="mamba"
-CONDA_OFFSET="2"
-MAMBA_OFFSET="3"
-
-# USE_CONDA="${TRUE}"
-USE_CONDA="${FALSE}"
-# USE_MAMBA="$(echo "$(( ( USE_CONDA + 1 ) % 2 ))")"
-USE_MAMBA="$(((USE_CONDA + 1) % 2))"
-
-# Define Command and Offset based on package manager choice
-if [[ ${USE_CONDA} == "${TRUE}" ]]; then
-	CMD="${CONDA_CMD}"
-	OFFSET="${CONDA_OFFSET}"
-elif [[ ${USE_MAMBA} == "${TRUE}" ]]; then
-	CMD="${MAMBA_CMD}"
-	OFFSET="${MAMBA_OFFSET}"
-else
-	echo "Borked"
-	exit 1
-fi
-
-OS_TYPE="$(uname -s)"
-[[ ${DEBUG} == "${TRUE}" ]] && print_status "DEBUG: OS Type: ${OS_TYPE}"
-if [[ ${OS_TYPE} == "${LINUX}" ]]; then
-	BASH_CONFIG="/home/pcalnon/.bashrc"
-	[[ ${DEBUG} == "${TRUE}" ]] && print_status "DEBUG: Bash Linux config file: ${BASH_CONFIG}"
-elif [[ ${OS_TYPE} == "${MACOS}" ]]; then
-	BASH_CONFIG="/Users/pcalnon/.bash_profile"
-	[[ ${DEBUG} == "${TRUE}" ]] && print_status "DEBUG: Bash MacOS config file: ${BASH_CONFIG}"
-else
-	print_error "Unsupported OS: ${OS_TYPE}"
-	exit 1
-fi
-[[ ${DEBUG} == "${TRUE}" ]] && print_status "DEBUG: Bash config file: ${BASH_CONFIG}"
-
-# Function to print colored output
-print_status() {
-	echo -e "${BLUE}[INFO]${NC} $1"
-}
-
-print_success() {
-	echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-print_warning() {
-	echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-print_error() {
-	echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# Function to check if command exists
-command_exists() {
+#####################################################################################################################################################################################################
+# Define Function to check if command exists
+#####################################################################################################################################################################################################
+function command_exists() {
+    # shellcheck disable=SC2015
     [[ ${DEBUG} == "${TRUE}" ]] && command -v "$1" || command -v "$1" >/dev/null 2>&1   # trunk-ignore(shellcheck/SC2015)
 }
 
-print_status "Starting ${PROJECT_NAME} environment setup..."
 
-# Check if conda is installed
-RESULT="$(command_exists conda)"
-[[ ${DEBUG} == "${TRUE}" ]] && print_status "DEBUG: Conda check result: ${RESULT}"
-if [[ ${RESULT} == "" ]]; then
-	print_error "Conda is not installed or not in PATH"
-	print_status "Please install Miniconda or Anaconda and try again"
-	exit 1
+#####################################################################################################################################################################################################
+# Define Command and Offset based on package manager choice
+#####################################################################################################################################################################################################
+log_trace "Define Command and Offset based on package manager choice"
+if [[ "${USE_CONDA}" == "${TRUE}" ]]; then
+	CMD="${CONDA_CMD}"
+	OFFSET="${CONDA_OFFSET}"
+elif [[ "${USE_MAMBA}" == "${TRUE}" ]]; then
+	CMD="${MAMBA_CMD}"
+	OFFSET="${MAMBA_OFFSET}"
+else
+    log_fatal "No package manager selected. Unable to continue."
 fi
-[[ ${DEBUG} == "${TRUE}" ]] && print_status "DEBUG: Conda is installed"
-CONDA_VERSION="$(conda --version)"
-print_success "Conda found: ${CONDA_VERSION}"
 
+log_debug "OS Type: ${OS_TYPE}"
+if [[ "${OS_TYPE}" == "${LINUX}" ]]; then
+	BASH_CONFIG="/home/pcalnon/.bashrc"
+    log_debug "Bash Linux config file: ${BASH_CONFIG}"
+elif [[ "${OS_TYPE}" == "${MACOS}" ]]; then
+	BASH_CONFIG="/Users/pcalnon/.bash_profile"
+    log_debug "Bash MacOS config file: ${BASH_CONFIG}"
+else
+    log_fatal "Unsupported OS: ${OS_TYPE}"
+fi
+
+log_debug "Bash config file: ${BASH_CONFIG}"
+log_info "Starting ${PROJECT_NAME} environment setup..."
+
+
+#####################################################################################################################################################################################################
+# Check if conda is installed
+#####################################################################################################################################################################################################
+log_trace "Check if conda is installed"
+RESULT="$(command_exists conda)"
+log_debug "Conda check result: ${RESULT}"
+if [[ "${RESULT}" == "" ]]; then
+	log_info "Please install Miniconda or Anaconda and try again"
+	log_fatal "Conda is not installed or not in PATH"
+fi
+log_debug "Verified Conda is installed"
+
+CONDA_VERSION="$(conda --version)"
+log_info "Conda found: ${CONDA_VERSION}"
+
+
+# TODO: Done above here
+
+
+#####################################################################################################################################################################################################
 # Check if mamba is installed
+#####################################################################################################################################################################################################
+log_trace "Check if mamba is installed"
 RESULT="$(command_exists mamba)"
 [[ ${DEBUG} == "${TRUE}" ]] && print_status "DEBUG: Mamba check result: ${RESULT}"
 if [[ ${RESULT} == "" ]]; then
@@ -143,7 +118,11 @@ fi
 MAMBA_FOUND="$(mamba --version)"
 print_success "Mamba found: ${MAMBA_FOUND}"
 
+
+#####################################################################################################################################################################################################
 # Navigate to project directory
+#####################################################################################################################################################################################################
+log_trace "Navigate to project directory"
 cd "${PROJECT_DIR}" || {
 	print_error "Failed to navigate to project directory: ${PROJECT_DIR}"
 	exit 1
@@ -152,8 +131,11 @@ cd "${PROJECT_DIR}" || {
 WORKING_DIR="$(pwd || 0)"
 print_status "Working in directory: ${WORKING_DIR}"
 
+
+#####################################################################################################################################################################################################
 # Check if environment already exists
-print_status "Check if conda environment already exists: ${ENV_NAME}"
+#####################################################################################################################################################################################################
+log_trace "Check if conda environment already exists"
 ENV_LIST_RAW="$(eval "${CMD} env list")"
 ENV_LIST_NO_COM="$(echo "${ENV_LIST_RAW}" | grep -v -e "${COMMENT_REGEX}")"
 ENV_LIST="$(echo "${ENV_LIST_NO_COM}" | tail -n +"${OFFSET}")"
@@ -176,7 +158,11 @@ if [[ ${ENV_EXISTS} != "" || ${TRUE} == "${TRUE}" ]]; then
 	fi
 fi
 
+
+#####################################################################################################################################################################################################
 # Creating conda environment from Create conda environment YAML file
+#####################################################################################################################################################################################################
+log_trace "Creating conda environment from Create conda environment YAML file"
 print_status "Creating conda environment from conf/conda_environment.yaml..."
 if conda env create -f conf/conda_environment.yaml; then
 	print_success "Conda environment created successfully"
@@ -189,12 +175,17 @@ print_status "Initializing and Activating conda environment: ${ENV_NAME}..."
 echo "source \"${BASH_CONFIG}\" && conda activate \"${ENV_NAME}\""
 if [[ -f ${BASH_CONFIG} ]]; then
 	print_status "Sourcing bash config: ${BASH_CONFIG}"
+	# shellcheck disable=SC1090
 	source "${BASH_CONFIG}"    # trunk-ignore(shellcheck/SC1090)
 else
 	print_warning "Bash config not found: ${BASH_CONFIG}"
 fi
 
+
+#####################################################################################################################################################################################################
 # Try to activate the environment; ensure conda is available in this shell
+#####################################################################################################################################################################################################
+log_trace "Try to activate the environment; ensure conda is available in this shell"
 if command -v conda >/dev/null 2>&1; then
 	conda activate "${ENV_NAME}"
 else
@@ -202,7 +193,11 @@ else
 	exit 1
 fi
 
+
+#####################################################################################################################################################################################################
 # Verify activation
+#####################################################################################################################################################################################################
+log_trace "Verify activation"
 if [[ ${CONDA_DEFAULT_ENV} != "${ENV_NAME}" ]]; then
 	print_error "Failed to activate environment"
 	exit 1
@@ -210,11 +205,19 @@ fi
 
 print_success "Environment '${ENV_NAME}' activated"
 
+
+#####################################################################################################################################################################################################
 # Install additional pip packages if needed
+#####################################################################################################################################################################################################
+log_trace "Install additional pip packages"
 print_status "Installing additional pip packages..."
 pip install -r conf/requirements.txt
 
+
+#####################################################################################################################################################################################################
 # Verify key packages
+#####################################################################################################################################################################################################
+log_trace "Verify key packages"
 print_status "Verifying key package installations..."
 python -c "
 import sys
@@ -243,35 +246,27 @@ else
 	exit 1
 fi
 
+
+#####################################################################################################################################################################################################
 # Create necessary directories
+#####################################################################################################################################################################################################
+log_trace "Create necessary directories"
 print_status "Creating project directories..."
 mkdir -p logs data/training data/testing data/samples images
 
+
+#####################################################################################################################################################################################################
 # Set up environment variables
-print_status "Setting up environment variables..."
-cat >.env <<EOF
-# Juniper Canopy Environment Variables
-CASCOR_ENV=development
-CASCOR_DEBUG=true
-CASCOR_LOG_LEVEL=DEBUG
-CASCOR_CONSOLE_LOG_LEVEL=INFO
-CASCOR_FILE_LOG_LEVEL=DEBUG
-CASCOR_CONFIG_PATH=conf/app_config.yaml
+#####################################################################################################################################################################################################
+log_trace "Set up environment variables"
+echo "${ENV_DOT_FILE_CONTENT}" >"${ENV_DOT_FILE}"
+log_info "Environment file created"
 
-# Performance settings
-OMP_NUM_THREADS=4
-MKL_NUM_THREADS=4
-NUMBA_NUM_THREADS=4
 
-# Application settings
-CASCOR_HOST=127.0.0.1
-CASCOR_PORT=8050
-EOF
-
-print_success "Environment file created"
-
+#####################################################################################################################################################################################################
 # Create a simple test script
-print_status "Creating test script..."
+#####################################################################################################################################################################################################
+log_trace "Creating test script..."
 cat >test_setup.py <<'EOF'
 #!/usr/bin/env python3
 """
@@ -370,23 +365,32 @@ if __name__ == "__main__":
     main()
 EOF
 
+
+#####################################################################################################################################################################################################
 # Make test script executable
+#####################################################################################################################################################################################################
+log_trace "Make test script executable"
+log_debug "chmod +x test_setup.py"
 chmod +x test_setup.py
 
+
+#####################################################################################################################################################################################################
 # Run the test script
-print_status "Running setup verification..."
-python test_setup.py
-RESULT=$?
+#####################################################################################################################################################################################################
+log_trace "Running setup verification..."
+log_debug "python test_setup.py"
+python test_setup.py; SUCCESS=$?
 
-if [[ ${RESULT} == "${TRUE}" ]]; then
-	print_success "Setup verification completed successfully!"
-else
-	print_error "Setup verification failed"
-	exit 1
-fi
+# shellcheck disable=SC2015
+[[ "${SUCCESS}" != "${TRUE}" ]] && log_critical "Test Environment's Setup verification failed" || log_info "Setup verification completed successfully!"
 
+
+#####################################################################################################################################################################################################
 # Final instructions
-print_status "Setup completed successfully!"
+#####################################################################################################################################################################################################
+log_info "Setup completed successfully!"
+
+echo "Setup completed successfully!"
 echo
 echo "To start working with the Juniper Canopy:"
 echo "1. Activate the environment: conda activate ${ENV_NAME}"
@@ -397,4 +401,7 @@ echo "Configuration files are available in the conf/ directory"
 echo "Documentation is available in the notes/ directory"
 echo "Logs will be written to the logs/ directory"
 echo
-print_success "Happy coding! 🚀"
+echo "Happy coding! 🚀"
+
+log_info "Happy coding! 🚀"
+exit $(( TRUE ))

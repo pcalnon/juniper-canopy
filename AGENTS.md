@@ -11,6 +11,46 @@ The juniper_canopy prototype is a real-time monitoring and diagnostic frontend f
 - Demo mode for development without backend connection
 - Standardized WebSocket message protocol
 
+## AI Agent Quick Start
+
+For agents and subagents working on this codebase, follow this checklist:
+
+1. **Run the app in demo mode**
+
+   ```bash
+   ./demo
+   # or: ./util/juniper_canopy-demo.bash
+   ```
+
+2. **Run fast tests only (no external deps)**
+
+   ```bash
+   cd src
+   pytest -m "unit and not slow" -v
+   ```
+
+3. **Before changing configuration**
+   - Check `src/constants.py` and `conf/app_config.yaml`
+   - Respect the hierarchy: env vars (`CASCOR_*`) > YAML > constants
+
+4. **Before changing WebSocket or API routes**
+   - Update both FastAPI (`main.py`, `communication/websocket_manager.py`) and any Dash callbacks using those routes
+   - Update `docs/api/` and tests in `src/tests/integration/`
+
+5. **Before changing demo mode behavior**
+   - Understand `src/demo_mode.py` and how `CASCOR_DEMO_MODE` controls app startup
+   - Ensure `./demo` still starts successfully and tests still pass
+
+6. **Singleton reset guidance**
+   - If you add new singleton-like components, extend the `reset_singletons` fixture in `src/tests/conftest.py`
+
+**Where to find more details:**
+
+- [Constants Guide](docs/CONSTANTS_GUIDE.md)
+- [Testing Docs](docs/testing/)
+- [CasCor Backend Integration](docs/cascor/)
+- [API Documentation](docs/api/)
+
 ## Quick Start Commands
 
 ### Running the Application
@@ -20,12 +60,15 @@ The juniper_canopy prototype is a real-time monitoring and diagnostic frontend f
 ./demo
 
 # Or use the full script path
-./utils/run_demo.bash
+./util/juniper_canopy-demo.bash
 
-# Run with real CasCor backend (production)
+# Run with real CasCor backend (production-like)
+# Ensure CASCOR_DEMO_MODE is NOT set, and backend is available at CASCOR_BACKEND_PATH
 cd src
-/opt/miniforge3/envs/JuniperPython/bin/python main.py
+uvicorn main:app --host 0.0.0.0 --port 8050 --log-level info
 ```
+
+> **Note:** The canonical way to run the application is via `uvicorn main:app`. The `./demo` script handles conda activation and environment setup automatically.
 
 ### Testing
 
@@ -63,6 +106,82 @@ pytest -m "not requires_cascor" -v
 # View coverage report
 open reports/coverage/index.html  # macOS
 xdg-open reports/coverage/index.html  # Linux
+```
+
+#### Pytest Markers
+
+| Marker            | Meaning                                      | Typical use                                           |
+|-------------------|----------------------------------------------|-------------------------------------------------------|
+| `unit`            | Fast tests, no external dependencies         | Pure logic / small components                         |
+| `integration`     | Integration tests (DB, FS, backend, etc.)    | Backend + frontend wiring, config, I/O                |
+| `regression`      | Regression tests for fixed bugs              | Guarding against previously-fixed issues              |
+| `performance`     | Performance / benchmark tests                | Throughput, latency, allocation checks                |
+| `e2e`             | Full end-to-end tests                        | Full stack with real services                         |
+| `slow`            | Tests > 1s                                   | Load-heavy, large data, long-running loops            |
+| `requires_cascor` | Needs a real CasCor backend                  | Real backend integration tests                        |
+| `requires_server` | Needs a running server                       | External client tests vs pre-started server           |
+| `requires_redis`  | Needs Redis                                  | Cache / pub-sub integration tests                     |
+| `requires_display`| Needs a GUI/display                          | Visualization / UI snapshot tests                     |
+
+Example marker usage:
+
+```bash
+# Run only regression tests
+cd src
+pytest tests/regression/ -v
+
+# Run all tests except slow and CasCor-dependent
+pytest -m "not slow and not requires_cascor" -v
+
+# Run only performance benchmarks
+pytest -m performance -v
+```
+
+#### Test Environment Variables
+
+The test suite auto-skips certain tests unless you opt in via environment variables:
+
+| Variable                  | Effect                                                       | Default |
+|---------------------------|--------------------------------------------------------------|---------|
+| `CASCOR_BACKEND_AVAILABLE`| Enable tests marked `requires_cascor`                        | unset   |
+| `RUN_SERVER_TESTS`        | Enable tests marked `requires_server`                        | unset   |
+| `RUN_DISPLAY_TESTS`       | Enable tests marked `requires_display` in headless environments | unset |
+| `ENABLE_SLOW_TESTS`       | Run tests marked `slow`                                      | unset   |
+
+> **Note:** `conftest.py` **forces** `CASCOR_DEMO_MODE=1` for the test process by default so tests do **not** require a real backend unless you explicitly enable it via `CASCOR_BACKEND_AVAILABLE=1`.
+
+Example:
+
+```bash
+# Enable CasCor backend and slow tests
+export CASCOR_BACKEND_AVAILABLE=1
+export ENABLE_SLOW_TESTS=1
+cd src
+pytest -m "not requires_display" -v
+```
+
+#### Key Test Fixtures
+
+These fixtures are defined in `src/tests/conftest.py` and are available everywhere under `src/tests/`:
+
+- **`client`** (module scope): FastAPI `TestClient` against `main.app` with `CASCOR_DEMO_MODE=1`. Use this for exercising API endpoints in tests without starting uvicorn.
+
+- **`reset_singletons`** (function scope, autouse): Resets `ConfigManager`, `DemoMode`, and `CallbackContextAdapter` singletons before and after each test. **Agent guidance:** Do not bypass this fixture; if you introduce new singletons, extend this fixture to reset them.
+
+- **`fake_backend_root`**: Creates a fake CasCor backend modules tree under a temporary directory. Use it to test `CascorIntegration` behavior without a real backend.
+
+- **`ensure_test_data_directory`** (session scope, autouse): Ensures `src/tests/data/` exists and creates `sample_metrics.json` if missing.
+
+- **`sample_training_metrics`, `sample_network_topology`, `sample_dataset`**: Provide realistic test data for metrics/topology/dataset-related code.
+
+Example usage:
+
+```python
+@pytest.mark.unit
+def test_get_topology_uses_demo_mode(client, sample_network_topology):
+    """Example usage of client fixture."""
+    response = client.get("/api/network/topology")
+    assert response.status_code == 200
 ```
 
 ### Code Quality
@@ -127,25 +246,54 @@ flake8 src/
 
 ```bash
 juniper_canopy/
-├── conf/                    # Configuration files
-│   ├── app_config.yaml      # Application configuration
-│   ├── requirements.txt     # Python dependencies
-│   └── conda_environment.yaml
-├── data/                    # Datasets
-├── docs/                    # Reference documentation
-├── images/                  # Generated images
-├── logs/                    # Log files
-├── notes/                   # Documentation and notes
-├── src/                     # Source code
-│   ├── backend/            # Backend integration
-│   ├── communication/       # WebSocket management
-│   ├── frontend/           # Dash dashboard components
-│   ├── logger/             # Logging system
-│   ├── tests/              # Test suite
-│   ├── config_manager.py   # Configuration management
-│   ├── demo_mode.py        # Demo mode simulation
-│   └── main.py             # Application entry point
-└── utils/                   # Utility scripts
+├── conf/                         # Configuration & infrastructure
+│   ├── app_config.yaml           # Main application config (see "Configuration Management")
+│   ├── conda_environment.yaml    # Conda env spec for JuniperPython
+│   ├── requirements.txt          # Pip dependencies
+│   ├── Dockerfile                # Container image for Juniper Canopy
+│   ├── docker-compose.yaml       # Local stack (app + services like Redis)
+│   ├── logging_config.yaml       # Logging configuration
+│   ├── init.conf                 # Shared shell init for utility scripts
+│   └── ... (35+ shell/logging/env configs)
+├── data/                         # Datasets for training/testing
+├── docs/                         # Reference & subsystem documentation
+│   ├── api/                      # API-level docs for FastAPI/Dash endpoints
+│   ├── cascor/                   # CasCor backend integration docs
+│   ├── cassandra/                # Persistence / Cassandra integration docs
+│   ├── ci_cd/                    # CI/CD pipeline documentation
+│   ├── demo/                     # Demo mode behavior & usage
+│   ├── history/                  # Archived/superseded documentation
+│   ├── phase0-3/                 # Historical design docs / early phases
+│   ├── redis/                    # Redis/cache integration docs
+│   ├── testing/                  # Testing guides and advanced scenarios
+│   └── *.md                      # Quick start, environment setup, etc.
+├── images/                       # Generated images/screenshots
+├── logs/                         # Log files (runtime)
+├── notes/                        # Development notes and implementation details
+├── reports/                      # Test coverage and CI reports
+├── src/                          # Source code
+│   ├── backend/                  # CasCor backend integration & adapters
+│   ├── communication/            # WebSocket management & protocol
+│   ├── frontend/                 # Dash dashboard components & callbacks
+│   │   └── components/           # Individual UI components
+│   ├── logger/                   # Logging system
+│   ├── tests/                    # Test suite
+│   │   ├── unit/                 # Unit tests (fast, no external deps)
+│   │   ├── integration/          # Integration tests (DB, files, backend)
+│   │   ├── regression/           # Regression tests for fixed bugs
+│   │   ├── performance/          # Performance/benchmark tests
+│   │   ├── fixtures/             # Additional test fixtures
+│   │   ├── mocks/                # Mock implementations
+│   │   └── helpers/              # Test utility functions
+│   ├── config_manager.py         # Configuration management
+│   ├── constants.py              # Central constants (see "Constants Management")
+│   ├── demo_mode.py              # Demo mode simulation
+│   └── main.py                   # FastAPI + Dash application entrypoint
+├── util/                         # Utility scripts (bash, invoked via ./demo, etc.)
+├── demo                          # Root-level demo launcher script (bash)
+├── conftest.py                   # Root pytest config (adds src/ to path)
+├── pyproject.toml                # Python project config (black, isort, pytest, coverage)
+└── AGENTS.md                     # This file
 ```
 
 ### Key Components
@@ -174,6 +322,67 @@ juniper_canopy/
    - Centralized application constants
    - Type-safe configuration values
    - Training parameters, UI settings, server config
+
+## Demo Mode vs Real Backend
+
+### Demo Mode (Default for Development)
+
+- **Activation:** Set `CASCOR_DEMO_MODE=1` (the `./demo` script does this automatically)
+- **Behavior:** Simulated training loop, no real CasCor backend required
+- **Use case:** UI development, testing, demonstrations
+
+```bash
+# Run in demo mode
+./demo
+# or explicitly:
+export CASCOR_DEMO_MODE=1
+cd src && uvicorn main:app --host 0.0.0.0 --port 8050
+```
+
+### Real Backend Mode (Production)
+
+- **Activation:** Unset `CASCOR_DEMO_MODE` and set `CASCOR_BACKEND_PATH`
+- **Behavior:** Connects to real CasCor neural network backend
+- **Use case:** Production, real training sessions
+
+```bash
+# Run with real backend
+unset CASCOR_DEMO_MODE
+export CASCOR_BACKEND_PATH=/path/to/cascor
+cd src && uvicorn main:app --host 0.0.0.0 --port 8050
+```
+
+### Agent Guidance for Demo Mode
+
+- **Tests must work with demo mode**: `conftest.py` forces `CASCOR_DEMO_MODE=1` by default
+- **New features must be demo-aware**: Check `demo_mode_active` before calling real backend
+- **Use `CascorIntegration` carefully**: Only behind checks that respect demo mode and `CASCOR_BACKEND_AVAILABLE`
+
+## Docker and Local Stack
+
+Containerization configs live under `conf/`:
+
+- `conf/Dockerfile` – Builds a Juniper Canopy image (FastAPI + Dash + demo/backend integration)
+- `conf/docker-compose.yaml` – Optional local stack (app + supporting services like Redis)
+
+### Basic Docker Usage
+
+```bash
+# Build image
+docker build -f conf/Dockerfile -t juniper_canopy .
+
+# Run container
+docker run --rm -p 8050:8050 juniper_canopy
+
+# Or with docker-compose
+docker compose -f conf/docker-compose.yaml up --build
+```
+
+### Agent Guidance for Docker
+
+- Keep ports and environment variables consistent with `app_config.yaml` and `ServerConstants`
+- If you change API paths or WebSocket endpoints, update both FastAPI routes and Docker/docker-compose health checks
+- The canonical entrypoint is `uvicorn main:app`—if this changes, update `conf/Dockerfile`
 
 ## Constants Management
 
@@ -767,7 +976,7 @@ The demo mode must accurately simulate the real CasCor backend to enable UI deve
 - Match CasCor backend payload shapes, keys, and update cadence
 - Expose identical API/WebSocket interfaces (UI code must be agnostic)
 - Support thread-safe control via Events (clean stop/pause)
-- Started via `./demo` or `utils/run_demo.bash` (conda activation required)
+- Started via `./demo` or `util/juniper_canopy-demo.bash` (conda activation required)
 
 **Implementation:** [src/demo_mode.py](src/demo_mode.py)
 
@@ -791,11 +1000,11 @@ The demo mode must accurately simulate the real CasCor backend to enable UI deve
 /opt/miniforge3/envs/JuniperPython/bin/python
 ```
 
-**Launch via scripts in `utils/`** (they activate conda automatically):
+**Launch via scripts in `util/`** (they activate conda automatically):
 
 ```bash
 ./demo                    # Demo mode
-./utils/run_demo.bash     # Same as ./demo
+./util/juniper_canopy-demo.bash     # Same as ./demo
 ./try                     # Try script (if present)
 ```
 
@@ -845,7 +1054,7 @@ Organize files according to their purpose:
 | Datasets | `data/` | `data/spiral_dataset.csv` |
 | Logs | `logs/` | `logs/system.log` |
 | Images | `images/` | `images/network_topology.png` |
-| Scripts | `utils/` | `utils/run_demo.bash` |
+| Scripts | `util/` | `util/juniper_canopy-demo.bash` |
 ```
 
 **Mirror package structure in tests:**

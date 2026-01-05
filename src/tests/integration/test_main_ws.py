@@ -240,42 +240,45 @@ class TestWebSocketEndpoints:
 
         with client.websocket_connect("/ws/training") as ws1:
             with client.websocket_connect("/ws/training") as ws2:
-                # Skip connection messages
-                ws1.receive_json()
-                ws2.receive_json()
-                ws1.receive_json()  # Initial status
-                ws2.receive_json()  # Initial status
+                self._receive_broadcast_from_multiple_clients(ws1, ws2, client)
 
-                # Trigger broadcast via training command
-                client.post("/api/train/start")
-                time.sleep(0.3)  # Allow broadcast buffering
+    def _receive_broadcast_from_multiple_clients(self, ws1, ws2, client):
+        # Skip connection messages
+        ws1.receive_json()
+        ws2.receive_json()
+        ws1.receive_json()  # Initial status
+        ws2.receive_json()  # Initial status
 
-                # Both should receive broadcast
-                received1 = False
-                received2 = False
+        # Trigger broadcast via training command
+        client.post("/api/train/start")
+        time.sleep(0.3)  # Allow broadcast buffering
 
-                for _ in range(10):
-                    try:
-                        msg1 = ws1.receive_json()
-                        if msg1.get("type") in ["metrics", "state", "control_ack"]:
-                            received1 = True
-                    except Exception:
-                        break
+        # Both should receive broadcast
+        received1 = False
+        received2 = False
 
-                    if not received2:
-                        try:
-                            msg2 = ws2.receive_json()
-                            if msg2.get("type") in ["metrics", "state", "control_ack"]:
-                                received2 = True
-                        except Exception:
-                            break
+        for _ in range(10):
+            try:
+                msg1 = ws1.receive_json()
+                if msg1.get("type") in ["metrics", "state", "control_ack"]:
+                    received1 = True
+            except Exception:
+                break
 
-                    if received1 and received2:
-                        break
+            if not received2:
+                try:
+                    msg2 = ws2.receive_json()
+                    if msg2.get("type") in ["metrics", "state", "control_ack"]:
+                        received2 = True
+                except Exception:
+                    break
 
-                # Both clients should receive broadcasts
-                assert received1, "Client 1 should receive broadcast"
-                assert received2, "Client 2 should receive broadcast"
+            if received1 and received2:
+                break
+
+        # Both clients should receive broadcasts
+        assert received1, "Client 1 should receive broadcast"
+        assert received2, "Client 2 should receive broadcast"
 
     def test_broadcast_survives_client_disconnect(self, client):
         """Test broadcasts continue when one client disconnects."""

@@ -1,3 +1,5 @@
+# Juniper Canopy
+
 Metadata-Version: 2.4
 Name: juniper_canopy
 Version: 0.4.0
@@ -22,8 +24,6 @@ Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
 Classifier: Topic :: Scientific/Engineering :: Visualization
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown
-
-# Juniper Canopy
 
 ## Real-Time Monitoring and Diagnostics Frontend for Cascade Correlation Neural Networks
 

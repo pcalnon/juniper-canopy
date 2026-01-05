@@ -117,8 +117,6 @@ class TestTrainingMetricsDataHandling:
         if hasattr(metrics, "update_metrics"):
             data = {"epoch": 1, "loss": 0.5, "accuracy": 0.8}
             metrics.update_metrics(data)
-            # Should not raise exception
-            assert True
 
     def test_get_metrics_history(self, metrics):
         """Should retrieve metrics history."""
@@ -131,8 +129,6 @@ class TestTrainingMetricsDataHandling:
         """Should clear metrics."""
         if hasattr(metrics, "clear"):
             metrics.clear()
-            # Should not raise exception
-            assert True
 
 
 class TestTrainingMetricsInheritance:

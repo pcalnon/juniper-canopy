@@ -1,0 +1,95 @@
+/* @import url("happy_dance.css"); */
+
+* { margin: 0; padding: 0; }
+
+abbr,acronym,blockquote,code,dir,kbd,listing,plaintext,q,samp,tt,var,xmp { hyphens: none; }
+
+html {
+	font: normal 18px/1.25 "Source Sans Pro", sans-serif;
+	color: #fff;
+	hyphens: auto;
+	word-wrap: break-word;
+	background: #000;
+}
+
+body > :first-child {
+	margin-top: 0rem;
+	margin-bottom: 0rem;
+	margin-left: 0rem;
+	margin-right: 0rem;
+	color: #fff;
+	background: #000;
+    vertical-align: top;
+}
+
+link[rel="stylesheet"] {
+    text-decoration: none;
+    color: #000;
+    background-color: #000;
+    vertical-align: top;
+    display: none;
+    float: right;
+    height: 0rem;
+    font-size: 0;
+    margin: 0rem;
+    margin-top: 0rem;
+    margin-bottom: -10rem;
+    padding: 0rem;
+    padding-top: 0rem;
+    padding-bottom: 0rem;
+}
+
+h1 {
+    display: block;
+    font-size: 2.75rem;
+	line-height: 0;
+	margin: 0rem;
+    margin-top: 0rem;
+    margin-bottom: 0rem;
+    padding: 0rem;
+    padding-top: 0rem;
+    padding-bottom: 0rem;
+	text-rendering: optimizeLegibility;
+}
+
+div[name="nofloat"] {
+    clear: both;
+    float: none;
+}
+
+img[alt^="Juniper"] {
+    display: block;
+    width: 200px;
+    margin: 0rem;
+    margin-top: 0rem;
+    margin-bottom: -2rem;
+    padding: 0rem;
+    padding-top: 0rem;
+    padding-bottom: -2rem;
+}
+
+img[alt$=">"] {
+    float: right;
+}
+
+img[alt$="<"] {
+    float: left;
+}
+
+img[alt$="><"] {
+    display: block;
+    float: none!important;
+}
+
+img[src*='#left'] {
+    float: left;
+}
+
+img[src*='#right'] {
+    float: right;
+}
+
+img[src*='#center'] {
+    display: block;
+    margin: auto;
+}

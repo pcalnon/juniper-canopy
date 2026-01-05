@@ -67,12 +67,13 @@ class TestDashboardE2E:
 
     def test_training_controls_work(self, client):
         """Training control endpoints should work."""
-        # Pause
-        response = client.post("/api/train/pause")
-        assert response.status_code == 200
-        assert response.json()["status"] == "paused"
+        response = self._test_training_controls_result(client, "/api/train/pause", "paused")
+        response = self._test_training_controls_result(client, "/api/train/resume", "running")
 
-        # Resume
-        response = client.post("/api/train/resume")
-        assert response.status_code == 200
-        assert response.json()["status"] == "running"
+    def _test_training_controls_result(self, client, arg1, arg2):
+        # Pause
+        result = client.post(arg1)
+        assert result.status_code == 200
+        assert result.json()["status"] == arg2
+
+        return result

@@ -39,10 +39,12 @@
 # import logging
 # from typing import Dict, Any, List, Optional
 import os
+import time
 from typing import Any, Dict, List, Tuple
 
 # from plotly.subplots import make_subplots
 import dash
+import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
@@ -166,6 +168,111 @@ class MetricsPanel(BaseComponent):
                     ],
                     style={"marginBottom": "10px"},
                 ),
+                # Replay Controls
+                html.Div(
+                    id=f"{self.component_id}-replay-controls",
+                    children=[
+                        html.Div(
+                            [
+                                dbc.Button(
+                                    "⏮",
+                                    id=f"{self.component_id}-replay-start",
+                                    size="sm",
+                                    color="secondary",
+                                    className="me-1",
+                                    title="Go to start",
+                                ),
+                                dbc.Button(
+                                    "◀",
+                                    id=f"{self.component_id}-replay-step-back",
+                                    size="sm",
+                                    color="secondary",
+                                    className="me-1",
+                                    title="Step backward",
+                                ),
+                                dbc.Button(
+                                    "▶",
+                                    id=f"{self.component_id}-replay-play",
+                                    size="sm",
+                                    color="primary",
+                                    className="me-1",
+                                    title="Play/Pause",
+                                ),
+                                dbc.Button(
+                                    "▶",
+                                    id=f"{self.component_id}-replay-step-forward",
+                                    size="sm",
+                                    color="secondary",
+                                    className="me-1",
+                                    title="Step forward",
+                                ),
+                                dbc.Button(
+                                    "⏭",
+                                    id=f"{self.component_id}-replay-end",
+                                    size="sm",
+                                    color="secondary",
+                                    className="me-1",
+                                    title="Go to end",
+                                ),
+                                html.Span("|", style={"margin": "0 10px", "color": "#ccc"}),
+                                dbc.ButtonGroup(
+                                    [
+                                        dbc.Button(
+                                            "1x",
+                                            id=f"{self.component_id}-speed-1x",
+                                            size="sm",
+                                            color="info",
+                                            outline=True,
+                                        ),
+                                        dbc.Button(
+                                            "2x",
+                                            id=f"{self.component_id}-speed-2x",
+                                            size="sm",
+                                            color="info",
+                                            outline=True,
+                                        ),
+                                        dbc.Button(
+                                            "4x",
+                                            id=f"{self.component_id}-speed-4x",
+                                            size="sm",
+                                            color="info",
+                                            outline=True,
+                                        ),
+                                    ],
+                                    size="sm",
+                                ),
+                            ],
+                            style={"display": "flex", "alignItems": "center", "marginBottom": "10px"},
+                        ),
+                        # Progress slider
+                        html.Div(
+                            [
+                                html.Span(
+                                    id=f"{self.component_id}-replay-position",
+                                    children="0 / 0",
+                                    style={"marginRight": "10px", "fontSize": "12px", "minWidth": "60px"},
+                                ),
+                                dcc.Slider(
+                                    id=f"{self.component_id}-replay-slider",
+                                    min=0,
+                                    max=100,
+                                    value=0,
+                                    marks=None,
+                                    tooltip={"placement": "bottom", "always_visible": False},
+                                    updatemode="drag",
+                                ),
+                            ],
+                            style={"display": "flex", "alignItems": "center"},
+                        ),
+                    ],
+                    style={
+                        "marginBottom": "15px",
+                        "padding": "10px",
+                        "backgroundColor": "#f8f9fa",
+                        "borderRadius": "5px",
+                        "display": "none",
+                    },
+                ),
                 # Current metrics display
                 html.Div(
                     [
@@ -226,19 +333,44 @@ class MetricsPanel(BaseComponent):
                     style={"height": "300px"},
                 ),
                 # Network Information: Details section has been moved to left sidebar in dashboard_manager.py
-                # Candidate Pool Section
+                # Candidate Pool Section - always visible with collapsible content
                 html.Div(
                     id=f"{self.component_id}-candidate-pool-section",
                     children=[
-                        html.H4("Candidate Pool", style={"marginTop": "20px", "marginBottom": "10px"}),
-                        html.Div(id=f"{self.component_id}-candidate-pool-info", children=[]),
+                        html.H4(
+                            [
+                                "Candidate Pool ",
+                                html.Span(
+                                    "▼",
+                                    id=f"{self.component_id}-candidate-toggle-icon",
+                                    style={"cursor": "pointer", "fontSize": "12px", "marginLeft": "5px"},
+                                ),
+                            ],
+                            id=f"{self.component_id}-candidate-toggle",
+                            style={"marginTop": "20px", "marginBottom": "10px", "cursor": "pointer"},
+                        ),
+                        dbc.Collapse(
+                            id=f"{self.component_id}-candidate-collapse",
+                            is_open=True,
+                            children=[
+                                html.Div(id=f"{self.component_id}-candidate-pool-info", children=[]),
+                            ],
+                        ),
+                        # Historical pools section
+                        html.Div(
+                            id=f"{self.component_id}-candidate-history-section",
+                            children=[],
+                            style={"marginTop": "10px"},
+                        ),
                     ],
-                    style={"marginTop": "20px", "display": "none"},
+                    style={"marginTop": "20px"},
                 ),
                 # Data store for metrics
                 dcc.Store(id=f"{self.component_id}-metrics-store", data=[]),
                 dcc.Store(id=f"{self.component_id}-network-stats-store", data={}),
                 dcc.Store(id=f"{self.component_id}-training-state-store", data={}),
+                # Candidate pool history store (keyed by pool ID, contains all completed pools)
+                dcc.Store(id=f"{self.component_id}-candidate-pools-history", data=[]),
                 # View state store for preserving graph zoom/pan
                 dcc.Store(
                     id=f"{self.component_id}-view-state",
@@ -252,6 +384,23 @@ class MetricsPanel(BaseComponent):
                 # Update interval
                 dcc.Interval(id=f"{self.component_id}-update-interval", interval=self.update_interval, n_intervals=0),
                 dcc.Interval(id=f"{self.component_id}-stats-update-interval", interval=5000, n_intervals=0),
+                # Replay functionality stores
+                dcc.Store(
+                    id=f"{self.component_id}-replay-state",
+                    data={
+                        "mode": "stopped",
+                        "speed": 1.0,
+                        "current_index": 0,
+                        "start_index": 0,
+                        "end_index": None,
+                    },
+                ),
+                dcc.Interval(
+                    id=f"{self.component_id}-replay-interval",
+                    interval=1000,
+                    disabled=True,
+                    n_intervals=0,
+                ),
             ],
             style={"padding": "20px"},
         )
@@ -289,6 +438,129 @@ class MetricsPanel(BaseComponent):
         )
         def update_candidate_pool(state):
             return self._update_candidate_pool_handler(state=state)
+
+        @app.callback(
+            [
+                Output(f"{self.component_id}-candidate-collapse", "is_open"),
+                Output(f"{self.component_id}-candidate-toggle-icon", "children"),
+            ],
+            Input(f"{self.component_id}-candidate-toggle", "n_clicks"),
+            State(f"{self.component_id}-candidate-collapse", "is_open"),
+            prevent_initial_call=True,
+        )
+        def toggle_candidate_section(n_clicks, is_open):
+            """Toggle candidate pool section visibility."""
+            if n_clicks:
+                new_state = not is_open
+                icon = "▼" if new_state else "▶"
+                return new_state, icon
+            return is_open, "▼"
+
+        @app.callback(
+            Output(f"{self.component_id}-candidate-pools-history", "data"),
+            Input(f"{self.component_id}-training-state-store", "data"),
+            State(f"{self.component_id}-candidate-pools-history", "data"),
+        )
+        def update_candidate_history(state, history):
+            """Update candidate pool history when a pool completes."""
+            if not state:
+                return history or []
+
+            pool_status = state.get("candidate_pool_status", "Inactive")
+            pool_phase = state.get("candidate_pool_phase", "Idle")
+            current_epoch = state.get("current_epoch", 0)
+
+            # Create pool snapshot if we have active pool data
+            if pool_status != "Inactive":
+                pool_snapshot = {
+                    "epoch": current_epoch,
+                    "status": pool_status,
+                    "phase": pool_phase,
+                    "size": state.get("candidate_pool_size", 0),
+                    "top_candidate_id": state.get("top_candidate_id", ""),
+                    "top_candidate_score": state.get("top_candidate_score", 0.0),
+                    "second_candidate_id": state.get("second_candidate_id", ""),
+                    "second_candidate_score": state.get("second_candidate_score", 0.0),
+                    "pool_metrics": state.get("pool_metrics", {}),
+                    "timestamp": time.time(),
+                }
+
+                # Check if this pool is already in history (by epoch)
+                current_history = history or []
+                existing = next((p for p in current_history if p.get("epoch") == current_epoch), None)
+
+                if not existing:
+                    # Add new pool to history (max 10 entries)
+                    current_history = [pool_snapshot] + current_history[:9]
+                    return current_history
+
+            return history or []
+
+        @app.callback(
+            Output(f"{self.component_id}-candidate-history-section", "children"),
+            Input(f"{self.component_id}-candidate-pools-history", "data"),
+        )
+        def render_candidate_history(history):
+            """Render historical candidate pools as collapsed sections."""
+            if not history or len(history) <= 1:
+                return []
+
+            # Skip the first (current) pool, show rest as collapsed
+            history_items = []
+            for pool in history[1:]:
+                epoch = pool.get("epoch", 0)
+                top_id = pool.get("top_candidate_id", "N/A")
+                top_score = pool.get("top_candidate_score", 0.0)
+
+                history_items.append(
+                    dbc.Card(
+                        [
+                            dbc.CardHeader(
+                                html.Div(
+                                    [
+                                        html.Span(f"Pool @ Epoch {epoch}", style={"fontWeight": "600"}),
+                                        html.Span(
+                                            f" - Best: {top_id} ({top_score:.3f})",
+                                            style={"color": "#6c757d", "fontSize": "12px"},
+                                        ),
+                                    ]
+                                ),
+                                style={"padding": "8px 12px", "cursor": "pointer"},
+                                id={"type": "history-pool-header", "index": epoch},
+                            ),
+                            dbc.Collapse(
+                                dbc.CardBody(
+                                    html.Div(
+                                        [
+                                            html.P([html.Strong("Size: "), str(pool.get("size", 0))]),
+                                            html.P(
+                                                [html.Strong("Top Candidate: "), pool.get("top_candidate_id", "N/A")]
+                                            ),
+                                            html.P(
+                                                [html.Strong("Score: "), f"{pool.get('top_candidate_score', 0.0):.4f}"]
+                                            ),
+                                        ]
+                                    ),
+                                    style={"padding": "10px"},
+                                ),
+                                id={"type": "history-pool-collapse", "index": epoch},
+                                is_open=False,
+                            ),
+                        ],
+                        style={"marginBottom": "5px"},
+                    )
+                )
+
+            if history_items:
+                return html.Div(
+                    [
+                        html.H6(
+                            "Previous Pools", style={"marginTop": "15px", "marginBottom": "10px", "color": "#6c757d"}
+                        ),
+                        *history_items,
+                    ]
+                )
+            return []
 
         @app.callback(
             Output(f"{self.component_id}-view-state", "data"),
@@ -362,6 +634,174 @@ class MetricsPanel(BaseComponent):
         def update_metrics_display(metrics_data: List[Dict[str, Any]], theme: str, view_state: Dict):
             return self._update_metrics_display_handler(metrics_data=metrics_data, theme=theme, view_state=view_state)
 
+        # Replay Controls Callbacks
+        @app.callback(
+            Output(f"{self.component_id}-replay-controls", "style"),
+            [
+                Input(f"{self.component_id}-training-state-store", "data"),
+                Input("theme-state", "data"),
+            ],
+        )
+        def toggle_replay_visibility(state, theme):
+            """Show replay controls when training is not running."""
+            is_dark = theme == "dark" if theme else False
+            base_style = {
+                "marginBottom": "15px",
+                "padding": "10px",
+                "backgroundColor": "#2d2d2d" if is_dark else "#f8f9fa",
+                "borderRadius": "5px",
+            }
+
+            if not state:
+                return {**base_style, "display": "block"}
+
+            status = state.get("status", "STOPPED").upper()
+            if status in ["STOPPED", "PAUSED", "COMPLETED", "FAILED"]:
+                return {**base_style, "display": "block"}
+            return {**base_style, "display": "none"}
+
+        @app.callback(
+            [
+                Output(f"{self.component_id}-replay-state", "data"),
+                Output(f"{self.component_id}-replay-interval", "disabled"),
+                Output(f"{self.component_id}-replay-interval", "interval"),
+            ],
+            [
+                Input(f"{self.component_id}-replay-play", "n_clicks"),
+                Input(f"{self.component_id}-replay-step-back", "n_clicks"),
+                Input(f"{self.component_id}-replay-step-forward", "n_clicks"),
+                Input(f"{self.component_id}-replay-start", "n_clicks"),
+                Input(f"{self.component_id}-replay-end", "n_clicks"),
+                Input(f"{self.component_id}-speed-1x", "n_clicks"),
+                Input(f"{self.component_id}-speed-2x", "n_clicks"),
+                Input(f"{self.component_id}-speed-4x", "n_clicks"),
+                Input(f"{self.component_id}-replay-slider", "value"),
+            ],
+            [
+                State(f"{self.component_id}-replay-state", "data"),
+                State(f"{self.component_id}-metrics-store", "data"),
+            ],
+            prevent_initial_call=True,
+        )
+        def handle_replay_controls(
+            play_clicks,
+            back_clicks,
+            forward_clicks,
+            start_clicks,
+            end_clicks,
+            speed_1x,
+            speed_2x,
+            speed_4x,
+            slider_value,
+            current_state,
+            metrics_data,
+        ):
+            """Handle replay control button clicks."""
+            ctx = dash.callback_context
+            if not ctx.triggered:
+                return current_state, True, 1000
+
+            trigger = ctx.triggered[0]["prop_id"].split(".")[0]
+            state = (
+                current_state.copy()
+                if current_state
+                else {
+                    "mode": "stopped",
+                    "speed": 1.0,
+                    "current_index": 0,
+                    "start_index": 0,
+                    "end_index": None,
+                }
+            )
+
+            max_index = len(metrics_data) - 1 if metrics_data else 0
+            state["end_index"] = state.get("end_index") or max_index
+
+            if "replay-play" in trigger:
+                state["mode"] = "paused" if state["mode"] == "playing" else "playing"
+            elif "step-back" in trigger:
+                state["mode"] = "paused"
+                state["current_index"] = max(0, state["current_index"] - 1)
+            elif "step-forward" in trigger:
+                state["mode"] = "paused"
+                state["current_index"] = min(max_index, state["current_index"] + 1)
+            elif "replay-start" in trigger:
+                state["current_index"] = state["start_index"]
+                state["mode"] = "paused"
+            elif "replay-end" in trigger:
+                state["current_index"] = state["end_index"] or max_index
+                state["mode"] = "paused"
+            elif "speed-1x" in trigger:
+                state["speed"] = 1.0
+            elif "speed-2x" in trigger:
+                state["speed"] = 2.0
+            elif "speed-4x" in trigger:
+                state["speed"] = 4.0
+            elif "replay-slider" in trigger:
+                state["current_index"] = int((slider_value / 100) * max_index) if max_index > 0 else 0
+                state["mode"] = "paused"
+
+            base_interval = 1000
+            interval = int(base_interval / state["speed"])
+            disabled = state["mode"] != "playing"
+
+            return state, disabled, interval
+
+        @app.callback(
+            Output(f"{self.component_id}-replay-state", "data", allow_duplicate=True),
+            Input(f"{self.component_id}-replay-interval", "n_intervals"),
+            [
+                State(f"{self.component_id}-replay-state", "data"),
+                State(f"{self.component_id}-metrics-store", "data"),
+            ],
+            prevent_initial_call=True,
+        )
+        def replay_tick(n_intervals, state, metrics_data):
+            """Advance replay by one step on interval tick."""
+            if not state or state["mode"] != "playing":
+                return state
+
+            max_index = len(metrics_data) - 1 if metrics_data else 0
+            end_index = state.get("end_index") or max_index
+
+            new_index = state["current_index"] + 1
+            if new_index > end_index:
+                state["mode"] = "stopped"
+                state["current_index"] = end_index
+            else:
+                state["current_index"] = new_index
+
+            return state
+
+        @app.callback(
+            [
+                Output(f"{self.component_id}-replay-slider", "value"),
+                Output(f"{self.component_id}-replay-slider", "max"),
+                Output(f"{self.component_id}-replay-position", "children"),
+            ],
+            [
+                Input(f"{self.component_id}-replay-state", "data"),
+                Input(f"{self.component_id}-metrics-store", "data"),
+            ],
+        )
+        def update_replay_ui(state, metrics_data):
+            """Update replay slider and position display."""
+            max_index = len(metrics_data) - 1 if metrics_data else 0
+            current_index = state.get("current_index", 0) if state else 0
+
+            slider_value = (current_index / max_index * 100) if max_index > 0 else 0
+            position_text = f"{current_index} / {max_index}"
+
+            return slider_value, 100, position_text
+
+        @app.callback(
+            Output(f"{self.component_id}-replay-play", "children"),
+            Input(f"{self.component_id}-replay-state", "data"),
+        )
+        def update_play_button(state):
+            """Update play button icon based on replay state."""
+            return "⏸" if state and state.get("mode") == "playing" else "▶"
+
         self.logger.debug(f"Callbacks registered for {self.component_id}")
 
     def _fetch_network_stats_handler(self, n_intervals=None):
@@ -417,12 +857,18 @@ class MetricsPanel(BaseComponent):
         Returns:
             Tuple of (pool info children, section style)
         """
+        if not state:
+            return [], {"marginTop": "20px"}
+
         pool_status = state.get("candidate_pool_status", "Inactive")
 
         if pool_status == "Inactive":
-            return [], {"marginTop": "20px", "display": "none"}
+            return html.Div(
+                "No active candidate pool",
+                style={"color": "#6c757d", "fontStyle": "italic", "padding": "10px"},
+            ), {"marginTop": "20px"}
 
-        return self._create_candidate_pool_display(state), {"marginTop": "20px", "display": "block"}
+        return self._create_candidate_pool_display(state), {"marginTop": "20px"}
 
     def _update_metrics_display_handler(
         self, metrics_data: List[Dict[str, Any]] = None, theme: str = None, view_state: Dict = None

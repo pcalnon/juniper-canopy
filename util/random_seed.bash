@@ -1,118 +1,88 @@
 #!/usr/bin/env bash
-############################################################################################################################################################
-# Project: Juniper
-# Application: dynamic_nn
-# Version: 6.3.2
+#####################################################################################################################################################################################################
+# Project:       Juniper
+# Sub-Project:   JuniperCanopy
+# Application:   juniper_canopy
+# Purpose:       Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
 #
-# File: random_seed.bash
-# Author: Paul Calnon
-# Created: 2024-04-01
-# Modified: 2024-04-01
+# Author:        Paul Calnon
+# Version:       0.1.4 (0.7.3)
+# File Name:     random_seed.bash
+# File Path:     <Project>/<Sub-Project>/<Application>/util/
 #
-############################################################################################################################################################
+# Date:          2024-04-01
+# Last Modified: 2026-01-03
+#
+# License:       MIT License
+# Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
+#
 # Description:
 #   Call a python script to generate a new, cryptographically secure random value for use as seed in psuedo random functions
 #
-#
-############################################################################################################################################################
+#####################################################################################################################################################################################################
 # Notes:
 #   /Users/pcalnon/opt/anaconda3/envs/pytorch_cuda/bin/python
 #   /home/pcalnon/anaconda3/envs/pytorch_cuda/bin/python
 #
+########################################################################################################)#############################################################################################
+# References:
 #
-############################################################################################################################################################
-
-#####################################################################################################
-# Define Global Configuration File Constants
-####################################################################################################
-ROOT_DIR="${HOME}"
-
-DEV_DIR_NAME="Development"
-ROOT_DEV_DIR="${ROOT_DIR}/${DEV_DIR_NAME}"
-
-PYTHON_DIR_NAME="python/testing"
-PYTHON_DIR="${ROOT_DEV_DIR}/${PYTHON_DIR_NAME}"
-
-# ROOT_PROJ_NAME="dynamic_nn"
-# ROOT_PROJ_NAME="juniper"
-ROOT_PROJ_NAME="Juniper"
-PROJ_DIR="${PYTHON_DIR}/${ROOT_PROJ_NAME}"
-
-ROOT_CONF_NAME="conf"
-CONF_DIR="${PROJ_DIR}/${ROOT_CONF_NAME}"
-
-ROOT_CONF_FILE_NAME="script_util.cfg"
-CONF_FILE="${CONF_DIR}/${ROOT_CONF_FILE_NAME}"
-
-ROOT_UTIL_NAME="util"
-UTIL_DIR="${PROJ_DIR}/${ROOT_UTIL_NAME}"
-
-NEW_RANDOM_SEED_FILE_NAME="new_random_seed.py"
-RANDOM_SEED="${UTIL_DIR}/${NEW_RANDOM_SEED_FILE_NAME}"
-
-OS_NAME_SCRIPT_FILE="__get_os_name.bash"
-OS_NAME_SCRIPT="${UTIL_DIR}/${OS_NAME_SCRIPT_FILE}"
+#####################################################################################################################################################################################################
+# TODO :
+#
+#####################################################################################################################################################################################################
+# COMPLETED:
+#
+#####################################################################################################################################################################################################
 
 
-####################################################################################################
+#####################################################################################################################################################################################################
 # Source script config file
-####################################################################################################
-#echo "source ${CONF_FILE}"
-source ${CONF_FILE}
-
-
-####################################################################################################
-# Define Environment constants for determining active python binary
-####################################################################################################
-OS_LINUX="Linux"
-OS_MACOS="Darwin"
-OS_WINDOWS="Windows"
-OS_UNKNOWN="Unknown"
-
-CONDA_MACOS="opt/anaconda3"
-CONDA_LINUX="anaconda3"
-
-PYTHON_LOC="envs/pytorch_cuda/bin/python"
+#####################################################################################################################################################################################################
+set -o functrace
+# shellcheck disable=SC2155
+export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")" && INIT_CONF="$(dirname "$(dirname "${PARENT_PATH_PARAM}")")/conf/init.conf"
+# shellcheck disable=SC2015,SC1090
+[[ -f "${INIT_CONF}" ]] && source "${INIT_CONF}" || { echo "Init Config File Not Found. Unable to Continue."; exit 1; }
 
 
 ####################################################################################################
 # Get the OS name and find active python binary
 ####################################################################################################
-
-#echo "Getting Current OS Name"
-#OS_NAME=$(__get_os_name.bash)
-#echo "OS_NAME=\$(${OS_NAME_SCRIPT})"
+log_trace "Get the OS name and find active python binary"
 OS_NAME=$(${OS_NAME_SCRIPT})
-#echo "Detected Running OS: ${OS_NAME}"
+log_verbose "OS_NAME: ${OS_NAME}"
 
-# Validate Local OS
-#echo "Validating Local OS"
-if [[ ${OS_NAME} == ${OS_LINUX} ]]; then
-    #echo "Found Valid OS: ${OS_NAME}"
+
+#####################################################################################################################################################################################################
+# Validate the Local OS
+#####################################################################################################################################################################################################
+log_trace "Validate the Local OS"
+if [[ "${OS_NAME}" == "${OS_LINUX}" ]]; then
     PYTHON_CMD="${HOME}/${CONDA_LINUX}/${PYTHON_LOC}"
-elif [[ ${OS_NAME} == ${OS_MACOS} ]]; then
-    #echo "Found Valid OS: ${OS_NAME}"
+    log_verbose "PYTHON_CMD: ${PYTHON_CMD}"
+elif [[ "${OS_NAME}" == "${OS_MACOS}" ]]; then
     PYTHON_CMD="${HOME}/${CONDA_MACOS}/${PYTHON_LOC}"
-elif [[ ${OS_NAME} == ${OS_WINDOWS} ]]; then
-    echo "Error: Why the hell are you running ${OS_WINDOWS}??"
-    exit 1
+    log_verbose "PYTHON_CMD: ${PYTHON_CMD}"
+elif [[ "${OS_NAME}" == "${OS_WINDOWS}" ]]; then
+    log_critical "Why the hell are you running ${OS_WINDOWS}???"
 else
-    echo "Error: You are running an ${OS_UNKNOWN} OS. Cowardly not wading into this crazy."
-    exit 2
+    log_fatal "Error: You are running an ${OS_UNKNOWN} OS. Cowardly not wading into this crazy."
 fi
-#echo "OS Name: ${OS_NAME},  Python Command: ${PYTHON_CMD}"
 
-PYTHON_VER="$(${PYTHON_CMD} --version)"
-#echo "Current Python Version: ${PYTHON_VER}"
-#echo "Local OS: ${OS_NAME}, Python: ${PYTHON_CMD}, Version: ${PYTHON_VERSION}"
-#echo "Launching python script: ${RANDOM_SEED}"
-#echo "${PYTHON_CMD} ${RANDOM_SEED}"
-${PYTHON_CMD} ${RANDOM_SEED}
 
-RESULT="$?"
-if [[ ${RESULT} == "0" ]]; then
-    echo -ne "\nSuccess!!  "
-else
-    echo -ne "\nFailure :(  "
-fi
-echo "Python Script: ${NEW_RANDOM_SEED_FILE_NAME}, returned: ${RESULT}"
+#####################################################################################################################################################################################################
+# Run the Python script to initialize application randomness with a new seed
+#####################################################################################################################################################################################################
+log_debug "Run the Python script to initialize application randomness with a new seed"
+log_trace "Get Python Version"
+# shellcheck disable=SC2155
+export PYTHON_VER="$(${PYTHON_CMD} --version)"
+log_verbose "PYTHON_VER: ${PYTHON_VER}"
+log_trace "Call Python Script"
+"${PYTHON_CMD}" "${RANDOM_SEED}"; SUCCESS="$?"
+log_trace "Check Python Script Result"
+[[ "${SUCCESS}" == "${TRUE}" ]] && echo -ne "\nSuccess!!  " || echo -ne "\nFailure :(  "
+log_info "Python Script: ${NEW_RANDOM_SEED_FILE_NAME}, returned: ${SUCCESS}"
+
+exit $(( SUCCESS ))

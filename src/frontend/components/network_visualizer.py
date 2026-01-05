@@ -44,6 +44,8 @@ import plotly.graph_objects as go
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
+from constants import DashboardConstants
+
 from ..base_component import BaseComponent
 
 # import numpy as np
@@ -105,6 +107,7 @@ class NetworkVisualizer(BaseComponent):
                                     id=f"{self.component_id}-layout-selector",
                                     options=[
                                         {"label": "Hierarchical", "value": "hierarchical"},
+                                        {"label": "Staggered", "value": "staggered"},
                                         {"label": "Spring", "value": "spring"},
                                         {"label": "Circular", "value": "circular"},
                                     ],
@@ -164,10 +167,26 @@ class NetworkVisualizer(BaseComponent):
                         "borderRadius": "3px",
                     },
                 ),
+                # Selected node info panel
+                html.Div(
+                    id=f"{self.component_id}-selection-info",
+                    children=[],
+                    style={
+                        "marginBottom": "10px",
+                        "padding": "10px",
+                        "backgroundColor": "#e3f2fd",
+                        "borderRadius": "4px",
+                        "display": "none",
+                    },
+                ),
                 # Network graph
                 dcc.Graph(
                     id=f"{self.component_id}-graph",
-                    config={"displayModeBar": True, "displaylogo": False},
+                    config={
+                        "displayModeBar": True,
+                        "displaylogo": False,
+                        "modeBarButtonsToAdd": ["select2d", "lasso2d"],
+                    },
                     style={"height": "600px"},
                 ),
                 # Topology data store
@@ -183,6 +202,8 @@ class NetworkVisualizer(BaseComponent):
                 ),
                 # Previous topology hash to detect changes
                 dcc.Store(id=f"{self.component_id}-topology-hash", data=None),
+                # Selected nodes store
+                dcc.Store(id=f"{self.component_id}-selected-nodes", data=[]),
             ],
             style={"padding": "20px"},
         )
@@ -247,6 +268,7 @@ class NetworkVisualizer(BaseComponent):
                 Input(f"{self.component_id}-show-weights", "value"),
                 Input("metrics-panel-metrics-store", "data"),
                 Input("theme-state", "data"),
+                Input(f"{self.component_id}-selected-nodes", "data"),
             ],
             [
                 State(f"{self.component_id}-view-state", "data"),
@@ -259,6 +281,7 @@ class NetworkVisualizer(BaseComponent):
             show_weights: List[str],
             metrics_data: List[Dict[str, Any]],
             theme: str,
+            selected_nodes: List[str],
             view_state: Dict[str, Any],
             prev_hash: str,
         ):
@@ -271,6 +294,7 @@ class NetworkVisualizer(BaseComponent):
                 show_weights: List containing 'show' if weights should be displayed
                 metrics_data: Historical metrics data for detecting new units
                 theme: Current theme
+                selected_nodes: List of selected node IDs
                 view_state: Stored view state (zoom, pan, dragmode)
                 prev_hash: Previous topology hash
 
@@ -303,7 +327,9 @@ class NetworkVisualizer(BaseComponent):
 
             # Create network graph
             show_weight_labels = bool(show_weights) and ("show" in show_weights)
-            fig = self._create_network_graph(topology_data, layout_type, show_weight_labels, newly_added_unit, theme)
+            fig = self._create_network_graph(
+                topology_data, layout_type, show_weight_labels, newly_added_unit, theme, selected_nodes
+            )
 
             # Apply stored view state
             if view_state:
@@ -337,6 +363,95 @@ class NetworkVisualizer(BaseComponent):
                 "borderRadius": "3px",
             }
 
+        @app.callback(
+            [
+                Output(f"{self.component_id}-selected-nodes", "data"),
+                Output(f"{self.component_id}-selection-info", "children"),
+                Output(f"{self.component_id}-selection-info", "style"),
+            ],
+            [
+                Input(f"{self.component_id}-graph", "clickData"),
+                Input(f"{self.component_id}-graph", "selectedData"),
+            ],
+            State(f"{self.component_id}-selected-nodes", "data"),
+            prevent_initial_call=True,
+        )
+        def handle_node_selection(click_data, selected_data, current_selection):
+            """Handle node selection via click or box/lasso select."""
+            import dash
+
+            ctx = dash.callback_context
+            trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
+
+            base_style = {
+                "marginBottom": "10px",
+                "padding": "10px",
+                "backgroundColor": "#e3f2fd",
+                "borderRadius": "4px",
+                "border": "1px solid #90caf9",
+            }
+            hidden_style = {**base_style, "display": "none"}
+            visible_style = {**base_style, "display": "block"}
+
+            # Handle box/lasso selection
+            if "selectedData" in trigger and selected_data:
+                points = selected_data.get("points", [])
+                if points:
+                    selected_nodes = []
+                    for point in points:
+                        text = point.get("text", "")
+                        if text:
+                            node_id = text.lower().replace(" ", "_")
+                            selected_nodes.append(node_id)
+
+                    if selected_nodes:
+                        info = html.Div(
+                            [
+                                html.Strong(f"Selected: {len(selected_nodes)} node(s)"),
+                                html.Ul([html.Li(n.replace("_", " ").title()) for n in selected_nodes[:5]]),
+                                html.Span(
+                                    "(Click elsewhere to deselect)",
+                                    style={"fontSize": "11px", "color": "#666"},
+                                ),
+                            ]
+                        )
+                        return selected_nodes, info, visible_style
+
+            # Handle single click selection
+            if "clickData" in trigger and click_data:
+                points = click_data.get("points", [])
+                if points:
+                    point = points[0]
+                    text = point.get("text", "")
+                    if text:
+                        node_id = text.lower().replace(" ", "_")
+
+                        # Toggle selection: if already selected, deselect
+                        if current_selection and node_id in current_selection:
+                            return [], [], hidden_style
+
+                        # Get node info
+                        curve_number = point.get("curveNumber", 0)
+                        layer_names = ["", "", "Input", "Hidden", "Output"]
+                        layer = layer_names[min(curve_number, 4)] if curve_number >= 2 else "Unknown"
+
+                        info = html.Div(
+                            [
+                                html.Strong(f"Selected: {text}"),
+                                html.Br(),
+                                html.Span(f"Layer: {layer}", style={"color": "#666"}),
+                                html.Br(),
+                                html.Span(
+                                    "(Click again or elsewhere to deselect)",
+                                    style={"fontSize": "11px", "color": "#888"},
+                                ),
+                            ]
+                        )
+                        return [node_id], info, visible_style
+
+            # No valid selection, clear
+            return [], [], hidden_style
+
         self.logger.debug(f"Callbacks registered for {self.component_id}")
 
     def _create_network_graph(
@@ -346,6 +461,7 @@ class NetworkVisualizer(BaseComponent):
         show_weights: bool,
         newly_added_unit: int = None,
         theme: str = "light",
+        selected_nodes: List[str] = None,
     ) -> go.Figure:
         """
         Create network graph visualization.
@@ -356,6 +472,7 @@ class NetworkVisualizer(BaseComponent):
             show_weights: Whether to display weight values on edges
             newly_added_unit: Index of newly added hidden unit (for highlighting)
             theme: Current theme ("light" or "dark")
+            selected_nodes: List of selected node IDs for highlighting
 
         Returns:
             Plotly figure object
@@ -425,6 +542,12 @@ class NetworkVisualizer(BaseComponent):
                     )
                 )
 
+        # Add selection highlights if any nodes are selected
+        if selected_nodes:
+            selection_traces = self._create_selection_highlight(pos, selected_nodes)
+            for trace in selection_traces:
+                fig.add_trace(trace)
+
         # Update layout
         is_dark = theme == "dark"
         fig.update_layout(
@@ -446,7 +569,13 @@ class NetworkVisualizer(BaseComponent):
         return fig
 
     def _calculate_layout(
-        self, G: nx.DiGraph, layout_type: str, n_input: int, n_hidden: int, n_output: int
+        self,
+        G: nx.DiGraph,
+        layout_type: str,
+        n_input: int,
+        n_hidden: int,
+        n_output: int,
+        scale: float = DashboardConstants.DEFAULT_SCALE,
     ) -> Dict[str, Tuple[float, float]]:
         """
         Calculate node positions based on layout algorithm.
@@ -462,39 +591,105 @@ class NetworkVisualizer(BaseComponent):
             Dictionary mapping node IDs to (x, y) positions
         """
         if layout_type == "circular":
-            pos = nx.circular_layout(G, scale=10)
+            return self._layout_type_circular(G=G, scale=scale)
+        elif layout_type == "hierarchical":  # Hierarchical layout with layers
+            return self._layout_type_hierarchical(G=G, n_input=n_input, n_hidden=n_hidden, n_output=n_output)
+        elif layout_type == "spring":  # Spring layout with constraints
+            return self._layout_type_sprint(
+                G=G, k=2, iterations=50, seed=42
+            )  # TODO: Convert these magic numbers into constants
+        elif layout_type == "staggered":
+            return self._layout_type_staggered(G=G, n_input=n_input, n_hidden=n_hidden, n_output=n_output)
+        else:  # Default to hierarchical
+            return self._calculate_layout(
+                G=G, layout_type="hierarchical", n_input=n_input, n_hidden=n_hidden, n_output=n_output
+            )
 
-        elif layout_type == "hierarchical":
-            # Hierarchical layout with layers
-            pos = {}
+    def _layout_type_circular(self, G: nx.DiGraph, scale: float = None):
+        return nx.circular_layout(G, scale=scale)
 
-            # Input layer (left)
-            for i in range(n_input):
-                y = (i - n_input / 2) * 1.5
-                pos[f"input_{i}"] = (0, y)
+    def _layout_type_hierarchical(self, G: nx.DiGraph, n_input: int, n_hidden: int, n_output: int):
+        pos = {}
+        # Input layer (left)
+        for i in range(n_input):
+            y = (i - n_input / 2) * 1.5
+            pos[f"input_{i}"] = (0, y)
+        # Hidden layer (middle) - staggered layout for better edge visibility
+        if n_hidden > 0:
+            self._calculate_hidden_node_position_offsets(n_hidden, pos)
+        # Output layer (right)
+        for i in range(n_output):
+            y = (i - n_output / 2) * 1.5
+            pos[f"output_{i}"] = (10, y)
+        return pos
 
-            # Hidden layer (middle)
+    def _layout_type_sprint(self, G: nx.DiGraph, k: float, iterations: int, seed: int):
+        pos = nx.spring_layout(G, k=2, iterations=50, seed=42)
+        # Scale positions
+        for node in pos:
+            pos[node] = (pos[node][0] * 10, pos[node][1] * 10)
+        return pos
+
+    def _layout_type_staggered(self, G: nx.DiGraph, n_input: int, n_hidden: int, n_output: int):
+        # Staggered hierarchical layout (same as hierarchical but more explicit)
+        pos = {}
+        # Input layer (left)
+        for i in range(n_input):
+            y = (i - n_input / 2) * 1.5
+            pos[f"input_{i}"] = (0, y)
+        # Hidden layer (middle) - staggered layout
+        if n_hidden > 0:
+            base_x = 5.0
+            spread = min(3.0, max(1.5, n_hidden * 0.5))
             for i in range(n_hidden):
                 y = (i - n_hidden / 2) * 1.5
-                pos[f"hidden_{i}"] = (5, y)
-
-            # Output layer (right)
-            for i in range(n_output):
-                y = (i - n_output / 2) * 1.5
-                pos[f"output_{i}"] = (10, y)
-
-        elif layout_type == "spring":
-            # Spring layout with constraints
-            pos = nx.spring_layout(G, k=2, iterations=50, seed=42)
-            # Scale positions
-            for node in pos:
-                pos[node] = (pos[node][0] * 10, pos[node][1] * 10)
-
-        else:
-            # Default to hierarchical
-            pos = self._calculate_layout(G, "hierarchical", n_input, n_hidden, n_output)
-
+                # Zigzag pattern
+                if n_hidden == 1:
+                    x = base_x
+                else:
+                    # Distribute across spread range
+                    position_ratio = i / max(1, n_hidden - 1)
+                    x = base_x - spread / 2 + position_ratio * spread
+                    # Add small offset for zigzag effect
+                    x += 0.3 if i % 2 == 0 else -0.3
+                pos[f"hidden_{i}"] = (x, y)
+        # Output layer (right)
+        for i in range(n_output):
+            y = (i - n_output / 2) * 1.5
+            pos[f"output_{i}"] = (10, y)
         return pos
+
+    def _calculate_hidden_node_position_offsets(self, n_hidden, pos):
+        # Base x position (midpoint between input and output)
+        base_x = 5.0
+        # Stagger offset (horizontal spread)
+        stagger_offset = 1.2
+
+        # Calculate positions with alternating offsets
+        hidden_x_positions = []
+        for i in range(n_hidden):
+            # Alternate left/right: even indices go right, odd go left
+            offset = stagger_offset / 2 if i % 2 == 0 else -stagger_offset / 2
+            hidden_x_positions.append(base_x + offset)
+
+        # If more than 2 nodes, use a more spread-out stagger pattern
+        if n_hidden > 2:
+            # Distribute nodes across a wider horizontal range
+            spread = min(3.0, n_hidden * 0.4)
+            for i in range(n_hidden):
+                # Create a wave pattern: first node at center, then alternating outward
+                if i == 0:
+                    hidden_x_positions[i] = base_x
+                else:
+                    # Alternate left and right with increasing offset
+                    direction = 1 if i % 2 == 1 else -1
+                    offset_level = (i + 1) // 2
+                    hidden_x_positions[i] = base_x + direction * (offset_level * spread / max(1, (n_hidden // 2)))
+
+        # Apply positions
+        for i in range(n_hidden):
+            y = (i - n_hidden / 2) * 1.5
+            pos[f"hidden_{i}"] = (hidden_x_positions[i], y)
 
     def _create_edge_traces(
         self, G: nx.DiGraph, pos: Dict[str, Tuple[float, float]], show_weights: bool
@@ -621,6 +816,58 @@ class NetworkVisualizer(BaseComponent):
             hovertext=labels,
             name=name,
         )
+
+    def _create_selection_highlight(
+        self, pos: Dict[str, Tuple[float, float]], selected_nodes: List[str]
+    ) -> List[go.Scatter]:
+        """
+        Create highlight traces for selected nodes.
+
+        Args:
+            pos: Node positions
+            selected_nodes: List of selected node IDs
+
+        Returns:
+            List of Scatter traces for selection highlights
+        """
+        if not selected_nodes:
+            return []
+
+        highlight_traces = []
+        for node_id in selected_nodes:
+            if node_id in pos:
+                x, y = pos[node_id]
+                highlight_traces.extend(
+                    (
+                        go.Scatter(
+                            x=[x],
+                            y=[y],
+                            mode="markers",
+                            marker={
+                                "size": 35,
+                                "color": "rgba(255, 193, 7, 0.5)",  # Yellow glow
+                                "line": {"width": 3, "color": "#ffc107"},
+                            },
+                            name="Selected",
+                            showlegend=False,
+                            hoverinfo="skip",
+                        ),
+                        go.Scatter(
+                            x=[x],
+                            y=[y],
+                            mode="markers",
+                            marker={
+                                "size": 28,
+                                "color": "rgba(0, 0, 0, 0)",
+                                "line": {"width": 3, "color": "#ff9800"},
+                            },
+                            name="Selected Ring",
+                            showlegend=False,
+                            hoverinfo="skip",
+                        ),
+                    )
+                )
+        return highlight_traces
 
     def _create_empty_graph(self, theme: str = "light") -> go.Figure:
         """

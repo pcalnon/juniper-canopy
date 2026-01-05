@@ -1,7 +1,7 @@
 # Juniper Canopy Fixes and Enhancements
 
-**Last Updated:** 2025-12-12  
-**Version:** 2.0.0  
+**Last Updated:** 2025-12-13  
+**Version:** 2.0.1  
 **Status:** Active Development
 
 ## Implementation Plan
@@ -253,15 +253,15 @@ For detailed implementation plans, see:
 | **P0**   | Training Controls: Manual apply button for meta-parameters             | ✅ Done      | 0     |
 | **P0**   | Training Controls: Prevent in-progress updates from triggering         | ✅ Done      | 0     |
 | Done     | Training Controls: Up/down arrows and direct entry for meta-parameters | Done         | -     |
-| **P1**   | Training Metrics Tab: Candidate info section display/collapsibility    | Not Started  | 1     |
+| **P1**   | Training Metrics Tab: Candidate info section display/collapsibility    | ✅ Done      | 1     |
 | **P0**   | Training Metrics Tab: Graph range selection not persisting             | ✅ Done      | 0     |
-| **P1**   | Training Metrics Tab: Add replay functionality                         | Not Started  | 1     |
+| **P1**   | Training Metrics Tab: Add replay functionality                         | ✅ Done      | 1     |
 | **P3**   | Training Metrics Tab: Add Save/Load buttons                            | Not Started  | 3     |
 | **P0**   | Network Topology Tab: Dark mode info bar background                    | ✅ Done      | 0     |
 | **P0**   | Network Topology Tab: Pan/Lasso tools performing Box Select            | ✅ Done      | 0     |
 | **P0**   | Network Topology Tab: Node interactions resetting after ~1 second      | ✅ Done      | 0     |
-| **P1**   | Network Topology Tab: Staggered hidden node layout                     | Not Started  | 1     |
-| **P1**   | Network Topology Tab: Mouse click events for node selection            | Not Started  | 1     |
+| **P1**   | Network Topology Tab: Staggered hidden node layout                     | ✅ Done      | 1     |
+| **P1**   | Network Topology Tab: Mouse click events for node selection            | ✅ Done      | 1     |
 | **P2**   | Network Topology Tab: Visual indicator for most recently added node    | Not Started  | 2     |
 | **P2**   | Network Topology Tab: Unique name suggestion for image downloads       | Not Started  | 2     |
 | **P3**   | Network Topology Tab: 3D interactive view                              | Not Started  | 3     |

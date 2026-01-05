@@ -35,6 +35,7 @@ After a button is pressed, it stays in "pressed" state and never returns to "unp
 ### Root Cause Analysis
 
 In `dashboard_manager.py`:
+
 - `_handle_training_buttons_handler` sets button to loading state
 - `_handle_button_timeout_and_acks_handler` should re-enable but logic is incomplete
 - Race conditions between debouncing and timeout handling
@@ -114,11 +115,11 @@ def test_rapid_clicks_debounced():
 
 ## P0-2: Meta-Parameters Apply Button
 
-### Problem
+### Problem. P0-2
 
 Meta-parameters are not applied after being changed. Need manual Apply button.
 
-### Solution Design
+### Solution Design, P0-2
 
 ```python
 # Add to _setup_layout() after meta-parameter inputs
@@ -207,14 +208,14 @@ def apply_parameters(n_clicks, lr, hu, epochs):
         return dash.no_update, f"Error: {str(e)}"
 ```
 
-### Files to Modify
+### Files to Modify, P0-2
 
 - `src/frontend/dashboard_manager.py`
   - `_setup_layout()` - Add Apply button and stores
   - `_setup_callbacks()` - Add parameter tracking callbacks
   - Remove automatic parameter sending from input change handlers
 
-### Tests to Add
+### Tests to Add, P0-2
 
 ```python
 # tests/unit/test_parameter_apply.py
@@ -239,15 +240,15 @@ def test_unsaved_indicator_shown():
 
 ## P0-3: Top Status Bar Updates
 
-### Problem
+### Problem, P0-3
 
 Status always shows "Stopped" and Phase always shows "Idle" regardless of actual training state.
 
-### Root Cause Analysis
+### Root Cause Analysis, P0-3
 
 `_update_top_status_phase_handler` fetches from `/api/state` but the response mapping may not match actual training states.
 
-### Solution Design
+### Solution Design, P0-3
 
 ```python
 def _get_status_phase_display_content(self, state_response=None):
@@ -297,7 +298,7 @@ def _get_status_phase_display_content(self, state_response=None):
     )
 ```
 
-### Files to Modify
+### Files to Modify, P0-3
 
 - `src/frontend/dashboard_manager.py`
   - `_get_status_phase_display_content()` - Fix state mapping
@@ -306,7 +307,7 @@ def _get_status_phase_display_content(self, state_response=None):
 - `src/main.py` (if needed)
   - Verify `/api/state` returns correct fields
 
-### Tests to Add
+### Tests to Add, P0-3
 
 ```python
 # tests/unit/test_status_bar_display.py
@@ -331,15 +332,15 @@ def test_colors_match_state():
 
 ## P0-4: Graph Range Persistence
 
-### Problem
+### Problem, P0-4
 
 When a range is selected on Training graphs, the display resets in ~1 second.
 
-### Root Cause Analysis
+### Root Cause Analysis, P0-4
 
 Interval-driven callbacks recreate the entire figure, overwriting user's zoom/pan state.
 
-### Solution Design
+### Solution Design, P0-4
 
 **Strategy: Preserve layout on data updates using figure patching.**
 
@@ -404,7 +405,7 @@ def update_loss_graph(self, metrics_data, view_state, theme):
     return fig
 ```
 
-### Files to Modify
+### Files to Modify, P0-4
 
 - `src/frontend/components/metrics_panel.py`
   - `get_layout()` - Add view-state store
@@ -413,7 +414,7 @@ def update_loss_graph(self, metrics_data, view_state, theme):
   - `update_accuracy_graph()` - Apply stored ranges
   - Add reset button to clear view state
 
-### Tests to Add
+### Tests to Add, P0-4
 
 ```python
 # tests/integration/test_range_persistence.py
@@ -435,11 +436,11 @@ def test_relayout_captured_correctly():
 
 ## P0-5: Pan/Lasso Tool Fix
 
-### Problem
+### Problem, P0-5
 
 Pan, Lasso Select, and Box Select tools all perform Box Select.
 
-### Solution Design
+### Solution Design, P0-5
 
 ```python
 # In network_visualizer.py
@@ -497,7 +498,7 @@ def update_network_graph(self, topology_data, tool_state, theme):
     return fig
 ```
 
-### Files to Modify
+### Files to Modify, P0-5
 
 - `src/frontend/components/network_visualizer.py`
   - `get_layout()` - Add tool-state store
@@ -505,7 +506,7 @@ def update_network_graph(self, topology_data, tool_state, theme):
   - `register_callbacks()` - Add tool capture callback
   - `update_network_graph()` - Apply stored tool state
 
-### Tests to Add
+### Tests to Add, P0-5
 
 ```python
 # tests/unit/test_topology_tools.py
@@ -524,11 +525,11 @@ def test_tool_selection_persists():
 
 ## P0-6: Interaction Persistence
 
-### Problem
+### Problem, P0-6
 
 All node interactions (zoom, pan, selection) reset after ~1 second.
 
-### Solution Design
+### Solution Design, P0-6
 
 **Same pattern as P0-4 and P0-5: Store view state, apply on updates.**
 
@@ -581,7 +582,7 @@ def _compute_topology_hash(self, topology_data):
     return hashlib.md5(json.dumps(key_data, sort_keys=True).encode()).hexdigest()
 ```
 
-### Files to Modify
+### Files to Modify, P0-6
 
 - `src/frontend/components/network_visualizer.py`
   - `get_layout()` - Add view-state store
@@ -589,7 +590,7 @@ def _compute_topology_hash(self, topology_data):
   - `update_network_graph()` - Check topology hash, apply view state
   - Add `_compute_topology_hash()` method
 
-### Tests to Add
+### Tests to Add, P0-6
 
 ```python
 # tests/integration/test_topology_persistence.py
@@ -611,11 +612,11 @@ def test_selection_persists():
 
 ## P0-7: Dark Mode Info Bar
 
-### Problem
+### Problem, P0-7
 
 Network topology info bar shows white text on white background in dark mode.
 
-### Solution Design
+### Solution Design, P0-7
 
 ```python
 # In network_visualizer.py
@@ -656,7 +657,7 @@ def update_stats_bar_theme(theme):
     }
 ```
 
-### Files to Modify
+### Files to Modify, P0-7
 
 - `src/frontend/components/network_visualizer.py`
   - `get_layout()` - Add ID to stats bar container
@@ -664,7 +665,7 @@ def update_stats_bar_theme(theme):
 - `src/frontend/assets/styles.css` (if needed)
   - Add `.network-stats-bar` class with theme variables
 
-### Tests to Add
+### Tests to Add, P0-7
 
 ```python
 # tests/unit/test_dark_mode_network.py
