@@ -1,18 +1,84 @@
 #!/usr/bin/env bash
+#####################################################################################################################################################################################################
+# Project:       Juniper
+# Sub-Project:   JuniperCanopy
+# Application:   juniper_canopy
+# Purpose:       Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
+#
+# Author:        Paul Calnon
+# Version:       0.1.4 (0.7.3)
+# File Name:     rsink.bash
+# File Path:     <Project>/<Sub-Project>/<Application>/util/
+#
+# Date:          2024-04-01
+# Last Modified: 2026-01-03
+#
+# License:       MIT License
+# Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
+#
+# Description:
+#     This script is used to sync data from the JuniperCanopy application primary server to all secondary servers that perform candidate correlation calculations.
+#
+#####################################################################################################################################################################################################
+# Notes:
+#
+########################################################################################################)#############################################################################################
+# References:
+#
+#####################################################################################################################################################################################################
+# TODO :
+#
+#####################################################################################################################################################################################################
+# COMPLETED:
+#
+#####################################################################################################################################################################################################
 
-if [[ $1 ]]; then
 
+#####################################################################################################################################################################################################
+# Source script config file
+#####################################################################################################################################################################################################
+set -o functrace
+# shellcheck disable=SC2155
+export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")" && INIT_CONF="$(dirname "$(dirname "${PARENT_PATH_PARAM}")")/conf/init.conf"
+# shellcheck disable=SC2015,SC1090
+[[ -f "${INIT_CONF}" ]] && source "${INIT_CONF}" || { echo "Init Config File Not Found. Unable to Continue."; exit 1; }
+
+
+#####################################################################################################################################################################################################
+# Process input parameters
+#####################################################################################################################################################################################################
+log_trace "Process input parameters"
 dest="./dest"
 src="./source"
 
-test $2 && dest="$2"
-test $1 && src="$1"
+if [[ "$1" != "" ]]; then
+  log_trace "Evaluate Input Parameters"
+  test "$2" && dest="$2"
+  test "$1" && src="$1"
+fi
+log_trace "Source: ${src}, Destination: ${dest}"
 
-rsync -a --safe-links ${src}/ ${dest}/
 
-abs_src="$(realpath -- ${src})"
-for i in $(find ${src} -type l); do
-  target="$(target="$(readlink -f -- $i)" && echo "${target%/*}")"
-  while [[ $target && ( ! $abs_src -ef $target ) ]]; do target="${target%/*}"; done
-  test ! ${target} && rsync -aL ${i} ${i/$src/$dest}
-done
+#####################################################################################################################################################################################################
+# Perform rsync
+#####################################################################################################################################################################################################
+log_trace "Performing rsync from ${src} to ${dest}"
+log_debug "rsync -a --safe-links \"${src}/\" \"${dest}/\""
+rsync -a --safe-links "${src}"/ "${dest}"/ ; SUCCESS="$?"
+[[ "${SUCCESS}" != "${TRUE}" ]] && log_fatal "Rsync failed with status ${SUCCESS}"
+log_info "Rsync completed with status ${SUCCESS}"
+
+
+#####################################################################################################################################################################################################
+# Validate rsync Transfer
+#####################################################################################################################################################################################################
+log_trace "Validate rsync Transfer"
+abs_src="$(realpath -- "${src}")"
+while read -r filename; do
+  target="$(target="$(readlink -f -- "${filename}")" && echo "${target%/*}")"
+  while [[ $target && ( ! $abs_src -ef "${target}" ) ]]; do target="${target%/*}"; done
+  test ! "${target}" && rsync -aL "${filename}" "${filename/$src/$dest}"
+done <<< "$(find "${src}" -type l)"
+log_trace "Rsync completed successfully"
+
+exit $(( TRUE ))

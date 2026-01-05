@@ -1,14 +1,58 @@
-#!/bin/bash
+#!/usr/bin/env bash
+#####################################################################################################################################################################################################
+# Project:       Juniper
+# Sub-Project:   JuniperCanopy
+# Application:   juniper_canopy
+# Purpose:       Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
+#
+# Author:        Paul Calnon
+# Version:       1.0.0
+# File Name:     get_script_path.bash
+# File Path:     <Project>/<Sub-Project>/<Application>/util/
+#
+# Date:          2025-08-01
+# Last Modified: 2026-01-04
+#
+# License:       MIT License
+# Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
+#
+# Description:
+#     This script finds the actual path of source files in the Juniper python project code base
+#
+#####################################################################################################################################################################################################
+# Notes:
+#
+#####################################################################################################################################################################################################
+# References:
+#
+#####################################################################################################################################################################################################
+# TODO :
+#     Move function def to fn config file
+#     Add logic to source fn config file to primary config file
+#
+#####################################################################################################################################################################################################
+# COMPLETED:
+#
+#####################################################################################################################################################################################################
 
-get_script_path() {
-    local source="${BASH_SOURCE[0]}"
-    while [ -L "$source" ]; do
-        local dir="$(cd -P "$(dirname "$source")" && pwd)"
-        source="$(readlink "$source")"
-        [[ $source != /* ]] && source="$dir/$source"
-    done
-    echo "$(cd -P "$(dirname "$source")" && pwd)/$(basename "$source")"
-}
 
-SCRIPT_PATH="$(get_script_path)"
-echo "${SCRIPT_PATH}"
+#####################################################################################################################################################################################################
+# Source script config file
+#####################################################################################################################################################################################################
+set -o functrace
+# shellcheck disable=SC2155
+export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")" && INIT_CONF="$(dirname "$(dirname "${PARENT_PATH_PARAM}")")/conf/init.conf"
+# shellcheck disable=SC2015,SC1090
+[[ -f "${INIT_CONF}" ]] && source "${INIT_CONF}" || { echo "Init Config File Not Found. Unable to Continue."; exit 1; }
+
+
+
+#####################################################################################################################################################################################################
+# Get the path and return it
+#####################################################################################################################################################################################################
+log_trace "Get the path and return it"
+# shellcheck disable=SC2155
+export SCRIPT_PATH="$(get_script_path)"
+log_verbose "SCRIPT_PATH: ${SCRIPT_PATH}"
+
+return $(( TRUE ))

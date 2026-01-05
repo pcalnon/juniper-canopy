@@ -172,11 +172,19 @@ class TestDemoModeBroadcastFailures:
     """Test WebSocket broadcast error handling."""
 
     def test_broadcast_metrics_import_error(self):
-        """Test _broadcast_metrics handles ImportError (lines 598-600)."""
+        """Test _broadcast_metrics handles ImportError (lines 598-600).
+
+        This test verifies the broadcast method handles import errors gracefully.
+        We patch the websocket_manager's broadcast method to simulate the error
+        occurring at the websocket layer rather than patching DemoMode's method,
+        which would cause unhandled thread exceptions.
+        """
         demo = DemoMode(update_interval=0.1)
 
-        with patch("demo_mode.DemoMode._broadcast_metrics") as mock_broadcast:
-            mock_broadcast.side_effect = ImportError("Module not available")
+        with patch(
+            "communication.websocket_manager.websocket_manager.broadcast_from_thread",
+            side_effect=ImportError("Module not available"),
+        ):
             demo.start()
             time.sleep(0.2)
             demo.stop()

@@ -1,16 +1,45 @@
-#######################################################################################
-# project: Juniper
-# prototype: juniper_canopy
-# author: Paul Calnon
-# created-on: 2025-12-06
-# created-by: pip 25.3
-# platform: linux-64
-# python: 3.14
-#######################################################################################
-# This file may be used to create the Juniper Canopy environment with pip using:
-# create:  $ pip list --format=freeze >requirements-pip.txt
-# install: $ pip install -r requirements-pip.txt
-#######################################################################################
+#####################################################################################################################################################################################################
+# Project:       Juniper
+# Sub-Project:   JuniperCanopy
+# Application:   juniper_canopy
+# Purpose:       Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
+#
+# Author:        Paul Calnon
+# Version:       0.1.4 (0.7.3)
+# File Name:     requirements.txt
+# File Path:     <Project>/<Sub-Project>/<Application>/conf/
+#
+# Date:          2025-12-06
+# Last Modified: 2026-01-02
+#
+# License:       MIT License
+# Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
+#
+# Description:
+#     This file lists python requirements that can be installed via pip
+#
+#####################################################################################################################################################################################################
+# Notes:
+#
+#     created-by: pip 25.3
+#     platform: linux-64
+#     python: 3.14
+#
+#     This file may be used to create the Juniper Canopy environment with pip using:
+#         create:  $ pip list --format=freeze >requirements-pip.txt
+#         install: $ pip install -r requirements-pip.txt
+#
+########################################################################################################)#############################################################################################
+# References:
+#
+#####################################################################################################################################################################################################
+# TODO :
+#
+#####################################################################################################################################################################################################
+# COMPLETED:
+#
+#####################################################################################################################################################################################################
+
 a2wsgi==1.10.10
 annotated-doc==0.0.4
 annotated-types==0.7.0

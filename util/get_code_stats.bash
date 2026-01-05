@@ -1,317 +1,259 @@
 #!/usr/bin/env bash
 #####################################################################################################################################################################################################
-# Application: Juniper
-# Script Name: get_code_stats.bash
-# Script Path: <Project>/util/get_code_stats.bash
+# Project:       Juniper
+# Sub-Project:   JuniperCanopy
+# Application:   juniper_canopy
+# Purpose:       Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
 #
-# Description: This script files in the source directory of the current project for a specific search term and then displays the number of files that do and do not contain the search term.
+# Author:        Paul Calnon
+# Version:       1.0.0
+# File Name:     get_code_stats.bash
+# File Path:     <Project>/<Sub-Project>/<Application>/util/
 #
-# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+# Date:          2025-02-05
+# Last Modified: 2026-01-06
+#
+# License:       MIT License
+# Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
+#
+# Description:
+#     This file is the sourced conf file for the get_code_stats.bash script. The conf file defines all script constants.
+#
+#####################################################################################################################################################################################################
 # Notes:
 #
-# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-# Examples:
+#     This script sources the following primary config file: ../conf/get_code_stats.conf
+#
+#     This script also assumes the existence of the following additional config files:
+#         - ../conf/common.conf
+#         - ../conf/logging.conf
+#
+#     This script also expects the following file to be present if the configuration process fails:
+#         - ../conf/config_fail.conf
+#
+#####################################################################################################################################################################################################
+# References:
+#
+#     SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
+#     CONF_PATH="$(dirname "$(dirname "${SCRIPT_PATH}")")/conf"
+#     CONF_FILENAME="$(basename -s ".bash" "${SCRIPT_PATH}").conf"
+#     CONF_FILE="${SCRIPT_PATH}/${SCRIPT_FILENAME}"
+#
+#     CONF_PATH="$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")/conf"
+#     CONF_FILENAME="$(basename -s ".bash" "$(realpath "${BASH_SOURCE[0]}")").conf"
+#     CONF_FILE="${CONF_PATH}/${CONF_FILENAME}"
+#
+#     CONF_FILE="$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")/conf/$(basename -s ".bash" "$(realpath "${BASH_SOURCE[0]}")").conf"
+#
+#     source "${CONF_FILE}";  SUCCESS="$?"
+#
+#####################################################################################################################################################################################################
+# TODO :
+#
+#####################################################################################################################################################################################################
+# COMPLETED:
 #
 #####################################################################################################################################################################################################
 
-#######################################################################################################################################################################################
-# Define Debug Constants
-#######################################################################################################################################################################################
-TRUE="TRUE"
-FALSE="FALSE"
 
-# DEBUG="${TRUE}"
-DEBUG="${FALSE}"
-
-
-#######################################################################################################################################################################################
-# Define Global Project Constants
-#######################################################################################################################################################################################
-HOME_DIR="${HOME}"
-
-FUNCTION_NAME="${0##*/}"
-
-# PROJ_NAME="dynamic_nn"
-# PROJ_NAME="juniper"
-PROJ_NAME="Juniper"
-
-#PROJ_LANG_DIR_NAME="rust/rust_mudgeon"
-PROJ_LANG_DIR_NAME="python"
-
-DEV_DIR_NAME="Development"
-DEV_DIR="${HOME_DIR}/${DEV_DIR_NAME}"
-PROJ_ROOT_DIR="${DEV_DIR}/${PROJ_LANG_DIR_NAME}"
-PROJ_DIR="${PROJ_ROOT_DIR}/${PROJ_NAME}"
-
-UTIL_DIR_NAME="util"
-UTIL_DIR="${PROJ_DIR}/${UTIL_DIR_NAME}"
-
-CONF_DIR_NAME="conf"
-CONF_DIR="${PROJ_DIR}/${CONF_DIR_NAME}"
-CONF_FILE_NAME="script_util.cfg"
-CONF_FILE="${CONF_DIR}/${CONF_FILE_NAME}"
-
-source "${CONF_FILE}"
+#####################################################################################################################################################################################################
+# Initialize script by sourcing the init_conf.bash config file
+#####################################################################################################################################################################################################
+set -o functrace
+# shellcheck disable=SC2155
+export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")" && INIT_CONF="$(dirname "$(dirname "${PARENT_PATH_PARAM}")")/conf/init.conf"
+# shellcheck disable=SC2015,SC1090
+[[ -f "${INIT_CONF}" ]] && source "${INIT_CONF}" || { echo "Init Config File Not Found. Unable to Continue."; exit 1; }
 
 
-#######################################################################################################################################################################################
-# Configure Script Environment
-#######################################################################################################################################################################################
-SRC_DIR_NAME="src"
-SRC_DIR="${PROJ_DIR}/${SRC_DIR_NAME}"
-LOG_DIR_NAME="logs"
-LOG_DIR="${PROJ_DIR}/${LOG_DIR_NAME}"
-UTIL_DIR_NAME="util"
-UTIL_DIR="${PROJ_DIR}/${UTIL_DIR_NAME}"
-DATA_DIR_NAME="data"
-DATA_DIR="${PROJ_DIR}/${DATA_DIR_NAME}"
-VIZ_DIR_NAME="viz"
-VIZ_DIR="${PROJ_DIR}/${VIZ_DIR_NAME}"
-CONF_DIR_NAME="conf"
-CONF_DIR="${PROJ_DIR}/${CONF_DIR_NAME}"
-TEST_DIR_NAME="tests"
-TEST_DIR="${PROJ_DIR}/${TEST_DIR_NAME}"
-
-
-#######################################################################################################################################################################################
-# Define the Script Environment File Constants
-#######################################################################################################################################################################################
-CONF_FILE_NAME="logging_config.yaml"
-CONF_FILE="${CONF_DIR}/${CONF_FILE_NAME}"
-GET_FILENAMES_SCRIPT_NAME="get_module_filenames.bash"
-GET_FILENAMES_SCRIPT="${UTIL_DIR}/${GET_FILENAMES_SCRIPT_NAME}"
-GET_SOURCETREE_SCRIPT_NAME="source_tree.bash"
-GET_SOURCETREE_SCRIPT="${UTIL_DIR}/${GET_SOURCETREE_SCRIPT_NAME}"
-GET_TODO_COMMENTS_SCRIPT_NAME="get_todo_comments.bash"
-GET_TODO_COMMENTS_SCRIPT="${UTIL_DIR}/${GET_TODO_COMMENTS_SCRIPT_NAME}"
-GET_FILE_TODO_SCRIPT_NAME="get_file_todo.bash"
-GET_FILE_TODO_SCRIPT="${UTIL_DIR}/${GET_FILE_TODO_SCRIPT_NAME}"
-GIT_LOG_WEEKS_SCRIPT_NAME="__git_log_weeks.bash"
-GIT_LOG_WEEKS_SCRIPT="${UTIL_DIR}/${GIT_LOG_WEEKS_SCRIPT_NAME}"
-
-
-#######################################################################################################################################################################################
-# Define the Script Constants
-#######################################################################################################################################################################################
-#DEBUG="true"
-DEBUG="false"
-
-FULL_OUTPUT="true"
-#FULL_OUTPUT="false"
-
-FILENAMES_SCRIPT_PARAMS="--full ${FULL_OUTPUT}"
-
-SEARCH_TERM_DEFAULT="TODO"
-TODO_SEARCH_SCRIPT_PARAMS="--search ${SEARCH_TERM_DEFAULT} --file"
-
-FIND_METHOD_REGEX='^[[:space:]]+(def)[[:space:]]+'
-FIND_METHOD_PARAMS="-E --"
-
-EXIT_COND_DEFAULT="1"
-
-INIT_PYTHON_FILE="__init__"
-
-GIT_LOG_WEEKS="0"
-
-SIZE_LABEL_MAG="1024"
-SIZE_LABELS=("B" "K" "M" "G" "T" "P" "E" "Z" "Y")
-
-TABLE_FORMAT="%-28s %8s %9s %7s %9s\n"
-SUMMARY_FORMAT="%-14s %-10s\n"
-FILE_SUMMARY_FORMAT="%-17s %-12s %-3s %-40s\n"
-
-# Longest File(s):  (    1999 lines) --  NeuralNetwork.py
-# Methods File(s):  (      76 methods) --  EvolveState.py
-# Largest File(s):  (108 KB)     --  NeuralNetwork.py
-# Roughest File(s): (      24 TODOs) --  DNA.py
-
-
-####################################################################################################
-# Define command line parameter switches
-####################################################################################################
-HELP_SHOR="-h"
-HELP_LONG="--help"
-
-SEARCH_SHORT="-s"
-SEARCH_LONG="--search"
-
-OUTPUT_SHORT="-f"
-OUTPUT_LONG="--full"
-
-
-####################################################################################################
-# Run env info functions
-####################################################################################################
-BASE_DIR=$(${GET_PROJECT_SCRIPT} "${BASH_SOURCE}")
-# Determine Host OS
-CURRENT_OS=$(${GET_OS_SCRIPT})
-# Define Script Functions
-source "${DATE_FUNCTIONS_SCRIPT}"
-
-
-####################################################################################################
-# Define Script Functions
-####################################################################################################
-function round_size() {
-    SIZEF="${1}"
-    SIZE="${SIZEF%.*}"
-    DEC="0.${DIG}"
-    if (( $(echo "${DEC} >= 0.5" | bc -l) )); then
-        SIZE=$(( SIZE + 1 ))
-    fi
-    echo "${SIZE}"
-}
-
-function current_size() {
-    CURRENT_SIZE="${1}"
-    LABEL="${CURRENT_SIZE: -1}"
-    SIZEF="${CURRENT_SIZE::-1}"
-    for i in "${!SIZE_LABELS[@]}"; do
-        if [[ "${SIZE_LABELS[${i}]}" == "${LABEL}" ]]; then
-            break
-        else
-            #SIZE=$(( SIZE * SIZE_LABEL_MAG ))
-            #SIZEF=$(( SIZEF * SIZE_LABEL_MAG ))
-            SIZEF="$(echo "${SIZEF} * ${SIZE_LABEL_MAG}" | bc -l)"
-	fi
-    done
-    SIZE="$(round_size ${SIZEF})"
-    echo "${SIZE}"
-}
-
-function readable_size() {
-    CURRENT_SIZE="${1}"
-    LABEL_INDEX=0
-    BYTES_LABEL=""
-    while (( $(echo "${CURRENT_SIZE} >= ${SIZE_LABEL_MAG}" | bc -l) )); do
-        CURRENT_SIZE="$(echo "${CURRENT_SIZE} / ${SIZE_LABEL_MAG}" | bc -l)"
-        LABEL_INDEX=$(( LABEL_INDEX + 1 ))
-    done
-    SIZE="$(round_size ${CURRENT_SIZE})"
-    if (( LABEL_INDEX > 0 )); then
-        BYTE_LABEL="${SIZE_LABELS[0]}"
-    fi
-    READABLE="${SIZE} ${SIZE_LABELS[${LABEL_INDEX}]}${BYTE_LABEL}"
-    echo "${READABLE}"
-}
-
-
-################################################################################################################
+#####################################################################################################################################################################################################
 # Print Column Labels and Header data for Project source files
-################################################################################################################
+#####################################################################################################################################################################################################
+log_debug "Print Column Labels and Header data for Project source files"
 # Print heading data
+log_debug "Print heading data"
 echo -ne "\nDisplay Stats for the ${PROJ_NAME} Project\n\n"
+# shellcheck disable=SC2059
 printf "${TABLE_FORMAT}" "Filename" "Lines" "Methods" "TODOs" "Size"
+# shellcheck disable=SC2059
 printf "${TABLE_FORMAT}" "----------------------------" "------" "--------" "------" "------"
 
 
-################################################################################################################
-# Search project source files and retrieve stats
-################################################################################################################
-# Initialize project summary counters
-TOTAL_FILES=0
-TOTAL_LINES=0
-TOTAL_METHODS=0
-TOTAL_TODOS=0
-TOTAL_SIZE=0
-
-MOST_LINES=0
-MOST_METHODS=0
-MOST_TODOS=0
-MOST_SIZE=0
-
-LONG_FILE=""
-METHOD_FILE=""
-ROUGH_FILE=""
-BIG_FILE=""
-
+#####################################################################################################################################################################################################
 # Evaluate each source file in project
-for i in $(${GET_FILENAMES_SCRIPT} ${FILENAMES_SCRIPT_PARAMS}); do
+#####################################################################################################################################################################################################
+log_debug "Evaluate each source file in project"
+# Inline find command for performance - avoid subprocess overhead of calling get_module_filenames.bash
+while read -r i; do
+    [[ -z "${i}" ]] && continue
     # Get current filename and absolute path
+    log_debug "Get current filename and absolute path"
     FILE_PATH="$(echo "${i}" | xargs)"
+    log_verbose "File Path: ${FILE_PATH}"
     FILE_NAME="$(echo "${FILE_PATH##*/}" | xargs)"
-    [[ ${DEBUG} == "${TRUE}" ]] && echo "Filename: ${FILE_NAME}"
-
+    log_debug "File Name: ${FILE_NAME}"
     # Calculate stats for current file
+    log_debug "Calculate stats for current file"
     TOTAL_FILES=$(( TOTAL_FILES + 1 ))
+    log_verbose "Total Files: ${TOTAL_FILES}"
 
+
+    #################################################################################################################################################################################################
     # Perform Line count calculations
-    CURRENT_LINES="$(cat ${FILE_PATH} | wc -l)"
+    #################################################################################################################################################################################################
+    log_debug "Perform Line count calculations"
+    CURRENT_LINES="$(cat "${FILE_PATH}" | wc -l)"
+    log_verbose "Current Lines: ${CURRENT_LINES}"
+    # TODO: consider switching to [[ ]] since output of bc is a bool?
     if (( $(echo "${CURRENT_LINES} > ${MOST_LINES}" | bc -l) )); then
+        log_verbose "Most Lines before update: ${MOST_LINES}"
         MOST_LINES="$(echo "${CURRENT_LINES}" | xargs)"
-	LONG_FILE="$(echo "${FILE_NAME}" | xargs)"
+        log_verbose "Most Lines after update: ${MOST_LINES}"
+        LONG_FILE="$(echo "${FILE_NAME}" | xargs)"
+        log_verbose "Long File: ${LONG_FILE}"
     elif (( $(echo "${CURRENT_LINES} == ${MOST_LINES}" | bc -l) )); then
+        log_verbose "Most Lines: ${MOST_LINES}"
+        log_verbose "Long File before update: ${LONG_FILE}"
         LONG_FILE="${LONG_FILE}, $(echo "${FILE_NAME}" | xargs)"
+        log_verbose "Long File after update: ${LONG_FILE}"
     fi
     TOTAL_LINES="$(echo "$(( TOTAL_LINES + CURRENT_LINES ))" | xargs)"
+    log_debug "Total Lines: ${TOTAL_LINES}"
 
+
+    #################################################################################################################################################################################################
     # Perform Method Count calculation
-    CURRENT_METHODS=$(grep ${FIND_METHOD_PARAMS} ${FIND_METHOD_REGEX} ${FILE_PATH} | wc -l)
+    #################################################################################################################################################################################################
+    log_debug "Perform Method Count calculation"
+    # Use tr to strip any whitespace and ensure we get a clean integer
+    CURRENT_METHODS="$(grep -c -E -- "${FIND_METHOD_REGEX}" "${FILE_PATH}" 2>/dev/null | tr -d '[:space:]')"
+    [[ -z "${CURRENT_METHODS}" ]] && CURRENT_METHODS="0"
+    log_verbose "Current Methods: ${CURRENT_METHODS}"
     if (( $(echo "${CURRENT_METHODS} > ${MOST_METHODS}" | bc -l) )); then
         MOST_METHODS="$(echo "${CURRENT_METHODS}" | xargs)"
-	METHOD_FILE="$(echo "${FILE_NAME}" | xargs)"
+        log_verbose "Most Methods: ${MOST_METHODS}"
+        METHOD_FILE="$(echo "${FILE_NAME}" | xargs)"
+        log_verbose "Method File: ${METHOD_FILE}"
     elif (( $(echo "${CURRENT_METHODS} == ${MOST_METHODS}" | bc -l) )); then
         METHOD_FILE="${METHOD_FILE}, $(echo "${FILE_NAME}" | xargs)"
+        log_verbose "Method File: ${METHOD_FILE}"
     fi
     TOTAL_METHODS="$(echo "$(( TOTAL_METHODS + CURRENT_METHODS ))" | xargs)"
+    log_debug "Total Methods: ${TOTAL_METHODS}"
 
+
+    #################################################################################################################################################################################################
     # Perform TODO count calculations
-    CURRENT_TODOS="$(echo "$(${GET_FILE_TODO_SCRIPT} ${TODO_SEARCH_SCRIPT_PARAMS} ${FILE_PATH})" | xargs)"
-    if (( $(echo "${CURRENT_TODOS} > ${MOST_TODOS}" | bc -l) )); then
+    #     NOTE: Inline grep for performance - avoid subprocess overhead of calling get_file_todo.bash
+    #     NOTE: Use tr to strip any newlines/whitespace and ensure we get a clean integer
+    #################################################################################################################################################################################################
+    log_debug "Perform TODO count calculations"
+    CURRENT_TODOS="$(grep -ic "${SEARCH_TERM_DEFAULT}" "${FILE_PATH}" 2>/dev/null | tr -d '[:space:]')"
+    [[ -z "${CURRENT_TODOS}" ]] && CURRENT_TODOS="0"
+    log_verbose "Current TODOS: ${CURRENT_TODOS}"
+    if (( CURRENT_TODOS > 0 && ( $(echo "${CURRENT_TODOS} > ${MOST_TODOS}" | bc -l) ) )); then
         MOST_TODOS="$(echo "${CURRENT_TODOS}" | xargs)"
-	ROUGH_FILE="$(echo "${FILE_NAME}" | xargs)"
-	[[ ${DEBUG} == ${TRUE} ]] && echo "Current TODOs: ${MOST_TODOS}, for File: ${ROUGH_FILE}"
-    elif (( $(echo "${CURRENT_TODOS} == ${MOST_TODOS}" | bc -l) )); then
+        log_verbose "Most TODOS: ${MOST_TODOS}"
+        ROUGH_FILE="$(echo "${FILE_NAME}" | xargs)"
+        log_verbose "Rough File: ${ROUGH_FILE}"
+        log_debug "Current TODOs: ${MOST_TODOS}, for File: ${ROUGH_FILE}"
+    elif (( CURRENT_TODOS > 0 && ( $(echo "${CURRENT_TODOS} == ${MOST_TODOS}" | bc -l) ) )); then
         ROUGH_FILE="${ROUGH_FILE}, $(echo "${FILE_NAME}" | xargs)"
+        log_verbose "Rough File: ${ROUGH_FILE}"
+    else
+        log_debug "No TODOs found in current file: ${FILE_NAME}"
+        log_verbose "Current TODOS: ${CURRENT_TODOS}, for File: ${FILE_NAME}"
+        log_verbose "Most TODOS: ${MOST_TODOS}, for File: ${ROUGH_FILE}"
+        log_debug "Total Todos: ${TOTAL_TODOS}"
+        log_debug "Current Todos: ${CURRENT_TODOS}"
+        log_verbose "Updated Total Todos: ${TOTAL_TODOS} + ${CURRENT_TODOS} = $(( TOTAL_TODOS + CURRENT_TODOS ))"
     fi
     TOTAL_TODOS="$(echo "$(( TOTAL_TODOS + CURRENT_TODOS ))" | xargs)"
+    log_debug "Total TODOS: ${TOTAL_TODOS}"
 
+
+    #################################################################################################################################################################################################
     # Perform size calculations
-    CURRENT_SIZE="$(echo "$(du -sh ${FILE_PATH} | cut -d $'\t' -f-1)" | xargs)"
-    BYTE_SIZE="$(current_size ${CURRENT_SIZE})"
+    #################################################################################################################################################################################################
+    log_debug "Perform size calculations"
+    CURRENT_SIZE="$(du -sh "${FILE_PATH}" | cut -d $'\t' -f-1 | xargs)"
+    log_verbose "Current Size: ${CURRENT_SIZE}"
+    BYTE_SIZE="$(current_size "${CURRENT_SIZE}")"
+    log_verbose "Byte Size: ${BYTE_SIZE}"
     if (( $(echo "${BYTE_SIZE} > ${MOST_SIZE}" | bc -l) )); then
         MOST_SIZE="$(echo "${BYTE_SIZE}" | xargs)"
-	BIG_FILE="$(echo "${FILE_NAME}" | xargs)"
+        log_verbose "Most Size: ${MOST_SIZE}"
+        BIG_FILE="$(echo "${FILE_NAME}" | xargs)"
+        log_verbose "Big File: ${BIG_FILE}"
     elif (( $(echo "${BYTE_SIZE} == ${MOST_SIZE}" | bc -l) )); then
-        BIG_FILE="$(echo "${BIG_FILE}" | xargs), $(echo "${FILE_NAME}" | xargs)"
+        BIG_FILE="${BIG_FILE}, $(echo "${FILE_NAME}" | xargs)"
+        log_verbose "Big File: ${BIG_FILE}"
     fi
     TOTAL_SIZE="$(echo "$(( TOTAL_SIZE + BYTE_SIZE ))" | xargs)"
-    OUTPUT_SIZE="$(readable_size $(echo "${BYTE_SIZE}" | xargs))"
+    log_debug "Total Size: ${TOTAL_SIZE}"
+    OUTPUT_SIZE="$(readable_size "$(echo "${BYTE_SIZE}" | xargs)")"
+    log_debug "Output Size: ${OUTPUT_SIZE}"
 
+
+    #################################################################################################################################################################################################
     # Print Stats for current File
+    #################################################################################################################################################################################################
+    log_debug "Print Stats for current File"
+    # shellcheck disable=SC2059
     printf "${TABLE_FORMAT}" "${FILE_NAME}" "${CURRENT_LINES}" "${CURRENT_METHODS}" "${CURRENT_TODOS}" "${OUTPUT_SIZE}"
-done
-READABLE_SIZE="$(readable_size $(echo "${TOTAL_SIZE}" | xargs))"
-BIG_FILE_SIZE="$(readable_size $(echo "${MOST_SIZE}" | xargs))"
+
+done <<< "$(find "${SRC_DIR}" \( -name "*.py" ! -name "*__init__*" ! -name "*test_*.py" \) -type f 2>/dev/null)"
 
 
-################################################################################################################
+#####################################################################################################################################################################################################
+# Parse file sizes
+#####################################################################################################################################################################################################
+log_trace "Parsing file sizes"
+READABLE_SIZE="$(readable_size "$(echo "${TOTAL_SIZE}" | xargs)")"
+log_debug "Readable Size: ${READABLE_SIZE}"
+BIG_FILE_SIZE="$(readable_size "$(echo "${MOST_SIZE}" | xargs)")"
+log_debug "Big File Size: ${BIG_FILE_SIZE}"
+
+
+#####################################################################################################################################################################################################
 # Print Project Summary data
-################################################################################################################
+#####################################################################################################################################################################################################
+log_debug "Print Project Summary data"
 # Print summary data
 echo -ne "\n\nProject ${PROJ_NAME} Summary:\n\n"
+# shellcheck disable=SC2059
 printf "${SUMMARY_FORMAT}" "Total Files:" "${TOTAL_FILES}"
+# shellcheck disable=SC2059
 printf "${SUMMARY_FORMAT}" "Total Methods:" "${TOTAL_METHODS}"
+# shellcheck disable=SC2059
 printf "${SUMMARY_FORMAT}" "Total Lines:" "${TOTAL_LINES}"
+# shellcheck disable=SC2059
 printf "${SUMMARY_FORMAT}" "Total TODOs:" "${TOTAL_TODOS}"
+# shellcheck disable=SC2059
 printf "${SUMMARY_FORMAT}" "Total Size:" "${READABLE_SIZE}"
 
 
-################################################################################################################
+#####################################################################################################################################################################################################
 # Print Project File Summary data
-################################################################################################################
+#####################################################################################################################################################################################################
+log_debug "Print Project File Summary data"
 echo -ne "\n\nProject ${PROJ_NAME} File Summary:\n\n"
+# shellcheck disable=SC2059
 printf "${FILE_SUMMARY_FORMAT}" "Longest File(s):" "(${MOST_LINES} lines)" "--" "${LONG_FILE}"
+# shellcheck disable=SC2059
 printf "${FILE_SUMMARY_FORMAT}" "Methods File(s):" "(${MOST_METHODS} methods)" "--" "${METHOD_FILE}"
+# shellcheck disable=SC2059
 printf "${FILE_SUMMARY_FORMAT}" "Largest File(s):" "(${BIG_FILE_SIZE})" "--" "${BIG_FILE}"
+# shellcheck disable=SC2059
 printf "${FILE_SUMMARY_FORMAT}" "Roughest File(s):" "(${MOST_TODOS} TODOs)" "--" "${ROUGH_FILE}"
 
 
-################################################################################################################
+#####################################################################################################################################################################################################
 # Display Project Git log info
-################################################################################################################
+#####################################################################################################################################################################################################
+log_debug "Display Project Git log info"
 echo -ne "\n\nProject ${PROJ_NAME} Git Log Summary\n\n"
-${GIT_LOG_WEEKS_SCRIPT} ${GIT_LOG_WEEKS}
+${GIT_LOG_WEEKS_SCRIPT} "${GIT_LOG_WEEKS}"
 echo -ne "\n"
 
-exit 2
+exit $(( TRUE ))  # Exit successfully

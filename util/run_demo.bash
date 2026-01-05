@@ -1,1 +1,0 @@
-juniper_canopy-demo.bash

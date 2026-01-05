@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
 #####################################################################################################################################################################################################
 # Project:       Juniper
-# Prototype:     Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
-# File Name:     try.bash
+# Sub-Project:   JuniperCanopy
+# Application:   juniper_canopy
+# Purpose:       Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
+#
 # Author:        Paul Calnon
 # Version:       0.1.4 (0.7.3)
+# File Name:     juniper_canopy.bash
+# File Path:     <Project>/<Sub-Project>/<Application>/util/
 #
 # Date:          2025-10-11
-# Last Modified: 2025-12-03
+# Last Modified: 2026-01-02
 #
 # License:       MIT License
-# Copyright:     Copyright (c) 2024-2025 Paul Calnon
+# Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
 #
 # Description:
-#    This script performs initial environment setup and launches the Frontend Application
-#       to monitor the current Cascade Correlation Neural Network prototype
-#       including training, state, and architecture for monitoring and diagnostics.
+#    This script performs initial environment setup and launches the Frontend Application to monitor the current Cascade Correlation Neural Network prototype
+#    including training, state, and architecture for monitoring and diagnostics.
 #
 #####################################################################################################################################################################################################
 # Notes:
@@ -29,12 +32,9 @@
 #         PROJECT_PATH
 #         HOME_DIR
 #         MAIN_FILE
-#
 #         LANGUAGE_NAME
 #         LANGUAGE_PATH
-#
 #         PYTHON, JAVASCRIPT, RUST, JAVA, RUBY, NODE, GO, CPP, C, R
-#
 #         CASCOR_NAME
 #         CASCOR_PATH
 #         CASCOR
@@ -51,10 +51,15 @@
 #
 #####################################################################################################################################################################################################
 
+
 #####################################################################################################################################################################################################
-# Define Current Script name And Key Script Constant
+# Source script config file
 #####################################################################################################################################################################################################
-source "$( echo "$(dirname "$(realpath "${0}")")" | awk -F "util/" '{print $1 "conf/" $2 "/init.conf"}')" "try.bash"
+set -o functrace
+# shellcheck disable=SC2155
+export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")" && INIT_CONF="$(dirname "$(dirname "${PARENT_PATH_PARAM}")")/conf/init.conf"
+# shellcheck disable=SC2015,SC1090
+[[ -f "${INIT_CONF}" ]] && source "${INIT_CONF}" || { echo "Init Config File Not Found. Unable to Continue."; exit 1; }
 
 
 #####################################################################################################################################################################################################
@@ -79,13 +84,13 @@ if [[ "${DEMO_MODE}" == "${TRUE}" ]]; then
     log_debug "Launch Demo Mode: ${LAUNCH_DEMO_MODE}"
     ${LAUNCH_DEMO_MODE}
 else
-    if [[ "$(ps aux | grep -v grep | grep "${CASCOR_NAME}" 2>/dev/null)" == "" ]]; then
-        PID="$(ps aux | grep -v grep | grep "bash" | head -1 | awk -F " " '{print $2;}')"
+    if [[ "$(pgrep -f "${CASCOR_NAME}" 2>/dev/null)" == "" ]]; then
+        PID="$(pgrep -f "bash" | head -1 | awk -F " " '{print $2;}')"
         log_info "CasCor Backend is already running with pid: ${PID}"
     else
         log_info "CasCor Backend is not running, launching ${CASCOR_NAME} in Main Mode with real CasCor backend: ${CASCOR_MAIN_FILE}"
         log_debug "nohup ${LANGUAGE_PATH} \"${CASCOR_MAIN_FILE}\" > /dev/null 2>&1 &"
-        nohup ${LANGUAGE_PATH} "${CASCOR_MAIN_FILE}" > /dev/null 2>&1 &
+        nohup "${LANGUAGE_PATH}" "${CASCOR_MAIN_FILE}" > /dev/null 2>&1 &
         PID="$!"
         log_info "CasCor Backend is running with pid: ${PID}"
     fi
@@ -101,3 +106,5 @@ else
     kill -KILL "${PID}" && rm -f nohup.out
 fi
 log_info "Completed Launch of the Juniper Canopy Application Main function"
+
+exit $(( TRUE ))
