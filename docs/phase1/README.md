@@ -370,7 +370,7 @@ All Phase 1 features have been implemented and validated:
 | ---------------------------- | ----------- | ------------------------------------------------------------ |
 | P1-1: Candidate Info Section | ✅ Complete | `metrics_panel.py` lines 337-563, 1342-1503                  |
 | P1-2: Replay Functionality   | ✅ Complete | `metrics_panel.py` lines 171-266, 388-403, 637-800+          |
-| P1-3: Staggered Layout       | ✅ Complete | `network_visualizer.py` lines 110, 688-706                   |
+| P1-3: Staggered Layout       | ✅ Complete | `network_visualizer.py` lines 110, 676-706                   |
 | P1-4: Node Selection         | ✅ Complete | `network_visualizer.py` lines 171-181, 206, 366-453, 834-884 |
 
 ---
