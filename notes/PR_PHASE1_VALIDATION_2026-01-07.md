@@ -1,6 +1,6 @@
 # Pull Request: Phase 1 Validation & Documentation
 
-**Date:** 2026-01-07  
+**Date:** 2026-01-08  
 **Branch:** `juniper_canopy/feature/dashboard_upgrade/priority-1.2_2025-12-13`
 
 ---
@@ -48,7 +48,7 @@ Validates and documents all Phase 1 (P1) high-impact enhancements for the Junipe
 
 ### P1-2: Replay Functionality
 
-- Full playback controls (⏮, ◀, ▶, ▶, ⏭)
+- Full playback controls (⏮, ◀, ▶, ⏵, ⏭)
 - Speed selection (1x, 2x, 4x)
 - Progress slider with position display
 - Controls visible when training STOPPED/PAUSED/COMPLETED/FAILED
