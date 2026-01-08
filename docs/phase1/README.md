@@ -221,19 +221,22 @@ The Network Topology tab should display hidden nodes in a staggered layout:
 ```pseudocode
 Given n hidden nodes and base_x position:
   If n_hidden <= 2:
-    Place all nodes at base_x
+    For each hidden node i:
+      y = (i - n_hidden / 2) * 1.5
+      x_position = base_x
+      pos[f"hidden_{i}"] = (x_position, y)
   Else:
     Calculate spread = min(3.0, n_hidden * 0.4)
     For each hidden node i:
+      y = (i - n_hidden / 2) * 1.5
       If i == 0:
         x_position = base_x
       Else:
         direction = 1 if i % 2 == 1 else -1
         offset_level = (i + 1) // 2
         x_position = base_x + direction * (offset_level * spread / max(1, (n_hidden // 2)))
-        pos[f"hidden_{i}"] = (x_position, y)
-        y = (i - n_hidden / 2) * 1.5
       Endif
+      pos[f"hidden_{i}"] = (x_position, y)
     Endfor
   Endif
   return pos
