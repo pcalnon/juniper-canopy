@@ -54,6 +54,7 @@ from .callback_context import get_callback_context
 from .components.about_panel import AboutPanel
 from .components.dataset_plotter import DatasetPlotter
 from .components.decision_boundary import DecisionBoundary
+from .components.hdf5_snapshots_panel import HDF5SnapshotsPanel
 from .components.metrics_panel import MetricsPanel
 from .components.network_visualizer import NetworkVisualizer
 
@@ -179,12 +180,17 @@ class DashboardManager:
 
         self.about_panel = AboutPanel(self.config.get("about_panel", {}), component_id="about-panel")
 
+        self.hdf5_snapshots_panel = HDF5SnapshotsPanel(
+            self.config.get("hdf5_snapshots_panel", {}), component_id="hdf5-snapshots-panel"
+        )
+
         # Register components
         self.register_component(self.metrics_panel)
         self.register_component(self.network_visualizer)
         self.register_component(self.dataset_plotter)
         self.register_component(self.decision_boundary)
         self.register_component(self.about_panel)
+        self.register_component(self.hdf5_snapshots_panel)
 
         self.logger.info("All MVP components initialized and registered")
 
@@ -542,6 +548,11 @@ class DashboardManager:
                                             self.dataset_plotter.get_layout(),
                                             label="Dataset View",
                                             tab_id="dataset",
+                                        ),
+                                        dbc.Tab(
+                                            self.hdf5_snapshots_panel.get_layout(),
+                                            label="HDF5 Snapshots",
+                                            tab_id="snapshots",
                                         ),
                                         dbc.Tab(
                                             self.about_panel.get_layout(),

@@ -140,7 +140,7 @@ class TestDashboardManagerInitialization:
         """Test that DashboardManager registers all default components."""
         dm = DashboardManager(minimal_config)
         # 4 default components: metrics_panel, network_visualizer, dataset_plotter, decision_boundary
-        assert len(dm.components) == 5  # metrics, network, dataset, decision, about
+        assert len(dm.components) == 6  # metrics, network, dataset, decision, about, hdf5_snapshots
 
     def test_dashboard_manager_components_initialized(self, minimal_config):
         """Test that all default components are initialized."""

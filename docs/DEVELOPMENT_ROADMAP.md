@@ -1,8 +1,8 @@
 # Juniper Canopy Fixes and Enhancements
 
-**Last Updated:** 2026-01-07  
-**Version:** 2.3.0  
-**Status:** Phase 2 In Progress (P2-1, P2-2, P2-3 Complete)
+**Last Updated:** 2026-01-08  
+**Version:** 2.4.0  
+**Status:** Phase 2 Complete (All P2 Items Done)
 
 ## Implementation Plan
 
@@ -276,8 +276,8 @@ For detailed implementation plans, see:
 | **P3**   | Redis Tab: Display usage stats                                         | Not Started | 3     |
 | **P3**   | Redis Tab: Display/edit db schema                                      | Not Started | 3     |
 | **P3**   | Redis Tab: Manage cluster options                                      | Not Started | 3     |
-| **P2**   | HDF5 Snapshot Tab: List available snapshots                            | Not Started | 2     |
-| **P2**   | HDF5 Tab: Show snapshot details (timestamp, size, etc.)                | Not Started | 2     |
+| **P2**   | HDF5 Snapshot Tab: List available snapshots                            | ✅ Done     | 2     |
+| **P2**   | HDF5 Tab: Show snapshot details (timestamp, size, etc.)                | ✅ Done     | 2     |
 | **P3**   | HDF5 Tab: Create new snapshot                                          | Not Started | 3     |
 | **P3**   | HDF5 Tab: Restore from existing snapshot                               | Not Started | 3     |
 | **P3**   | HDF5 Tab: Show history of snapshot activities                          | Not Started | 3     |

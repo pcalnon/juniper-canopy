@@ -11,7 +11,7 @@
 # File Path:     ${HOME}/Development/python/JuniperCanopy/juniper_canopy/src/
 #
 # Date Created:  2025-10-11
-# Last Modified: 2025-12-13
+# Last Modified: 2026-01-08
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -800,6 +800,176 @@ async def get_statistics():
         Statistics dictionary
     """
     return websocket_manager.get_statistics()
+
+
+# =============================================================================
+# HDF5 Snapshot API Endpoints (P2-4, P2-5)
+# =============================================================================
+
+# Snapshot configuration
+SNAPSHOT_EXTENSIONS = (".h5", ".hdf5")
+_snapshots_dir = os.getenv("CASCOR_SNAPSHOT_DIR", config.get("backend.snapshots.directory", "./snapshots"))
+
+
+def _generate_mock_snapshots():
+    """Generate mock snapshot metadata for demo mode or missing backend."""
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    snapshots = []
+    for i in range(3):
+        ts = now - timedelta(hours=i * 24 + i * 2, minutes=i * 15)
+        ts = ts.replace(microsecond=0)
+        snapshots.append(
+            {
+                "id": f"demo_snapshot_{i + 1}",
+                "name": f"Demo Snapshot {i + 1}",
+                "timestamp": f"{ts.isoformat()}Z",
+                "size_bytes": (i + 1) * 1024 * 1024 + i * 512 * 1024,
+                "description": f"Demo training snapshot #{i + 1} (simulated)",
+            }
+        )
+    return snapshots
+
+
+def _list_snapshot_files():
+    """
+    Return list of snapshot metadata dicts from snapshots directory.
+
+    Each item:
+        - id: file stem (no extension)
+        - name: file name
+        - timestamp: ISO8601 from mtime (UTC)
+        - size_bytes: file size
+    """
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    path = Path(_snapshots_dir)
+    if not path.exists() or not path.is_dir():
+        return []
+
+    snapshots = []
+    for f in sorted(path.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        if not f.is_file() or f.suffix.lower() not in SNAPSHOT_EXTENSIONS:
+            continue
+
+        stat = f.stat()
+        ts = datetime.fromtimestamp(stat.st_mtime, tz=UTC).replace(microsecond=0)
+        snapshots.append(
+            {
+                "id": f.stem,
+                "name": f.name,
+                "timestamp": f"{ts.isoformat()}Z",
+                "size_bytes": stat.st_size,
+                "path": str(f.absolute()),
+            }
+        )
+    return snapshots
+
+
+@app.get("/api/v1/snapshots")
+async def get_snapshots():
+    """
+    List available HDF5 snapshots.
+
+    Returns:
+        JSON object with:
+            - snapshots: list of snapshot metadata objects
+            - message: optional status message
+    """
+    global demo_mode_active
+
+    try:
+        snapshots = _list_snapshot_files()
+    except Exception as e:
+        system_logger.error(f"Failed to list snapshots: {e}")
+        snapshots = []
+
+    # Demo mode or no real snapshots available → return mock data
+    if (demo_mode_active or not snapshots) and not cascor_integration:
+        snapshots = _generate_mock_snapshots()
+        return {"snapshots": snapshots, "message": "Demo mode: showing simulated snapshots"}
+
+    if not snapshots:
+        return {"snapshots": [], "message": "No snapshots available"}
+
+    return {"snapshots": snapshots}
+
+
+@app.get("/api/v1/snapshots/{snapshot_id}")
+async def get_snapshot_detail(snapshot_id: str):
+    """
+    Get details for a specific snapshot.
+
+    Args:
+        snapshot_id: The snapshot ID (file stem) to look up
+
+    Returns:
+        JSON object with snapshot metadata and optional HDF5 attributes
+    """
+    from datetime import UTC, datetime
+    from pathlib import Path
+
+    from fastapi import HTTPException
+
+    global demo_mode_active
+
+    # Demo mode: return synthetic details
+    if demo_mode_active or not cascor_integration:
+        for s in _generate_mock_snapshots():
+            if s["id"] == snapshot_id:
+                s["attributes"] = {
+                    "mode": "demo",
+                    "description": "Demo snapshot (no real HDF5 file)",
+                    "epochs_trained": 100 + int(snapshot_id.split("_")[-1]) * 50,
+                    "hidden_units": 3 + int(snapshot_id.split("_")[-1]),
+                }
+                return s
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    # Real mode: find file in snapshots directory
+    path = Path(_snapshots_dir)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Snapshot directory not found")
+
+    # Search by file stem
+    snapshot_file = next(
+        (
+            f
+            for f in path.iterdir()
+            if f.is_file() and f.suffix.lower() in SNAPSHOT_EXTENSIONS and f.stem == snapshot_id
+        ),
+        None,
+    )
+
+    if not snapshot_file:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+
+    stat = snapshot_file.stat()
+    ts = datetime.fromtimestamp(stat.st_mtime, tz=UTC).replace(microsecond=0)
+
+    detail = {
+        "id": snapshot_file.stem,
+        "name": snapshot_file.name,
+        "timestamp": f"{ts.isoformat()}Z",
+        "size_bytes": stat.st_size,
+        "path": str(snapshot_file.absolute()),
+        "attributes": None,
+    }
+
+    # Optional: if h5py is available, read HDF5 root attributes
+    try:
+        import h5py
+
+        with h5py.File(snapshot_file, "r") as f:
+            detail["attributes"] = {k: str(v) for k, v in f.attrs.items()}
+    except ImportError:
+        system_logger.debug("h5py not available, skipping HDF5 attribute extraction")
+    except Exception as e:
+        system_logger.warning(f"Failed to read HDF5 attributes for {snapshot_file}: {e}")
+
+    return detail
 
 
 @app.websocket("/ws")
