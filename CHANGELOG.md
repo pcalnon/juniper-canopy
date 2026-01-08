@@ -5,6 +5,56 @@ All notable changes to the juniper_canopy prototype will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-01-07
+
+### Phase 1 Complete - High-Impact Enhancements
+
+All Phase 1 items validated and documented. Phase 1 README created at `docs/phase1/README.md`.
+
+### Validated [0.16.0] - Phase 1 Features
+
+- **P1-1: Candidate Info Section Display/Collapsibility**
+  - Candidate pool section always visible with collapsible content
+  - Toggle icon (▼/▶) indicates collapsed state
+  - Historical pools tracked and displayed as collapsed cards
+  - Top 10 pools preserved, ordered by recency
+  - Implementation: `metrics_panel.py` lines 337-563, 1342-1503
+
+- **P1-2: Replay Functionality**
+  - Full replay controls (⏮, ◀, ▶, ▶, ⏭)
+  - Speed selection (1x, 2x, 4x)
+  - Progress slider with position display
+  - Controls visible when training STOPPED/PAUSED/COMPLETED/FAILED
+  - Implementation: `metrics_panel.py` lines 171-266, 388-403, 637-800+
+
+- **P1-3: Staggered Hidden Node Layout**
+  - "Staggered" layout option in dropdown
+  - Wave pattern: first node center, alternating outward
+  - Dynamic spread increases with node count (max 3.0)
+  - Implementation: `network_visualizer.py` lines 110, 688-706
+
+- **P1-4: Mouse Click Events for Node Selection**
+  - Single-click selects/deselects nodes
+  - Box/lasso selection for multiple nodes
+  - Visual highlight (yellow glow, orange ring)
+  - Selection info panel with node details
+  - Implementation: `network_visualizer.py` lines 171-181, 206, 366-453, 834-884
+
+### Added [0.16.0]
+
+- **Phase 1 Documentation** (`docs/phase1/README.md`)
+  - Complete documentation of all P1 implementations
+  - Root cause analysis and solution details
+  - Verification checklist
+
+### Test Results [0.16.0]
+
+- **2134 passed**, 32 skipped
+- All Phase 1 issues validated
+- Coverage maintained at 95%+
+
+---
+
 ## [0.15.0] - 2026-01-07
 
 ### Fixed [0.15.0] - Phase 0 Completion
