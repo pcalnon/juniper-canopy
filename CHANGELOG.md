@@ -309,7 +309,7 @@ All Phase 1 items validated and documented. Phase 1 README created at `docs/phas
 
 ## [0.15.1] - 2026-01-07
 
-### Security Patch Release - urllib3 Decompression Bomb Vulnerability
+### Security Patch Release (Critical) - urllib3 Decompression Bomb Vulnerability
 
 This release addresses a critical security vulnerability in the `urllib3` dependency. Full details in `notes/RELEASE_NOTES_v0.15.1-alpha.md`.
 
