@@ -54,11 +54,11 @@ Updated `urllib3` dependency to v2.6.3, which does not decode content of redirec
 
 ```bash
 # Update dependencies
-pip install --upgrade urllib3>=2.6.3
+pip install --upgrade urllib3~=2.6.3
 
 # Or update via conda environment
 conda activate JuniperPython
-pip install --upgrade urllib3>=2.6.3
+pip install --upgrade urllib3~=2.6.3
 
 # Verify installation
 python -c "import urllib3; print(urllib3.__version__)"
