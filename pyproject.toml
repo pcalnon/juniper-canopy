@@ -175,7 +175,7 @@ parallel = true
 show_missing = true
 skip_covered = false
 skip_empty = true
-fail_under = 60
+fail_under = 95
 precision = 2
 exclude_lines = [
   "pragma: no cover",
