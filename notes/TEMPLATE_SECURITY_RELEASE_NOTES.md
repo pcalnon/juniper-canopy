@@ -35,7 +35,7 @@ JuniperCanopy is a real-time monitoring and diagnostic frontend for Cascade Corr
 
 [EXPLANATION_OF_HOW_JUNIPERCANOPY_IS_AFFECTED]
 
-**Reference:** [Dependabot security advisory](<DEPENDABOT_ALERT_URL>)
+**Reference:** [Dependabot security advisory](DEPENDABOT_ALERT_URL)
 
 ---
 
