@@ -34,6 +34,7 @@
 #   - Initial implementation for Phase 2 (P2-4, P2-5)
 #
 #####################################################################################################################################################################################################
+import contextlib
 import os
 from typing import Any, Dict, List
 
@@ -400,19 +401,7 @@ class HDF5SnapshotsPanel(BaseComponent):
             Dict with 'snapshots' list and optional 'message'
         """
         try:
-            resp = requests.get(
-                "http://localhost:8050/api/v1/snapshots",
-                timeout=self.api_timeout,
-            )
-            if resp.status_code != 200:
-                self.logger.warning(f"Snapshots API returned status {resp.status_code}")
-                return {"snapshots": [], "message": f"API error {resp.status_code}"}
-
-            data = resp.json()
-            snapshots = data.get("snapshots", [])
-            message = data.get("message")
-            return {"snapshots": snapshots, "message": message}
-
+            return self._parse_snapshots_response()
         except requests.exceptions.Timeout:
             self.logger.warning("Snapshots API request timed out")
             return {"snapshots": [], "message": "Request timed out"}
@@ -422,6 +411,26 @@ class HDF5SnapshotsPanel(BaseComponent):
         except Exception as e:
             self.logger.warning(f"Failed to fetch snapshots: {e}")
             return {"snapshots": [], "message": "Snapshot service unavailable"}
+
+    def _parse_snapshots_response(self):
+        """
+        Parse snapshots list from backend API.
+
+        Returns:
+            Dict with 'snapshots' list and optional 'message'
+        """
+        self.logger.info("Fetching snapshots from API")
+        resp = requests.get(
+            "http://localhost:8050/api/v1/snapshots",
+            timeout=self.api_timeout,
+        )
+        if resp.status_code != 200:
+            self.logger.warning(f"Snapshots API returned status {resp.status_code}")
+            return {"snapshots": [], "message": f"API error {resp.status_code}"}
+        data = resp.json()
+        snapshots = data.get("snapshots", [])
+        message = data.get("message")
+        return {"snapshots": snapshots, "message": message}
 
     def _fetch_snapshot_detail_handler(self, snapshot_id: str) -> Dict[str, Any]:
         """
@@ -890,11 +899,9 @@ class HDF5SnapshotsPanel(BaseComponent):
             if not prop_id:
                 return False, "", None
 
-            # try:
+            import json
 
             with contextlib.suppress(json.JSONDecodeError, IndexError):
-                import json
-
                 id_str = prop_id.rsplit(".", 1)[0]
                 id_dict = json.loads(id_str)
                 snapshot_id = id_dict.get("index")
@@ -1062,5 +1069,15 @@ class HDF5SnapshotsPanel(BaseComponent):
                 return True, icon, content
             else:
                 return False, icon, "Loading history..."
+
+        # Expose callback functions for unit testing
+        self._cb_create_snapshot = create_snapshot
+        self._cb_update_snapshots_table = update_snapshots_table
+        self._cb_select_snapshot = select_snapshot
+        self._cb_update_detail_panel = update_detail_panel
+        self._cb_open_restore_modal = open_restore_modal
+        self._cb_close_restore_modal = close_restore_modal
+        self._cb_confirm_restore = confirm_restore
+        self._cb_toggle_history = toggle_history
 
         self.logger.debug(f"Callbacks registered for {self.component_id}")

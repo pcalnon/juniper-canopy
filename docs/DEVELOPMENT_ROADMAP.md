@@ -1,8 +1,8 @@
 # Juniper Canopy Fixes and Enhancements
 
 **Last Updated:** 2026-01-09  
-**Version:** 2.6.0  
-**Status:** Phase 3 In Progress (P3-1, P3-2, P3-3 Complete - Wave 1 Done)
+**Version:** 2.7.0  
+**Status:** Phase 3 In Progress (Wave 1 & 2 Complete - P3-1 through P3-5 Verified)
 
 ## Implementation Plan
 

@@ -353,4 +353,8 @@ class AboutPanel(BaseComponent):
                 style={"listStyleType": "disc", "paddingLeft": "20px", "fontSize": "13px"},
             )
 
+        # Expose callback functions for unit testing
+        self._cb_toggle_system_info = toggle_system_info
+        self._cb_update_system_info = update_system_info
+
         self.logger.debug(f"Callbacks registered for {self.component_id}")

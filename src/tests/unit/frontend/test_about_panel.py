@@ -232,3 +232,77 @@ class TestModuleConstants:
         assert isinstance(COPYRIGHT_YEAR, str)
         # Should be a year or range like "2024" or "2024-2026"
         assert "202" in COPYRIGHT_YEAR
+
+
+# =============================================================================
+# Callback Tests
+# =============================================================================
+
+
+class DummyApp:
+    """Dummy Dash app for testing callbacks without running a server."""
+
+    def callback(self, *args, **kwargs):
+        """Return decorator that returns function unchanged."""
+
+        def decorator(func):
+            return func
+
+        return decorator
+
+
+@pytest.fixture
+def registered_panel(panel):
+    """Create panel with callbacks registered."""
+    app = DummyApp()
+    panel.register_callbacks(app)
+    return panel
+
+
+class TestAboutPanelCallbacks:
+    """Test AboutPanel callback functions."""
+
+    def test_toggle_system_info_opens_when_clicked(self, registered_panel):
+        """Should return True (open) when clicked while closed."""
+        result = registered_panel._cb_toggle_system_info(1, False)
+        assert result is True
+
+    def test_toggle_system_info_closes_when_clicked(self, registered_panel):
+        """Should return False (closed) when clicked while open."""
+        result = registered_panel._cb_toggle_system_info(1, True)
+        assert result is False
+
+    def test_toggle_system_info_no_clicks(self, registered_panel):
+        """Should return current state when no clicks."""
+        result = registered_panel._cb_toggle_system_info(None, True)
+        assert result is True
+
+        result = registered_panel._cb_toggle_system_info(0, False)
+        assert result is False
+
+    def test_update_system_info_closed_returns_empty(self, registered_panel):
+        """Should return empty list when collapse is closed."""
+        result = registered_panel._cb_update_system_info(False)
+        assert result == []
+
+    def test_update_system_info_open_returns_content(self, registered_panel):
+        """Should return system info list when collapse is open."""
+        result = registered_panel._cb_update_system_info(True)
+
+        # Should be an html.Ul
+        assert isinstance(result, html.Ul)
+
+        # Should contain system info
+        result_str = str(result)
+        assert "Python Version" in result_str
+        assert "Platform" in result_str
+        assert "Architecture" in result_str
+        assert "App Version" in result_str
+        assert registered_panel.version in result_str
+
+    def test_callbacks_exposed_after_registration(self, registered_panel):
+        """Callback functions should be exposed after registration."""
+        assert hasattr(registered_panel, "_cb_toggle_system_info")
+        assert hasattr(registered_panel, "_cb_update_system_info")
+        assert callable(registered_panel._cb_toggle_system_info)
+        assert callable(registered_panel._cb_update_system_info)

@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.21.0] - 2026-01-09
+
+### Phase 3 Verification & Coverage Improvements
+
+Verified P3-2 and P3-3 implementations and significantly increased test coverage for frontend components. Fixed bug in `open_restore_modal` callback. Status documented in `docs/phase3/README.md`.
+
+### Added [0.21.0]
+
+- **45 new callback tests** for HDF5SnapshotsPanel
+  - `test_hdf5_callbacks.py`: 39 tests covering all 8 callback functions
+  - Tests for create_snapshot, update_snapshots_table, select_snapshot
+  - Tests for update_detail_panel, open_restore_modal, confirm_restore, toggle_history
+  - Edge case coverage for no-click states, error handling, and fallback paths
+
+- **6 new callback tests** for AboutPanel
+  - Tests for toggle_system_info and update_system_info callbacks
+  - Verifies system information display when collapse is opened
+
+- **Callback function exposure pattern** for unit testing
+  - Added `_cb_*` attributes to expose callback functions after registration
+  - Enables direct unit testing without requiring Dash server
+  - Pattern applied to `HDF5SnapshotsPanel` and `AboutPanel`
+
+### Fixed [0.21.0]
+
+- **Bug: UnboundLocalError in open_restore_modal callback** (`hdf5_snapshots_panel.py`)
+  - `json` import was inside `contextlib.suppress` block but referenced in the `with` statement
+  - Moved import before the `with` statement to fix the error
+  - Lines 893-896 refactored
+
+- **Missing import: contextlib** (`hdf5_snapshots_panel.py`)
+  - Added `import contextlib` to module imports
+
+### Changed [0.21.0]
+
+- **Coverage improved** across frontend components:
+  - `hdf5_snapshots_panel.py`: 54% → 95% (+41%)
+  - `about_panel.py`: 73% → 100% (+27%)
+  - Overall coverage maintained at 93%
+
+- **Test count increased**: 2368 → 2413 tests (+45)
+
+### Test Results [0.21.0]
+
+- **2413 tests passing** (0 failures)
+- **39 skipped** (requires backend/display)
+- **93% overall coverage**
+- All P3-2 and P3-3 verification checkboxes now complete
+
+---
+
 ## [0.20.0] - 2026-01-09
 
 ### Phase 3 Wave 1 Complete - HDF5 Snapshot Capabilities (P3-1, P3-2, P3-3)

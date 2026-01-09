@@ -1200,30 +1200,23 @@ class NetworkVisualizer(BaseComponent):
             x = 0
             y = (i - n_input / 2) * 1.2
             pos[f"input_{i}"] = (x, y, 0)
-
         # Hidden layer (z=1) - arranged in a grid or circle
         if n_hidden > 0:
-            if n_hidden <= 4:
-                # Line arrangement for small numbers
-                for i in range(n_hidden):
+            for i in range(n_hidden):
+                if n_hidden <= 4:
                     x = 0
                     y = (i - n_hidden / 2) * 1.2
-                    pos[f"hidden_{i}"] = (x, y, 1)
-            else:
-                # Circular arrangement for larger numbers
-                for i in range(n_hidden):
+                else:
                     angle = 2 * math.pi * i / n_hidden
                     radius = min(3, n_hidden * 0.4)
                     x = radius * math.cos(angle)
                     y = radius * math.sin(angle)
-                    pos[f"hidden_{i}"] = (x, y, 1)
-
+                pos[f"hidden_{i}"] = (x, y, 1)
         # Output layer (z=2) - arranged in a line along y-axis
         for i in range(n_output):
             x = 0
             y = (i - n_output / 2) * 1.2
             pos[f"output_{i}"] = (x, y, 2)
-
         return pos
 
     def _update_highlight_state(

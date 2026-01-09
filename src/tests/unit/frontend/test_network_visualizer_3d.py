@@ -171,7 +171,8 @@ class TestCreate3DNetworkGraph:
 
         # Check for line traces (edges)
         line_traces = [t for t in fig.data if hasattr(t, "mode") and t.mode == "lines"]
-        assert len(line_traces) > 0
+        # assert len(line_traces) > 0
+        assert line_traces
 
     def test_create_3d_graph_has_nodes_by_layer(self, network_visualizer, sample_topology):
         """Should include separate node traces for each layer."""
@@ -262,7 +263,8 @@ class TestEdgeWeightColoring:
 
         # Find edge trace
         edge_traces = [t for t in fig.data if hasattr(t, "mode") and t.mode == "lines"]
-        assert len(edge_traces) > 0
+        # assert len(edge_traces) > 0
+        assert edge_traces
 
     def test_negative_weight_edge_color(self, network_visualizer):
         """Should color negative weights blue-ish."""
@@ -283,4 +285,5 @@ class TestEdgeWeightColoring:
         )
 
         edge_traces = [t for t in fig.data if hasattr(t, "mode") and t.mode == "lines"]
-        assert len(edge_traces) > 0
+        # assert len(edge_traces) > 0
+        assert edge_traces
