@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.24.2] - 2026-01-12
+
+### Environment Fix: Missing pytest-mock Dependency
+
+Fixed 32 test failures caused by missing `pytest-mock` dependency in the `JuniperCanopy` conda environment.
+
+### Fixed [0.24.2]
+
+- **Missing pytest-mock dependency**:
+  - Added `pytest-mock=3.15.1` to `conda_environment.yaml`
+  - Resolves `fixture 'mocker' not found` errors in 32 tests within `test_dashboard_manager.py`
+  - Affected test classes: `TestDashboardManagerHandlersWithMocking`, `TestTrainingButtonHandlers`, `TestParameterHandlers`, `TestHandleTrainingButtons`, `TestDashboardManagerMiscMethods`
+
+### Changed [0.24.2]
+
+- Updated `notes/VALIDATION_REPORT_2026-01-12.md` with issue resolution details
+
+### Technical Notes [0.24.2]
+
+- **SemVer impact:** PATCH – Environment configuration fix; no application code changes
+- All 2903 tests now pass with `JuniperCanopy` conda environment
+- Test execution time: 107.49s (Python 3.14)
+- The `mocker` fixture is provided by `pytest-mock` and used extensively for HTTP request mocking in dashboard handler tests
+
+---
+
+## [0.24.1] - 2026-01-12
+
+### Post-Refactor Validation
+
+Comprehensive validation of the Juniper Canopy application following the Phase 0–3 refactoring process.
+
+### Added [0.24.1]
+
+- **Validation Report**:
+  - `notes/VALIDATION_REPORT_2026-01-12.md` documenting:
+    - Full test suite execution: 2903 passed, 39 skipped, 0 failed
+    - Code coverage analysis: 94% overall (28,486 of 30,170 lines covered)
+    - 20 of 24 core source files meet or exceed 95% coverage target
+    - Infrastructure and CI/CD pipeline status verification
+
+### Technical Notes [0.24.1]
+
+- **SemVer impact:** PATCH – Documentation addition only; no code changes
+- All tests pass on Python 3.13.9 with pytest 9.0.1
+- Test execution time: 112.29s (2942 tests collected)
+- Validation confirms v0.24.0 stability and production readiness
+
+---
+
 ## [0.24.0] - 2026-01-11
 
 ### Post-Refactor Verification & Documentation Templates
