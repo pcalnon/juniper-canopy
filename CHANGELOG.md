@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.24.5] - 2026-01-22
+
+### Added: [0.24.5]
+
+- **Integration Issue 4.3**: Added metrics normalization to DataAdapter
+  - **Location**: `src/backend/data_adapter.py`
+  - **Problem**: Key naming mismatch between Cascor backend and Canopy frontend
+    - Cascor uses `value_loss`/`value_accuracy`
+    - Canopy expects `val_loss`/`val_accuracy`
+  - **Solution**: Added `normalize_metrics()` and `denormalize_metrics()` methods
+  - **Key Mappings**:
+    - `value_loss` → `val_loss`
+    - `value_accuracy` → `val_accuracy`
+    - `loss` → `train_loss` (legacy format)
+    - `accuracy` → `train_accuracy` (legacy format)
+  - **Tests Added**: 20 new unit tests in `tests/unit/backend/test_data_adapter_normalization.py`
+  - **Result**: Bidirectional metrics format conversion between Cascor and Canopy
+
+### Technical Notes [0.24.5]
+
+- **SemVer impact**: PATCH – New methods added; no breaking changes
+- `data_adapter.py` version: 0.1.4 → 0.1.5
+- All 20 normalization tests pass
+
+---
+
 ## [0.24.4] - 2026-01-21
 
 ### Fixed: [0.24.4]

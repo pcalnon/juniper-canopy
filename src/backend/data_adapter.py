@@ -4,10 +4,10 @@
 # Prototype:     Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
 # File Name:     data_adapter.py
 # Author:        Paul Calnon
-# Version:       0.1.4 (0.7.3)
+# Version:       0.1.5 (0.7.3)
 #
 # Date:          2025-10-11
-# Last Modified: 2025-12-03
+# Last Modified: 2026-01-22
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-2025 Paul Calnon
@@ -469,3 +469,82 @@ class DataAdapter:
         """Invalidate cached statistics (call when topology changes)."""
         self._cached_stats = None
         self._cached_topology = None
+
+    def normalize_metrics(self, raw_metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalize Cascor backend metrics to Canopy frontend format.
+
+        Handles key naming differences between applications:
+        - Cascor uses 'value_loss'/'value_accuracy'
+        - Canopy expects 'val_loss'/'val_accuracy'
+
+        Also handles legacy formats where 'loss' and 'accuracy' may be
+        provided without 'train_' prefix.
+
+        Args:
+            raw_metrics: Raw metrics dictionary from Cascor backend
+
+        Returns:
+            Normalized metrics dictionary for Canopy frontend
+
+        Example:
+            raw = {'epoch': 5, 'value_loss': 0.3, 'value_accuracy': 0.9}
+            normalized = adapter.normalize_metrics(raw)
+            # Returns: {'epoch': 5, 'val_loss': 0.3, 'val_accuracy': 0.9}
+        """
+        if raw_metrics is None:
+            return {}
+
+        normalized = {}
+
+        # Key mapping from Cascor format to Canopy format
+        key_mapping = {
+            # Cascor 'value_' prefix → Canopy 'val_' prefix
+            "value_loss": "val_loss",
+            "value_accuracy": "val_accuracy",
+            # Legacy format: bare 'loss'/'accuracy' → 'train_loss'/'train_accuracy'
+            "loss": "train_loss",
+            "accuracy": "train_accuracy",
+        }
+
+        for key, value in raw_metrics.items():
+            # Apply key mapping if applicable
+            normalized_key = key_mapping.get(key, key)
+
+            # Skip if we already have the normalized version (avoid overwriting)
+            # e.g., if both 'train_loss' and 'loss' are present, keep 'train_loss'
+            if normalized_key in normalized and key in key_mapping:
+                continue
+
+            normalized[normalized_key] = value
+
+        return normalized
+
+    def denormalize_metrics(self, normalized_metrics: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert Canopy frontend metrics back to Cascor backend format.
+
+        Inverse of normalize_metrics() for bidirectional communication.
+
+        Args:
+            normalized_metrics: Normalized metrics dictionary from Canopy frontend
+
+        Returns:
+            Denormalized metrics dictionary for Cascor backend
+        """
+        if normalized_metrics is None:
+            return {}
+
+        denormalized = {}
+
+        # Reverse key mapping: Canopy format → Cascor format
+        key_mapping = {
+            "val_loss": "value_loss",
+            "val_accuracy": "value_accuracy",
+        }
+
+        for key, value in normalized_metrics.items():
+            denormalized_key = key_mapping.get(key, key)
+            denormalized[denormalized_key] = value
+
+        return denormalized
