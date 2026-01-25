@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.24.6] - 2026-01-24
+
+### Fixed: [0.24.6]
+
+- **CANOPY-P1-003**: Fixed monitoring thread race condition
+  - **Location**: `src/backend/cascor_integration.py`
+  - **Problem**: `_monitoring_loop()` reads `network.history` while training mutates it, causing intermittent exceptions or inconsistent reads
+  - **Solution**:
+    - Added `self.metrics_lock = threading.Lock()` for thread-safe metrics extraction
+    - Updated `_extract_current_metrics()` to use lock when accessing network.history
+    - Added defensive copying of history lists while holding lock
+    - Added exception handling for concurrent modification edge cases
+  - **Lines Changed**: 117-121, 765-789
+
+### Verified: [0.24.6]
+
+- **CANOPY-P1-002**: Module naming collision - Workaround verified working
+  - `CascorIntegration._add_backend_to_path()` uses `sys.path.insert(0, ...)` to ensure Cascor modules take priority
+  - Full rename deferred to post-deployment
+
+### Technical Notes: [0.24.6]
+
+- **SemVer impact**: PATCH – Thread safety fix; no API changes
+- Part of PRE-DEPLOYMENT_ROADMAP.md P1 issue resolution
+- All existing tests continue to pass
+
+---
+
 ## [0.24.5] - 2026-01-22
 
 ### Added: [0.24.5]

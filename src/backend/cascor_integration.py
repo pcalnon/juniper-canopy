@@ -115,7 +115,10 @@ class CascorIntegration:
         # TODO: Make configurable via Constants or config
         self.monitoring_interval = 1.0  # seconds
         self._original_methods = {}  # Original methods (for restoration)
-        self.topology_lock = threading.Lock()  # Thread safety
+        self.topology_lock = threading.Lock()  # Thread safety for topology extraction
+        # CANOPY-P1-003: Add metrics lock for thread-safe metrics extraction
+        # Fixes race condition where _monitoring_loop reads network.history while training mutates it
+        self.metrics_lock = threading.Lock()  # Thread safety for metrics extraction
         self._shutdown_called = False
         self.logger.info("CascorIntegration initialized successfully")
 
@@ -738,10 +741,11 @@ class CascorIntegration:
     def _extract_current_metrics(self) -> Dict:
         """
         Description:
-            Extract current metrics from network state.
+            Extract current metrics from network state (thread-safe).
         Args: None
         Raises: None
         Notes:
+            CANOPY-P1-003: Uses metrics_lock for thread-safe access to network.history.
             Returns a dictionary with the current metrics.
             {
                 'epoch': 5,
@@ -759,14 +763,28 @@ class CascorIntegration:
         """
         if self.network is None or not hasattr(self.network, "history"):
             return {}
-        history = self.network.history
+        # CANOPY-P1-003: Use metrics_lock to prevent race condition with training thread
+        # The network.history dictionary is mutated during training, so we need exclusive access
+        with self.metrics_lock:
+            try:
+                history = self.network.history
+                # Copy values while holding lock to prevent mutation during read
+                train_loss_list = list(history.get("train_loss", []))
+                train_accuracy_list = list(history.get("train_accuracy", []))
+                value_loss_list = list(history.get("value_loss", []))
+                value_accuracy_list = list(history.get("value_accuracy", []))
+                hidden_units_count = len(self.network.hidden_units)
+            except (RuntimeError, KeyError) as e:
+                # Handle case where history is modified during read
+                self.logger.debug(f"Concurrent modification detected in metrics extraction: {e}")
+                return {}
         return {
-            "epoch": len(history.get("train_loss", [])),
-            "train_loss": history["train_loss"][-1] if history.get("train_loss") else None,
-            "train_accuracy": history["train_accuracy"][-1] if history.get("train_accuracy") else None,
-            "value_loss": history["value_loss"][-1] if history.get("value_loss") else None,
-            "value_accuracy": history["value_accuracy"][-1] if history.get("value_accuracy") else None,
-            "hidden_units": len(self.network.hidden_units),
+            "epoch": len(train_loss_list),
+            "train_loss": train_loss_list[-1] if train_loss_list else None,
+            "train_accuracy": train_accuracy_list[-1] if train_accuracy_list else None,
+            "value_loss": value_loss_list[-1] if value_loss_list else None,
+            "value_accuracy": value_accuracy_list[-1] if value_accuracy_list else None,
+            "hidden_units": hidden_units_count,
             "timestamp": datetime.now().isoformat(),
         }
 
