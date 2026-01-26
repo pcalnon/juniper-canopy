@@ -1793,8 +1793,7 @@ async def api_train_stop():
     # P1-NEW-003: Support stop for cascor_integration (best-effort)
     if cascor_integration:
         if cascor_integration.is_training_in_progress():
-            requested = cascor_integration.request_training_stop()
-            if requested:
+            if requested := cascor_integration.request_training_stop():
                 message = "Training stop requested (best-effort)"
                 schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", True, message)))
                 return {"status": "stop_requested", "message": message}
