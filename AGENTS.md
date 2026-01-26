@@ -323,6 +323,12 @@ juniper_canopy/
    - Type-safe configuration values
    - Training parameters, UI settings, server config
 
+6. **CasCor Integration** (`src/backend/cascor_integration.py`) - P1-NEW-003, P1-NEW-002
+   - Async training support via `ThreadPoolExecutor`
+   - `fit_async()` and `start_training_background()` methods
+   - RemoteWorkerClient integration for distributed training
+   - Thread-safe training status tracking
+
 ## Demo Mode vs Real Backend
 
 ### Demo Mode (Default for Development)

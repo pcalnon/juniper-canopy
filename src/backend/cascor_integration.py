@@ -42,12 +42,14 @@
 # COMPLETED:
 #
 #####################################################################################################################################################################################################
+import asyncio
 import contextlib
 import logging
 import os
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple, Union
@@ -120,6 +122,14 @@ class CascorIntegration:
         # Fixes race condition where _monitoring_loop reads network.history while training mutates it
         self.metrics_lock = threading.Lock()  # Thread safety for metrics extraction
         self._shutdown_called = False
+
+        # P1-NEW-003: Async training support - prevents blocking FastAPI event loop
+        # Single-worker executor ensures only one training runs at a time
+        self._training_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="CascorFit")
+        self._training_lock = threading.Lock()
+        self._training_future = None
+        self._training_stop_requested = False
+
         self.logger.info("CascorIntegration initialized successfully")
 
     def _resolve_backend_path(self, backend_path: Optional[str] = None) -> Path:
@@ -313,6 +323,21 @@ class CascorIntegration:
             except ImportError:
                 self.TrainingResults = None
                 self.logger.debug("TrainingResults not available")
+
+            # P1-NEW-002: Import RemoteWorkerClient for distributed training
+            try:
+                from remote_client.remote_client import RemoteWorkerClient
+
+                self.RemoteWorkerClient = RemoteWorkerClient
+                self.logger.info("Imported RemoteWorkerClient")
+            except ImportError:
+                self.RemoteWorkerClient = None
+                self.logger.debug("RemoteWorkerClient not available")
+
+            # P1-NEW-002: Initialize remote worker client state
+            self._remote_client = None
+            self._remote_workers_active = False
+
         except ImportError as e:
             raise ImportError(
                 f"Failed to import CasCor backend modules: {e}\n"
@@ -466,6 +491,267 @@ class CascorIntegration:
         except Exception as e:
             self.logger.error(f"Failed to install monitoring hooks: {e}", exc_info=True)
             return False
+
+    # =========================================================================
+    # P1-NEW-003: Async Training Methods
+    # =========================================================================
+
+    def is_training_in_progress(self) -> bool:
+        """
+        Description:
+            Check if training is currently in progress.
+        Returns:
+            True if training is running, False otherwise.
+        """
+        with self._training_lock:
+            return self._training_future is not None and not self._training_future.done()
+
+    def request_training_stop(self) -> bool:
+        """
+        Description:
+            Request training to stop (best-effort, training may not stop immediately).
+        Returns:
+            True if stop was requested, False if no training in progress.
+        Notes:
+            This sets a flag that training code can check periodically.
+            Actual stopping depends on the backend checking this flag.
+        """
+        with self._training_lock:
+            if self._training_future is None or self._training_future.done():
+                self.logger.debug("No training in progress to stop")
+                return False
+            self._training_stop_requested = True
+            self.logger.info("Training stop requested")
+            return True
+
+    def _run_fit_sync(self, *args, **kwargs) -> Dict:
+        """
+        Description:
+            Run the monitored fit method synchronously (called from executor thread).
+        Returns:
+            Training history dictionary.
+        """
+        try:
+            self._training_stop_requested = False
+            if self.network is None:
+                raise RuntimeError("No network connected")
+            return self.network.fit(*args, **kwargs)
+        finally:
+            with self._training_lock:
+                self._training_stop_requested = False
+
+    async def fit_async(self, *args, **kwargs) -> Dict:
+        """
+        Description:
+            Async wrapper for training that runs fit() in a background thread.
+            This prevents blocking the FastAPI event loop during training.
+        Args:
+            *args, **kwargs: Arguments passed to network.fit()
+        Returns:
+            Training history dictionary.
+        Raises:
+            RuntimeError: If no network connected or training already in progress.
+        Notes:
+            Uses ThreadPoolExecutor with max_workers=1 to prevent concurrent training.
+            The monitored_fit wrapper is used, so all monitoring hooks are active.
+        Example:
+            history = await cascor_integration.fit_async(x_train, y_train, epochs=100)
+        """
+        if self.network is None:
+            raise RuntimeError("No network connected. Call create_network() first.")
+
+        with self._training_lock:
+            if self._training_future is not None and not self._training_future.done():
+                raise RuntimeError("Training already in progress. Wait for completion or request stop.")
+            self._training_stop_requested = False
+
+        self.logger.info("Starting async training")
+
+        loop = asyncio.get_running_loop()
+        with self._training_lock:
+            self._training_future = loop.run_in_executor(
+                self._training_executor, lambda: self._run_fit_sync(*args, **kwargs)
+            )
+
+        try:
+            result = await self._training_future
+            self.logger.info("Async training completed successfully")
+            return result
+        except Exception as e:
+            self.logger.error(f"Async training failed: {e}", exc_info=True)
+            raise
+        finally:
+            with self._training_lock:
+                self._training_future = None
+                self._training_stop_requested = False
+
+    def start_training_background(self, *args, **kwargs) -> bool:
+        """
+        Description:
+            Start training in a background thread (fire-and-forget).
+            Returns immediately without waiting for training to complete.
+        Args:
+            *args, **kwargs: Arguments passed to network.fit()
+        Returns:
+            True if training was started, False if already in progress.
+        Notes:
+            Use is_training_in_progress() to check status.
+            Use get_training_status() for detailed training state.
+        Example:
+            if cascor_integration.start_training_background(x_train, y_train):
+                print("Training started")
+        """
+        if self.network is None:
+            self.logger.error("No network connected. Call create_network() first.")
+            return False
+
+        with self._training_lock:
+            if self._training_future is not None and not self._training_future.done():
+                self.logger.warning("Training already in progress")
+                return False
+            self._training_stop_requested = False
+            self._training_future = self._training_executor.submit(self._run_fit_sync, *args, **kwargs)
+
+        self.logger.info("Background training started")
+        return True
+
+    # =========================================================================
+    # P1-NEW-002: Remote Worker Client Methods
+    # =========================================================================
+
+    def connect_remote_workers(self, address: Tuple[str, int], authkey: Union[str, bytes]) -> bool:
+        """
+        Description:
+            Connect to a remote CandidateTrainingManager server for distributed training.
+        Args:
+            address: Tuple of (host, port) for the remote manager server.
+            authkey: Authentication key (string or bytes) for secure connection.
+        Returns:
+            True if connected successfully, False otherwise.
+        Raises:
+            RuntimeError: If RemoteWorkerClient is not available.
+        Notes:
+            The remote manager server must be running and accessible.
+            Use start_remote_workers() after connecting to spawn worker processes.
+        Example:
+            if integration.connect_remote_workers(("192.168.1.100", 5000), "secret"):
+                integration.start_remote_workers(4)
+        """
+        if self.RemoteWorkerClient is None:
+            self.logger.error("RemoteWorkerClient not available")
+            raise RuntimeError("RemoteWorkerClient not imported. Check backend installation.")
+
+        if self._remote_client is not None:
+            self.logger.warning("Already connected to remote manager. Disconnect first.")
+            return False
+
+        try:
+            self._remote_client = self.RemoteWorkerClient(address, authkey)
+            self._remote_client.connect()
+            self.logger.info(f"Connected to remote manager at {address}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to connect to remote manager: {e}", exc_info=True)
+            self._remote_client = None
+            return False
+
+    def start_remote_workers(self, num_workers: int = 1) -> bool:
+        """
+        Description:
+            Start remote worker processes that participate in distributed training.
+        Args:
+            num_workers: Number of worker processes to start (default: 1).
+        Returns:
+            True if workers started successfully, False otherwise.
+        Notes:
+            Must call connect_remote_workers() first.
+            Workers will consume tasks from the remote queue and return results.
+        Example:
+            integration.connect_remote_workers(("localhost", 5000), "secret")
+            integration.start_remote_workers(4)
+        """
+        if self._remote_client is None:
+            self.logger.error("Not connected to remote manager. Call connect_remote_workers() first.")
+            return False
+
+        try:
+            self._remote_client.start_workers(num_workers)
+            self._remote_workers_active = True
+            self.logger.info(f"Started {num_workers} remote worker(s)")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to start remote workers: {e}", exc_info=True)
+            return False
+
+    def stop_remote_workers(self, timeout: int = 10) -> bool:
+        """
+        Description:
+            Stop all remote worker processes gracefully.
+        Args:
+            timeout: Timeout in seconds to wait for workers to stop (default: 10).
+        Returns:
+            True if workers stopped successfully, False otherwise.
+        Notes:
+            Sends sentinel values to workers and waits for graceful shutdown.
+            Forces termination if workers don't stop within timeout.
+        Example:
+            integration.stop_remote_workers()
+        """
+        if self._remote_client is None:
+            self.logger.debug("No remote client connected")
+            return True
+
+        try:
+            self._remote_client.stop_workers(timeout)
+            self._remote_workers_active = False
+            self.logger.info("Remote workers stopped")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to stop remote workers: {e}", exc_info=True)
+            return False
+
+    def disconnect_remote_workers(self) -> bool:
+        """
+        Description:
+            Disconnect from the remote manager and clean up resources.
+        Returns:
+            True if disconnected successfully, False otherwise.
+        Notes:
+            Automatically stops workers before disconnecting.
+        Example:
+            integration.disconnect_remote_workers()
+        """
+        if self._remote_client is None:
+            self.logger.debug("No remote client to disconnect")
+            return True
+
+        try:
+            self._remote_client.disconnect()
+            self._remote_client = None
+            self._remote_workers_active = False
+            self.logger.info("Disconnected from remote manager")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to disconnect from remote manager: {e}", exc_info=True)
+            return False
+
+    def get_remote_worker_status(self) -> Dict[str, Any]:
+        """
+        Description:
+            Get status of remote worker connection and workers.
+        Returns:
+            Dictionary with remote worker status information.
+        Example:
+            status = integration.get_remote_worker_status()
+            if status['connected']:
+                print(f"Workers active: {status['workers_active']}")
+        """
+        return {
+            "available": self.RemoteWorkerClient is not None,
+            "connected": self._remote_client is not None,
+            "workers_active": self._remote_workers_active,
+            "address": getattr(self._remote_client, "address", None) if self._remote_client else None,
+        }
 
     def _on_training_start(self):
         """
@@ -1151,6 +1437,8 @@ class CascorIntegration:
         - Stops monitoring thread
         - Restores original methods
         - Ends training monitoring
+        - Shuts down training executor (P1-NEW-003)
+        - Disconnects remote workers (P1-NEW-002)
         Returns: None
         Example:
             integration.shutdown()
@@ -1160,6 +1448,18 @@ class CascorIntegration:
             return
         self._shutdown_called = True
         self.logger.info("Shutting down CasCor integration")
+
+        # P1-NEW-003: Request training stop and shutdown executor
+        self.request_training_stop()
+        if hasattr(self, "_training_executor") and self._training_executor:
+            self._training_executor.shutdown(wait=False, cancel_futures=False)
+            self._training_executor = None
+            self.logger.debug("Training executor shutdown")
+
+        # P1-NEW-002: Disconnect remote workers
+        if hasattr(self, "_remote_client") and self._remote_client:
+            self.disconnect_remote_workers()
+
         self.stop_monitoring()  # Stop monitoring thread
         self.restore_original_methods()  # Restore original methods
         if hasattr(self, "training_monitor") and self.training_monitor:  # End training monitoring

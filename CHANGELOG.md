@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.25.0] - 2026-01-25
+
+### Added: [0.25.0]
+
+- **P1-NEW-003: Async Training Boundary** (PRE-DEPLOYMENT_ROADMAP-2.md Phase C.1)
+  - **Location**: `src/backend/cascor_integration.py`
+  - **Problem**: Synchronous `fit()` method blocks FastAPI event loop
+  - **Solution**:
+    - Added `ThreadPoolExecutor` with `max_workers=1` for async training
+    - Added `is_training_in_progress()` method to check training status
+    - Added `request_training_stop()` for best-effort stop requests
+    - Added `fit_async()` method using `asyncio.run_in_executor()`
+    - Added `start_training_background()` for fire-and-forget training
+    - Updated `shutdown()` to clean up executor
+
+- **P1-NEW-002: RemoteWorkerClient Integration** (PRE-DEPLOYMENT_ROADMAP-2.md Phase C.2)
+  - **Location**: `src/backend/cascor_integration.py`
+  - **Problem**: RemoteWorkerClient for distributed training not exposed
+  - **Solution**:
+    - Added RemoteWorkerClient import from Cascor backend
+    - Added `connect_remote_workers(address, authkey)` method
+    - Added `start_remote_workers(num_workers)` method
+    - Added `stop_remote_workers(timeout)` method
+    - Added `disconnect_remote_workers()` method
+    - Added `get_remote_worker_status()` method
+    - Updated `shutdown()` to disconnect remote workers
+
+- **New API Endpoints** (PRE-DEPLOYMENT_ROADMAP-2.md Phase C)
+  - **Location**: `src/main.py`
+  - Training endpoints updated for cascor_integration:
+    - `POST /api/train/start` - Now uses `start_training_background()`
+    - `POST /api/train/stop` - Now supports cascor_integration stop
+    - `GET /api/train/status` - New endpoint for training status
+  - Remote worker endpoints:
+    - `GET /api/remote/status` - Check remote worker status
+    - `POST /api/remote/connect` - Connect to remote manager
+    - `POST /api/remote/start_workers` - Start workers
+    - `POST /api/remote/stop_workers` - Stop workers
+    - `POST /api/remote/disconnect` - Disconnect from manager
+
+### Technical Notes: [0.25.0]
+
+- **SemVer impact**: MINOR – New features added; no breaking changes
+- Part of PRE-DEPLOYMENT_ROADMAP-2.md Phase C implementation
+- P1-NEW-001 (Full IPC) deferred per Oracle analysis
+- All syntax validated; full test verification pending
+
+---
+
 ## [0.24.7] - 2026-01-24
 
 ### Added: [0.24.7]

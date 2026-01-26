@@ -1712,10 +1712,29 @@ async def api_train_start(reset: bool = False):
         schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", success, message)))
         return {"status": "started", **state}
     if cascor_integration:
-        success = False
-        message = "Start command not implemented for cascor"
-        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", success, message)))
-        return {"status": "unimplemented"}
+        # P1-NEW-003: Use async training to avoid blocking event loop
+        if cascor_integration.is_training_in_progress():
+            message = "Training already in progress"
+            schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, message)))
+            return {"status": "busy", "message": message}
+
+        if cascor_integration.network is None:
+            message = "No network configured. Create or load a network first."
+            schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, message)))
+            return JSONResponse({"error": message}, status_code=400)
+
+        # Start training in background (fire-and-forget)
+        # Actual training uses monitoring hooks for WebSocket updates
+        started = cascor_integration.start_training_background()
+        if started:
+            success = True
+            message = "Training started successfully"
+            schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", success, message)))
+            return {"status": "started", "message": message}
+        else:
+            message = "Failed to start training"
+            schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, message)))
+            return JSONResponse({"error": message}, status_code=500)
 
     schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, "No backend available")))
     return JSONResponse({"error": "No backend available"}, status_code=503)
@@ -1771,6 +1790,19 @@ async def api_train_stop():
         schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", True, "Training stopped")))
         return {"status": "stopped"}
 
+    # P1-NEW-003: Support stop for cascor_integration (best-effort)
+    if cascor_integration:
+        if cascor_integration.is_training_in_progress():
+            requested = cascor_integration.request_training_stop()
+            if requested:
+                message = "Training stop requested (best-effort)"
+                schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", True, message)))
+                return {"status": "stop_requested", "message": message}
+        else:
+            message = "No training in progress"
+            schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", True, message)))
+            return {"status": "stopped", "message": message}
+
     schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", False, "No backend available")))
     return JSONResponse({"error": "No backend available"}, status_code=503)
 
@@ -1791,6 +1823,26 @@ async def api_train_reset():
 
     schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("reset", False, "No backend available")))
     return JSONResponse({"error": "No backend available"}, status_code=503)
+
+
+@app.get("/api/train/status")
+async def api_train_status():
+    """
+    Get current training status (P1-NEW-003).
+    Returns:
+        Training status dictionary with network info and training state.
+    """
+    if demo_mode_instance:
+        return {"backend": "demo", **demo_mode_instance.get_state()}
+
+    if cascor_integration:
+        status = cascor_integration.get_training_status()
+        status["backend"] = "cascor"
+        status["training_in_progress"] = cascor_integration.is_training_in_progress()
+        status["stop_requested"] = cascor_integration._training_stop_requested
+        return status
+
+    return {"backend": None, "status": "no_backend"}
 
 
 @app.post("/api/set_params")
@@ -1842,6 +1894,98 @@ async def api_set_params(params: dict):
     except Exception as e:
         system_logger.error(f"Failed to set parameters: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# =========================================================================
+# P1-NEW-002: Remote Worker Management Endpoints
+# =========================================================================
+
+
+@app.get("/api/remote/status")
+async def api_remote_status():
+    """
+    Get remote worker connection status (P1-NEW-002).
+    Returns:
+        Dictionary with remote worker status information.
+    """
+    if cascor_integration:
+        return cascor_integration.get_remote_worker_status()
+    return {"available": False, "connected": False, "workers_active": False, "error": "No backend"}
+
+
+@app.post("/api/remote/connect")
+async def api_remote_connect(host: str, port: int, authkey: str):
+    """
+    Connect to a remote CandidateTrainingManager (P1-NEW-002).
+    Args:
+        host: Remote manager host address.
+        port: Remote manager port.
+        authkey: Authentication key for secure connection.
+    Returns:
+        Connection status.
+    """
+    if not cascor_integration:
+        return JSONResponse({"error": "No backend available"}, status_code=503)
+
+    try:
+        success = cascor_integration.connect_remote_workers((host, port), authkey)
+        if success:
+            return {"status": "connected", "address": f"{host}:{port}"}
+        return JSONResponse({"error": "Connection failed"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/remote/start_workers")
+async def api_remote_start_workers(num_workers: int = 1):
+    """
+    Start remote worker processes (P1-NEW-002).
+    Args:
+        num_workers: Number of workers to start (default: 1).
+    Returns:
+        Worker start status.
+    """
+    if not cascor_integration:
+        return JSONResponse({"error": "No backend available"}, status_code=503)
+
+    success = cascor_integration.start_remote_workers(num_workers)
+    if success:
+        return {"status": "started", "num_workers": num_workers}
+    return JSONResponse({"error": "Failed to start workers"}, status_code=500)
+
+
+@app.post("/api/remote/stop_workers")
+async def api_remote_stop_workers(timeout: int = 10):
+    """
+    Stop remote worker processes (P1-NEW-002).
+    Args:
+        timeout: Timeout for graceful shutdown (default: 10s).
+    Returns:
+        Worker stop status.
+    """
+    if not cascor_integration:
+        return JSONResponse({"error": "No backend available"}, status_code=503)
+
+    success = cascor_integration.stop_remote_workers(timeout)
+    if success:
+        return {"status": "stopped"}
+    return JSONResponse({"error": "Failed to stop workers"}, status_code=500)
+
+
+@app.post("/api/remote/disconnect")
+async def api_remote_disconnect():
+    """
+    Disconnect from remote manager (P1-NEW-002).
+    Returns:
+        Disconnection status.
+    """
+    if not cascor_integration:
+        return JSONResponse({"error": "No backend available"}, status_code=503)
+
+    success = cascor_integration.disconnect_remote_workers()
+    if success:
+        return {"status": "disconnected"}
+    return JSONResponse({"error": "Failed to disconnect"}, status_code=500)
 
 
 # Dash app is automatically mounted at /dashboard/ via DashboardManager
