@@ -1712,6 +1712,8 @@ async def api_train_start(reset: bool = False):
         schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", success, message)))
         return {"status": "started", **state}
     if cascor_integration:
+        # success = False
+        # message = "Start command not implemented for cascor"
         # P1-NEW-003: Use async training to avoid blocking event loop
         if cascor_integration.is_training_in_progress():
             message = "Training already in progress"
@@ -1723,10 +1725,7 @@ async def api_train_start(reset: bool = False):
             schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, message)))
             return JSONResponse({"error": message}, status_code=400)
 
-        # Start training in background (fire-and-forget)
-        # Actual training uses monitoring hooks for WebSocket updates
-        started = cascor_integration.start_training_background()
-        if started:
+        if started := cascor_integration.start_training_background():
             success = True
             message = "Training started successfully"
             schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", success, message)))
@@ -1735,6 +1734,7 @@ async def api_train_start(reset: bool = False):
             message = "Failed to start training"
             schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, message)))
             return JSONResponse({"error": message}, status_code=500)
+            # return {"status": "unimplemented"}
 
     schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, "No backend available")))
     return JSONResponse({"error": "No backend available"}, status_code=503)
