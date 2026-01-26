@@ -376,11 +376,13 @@ class TestTrainingControlEndpointsDirect:
             main.loop_holder["loop"] = original_loop
 
     @pytest.mark.asyncio
-    async def test_train_start_cascor_mode_returns_unimplemented(self):
-        """CasCor mode start should return unimplemented status."""
+    async def test_train_start_cascor_mode_busy(self):
+        """CasCor mode start should return busy when training in progress."""
         import main
 
         mock_cascor = MagicMock()
+        # P1-NEW-003: Async training - mock returns True for is_training_in_progress
+        mock_cascor.is_training_in_progress.return_value = True
 
         original_demo_instance = main.demo_mode_instance
         original_cascor = main.cascor_integration
@@ -395,7 +397,37 @@ class TestTrainingControlEndpointsDirect:
 
             result = await main.api_train_start(reset=False)
 
-            assert result["status"] == "unimplemented"
+            assert result["status"] == "busy"
+            assert "already in progress" in result["message"]
+        finally:
+            main.demo_mode_instance = original_demo_instance
+            main.cascor_integration = original_cascor
+            main.loop_holder["loop"] = original_loop
+
+    @pytest.mark.asyncio
+    async def test_train_start_cascor_mode_success(self):
+        """CasCor mode start should return started when training begins."""
+        import main
+
+        mock_cascor = MagicMock()
+        mock_cascor.is_training_in_progress.return_value = False
+        mock_cascor.network = MagicMock()  # Network exists
+        mock_cascor.start_training_background.return_value = True
+
+        original_demo_instance = main.demo_mode_instance
+        original_cascor = main.cascor_integration
+        original_loop = main.loop_holder["loop"]
+
+        try:
+            main.demo_mode_instance = None
+            main.cascor_integration = mock_cascor
+            mock_loop = MagicMock()
+            mock_loop.is_closed.return_value = False
+            main.loop_holder["loop"] = mock_loop
+
+            result = await main.api_train_start(reset=False)
+
+            assert result["status"] == "started"
         finally:
             main.demo_mode_instance = original_demo_instance
             main.cascor_integration = original_cascor

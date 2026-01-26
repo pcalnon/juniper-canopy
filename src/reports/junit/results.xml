@@ -1,11 +1,1 @@
-<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="0" skipped="0" tests="1" time="0.089" timestamp="2026-01-25T20:05:22.546406-06:00" hostname="yamaguchi"><testcase classname="" name="src.tests.integration.backend.test_cascor_integration_monitoring" time="0.000"><error message="collection failure">ImportError while importing test module '/home/pcalnon/Development/python/Juniper/JuniperCanopy/juniper_canopy/src/tests/integration/backend/test_cascor_integration_monitoring.py'.
-Hint: make sure your test modules/packages have valid Python names.
-Traceback:
-/usr/lib/python3.14/importlib/__init__.py:88: in import_module
-    return _bootstrap._gcd_import(name[level:], package, level)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-tests/integration/backend/test_cascor_integration_monitoring.py:17: in &lt;module&gt;
-    from backend.cascor_integration import CascorIntegration
-backend/cascor_integration.py:57: in &lt;module&gt;
-    import numpy as np
-E   ModuleNotFoundError: No module named 'numpy'</error></testcase></testsuite></testsuites>
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="0" time="3.868" timestamp="2026-01-26T07:15:21.235814-06:00" hostname="yamaguchi" /></testsuites>

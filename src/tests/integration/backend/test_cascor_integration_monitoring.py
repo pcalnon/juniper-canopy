@@ -17,6 +17,30 @@ import pytest
 from backend.cascor_integration import CascorIntegration
 
 
+def create_mock_integration(network=None):
+    """
+    Create a CascorIntegration instance without calling __init__.
+
+    This helper properly initializes all required attributes that __init__
+    would set, avoiding AttributeError in tests that use __new__.
+
+    Args:
+        network: Optional network instance to attach
+
+    Returns:
+        CascorIntegration instance with minimal required attributes
+    """
+    integration = CascorIntegration.__new__(CascorIntegration)
+    integration.logger = MagicMock()
+    integration.network = network
+    integration.monitoring_thread = None
+    integration.monitoring_active = False
+    integration.metrics_lock = threading.Lock()  # CANOPY-P1-003 thread safety
+    integration.topology_lock = threading.Lock()
+    integration._shutdown_called = False
+    return integration
+
+
 class FakeNetwork:
     """Fake network for testing monitoring."""
 
@@ -58,11 +82,7 @@ class TestCascorIntegrationMonitoring:
         """Test start_monitoring_thread creates and starts thread."""
         with patch.object(CascorIntegration, "_add_backend_to_path"):
             with patch.object(CascorIntegration, "_import_backend_modules"):
-                integration = CascorIntegration.__new__(CascorIntegration)
-                integration.logger = MagicMock()
-                integration.network = FakeNetwork()
-                integration.monitoring_thread = None
-                integration.monitoring_active = False
+                integration = create_mock_integration(network=FakeNetwork())
 
                 integration.start_monitoring_thread(interval=0.1)
 
@@ -81,11 +101,7 @@ class TestCascorIntegrationMonitoring:
         """Test start_monitoring_thread is idempotent (doesn't create duplicate threads)."""
         with patch.object(CascorIntegration, "_add_backend_to_path"):
             with patch.object(CascorIntegration, "_import_backend_modules"):
-                integration = CascorIntegration.__new__(CascorIntegration)
-                integration.logger = MagicMock()
-                integration.network = FakeNetwork()
-                integration.monitoring_thread = None
-                integration.monitoring_active = False
+                integration = create_mock_integration(network=FakeNetwork())
 
                 # Start first thread
                 integration.start_monitoring_thread(interval=0.1)
@@ -106,11 +122,7 @@ class TestCascorIntegrationMonitoring:
         """Test stop_monitoring cleanly stops the monitoring thread."""
         with patch.object(CascorIntegration, "_add_backend_to_path"):
             with patch.object(CascorIntegration, "_import_backend_modules"):
-                integration = CascorIntegration.__new__(CascorIntegration)
-                integration.logger = MagicMock()
-                integration.network = FakeNetwork()
-                integration.monitoring_thread = None
-                integration.monitoring_active = False
+                integration = create_mock_integration(network=FakeNetwork())
 
                 integration.start_monitoring_thread(interval=0.1)
                 # trunk-ignore(bandit/B101)
@@ -127,10 +139,7 @@ class TestCascorIntegrationMonitoring:
         """Test stop_monitoring is idempotent."""
         with patch.object(CascorIntegration, "_add_backend_to_path"):
             with patch.object(CascorIntegration, "_import_backend_modules"):
-                integration = CascorIntegration.__new__(CascorIntegration)
-                integration.logger = MagicMock()
-                integration.monitoring_active = False
-                integration.monitoring_thread = None
+                integration = create_mock_integration()
 
                 # Call stop_monitoring when not active - should return early
                 integration.stop_monitoring()
@@ -144,9 +153,7 @@ class TestCascorIntegrationMonitoring:
         """Test _extract_current_metrics extracts metrics from network history."""
         with patch.object(CascorIntegration, "_add_backend_to_path"):
             with patch.object(CascorIntegration, "_import_backend_modules"):
-                integration = CascorIntegration.__new__(CascorIntegration)
-                integration.logger = MagicMock()
-                integration.network = FakeNetwork(with_history=True)
+                integration = create_mock_integration(network=FakeNetwork(with_history=True))
 
                 metrics = integration._extract_current_metrics()
 
@@ -169,9 +176,7 @@ class TestCascorIntegrationMonitoring:
         """Test _extract_current_metrics with empty history."""
         with patch.object(CascorIntegration, "_add_backend_to_path"):
             with patch.object(CascorIntegration, "_import_backend_modules"):
-                integration = CascorIntegration.__new__(CascorIntegration)
-                integration.logger = MagicMock()
-                integration.network = FakeNetwork(with_history=False)
+                integration = create_mock_integration(network=FakeNetwork(with_history=False))
 
                 metrics = integration._extract_current_metrics()
 
@@ -186,9 +191,7 @@ class TestCascorIntegrationMonitoring:
         """Test _extract_current_metrics returns empty dict when no network."""
         with patch.object(CascorIntegration, "_add_backend_to_path"):
             with patch.object(CascorIntegration, "_import_backend_modules"):
-                integration = CascorIntegration.__new__(CascorIntegration)
-                integration.logger = MagicMock()
-                integration.network = None
+                integration = create_mock_integration(network=None)
 
                 metrics = integration._extract_current_metrics()
 
@@ -199,12 +202,9 @@ class TestCascorIntegrationMonitoring:
         """Test _extract_current_metrics when network has no history attribute."""
         with patch.object(CascorIntegration, "_add_backend_to_path"):
             with patch.object(CascorIntegration, "_import_backend_modules"):
-                integration = CascorIntegration.__new__(CascorIntegration)
-                integration.logger = MagicMock()
-
                 # Network without history attribute
                 network = MagicMock(spec=["input_size", "output_size"])
-                integration.network = network
+                integration = create_mock_integration(network=network)
 
                 metrics = integration._extract_current_metrics()
 
@@ -215,8 +215,7 @@ class TestCascorIntegrationMonitoring:
         """Test _broadcast_message calls WebSocket broadcast."""
         with patch.object(CascorIntegration, "_add_backend_to_path"):
             with patch.object(CascorIntegration, "_import_backend_modules"):
-                integration = CascorIntegration.__new__(CascorIntegration)
-                integration.logger = MagicMock()
+                integration = create_mock_integration()
 
                 # Mock the websocket_manager module
                 mock_websocket = MagicMock()
@@ -231,8 +230,7 @@ class TestCascorIntegrationMonitoring:
         """Test _broadcast_message handles exceptions gracefully."""
         with patch.object(CascorIntegration, "_add_backend_to_path"):
             with patch.object(CascorIntegration, "_import_backend_modules"):
-                integration = CascorIntegration.__new__(CascorIntegration)
-                integration.logger = MagicMock()
+                integration = create_mock_integration()
 
                 # Mock websocket_manager to raise exception
                 mock_websocket = MagicMock()
@@ -248,9 +246,7 @@ class TestCascorIntegrationMonitoring:
         """Test _monitoring_loop extracts and broadcasts metrics periodically."""
         with patch.object(CascorIntegration, "_add_backend_to_path"):
             with patch.object(CascorIntegration, "_import_backend_modules"):
-                integration = CascorIntegration.__new__(CascorIntegration)
-                integration.logger = MagicMock()
-                integration.network = FakeNetwork(with_history=True)
+                integration = create_mock_integration(network=FakeNetwork(with_history=True))
                 integration.monitoring_active = True
                 integration._broadcast_message = MagicMock()
 
@@ -273,9 +269,7 @@ class TestCascorIntegrationMonitoring:
         """Test _monitoring_loop continues running after exceptions."""
         with patch.object(CascorIntegration, "_add_backend_to_path"):
             with patch.object(CascorIntegration, "_import_backend_modules"):
-                integration = CascorIntegration.__new__(CascorIntegration)
-                integration.logger = MagicMock()
-                integration.network = FakeNetwork(with_history=True)
+                integration = create_mock_integration(network=FakeNetwork(with_history=True))
                 integration.monitoring_active = True
 
                 # Make _broadcast_message raise exception first time, then work
@@ -305,9 +299,7 @@ class TestCascorIntegrationMonitoring:
         """Test _monitoring_loop stops when network is set to None."""
         with patch.object(CascorIntegration, "_add_backend_to_path"):
             with patch.object(CascorIntegration, "_import_backend_modules"):
-                integration = CascorIntegration.__new__(CascorIntegration)
-                integration.logger = MagicMock()
-                integration.network = FakeNetwork(with_history=True)
+                integration = create_mock_integration(network=FakeNetwork(with_history=True))
                 integration.monitoring_active = True
                 integration._broadcast_message = MagicMock()
 
@@ -329,11 +321,7 @@ class TestCascorIntegrationMonitoring:
         """Test start_monitoring_thread uses custom interval."""
         with patch.object(CascorIntegration, "_add_backend_to_path"):
             with patch.object(CascorIntegration, "_import_backend_modules"):
-                integration = CascorIntegration.__new__(CascorIntegration)
-                integration.logger = MagicMock()
-                integration.network = FakeNetwork()
-                integration.monitoring_thread = None
-                integration.monitoring_active = False
+                integration = create_mock_integration(network=FakeNetwork())
 
                 custom_interval = 0.25
                 integration.start_monitoring_thread(interval=custom_interval)

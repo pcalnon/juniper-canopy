@@ -1336,10 +1336,12 @@ class TestTrainEndpointsWithCascor:
     """Test training endpoints with mocked cascor integration."""
 
     @pytest.mark.integration
-    def test_train_start_with_cascor(self, client):
-        """POST /api/train/start should return unimplemented with cascor."""
+    def test_train_start_with_cascor_busy(self, client):
+        """POST /api/train/start should return busy when training in progress."""
         original_demo = main_module.demo_mode_instance
         mock_cascor = MagicMock()
+        # P1-NEW-003: Async training - mock returns True for is_training_in_progress
+        mock_cascor.is_training_in_progress.return_value = True
         original_cascor = main_module.cascor_integration
 
         try:
@@ -1348,7 +1350,49 @@ class TestTrainEndpointsWithCascor:
 
             response = client.post("/api/train/start")
             assert response.status_code == 200
-            assert response.json()["status"] == "unimplemented"
+            assert response.json()["status"] == "busy"
+            assert "already in progress" in response.json()["message"]
+        finally:
+            main_module.demo_mode_instance = original_demo
+            main_module.cascor_integration = original_cascor
+
+    @pytest.mark.integration
+    def test_train_start_with_cascor_no_network(self, client):
+        """POST /api/train/start should return error when no network configured."""
+        original_demo = main_module.demo_mode_instance
+        mock_cascor = MagicMock()
+        mock_cascor.is_training_in_progress.return_value = False
+        mock_cascor.network = None  # No network configured
+        original_cascor = main_module.cascor_integration
+
+        try:
+            main_module.demo_mode_instance = None
+            main_module.cascor_integration = mock_cascor
+
+            response = client.post("/api/train/start")
+            assert response.status_code == 400
+            assert "No network configured" in response.json()["error"]
+        finally:
+            main_module.demo_mode_instance = original_demo
+            main_module.cascor_integration = original_cascor
+
+    @pytest.mark.integration
+    def test_train_start_with_cascor_success(self, client):
+        """POST /api/train/start should start training when conditions met."""
+        original_demo = main_module.demo_mode_instance
+        mock_cascor = MagicMock()
+        mock_cascor.is_training_in_progress.return_value = False
+        mock_cascor.network = MagicMock()  # Network exists
+        mock_cascor.start_training_background.return_value = True
+        original_cascor = main_module.cascor_integration
+
+        try:
+            main_module.demo_mode_instance = None
+            main_module.cascor_integration = mock_cascor
+
+            response = client.post("/api/train/start")
+            assert response.status_code == 200
+            assert response.json()["status"] == "started"
         finally:
             main_module.demo_mode_instance = original_demo
             main_module.cascor_integration = original_cascor
