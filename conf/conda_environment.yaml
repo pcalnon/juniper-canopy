@@ -62,7 +62,8 @@ channels:
   - ehmoussi
   - konstantin-orangeqs
 dependencies:
-  - python=3.14.2=h32b2ec7_100_cp314
+  # - python=3.14.2=h32b2ec7_100_cp314
+  - python=3.14.0=h32b2ec7_100_cp314
 
   # Add other dependencies
   - _libgcc_mutex=0.1=conda_forge
