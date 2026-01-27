@@ -150,117 +150,58 @@ jobs:
       - name: Fix Default Branch Name
         run: |
           echo "Fixing Default Branch Name..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║       Juniper Canopy - Fix Default Branch Name             ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          # git branch -M main
-          # git branch -m main
           git config --global init.defaultBranch main
+
+      - name: Free disk space
+        run: |
+          echo "Freeing disk space before conda setup..."
+          df -h
+          sudo rm -rf /usr/games /usr/share/php* /usr/share/julia*
+          sudo rm -rf /usr/local/julia* /usr/local/gradle* /usr/local/apache-maven*
+          sudo rm -rf /usr/local/kotlinc /usr/local/bison
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet
+          sudo rm -rf /opt/microsoft /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL /opt/hostedtoolcache/go
+          df -h
 
       - name: Set up Conda
         uses: conda-incubator/setup-miniconda@v3
         with:
           python-version: ${{ matrix.python-version }}
-          # channels: conda-forge,pytorch,plotly,defaults
-          channels: conda-forge,pytorch,nvidia,plotly,RMG,numba,jasonb857,ehmoussi,konstantin-orangeqs
+          channels: conda-forge,pytorch,plotly
           conda-remove-defaults: true
           miniforge-version: latest
           use-mamba: true
           channel-priority: flexible
           activate-environment: JuniperCanopy
-          environment-file: conf/conda_environment.yaml
+          environment-file: conf/conda_environment_ci.yaml
           auto-activate-base: false
 
       - name: Verify Conda Environment
         shell: bash -el {0}
         run: |
           echo "Verifying Conda Environment..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║       Juniper Canopy - Verify Conda Environment            ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
           conda list -n JuniperCanopy
-          eval "$(mamba shell hook --shell bash)"
-          mamba shell init --shell bash --root-prefix=~/.local/share/mamba
-          mamba activate JuniperCanopy
-          conda env list
           which python
           python --version
           pip --version
           df -h
-        continue-on-error: true
 
-      - name: Display Directory Contents
-        run: |
-          echo "Displaying directory contents..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Display Directory Contents           ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          echo "ls -Flah /opt" && ls -Flah /opt
-          echo "ls -Flah /usr" && ls -Flah /usr
-          echo "ls -Flah /usr/share" && ls -Flah /usr/share
-          echo "ls -Flah /usr/local" && ls -Flah /usr/local
-          echo "ls -Flah /usr/local/lib" && ls -Flah /usr/local/lib
-          echo "ls -Flah /home" && ls -Flah /home
-          echo "ls -Flah /home/runner" && ls -Flah /home/runner
-          echo "ls -Flah /home/runner/work" && ls -Flah /home/runner/work
-          echo "ls -Flah /home/runner/work/Juniper" && ls -Flah /home/runner/work/Juniper
-          echo "ls -Flah /home/runner/work/Juniper/Juniper" && ls -Flah /home/runner/work/Juniper/Juniper
-          echo "lsblk" && sudo lsblk
-        continue-on-error: true
-
-      - name: Free disk space
-        run: |
-          echo "Freeing disk space..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Free disk space                      ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          df -h
-          conda clean --all
-          sudo rm -rf /usr/games
-          sudo rm -rf /usr/share/php*
-          sudo rm -rf /usr/share/julia*
-
-          sudo rm -rf /usr/local/julia*
-          sudo rm -rf /usr/local/gradle*
-          sudo rm -rf /usr/local/apache-maven*
-          sudo rm -rf /usr/local/kotlinc
-          sudo rm -rf /usr/local/bison
-
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/microsoft
-          sudo rm -rf /opt/ghc
-          df -h
-        continue-on-error: true
-
-      - name: Install Dependencies
+      - name: Install Additional Dependencies
         shell: bash -el {0}
         run: |
-          echo "Installing dependencies..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Install Dependencies                 ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
+          echo "Installing additional dependencies..."
           python -m pip install --upgrade pip
-          pip install -r conf/requirements.txt
+          pip install -r conf/requirements_ci.txt
         continue-on-error: true
 
       - name: Verify Test Files
         shell: bash -el {0}
         run: |
           echo "Verifying Test Files..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Verify Test Files                    ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          echo -ne "\n========== Test Directory Structure ==========================\n"
           ls -la src/tests/
-          echo -ne "\n========== Test Files ========================================\n"
-          find src/tests -name "test_*.py" -type f
-          echo -ne "\n========== Conftest Files ====================================\n"
-          find src/tests -name "conftest.py" -type f
-          echo -ne "\n========== Creating Required Directories =====================\n"
-          mkdir -p logs
-          mkdir -p src/logs
-          mkdir -p reports/junit
+          find src/tests -name "test_*.py" -type f | head -20
+          mkdir -p logs src/logs reports/junit
           echo "Created logs/, src/logs/, reports/junit/"
         continue-on-error: true
 
@@ -490,118 +431,57 @@ jobs:
       - name: Fix Default Branch Name
         run: |
           echo "Fixing Default Branch Name..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║       Juniper Canopy - Fix Default Branch Name             ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          # git branch -M main
-          # git branch -m main
           git config --global init.defaultBranch main
+
+      - name: Free disk space
+        run: |
+          echo "Freeing disk space before conda setup..."
+          df -h
+          sudo rm -rf /usr/games /usr/share/php* /usr/share/julia*
+          sudo rm -rf /usr/local/julia* /usr/local/gradle* /usr/local/apache-maven*
+          sudo rm -rf /usr/local/kotlinc /usr/local/bison
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet
+          sudo rm -rf /opt/microsoft /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL /opt/hostedtoolcache/go
+          df -h
 
       - name: Set up Conda
         uses: conda-incubator/setup-miniconda@v3
         with:
           python-version: ${{ matrix.python-version }}
-          # channels: conda-forge,pytorch,plotly,defaults
-          channels: conda-forge,pytorch,nvidia,RMG,numba,jasonb857,ehmoussi,konstantin-orangeqs
+          channels: conda-forge,pytorch,plotly
           conda-remove-defaults: true
           miniforge-version: latest
           use-mamba: true
           channel-priority: flexible
           activate-environment: JuniperCanopy
-          environment-file: conf/conda_environment.yaml
+          environment-file: conf/conda_environment_ci.yaml
           auto-activate-base: false
 
       - name: Verify Conda Environment
         shell: bash -el {0}
         run: |
           echo "Verifying Conda Environment..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║       Juniper Canopy - Verify Conda Environment            ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
           conda list -n JuniperCanopy
-          eval "$(mamba shell hook --shell bash)"
-          mamba shell init --shell bash --root-prefix=~/.local/share/mamba
-          mamba activate JuniperCanopy
-          conda env list
           which python
           python --version
           pip --version
           df -h
-        continue-on-error: true
 
-      - name: Display Directory Contents
-        run: |
-          echo "Displaying directory contents..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Display Directory Contents           ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          echo "ls -Flah /opt" && ls -Flah /opt
-          echo "ls -Flah /usr" && ls -Flah /usr
-          echo "ls -Flah /usr/share" && ls -Flah /usr/share
-          echo "ls -Flah /usr/local" && ls -Flah /usr/local
-          echo "ls -Flah /usr/local/lib" && ls -Flah /usr/local/lib
-          echo "ls -Flah /home" && ls -Flah /home
-          echo "ls -Flah /home/runner" && ls -Flah /home/runner
-          echo "ls -Flah /home/runner/work" && ls -Flah /home/runner/work
-          echo "ls -Flah /home/runner/work/Juniper" && ls -Flah /home/runner/work/Juniper
-          echo "ls -Flah /home/runner/work/Juniper/Juniper" && ls -Flah /home/runner/work/Juniper/Juniper
-          echo "lsblk" && sudo lsblk
-        continue-on-error: true
-
-      - name: Free disk space
-        run: |
-          echo "Freeing disk space..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Free disk space                      ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          df -h
-          conda clean --all
-          sudo rm -rf /usr/games
-          sudo rm -rf /usr/share/php*
-          sudo rm -rf /usr/share/julia*
-
-          sudo rm -rf /usr/local/julia*
-          sudo rm -rf /usr/local/gradle*
-          sudo rm -rf /usr/local/apache-maven*
-          sudo rm -rf /usr/local/kotlinc
-          sudo rm -rf /usr/local/bison
-
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/microsoft
-          sudo rm -rf /opt/ghc
-          df -h
-        continue-on-error: true
-
-      - name: Install Dependencies
+      - name: Install Additional Dependencies
         shell: bash -el {0}
         run: |
-          echo "Installing Dependencies..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Install Dependencies                 ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
+          echo "Installing additional dependencies..."
           python -m pip install --upgrade pip
-          pip install -r conf/requirements.txt
+          pip install -r conf/requirements_ci.txt
 
       - name: Verify Test Files
         shell: bash -el {0}
         run: |
           echo "Verifying Test Files..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Verify Test Files                    ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          echo -ne "\n========== Test Directory Structure ==========================\n"
           ls -la src/tests/
-          echo -ne "\n========== Test Files ========================================\n"
-          find src/tests -name "test_*.py" -type f
-          echo -ne "\n========== Conftest Files ====================================\n"
-          find src/tests -name "conftest.py" -type f
-          echo -ne "\n========== Creating Required Directories =====================\n"
-          mkdir -p logs
-          mkdir -p src/logs
-          mkdir -p reports/junit
-          echo "Created logs/, src/logs/, reports/junit/"
-        continue-on-error: true
+          find src/tests -name "test_*.py" -type f | head -20
+          mkdir -p logs src/logs reports/junit
 
       - name: Run Integration Tests Only
         shell: bash -el {0}
