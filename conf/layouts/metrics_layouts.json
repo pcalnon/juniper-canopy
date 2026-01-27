@@ -13,7 +13,7 @@
   },
   "test_layout": {
     "name": "test_layout",
-    "created": "2026-01-26T13:07:28.619089+00:00Z",
+    "created": "2026-01-26T21:42:01.431385+00:00Z",
     "description": "Test layout",
     "selected_metrics": [
       "loss",
@@ -25,7 +25,7 @@
   },
   "metrics_test_layout": {
     "name": "metrics_test_layout",
-    "created": "2026-01-26T13:07:28.653777+00:00Z",
+    "created": "2026-01-26T21:42:01.438485+00:00Z",
     "description": "",
     "selected_metrics": [
       "loss",
@@ -37,7 +37,7 @@
   },
   "get_test_layout": {
     "name": "get_test_layout",
-    "created": "2026-01-26T13:07:28.662662+00:00Z",
+    "created": "2026-01-26T21:42:01.447914+00:00Z",
     "description": "",
     "selected_metrics": [
       "loss",
@@ -49,7 +49,7 @@
   },
   "hyper_layout": {
     "name": "hyper_layout",
-    "created": "2026-01-26T13:07:29.571925+00:00Z",
+    "created": "2026-01-26T21:42:02.191502+00:00Z",
     "description": "",
     "selected_metrics": [
       "loss",
@@ -61,7 +61,7 @@
   },
   "smoothing_test_layout": {
     "name": "smoothing_test_layout",
-    "created": "2026-01-26T13:07:29.599393+00:00Z",
+    "created": "2026-01-26T21:42:02.198997+00:00Z",
     "description": "",
     "selected_metrics": [
       "loss",
@@ -73,7 +73,7 @@
   },
   "first_layout": {
     "name": "first_layout",
-    "created": "2026-01-26T13:07:29.805896+00:00Z",
+    "created": "2026-01-26T21:42:02.367367+00:00Z",
     "description": "",
     "selected_metrics": [
       "loss",
@@ -85,7 +85,7 @@
   },
   "second_layout": {
     "name": "second_layout",
-    "created": "2026-01-26T13:07:29.840404+00:00Z",
+    "created": "2026-01-26T21:42:02.369058+00:00Z",
     "description": "",
     "selected_metrics": [
       "loss",
@@ -97,7 +97,7 @@
   },
   "default_metrics_layout": {
     "name": "default_metrics_layout",
-    "created": "2026-01-26T13:07:29.863892+00:00Z",
+    "created": "2026-01-26T21:42:02.381916+00:00Z",
     "description": "",
     "selected_metrics": [
       "loss",
