@@ -193,7 +193,10 @@ jobs:
           echo "Installing additional dependencies..."
           python -m pip install --upgrade pip
           pip install -r conf/requirements_ci.txt
-        continue-on-error: true
+          echo "Verifying critical packages..."
+          python -c "import a2wsgi; print('a2wsgi OK')"
+          python -c "import fastapi; print('fastapi OK')"
+          python -c "import dash; print('dash OK')"
 
       - name: Verify Test Files
         shell: bash -el {0}
@@ -474,13 +477,15 @@ jobs:
           echo "Installing additional dependencies..."
           python -m pip install --upgrade pip
           pip install -r conf/requirements_ci.txt
+          echo "Verifying critical packages..."
+          python -c "import a2wsgi; print('a2wsgi OK')"
+          python -c "import fastapi; print('fastapi OK')"
 
       - name: Verify Test Files
         shell: bash -el {0}
         run: |
           echo "Verifying Test Files..."
           ls -la src/tests/
-          find src/tests -name "test_*.py" -type f | head -20
           mkdir -p logs src/logs reports/junit
 
       - name: Run Integration Tests Only

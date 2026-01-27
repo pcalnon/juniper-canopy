@@ -77,7 +77,6 @@ dependencies:
 
   # Web framework
   - fastapi
-  - a2wsgi
   - uvicorn
   - starlette
   - websockets
@@ -131,7 +130,7 @@ dependencies:
   - python-dateutil
   - six
 
-  # PyTorch CPU-only for CI (much smaller than GPU version)
-  # Note: torch CPU version will be installed via requirements.txt or pip directly
+  # Packages not available on conda-forge (install via pip)
   - pip:
+      - a2wsgi
       - torch
