@@ -398,9 +398,8 @@ dependencies:
 
   # PyTorch and Triton installed via pip (not available on conda-forge for Python 3.14)
   - pip:
-      - a2wsgi
-      - anyio
+      # PyTorch and Triton are pinned for reproducible builds
       # - torch>=2.0
-      - torch
+      - torch==2.5.0
       # - triton>=2.0
-      - triton
+      - triton==3.1.0
