@@ -1671,8 +1671,8 @@ Fix by: 2025-11-12
 - [CICD_QUICK_START.md](CICD_QUICK_START.md) - Quick start guide
 - [CICD_ENVIRONMENT_SETUP.md](CICD_ENVIRONMENT_SETUP.md) - Environment configuration
 - [CICD_REFERENCE.md](CICD_REFERENCE.md) - Technical reference
-- [PRE_COMMIT_GUIDE.md](PRE_COMMIT_GUIDE.md) - Pre-commit hooks
-- [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) - Deployment procedures
+- [AGENTS.md](../../AGENTS.md) - Project development guide
+- [README.md](../../README.md) - Project overview
 
 ### External Resources
 
@@ -1684,6 +1684,6 @@ Fix by: 2025-11-12
 
 ---
 
-**Last Updated:** 2025-11-05  
-**Version:** 1.0.0  
+**Last Updated:** 2026-01-29  
+**Version:** 0.25.0  
 **Status:** ✅ Complete

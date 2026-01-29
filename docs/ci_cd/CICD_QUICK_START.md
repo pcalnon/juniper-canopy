@@ -1,8 +1,8 @@
 # CI/CD Quick Start Guide
 
-**Last Updated:** 2025-11-11  
+**Last Updated:** 2026-01-29  
 **Time to Complete:** ~5 minutes  
-**Version:** 2.0.0
+**Version:** 0.25.0
 
 ---
 
@@ -240,7 +240,8 @@ cd src && pytest tests/ -v
 - [CI/CD Manual](CICD_MANUAL.md) - Complete guide
 - [Environment Setup](CICD_ENVIRONMENT_SETUP.md) - Configuration
 - [Reference](CICD_REFERENCE.md) - Technical specs
-- [Pre-commit Guide](../deployment/PRE_COMMIT_GUIDE.md) - Hook details
+- [AGENTS.md](../../AGENTS.md) - Project development guide
+- [README.md](../../README.md) - Project overview
 
 ---
 

@@ -1,5 +1,8 @@
 # Testing Quick Start Guide
 
+**Last Updated:** January 29, 2026  
+**Version:** v0.25.0
+
 Get up and running with tests in **5 minutes**.
 
 ## Prerequisites
@@ -16,7 +19,7 @@ pytest --version
 
 ```bash
 # From project root
-cd /home/pcalnon/Development/python/JuniperCanopy/juniper_canopy
+cd /home/pcalnon/Development/python/Juniper/JuniperCanopy/juniper_canopy
 
 # Run all tests
 pytest
@@ -93,7 +96,7 @@ which python
 
 ```bash
 # Run from project root
-cd /home/pcalnon/Development/python/JuniperCanopy/juniper_canopy
+cd /home/pcalnon/Development/python/Juniper/JuniperCanopy/juniper_canopy
 
 # Check pytest configuration
 cat src/tests/pytest.ini

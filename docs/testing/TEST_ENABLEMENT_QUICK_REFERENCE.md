@@ -1,5 +1,8 @@
 # Test Enablement Quick Reference Card
 
+**Last Updated:** January 29, 2026  
+**Version:** v0.25.0
+
 ## Environment Variables
 
 ```bash
@@ -67,4 +70,4 @@ pytest --collect-only -q | head -20
 
 ## See Full Guide
 
-[docs/SELECTIVE_TEST_GUIDE.md](docs/SELECTIVE_TEST_GUIDE.md)
+[SELECTIVE_TEST_GUIDE.md](SELECTIVE_TEST_GUIDE.md)

@@ -2,9 +2,9 @@
 
 ## Complete guide for CasCor backend integration in Juniper Canopy
 
-**Version:** 0.4.0  
+**Version:** 0.25.0  
 **Status:** ✅ PARTIALLY IMPLEMENTED  
-**Last Updated:** November 7, 2025
+**Last Updated:** January 29, 2026
 
 ---
 
@@ -25,6 +25,8 @@ The CasCor backend integration (`src/backend/cascor_integration.py`) provides a 
 - ✅ Prediction function access
 - ✅ Background monitoring thread
 - ✅ Automatic fallback to demo mode
+- ✅ Async training support (`fit_async`, `start_training_background`)
+- ✅ Remote worker integration for distributed training
 
 **Planned:**
 
@@ -41,6 +43,8 @@ The CasCor backend integration (`src/backend/cascor_integration.py`) provides a 
 - [Installation](#installation)
 - [Basic Usage](#basic-usage)
 - [Advanced Features](#advanced-features)
+- [Async Training](#async-training)
+- [Remote Worker Integration](#remote-worker-integration)
 - [Monitoring Hooks](#monitoring-hooks)
 - [API Reference](#api-reference)
 - [Testing](#testing)
@@ -375,6 +379,141 @@ print(f"Hidden units: {status['hidden_units']}")
 
 ---
 
+## Async Training
+
+The CasCor integration supports asynchronous training to keep the UI responsive during long training sessions.
+
+### Using fit_async
+
+The `fit_async` method runs training in a background thread and returns an awaitable:
+
+```python
+import asyncio
+from backend.cascor_integration import CascorIntegration
+
+async def train_network():
+    integration = CascorIntegration()
+    network = integration.create_network({
+        'input_size': 2,
+        'output_size': 1,
+        'max_hidden_units': 5
+    })
+
+    # Prepare data
+    x = torch.tensor([[0, 0], [0, 1], [1, 0], [1, 1]], dtype=torch.float32)
+    y = torch.tensor([[0], [1], [1], [0]], dtype=torch.float32)
+
+    # Async training - UI remains responsive
+    history = await integration.fit_async(x, y, {'learning_rate': 0.01})
+
+    print(f"Training complete: {history['train_loss'][-1]:.4f}")
+
+asyncio.run(train_network())
+```
+
+### Using start_training_background
+
+For fire-and-forget training, use `start_training_background`:
+
+```python
+from backend.cascor_integration import CascorIntegration
+
+integration = CascorIntegration()
+network = integration.create_network(config)
+
+# Start training in background (returns immediately)
+integration.start_training_background(x, y, {'learning_rate': 0.01})
+
+# Check training status
+while integration.is_training_in_progress():
+    status = integration.get_training_status()
+    print(f"Epoch: {status['current_epoch']}")
+    time.sleep(1.0)
+
+print("Training complete!")
+```
+
+### Stopping Training
+
+Request graceful training stop:
+
+```python
+# Request stop (training completes current epoch)
+integration.request_training_stop()
+
+# Check if still running
+if not integration.is_training_in_progress():
+    print("Training stopped")
+```
+
+---
+
+## Remote Worker Integration
+
+The CasCor integration supports distributed training via remote workers for improved performance on large datasets.
+
+### Connecting to Remote Workers
+
+```python
+from backend.cascor_integration import CascorIntegration
+
+integration = CascorIntegration()
+
+# Connect to existing remote worker manager
+integration.connect_remote_workers(
+    address=('192.168.1.100', 5000),
+    authkey=b'secret_key'
+)
+
+# Verify connection
+status = integration.get_remote_worker_status()
+print(f"Connected workers: {status['connected_workers']}")
+print(f"Worker status: {status['status']}")
+```
+
+### Starting Local Workers
+
+Start worker processes on the local machine:
+
+```python
+# Start 4 local worker processes
+integration.start_remote_workers(num_workers=4)
+
+# Check worker status
+status = integration.get_remote_worker_status()
+print(f"Active workers: {status['active_workers']}")
+print(f"Pending tasks: {status['pending_tasks']}")
+```
+
+### Stopping Workers
+
+```python
+# Stop workers with timeout
+integration.stop_remote_workers(timeout=5.0)
+
+# Or disconnect without stopping
+integration.disconnect_remote_workers()
+```
+
+### Worker Status
+
+```python
+status = integration.get_remote_worker_status()
+
+# Status dictionary structure:
+# {
+#     'connected': True,
+#     'active_workers': 4,
+#     'connected_workers': 4,
+#     'pending_tasks': 0,
+#     'completed_tasks': 127,
+#     'status': 'running',
+#     'address': ('192.168.1.100', 5000)
+# }
+```
+
+---
+
 ## Monitoring Hooks
 
 ### Hook Architecture
@@ -465,6 +604,15 @@ See [CASCOR_BACKEND_REFERENCE.md](CASCOR_BACKEND_REFERENCE.md) for complete API 
 - `get_dataset_info(x, y)` - Get dataset information
 - `get_prediction_function()` - Get prediction function
 - `get_training_status()` - Get training status
+- `fit_async(data, params)` - Async training
+- `start_training_background(data, params)` - Background training
+- `is_training_in_progress()` - Check training status
+- `request_training_stop()` - Request training stop
+- `connect_remote_workers(address, authkey)` - Connect to workers
+- `start_remote_workers(num_workers)` - Start local workers
+- `stop_remote_workers(timeout)` - Stop workers
+- `disconnect_remote_workers()` - Disconnect from workers
+- `get_remote_worker_status()` - Get worker status
 - `shutdown()` - Cleanup resources
 
 ---
@@ -550,8 +698,8 @@ with CascorIntegration() as integration:
 
 ---
 
-**Last Updated:** November 7, 2025  
-**Version:** 0.4.0  
+**Last Updated:** January 29, 2026  
+**Version:** 0.25.0  
 **Status:** ✅ PARTIALLY IMPLEMENTED
 
 **Explore advanced features and integrate with your workflow!**

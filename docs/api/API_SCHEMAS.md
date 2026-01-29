@@ -1,7 +1,7 @@
 # API Response Schemas
 
-**Last Updated:** 2025-11-13  
-**Version:** 0.1.0  
+**Last Updated:** January 29, 2026  
+**Version:** 1.1.0  
 **Status:** Current
 
 ## Table of Contents
@@ -24,6 +24,12 @@
     - [POST /api/train/resume](#post-apitrainresume)
     - [POST /api/train/stop](#post-apitrainstop)
     - [POST /api/train/reset](#post-apitrainreset)
+    - [GET /api/train/status](#get-apitrainstatus)
+  - [Remote Worker Endpoints](#remote-worker-endpoints)
+    - [GET /api/remote/status](#get-apiremotestatus)
+    - [POST /api/remote/connect](#post-apiremoteconnect)
+    - [POST /api/remote/start\_workers](#post-apiremotestart_workers)
+    - [POST /api/remote/stop\_workers](#post-apiremotestop_workers)
   - [WebSocket Endpoints](#websocket-endpoints)
     - [WS /ws/training](#ws-wstraining)
     - [WS /ws/control](#ws-wscontrol)
@@ -563,6 +569,185 @@ Reset training to initial state.
 
 - `200`: Success
 - `503`: No backend available
+
+---
+
+### GET /api/train/status
+
+Get current training status flags.
+
+**Response:**
+
+```json
+{
+  "is_training_in_progress": true,
+  "stop_requested": false
+}
+```
+
+**Response Fields:**
+
+- `is_training_in_progress` (boolean): Whether training is currently running
+- `stop_requested` (boolean): Whether a stop has been requested but not yet completed
+
+**Status Codes:**
+
+- `200`: Success
+- `503`: No backend available
+
+---
+
+## Remote Worker Endpoints
+
+### GET /api/remote/status
+
+Get remote worker connection status.
+
+**Response:**
+
+```json
+{
+  "connected": true,
+  "address": "localhost:5000",
+  "workers_active": 4
+}
+```
+
+**Response (Not Connected):**
+
+```json
+{
+  "connected": false,
+  "address": null,
+  "workers_active": 0
+}
+```
+
+**Response Fields:**
+
+- `connected` (boolean): Whether connected to remote worker manager
+- `address` (string | null): Address of connected remote manager, or null if not connected
+- `workers_active` (integer): Number of currently active workers
+
+**Status Codes:**
+
+- `200`: Success
+- `503`: No backend available
+
+---
+
+### POST /api/remote/connect
+
+Connect to a remote worker manager.
+
+**Request:**
+
+```json
+{
+  "address": "localhost:5000",
+  "authkey": "optional-auth-key"
+}
+```
+
+**Request Fields:**
+
+- `address` (string, required): Address of the remote worker manager (host:port)
+- `authkey` (string, optional): Authentication key for secure connection
+
+**Response:**
+
+```json
+{
+  "status": "connected",
+  "address": "localhost:5000"
+}
+```
+
+**Response Fields:**
+
+- `status` (string): Connection status ("connected")
+- `address` (string): Address of connected remote manager
+
+**Status Codes:**
+
+- `200`: Success
+- `400`: Invalid address format
+- `503`: No backend available or connection failed
+
+---
+
+### POST /api/remote/start_workers
+
+Start remote worker processes.
+
+**Request:**
+
+```json
+{
+  "num_workers": 4
+}
+```
+
+**Request Fields:**
+
+- `num_workers` (integer, required): Number of worker processes to start
+
+**Response:**
+
+```json
+{
+  "status": "started",
+  "workers_active": 4
+}
+```
+
+**Response Fields:**
+
+- `status` (string): Operation status ("started")
+- `workers_active` (integer): Number of workers now active
+
+**Status Codes:**
+
+- `200`: Success
+- `400`: Invalid number of workers
+- `503`: No backend available or not connected to remote manager
+
+---
+
+### POST /api/remote/stop_workers
+
+Stop remote worker processes.
+
+**Request:**
+
+```json
+{
+  "timeout": 30
+}
+```
+
+**Request Fields:**
+
+- `timeout` (integer, optional): Timeout in seconds for graceful shutdown (default: 30)
+
+**Response:**
+
+```json
+{
+  "status": "stopped",
+  "workers_active": 0
+}
+```
+
+**Response Fields:**
+
+- `status` (string): Operation status ("stopped")
+- `workers_active` (integer): Number of workers still active (should be 0)
+
+**Status Codes:**
+
+- `200`: Success
+- `503`: No backend available or not connected to remote manager
 
 ---
 

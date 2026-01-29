@@ -779,8 +779,11 @@ if epoch % 30 == 0:
 
 ---
 
+**Last Updated:** January 29, 2026
+**Version:** v0.25.0
+
 **See Also:**
 
-- [AGENTS.md](../AGENTS.md) - Development guide
-- [README.md](../README.md) - Project overview
-- [DEVELOPMENT_ROADMAP.md](../notes/DEVELOPMENT_ROADMAP.md) - Planned features
+- [AGENTS.md](../../AGENTS.md) - Development guide
+- [README.md](../../README.md) - Project overview
+- [DEVELOPMENT_ROADMAP.md](../../notes/DEVELOPMENT_ROADMAP.md) - Planned features

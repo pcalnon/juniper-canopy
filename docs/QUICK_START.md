@@ -2,9 +2,9 @@
 
 ## Get Juniper Canopy running in 5 minutes
 
-**Version:** 0.4.0  
+**Version:** 0.25.0  
 **Status:** ✅ Production Ready  
-**Last Updated:** November 11, 2025  
+**Last Updated:** January 29, 2026  
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring  
 
 ---
@@ -148,7 +148,7 @@ curl http://localhost:8050/api/metrics
 # Expected: JSON with epoch, loss, accuracy, etc.
 
 # Get network topology
-curl http://localhost:8050/api/network/topology
+curl http://localhost:8050/api/topology
 
 # Expected: JSON with network structure
 ```
@@ -476,10 +476,10 @@ pip install -r conf/requirements.txt
 
 ### Learn More
 
-- **[README.md](README.md)** - Complete project overview and features
+- **[README.md](../README.md)** - Complete project overview and features
 - **[ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)** - Detailed environment configuration
-- **[AGENTS.md](AGENTS.md)** - Development guide and conventions
-- **[docs/CI_CD.md](docs/CI_CD.md)** - Testing and CI/CD workflows
+- **[AGENTS.md](../AGENTS.md)** - Development guide and conventions
+- **[CI/CD Guide](ci_cd/CICD_QUICK_START.md)** - Testing and CI/CD workflows
 
 ### Start Developing
 
@@ -656,7 +656,7 @@ ws://localhost:8050/ws/control
 - [ ] Running from correct directory? (`pwd` should end with juniper_canopy)
 - [ ] Logs showing errors? (`tail -f logs/system.log`)
 
-**Still stuck?** See [AGENTS.md](AGENTS.md) Common Issues section.
+**Still stuck?** See [AGENTS.md](../AGENTS.md) Common Issues section.
 
 ---
 
@@ -665,8 +665,8 @@ ws://localhost:8050/ws/control
 ### Documentation
 
 - **[DOCUMENTATION_OVERVIEW.md](DOCUMENTATION_OVERVIEW.md)** - Complete doc navigation
-- **[AGENTS.md](AGENTS.md)** - Development guide with troubleshooting
-- **[CHANGELOG.md](CHANGELOG.md)** - Version history and known issues
+- **[AGENTS.md](../AGENTS.md)** - Development guide with troubleshooting
+- **[CHANGELOG.md](../CHANGELOG.md)** - Version history and known issues
 
 ### Check Logs for Issues
 
@@ -718,29 +718,29 @@ conda list | grep -E "(fastapi|dash|uvicorn)"
 
 ### For Developers
 
-1. Read [AGENTS.md](AGENTS.md) development guide
-2. Set up [pre-commit hooks](docs/PRE_COMMIT_GUIDE.md)
-3. Run [test suite](docs/CI_CD.md)
-4. Review [code style guidelines](AGENTS.md#code-style-guidelines)
+1. Read [AGENTS.md](../AGENTS.md) development guide
+2. Set up [pre-commit hooks](ci_cd/CICD_QUICK_START.md)
+3. Run [test suite](ci_cd/CICD_QUICK_START.md)
+4. Review [code style guidelines](../AGENTS.md#code-style-guidelines)
 
 ### For Users
 
 1. Explore all dashboard tabs
 2. Experiment with demo mode parameters
 3. Try connecting to real CasCor backend
-4. Review [feature documentation](README.md#key-features)
+4. Review [feature documentation](../README.md#active-research-components)
 
 ### For Contributors
 
-1. Read [contributing guidelines](AGENTS.md#contributing)
-2. Review [definition of done](AGENTS.md#definition-of-done)
-3. Check [development roadmap](docs/history/) for open tasks
-4. Set up [CI/CD locally](docs/CI_CD.md)
+1. Read [contributing guidelines](../AGENTS.md#contributing)
+2. Review [definition of done](../AGENTS.md#definition-of-done)
+3. Check [development roadmap](../notes/) for open tasks
+4. Set up [CI/CD locally](ci_cd/CICD_QUICK_START.md)
 
 ---
 
-**Last Updated:** November 7, 2025  
-**Version:** 0.4.0  
+**Last Updated:** January 29, 2026  
+**Version:** 0.25.0  
 **Status:** ✅ Production Ready
 
 ```markdown

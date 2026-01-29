@@ -92,8 +92,11 @@ export CASCOR_SERVER_PORT=8051
 
 ---
 
+**Last Updated:** January 29, 2026
+**Version:** v0.25.0
+
 **See Also:**
 
-- [Main README](../README.md) - Project overview
-- [AGENTS.md](../AGENTS.md) - Development guide
-- [CHANGELOG.md](../CHANGELOG.md) - Recent changes
+- [Main README](../../README.md) - Project overview
+- [AGENTS.md](../../AGENTS.md) - Development guide
+- [CHANGELOG.md](../../CHANGELOG.md) - Recent changes

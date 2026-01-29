@@ -1,5 +1,8 @@
 # Testing Reference - Technical Documentation
 
+**Last Updated:** January 29, 2026  
+**Version:** v0.25.0
+
 Complete technical reference for the Juniper Canopy testing infrastructure.
 
 ## Table of Contents

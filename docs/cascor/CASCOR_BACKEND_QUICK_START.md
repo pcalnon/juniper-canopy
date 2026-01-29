@@ -2,9 +2,9 @@
 
 ## Connect to real CasCor backend in 5 minutes
 
-**Version:** 0.4.0  
-**Status:** ✅ PARTIALLY IMPLEMENTED  
-**Last Updated:** November 7, 2025
+**Version:** 0.25.0  
+**Status:** ✅ ASYNC TRAINING READY  
+**Last Updated:** January 29, 2026
 
 ---
 
@@ -18,8 +18,12 @@
 - ✅ Real-time metrics extraction
 - ✅ Network topology visualization
 - ✅ Automatic fallback to Demo Mode if backend unavailable
+- ✅ Async training support (non-blocking fit)
+- ✅ Background training start capability
+- ✅ Training status and stop request support
+- ✅ Remote worker integration for distributed training
 
-**Current Status:** Partially implemented in `src/backend/cascor_integration.py`
+**Current Status:** Async training ready in `src/backend/cascor_integration.py`
 
 ---
 
@@ -511,6 +515,73 @@ tail -f logs/system.log | grep "Monitoring hooks"
 
 ---
 
+## Async Training (v0.25.0)
+
+**v0.25.0 adds non-blocking training support** via `fit_async()` and `start_training_background()` methods.
+
+### Start Training in Background
+
+```python
+from backend.cascor_integration import CascorIntegration
+
+integration = CascorIntegration()
+network = integration.create_network(...)
+
+# Start training without blocking
+integration.start_training_background(x_train, y_train, epochs=100)
+
+# Check if training is in progress
+if integration.is_training_in_progress():
+    print("Training running...")
+
+# Request training to stop gracefully
+integration.request_training_stop()
+```
+
+### Using fit_async()
+
+```python
+import asyncio
+
+# Non-blocking fit (returns Future)
+future = integration.fit_async(x_train, y_train, epochs=100)
+
+# Do other work while training runs...
+
+# Wait for completion when needed
+result = future.result()
+```
+
+**Note:** Background training runs in a `ThreadPoolExecutor`, allowing the UI to remain responsive during training.
+
+---
+
+## Remote Workers (v0.25.0)
+
+**v0.25.0 adds distributed training support** via `RemoteWorkerClient` integration.
+
+### Connect to Remote Workers
+
+```python
+from backend.cascor_integration import CascorIntegration
+
+integration = CascorIntegration()
+
+# Connect to remote worker
+integration.connect_remote_worker(host="192.168.1.100", port=5000)
+
+# Start distributed training
+integration.start_remote_training(x_train, y_train, worker_count=4)
+
+# Monitor remote worker status
+status = integration.get_remote_worker_status()
+print(f"Workers active: {status['active_workers']}")
+```
+
+**See [CASCOR_BACKEND_MANUAL.md](CASCOR_BACKEND_MANUAL.md) for complete remote worker configuration and advanced distributed training options.**
+
+---
+
 ## Next Steps
 
 ### Explore Integration Features
@@ -653,8 +724,8 @@ integration.create_monitoring_callback('epoch_end', on_epoch_end)
 
 ---
 
-**Last Updated:** November 7, 2025  
-**Version:** 0.4.0  
-**Status:** ✅ PARTIALLY IMPLEMENTED
+**Last Updated:** January 29, 2026  
+**Version:** 0.25.0  
+**Status:** ✅ ASYNC TRAINING READY
 
 **Ready to use! See [CASCOR_BACKEND_MANUAL.md](CASCOR_BACKEND_MANUAL.md) for advanced features!**

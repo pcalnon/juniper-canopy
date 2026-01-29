@@ -2,8 +2,8 @@
 
 ## Complete Navigation Guide to Juniper Canopy Documentation
 
-**Version:** 0.4.1  
-**Last Updated:** November 11, 2025  
+**Version:** 0.25.0  
+**Last Updated:** January 29, 2026  
 **Project:** Juniper Canopy - Real-Time CasCor Monitoring Frontend
 
 ---
@@ -34,23 +34,22 @@
 
 ### I Want To
 
-| Goal                         | Document                                                          | Location    |
-| ---------------------------- | ----------------------------------------------------------------- | ----------- |
-| **Get the app running**      | [QUICK_START.md](QUICK_START.md)                                  | Root        |
-| **Understand the project**   | [README.md](README.md)                                            | Root        |
-| **Set up my environment**    | [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)                      | Root        |
-| **Run tests**                | [TESTING_QUICK_START.md](TESTING_QUICK_START.md)                  | Root        |
-| **Set up test environment**  | [TESTING_ENVIRONMENT_SETUP.md](TESTING_ENVIRONMENT_SETUP.md)      | Root        |
-| **Learn testing**            | [TESTING_MANUAL.md](TESTING_MANUAL.md)                            | Root        |
-| **View coverage reports**    | [TESTING_REPORTS_COVERAGE.md](TESTING_REPORTS_COVERAGE.md)        | Root        |
-| **Testing reference**        | [TESTING_REFERENCE.md](TESTING_REFERENCE.md)                      | Root        |
-| **Get CI/CD running**        | [CICD_QUICK_START.md](docs/ci_cd/CICD_QUICK_START.md)             | docs/ci_cd/ |
-| **Set up CI/CD environment** | [CICD_ENVIRONMENT_SETUP.md](docs/ci_cd/CICD_ENVIRONMENT_SETUP.md) | docs/ci_cd/ |
-| **Learn CI/CD workflow**     | [CICD_MANUAL.md](docs/ci_cd/CICD_MANUAL.md)                       | docs/ci_cd/ |
-| **CI/CD reference**          | [CICD_REFERENCE.md](docs/ci_cd/CICD_REFERENCE.md)                 | docs/ci_cd/ |
-| **See version history**      | [CHANGELOG.md](CHANGELOG.md)                                      | Root        |
-| **Contribute code**          | [AGENTS.md](AGENTS.md)                                            | Root        |
-| **Find external links**      | [references_and_links.md](docs/references_and_links.md)           | docs/       |
+| Goal                         | Document                                                                  | Location       |
+| ---------------------------- | ------------------------------------------------------------------------- | -------------- |
+| **Get the app running**      | [QUICK_START.md](QUICK_START.md)                                          | docs/          |
+| **Understand the project**   | [README.md](../README.md)                                                 | Root           |
+| **Set up my environment**    | [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)                              | docs/          |
+| **Run tests**                | [TESTING_QUICK_START.md](testing/TESTING_QUICK_START.md)                  | docs/testing/  |
+| **Set up test environment**  | [TESTING_ENVIRONMENT_SETUP.md](testing/TESTING_ENVIRONMENT_SETUP.md)      | docs/testing/  |
+| **Learn testing**            | [TESTING_MANUAL.md](testing/TESTING_MANUAL.md)                            | docs/testing/  |
+| **View coverage reports**    | [TESTING_REPORTS_COVERAGE.md](testing/TESTING_REPORTS_COVERAGE.md)        | docs/testing/  |
+| **Testing reference**        | [TESTING_REFERENCE.md](testing/TESTING_REFERENCE.md)                      | docs/testing/  |
+| **Get CI/CD running**        | [CICD_QUICK_START.md](ci_cd/CICD_QUICK_START.md)                          | docs/ci_cd/    |
+| **Set up CI/CD environment** | [CICD_ENVIRONMENT_SETUP.md](ci_cd/CICD_ENVIRONMENT_SETUP.md)              | docs/ci_cd/    |
+| **Learn CI/CD workflow**     | [CICD_MANUAL.md](ci_cd/CICD_MANUAL.md)                                    | docs/ci_cd/    |
+| **CI/CD reference**          | [CICD_REFERENCE.md](ci_cd/CICD_REFERENCE.md)                              | docs/ci_cd/    |
+| **See version history**      | [CHANGELOG.md](../CHANGELOG.md)                                           | Root           |
+| **Contribute code**          | [AGENTS.md](../AGENTS.md)                                                 | Root           |
 
 ---
 
@@ -58,7 +57,7 @@
 
 ### Essential Documents (Read First)
 
-#### 1. [README.md](README.md)
+#### 1. [README.md](../README.md)
 
 **Location:** Root directory  
 **Purpose:** Project overview, features, quick start  
@@ -79,7 +78,7 @@
 
 #### 2. [QUICK_START.md](QUICK_START.md)
 
-**Location:** Root directory  
+**Location:** docs/ directory  
 **Purpose:** Get running in 5 minutes  
 **Audience:** New users, developers  
 **Key Sections:**
@@ -97,7 +96,7 @@
 
 #### 3. [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)
 
-**Location:** Root directory  
+**Location:** docs/ directory  
 **Purpose:** Complete environment configuration guide  
 **Audience:** Developers setting up for the first time  
 **Key Sections:**
@@ -113,9 +112,9 @@
 
 ---
 
-#### 4. [AGENTS.md](AGENTS.md)
+#### 4. [AGENTS.md](../AGENTS.md)
 
-**Location:** Root directory (also duplicated in docs/)  
+**Location:** Root directory  
 **Purpose:** AI agent development guide and conventions  
 **Audience:** Developers, AI assistants  
 **Key Sections:**
@@ -136,7 +135,7 @@
 
 ### Project Information
 
-#### [CHANGELOG.md](CHANGELOG.md)
+#### [CHANGELOG.md](../CHANGELOG.md)
 
 **Location:** Root directory  
 **Purpose:** Version history and release notes  
@@ -167,9 +166,6 @@
 ```bash
 juniper_canopy/
 ├── README.md                      ← Start here
-├── QUICK_START.md                 ← Get running fast
-├── ENVIRONMENT_SETUP.md           ← Environment setup
-├── DOCUMENTATION_OVERVIEW.md      ← You are here
 ├── AGENTS.md                      ← Development guide
 ├── CHANGELOG.md                   ← Version history
 ├── conf/                          ← Configuration
@@ -177,15 +173,22 @@ juniper_canopy/
 │   ├── requirements.txt
 │   └── conda_environment.yaml
 ├── docs/                          ← Technical documentation
+│   ├── DOCUMENTATION_OVERVIEW.md  ← You are here
+│   ├── QUICK_START.md             ← Get running fast
+│   ├── ENVIRONMENT_SETUP.md       ← Environment setup
 │   ├── ci_cd/                     ← CI/CD documentation (4 files)
 │   │   ├── CICD_QUICK_START.md
 │   │   ├── CICD_ENVIRONMENT_SETUP.md
 │   │   ├── CICD_MANUAL.md
 │   │   └── CICD_REFERENCE.md
 │   ├── testing/                   ← Testing documentation
+│   │   ├── TESTING_QUICK_START.md
+│   │   ├── TESTING_ENVIRONMENT_SETUP.md
+│   │   ├── TESTING_MANUAL.md
+│   │   ├── TESTING_REFERENCE.md
+│   │   └── TESTING_REPORTS_COVERAGE.md
 │   ├── deployment/                ← Deployment guides
-│   ├── references_and_links.md
-│   └── history/                   ← Historical docs (75+ files)
+│   └── history/                   ← Historical docs
 ├── src/                           ← Source code
 │   ├── main.py                    ← Entry point
 │   ├── demo_mode.py
@@ -207,10 +210,10 @@ juniper_canopy/
 
 ### CI/CD & Quality
 
-> **Note:** CI/CD documentation consolidated on 2025-11-11. All CI/CD guides now in [docs/ci_cd/](docs/ci_cd/).  
-> Legacy files archived to [docs/history/](docs/history/).
+> **Note:** CI/CD documentation consolidated on 2025-11-11. All CI/CD guides now in [docs/ci_cd/](ci_cd/).  
+> Legacy files archived to [docs/history/](history/).
 
-#### [docs/ci_cd/CICD_QUICK_START.md](docs/ci_cd/CICD_QUICK_START.md)
+#### [docs/ci_cd/CICD_QUICK_START.md](ci_cd/CICD_QUICK_START.md)
 
 **Lines:** ~400  
 **Purpose:** Get CI/CD running in 5 minutes  
@@ -231,7 +234,7 @@ juniper_canopy/
 
 ---
 
-#### [docs/ci_cd/CICD_ENVIRONMENT_SETUP.md](docs/ci_cd/CICD_ENVIRONMENT_SETUP.md)
+#### [docs/ci_cd/CICD_ENVIRONMENT_SETUP.md](ci_cd/CICD_ENVIRONMENT_SETUP.md)
 
 **Lines:** ~870  
 **Purpose:** Complete CI/CD environment configuration  
@@ -248,303 +251,151 @@ juniper_canopy/
 **When to Read:**
 
 - Setting up GitHub Actions for first time
-- Modifying CI/CD pipeline
-- Troubleshooting environment issues
+- Modifying CI/CD environment
+- Troubleshooting CI failures
 
 ---
 
-#### [docs/ci_cd/CICD_MANUAL.md](docs/ci_cd/CICD_MANUAL.md)
+#### [docs/ci_cd/CICD_MANUAL.md](ci_cd/CICD_MANUAL.md)
 
 **Lines:** ~1,688  
 **Purpose:** Comprehensive CI/CD usage guide  
-**Audience:** Developers, reviewers  
+**Audience:** All developers  
 **Key Sections:**
 
-- Daily developer workflow
-- Writing and running tests
-- Coverage workflow
-- Pre-commit hooks usage
-- Debugging CI failures
-- Emergency procedures
+- Complete pipeline overview
+- Pre-commit hooks
+- GitHub Actions workflow
+- Testing stages
+- Coverage reporting
+- Troubleshooting
 
 **When to Read:**
 
-- Learning CI/CD workflow
-- Debugging test failures
-- Reviewing pull requests
-- Managing pipeline issues
+- Understanding full CI/CD pipeline
+- Adding new workflow stages
+- Debugging CI issues
 
 ---
 
-#### [docs/ci_cd/CICD_REFERENCE.md](docs/ci_cd/CICD_REFERENCE.md)
+#### [docs/ci_cd/CICD_REFERENCE.md](ci_cd/CICD_REFERENCE.md)
 
 **Lines:** ~1,058  
 **Purpose:** Technical CI/CD reference  
 **Audience:** All developers  
 **Key Sections:**
 
-- Pipeline architecture
-- Workflow specifications
-- Tool configurations
+- Workflow file syntax
+- Action configurations
 - Environment variables
-- Command reference
-- Troubleshooting reference
+- Secret management
+- Artifact handling
+- Matrix testing
 
 **When to Read:**
 
-- Need quick command reference
-- Understanding pipeline details
-- Configuring tools
+- Quick lookup of CI/CD configurations
+- Modifying workflow files
+- Adding new checks
 
 ---
 
-### Configuration & Setup
+### Testing Documentation
 
-#### [conf/app_config.yaml](conf/app_config.yaml)
+> **Note:** Testing documentation located in [docs/testing/](testing/).
 
-**Purpose:** Application configuration  
-**Format:** YAML  
+#### [docs/testing/TESTING_QUICK_START.md](testing/TESTING_QUICK_START.md)
+
+**Purpose:** Get testing in 5 minutes  
+**Audience:** New developers  
 **Key Sections:**
 
-- Server settings (port, host)
-- Demo mode configuration
-- Backend integration paths
-- Logging levels
-- WebSocket settings
-
-**Environment Variable Overrides:**
-
-- Format: `CASCOR_<SECTION>_<KEY>`
-- Example: `CASCOR_SERVER_PORT=8051`
-- Supports `${VAR}` and `$VAR` expansion
+- Prerequisites
+- Running tests
+- Basic test commands
+- Quick troubleshooting
 
 ---
 
-#### [conf/requirements.txt](conf/requirements.txt)
+#### [docs/testing/TESTING_ENVIRONMENT_SETUP.md](testing/TESTING_ENVIRONMENT_SETUP.md)
 
-**Purpose:** Python dependencies  
-**Format:** pip requirements file  
-**Key Dependencies:**
-
-- fastapi
-- uvicorn
-- dash
-- plotly
-- pytest
-- pytest-cov
-- websockets
-
----
-
-#### [conf/conda_environment.yaml](conf/conda_environment.yaml)
-
-**Purpose:** Conda environment specification  
-**Environment Name:** JuniperPython  
-**Python Version:** 3.11+
-
----
-
-### Reference Documentation
-
-#### [docs/references_and_links.md](docs/references_and_links.md)
-
-**Lines:** ~176  
-**Purpose:** External resources and references  
-**Audience:** All users  
+**Purpose:** Complete test environment configuration  
+**Audience:** Developers  
 **Key Sections:**
 
-- FastAPI documentation
-- Dash/Plotly guides
-- WebSocket specifications
-- Testing frameworks
-- CI/CD tools
-- Python best practices
+- Test environment setup
+- Dependencies
+- Configuration
+- Environment variables
+
+---
+
+#### [docs/testing/TESTING_MANUAL.md](testing/TESTING_MANUAL.md)
+
+**Purpose:** Comprehensive testing guide  
+**Audience:** All developers  
+**Key Sections:**
+
+- Test organization
+- Writing tests
+- Running tests
+- Coverage requirements
+- Best practices
+
+---
+
+#### [docs/testing/TESTING_REFERENCE.md](testing/TESTING_REFERENCE.md)
+
+**Purpose:** Technical testing reference  
+**Audience:** Developers  
+**Key Sections:**
+
+- Pytest configuration
+- Fixtures
+- Markers
+- Command reference
+
+---
+
+#### [docs/testing/TESTING_REPORTS_COVERAGE.md](testing/TESTING_REPORTS_COVERAGE.md)
+
+**Purpose:** Coverage analysis and reports  
+**Audience:** Developers  
+**Key Sections:**
+
+- Coverage metrics
+- Report generation
+- Coverage requirements
+- Analysis
 
 ---
 
 ## Development Resources
 
-### Code Style & Conventions
+### Configuration
 
-**Source:** [AGENTS.md](AGENTS.md) - Code Style Guidelines section
-
-**Key Conventions:**
-
-- **File Headers:** Standard project header with author, version, date
-- **Naming:** PascalCase (classes), snake_case (functions), UPPER_SNAKE_CASE (constants)
-- **Metric Naming:** snake_case with `train_`/`val_` prefixes
-- **Thread Safety:** Locks for shared state, Events for signaling
-- **Path Resolution:** Use pathlib, no hardcoded absolute paths
-- **Error Handling:** Appropriate logging levels (debug, info, warning, error)
-
----
-
-### Testing Standards
-
-**Source:** [AGENTS.md](AGENTS.md) - Testing Guidelines section
-
-**Requirements:**
-
-- **No PR without tests** for new/changed behavior
-- **Unit tests:** >80% coverage
-- **Integration tests:** Core workflows covered
-- **Critical paths:** 100% coverage
-- **Regression tests:** For all fixed bugs
-
-**Test Organization:**
-
-```bash
-src/tests/
-├── conftest.py              # Shared fixtures
-├── unit/                    # Unit tests
-├── integration/             # Integration tests
-└── performance/             # Performance tests
-```
-
----
-
-### API & WebSocket Contracts
-
-**Source:** [AGENTS.md](AGENTS.md) - API and WebSocket Contracts section
-
-**REST Endpoints:**
-
-- `GET /api/metrics` - Current training metrics
-- `GET /api/metrics/history` - Historical metrics
-- `GET /api/network/topology` - Network structure
-- `GET /api/decision_boundary` - Decision boundary data
-- `GET /api/dataset` - Current dataset points
-- `GET /health` - Health check
-
-**WebSocket Channels:**
-
-- `/ws/training` - Stream metrics and state updates
-- `/ws/control` - Send commands (start, stop, pause, resume, reset)
-
-**Message Format:**
-
-```json
-{
-  "type": "metrics | state | topology | event",
-  "timestamp": 1234567890.123,
-  "data": { ... }
-}
-```
-
----
-
-### Definition of Done
-
-**Source:** [AGENTS.md](AGENTS.md) - Definition of Done section
-
-**All new/modified code must meet:**
-
-**Code Quality:**
-
-- [ ] Thread safety preserved
-- [ ] Bounded collections for streaming/history buffers
-- [ ] Metric naming follows standard
-- [ ] Proper path resolution
-- [ ] Error handling with appropriate logging
-
-**Testing:**
-
-- [ ] Unit tests added for new functionality
-- [ ] Integration tests for component interactions
-- [ ] Regression tests for fixed bugs
-- [ ] Coverage maintained/increased
-- [ ] All tests passing
-
-**API/Interface:**
-
-- [ ] API/WebSocket changes backward compatible or versioned
-- [ ] Payload schemas documented
-- [ ] No breaking changes without migration plan
-
-**Documentation:**
-
-- [ ] CHANGELOG.md updated
-- [ ] README.md reflects current instructions
-- [ ] Roadmap status updated
-- [ ] Code comments only where complexity requires
+| File                      | Purpose                       | Location |
+| ------------------------- | ----------------------------- | -------- |
+| `conf/app_config.yaml`    | Application configuration     | conf/    |
+| `conf/requirements.txt`   | Python dependencies           | conf/    |
+| `pyproject.toml`          | Python project configuration  | Root     |
+| `.pre-commit-config.yaml` | Pre-commit hook configuration | Root     |
 
 ---
 
 ## Historical Documentation
 
-### Archive Location
+### docs/history/ Directory
 
-**Path:** [docs/history/](docs/history/)  
-**Files:** 67 documents  
-**Total Lines:** ~33,000  
-**Purpose:** Historical record of development, fixes, analyses
+Contains archived documentation that has been superseded or consolidated.
 
-### Categories
+**Location:** [docs/history/](history/)
 
-#### MVP/Implementation Reports (15 files)
+**Purpose:** Historical reference for:
 
-- FINAL_STATUS_2025-11-03.md
-- MVP_COMPLETE_SUMMARY.md
-- MVP_ACHIEVEMENT_REPORT.md
-- PHASE_1_MVP_COMPLETE.md
-- Implementation summaries
-
-**Purpose:** Track MVP completion milestones
-
----
-
-#### Testing Reports (10 files)
-
-- TEST_FIXES_2025-11-03.md
-- FRONTEND_TESTING_2025-11-03.md
-- TESTING_VERIFICATION_REPORT.md
-- Coverage improvement reports
-
-**Purpose:** Document testing evolution and fixes
-
----
-
-#### Bug Fix Reports (12 files)
-
-- REGRESSION_FIX_REPORT.md
-- MISSING_DATA_FIX_2025-10-29.md
-- DASH_FASTAPI_INTEGRATION_FIX.md
-- Frontend fix implementations
-
-**Purpose:** Record bug investigations and solutions
-
----
-
-#### Analysis/Design Documents (12 files)
-
-- architecture_design.md
-- juniper_canopy_design.md
-- technical_specifications.md
-- logging_framework_design.md
-
-**Purpose:** Design decisions and architectural analysis
-
----
-
-#### Integration/Planning (8 files)
-
-- DEVELOPMENT_ROADMAP.md
-- cascor_backend_integration_plan.md
-- INTEGRATION_PATTERNS.md
-
-**Purpose:** Planning and integration strategies
-
----
-
-### When to Consult Historical Docs
-
-**Scenarios:**
-
-1. **Investigating a regression** - Check bug fix reports
-2. **Understanding design decisions** - Review design documents
-3. **Seeing project evolution** - Read MVP completion reports
-4. **Troubleshooting similar issues** - Search fix reports
-5. **Learning implementation patterns** - Study integration documents
+- Archived design documents
+- Superseded guides
+- Legacy implementation notes
 
 ---
 
@@ -552,40 +403,32 @@ src/tests/
 
 ### Root Directory
 
-| File                      | Lines | Type       | Audience       | Status                |
-| ------------------------- | ----- | ---------- | -------------- | --------------------- |
-| README.md                 | ~550  | Overview   | All            | ✅ Active             |
-| QUICK_START.md            | ~250  | Tutorial   | New users      | ✅ Active             |
-| ENVIRONMENT_SETUP.md      | ~400  | Guide      | Developers     | ✅ Active             |
-| DOCUMENTATION_OVERVIEW.md | ~700  | Navigation | All            | ✅ Active (this file) |
-| AGENTS.md                 | 829   | Reference  | Developers, AI | ✅ Active             |
-| CHANGELOG.md              | 392   | History    | All            | ✅ Active             |
+| File                       | Lines  | Type      | Audience       | Status        |
+| -------------------------- | ------ | --------- | -------------- | ------------- |
+| **README.md**              | ~200   | Overview  | All            | ✅ **Active** |
+| **AGENTS.md**              | ~1,800 | Reference | Developers, AI | ✅ **Active** |
+| **CHANGELOG.md**           | ~400   | History   | All            | ✅ **Active** |
 
 ### docs/ Directory
 
-| File                                     | Lines  | Type      | Audience       | Status                           |
-| ---------------------------------------- | ------ | --------- | -------------- | -------------------------------- |
-| **ci_cd/CICD_QUICK_START.md**            | ~400   | Tutorial  | Developers     | ✅ **Active**                    |
-| **ci_cd/CICD_ENVIRONMENT_SETUP.md**      | ~870   | Guide     | DevOps         | ✅ **Active**                    |
-| **ci_cd/CICD_MANUAL.md**                 | ~1,688 | Guide     | Developers     | ✅ **Active**                    |
-| **ci_cd/CICD_REFERENCE.md**              | ~1,058 | Reference | All            | ✅ **Active**                    |
-| references_and_links.md                  | 176    | Reference | All            | ✅ Active                        |
-| AGENTS.md                                | 829    | Reference | Developers, AI | ✅ Active (duplicate)            |
-| README.md                                | 142    | Overview  | All            | 🟡 Superseded by root README     |
-| CHANGELOG.md                             | 392    | History   | All            | 🟡 Superseded by root CHANGELOG  |
-| **testing/TESTING_QUICK_START.md**       | ~180   | Tutorial  | Developers     | ✅ **Active**                    |
-| **testing/TESTING_ENVIRONMENT_SETUP.md** | ~550   | Guide     | Developers     | ✅ **Active**                    |
-| **testing/TESTING_MANUAL.md**            | ~900   | Guide     | Developers     | ✅ **Active**                    |
-| **testing/TESTING_REFERENCE.md**         | ~1,200 | Reference | Developers     | ✅ **Active**                    |
-| **testing/TESTING_REPORTS_COVERAGE.md**  | ~900   | Guide     | Developers     | ✅ **Active**                    |
+| File                                     | Lines  | Type      | Audience       | Status        |
+| ---------------------------------------- | ------ | --------- | -------------- | ------------- |
+| **DOCUMENTATION_OVERVIEW.md**            | ~800   | Overview  | All            | ✅ **Active** |
+| **QUICK_START.md**                       | ~400   | Tutorial  | New users      | ✅ **Active** |
+| **ENVIRONMENT_SETUP.md**                 | ~600   | Guide     | Developers     | ✅ **Active** |
+| **ci_cd/CICD_QUICK_START.md**            | ~400   | Tutorial  | Developers     | ✅ **Active** |
+| **ci_cd/CICD_ENVIRONMENT_SETUP.md**      | ~870   | Guide     | DevOps         | ✅ **Active** |
+| **ci_cd/CICD_MANUAL.md**                 | ~1,688 | Guide     | Developers     | ✅ **Active** |
+| **ci_cd/CICD_REFERENCE.md**              | ~1,058 | Reference | All            | ✅ **Active** |
+| **testing/TESTING_QUICK_START.md**       | ~180   | Tutorial  | Developers     | ✅ **Active** |
+| **testing/TESTING_ENVIRONMENT_SETUP.md** | ~550   | Guide     | Developers     | ✅ **Active** |
+| **testing/TESTING_MANUAL.md**            | ~900   | Guide     | Developers     | ✅ **Active** |
+| **testing/TESTING_REFERENCE.md**         | ~1,200 | Reference | Developers     | ✅ **Active** |
+| **testing/TESTING_REPORTS_COVERAGE.md**  | ~900   | Guide     | Developers     | ✅ **Active** |
 
-> **Note:** CI/CD documentation consolidated 2025-11-11 (12→4 files). See [docs/ci_cd/CONSOLIDATION_SUMMARY.md](docs/ci_cd/CONSOLIDATION_SUMMARY.md).
+### docs/history/ Directory, Document Index
 
-### docs/history/ Directory
-
-**75+ files, ~36,000+ lines** - See [Historical Documentation](#historical-documentation) section
-
-> **Recent Additions (2025-11-11):** 8 CI/CD files archived during consolidation
+Contains archived documentation - see [Historical Documentation](#historical-documentation) section
 
 ---
 
@@ -597,7 +440,6 @@ src/tests/
 
 - Use clear, descriptive names: `QUICK_START.md`, `ENVIRONMENT_SETUP.md`
 - All caps for major guides: `README.md`, `CHANGELOG.md`, `AGENTS.md`
-- Lowercase with underscores for references: `references_and_links.md`
 
 **Historical Documentation:**
 
@@ -647,13 +489,12 @@ Content...
 
 **Internal Links:**
 
-- Use relative paths: `[AGENTS.md](AGENTS.md)`, `[CI_CD.md](docs/CI_CD.md)`
-- Include section anchors: `[Testing](#testing)`, `[Quick Start](README.md#quick-start)`
+- Use relative paths: `[AGENTS.md](../AGENTS.md)`, `[CICD_MANUAL.md](ci_cd/CICD_MANUAL.md)`
+- Include section anchors: `[Testing](#testing)`, `[Quick Start](../README.md#quick-start)`
 
 **External Links:**
 
 - Use descriptive text: `[FastAPI Documentation](https://fastapi.tiangolo.com/)`
-- Collect in references_and_links.md for reuse
 
 ---
 
@@ -663,8 +504,7 @@ Content...
 
 1. **CHANGELOG.md** - Summarize changes and impact
 2. **README.md** - Update if run/test instructions change
-3. **DEVELOPMENT_ROADMAP.md** - Update status (if in docs/history/)
-4. **Relevant technical docs** - Update affected guides
+3. **Relevant technical docs** - Update affected guides
 
 **Version Bumps:**
 
@@ -681,22 +521,8 @@ Content...
 1. **ARCHITECTURE.md** - Complete system architecture with diagrams
 2. **API_REFERENCE.md** - Complete API endpoint specifications
 3. **TROUBLESHOOTING.md** - Common issues and solutions extracted from AGENTS.md
-4. **DEVELOPMENT_ROADMAP.md** - Current and future features (currently in history/)
-5. **CONTRIBUTING.md** - Contribution guidelines
-6. **SECURITY.md** - Security policies and reporting
-
----
-
-### Consolidation Opportunities
-
-**High Priority:**
-
-1. Merge CI/CD quick references into CI_CD.md
-2. Merge pre-commit quick reference into PRE_COMMIT_GUIDE.md
-3. Consolidate MVP reports into single IMPLEMENTATION_HISTORY.md
-4. Extract troubleshooting from AGENTS.md to TROUBLESHOOTING.md
-
-**See:** [docs/DOCUMENTATION_ANALYSIS_2025-11-05.md](docs/DOCUMENTATION_ANALYSIS_2025-11-05.md) for detailed analysis
+4. **CONTRIBUTING.md** - Contribution guidelines
+5. **SECURITY.md** - Security policies and reporting
 
 ---
 
@@ -761,17 +587,15 @@ python -m py_compile src/**/*.py
 ```bash
 # Start here
 README.md              # What is this?
-QUICK_START.md         # Get running now
-ENVIRONMENT_SETUP.md   # Set up environment
+docs/QUICK_START.md    # Get running now
+docs/ENVIRONMENT_SETUP.md  # Set up environment
 
 # Development
 AGENTS.md              # Development guide
-docs/CI_CD.md          # Testing & CI/CD
-docs/PRE_COMMIT_GUIDE.md  # Code quality
+docs/ci_cd/CICD_MANUAL.md  # Testing & CI/CD
 
 # Reference
 CHANGELOG.md           # Version history
-docs/references_and_links.md  # External links
 ```
 
 ---
@@ -791,8 +615,8 @@ docs/references_and_links.md  # External links
 
 ---
 
-**Last Updated:** November 11, 2025  
-**Version:** 0.4.1  
+**Last Updated:** January 29, 2026  
+**Version:** 0.25.0  
 **Maintainer:** Paul Calnon
 
 ---
@@ -809,4 +633,3 @@ docs/references_and_links.md  # External links
   - CICD_MANUAL.md - Comprehensive usage guide
   - CICD_REFERENCE.md - Technical reference
 - **Archived:** 8 legacy files to docs/history/ (2025-11-11)
-- **See:** [docs/ci_cd/CONSOLIDATION_SUMMARY.md](docs/ci_cd/CONSOLIDATION_SUMMARY.md)

@@ -1,9 +1,10 @@
 <!-- trunk-ignore-all(prettier) -->
 # Juniper Canopy Testing Analysis Report
 
-**Date**: November 18, 2025  
+**Last Updated:** January 29, 2026  
+**Version:** v0.25.0  
 **Project**: juniper_canopy prototype  
-**Location**: /home/pcalnon/Development/python/JuniperCanopy/juniper_canopy
+**Location**: /home/pcalnon/Development/python/Juniper/JuniperCanopy/juniper_canopy
 
 ## Executive Summary
 
@@ -338,7 +339,7 @@ All tests failing with connection refused errors:
 
 ### Coverage Improvement Plan
 
-See `docs/COVERAGE_IMPROVEMENTS_SUMMARY.md` for:
+See `docs/testing/COVERAGE_IMPROVEMENTS_SUMMARY.md` for:
 
 - Detailed test case specifications for each file
 - Implementation phases
@@ -428,7 +429,7 @@ See `docs/COVERAGE_IMPROVEMENTS_SUMMARY.md` for:
 ### New Files Created (2 files)
 
 1. ✅ `tests/unit/frontend/test_dashboard_manager_coverage.py` - 294 lines
-2. ✅ `docs/COVERAGE_IMPROVEMENTS_SUMMARY.md` - Complete implementation plan
+2. ✅ `docs/testing/COVERAGE_IMPROVEMENTS_SUMMARY.md` - Complete implementation plan
 
 ---
 

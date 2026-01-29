@@ -1,7 +1,7 @@
 # Juniper Canopy API Reference
 
-**Version:** 1.0.0  
-**Last Updated:** November 5, 2025  
+**Version:** 1.1.0  
+**Last Updated:** January 29, 2026  
 **Base URL:** `http://127.0.0.1:8050`
 
 ---
@@ -11,11 +11,13 @@
 1. [Overview](#overview)
 2. [Authentication](#authentication)
 3. [REST API Endpoints](#rest-api-endpoints)
-4. [WebSocket Channels](#websocket-channels)
-5. [Data Models](#data-models)
-6. [Error Handling](#error-handling)
-7. [Rate Limiting](#rate-limiting)
-8. [Code Examples](#code-examples)
+4. [Training Control Endpoints](#training-control-endpoints)
+5. [Remote Worker Endpoints](#remote-worker-endpoints)
+6. [WebSocket Channels](#websocket-channels)
+7. [Data Models](#data-models)
+8. [Error Handling](#error-handling)
+9. [Rate Limiting](#rate-limiting)
+10. [Code Examples](#code-examples)
 
 ---
 
@@ -636,6 +638,432 @@ curl http://127.0.0.1:8050/api/statistics
     }
   ]
 }
+```
+
+---
+
+## Training Control Endpoints
+
+### POST /api/train/start
+
+**Description:** Start training (with optional reset)
+
+**Parameters:**
+
+- `reset` (boolean, query, optional) - Reset network before starting (default: `false`)
+
+**Response Schema (Success):**
+
+```json
+{
+  "status": "started",
+  "is_running": true,
+  "is_paused": false,
+  "current_epoch": 0,
+  "current_loss": 1.0,
+  "current_accuracy": 0.5,
+  "hidden_units": 0
+}
+```
+
+**Status Codes:**
+
+- `200 OK` - Training started successfully
+- `400 Bad Request` - No network configured (cascor backend)
+- `500 Internal Server Error` - Failed to start training
+- `503 Service Unavailable` - No backend available
+
+**Example Request:**
+
+```bash
+curl -X POST "http://127.0.0.1:8050/api/train/start?reset=true"
+```
+
+---
+
+### POST /api/train/pause
+
+**Description:** Pause training (preserves state)
+
+> **Note:** Currently only works in demo mode. Cascor backend does not support pause.
+
+**Parameters:** None
+
+**Response Schema:**
+
+```json
+{
+  "status": "paused"
+}
+```
+
+**Status Codes:**
+
+- `200 OK` - Training paused successfully
+- `503 Service Unavailable` - No backend available (or pause not supported)
+
+**Example Request:**
+
+```bash
+curl -X POST http://127.0.0.1:8050/api/train/pause
+```
+
+---
+
+### POST /api/train/resume
+
+**Description:** Resume paused training
+
+> **Note:** Currently only works in demo mode. Cascor backend does not support resume.
+
+**Parameters:** None
+
+**Response Schema:**
+
+```json
+{
+  "status": "running"
+}
+```
+
+**Status Codes:**
+
+- `200 OK` - Training resumed successfully
+- `503 Service Unavailable` - No backend available (or resume not supported)
+
+**Example Request:**
+
+```bash
+curl -X POST http://127.0.0.1:8050/api/train/resume
+```
+
+---
+
+### POST /api/train/stop
+
+**Description:** Stop training
+
+**Parameters:** None
+
+**Response Schema (Demo Mode):**
+
+```json
+{
+  "status": "stopped"
+}
+```
+
+**Response Schema (Cascor Backend):**
+
+```json
+{
+  "status": "stop_requested",
+  "message": "Training stop requested (best-effort)"
+}
+```
+
+**Status Codes:**
+
+- `200 OK` - Training stopped or stop requested
+- `503 Service Unavailable` - No backend available
+
+**Example Request:**
+
+```bash
+curl -X POST http://127.0.0.1:8050/api/train/stop
+```
+
+**Notes:**
+
+- Demo mode: Immediate stop
+- Cascor backend: Best-effort stop request (training may complete current epoch)
+
+---
+
+### POST /api/train/reset
+
+**Description:** Reset training state
+
+**Parameters:** None
+
+**Response Schema:**
+
+```json
+{
+  "status": "reset",
+  "is_running": false,
+  "is_paused": false,
+  "current_epoch": 0,
+  "current_loss": 1.0,
+  "current_accuracy": 0.5,
+  "hidden_units": 0
+}
+```
+
+**Status Codes:**
+
+- `200 OK` - Training reset successfully
+- `503 Service Unavailable` - No backend available
+
+**Example Request:**
+
+```bash
+curl -X POST http://127.0.0.1:8050/api/train/reset
+```
+
+---
+
+### GET /api/train/status
+
+**Description:** Get current training status (whether training is in progress)
+
+**Parameters:** None
+
+**Response Schema (Demo Mode):**
+
+```json
+{
+  "backend": "demo",
+  "is_running": true,
+  "is_paused": false,
+  "current_epoch": 42,
+  "current_loss": 0.234,
+  "current_accuracy": 0.876,
+  "hidden_units": 3
+}
+```
+
+**Response Schema (Cascor Backend):**
+
+```json
+{
+  "backend": "cascor",
+  "training_in_progress": true,
+  "stop_requested": false,
+  "current_epoch": 42,
+  "current_loss": 0.234,
+  "current_accuracy": 0.876,
+  "hidden_units": 3
+}
+```
+
+**Response Schema (No Backend):**
+
+```json
+{
+  "backend": null,
+  "status": "no_backend"
+}
+```
+
+**Field Descriptions:**
+
+- `backend` (string|null) - Active backend: `"demo"`, `"cascor"`, or `null`
+- `training_in_progress` (boolean) - Whether training is currently running (cascor)
+- `stop_requested` (boolean) - Whether a stop has been requested (cascor)
+- `is_running` (boolean) - Training running state (demo)
+- `is_paused` (boolean) - Training paused state (demo)
+- `current_epoch` (integer) - Current epoch number
+- `current_loss` (float) - Current training loss
+- `current_accuracy` (float) - Current training accuracy
+- `hidden_units` (integer) - Number of hidden cascade units
+
+**Status Codes:**
+
+- `200 OK` - Status retrieved successfully
+
+**Example Request:**
+
+```bash
+curl http://127.0.0.1:8050/api/train/status
+```
+
+---
+
+## Remote Worker Endpoints
+
+These endpoints manage distributed training via the RemoteWorkerClient.
+
+> **Note:** Remote worker endpoints require the Cascor backend. They are not available in demo mode.
+
+### GET /api/remote/status
+
+**Description:** Get remote worker connection status
+
+**Parameters:** None
+
+**Response Schema (Connected):**
+
+```json
+{
+  "available": true,
+  "connected": true,
+  "workers_active": true,
+  "num_workers": 4,
+  "address": "192.168.1.100:5000"
+}
+```
+
+**Response Schema (Not Connected):**
+
+```json
+{
+  "available": true,
+  "connected": false,
+  "workers_active": false
+}
+```
+
+**Response Schema (No Backend):**
+
+```json
+{
+  "available": false,
+  "connected": false,
+  "workers_active": false,
+  "error": "No backend"
+}
+```
+
+**Field Descriptions:**
+
+- `available` (boolean) - Whether remote worker functionality is available
+- `connected` (boolean) - Whether connected to a remote manager
+- `workers_active` (boolean) - Whether workers are currently running
+- `num_workers` (integer, optional) - Number of active workers
+- `address` (string, optional) - Remote manager address
+- `error` (string, optional) - Error message if unavailable
+
+**Status Codes:**
+
+- `200 OK` - Status retrieved successfully
+
+**Example Request:**
+
+```bash
+curl http://127.0.0.1:8050/api/remote/status
+```
+
+---
+
+### POST /api/remote/connect
+
+**Description:** Connect to a remote CandidateTrainingManager
+
+**Parameters:**
+
+- `host` (string, query, required) - Remote manager host address
+- `port` (integer, query, required) - Remote manager port
+- `authkey` (string, query, required) - Authentication key for secure connection
+
+**Response Schema (Success):**
+
+```json
+{
+  "status": "connected",
+  "address": "192.168.1.100:5000"
+}
+```
+
+**Status Codes:**
+
+- `200 OK` - Connected successfully
+- `500 Internal Server Error` - Connection failed
+- `503 Service Unavailable` - No backend available
+
+**Example Request:**
+
+```bash
+curl -X POST "http://127.0.0.1:8050/api/remote/connect?host=192.168.1.100&port=5000&authkey=secret123"
+```
+
+---
+
+### POST /api/remote/start_workers
+
+**Description:** Start remote worker processes
+
+**Parameters:**
+
+- `num_workers` (integer, query, optional) - Number of workers to start (default: `1`)
+
+**Response Schema (Success):**
+
+```json
+{
+  "status": "started",
+  "num_workers": 4
+}
+```
+
+**Status Codes:**
+
+- `200 OK` - Workers started successfully
+- `500 Internal Server Error` - Failed to start workers
+- `503 Service Unavailable` - No backend available
+
+**Example Request:**
+
+```bash
+curl -X POST "http://127.0.0.1:8050/api/remote/start_workers?num_workers=4"
+```
+
+---
+
+### POST /api/remote/stop_workers
+
+**Description:** Stop remote worker processes
+
+**Parameters:**
+
+- `timeout` (integer, query, optional) - Timeout for graceful shutdown in seconds (default: `10`)
+
+**Response Schema (Success):**
+
+```json
+{
+  "status": "stopped"
+}
+```
+
+**Status Codes:**
+
+- `200 OK` - Workers stopped successfully
+- `500 Internal Server Error` - Failed to stop workers
+- `503 Service Unavailable` - No backend available
+
+**Example Request:**
+
+```bash
+curl -X POST "http://127.0.0.1:8050/api/remote/stop_workers?timeout=30"
+```
+
+---
+
+### POST /api/remote/disconnect
+
+**Description:** Disconnect from remote manager
+
+**Parameters:** None
+
+**Response Schema (Success):**
+
+```json
+{
+  "status": "disconnected"
+}
+```
+
+**Status Codes:**
+
+- `200 OK` - Disconnected successfully
+- `500 Internal Server Error` - Failed to disconnect
+- `503 Service Unavailable` - No backend available
+
+**Example Request:**
+
+```bash
+curl -X POST http://127.0.0.1:8050/api/remote/disconnect
 ```
 
 ---

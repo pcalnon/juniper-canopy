@@ -886,10 +886,10 @@ def _broadcast_metrics(self):
 - [Demo Mode Manual](DEMO_MODE_MANUAL.md) - User guide
 - [Environment Setup](DEMO_MODE_ENVIRONMENT_SETUP.md) - Configuration
 - [Quick Start](DEMO_MODE_QUICK_START.md) - Launch guide
-- [AGENTS.md](../AGENTS.md) - Development guide
+- [AGENTS.md](../../AGENTS.md) - Development guide
 
 ---
 
-**Last Updated:** 2025-11-05
-**Version:** 1.0.0
+**Last Updated:** January 29, 2026
+**Version:** v0.25.0
 **Status:** Production Ready

@@ -1,8 +1,8 @@
 # Juniper Canopy User Manual
 
-**Version:** 0.4.0  
+**Version:** 0.25.0  
 **Status:** ✅ Production Ready  
-**Last Updated:** November 11, 2025  
+**Last Updated:** January 29, 2026  
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -769,6 +769,33 @@ ps aux | grep -i python.*main.py
 
 ## Advanced Features
 
+### Async Training (v0.25.0+)
+
+Version 0.25.0 introduces asynchronous training capabilities via `CascorIntegration`:
+
+- **`fit_async()`** - Non-blocking training with `ThreadPoolExecutor`
+- **`start_training_background()`** - Background training with real-time status updates
+- **RemoteWorkerClient integration** - Distributed training support
+- **Thread-safe status tracking** - Monitor training progress from any thread
+
+**Example Usage:**
+
+```python
+from backend.cascor_integration import CascorIntegration
+
+integration = CascorIntegration()
+future = integration.fit_async(X_train, y_train, max_epochs=200)
+
+# Training runs in background - check status
+while not future.done():
+    status = integration.get_training_status()
+    print(f"Epoch: {status['current_epoch']}")
+```
+
+> **Note:** Async training requires a real CasCor backend (not available in demo mode).
+
+---
+
 ### WebSocket Real-Time Updates
 
 Juniper Canopy uses WebSocket push updates for real-time data streaming:
@@ -896,7 +923,7 @@ logs/ui.log        # User interactions
 ### Documentation
 
 - [README.md](../README.md) - Quick start guide
-- [API_REFERENCE.md](API_REFERENCE.md) - Complete API documentation
+- [API_REFERENCE.md](api/API_REFERENCE.md) - Complete API documentation
 - [DEVELOPMENT_ROADMAP.md](../notes/DEVELOPMENT_ROADMAP.md) - Planned features
 - [CHANGELOG.md](../CHANGELOG.md) - Release history
 
@@ -908,8 +935,8 @@ logs/ui.log        # User interactions
 
 ### Version Information
 
-**Current Version:** 1.0.0 (MVP)  
-**Release Date:** October 2025  
+**Current Version:** 0.25.0  
+**Release Date:** January 2026  
 **Python:** 3.11+  
 **License:** MIT
 

@@ -1,5 +1,8 @@
 # Testing Environment Setup
 
+**Last Updated:** January 29, 2026  
+**Version:** v0.25.0
+
 Complete guide to setting up the testing environment for Juniper Canopy.
 
 ## Table of Contents
@@ -461,7 +464,7 @@ pip install -r conf/requirements.txt
 echo $PYTHONPATH
 
 # Add src directory to path
-export PYTHONPATH="${PYTHONPATH}:/home/pcalnon/Development/python/JuniperCanopy/juniper_canopy/src"
+export PYTHONPATH="${PYTHONPATH}:/home/pcalnon/Development/python/Juniper/JuniperCanopy/juniper_canopy/src"
 
 # Or activate conda environment
 conda activate JuniperPython

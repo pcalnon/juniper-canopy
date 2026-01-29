@@ -1,7 +1,7 @@
 # Selective Test Enablement Guide
 
-**Last Updated:** 2025-11-18  
-**Version:** 1.0.0
+**Last Updated:** January 29, 2026  
+**Version:** v0.25.0
 
 ## Overview
 

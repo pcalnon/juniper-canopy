@@ -331,7 +331,10 @@ ls -la conf/app_config.yaml
 
 ---
 
+**Last Updated:** January 29, 2026
+**Version:** v0.25.0
+
 **See Also:**
 
-- [AGENTS.md](../AGENTS.md) - Development guide
-- [README.md](../README.md) - Project overview
+- [AGENTS.md](../../AGENTS.md) - Development guide
+- [README.md](../../README.md) - Project overview

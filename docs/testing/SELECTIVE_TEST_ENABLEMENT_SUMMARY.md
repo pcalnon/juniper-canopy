@@ -1,6 +1,7 @@
 # Selective Test Enablement System - Implementation Summary
 
-**Date:** 2025-11-18  
+**Last Updated:** January 29, 2026  
+**Version:** v0.25.0  
 **Status:** ✅ Complete
 
 ## Overview
@@ -131,7 +132,7 @@ class TestWebSocketStateMessages:
 
 ### 5. Created Comprehensive Documentation
 
-**File:** `docs/SELECTIVE_TEST_GUIDE.md`
+**File:** `docs/testing/SELECTIVE_TEST_GUIDE.md`
 
 **Contents:**
 
@@ -363,10 +364,10 @@ collected 170 items / 15 skipped
 
 ## References
 
-- [docs/SELECTIVE_TEST_GUIDE.md](docs/SELECTIVE_TEST_GUIDE.md) - Complete usage guide
-- [pyproject.toml](pyproject.toml) - Pytest configuration
-- [src/tests/conftest.py](src/tests/conftest.py) - Skip logic implementation
-- [.github/workflows/ci.yml](.github/workflows/ci.yml) - CI configuration
+- [SELECTIVE_TEST_GUIDE.md](SELECTIVE_TEST_GUIDE.md) - Complete usage guide
+- [pyproject.toml](../../pyproject.toml) - Pytest configuration
+- [src/tests/conftest.py](../../src/tests/conftest.py) - Skip logic implementation
+- [.github/workflows/ci.yml](../../.github/workflows/ci.yml) - CI configuration
 
 ## Summary
 

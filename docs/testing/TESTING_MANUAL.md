@@ -1,5 +1,8 @@
 # Testing Manual - Comprehensive User Guide
 
+**Last Updated:** January 29, 2026  
+**Version:** v0.25.0
+
 Complete guide to testing the Juniper Canopy application.
 
 ## Table of Contents

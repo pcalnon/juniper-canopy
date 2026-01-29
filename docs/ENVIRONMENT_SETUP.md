@@ -2,9 +2,9 @@
 
 ## Complete Environment Configuration for Juniper Canopy
 
-**Version:** 0.4.0  
+**Version:** 0.25.0  
 **Status:** ✅ Production Ready  
-**Last Updated:** November 11, 2025  
+**Last Updated:** January 29, 2026  
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -1028,7 +1028,7 @@ repos:
         args: ["--max-line-length=120"]
 ```
 
-**See:** [docs/PRE_COMMIT_GUIDE.md](docs/PRE_COMMIT_GUIDE.md) for details.
+**See:** [CI/CD Quick Start](ci_cd/CICD_QUICK_START.md) for details.
 
 ---
 
@@ -1097,12 +1097,12 @@ pip freeze > requirements-frozen.txt
 ## Next Steps
 
 - **[QUICK_START.md](QUICK_START.md)** - Run the application
-- **[AGENTS.md](AGENTS.md)** - Development guide
-- **[docs/CI_CD.md](docs/CI_CD.md)** - Testing and CI/CD
-- **[docs/PRE_COMMIT_GUIDE.md](docs/PRE_COMMIT_GUIDE.md)** - Code quality automation
+- **[AGENTS.md](../AGENTS.md)** - Development guide
+- **[CI/CD Quick Start](ci_cd/CICD_QUICK_START.md)** - Testing and CI/CD
+- **[CI/CD Manual](ci_cd/CICD_MANUAL.md)** - Complete CI/CD guide
 
 ---
 
-**Last Updated:** November 7, 2025  
-**Version:** 0.4.0  
+**Last Updated:** January 29, 2026  
+**Version:** 0.25.0  
 **Maintainer:** Paul Calnon

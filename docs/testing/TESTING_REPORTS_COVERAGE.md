@@ -1,5 +1,8 @@
 # Testing Reports and Coverage Guide
 
+**Last Updated:** January 29, 2026  
+**Version:** v0.25.0
+
 Complete guide to generating, reading, and analyzing test reports and coverage metrics.
 
 ## Table of Contents

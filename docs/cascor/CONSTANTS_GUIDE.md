@@ -1,7 +1,7 @@
 # Constants Management Guide
 
-**Last Updated:** 2025-11-17  
-**Version:** 1.0.0
+**Last Updated:** 2026-01-29  
+**Version:** 0.25.0
 
 ## Overview
 
@@ -776,13 +776,14 @@ Is this a hard-coded value?
 
 ## Additional Resources
 
-- [Constants Module Source](../src/constants.py)
-- [Constants Unit Tests](../src/tests/unit/test_constants.py)
-- [Configuration Guide](../conf/app_config.yaml)
-- [Project Style Guide](../AGENTS.md)
+- [Constants Module Source](../../src/canopy_constants.py)
+- [Constants Unit Tests](../../src/tests/unit/test_constants.py)
+- [Configuration Guide](../../conf/app_config.yaml)
+- [Project Style Guide](../../AGENTS.md)
 
 ## Version History
 
-| Version | Date       | Changes                |
-| ------- | ---------- | ---------------------- |
-| 1.0.0   | 2025-11-17 | Initial guide creation |
+| Version | Date       | Changes                                           |
+| ------- | ---------- | ------------------------------------------------- |
+| 0.25.0  | 2026-01-29 | Updated links; renamed constants.py to canopy_constants.py |
+| 1.0.0   | 2025-11-17 | Initial guide creation                            |

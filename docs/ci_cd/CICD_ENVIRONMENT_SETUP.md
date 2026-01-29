@@ -1,7 +1,7 @@
 # CI/CD Environment Setup Guide
 
-**Last Updated:** 2025-11-11  
-**Version:** 2.0.0
+**Last Updated:** 2026-01-29  
+**Version:** 0.25.0
 
 Complete guide to configuring the GitHub Actions CI/CD environment.
 

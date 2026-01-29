@@ -2,9 +2,9 @@
 
 ## Technical reference for CasCor backend integration in Juniper Canopy
 
-**Version:** 0.4.0  
+**Version:** 0.25.0  
 **Status:** ✅ PARTIALLY IMPLEMENTED  
-**Last Updated:** November 7, 2025
+**Last Updated:** January 29, 2026
 
 ---
 
@@ -332,6 +332,231 @@ integration.create_monitoring_callback('epoch_end', on_epoch)
 
 ---
 
+#### fit_async
+
+```python
+fit_async(
+    data: Tuple[torch.Tensor, torch.Tensor],
+    params: Optional[Dict[str, Any]] = None
+) -> Awaitable[Dict[str, Any]]
+```
+
+**Description:** Run training asynchronously in a background thread.
+
+**Parameters:**
+
+- `data` (Tuple): Tuple of (x, y) training tensors
+- `params` (Dict, optional): Training parameters
+  - `learning_rate` (float): Learning rate
+  - `output_epochs` (int): Output training epochs
+  - `candidate_epochs` (int): Candidate training epochs
+
+**Returns:**
+
+- `Awaitable[Dict]`: Awaitable that resolves to training history
+
+**Example:**
+
+```python
+async def train():
+    history = await integration.fit_async((x, y), {'learning_rate': 0.01})
+    print(f"Final loss: {history['train_loss'][-1]}")
+
+asyncio.run(train())
+```
+
+---
+
+#### start_training_background
+
+```python
+start_training_background(
+    data: Tuple[torch.Tensor, torch.Tensor],
+    params: Optional[Dict[str, Any]] = None
+) -> None
+```
+
+**Description:** Start training in background thread (fire-and-forget).
+
+**Parameters:**
+
+- `data` (Tuple): Tuple of (x, y) training tensors
+- `params` (Dict, optional): Training parameters
+
+**Returns:**
+
+- `None`: Returns immediately, training runs in background
+
+**Example:**
+
+```python
+integration.start_training_background((x, y), {'learning_rate': 0.01})
+# Training runs in background
+```
+
+---
+
+#### is_training_in_progress
+
+```python
+is_training_in_progress() -> bool
+```
+
+**Description:** Check if training is currently in progress.
+
+**Returns:**
+
+- `bool`: True if training is active
+
+**Example:**
+
+```python
+if integration.is_training_in_progress():
+    print("Training in progress...")
+```
+
+---
+
+#### request_training_stop
+
+```python
+request_training_stop() -> None
+```
+
+**Description:** Request graceful training stop (completes current epoch).
+
+**Returns:**
+
+- `None`
+
+**Example:**
+
+```python
+integration.request_training_stop()
+# Training will stop after current epoch
+```
+
+---
+
+#### connect_remote_workers
+
+```python
+connect_remote_workers(
+    address: Tuple[str, int],
+    authkey: bytes
+) -> None
+```
+
+**Description:** Connect to a remote worker manager for distributed training.
+
+**Parameters:**
+
+- `address` (Tuple): Host and port tuple (e.g., `('192.168.1.100', 5000)`)
+- `authkey` (bytes): Authentication key for connection
+
+**Raises:**
+
+- `ConnectionError`: If connection fails
+
+**Example:**
+
+```python
+integration.connect_remote_workers(
+    address=('192.168.1.100', 5000),
+    authkey=b'secret_key'
+)
+```
+
+---
+
+#### start_remote_workers
+
+```python
+start_remote_workers(num_workers: int = 4) -> None
+```
+
+**Description:** Start local worker processes for distributed training.
+
+**Parameters:**
+
+- `num_workers` (int): Number of worker processes to start (default: 4)
+
+**Example:**
+
+```python
+integration.start_remote_workers(num_workers=8)
+```
+
+---
+
+#### stop_remote_workers
+
+```python
+stop_remote_workers(timeout: float = 5.0) -> None
+```
+
+**Description:** Stop all remote worker processes.
+
+**Parameters:**
+
+- `timeout` (float): Maximum time to wait for workers to stop (default: 5.0 seconds)
+
+**Example:**
+
+```python
+integration.stop_remote_workers(timeout=10.0)
+```
+
+---
+
+#### disconnect_remote_workers
+
+```python
+disconnect_remote_workers() -> None
+```
+
+**Description:** Disconnect from remote workers without stopping them.
+
+**Returns:**
+
+- `None`
+
+**Example:**
+
+```python
+integration.disconnect_remote_workers()
+```
+
+---
+
+#### get_remote_worker_status
+
+```python
+get_remote_worker_status() -> Dict[str, Any]
+```
+
+**Description:** Get status of remote workers.
+
+**Returns:**
+
+- `Dict`: Worker status
+  - `connected` (bool): Whether connected to worker manager
+  - `active_workers` (int): Number of active workers
+  - `connected_workers` (int): Number of connected workers
+  - `pending_tasks` (int): Number of pending tasks
+  - `completed_tasks` (int): Number of completed tasks
+  - `status` (str): Worker status ('running', 'stopped', 'error')
+  - `address` (Tuple): Connected address or None
+
+**Example:**
+
+```python
+status = integration.get_remote_worker_status()
+print(f"Workers: {status['active_workers']}/{status['connected_workers']}")
+```
+
+---
+
 #### shutdown
 
 ```python
@@ -604,8 +829,8 @@ with self.topology_lock:
 
 ---
 
-**Last Updated:** November 7, 2025  
-**Version:** 0.4.0  
+**Last Updated:** January 29, 2026  
+**Version:** 0.25.0  
 **Status:** ✅ PARTIALLY IMPLEMENTED
 
 **Complete technical reference for CasCor backend integration!**
