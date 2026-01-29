@@ -11,7 +11,7 @@
 
 This release consolidates all pre-deployment work following the Phase 0-3 refactoring completion (v0.24.0). It includes critical thread safety fixes, metrics normalization for Cascor-Canopy interoperability, comprehensive API compatibility testing, and extensive pre-deployment documentation. This release prepares Juniper Canopy for production deployment alongside Juniper Cascor.
 
-> **Status:** ALPHA – Feature-complete. Integration verified. Ready for production deployment.
+> **Status:** ALPHA – MVP Feature-complete. Integration verified. Ready for initial production deployment in BETA status.
 
 ---
 
@@ -148,11 +148,11 @@ Comprehensive deployment preparation documentation.
 
 Significant test additions for integration verification:
 
-| Component                              | v0.24.0 | v0.25.0 | Change |
-| -------------------------------------- | ------- | ------- | ------ |
-| data_adapter.py                        | 100%    | 100%    | +20 tests |
-| test_cascor_api_compatibility.py       | —       | New     | +21 tests |
-| test_data_adapter_normalization.py     | —       | New     | +20 tests |
+| Component                          | v0.24.0 | v0.25.0 | Change    |
+| ---------------------------------- | ------- | ------- | --------- |
+| data_adapter.py                    | 100%    | 100%    | +20 tests |
+| test_cascor_api_compatibility.py   | —       | New     | +21 tests |
+| test_data_adapter_normalization.py | —       | New     | +20 tests |
 
 ### Test Count Growth
 
@@ -181,9 +181,9 @@ Significant test additions for integration verification:
 
 ### New Methods
 
-| Method                | Module          | Description                          |
-| --------------------- | --------------- | ------------------------------------ |
-| `normalize_metrics()` | data_adapter.py | Convert Cascor → Canopy metric keys  |
+| Method                  | Module          | Description                         |
+| ----------------------- | --------------- | ----------------------------------- |
+| `normalize_metrics()`   | data_adapter.py | Convert Cascor → Canopy metric keys |
 | `denormalize_metrics()` | data_adapter.py | Convert Canopy → Cascor metric keys |
 
 ### Metrics Key Mapping
@@ -296,17 +296,17 @@ See [PRE-DEPLOYMENT_ROADMAP.md](../PRE-DEPLOYMENT_ROADMAP.md) for:
 
 ## Version History
 
-| Version       | Date       | Description                                          |
-| ------------- | ---------- | ---------------------------------------------------- |
-| 0.24.0-alpha  | 2026-01-11 | Post-refactor verification, documentation templates  |
-| 0.24.1        | 2026-01-12 | Post-refactor validation                             |
-| 0.24.2        | 2026-01-12 | Missing pytest-mock dependency fix                   |
-| 0.24.3        | 2026-01-20 | Deprecation warning documentation                    |
-| 0.24.4        | 2026-01-21 | Backend path config, asyncio deprecation fix         |
-| 0.24.5        | 2026-01-22 | Metrics normalization, API compatibility tests       |
-| 0.24.6        | 2026-01-24 | Thread-safe metrics extraction                       |
-| 0.24.7        | 2026-01-24 | Integration analysis, profiling refs, coverage roadmap |
-| 0.25.0-alpha  | 2026-01-25 | Pre-deployment release consolidation                 |
+| Version      | Date       | Description                                            |
+| ------------ | ---------- | ------------------------------------------------------ |
+| 0.24.0-alpha | 2026-01-11 | Post-refactor verification, documentation templates    |
+| 0.24.1       | 2026-01-12 | Post-refactor validation                               |
+| 0.24.2       | 2026-01-12 | Missing pytest-mock dependency fix                     |
+| 0.24.3       | 2026-01-20 | Deprecation warning documentation                      |
+| 0.24.4       | 2026-01-21 | Backend path config, asyncio deprecation fix           |
+| 0.24.5       | 2026-01-22 | Metrics normalization, API compatibility tests         |
+| 0.24.6       | 2026-01-24 | Thread-safe metrics extraction                         |
+| 0.24.7       | 2026-01-24 | Integration analysis, profiling refs, coverage roadmap |
+| 0.25.0-alpha | 2026-01-25 | Pre-deployment release consolidation                   |
 
 ---
 
