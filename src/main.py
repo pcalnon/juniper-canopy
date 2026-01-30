@@ -1832,7 +1832,7 @@ async def api_train_status():
         Training status dictionary with network info and training state.
     """
     if demo_mode_instance:
-        return {"backend": "demo", **demo_mode_instance.get_state()}
+        return {"backend": "demo", **demo_mode_instance.get_current_state()}
 
     if cascor_integration:
         status = cascor_integration.get_training_status()
