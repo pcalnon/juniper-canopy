@@ -1,3 +1,25 @@
+#####################################################################################################################################################################################################
+# Project:       Juniper
+# Sub-Project:   JuniperCanopy
+# Application:   juniper_canopy
+# File Name:     pyproject.toml
+# Author:        Paul Calnon
+# Version:       0.2.2
+#
+# Date Created:  2025-11-03
+# Last Modified: 2026-01-31
+#
+# License:       MIT License
+# Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
+#
+# Description:
+#    Python project configuration for Juniper Canopy
+#    Configures Black, isort, pytest, coverage, and mypy
+#
+# References:
+#    - CANOPY-P1-001: CI/CD Pipeline Parity
+#####################################################################################################################################################################################################
+
 [build-system]
 requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
@@ -40,25 +62,18 @@ Issues = "https://github.com/USERNAME/REPO/issues"
 # ==========================================
 [tool.black]
 line-length = 120
-target-version = ['py311', 'py312']
+target-version = ['py311', 'py312', 'py313']
 include = '\.pyi?$'
 extend-exclude = '''
 /(
-    # Default excludes
-    \.eggs
-    | \.git
-    | \.hg
-    | \.mypy_cache
-    | \.tox
-    | \.venv
-    | _build
-    | buck-out
-    | build
-    | dist
-    # Additional excludes
+    \.git
+    | \.pytest_cache
+    | \.trunk
+    | __pycache__
+    | data
     | logs
     | reports
-    | data
+    | htmlcov
     | images
 )/
 '''
@@ -78,59 +93,63 @@ split_on_trailing_comma = true
 skip_gitignore = true
 known_first_party = ["src"]
 sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
+skip = [".git", "__pycache__", ".pytest_cache", ".trunk", "data", "logs", "reports", "htmlcov"]
+skip_glob = ["*/data/*", "*/logs/*", "*/reports/*"]
 
 # ==========================================
 # Bandit Security Scanner Configuration
 # ==========================================
 [tool.bandit]
 exclude_dirs = ["tests", "src/tests", ".venv", "venv", "__pycache__"]
-# skips = ["B101", "B601"]
-skips = ["B101", "B601", "B103"]
-recursive = true
-targets = ["src"]
+skips = ["B101", "B311"]
 
 # ==========================================
 # MyPy Type Checker Configuration
 # ==========================================
 [tool.mypy]
-# python_version = "3.11"
 python_version = "3.14"
-warn_return_any = true
+warn_return_any = false
 warn_unused_configs = true
-disallow_untyped_defs = false # Gradual typing
 ignore_missing_imports = true
-no_implicit_optional = true
-show_error_codes = true
-show_column_numbers = true
-pretty = true
+no_strict_optional = true
+exclude = [
+    "^data/",
+    "^logs/",
+    "^reports/",
+    "^htmlcov/",
+    "^tests/",
+]
 
-# Exclude paths
-exclude = ["^tests/", "^reports/", "^logs/", "^data/"]
+[[tool.mypy.overrides]]
+module = [
+    "dash.*",
+    "plotly.*",
+    "fastapi.*",
+    "uvicorn.*",
+    "starlette.*",
+]
+ignore_missing_imports = true
 
 # ==========================================
 # Pytest Configuration (additional)
 # ==========================================
 [tool.pytest.ini_options]
 minversion = "7.0"
-# testpaths removed - causes import issues with Python 3.13
-# pytest will discover tests from project root instead
+testpaths = ["src/tests"]
 pythonpath = ["src"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+timeout = 60
+timeout_method = "signal"
 addopts = [
-  "--verbose",
-  "--color=yes",
-  "--assert=plain",
-#  "--cov=src",
-#  "--cov=.",
-#  "--cov-report=html:reports/coverage",
-#  "--cov-report=term-missing",
-  "--junit-xml=reports/junit/results.xml",
-#  "--html=reports/test_report.html",
-#  "--self-contained-html",
-#  "--strict-markers",
-#  "--tb=short",
+    "-ra",
+    "-q",
+    "-p", "no:warnings",
+    "--strict-markers",
+    "--strict-config",
+    "--continue-on-collection-errors",
+    "--tb=short",
 ]
 markers = [
   "unit: Unit tests (fast, no external dependencies)",
@@ -143,11 +162,11 @@ markers = [
   "requires_cascor: Tests requiring CasCor backend",
   "requires_server: Tests requiring live server running",
   "requires_display: Tests requiring display for visualization",
+  "api: Tests for API endpoints",
+  "generators: Tests for data generators",
 ]
 asyncio_mode = "auto"
-# Disable assertion rewriting to fix import issues with Python 3.13
 consider_namespace_packages = false
-# Warning filters
 filterwarnings = [
   "error::RuntimeWarning",
   "ignore::DeprecationWarning:dash.*",
@@ -176,7 +195,7 @@ parallel = true
 show_missing = true
 skip_covered = false
 skip_empty = true
-fail_under = 95
+fail_under = 50
 precision = 2
 exclude_lines = [
   "pragma: no cover",

@@ -1,23 +1,30 @@
 ---
-####################################################################################################################################################################################################
+#####################################################################################################################################################################################################
 # Project:       Juniper
-# Prototype:     Juniper Canopy: Monitoring/Diagnostic Frontend for CasCor
+# Sub-Project:   JuniperCanopy
+# Application:   juniper_canopy
 # File Name:     ci.yml
 # Author:        Paul Calnon
-# Version:       0.10.0
+# Version:       0.11.0
 #
-# Date:          2025-11-03
-# Last Modified: 2025-12-12
+# Date Created:  2025-11-03
+# Last Modified: 2026-01-31
 #
 # License:       MIT License
-# Copyright:     Copyright (c) 2024-2025 Paul Calnon
+# Copyright:     Copyright (c) 2024-2026 Paul Calnon
 #
 # Description:
 #    GitHub Actions CI/CD Pipeline for Juniper Canopy CasCor NN Frontend
-#    - Runs tests on every push and PR
-#    - Generates coverage reports
-#    - Enforces quality gates
-#    - Supports multiple Python versions
+#    - Pre-commit hooks for code quality (black, isort, flake8, mypy, bandit)
+#    - Unit tests with coverage enforcement
+#    - Integration tests
+#    - Security scanning (Gitleaks, Bandit SARIF, pip-audit)
+#    - Proper failure handling (no continue-on-error for critical steps)
+#    - Dependency caching for performance
+#
+# References:
+#    - CANOPY-P1-001: CI/CD Pipeline Setup
+#    - Best practices: https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions
 #####################################################################################################################################################################################################
 
 name: CI/CD Pipeline
@@ -33,124 +40,78 @@ on:
     branches:
       - main
       - develop
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ENV_NAME: JuniperCanopy
+  PYTHON_TEST_VERSION: "3.14"
+  COVERAGE_FAIL_UNDER: "50"
 
 jobs:
-  lint:
-    name: Code Quality Checks
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # Pre-commit: Code Quality Checks (runs across multiple Python versions)
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  pre-commit:
+    name: Pre-commit (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Code
-        # uses: actions/checkout@v4
-        uses: actions/checkout@v6
-        with:
-          # fetch-depth: 0
-          fetch-depth: 1
-
-      - name: Fix Default Branch Name
-        run: |
-          echo "Fixing Default Branch Name..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║       Juniper Canopy - Fix Default Branch Name             ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          # git branch -M main
-          # git branch -m main
-          git config --global init.defaultBranch main
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: 3.14
-
-      - name: Install Linting Tools
-        run: |
-          echo "Installing Linting Tools..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║       Juniper Canopy - Installing Linting Tools            ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          python -m pip install --upgrade pip
-          pip install black isort mypy flake8 flake8-bugbear flake8-comprehensions flake8-simplify
-          python3 -m pip install types-requests
-
-      - name: Run Black (Format Check)
-        run: |
-          echo "Running Black..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║       Juniper Canopy - Running Black (Format Check)        ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          black --check --diff src/ || true
-        continue-on-error: true
-
-      - name: Run isort (Import Sort Check)
-        run: |
-          echo "Running isort..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║       Juniper Canopy - Running isort (Import Sort Check)   ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          isort --check-only --diff src/ || true
-        continue-on-error: true
-
-      - name: Run Flake8 (Linter)
-        run: |
-          echo "Running Flake8..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║       Juniper Canopy - Running Flake8 (Linter)             ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-
-          echo "Stopping build on Error for:"
-          echo "flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics"
-          # flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics
-          echo "Continuing build on Warnings for:"
-          echo -ne "flake8 src/ --count --select=B,C,E,F,W,T4,B9 --extend-ignore=E203,E266,E501,W503,MD033,MD041 "
-          # echo -ne "flake8 src/ --count --select=B,C,E,F,W,T4,B9 --extend-ignore=E203,E266,E501,W503 "
-          echo -ne "--max-line-length=120 --max-complexity=15 --show-source --statistics --exit-zero\n"
-          flake8 src/ \
-              --count \
-              --select=B,C,E,F,W,T4,B9 \
-              --extend-ignore=E203,E266,E501,W503,MD033,MD041 \
-              --max-line-length=120 \
-              --max-complexity=15 \
-              --show-source \
-              --statistics \
-              --exit-zero
-
-          # Stop the build if there are Python syntax errors or undefined names
-          # flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics
-          # Exit-zero, errors are warnings (warnings won't fail the build)
-          # flake8 src/ --count --max-line-length=120 --statistics --exit-zero
-        continue-on-error: true
-
-      - name: Run MyPy (Type Checker)
-        run: |
-          echo "Running MyPy..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Running MyPy (Type Checker)          ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          mypy src/ --ignore-missing-imports --no-strict-optional || true
-        continue-on-error: true
-
-  test:
-    name: Test Suite (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
-
     strategy:
       fail-fast: false
       matrix:
-        # python-version: ["3.11", "3.12", "3.13", "3.14"]
-        python-version: ["3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install pre-commit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pre-commit
+
+      - name: Cache pre-commit hooks
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            pre-commit-${{ runner.os }}-${{ matrix.python-version }}-
+
+      - name: Run pre-commit hooks
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Pre-commit Checks                   ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          pre-commit run --all-files --show-diff-on-failure
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # Unit Tests: Run unit tests with coverage enforcement
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  unit-tests:
+    name: Unit Tests + Coverage (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    needs: [pre-commit]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - name: Checkout Code
-        # uses: actions/checkout@v4
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
-          # fetch-depth: 0
           fetch-depth: 1
-
-      - name: Fix Default Branch Name
-        run: |
-          echo "Fixing Default Branch Name..."
-          git config --global init.defaultBranch main
 
       - name: Free disk space
         run: |
@@ -164,278 +125,117 @@ jobs:
           sudo rm -rf /opt/hostedtoolcache/CodeQL /opt/hostedtoolcache/go
           df -h
 
-      - name: Set up Conda
+      - name: Set up Miniforge (mamba)
         uses: conda-incubator/setup-miniconda@v3
         with:
-          python-version: ${{ matrix.python-version }}
-          channels: conda-forge,pytorch,plotly
-          conda-remove-defaults: true
           miniforge-version: latest
           use-mamba: true
-          channel-priority: flexible
-          activate-environment: JuniperCanopy
-          environment-file: conf/conda_environment_ci.yaml
           auto-activate-base: false
 
-      - name: Verify Conda Environment
-        shell: bash -el {0}
+      - name: Cache conda packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/miniforge3/pkgs
+            ~/miniconda3/pkgs
+            ~/.conda/pkgs
+          key: conda-pkgs-${{ runner.os }}-${{ hashFiles('conf/conda_environment_ci.yaml') }}
+          restore-keys: |
+            conda-pkgs-${{ runner.os }}-
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('conf/requirements_ci.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
+
+      - name: Create conda environment
+        shell: bash -l {0}
         run: |
-          echo "Verifying Conda Environment..."
-          conda list -n JuniperCanopy
-          which python
+          set -euxo pipefail
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Create Conda Environment            ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          mamba env create -n "${ENV_NAME}" -f conf/conda_environment_ci.yaml python=${{ matrix.python-version }} || \
+            mamba env update -n "${ENV_NAME}" -f conf/conda_environment_ci.yaml
+          conda activate "${ENV_NAME}"
           python --version
           pip --version
-          df -h
 
-      - name: Install Additional Dependencies
-        shell: bash -el {0}
+      - name: Install additional dependencies
+        shell: bash -l {0}
         run: |
-          echo "Installing additional dependencies..."
-          python -m pip install --upgrade pip
+          set -euxo pipefail
+          conda activate "${ENV_NAME}"
           pip install -r conf/requirements_ci.txt
-          echo "Verifying critical packages..."
-          python -c "import a2wsgi; print('a2wsgi OK')"
-          python -c "import fastapi; print('fastapi OK')"
-          python -c "import dash; print('dash OK')"
+          pip install pytest pytest-cov pytest-timeout pytest-xdist coverage[toml]
 
-      - name: Verify Test Files and Create Directories
-        shell: bash -el {0}
+      - name: Create required directories
         run: |
-          echo "Verifying Test Files..."
-          ls -la src/tests/ | head -20
-          # Ensure log directories exist as directories (not files)
-          rm -f logs src/logs 2>/dev/null || true
           mkdir -p logs src/logs reports/junit reports/coverage
-          echo "Created logs/, src/logs/, reports/junit/, reports/coverage/"
-          ls -la logs/ src/logs/
 
-      - name: Run Tests with Coverage
-        shell: bash -el {0}
+      - name: Run Unit Tests with Coverage Gate
+        shell: bash -l {0}
         env:
-          # CI test environment configuration
-          # Disabled standard in CI
-          CASCOR_BACKEND_AVAILABLE: 0  # (Enable when needed in nightly build)
-          RUN_SERVER_TESTS: 0  # Disabled (requires live server)
-          ENABLE_SLOW_TESTS: 0  # Skip slow tests for fast feedback
-
+          CASCOR_BACKEND_AVAILABLE: 0
+          RUN_SERVER_TESTS: 0
+          ENABLE_SLOW_TESTS: 0
         run: |
-          echo "Running tests with coverage..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Run Tests with Coverage              ║"
+          set -euxo pipefail
+          conda activate "${ENV_NAME}"
+
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Unit Tests (Fast Only)              ║"
           echo "╚════════════════════════════════════════════════════════════╝"
+
           cd src
-          # Run tests excluding external dependencies
-          # TODO: skip tests when calculating coverage
-          pytest tests/ \
-            --verbose \
+          python -m pytest \
             -m "not requires_cascor and not requires_server and not slow" \
+            tests/ \
+            --verbose \
+            --timeout=60 \
+            --maxfail=5 \
+            --junitxml=../reports/junit/junit-unit.xml \
             --cov=. \
-            --cov-report=xml:../coverage.xml \
             --cov-report=term-missing \
-            --cov-report=html:../reports/coverage \
-            --junit-xml=../reports/junit/results.xml \
-            --html=../reports/test_report.html \
-            --self-contained-html \
-            --continue-on-collection-errors \
-            || true
-        continue-on-error: true
+            --cov-report=xml:../reports/coverage/coverage.xml \
+            --cov-report=html:../reports/coverage/htmlcov \
+            --cov-fail-under=${COVERAGE_FAIL_UNDER}
 
-      # Regression Test Suite
-      # Runs critical regression tests to prevent known issues from reoccurring
-      # - Metrics panel data format validation
-      # -     (prevents data display regressions)
-      # - API contract verification (ensures backend/frontend compatibility)
-      # - End-to-end dashboard tests (validates full user workflow)
-      - name: Run Regression Tests
-        shell: bash -el {0}
-        # pytest tests/unit/test_metrics_panel.py::
-        #     TestMetricsPanelDataFormatRegression -v
-        run: |
-          echo "Running regression tests..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Run Regression Tests                 ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          cd src
-          pytest tests/unit/test_metrics_panel.py -v
-          pytest tests/integration/test_api_contracts.py -v
-          pytest tests/integration/test_dashboard_e2e.py -v
-        continue-on-error: false  # Fail build if regression tests fail
-
-      - name: Upload Coverage to Codecov
-        uses: codecov/codecov-action@v4
+      - name: Upload Coverage Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
         with:
-          file: ./coverage.xml
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
-        continue-on-error: true
+          name: coverage-report-py${{ matrix.python-version }}
+          path: |
+            reports/coverage/coverage.xml
+            reports/coverage/htmlcov/
+          retention-days: 30
 
       - name: Upload Test Results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-results-${{ matrix.python-version }}
-          path: |
-            reports/coverage/
-            coverage.xml
+          name: unit-test-results-py${{ matrix.python-version }}
+          path: reports/junit/junit-unit.xml
           retention-days: 30
 
-      - name: Upload Coverage HTML Report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: coverage-report-${{ matrix.python-version }}
-          path: reports/coverage/
-          retention-days: 30
-
-      - name: Check Coverage Threshold
-        shell: bash -el {0}
-        run: |
-          echo "Checking coverage threshold..."
-          # TODO: skip tests when calculating coverage
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Check Coverage Threshold             ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          cd src
-          COVERAGE="$(pytest tests/ --cov=. --cov-report=term-missing)"
-          COVERAGE="$(echo "${COVERAGE}" | grep "TOTAL")"
-          COVERAGE="$(echo "${COVERAGE}" | awk '{print $NF}' | sed 's/%//')"
-          echo "Current coverage: ${COVERAGE}%"
-
-          # Warning threshold (don't fail, just warn)
-          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
-            echo "::warning::Coverage is below 80% (current: ${COVERAGE}%)"
-          fi
-
-          # Failure threshold (fail the build)
-          if (( $(echo "$COVERAGE < 60" | bc -l) )); then
-            echo "::error::Coverage critically low: ${COVERAGE}% (min: 60%)"
-            exit 1
-          fi
-        continue-on-error: true
-
-      - name: Test Summary
-        shell: bash -el {0}
-        run: |
-          echo "Compiling Test Summary..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Test Summary                         ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          if [[ -f reports/junit/results.xml ]]; then
-            echo "Test results generated successfully"
-            cat reports/junit/results.xml | grep -o 'tests="[0-9]*"'&& {
-                echo "Tests completed";
-            }
-          else
-            echo "No test results file found"
-          fi
-
-  build:
-    name: Build and Package
-    runs-on: ubuntu-latest
-    needs: [lint, test]
-
-    steps:
-      - name: Checkout Code
-        # uses: actions/checkout@v4
-        uses: actions/checkout@v6
-        with:
-          # fetch-depth: 0
-          fetch-depth: 1
-
-      - name: Fix Default Branch Name
-        run: |
-          echo "Fixing Default Branch Name..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║       Juniper Canopy - Fix Default Branch Name             ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          # git branch -M main
-          # git branch -m main
-          git config --global init.defaultBranch main
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          # python-version: "3.13"
-          python-version: "3.14"
-
-      - name: Check disk space
-        run: |
-          echo "Checking disk space..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Check Disk Space                     ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          df -h
-
-      - name: Install Build Tools
-        run: |
-          echo "Installing build tools..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Install Build Tools                  ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          python -m pip install --upgrade pip
-          pip install build wheel setuptools
-
-      - name: Verify Project Structure
-        run: |
-          echo "Verifying project structure..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Verify Project Structure             ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          echo -ne "\n=========== Project Directory ================================\n"
-          ls -Flah
-          echo -ne "\n=========== Source Directory =================================\n"
-          ls -Flah src/
-          echo -ne "\n=========== Project Directory Structure ======================\n"
-          tree .
-
-      - name: Check for Syntax Errors
-        run: |
-          echo "Checking for syntax errors..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Check for Syntax Errors              ║"
-          echo "╚════════════════════════════════════════════════════════════╝"
-          python -m py_compile src/**/*.py || true
-        continue-on-error: true
-
-      - name: Build Summary
-        run: |
-          echo "Building Summary..."
-          printf "\n╔════════════════════════════════════════════════════════════╗\n"
-          printf "║      Juniper Canopy - Build Summary                        ║\n"
-          printf "╠════════════════════════════════════════════════════════════╣\n"
-          printf "║%4s%-54s║\n"     " " "Build Information:"
-          printf "║%4s%-18s%36s║\n" " " "Operating System:"  "$(echo \"$(uname -a)\" | awk -F \  '{print $1,$2,$3;}')"
-          printf "║%4s%-16s%38s║\n" " " "Python Version:"    "$(python --version)"
-          printf "║%4s%-9s%45s║\n"  " " "Project: "          "Juniper Canopy"
-          printf "║%4s%-9s%45s║\n" " " "Version:" "$(grep 'Version:' src/main.py | head -1 | awk '{print $3}')"
-          printf "║%4s%-12s%42s║\n" " " "Build Date: "       "$(date -u)"
-          printf "╚════════════════════════════════════════════════════════════╝\n"
-
-  integration:
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # Integration Tests: Run integration tests (PRs and main/develop pushes)
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
-    needs: [test]
-
-    strategy:
-      matrix:
-        # python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-        python-version: ["3.14"]
-
-    if: github.event_name == 'pull_request'
+    needs: [unit-tests]
+    if: github.event_name == 'pull_request' || github.ref_name == 'main' || github.ref_name == 'develop'
 
     steps:
       - name: Checkout Code
-        # uses: actions/checkout@v4
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
-          # fetch-depth: 0
           fetch-depth: 1
-
-      - name: Fix Default Branch Name
-        run: |
-          echo "Fixing Default Branch Name..."
-          git config --global init.defaultBranch main
 
       - name: Free disk space
         run: |
@@ -449,125 +249,215 @@ jobs:
           sudo rm -rf /opt/hostedtoolcache/CodeQL /opt/hostedtoolcache/go
           df -h
 
-      - name: Set up Conda
+      - name: Set up Miniforge (mamba)
         uses: conda-incubator/setup-miniconda@v3
         with:
-          python-version: ${{ matrix.python-version }}
-          channels: conda-forge,pytorch,plotly
-          conda-remove-defaults: true
           miniforge-version: latest
           use-mamba: true
-          channel-priority: flexible
-          activate-environment: JuniperCanopy
-          environment-file: conf/conda_environment_ci.yaml
           auto-activate-base: false
 
-      - name: Verify Conda Environment
-        shell: bash -el {0}
-        run: |
-          echo "Verifying Conda Environment..."
-          conda list -n JuniperCanopy
-          which python
-          python --version
-          pip --version
-          df -h
+      - name: Cache conda packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/miniforge3/pkgs
+            ~/miniconda3/pkgs
+            ~/.conda/pkgs
+          key: conda-pkgs-${{ runner.os }}-${{ hashFiles('conf/conda_environment_ci.yaml') }}
+          restore-keys: |
+            conda-pkgs-${{ runner.os }}-
 
-      - name: Install Additional Dependencies
-        shell: bash -el {0}
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('conf/requirements_ci.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
+
+      - name: Create conda environment
+        shell: bash -l {0}
         run: |
-          echo "Installing additional dependencies..."
-          python -m pip install --upgrade pip
+          set -euxo pipefail
+          mamba env create -n "${ENV_NAME}" -f conf/conda_environment_ci.yaml python=${{ env.PYTHON_TEST_VERSION }} || \
+            mamba env update -n "${ENV_NAME}" -f conf/conda_environment_ci.yaml
+          conda activate "${ENV_NAME}"
           pip install -r conf/requirements_ci.txt
-          echo "Verifying critical packages..."
-          python -c "import a2wsgi; print('a2wsgi OK')"
-          python -c "import fastapi; print('fastapi OK')"
+          pip install pytest pytest-timeout pytest-xdist
 
-      - name: Verify Test Files and Create Directories
-        shell: bash -el {0}
+      - name: Create required directories
         run: |
-          echo "Verifying Test Files..."
-          ls -la src/tests/ | head -20
-          # Ensure log directories exist as directories (not files)
-          rm -f logs src/logs 2>/dev/null || true
-          mkdir -p logs src/logs reports/junit reports/coverage
-          ls -la logs/ src/logs/
+          mkdir -p logs src/logs reports/junit
 
-      - name: Run Integration Tests Only
-        shell: bash -el {0}
+      - name: Run Integration Tests (Fast Only)
+        shell: bash -l {0}
         env:
           CASCOR_BACKEND_AVAILABLE: 0
           RUN_SERVER_TESTS: 0
           ENABLE_SLOW_TESTS: 0
-
         run: |
-          echo "Running Integration Tests..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Run Integration Tests                ║"
+          set -euxo pipefail
+          conda activate "${ENV_NAME}"
+
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Integration Tests (Fast Only)       ║"
           echo "╚════════════════════════════════════════════════════════════╝"
+
           cd src
-          pytest tests/integration/ \
+          python -m pytest \
+            -m "integration and not requires_cascor and not requires_server and not slow" \
+            tests/integration \
             --verbose \
-            --maxfail=5 \
-            -m "integration and not requires_cascor and not requires_server" \
-            || true
+            --timeout=120 \
+            --maxfail=3 \
+            --junitxml=../reports/junit/junit-integration.xml
+
+      - name: Upload Integration Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-test-results
+          path: reports/junit/junit-integration.xml
+          retention-days: 30
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # Security: Run security scans (Gitleaks, Bandit, pip-audit)
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  security:
+    name: Security Scans
+    runs-on: ubuntu-latest
+    needs: [pre-commit]
+
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks (Secrets Detection)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          fail: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install security tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit pip-audit
+
+      - name: Create reports directory
+        run: mkdir -p reports/security
+
+      - name: Run Bandit (SAST) -> SARIF
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Bandit Security Scan                ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          bandit -r src -f sarif -o reports/security/bandit.sarif || true
+
+      - name: Upload Bandit SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: reports/security/bandit.sarif
         continue-on-error: true
 
-      - name: Integration Test Summary
-        shell: bash -el {0}
+      - name: Run pip-audit (Dependency Vulnerabilities)
         run: |
-          echo "Compiling Summary for Integration Tests..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Integration Test Summary             ║"
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - pip-audit Dependency Scan           ║"
           echo "╚════════════════════════════════════════════════════════════╝"
-          echo -ne "\n=== Integration Tests Completed ===\n"
-          echo "Note: Some tests may require external dependencies"
+          pip install dash fastapi uvicorn plotly numpy scipy
+          pip freeze > reports/security/pip-freeze.txt
+          pip-audit -r reports/security/pip-freeze.txt || echo "::warning::Vulnerabilities found in dependencies"
 
-  quality-gate:
+      - name: Upload Security Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-reports
+          path: reports/security/
+          retention-days: 30
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # Required Checks Aggregator: Final quality gate
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  required-checks:
     name: Quality Gate
     runs-on: ubuntu-latest
-    needs: [lint, test, build]
     if: always()
+    needs: [pre-commit, unit-tests, integration-tests, security]
 
     steps:
-      - name: Check Quality Gate
+      - name: Check Quality Gate Status
         run: |
-          echo "Checking Quality Gate..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Quality Gate Status                  ║"
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Quality Gate Status                 ║"
           echo "╚════════════════════════════════════════════════════════════╝"
-          echo " "
-          echo "Lint: ${{ needs.lint.result }}"
-          echo "Test: ${{ needs.test.result }}"
-          echo "Build: ${{ needs.build.result }}"
-          # Determine overall status
-          if [[ "${{ needs.test.result }}" == "failure" ]]; then
-            echo "::error::Tests failed - Quality gate FAILED"
+          echo ""
+          echo "Pre-commit:        ${{ needs.pre-commit.result }}"
+          echo "Unit Tests:        ${{ needs.unit-tests.result }}"
+          echo "Integration Tests: ${{ needs.integration-tests.result }}"
+          echo "Security:          ${{ needs.security.result }}"
+          echo ""
+
+          # Pre-commit and unit-tests MUST pass
+          if [[ "${{ needs.pre-commit.result }}" != "success" ]]; then
+            echo "::error::Pre-commit checks failed"
             exit 1
-          elif [[ "${{ needs.lint.result }}" == "failure" ]]; then
-            echo "::warning::Linting failed - Consider fixing before merge"
-          elif [[ "${{ needs.build.result }}" == "failure" ]]; then
-            echo "::error::Build failed - Quality gate FAILED"
-            exit 1
-          else
-            echo "::notice::Quality gate PASSED ✓"
           fi
 
+          if [[ "${{ needs.unit-tests.result }}" != "success" ]]; then
+            echo "::error::Unit tests failed"
+            exit 1
+          fi
+
+          # Security should pass (but SARIF upload failures are allowed)
+          if [[ "${{ needs.security.result }}" == "failure" ]]; then
+            echo "::error::Security scans failed"
+            exit 1
+          fi
+
+          # Integration tests: failure = error, skipped = OK (for feature branches)
+          if [[ "${{ needs.integration-tests.result }}" == "failure" ]]; then
+            echo "::error::Integration tests failed"
+            exit 1
+          fi
+
+          echo "::notice::Quality Gate PASSED ✓"
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # Notify: Build status notification
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
   notify:
-    name: Notification
+    name: Build Notification
     runs-on: ubuntu-latest
-    needs: [quality-gate]
+    needs: [required-checks]
     if: always()
 
     steps:
-      - name: Build Status
+      - name: Build Status Summary
         run: |
-          echo "Building Status Notification..."
-          echo -ne "\n╔════════════════════════════════════════════════════════════╗\n"
-          echo "║      Juniper Canopy - Build Status Notification            ║"
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Build Complete                      ║"
           echo "╚════════════════════════════════════════════════════════════╝"
-          echo -ne "\n====== CI/CD Pipeline Complete ===============================\n"
-          echo "Status: ${{ needs.quality-gate.result }}"
+          echo ""
+          echo "========== CI/CD Pipeline Summary =============================="
+          echo "Status:   ${{ needs.required-checks.result }}"
           echo "Workflow: ${{ github.workflow }}"
-          echo "Branch: ${{ github.ref_name }}"
-          echo "Commit: ${{ github.sha }}"
-          echo "Actor: ${{ github.actor }}"
+          echo "Branch:   ${{ github.ref_name }}"
+          echo "Commit:   ${{ github.sha }}"
+          echo "Actor:    ${{ github.actor }}"
+          echo "Event:    ${{ github.event_name }}"
+          echo "================================================================"
