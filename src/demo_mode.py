@@ -408,28 +408,28 @@ class DemoMode:
             response = client.create_dataset(
                 generator="spiral",
                 params={
-                    "n_points": n_samples // 2,
+                    "n_points_per_spiral": n_samples // 2,
                     "n_spirals": 2,
                     "noise": 0.1,
+                    "seed": 42,
                 },
                 persist=False,
             )
 
-            dataset_id = response.get("id")
+            dataset_id = response.get("dataset_id")
             if not dataset_id:
-                self.logger.warning("JuniperData response missing dataset ID")
+                self.logger.warning("JuniperData response missing dataset_id")
                 return None
 
             npz_data = client.download_artifact_npz(dataset_id)
 
-            inputs = npz_data.get("inputs", npz_data.get("features"))
-            targets = npz_data.get("targets", npz_data.get("labels"))
-
-            if inputs is None or targets is None:
-                self.logger.warning("JuniperData artifact missing inputs/targets")
+            inputs = npz_data.get("X_full")
+            targets_one_hot = npz_data.get("y_full")
+            if inputs is None or targets_one_hot is None:
+                self.logger.warning("JuniperData artifact missing X_full/y_full")
                 return None
 
-            targets = targets.flatten()
+            targets = np.argmax(targets_one_hot, axis=1).astype(np.float32)
 
             self.logger.info(f"Generated spiral dataset via JuniperData: {len(inputs)} samples")
 

@@ -1309,28 +1309,29 @@ class CascorIntegration:
         response = client.create_dataset(
             generator="spiral",
             params={
-                "n_points": n_samples,
+                "n_points_per_spiral": n_samples,
                 "n_spirals": 2,
                 "noise": 0.0,
+                "seed": 42,
             },
             persist=False,
         )
 
-        dataset_id = response.get("id")
+        dataset_id = response.get("dataset_id")
         if not dataset_id:
-            self.logger.warning("JuniperData response missing dataset ID")
+            self.logger.warning("JuniperData response missing dataset_id")
             return None
 
         npz_data = client.download_artifact_npz(dataset_id)
 
-        features = npz_data.get("inputs", npz_data.get("features"))
-        labels = npz_data.get("targets", npz_data.get("labels"))
+        features = npz_data.get("X_full")
+        labels_one_hot = npz_data.get("y_full")
 
-        if features is None or labels is None:
-            self.logger.warning("JuniperData artifact missing features/labels")
+        if features is None or labels_one_hot is None:
+            self.logger.warning("JuniperData artifact missing X_full/y_full")
             return None
 
-        labels = labels.flatten()
+        labels = np.argmax(labels_one_hot, axis=1).astype(np.float32)
         num_samples = len(features)
 
         unique, counts = np.unique(labels, return_counts=True)

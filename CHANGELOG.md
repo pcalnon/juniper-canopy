@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.26.1] - 2026-01-31
+
+### Fixed: [0.26.1]
+
+- **JuniperData API Contract Fixes** (Oracle verification identified issues)
+  - **`src/demo_mode.py`**: Fixed `_generate_spiral_dataset_from_juniper_data()`
+    - Changed param key from `n_points` to `n_points_per_spiral`
+    - Changed response key from `id` to `dataset_id`
+    - Changed NPZ keys from `inputs/targets` to `X_full/y_full`
+    - Added `np.argmax()` conversion for one-hot labels
+    - Added `seed` parameter for reproducibility
+
+  - **`src/backend/cascor_integration.py`**: Fixed `_create_juniper_dataset()`
+    - Changed param key from `n_points` to `n_points_per_spiral`
+    - Changed response key from `id` to `dataset_id`
+    - Changed NPZ keys from `features/labels` to `X_full/y_full`
+    - Added `np.argmax()` conversion for one-hot labels
+    - Added `seed` parameter for reproducibility
+
+### Technical Notes: [0.26.1]
+
+- **SemVer impact**: PATCH – Bug fixes; no API changes
+- Oracle analysis verified extraction completeness
+- All 83 tests passing after fixes
+
+---
+
 ## [0.26.0] - 2026-01-31
 
 ### Added: [0.26.0]
