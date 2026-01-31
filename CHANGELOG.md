@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.26.0] - 2026-01-31
+
+### Added: [0.26.0]
+
+- **Phase 4: JuniperData Integration** (JUNIPER_CASCOR_SPIRAL_DATA_GEN_REFACTOR_PLAN.md)
+  - **New Module**: `src/juniper_data_client/`
+    - `__init__.py` - Package exports JuniperDataClient
+    - `client.py` - REST client for JuniperData service
+      - `create_dataset(generator, params)` - Create/generate dataset
+      - `download_artifact_npz(dataset_id)` - Download NPZ artifact as dict
+      - `get_preview(dataset_id, n)` - Get dataset preview
+
+  - **Updated**: `src/demo_mode.py`
+    - Added JuniperData integration to `_generate_spiral_dataset()`
+    - New method `_generate_spiral_dataset_from_juniper_data()` for service calls
+    - New method `_generate_spiral_dataset_local()` for fallback generation
+    - Feature flag: `JUNIPER_DATA_URL` enables JuniperData mode
+
+  - **Updated**: `src/backend/cascor_integration.py`
+    - Added JuniperData integration to `_generate_missing_dataset_info()`
+    - New method `_generate_dataset_from_juniper_data()` for service calls
+    - New method `_generate_dataset_local()` for fallback generation
+    - Feature flag: `JUNIPER_DATA_URL` enables JuniperData mode
+
+### Technical Notes: [0.26.0]
+
+- **SemVer impact**: MINOR – New JuniperData integration; backward compatible
+- Part of Spiral Dataset Generator Refactor Phase 4
+- All existing tests passing (demo_mode: 59 tests, cascor_integration: 24 tests)
+- Graceful fallback to local generation when JuniperData unavailable
+
+### Usage: [0.26.0]
+
+```bash
+# Enable JuniperData service integration
+export JUNIPER_DATA_URL=http://localhost:8100
+
+# Disable (uses local generation - default, backward compatible)
+unset JUNIPER_DATA_URL
+```
+
+---
+
 ## [0.25.0] - 2026-01-25
 
 ### Added: [0.25.0]

@@ -369,6 +369,91 @@ class DemoMode:
         """
         Generate two-class spiral dataset.
 
+        Uses JuniperData service if JUNIPER_DATA_URL environment variable is set,
+        otherwise falls back to local generation.
+
+        Args:
+            n_samples: Number of samples per class
+
+        Returns:
+            Dataset dictionary
+        """
+        juniper_data_url = os.environ.get("JUNIPER_DATA_URL")
+        if juniper_data_url:
+            dataset = self._generate_spiral_dataset_from_juniper_data(n_samples, juniper_data_url)
+            if dataset is not None:
+                return dataset
+            self.logger.warning("JuniperData service unavailable, falling back to local generation")
+
+        return self._generate_spiral_dataset_local(n_samples)
+
+    def _generate_spiral_dataset_from_juniper_data(
+        self, n_samples: int, juniper_data_url: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Generate spiral dataset using JuniperData service.
+
+        Args:
+            n_samples: Number of samples per class
+            juniper_data_url: URL of the JuniperData service
+
+        Returns:
+            Dataset dictionary or None if service unavailable
+        """
+        try:
+            from juniper_data_client import JuniperDataClient
+
+            client = JuniperDataClient(base_url=juniper_data_url)
+
+            response = client.create_dataset(
+                generator="spiral",
+                params={
+                    "n_points": n_samples // 2,
+                    "n_spirals": 2,
+                    "noise": 0.1,
+                },
+                persist=False,
+            )
+
+            dataset_id = response.get("id")
+            if not dataset_id:
+                self.logger.warning("JuniperData response missing dataset ID")
+                return None
+
+            npz_data = client.download_artifact_npz(dataset_id)
+
+            inputs = npz_data.get("inputs", npz_data.get("features"))
+            targets = npz_data.get("targets", npz_data.get("labels"))
+
+            if inputs is None or targets is None:
+                self.logger.warning("JuniperData artifact missing inputs/targets")
+                return None
+
+            targets = targets.flatten()
+
+            self.logger.info(f"Generated spiral dataset via JuniperData: {len(inputs)} samples")
+
+            return {
+                "inputs": inputs,
+                "targets": targets,
+                "inputs_tensor": torch.from_numpy(inputs).float(),
+                "targets_tensor": torch.from_numpy(targets).float().unsqueeze(1),
+                "num_samples": len(inputs),
+                "num_features": inputs.shape[1] if len(inputs.shape) > 1 else 2,
+                "num_classes": 2,
+            }
+
+        except ImportError:
+            self.logger.warning("juniper_data_client not available")
+            return None
+        except Exception as e:
+            self.logger.warning(f"JuniperData request failed: {type(e).__name__}: {e}")
+            return None
+
+    def _generate_spiral_dataset_local(self, n_samples: int = 200) -> Dict[str, Any]:
+        """
+        Generate two-class spiral dataset locally.
+
         Args:
             n_samples: Number of samples per class
 
@@ -377,25 +462,20 @@ class DemoMode:
         """
         np.random.seed(42)
 
-        # Generate spiral parameters
         n_per_class = n_samples // 2
         theta = np.linspace(0, 4 * np.pi, n_per_class)
 
-        # Class 0: clockwise spiral
         r0 = theta / (4 * np.pi)
         x0 = r0 * np.cos(theta) + np.random.randn(n_per_class) * 0.1
         y0 = r0 * np.sin(theta) + np.random.randn(n_per_class) * 0.1
 
-        # Class 1: counter-clockwise spiral
         r1 = theta / (4 * np.pi)
         x1 = -r1 * np.cos(theta) + np.random.randn(n_per_class) * 0.1
         y1 = -r1 * np.sin(theta) + np.random.randn(n_per_class) * 0.1
 
-        # Combine
         inputs = np.vstack([np.column_stack([x0, y0]), np.column_stack([x1, y1])])
         targets = np.concatenate([np.zeros(n_per_class), np.ones(n_per_class)])
 
-        # Shuffle
         indices = np.random.permutation(len(inputs))
         inputs = inputs[indices]
         targets = targets[indices]

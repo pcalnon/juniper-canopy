@@ -1265,26 +1265,107 @@ class CascorIntegration:
         Args: None
         Raises: None
         Notes:
-            Generates a simple spiral dataset for demonstration purposes.
+            Uses JuniperData service if JUNIPER_DATA_URL is set, otherwise generates
+            a simple spiral dataset locally for demonstration purposes.
         Returns:
             Dictionary with mock dataset information
         Example:
             dataset_info = integration._generate_missing_dataset_info()
         """
-        # Generate mock spiral dataset for demo
+        juniper_data_url = os.environ.get("JUNIPER_DATA_URL")
+        if juniper_data_url:
+            dataset = self._generate_dataset_from_juniper_data(juniper_data_url)
+            if dataset is not None:
+                return dataset
+            self.logger.warning("JuniperData service unavailable, falling back to local generation")
+
+        return self._generate_dataset_local()
+
+    def _generate_dataset_from_juniper_data(self, juniper_data_url: str) -> Optional[Dict[str, Any]]:
+        """
+        Generate dataset using JuniperData service.
+
+        Args:
+            juniper_data_url: URL of the JuniperData service
+
+        Returns:
+            Dataset dictionary or None if service unavailable
+        """
+        try:
+            from juniper_data_client import JuniperDataClient
+
+            client = JuniperDataClient(base_url=juniper_data_url)
+
+            n_samples = 100
+            response = client.create_dataset(
+                generator="spiral",
+                params={
+                    "n_points": n_samples,
+                    "n_spirals": 2,
+                    "noise": 0.0,
+                },
+                persist=False,
+            )
+
+            dataset_id = response.get("id")
+            if not dataset_id:
+                self.logger.warning("JuniperData response missing dataset ID")
+                return None
+
+            npz_data = client.download_artifact_npz(dataset_id)
+
+            features = npz_data.get("inputs", npz_data.get("features"))
+            labels = npz_data.get("targets", npz_data.get("labels"))
+
+            if features is None or labels is None:
+                self.logger.warning("JuniperData artifact missing features/labels")
+                return None
+
+            labels = labels.flatten()
+            num_samples = len(features)
+
+            unique, counts = np.unique(labels, return_counts=True)
+            class_distribution = {int(k): int(v) for k, v in zip(unique, counts)}
+
+            self.logger.info(f"Generated spiral dataset via JuniperData: {num_samples} samples")
+
+            return {
+                "features": features.tolist(),
+                "labels": labels.tolist(),
+                "num_samples": num_samples,
+                "num_features": features.shape[1] if len(features.shape) > 1 else 2,
+                "num_classes": len(unique),
+                "class_distribution": class_distribution,
+                "dataset_name": "Spiral Dataset (JuniperData)",
+                "mock_mode": False,
+            }
+
+        except ImportError:
+            self.logger.warning("juniper_data_client not available")
+            return None
+        except Exception as e:
+            self.logger.warning(f"JuniperData request failed: {type(e).__name__}: {e}")
+            return None
+
+    def _generate_dataset_local(self) -> Dict[str, Any]:
+        """
+        Generate mock spiral dataset locally.
+
+        Returns:
+            Dictionary with mock dataset information
+        """
         self.logger.info("No dataset available, generating mock spiral dataset")
-        import numpy as np
 
         n_samples = 100
         theta = np.linspace(0, 4 * np.pi, n_samples)
 
-        # Generate two spiral classes
         x1 = theta * np.cos(theta) / 10
         y1 = theta * np.sin(theta) / 10
         x2 = -theta * np.cos(theta) / 10
         y2 = -theta * np.sin(theta) / 10
         features = np.vstack([np.column_stack([x1, y1]), np.column_stack([x2, y2])])
         labels = np.concatenate([np.zeros(n_samples), np.ones(n_samples)])
+
         return {
             "features": features.tolist(),
             "labels": labels.tolist(),
