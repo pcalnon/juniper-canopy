@@ -1272,8 +1272,7 @@ class CascorIntegration:
         Example:
             dataset_info = integration._generate_missing_dataset_info()
         """
-        juniper_data_url = os.environ.get("JUNIPER_DATA_URL")
-        if juniper_data_url:
+        if juniper_data_url := os.environ.get("JUNIPER_DATA_URL"):
             dataset = self._generate_dataset_from_juniper_data(juniper_data_url)
             if dataset is not None:
                 return dataset
@@ -1292,60 +1291,63 @@ class CascorIntegration:
             Dataset dictionary or None if service unavailable
         """
         try:
-            from juniper_data_client import JuniperDataClient
-
-            client = JuniperDataClient(base_url=juniper_data_url)
-
-            n_samples = 100
-            response = client.create_dataset(
-                generator="spiral",
-                params={
-                    "n_points": n_samples,
-                    "n_spirals": 2,
-                    "noise": 0.0,
-                },
-                persist=False,
-            )
-
-            dataset_id = response.get("id")
-            if not dataset_id:
-                self.logger.warning("JuniperData response missing dataset ID")
-                return None
-
-            npz_data = client.download_artifact_npz(dataset_id)
-
-            features = npz_data.get("inputs", npz_data.get("features"))
-            labels = npz_data.get("targets", npz_data.get("labels"))
-
-            if features is None or labels is None:
-                self.logger.warning("JuniperData artifact missing features/labels")
-                return None
-
-            labels = labels.flatten()
-            num_samples = len(features)
-
-            unique, counts = np.unique(labels, return_counts=True)
-            class_distribution = {int(k): int(v) for k, v in zip(unique, counts)}
-
-            self.logger.info(f"Generated spiral dataset via JuniperData: {num_samples} samples")
-
-            return {
-                "features": features.tolist(),
-                "labels": labels.tolist(),
-                "num_samples": num_samples,
-                "num_features": features.shape[1] if len(features.shape) > 1 else 2,
-                "num_classes": len(unique),
-                "class_distribution": class_distribution,
-                "dataset_name": "Spiral Dataset (JuniperData)",
-                "mock_mode": False,
-            }
-
+            return self._create_juniper_dataset(juniper_data_url)
         except ImportError:
             self.logger.warning("juniper_data_client not available")
             return None
         except Exception as e:
             self.logger.warning(f"JuniperData request failed: {type(e).__name__}: {e}")
             return None
+
+    # TODO Rename this here and in `_generate_dataset_from_juniper_data`
+    def _create_juniper_dataset(self, juniper_data_url):
+        from juniper_data_client import JuniperDataClient
+
+        client = JuniperDataClient(base_url=juniper_data_url)
+
+        n_samples = 100
+        response = client.create_dataset(
+            generator="spiral",
+            params={
+                "n_points": n_samples,
+                "n_spirals": 2,
+                "noise": 0.0,
+            },
+            persist=False,
+        )
+
+        dataset_id = response.get("id")
+        if not dataset_id:
+            self.logger.warning("JuniperData response missing dataset ID")
+            return None
+
+        npz_data = client.download_artifact_npz(dataset_id)
+
+        features = npz_data.get("inputs", npz_data.get("features"))
+        labels = npz_data.get("targets", npz_data.get("labels"))
+
+        if features is None or labels is None:
+            self.logger.warning("JuniperData artifact missing features/labels")
+            return None
+
+        labels = labels.flatten()
+        num_samples = len(features)
+
+        unique, counts = np.unique(labels, return_counts=True)
+        class_distribution = {int(k): int(v) for k, v in zip(unique, counts)}
+
+        self.logger.info(f"Generated spiral dataset via JuniperData: {num_samples} samples")
+
+        return {
+            "features": features.tolist(),
+            "labels": labels.tolist(),
+            "num_samples": num_samples,
+            "num_features": features.shape[1] if len(features.shape) > 1 else 2,
+            "num_classes": len(unique),
+            "class_distribution": class_distribution,
+            "dataset_name": "Spiral Dataset (JuniperData)",
+            "mock_mode": False,
+        }
 
     def _generate_dataset_local(self) -> Dict[str, Any]:
         """
