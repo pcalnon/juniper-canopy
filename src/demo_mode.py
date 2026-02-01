@@ -365,7 +365,7 @@ class DemoMode:
         except Exception as e:
             self.logger.warning(f"State broadcast failed: {type(e).__name__}: {e}")
 
-    def _generate_spiral_dataset(self, n_samples: int = 200) -> Dict[str, Any]:
+    def _generate_spiral_dataset(self, n_samples: int = 200, algorithm: Optional[str] = None) -> Dict[str, Any]:
         """
         Generate two-class spiral dataset.
 
@@ -374,13 +374,14 @@ class DemoMode:
 
         Args:
             n_samples: Number of samples per class
+            algorithm: Optional algorithm parameter for backward compatibility
 
         Returns:
             Dataset dictionary
         """
         juniper_data_url = os.environ.get("JUNIPER_DATA_URL")
         if juniper_data_url:
-            dataset = self._generate_spiral_dataset_from_juniper_data(n_samples, juniper_data_url)
+            dataset = self._generate_spiral_dataset_from_juniper_data(n_samples, juniper_data_url, algorithm=algorithm)
             if dataset is not None:
                 return dataset
             self.logger.warning("JuniperData service unavailable, falling back to local generation")
@@ -388,7 +389,10 @@ class DemoMode:
         return self._generate_spiral_dataset_local(n_samples)
 
     def _generate_spiral_dataset_from_juniper_data(
-        self, n_samples: int, juniper_data_url: str
+        self,
+        n_samples: int,
+        juniper_data_url: str,
+        algorithm: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Generate spiral dataset using JuniperData service.
@@ -396,6 +400,7 @@ class DemoMode:
         Args:
             n_samples: Number of samples per class
             juniper_data_url: URL of the JuniperData service
+            algorithm: Optional algorithm parameter for backward compatibility
 
         Returns:
             Dataset dictionary or None if service unavailable
@@ -405,14 +410,18 @@ class DemoMode:
 
             client = JuniperDataClient(base_url=juniper_data_url)
 
+            params = {
+                "n_points_per_spiral": n_samples // 2,
+                "n_spirals": 2,
+                "noise": 0.1,
+                "seed": 42,
+            }
+            if algorithm is not None:
+                params["algorithm"] = algorithm
+
             response = client.create_dataset(
                 generator="spiral",
-                params={
-                    "n_points_per_spiral": n_samples // 2,
-                    "n_spirals": 2,
-                    "noise": 0.1,
-                    "seed": 42,
-                },
+                params=params,
                 persist=False,
             )
 

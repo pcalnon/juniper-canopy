@@ -1280,18 +1280,21 @@ class CascorIntegration:
 
         return self._generate_dataset_local()
 
-    def _generate_dataset_from_juniper_data(self, juniper_data_url: str) -> Optional[Dict[str, Any]]:
+    def _generate_dataset_from_juniper_data(
+        self, juniper_data_url: str, algorithm: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """
         Generate dataset using JuniperData service.
 
         Args:
             juniper_data_url: URL of the JuniperData service
+            algorithm: Optional algorithm name for backward compatibility
 
         Returns:
             Dataset dictionary or None if service unavailable
         """
         try:
-            return self._create_juniper_dataset(juniper_data_url)
+            return self._create_juniper_dataset(juniper_data_url, algorithm=algorithm)
         except ImportError:
             self.logger.warning("juniper_data_client not available")
             return None
@@ -1300,20 +1303,23 @@ class CascorIntegration:
             return None
 
     # TODO Rename this here and in `_generate_dataset_from_juniper_data`
-    def _create_juniper_dataset(self, juniper_data_url):
+    def _create_juniper_dataset(self, juniper_data_url, algorithm: Optional[str] = None):
         from juniper_data_client import JuniperDataClient
 
         client = JuniperDataClient(base_url=juniper_data_url)
 
         n_samples = 100
+        params = {
+            "n_points_per_spiral": n_samples,
+            "n_spirals": 2,
+            "noise": 0.0,
+            "seed": 42,
+        }
+        if algorithm is not None:
+            params["algorithm"] = algorithm
         response = client.create_dataset(
             generator="spiral",
-            params={
-                "n_points_per_spiral": n_samples,
-                "n_spirals": 2,
-                "noise": 0.0,
-                "seed": 42,
-            },
+            params=params,
             persist=False,
         )
 
