@@ -2229,6 +2229,30 @@ All new or modified code must meet these requirements before merging:
 
 ## Recent Changes
 
+### 2026-02-01: CI/CD Parity Across All Juniper Applications
+
+**Complete CI/CD Standardization:**
+
+All three Juniper applications (JuniperCascor, JuniperData, JuniperCanopy) now use identical CI/CD settings:
+
+- **Line Length**: 512 for all linters (black, isort, flake8)
+- **Coverage Threshold**: 80% fail-under, 90% target
+- **Build Stage**: Added to PR CI for all applications
+- **yamllint**: Added to pre-commit for all applications
+- **mypy**: Fully enabled in CI for all applications
+- **Artifact Paths**: Standardized to reports/junit/, reports/htmlcov/, reports/coverage.xml
+- **Python Matrix**: 3.11, 3.12, 3.13, 3.14
+
+**Files Updated:**
+
+- `.pre-commit-config.yaml` (v1.2.0)
+- `.github/workflows/ci.yml` (v0.12.0)
+- `pyproject.toml` (v0.2.3)
+
+**See:** [JUNIPER_CASCOR_SPIRAL_DATA_GEN_REFACTOR_PLAN.md](../../../JuniperCascor/juniper_cascor/notes/JUNIPER_CASCOR_SPIRAL_DATA_GEN_REFACTOR_PLAN.md#15-cicd-parity-status)
+
+---
+
 ### 2025-11-11: CI/CD Documentation Consolidation
 
 **Complete Reorganization:**

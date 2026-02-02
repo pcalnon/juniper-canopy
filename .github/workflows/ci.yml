@@ -5,7 +5,7 @@
 # Application:   juniper_canopy
 # File Name:     ci.yml
 # Author:        Paul Calnon
-# Version:       0.11.0
+# Version:       0.12.0
 #
 # Date Created:  2025-11-03
 # Last Modified: 2026-01-31
@@ -52,7 +52,7 @@ permissions:
 env:
   ENV_NAME: JuniperCanopy
   PYTHON_TEST_VERSION: "3.14"
-  COVERAGE_FAIL_UNDER: "50"
+  COVERAGE_FAIL_UNDER: "80"
 
 jobs:
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -174,7 +174,7 @@ jobs:
 
       - name: Create required directories
         run: |
-          mkdir -p logs src/logs reports/junit reports/coverage
+          mkdir -p logs src/logs reports/junit reports/coverage reports/htmlcov
 
       - name: Run Unit Tests with Coverage Gate
         shell: bash -l {0}
@@ -200,8 +200,8 @@ jobs:
             --junitxml=../reports/junit/junit-unit.xml \
             --cov=. \
             --cov-report=term-missing \
-            --cov-report=xml:../reports/coverage/coverage.xml \
-            --cov-report=html:../reports/coverage/htmlcov \
+            --cov-report=xml:../reports/coverage.xml \
+            --cov-report=html:../reports/htmlcov \
             --cov-fail-under=${COVERAGE_FAIL_UNDER}
 
       - name: Upload Coverage Artifacts
@@ -210,8 +210,8 @@ jobs:
         with:
           name: coverage-report-py${{ matrix.python-version }}
           path: |
-            reports/coverage/coverage.xml
-            reports/coverage/htmlcov/
+            reports/coverage.xml
+            reports/htmlcov/
           retention-days: 30
 
       - name: Upload Test Results
@@ -219,7 +219,7 @@ jobs:
         if: always()
         with:
           name: unit-test-results-py${{ matrix.python-version }}
-          path: reports/junit/junit-unit.xml
+          path: reports/junit/
           retention-days: 30
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -317,7 +317,52 @@ jobs:
         if: always()
         with:
           name: integration-test-results
-          path: reports/junit/junit-integration.xml
+          path: reports/junit/
+          retention-days: 30
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # Build: Build distribution packages
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  build:
+    name: Build Distribution
+    runs-on: ubuntu-latest
+    needs: [unit-tests]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build distribution packages
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Build Distribution                  ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          python -m build --sdist --wheel
+
+      - name: Verify build artifacts
+        run: |
+          echo "Checking build artifacts..."
+          ls -la dist/
+          test -f dist/*.tar.gz || (echo "::error::Source distribution not found" && exit 1)
+          test -f dist/*.whl || (echo "::error::Wheel not found" && exit 1)
+          echo "Build artifacts verified successfully"
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-packages
+          path: dist/
           retention-days: 30
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -397,7 +442,7 @@ jobs:
     name: Quality Gate
     runs-on: ubuntu-latest
     if: always()
-    needs: [pre-commit, unit-tests, integration-tests, security]
+    needs: [pre-commit, unit-tests, integration-tests, security, build]
 
     steps:
       - name: Check Quality Gate Status
@@ -410,6 +455,7 @@ jobs:
           echo "Unit Tests:        ${{ needs.unit-tests.result }}"
           echo "Integration Tests: ${{ needs.integration-tests.result }}"
           echo "Security:          ${{ needs.security.result }}"
+          echo "Build:             ${{ needs.build.result }}"
           echo ""
 
           # Pre-commit and unit-tests MUST pass

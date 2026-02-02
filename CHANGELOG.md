@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.27.0] - 2026-02-01
+
+**Summary**: CI/CD parity achieved across JuniperCascor, JuniperData, and JuniperCanopy with standardized settings.
+
+### Changed: [0.27.0]
+
+- **CI/CD Configuration Parity**
+  - `.pre-commit-config.yaml` (v1.2.0)
+    - Line length: 512 for black, isort, flake8
+    - Added yamllint hook (v1.35.1, relaxed config)
+    - Enabled mypy in CI (removed from skip list)
+  - `.github/workflows/ci.yml` (v0.12.0)
+    - Coverage threshold: 80% (up from 50%)
+    - Added build job with package verification
+    - Standardized artifact paths: reports/junit/, reports/htmlcov/, reports/coverage.xml
+    - Replaced 6-job pipeline with 7-job pipeline (added build)
+  - `pyproject.toml` (v0.2.3)
+    - Line length: 512 for black/isort
+    - Coverage fail_under: 80%
+
+### Technical Notes: [0.27.0]
+
+- **SemVer impact**: MINOR – CI pipeline structure changed
+- **CI Parity**: All 3 Juniper applications now use identical CI/CD settings
+
+---
+
 ## [0.26.1] - 2026-01-31
 
 ### Fixed: [0.26.1]

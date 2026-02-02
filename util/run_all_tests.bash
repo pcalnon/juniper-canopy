@@ -61,11 +61,11 @@ log_verbose "Current Directory: $(pwd)"
 #####################################################################################################################################################################################################
 log_trace "Run Tests with designated reports"
 if [[ "${COVERAGE_REPORT}" == "${FALSE}" ]]; then
-    RUN_TESTS_NO_COV_RPT="pytest -v src/tests"
+    RUN_TESTS_NO_COV_RPT="pytest -vv ./src/tests"
     log_verbose "RUN_TESTS_NO_COV_RPT: ${RUN_TESTS_NO_COV_RPT}"
     eval "${RUN_TESTS_NO_COV_RPT}"; SUCCESS="$?"
 elif [[ "${COVERAGE_REPORT}" == "${TRUE}" ]]; then
-    RUN_TESTS_WITH_COV_RPT="pytest -v ./src/tests \
+    RUN_TESTS_WITH_COV_RPT="pytest -vv ./src/tests \
         --cov=src \
         --cov-report=xml:src/tests/reports/coverage.xml \
         --cov-report=term-missing \

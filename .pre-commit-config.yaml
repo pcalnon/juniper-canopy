@@ -4,7 +4,7 @@
 # Application:   juniper_canopy
 # File Name:     .pre-commit-config.yaml
 # Author:        Paul Calnon
-# Version:       1.1.0
+# Version:       1.2.0
 #
 # Date Created:  2025-11-03
 # Last Modified: 2026-01-31
@@ -97,7 +97,7 @@ repos:
       - id: black
         name: Format with Black
         args:
-          - --line-length=120
+          - --line-length=512
         files: ^src/
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -110,7 +110,7 @@ repos:
         name: Sort imports with isort
         args:
           - --profile=black
-          - --line-length=120
+          - --line-length=512
         files: ^src/
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -122,7 +122,7 @@ repos:
       - id: flake8
         name: Lint with Flake8
         args:
-          - --max-line-length=120
+          - --max-line-length=512
           - --extend-ignore=E203,E265,E266,E501,W503,E722,E402,E226,C409,C901,B008,B904,B905,B907,F401
           - --max-complexity=15
           - --select=B,C,E,F,W,T4,B9
@@ -206,9 +206,18 @@ repos:
           - --severity=error
         files: \.(sh|bash)$
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # YAML Linting - yamllint
+  # ═══════════════════════════════════════════════════════════════════════════
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        name: Lint YAML files
+        args: [--format, parsable, -d, relaxed]
+        types: [yaml]
+
 # CI configuration (for pre-commit.ci service, if used)
 ci:
   autofix_prs: false
   autoupdate_schedule: monthly
-  skip:
-    - mypy  # Skip mypy in CI (runs separately with full env)

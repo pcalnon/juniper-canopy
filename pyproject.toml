@@ -4,7 +4,7 @@
 # Application:   juniper_canopy
 # File Name:     pyproject.toml
 # Author:        Paul Calnon
-# Version:       0.2.2
+# Version:       0.2.3
 #
 # Date Created:  2025-11-03
 # Last Modified: 2026-01-31
@@ -61,7 +61,7 @@ Issues = "https://github.com/USERNAME/REPO/issues"
 # Black Configuration
 # ==========================================
 [tool.black]
-line-length = 120
+line-length = 512
 target-version = ['py311', 'py312', 'py313']
 include = '\.pyi?$'
 extend-exclude = '''
@@ -83,7 +83,7 @@ extend-exclude = '''
 # ==========================================
 [tool.isort]
 profile = "black"
-line_length = 120
+line_length = 512
 multi_line_output = 3
 include_trailing_comma = true
 force_grid_wrap = 0
@@ -195,7 +195,7 @@ parallel = true
 show_missing = true
 skip_covered = false
 skip_empty = true
-fail_under = 50
+fail_under = 80
 precision = 2
 exclude_lines = [
   "pragma: no cover",
