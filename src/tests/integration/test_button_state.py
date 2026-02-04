@@ -25,12 +25,48 @@ class TestButtonStateIntegration:
     """Integration tests for button state management."""
 
     def test_button_click_disables_button(self):
-        # sourcery skip: remove-assert-true
         """Test: Click Start → verify button disabled."""
-        # Button disable logic is implemented in handle_training_buttons
-        # When clicked, button state is immediately set to disabled/loading
-        # trunk-ignore(bandit/B101)
-        assert True  # Implementation verified
+        from unittest.mock import MagicMock, patch
+
+        from frontend.dashboard_manager import DashboardManager
+
+        config = {
+            "metrics_panel": {},
+            "network_visualizer": {},
+            "dataset_plotter": {},
+            "decision_boundary": {},
+        }
+
+        dashboard = DashboardManager(config)
+
+        with patch("frontend.dashboard_manager.requests.post") as mock_post:
+            mock_post.return_value.status_code = 200
+
+            mock_request = MagicMock()
+            mock_request.scheme = "http"
+            mock_request.host = "localhost:8050"
+
+            with patch("frontend.dashboard_manager.request", mock_request):
+                _, button_states = dashboard._handle_training_buttons_handler(
+                    start_clicks=1,
+                    pause_clicks=0,
+                    stop_clicks=0,
+                    resume_clicks=0,
+                    reset_clicks=0,
+                    last_click={"button": None, "timestamp": 0},
+                    button_states={
+                        "start": {"disabled": False, "loading": False},
+                        "pause": {"disabled": False, "loading": False},
+                        "stop": {"disabled": False, "loading": False},
+                        "resume": {"disabled": False, "loading": False},
+                        "reset": {"disabled": False, "loading": False},
+                    },
+                    trigger="start-button",
+                )
+
+            # Verify button is disabled after click
+            assert button_states["start"]["disabled"] is True, "Button should be disabled after click"
+            assert button_states["start"]["loading"] is True, "Button should show loading state"
 
     def test_dashboard_has_button_state_stores(self):
         """Test: Dashboard has button state management stores."""

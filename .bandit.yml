@@ -1,0 +1,45 @@
+# Bandit Security Configuration for Juniper Canopy
+# Version: 1.0.0
+# Date: 2026-02-04
+#
+# This file defines security scan configuration for Bandit SAST tool.
+# Document any skipped checks with justification.
+
+# Exclude test files from security scans (test code uses assert, random, etc.)
+exclude_dirs:
+  - src/tests
+  - util/verification
+
+# Skipped tests with justification
+skips:
+  # B101: assert used - OK in test code (excluded above) and debug code
+  # Justification: assert statements are used intentionally for runtime checks
+  # during development. Production code should not rely on assert.
+  # - B101
+
+  # B104: hardcoded_bind_all_interfaces
+  # Justification: Development server binds to 0.0.0.0 intentionally for
+  # local network access during development/testing.
+  - B104
+
+  # B311: random - pseudo-random generators not suitable for security/crypto
+  # Justification: Random is used for demo mode data generation and testing,
+  # not for cryptographic purposes.
+  - B311
+
+# Tests to run (all by default minus skipped)
+# Uncomment specific tests to include only those
+# tests: []
+
+# Confidence level threshold
+# LOW, MEDIUM, HIGH
+confidence: MEDIUM
+
+# Severity level threshold
+# LOW, MEDIUM, HIGH
+severity: MEDIUM
+
+# Output settings for CI
+# aggregate: file - group results by file
+# aggregate: vuln - group results by vulnerability type
+aggregate: vuln

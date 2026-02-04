@@ -405,11 +405,22 @@ jobs:
         run: mkdir -p reports/security
 
       - name: Run Bandit (SAST) -> SARIF
+        id: bandit
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - Bandit Security Scan                ║"
           echo "╚════════════════════════════════════════════════════════════╝"
-          bandit -r src -f sarif -o reports/security/bandit.sarif || true
+          # Run Bandit and capture exit code, but always generate SARIF for upload
+          bandit -r src -f sarif -o reports/security/bandit.sarif -c .bandit.yml 2>&1 || BANDIT_EXIT=$?
+          # Also generate text report for human review
+          bandit -r src -f txt -o reports/security/bandit.txt -c .bandit.yml 2>&1 || true
+          if [ "${BANDIT_EXIT:-0}" -ne 0 ]; then
+            echo "::warning::Bandit found security issues. Review the SARIF report."
+            echo "bandit_found_issues=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Bandit scan passed - no security issues found."
+            echo "bandit_found_issues=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Upload Bandit SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
@@ -419,13 +430,24 @@ jobs:
         continue-on-error: true
 
       - name: Run pip-audit (Dependency Vulnerabilities)
+        id: pip_audit
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - pip-audit Dependency Scan           ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           pip install dash fastapi uvicorn plotly numpy scipy
           pip freeze > reports/security/pip-freeze.txt
-          pip-audit -r reports/security/pip-freeze.txt || echo "::warning::Vulnerabilities found in dependencies"
+          # Run pip-audit and capture exit code
+          pip-audit -r reports/security/pip-freeze.txt --output reports/security/pip-audit.txt 2>&1 || PIP_AUDIT_EXIT=$?
+          if [ "${PIP_AUDIT_EXIT:-0}" -ne 0 ]; then
+            echo "::error::pip-audit found vulnerabilities in dependencies!"
+            echo "vulnerabilities_found=true" >> "$GITHUB_OUTPUT"
+            cat reports/security/pip-audit.txt
+            exit 1
+          else
+            echo "::notice::pip-audit passed - no known vulnerabilities found."
+            echo "vulnerabilities_found=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Upload Security Reports
         uses: actions/upload-artifact@v4

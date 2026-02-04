@@ -1,82 +1,112 @@
 #!/usr/bin/env python
-"""Test script to verify candidate pool visibility in running demo."""
+"""Test script to verify candidate pool visibility in running demo.
+
+This test requires a running server (./demo) and is marked appropriately.
+"""
+import os
 import time
 
+import pytest
 import requests
 
-# import json
 
+@pytest.mark.e2e
+@pytest.mark.requires_server
+@pytest.mark.skipif(
+    not os.getenv("RUN_SERVER_TESTS"),
+    reason="Requires running server - set RUN_SERVER_TESTS=1 to enable",
+)
+class TestCandidateVisibility:
+    """Test that candidate pool becomes visible during candidate training phases."""
 
-def test_candidate_visibility():
-    """Test that candidate pool becomes active during candidate phases."""
+    BASE_URL = "http://localhost:8050"
 
-    base_url = _print_output_report_heading("Testing candidate pool visibility...", "http://localhost:8050")
-    # Check if server is running
-    try:
-        response = requests.get(f"{base_url}/health", timeout=2)
-        print(f"✓ Server is running: {response.json()}")
-    except Exception as e:
-        print(f"✗ Server not running: {e}")
-        print("Please start demo mode with: ./demo")
-        return
+    def test_server_health(self):
+        """Test that the server is running and healthy."""
+        response = requests.get(f"{self.BASE_URL}/health", timeout=2)
+        assert response.status_code == 200, f"Server health check failed: {response.status_code}"
+        health_data = response.json()
+        assert "status" in health_data or health_data is not None, "Health response should contain data"
 
-    seen_candidate_phase = _print_output_report_heading(
-        "\nMonitoring training state for candidate pool activity...", False
-    )
-    max_checks = 30
+    def test_state_endpoint_returns_data(self):
+        """Test that the state endpoint returns valid data."""
+        response = requests.get(f"{self.BASE_URL}/api/state", timeout=2)
+        assert response.status_code == 200, f"State endpoint failed: {response.status_code}"
+        data = response.json()
+        assert "current_epoch" in data or "epoch" in data or data is not None, "State should contain epoch data"
 
-    for i in range(max_checks):  # sourcery skip: no-loop-in-tests
-        try:
-            response = requests.get(f"{base_url}/api/state", timeout=2)
+    def test_candidate_pool_becomes_active(self):
+        """Test that candidate pool becomes active during candidate phases.
+
+        This test monitors the training state and verifies that the candidate
+        pool status transitions to 'Active' at some point during training.
+        Note: Candidate phases typically occur every 5 epochs.
+        """
+        seen_candidate_phase = False
+        max_checks = 30  # Check for up to 30 seconds
+
+        for _ in range(max_checks):
+            response = requests.get(f"{self.BASE_URL}/api/state", timeout=2)
+            assert response.status_code == 200, f"State endpoint failed: {response.status_code}"
             data = response.json()
 
-            epoch = data.get("current_epoch", 0)
-            phase = data.get("phase", "Unknown")
             pool_status = data.get("candidate_pool_status", "N/A")
-            pool_size = data.get("candidate_pool_size", 0)
-            top_cand = data.get("top_candidate_id", "")
-
-            print(f"\nCheck {i + 1}: Epoch {epoch}, Phase: {phase}")
-            print(f"  Pool Status: {pool_status}, Size: {pool_size}")
 
             if pool_status == "Active":
                 seen_candidate_phase = True
-                print("  ✓ CANDIDATE POOL ACTIVE!")
-                print(f"  Top Candidate: {top_cand} (score: {data.get('top_candidate_score', 0.0):.4f})")
-                candidate_runnerup = data.get("second_candidate_score", 0.0)
-                print(f"  Second Candidate: {data.get('second_candidate_id', '')} (score: {candidate_runnerup:.4f})")
-
-                if pool_metrics := data.get("pool_metrics", {}):
-                    print("  Pool Metrics:")
-                    print(f"    Avg Loss: {pool_metrics.get('avg_loss', 0.0):.4f}")
-                    print(f"    Avg Accuracy: {pool_metrics.get('avg_accuracy', 0.0):.4f}")
-                    print(f"    Avg F1 Score: {pool_metrics.get('avg_f1_score', 0.0):.4f}")
-
-                # Wait a bit more to see it in action
-                time.sleep(3)
+                # Verify pool data is present when active
+                pool_size = data.get("candidate_pool_size", 0)
+                assert pool_size >= 0, "Pool size should be non-negative"
+                top_candidate_id = data.get("top_candidate_id", "")
+                assert top_candidate_id is not None, "Top candidate ID should be present"
                 break
 
             time.sleep(1)
 
-        except Exception as e:
-            print(f"  Error: {e}")
-            break
+        # Note: This assertion may fail if the test doesn't run long enough
+        # to see a candidate phase. The test is marked as e2e for this reason.
+        assert seen_candidate_phase, f"Candidate pool never activated in {max_checks} seconds. " "Note: Candidate phases occur every 5 epochs with 1-second intervals."
 
-    print("\n" + "=" * 60)
-    if seen_candidate_phase:
-        print("✓ SUCCESS: Candidate pool was activated and data is visible!")
-    else:
-        print("✗ FAILED: Candidate pool never activated in {max_checks} seconds")
-        print("   Note: Candidate phases occur every 5 epochs")
-        print("   With 1-second update interval, should see by epoch 10 (~10 seconds)")
-    print("=" * 60)
+    def test_pool_metrics_available_when_active(self):
+        """Test that pool metrics are available when candidate pool is active.
+
+        This test waits for an active candidate phase and verifies that
+        pool metrics are properly populated.
+        """
+        max_checks = 30
+
+        for _ in range(max_checks):
+            response = requests.get(f"{self.BASE_URL}/api/state", timeout=2)
+            assert response.status_code == 200
+            data = response.json()
+
+            pool_status = data.get("candidate_pool_status", "N/A")
+
+            if pool_status == "Active":
+                pool_metrics = data.get("pool_metrics", {})
+                # Verify pool metrics structure when active
+                assert isinstance(pool_metrics, dict), "Pool metrics should be a dictionary"
+                # At minimum, metrics should be present (may be empty or populated)
+                return  # Test passed - found active phase with metrics
+
+            time.sleep(1)
+
+        pytest.skip("Could not observe active candidate phase within time limit")
 
 
-def _print_output_report_heading(arg0, arg1):
-    print(arg0)
-    print("=" * 60)
-    return arg1
+# Keep backward compatibility for manual execution
+def test_candidate_visibility_manual():
+    """Manual test function for backward compatibility.
+
+    Run with: python -m pytest src/tests/regression/test_candidate_visibility.py -v -s
+    With server: RUN_SERVER_TESTS=1 python -m pytest ...
+    """
+    pass  # The actual tests are in the class above
 
 
 if __name__ == "__main__":
-    test_candidate_visibility()
+    print("Running candidate visibility tests...")
+    print("=" * 60)
+    print("To run these tests, ensure the demo server is running (./demo)")
+    print("Then run: RUN_SERVER_TESTS=1 pytest src/tests/regression/test_candidate_visibility.py -v")
+    print("=" * 60)

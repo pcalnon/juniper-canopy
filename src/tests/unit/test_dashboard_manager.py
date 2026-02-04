@@ -229,14 +229,15 @@ class TestDashboardManagerEdgeCases:
     """Test edge cases."""
 
     def test_none_config_values(self):
-        """Should handle None config values."""
+        """Should handle None config values - either accepts them or raises TypeError/ValueError."""
         config = {"title": None, "update_interval": None}
         try:
             dashboard = DashboardManager(config)
-            assert dashboard is not None
-        except Exception:
-            # May not accept None values
-            assert True
+            # If we get here, None values were handled gracefully (valid behavior)
+            assert dashboard is not None, "Dashboard should be created"
+        except (TypeError, ValueError):
+            # Not accepting None values is also valid behavior
+            pass  # Test passes - rejecting None is acceptable
 
     def test_missing_server_config(self):
         """Should handle missing server config."""

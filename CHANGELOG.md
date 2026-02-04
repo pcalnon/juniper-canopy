@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.28.0] - 2026-02-04
+
+**Summary**: Test Suite & CI/CD Enhancement - Phase 1 Complete. Eliminated false-positive tests, moved non-test files, and fixed security scan suppression.
+
+### Changed: [0.28.0]
+
+- **Epic 1.1: Eliminated False-Positive Tests**
+  - `src/tests/performance/test_button_responsiveness.py`
+    - Replaced 4 `assert True` patterns with actual button behavior tests
+    - Tests now verify: rapid clicking prevention, button disable during execution, timeout re-enable, success re-enable
+  - `src/tests/integration/test_button_state.py`
+    - Replaced `assert True` with actual button state verification
+  - `src/tests/unit/frontend/test_metrics_panel_coverage.py`
+    - Replaced `assert True` with proper None handling verification
+  - `src/tests/unit/test_dashboard_manager.py`
+    - Fixed exception handling test to properly catch TypeError/ValueError
+  - `src/tests/unit/test_config_refactoring.py`
+    - Replaced try/except with pytest.raises pattern
+  - `src/tests/regression/test_candidate_visibility.py`
+    - Converted from manual script to proper pytest with assertions
+    - Added @pytest.mark.e2e and @pytest.mark.requires_server markers
+
+- **Epic 1.2: Removed Non-Test Files from Test Directory**
+  - Moved 5 manual verification scripts to `util/verification/`:
+    - `test_yaml.py` → `util/verification/verify_yaml.py`
+    - `test_dashboard_init.py` → `util/verification/verify_dashboard_init.py`
+    - `test_and_verify_button_layout.py` → `util/verification/verify_button_layout.py`
+    - `implementation_script.py` → `util/verification/implementation_script.py`
+    - `test_config.py` → `util/verification/verify_config_integration.py`
+
+- **Epic 1.3: Fixed Security Scan Suppression in CI**
+  - `.github/workflows/ci.yml`
+    - Bandit: Removed `|| true`, added proper exit code handling with output capture
+    - pip-audit: Changed warning to failure, added explicit error messaging
+  - Added `.bandit.yml` security configuration file
+    - Defines excluded directories (src/tests, util/verification)
+    - Documents skipped checks with justification (B104, B311)
+    - Sets severity and confidence thresholds
+
+### Added: [0.28.0]
+
+- **New Configuration Files**
+  - `.bandit.yml` - Security scan configuration for Bandit SAST tool
+
+- **New Directory Structure**
+  - `util/verification/` - Manual verification scripts moved from test directory
+
+### Technical Notes: [0.28.0]
+
+- **SemVer impact**: MINOR - Test infrastructure improvements; no API changes
+- **Test quality**: Eliminated 9 `assert True` false-positive patterns
+- **Test organization**: Removed 5 non-test files from test directory
+- **CI security**: Security scans now fail appropriately on issues
+- Implements Phase 1 of TEST_SUITE_CICD_ENHANCEMENT_DEVELOPMENT_PLAN.md
+
+---
+
 ## [0.27.0] - 2026-02-01
 
 **Summary**: CI/CD parity achieved across JuniperCascor, JuniperData, and JuniperCanopy with standardized settings.

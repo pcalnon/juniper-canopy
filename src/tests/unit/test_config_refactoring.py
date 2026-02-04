@@ -39,11 +39,7 @@ class TestServerConfiguration:
         with patch.dict(os.environ, {}, clear=True):
             config_mgr = ConfigManager()
             port_config = config_mgr.config.get("application", {}).get("server", {}).get("port")
-            port = (
-                int(os.getenv("CASCOR_SERVER_PORT", 0))
-                if os.getenv("CASCOR_SERVER_PORT")
-                else (port_config or ServerConstants.DEFAULT_PORT)
-            )
+            port = int(os.getenv("CASCOR_SERVER_PORT", 0)) if os.getenv("CASCOR_SERVER_PORT") else (port_config or ServerConstants.DEFAULT_PORT)
 
             # Should use config or constant, not env
             assert port == (port_config or ServerConstants.DEFAULT_PORT)
@@ -103,12 +99,10 @@ class TestDashboardConfiguration:
         """Test handling of invalid environment variable values."""
         with patch.dict(os.environ, {"CASCOR_TRAINING_LEARNING_RATE": "invalid"}):
             lr_env = os.getenv("CASCOR_TRAINING_LEARNING_RATE")
-            try:
+            assert lr_env == "invalid", "Environment variable should be set"
+            # Verify that attempting to parse raises ValueError
+            with pytest.raises(ValueError):
                 float(lr_env)
-                raise AssertionError("Should raise ValueError")
-            except ValueError:
-                # Expected - should fall back to config/constant
-                assert True
 
 
 class TestMetricsPanelConfiguration:
@@ -325,11 +319,7 @@ class TestConstantsConsistency:
     def test_training_constants_ranges(self):
         """Test training constants have valid ranges."""
         assert TrainingConstants.MIN_TRAINING_EPOCHS < TrainingConstants.MAX_TRAINING_EPOCHS
-        assert (
-            TrainingConstants.MIN_TRAINING_EPOCHS
-            <= TrainingConstants.DEFAULT_TRAINING_EPOCHS
-            <= TrainingConstants.MAX_TRAINING_EPOCHS
-        )
+        assert TrainingConstants.MIN_TRAINING_EPOCHS <= TrainingConstants.DEFAULT_TRAINING_EPOCHS <= TrainingConstants.MAX_TRAINING_EPOCHS
         assert TrainingConstants.MIN_LEARNING_RATE < TrainingConstants.MAX_LEARNING_RATE
         assert TrainingConstants.MIN_HIDDEN_UNITS < TrainingConstants.MAX_HIDDEN_UNITS
 

@@ -366,11 +366,14 @@ class TestEdgeCases:
         assert isinstance(fig, go.Figure)
 
     def test_add_metrics_with_none(self, metrics_panel):
-        # sourcery skip: remove-assert-true
         """Should handle None metrics gracefully."""
+        initial_length = len(metrics_panel.metrics_history)
         metrics_panel.add_metrics(None)
-        # Should either skip or handle gracefully
-        assert True  # No exception raised
+        # Verify that either None was skipped or handled without crashing
+        # The history length should either stay the same (None skipped) or increase by 1
+        new_length = len(metrics_panel.metrics_history)
+        assert new_length >= initial_length, "History should not shrink"
+        assert new_length <= initial_length + 1, "History should not grow by more than 1"
 
     def test_zero_max_data_points(self):
         """Should handle zero max_data_points."""
