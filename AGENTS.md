@@ -2229,6 +2229,24 @@ All new or modified code must meet these requirements before merging:
 
 ## Recent Changes
 
+### 2026-02-04: Test Suite & CI/CD Enhancement - Phase 2 Complete
+
+**Conftest Consolidation (Epic 2.1):**
+
+- Deleted duplicate `src/tests/fixtures/conftest.py`
+- Single conftest.py now serves as source of truth for all fixtures
+
+**Type Annotation Fixes (Epic 2.2):**
+
+- Fixed ConfigManager `__init__` type annotation to accept Path objects
+
+**Test Linting Enabled (Epic 2.3):**
+
+- Added separate flake8 hook for tests with relaxed configuration
+- Tests now linted with appropriate allowances (assert, random, higher complexity)
+
+---
+
 ### 2026-02-04: Test Suite & CI/CD Enhancement - Phase 1 Complete
 
 **Test Quality Improvements (Epic 1.1):**

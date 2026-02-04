@@ -114,7 +114,7 @@ repos:
         files: ^src/
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # Python Linting - Flake8
+  # Python Linting - Flake8 (source code)
   # ═══════════════════════════════════════════════════════════════════════════
   - repo: https://github.com/pycqa/flake8
     rev: 7.1.1
@@ -132,6 +132,27 @@ repos:
           - flake8-simplify>=0.21.0
         files: ^src/
         exclude: ^src/tests/
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Python Linting - Flake8 (tests - relaxed)
+  # ═══════════════════════════════════════════════════════════════════════════
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.1.1
+    hooks:
+      - id: flake8
+        name: Lint tests with Flake8 (relaxed)
+        args:
+          - --max-line-length=512
+          # Relaxed for tests: allow assert (S101), random (S311), bare except (E722)
+          # F401 (unused imports) often needed for fixtures
+          - --extend-ignore=E203,E265,E266,E501,W503,E722,E402,E226,C409,C901,B008,B904,B905,B907,F401,S101,S311
+          - --max-complexity=20
+          - --select=B,C,E,F,W,T4,B9
+        additional_dependencies:
+          - flake8-bugbear>=24.0.0
+          - flake8-comprehensions>=3.14.0
+          - flake8-simplify>=0.21.0
+        files: ^src/tests/
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Python Type Checking - MyPy

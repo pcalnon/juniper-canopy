@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.29.0] - 2026-02-04
+
+**Summary**: Test Suite & CI/CD Enhancement - Phase 2 Complete. Consolidated conftest.py, fixed type annotations, enabled test linting.
+
+### Changed: [0.29.0]
+
+- **Epic 2.1: Consolidated conftest.py Files**
+  - Deleted duplicate `src/tests/fixtures/conftest.py` (224 lines)
+  - Updated main `src/tests/conftest.py` to clean both `CASCOR_TEST_` and `JUNIPER_CANOPY_TEST_` env vars
+  - Single source of truth for all test fixtures
+
+- **Epic 2.2: Type Annotation Fixes**
+  - `src/config_manager.py`: Fixed `__init__` type annotation (`Optional[str]` → `Optional[Union[str, Path]]`)
+
+- **Epic 2.3: Enabled Test Linting**
+  - `.pre-commit-config.yaml`: Added separate flake8 hook for tests with relaxed settings
+  - Tests now linted with higher complexity limit (20 vs 15)
+  - Allowed patterns in tests: assert (S101), random (S311)
+
+### Technical Notes: [0.29.0]
+
+- **SemVer impact**: MINOR - Test infrastructure improvements; no API changes
+- Implements Phase 2 of TEST_SUITE_CICD_ENHANCEMENT_DEVELOPMENT_PLAN.md
+- MyPy error codes deferred to Phase 4 (requires more extensive type fixes)
+
+---
+
 ## [0.28.0] - 2026-02-04
 
 **Summary**: Test Suite & CI/CD Enhancement - Phase 1 Complete. Eliminated false-positive tests, moved non-test files, and fixed security scan suppression.

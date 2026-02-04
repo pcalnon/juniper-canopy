@@ -56,10 +56,7 @@ def pytest_configure(config):
 
     # Display test environment configuration
     print("\n=== Test Environment Configuration ===")
-    print(
-        f"CasCor Backend Tests: "
-        f"{'ENABLED' if os.getenv('CASCOR_BACKEND_AVAILABLE') else 'DISABLED (set CASCOR_BACKEND_AVAILABLE=1)'}"
-    )
+    print(f"CasCor Backend Tests: " f"{'ENABLED' if os.getenv('CASCOR_BACKEND_AVAILABLE') else 'DISABLED (set CASCOR_BACKEND_AVAILABLE=1)'}")
     print(f"Live Server Tests: {'ENABLED' if os.getenv('RUN_SERVER_TESTS') else 'DISABLED (set RUN_SERVER_TESTS=1)'}")
 
     enabled = os.getenv("RUN_DISPLAY_TESTS") or os.getenv("DISPLAY")
@@ -308,9 +305,7 @@ def ensure_test_data_directory():
     # Create sample data files if they don't exist
     sample_metrics_file = test_data_dir / "sample_metrics.json"
     if not sample_metrics_file.exists():
-        sample_data = {
-            "metrics": [{"epoch": i, "loss": 1.0 / (i + 1), "accuracy": (i / 100) * 0.9} for i in range(100)]
-        }
+        sample_data = {"metrics": [{"epoch": i, "loss": 1.0 / (i + 1), "accuracy": (i / 100) * 0.9} for i in range(100)]}
         with open(sample_metrics_file, "w") as f:
             json.dump(sample_data, f, indent=2)
 
@@ -440,6 +435,6 @@ def cleanup_test_environment():
     yield
     # Cleanup code runs after test
     # Clear any test-specific environment variables
-    test_env_vars = [k for k in os.environ if k.startswith("CASCOR_TEST_")]
+    test_env_vars = [k for k in os.environ if k.startswith(("CASCOR_TEST_", "JUNIPER_CANOPY_TEST_"))]
     for var in test_env_vars:
         del os.environ[var]
