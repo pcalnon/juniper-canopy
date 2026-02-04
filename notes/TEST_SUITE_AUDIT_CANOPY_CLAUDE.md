@@ -12,6 +12,7 @@
 This audit examined 116 test files across unit, integration, regression, and performance categories, along with the complete CI/CD pipeline configuration. The analysis identified several categories of issues that may impact test reliability, coverage accuracy, and code quality enforcement.
 
 **Key Findings:**
+
 - **8 tests** use trivial `assert True` patterns that don't validate behavior
 - **7 tests** are permanently skipped with hardcoded `@pytest.mark.skip()`
 - **2 duplicate conftest.py** files with redundant fixture definitions
@@ -48,19 +49,20 @@ This audit examined 116 test files across unit, integration, regression, and per
 
 **CRITICAL:** The following tests contain `assert True` patterns that pass regardless of actual behavior, providing false confidence in test coverage.
 
-| File | Line | Test Name | Issue |
-|------|------|-----------|-------|
-| `tests/performance/test_button_responsiveness.py` | 90 | `test_rapid_clicking_prevention` | `assert True` with comment "Debouncing is implemented" |
-| `tests/performance/test_button_responsiveness.py` | 97 | `test_button_disable_during_execution` | `assert True` with comment "Implementation verified" |
-| `tests/performance/test_button_responsiveness.py` | 104 | `test_button_re_enable_after_timeout` | `assert True` with comment "Implementation verified" |
-| `tests/performance/test_button_responsiveness.py` | 111 | `test_button_re_enable_after_success` | `assert True` with comment "Implementation verified" |
-| `tests/unit/frontend/test_metrics_panel_coverage.py` | 373 | `test_add_metrics_with_none` | `assert True  # No exception raised` |
-| `tests/unit/test_dashboard_manager.py` | 239 | `test_none_config_values` | `assert True` in except block |
-| `tests/integration/test_button_state.py` | 33 | `test_button_click_disables_button` | `assert True  # Implementation verified` |
+| File                                                 | Line | Test Name                              | Issue                                                  |
+| ---------------------------------------------------- | ---- | -------------------------------------- | ------------------------------------------------------ |
+| `tests/performance/test_button_responsiveness.py`    | 90   | `test_rapid_clicking_prevention`       | `assert True` with comment "Debouncing is implemented" |
+| `tests/performance/test_button_responsiveness.py`    | 97   | `test_button_disable_during_execution` | `assert True` with comment "Implementation verified"   |
+| `tests/performance/test_button_responsiveness.py`    | 104  | `test_button_re_enable_after_timeout`  | `assert True` with comment "Implementation verified"   |
+| `tests/performance/test_button_responsiveness.py`    | 111  | `test_button_re_enable_after_success`  | `assert True` with comment "Implementation verified"   |
+| `tests/unit/frontend/test_metrics_panel_coverage.py` | 373  | `test_add_metrics_with_none`           | `assert True  # No exception raised`                   |
+| `tests/unit/test_dashboard_manager.py`               | 239  | `test_none_config_values`              | `assert True` in except block                          |
+| `tests/integration/test_button_state.py`             | 33   | `test_button_click_disables_button`    | `assert True  # Implementation verified`               |
 
 **Impact:** These tests contribute to coverage metrics but provide no actual verification. A code change that breaks the tested functionality would not be detected.
 
 **Example of problematic pattern:**
+
 ```python
 # From test_button_responsiveness.py
 def test_rapid_clicking_prevention(self):
@@ -79,11 +81,12 @@ def test_rapid_clicking_prevention(self):
 
 #### 1.2.1 Non-Test Files in Test Directory
 
-| File | Issue | Recommendation |
-|------|-------|----------------|
+| File                                  | Issue                                                         | Recommendation                          |
+| ------------------------------------- | ------------------------------------------------------------- | --------------------------------------- |
 | `tests/unit/implementation_script.py` | Manual test runner script (461 lines), not a pytest test file | Move to `util/` or `scripts/` directory |
 
 **Details:** `implementation_script.py` is a standalone script that:
+
 - Uses `print()` statements for output instead of assertions
 - Tracks tests manually with global variables (`tests_passed`, `tests_failed`)
 - Runs subprocess commands
@@ -91,11 +94,12 @@ def test_rapid_clicking_prevention(self):
 
 #### 1.2.2 Manual Integration Tests Requiring Running Server
 
-| File | Issue |
-|------|-------|
+| File                                            | Issue                                                                                             |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `tests/regression/test_candidate_visibility.py` | Requires running server (`http://localhost:8050`), uses `requests` library, not pytest compatible |
 
 **Code excerpt:**
+
 ```python
 # This test requires a running server - not suitable for automated CI
 def test_candidate_visibility():
@@ -106,8 +110,8 @@ def test_candidate_visibility():
 
 #### 1.2.3 Setup Verification Scripts
 
-| File | Issue |
-|------|-------|
+| File                              | Issue                                                                            |
+| --------------------------------- | -------------------------------------------------------------------------------- |
 | `tests/integration/test_setup.py` | Environment verification script, more suited for setup utilities than test suite |
 
 ---
@@ -120,23 +124,25 @@ def test_candidate_visibility():
 
 Two conftest.py files exist with overlapping fixtures:
 
-| File | Fixtures |
-|------|----------|
-| `tests/conftest.py` (446 lines) | Primary fixtures including `client`, `reset_singletons`, `sample_*` fixtures |
+| File                                     | Fixtures                                                                                                                                                                                                             |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/conftest.py` (446 lines)          | Primary fixtures including `client`, `reset_singletons`, `sample_*` fixtures                                                                                                                                         |
 | `tests/fixtures/conftest.py` (225 lines) | Duplicates: `event_loop`, `test_config`, `sample_training_metrics`, `sample_network_topology`, `sample_dataset`, `temp_test_directory`, `mock_config_file`, `ensure_test_data_directory`, `cleanup_test_environment` |
 
 **Impact:** Fixture duplication can lead to:
+
 - Confusion about which fixture is being used
 - Inconsistent behavior if duplicates diverge
 - Maintenance burden
 
 #### 1.3.2 Duplicate Test Classes
 
-| Primary File | Duplicate File | Duplicated Classes |
-|--------------|----------------|-------------------|
+| Primary File                       | Duplicate File                        | Duplicated Classes                                                                                                       |
+| ---------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `tests/unit/test_main_coverage.py` | `tests/unit/test_main_coverage_95.py` | `TestHealthCheckEndpoint`, `TestStateEndpoint`, `TestStatusEndpoint`, `TestRootEndpoint`, `TestTrainingControlEndpoints` |
 
 **Impact:**
+
 - Inflated test counts
 - Duplicate execution time
 - Maintenance burden when behavior changes
@@ -147,27 +153,27 @@ Two conftest.py files exist with overlapping fixtures:
 
 **MEDIUM:** The following tests are explicitly skipped with `@pytest.mark.skip()`:
 
-| File | Test | Skip Reason | Validity Assessment |
-|------|------|-------------|---------------------|
-| `tests/integration/test_hdf5_snapshots_api.py:236` | `test_lists_real_hdf5_files` | "Requires patching global _snapshots_dir which is complex in demo mode" | **Valid** - technical limitation |
-| `tests/integration/test_hdf5_snapshots_api.py:244` | `test_ignores_non_hdf5_files` | "Requires patching global _snapshots_dir which is complex in demo mode" | **Valid** - technical limitation |
-| `tests/integration/test_main_api_endpoints.py:276` | `test_cors_headers_present` | "TestClient bypasses CORS middleware - headers not visible in tests" | **Valid** - known pytest/starlette limitation |
-| `tests/integration/test_main_api_endpoints.py:282` | `test_cors_allows_all_origins` | "TestClient bypasses CORS middleware - headers not visible in tests" | **Valid** - known pytest/starlette limitation |
-| `tests/integration/test_demo_endpoints.py:91` | `test_training_websocket_receives_state_messages` | "WebSocket broadcasts require full async event loop (use manual testing)" | **Questionable** - should be e2e test |
-| `tests/integration/test_demo_endpoints.py:111` | `test_training_websocket_receives_metrics_messages` | "WebSocket broadcasts require full async event loop (use manual testing)" | **Questionable** - should be e2e test |
-| `tests/integration/test_demo_endpoints.py:275` | `test_demo_mode_broadcasts_data` | "WebSocket broadcasts require full async event loop (use manual testing)" | **Questionable** - should be e2e test |
-| `tests/unit/test_logger_coverage.py:134` | `test_verbose_logging` | "VERBOSE is custom level, not in standard logging module" | **Valid** - feature not implemented |
+| File                                               | Test                                                | Skip Reason                                                               | Validity Assessment                           |
+| -------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------- |
+| `tests/integration/test_hdf5_snapshots_api.py:236` | `test_lists_real_hdf5_files`                        | "Requires patching global _snapshots_dir which is complex in demo mode"   | **Valid** - technical limitation              |
+| `tests/integration/test_hdf5_snapshots_api.py:244` | `test_ignores_non_hdf5_files`                       | "Requires patching global _snapshots_dir which is complex in demo mode"   | **Valid** - technical limitation              |
+| `tests/integration/test_main_api_endpoints.py:276` | `test_cors_headers_present`                         | "TestClient bypasses CORS middleware - headers not visible in tests"      | **Valid** - known pytest/starlette limitation |
+| `tests/integration/test_main_api_endpoints.py:282` | `test_cors_allows_all_origins`                      | "TestClient bypasses CORS middleware - headers not visible in tests"      | **Valid** - known pytest/starlette limitation |
+| `tests/integration/test_demo_endpoints.py:91`      | `test_training_websocket_receives_state_messages`   | "WebSocket broadcasts require full async event loop (use manual testing)" | **Questionable** - should be e2e test         |
+| `tests/integration/test_demo_endpoints.py:111`     | `test_training_websocket_receives_metrics_messages` | "WebSocket broadcasts require full async event loop (use manual testing)" | **Questionable** - should be e2e test         |
+| `tests/integration/test_demo_endpoints.py:275`     | `test_demo_mode_broadcasts_data`                    | "WebSocket broadcasts require full async event loop (use manual testing)" | **Questionable** - should be e2e test         |
+| `tests/unit/test_logger_coverage.py:134`           | `test_verbose_logging`                              | "VERBOSE is custom level, not in standard logging module"                 | **Valid** - feature not implemented           |
 
 **Conditional Skips (Environment-Based):**
 
 The following markers trigger skips based on environment variables (documented and appropriate):
 
-| Marker | Skip Condition | Tests Affected |
-|--------|----------------|----------------|
-| `requires_cascor` | `CASCOR_BACKEND_AVAILABLE` not set | Backend integration tests |
-| `requires_server` | `RUN_SERVER_TESTS` not set | Live server tests |
-| `requires_display` | No `DISPLAY` and `RUN_DISPLAY_TESTS` not set | Visualization tests |
-| `slow` | `ENABLE_SLOW_TESTS` not set | Long-running tests |
+| Marker             | Skip Condition                               | Tests Affected            |
+| ------------------ | -------------------------------------------- | ------------------------- |
+| `requires_cascor`  | `CASCOR_BACKEND_AVAILABLE` not set           | Backend integration tests |
+| `requires_server`  | `RUN_SERVER_TESTS` not set                   | Live server tests         |
+| `requires_display` | No `DISPLAY` and `RUN_DISPLAY_TESTS` not set | Visualization tests       |
+| `slow`             | `ENABLE_SLOW_TESTS` not set                  | Long-running tests        |
 
 These conditional skips are properly documented and appropriate.
 
@@ -189,6 +195,7 @@ def test_set_params_with_learning_rate(self, app_client):
 ```
 
 **Files with this pattern:**
+
 - `tests/unit/test_main_coverage.py` (multiple tests)
 - `tests/unit/test_main_coverage_95.py` (multiple tests)
 - `tests/unit/test_main_coverage_extended.py`
@@ -234,6 +241,7 @@ Verified with: `python -m py_compile src/tests/**/*.py`
 **NONE FOUND:** Based on static analysis, no tests appear to be broken in a way that would cause collection or execution failures.
 
 However, the following may fail in certain environments:
+
 - Tests in `test_candidate_visibility.py` require a running server
 - Tests with `requires_*` markers will skip appropriately
 
@@ -243,10 +251,10 @@ However, the following may fail in certain environments:
 
 **LOW:** The test suite configuration appropriately excludes security checks:
 
-| Tool | Configuration | Assessment |
-|------|---------------|------------|
-| Bandit | Skips B101 (assert), B311 (random) | **Appropriate** for test files |
-| Bandit | Excludes `tests/`, `src/tests/` | **Appropriate** - test code has different requirements |
+| Tool   | Configuration                      | Assessment                                             |
+| ------ | ---------------------------------- | ------------------------------------------------------ |
+| Bandit | Skips B101 (assert), B311 (random) | **Appropriate** for test files                         |
+| Bandit | Excludes `tests/`, `src/tests/`    | **Appropriate** - test code has different requirements |
 
 **Potential Concerns:**
 
@@ -263,32 +271,32 @@ However, the following may fail in certain environments:
 
 #### 2.1.1 Strengths
 
-| Feature | Assessment |
-|---------|------------|
+| Feature                                               | Assessment                             |
+| ----------------------------------------------------- | -------------------------------------- |
 | Multi-version Python testing (3.11, 3.12, 3.13, 3.14) | **Good** - comprehensive compatibility |
-| Concurrency control with `cancel-in-progress: true` | **Good** - prevents wasted resources |
-| Caching for conda and pip packages | **Good** - improves build times |
-| Security scanning (Gitleaks, Bandit, pip-audit) | **Good** - comprehensive security |
-| Coverage enforcement (80% fail-under) | **Good** - maintains quality bar |
-| SARIF upload to GitHub Security | **Good** - visibility |
-| Artifact retention (30 days) | **Good** - debugging capability |
+| Concurrency control with `cancel-in-progress: true`   | **Good** - prevents wasted resources   |
+| Caching for conda and pip packages                    | **Good** - improves build times        |
+| Security scanning (Gitleaks, Bandit, pip-audit)       | **Good** - comprehensive security      |
+| Coverage enforcement (80% fail-under)                 | **Good** - maintains quality bar       |
+| SARIF upload to GitHub Security                       | **Good** - visibility                  |
+| Artifact retention (30 days)                          | **Good** - debugging capability        |
 
 #### 2.1.2 Issues Identified
 
-| Issue | Severity | Details | Recommendation |
-|-------|----------|---------|----------------|
-| **Bandit with `\|\| true`** | **MEDIUM** | Line 412: `bandit ... \|\| true` allows security scan to fail silently | Remove `\|\| true` or use `continue-on-error: true` with explicit status check |
-| **pip-audit warning only** | **LOW** | Line 428: Uses `echo "::warning::"` instead of failing on vulnerabilities | Consider failing pipeline on high-severity vulnerabilities |
-| **No Python 3.10 support** | **LOW** | Matrix starts at 3.11 | Add 3.10 if broader compatibility needed |
-| **Disk space cleanup** | **INFO** | Uses manual `rm -rf` commands | Consider using `jlumbroso/free-disk-space` action |
+| Issue                       | Severity   | Details                                                                   | Recommendation                                                                 |
+| --------------------------- | ---------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| **Bandit with `\|\| true`** | **MEDIUM** | Line 412: `bandit ... \|\| true` allows security scan to fail silently    | Remove `\|\| true` or use `continue-on-error: true` with explicit status check |
+| **pip-audit warning only**  | **LOW**    | Line 428: Uses `echo "::warning::"` instead of failing on vulnerabilities | Consider failing pipeline on high-severity vulnerabilities                     |
+| **No Python 3.10 support**  | **LOW**    | Matrix starts at 3.11                                                     | Add 3.10 if broader compatibility needed                                       |
+| **Disk space cleanup**      | **INFO**   | Uses manual `rm -rf` commands                                             | Consider using `jlumbroso/free-disk-space` action                              |
 
 #### 2.1.3 Missing Recommended Actions
 
-| Missing Feature | Priority | Recommendation |
-|-----------------|----------|----------------|
-| Dependency review for PRs | **MEDIUM** | Add `actions/dependency-review-action` |
-| SAST with CodeQL | **LOW** | Consider `github/codeql-action/analyze` |
-| Test result comment on PRs | **LOW** | Add `EnricoMi/publish-unit-test-result-action` |
+| Missing Feature            | Priority   | Recommendation                                 |
+| -------------------------- | ---------- | ---------------------------------------------- |
+| Dependency review for PRs  | **MEDIUM** | Add `actions/dependency-review-action`         |
+| SAST with CodeQL           | **LOW**    | Consider `github/codeql-action/analyze`        |
+| Test result comment on PRs | **LOW**    | Add `EnricoMi/publish-unit-test-result-action` |
 
 ---
 
@@ -298,23 +306,23 @@ However, the following may fail in certain environments:
 
 #### 2.2.1 Strengths
 
-| Feature | Assessment |
-|---------|------------|
-| Comprehensive hook collection (9 repos) | **Good** - covers major quality tools |
-| Version pinning for reproducibility | **Good** - all hooks have explicit versions |
-| Monthly autoupdate schedule | **Good** - balances stability and updates |
-| Large file check (1000KB limit) | **Good** - prevents accidental commits |
-| Private key detection | **Good** - security |
+| Feature                                 | Assessment                                  |
+| --------------------------------------- | ------------------------------------------- |
+| Comprehensive hook collection (9 repos) | **Good** - covers major quality tools       |
+| Version pinning for reproducibility     | **Good** - all hooks have explicit versions |
+| Monthly autoupdate schedule             | **Good** - balances stability and updates   |
+| Large file check (1000KB limit)         | **Good** - prevents accidental commits      |
+| Private key detection                   | **Good** - security                         |
 
 #### 2.2.2 Issues Identified
 
-| Issue | Severity | Details | Recommendation |
-|-------|----------|---------|----------------|
-| **Flake8 excludes tests** | **MEDIUM** | Line 134: `exclude: ^src/tests/` | Tests should have some linting |
-| **MyPy excludes tests** | **MEDIUM** | Line 164: `exclude: ^src/tests/` | Tests should have type checking |
-| **Bandit excludes tests** | **LOW** | Line 181: `exclude: ^src/tests/` | Acceptable for tests |
-| **Markdown excludes docs/** | **LOW** | Line 195 | Docs should be linted |
-| **15+ MyPy error codes disabled** | **HIGH** | See Section 2.3.1 | Re-enable critical codes |
+| Issue                             | Severity   | Details                          | Recommendation                  |
+| --------------------------------- | ---------- | -------------------------------- | ------------------------------- |
+| **Flake8 excludes tests**         | **MEDIUM** | Line 134: `exclude: ^src/tests/` | Tests should have some linting  |
+| **MyPy excludes tests**           | **MEDIUM** | Line 164: `exclude: ^src/tests/` | Tests should have type checking |
+| **Bandit excludes tests**         | **LOW**    | Line 181: `exclude: ^src/tests/` | Acceptable for tests            |
+| **Markdown excludes docs/**       | **LOW**    | Line 195                         | Docs should be linted           |
+| **15+ MyPy error codes disabled** | **HIGH**   | See Section 2.3.1                | Re-enable critical codes        |
 
 #### 2.2.3 Excluded Directories Analysis
 
@@ -366,6 +374,7 @@ args:
 **Impact:** This configuration essentially disables most meaningful type checking. Critical type errors will not be caught.
 
 **Recommendation:** Gradually re-enable error codes, prioritizing:
+
 1. `arg-type` - catches wrong argument types
 2. `return-value` - catches return type mismatches
 3. `assignment` - catches incompatible assignments
@@ -378,25 +387,26 @@ args:
 --extend-ignore=E203,E265,E266,E501,W503,E722,E402,E226,C409,C901,B008,B904,B905,B907,F401
 ```
 
-| Ignored Code | Meaning | Assessment |
-|--------------|---------|------------|
-| E203 | Whitespace before ':' | **Acceptable** - Black compatibility |
-| E265 | Block comment spacing | **Acceptable** - style |
-| E266 | Too many # for comment | **Acceptable** - style |
-| E501 | Line too long | **Acceptable** - 512 char limit used |
-| W503 | Line break before binary operator | **Acceptable** - Black compatibility |
-| E722 | Bare except | **CONCERN** - catches all exceptions |
-| E402 | Module level import not at top | **Acceptable** - sometimes needed |
-| E226 | Arithmetic operator spacing | **Acceptable** - style |
-| C409 | Unnecessary list in dict/set | **Acceptable** - style |
-| C901 | Function too complex | **CONCERN** - hides complexity |
-| B008 | Mutable default argument | **CONCERN** - potential bug |
-| B904 | Raise without from | **Acceptable** - style |
-| B905 | Zip without strict | **CONCERN** - potential bug (Python 3.10+) |
-| B907 | Quadratic list extend | **Acceptable** - performance |
-| **F401** | **Unused import** | **CONCERN** - hides dead code |
+| Ignored Code | Meaning                           | Assessment                                 |
+| ------------ | --------------------------------- | ------------------------------------------ |
+| E203         | Whitespace before ':'             | **Acceptable** - Black compatibility       |
+| E265         | Block comment spacing             | **Acceptable** - style                     |
+| E266         | Too many # for comment            | **Acceptable** - style                     |
+| E501         | Line too long                     | **Acceptable** - 512 char limit used       |
+| W503         | Line break before binary operator | **Acceptable** - Black compatibility       |
+| E722         | Bare except                       | **CONCERN** - catches all exceptions       |
+| E402         | Module level import not at top    | **Acceptable** - sometimes needed          |
+| E226         | Arithmetic operator spacing       | **Acceptable** - style                     |
+| C409         | Unnecessary list in dict/set      | **Acceptable** - style                     |
+| C901         | Function too complex              | **CONCERN** - hides complexity             |
+| B008         | Mutable default argument          | **CONCERN** - potential bug                |
+| B904         | Raise without from                | **Acceptable** - style                     |
+| B905         | Zip without strict                | **CONCERN** - potential bug (Python 3.10+) |
+| B907         | Quadratic list extend             | **Acceptable** - performance               |
+| **F401**     | **Unused import**                 | **CONCERN** - hides dead code              |
 
 **Critical Concerns:**
+
 - **F401 (unused imports)**: Hiding unused imports can mask dead code and import side effects
 - **E722 (bare except)**: Can hide important exceptions
 - **B008 (mutable default)**: Classic Python bug source
@@ -414,13 +424,13 @@ line-length = 512
 
 #### 2.3.4 Test Directory Exclusion Summary
 
-| Tool | Excludes Tests | Impact |
-|------|----------------|--------|
-| MyPy | Yes | No type checking on tests |
-| Flake8 | Yes | No linting on tests |
-| Bandit | Yes | No security scanning on tests |
-| Black | No | Tests are formatted |
-| isort | No | Test imports are sorted |
+| Tool   | Excludes Tests | Impact                        |
+| ------ | -------------- | ----------------------------- |
+| MyPy   | Yes            | No type checking on tests     |
+| Flake8 | Yes            | No linting on tests           |
+| Bandit | Yes            | No security scanning on tests |
+| Black  | No             | Tests are formatted           |
+| isort  | No             | Test imports are sorted       |
 
 **Recommendation:** Enable at least basic linting on tests with a relaxed configuration.
 
@@ -430,37 +440,37 @@ line-length = 512
 
 ### 3.1 Critical (Address Immediately)
 
-| # | Issue | Action | Priority |
-|---|-------|--------|----------|
-| 1 | Tests with `assert True` | Replace with actual assertions or mark as TODO/remove | **P0** |
-| 2 | MyPy error codes disabled | Re-enable `arg-type`, `return-value`, `assignment` | **P0** |
-| 3 | `implementation_script.py` in tests | Move to `util/` directory | **P0** |
+| #   | Issue                               | Action                                                | Priority |
+| --- | ----------------------------------- | ----------------------------------------------------- | -------- |
+| 1   | Tests with `assert True`            | Replace with actual assertions or mark as TODO/remove | **P0**   |
+| 2   | MyPy error codes disabled           | Re-enable `arg-type`, `return-value`, `assignment`    | **P0**   |
+| 3   | `implementation_script.py` in tests | Move to `util/` directory                             | **P0**   |
 
 ### 3.2 High Priority (Address This Sprint)
 
-| # | Issue | Action | Priority |
-|---|-------|--------|----------|
-| 4 | Duplicate conftest.py | Consolidate into single `tests/conftest.py` | **P1** |
-| 5 | Duplicate test classes | Remove duplicates from `test_main_coverage_95.py` | **P1** |
-| 6 | F401 ignored in Flake8 | Enable unused import checking | **P1** |
-| 7 | Bandit `\|\| true` in CI | Remove silent failure | **P1** |
+| #   | Issue                    | Action                                            | Priority |
+| --- | ------------------------ | ------------------------------------------------- | -------- |
+| 4   | Duplicate conftest.py    | Consolidate into single `tests/conftest.py`       | **P1**   |
+| 5   | Duplicate test classes   | Remove duplicates from `test_main_coverage_95.py` | **P1**   |
+| 6   | F401 ignored in Flake8   | Enable unused import checking                     | **P1**   |
+| 7   | Bandit `\|\| true` in CI | Remove silent failure                             | **P1**   |
 
 ### 3.3 Medium Priority (Address This Month)
 
-| # | Issue | Action | Priority |
-|---|-------|--------|----------|
-| 8 | Skipped WebSocket tests | Convert to e2e tests with proper async handling | **P2** |
-| 9 | Overly permissive status code assertions | Tighten to specific expected codes | **P2** |
-| 10 | Enable linting on tests | Add relaxed flake8/mypy config for tests | **P2** |
-| 11 | E722, B008, B905 ignored | Re-enable these Flake8 checks | **P2** |
+| #   | Issue                                    | Action                                          | Priority |
+| --- | ---------------------------------------- | ----------------------------------------------- | -------- |
+| 8   | Skipped WebSocket tests                  | Convert to e2e tests with proper async handling | **P2**   |
+| 9   | Overly permissive status code assertions | Tighten to specific expected codes              | **P2**   |
+| 10  | Enable linting on tests                  | Add relaxed flake8/mypy config for tests        | **P2**   |
+| 11  | E722, B008, B905 ignored                 | Re-enable these Flake8 checks                   | **P2**   |
 
 ### 3.4 Low Priority (Backlog)
 
-| # | Issue | Action | Priority |
-|---|-------|--------|----------|
-| 12 | `test_candidate_visibility.py` | Convert to proper e2e test or move to manual tests | **P3** |
-| 13 | Add dependency-review action | Enhance PR security scanning | **P3** |
-| 14 | Reduce line length | Consider 120-character limit | **P3** |
+| #   | Issue                          | Action                                             | Priority |
+| --- | ------------------------------ | -------------------------------------------------- | -------- |
+| 12  | `test_candidate_visibility.py` | Convert to proper e2e test or move to manual tests | **P3**   |
+| 13  | Add dependency-review action   | Enhance PR security scanning                       | **P3**   |
+| 14  | Reduce line length             | Consider 120-character limit                       | **P3**   |
 
 ---
 
@@ -469,30 +479,34 @@ line-length = 512
 ### Test Files Analyzed (116 total)
 
 #### Unit Tests (71 files)
+
 - `tests/unit/*.py` (39 files)
 - `tests/unit/backend/*.py` (10 files)
 - `tests/unit/frontend/*.py` (24 files)
 
 #### Integration Tests (42 files)
+
 - `tests/integration/*.py` (38 files)
 - `tests/integration/backend/*.py` (4 files)
 
 #### Regression Tests (2 files)
+
 - `tests/regression/test_candidate_visibility.py`
 - `tests/regression/test_metrics_panel_data_format_regression.py`
 
 #### Performance Tests (1 file)
+
 - `tests/performance/test_button_responsiveness.py`
 
 ### Configuration Files Analyzed
 
-| File | Purpose |
-|------|---------|
-| `.github/workflows/ci.yml` | GitHub Actions CI/CD pipeline |
-| `.pre-commit-config.yaml` | Pre-commit hook configuration |
-| `pyproject.toml` | Python project and tool configuration |
-| `src/tests/conftest.py` | Primary pytest configuration |
-| `src/tests/fixtures/conftest.py` | Secondary fixtures (duplicate) |
+| File                             | Purpose                               |
+| -------------------------------- | ------------------------------------- |
+| `.github/workflows/ci.yml`       | GitHub Actions CI/CD pipeline         |
+| `.pre-commit-config.yaml`        | Pre-commit hook configuration         |
+| `pyproject.toml`                 | Python project and tool configuration |
+| `src/tests/conftest.py`          | Primary pytest configuration          |
+| `src/tests/fixtures/conftest.py` | Secondary fixtures (duplicate)        |
 
 ### Tools Used for Analysis
 

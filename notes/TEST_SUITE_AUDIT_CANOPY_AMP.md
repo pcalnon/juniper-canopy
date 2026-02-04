@@ -13,15 +13,15 @@ This audit examined the JuniperCanopy test suite (129 test files) and CI/CD pipe
 
 ### Key Findings Summary
 
-| Category | Critical | High | Medium | Low |
-|----------|----------|------|--------|-----|
-| Tests Always Pass | 1 | 6 | 0 | 0 |
-| Not Proper Test Files | 0 | 4 | 0 | 0 |
-| Unconditional Skips | 0 | 0 | 7 | 0 |
-| Empty/Placeholder Tests | 0 | 0 | 2 | 0 |
-| Exception Suppression | 0 | 0 | 0 | 4 |
-| CI/CD Issues | 0 | 2 | 3 | 2 |
-| **TOTAL** | **1** | **12** | **12** | **6** |
+| Category                | Critical | High   | Medium | Low   |
+| ----------------------- | -------- | ------ | ------ | ----- |
+| Tests Always Pass       | 1        | 6      | 0      | 0     |
+| Not Proper Test Files   | 0        | 4      | 0      | 0     |
+| Unconditional Skips     | 0        | 0      | 7      | 0     |
+| Empty/Placeholder Tests | 0        | 0      | 2      | 0     |
+| Exception Suppression   | 0        | 0      | 0      | 4     |
+| CI/CD Issues            | 0        | 2      | 3      | 2     |
+| **TOTAL**               | **1**    | **12** | **12** | **6** |
 
 **Overall Assessment:** The test suite has **significant quality issues** that undermine its effectiveness. At least **8 tests will always pass** regardless of code correctness, and **4 files in the test directory are not actual test files**. The CI/CD pipeline has **excessive error suppression** that may mask real issues.
 
@@ -36,17 +36,18 @@ These tests contain `assert True` or equivalent assertions that cannot fail:
 #### CRITICAL: Performance Tests (4 tests)
 **File:** `src/tests/performance/test_button_responsiveness.py`
 
-| Test Name | Line | Issue |
-|-----------|------|-------|
-| `test_rapid_clicking_prevention` | 90 | `assert True` with comment "Debouncing is implemented" |
-| `test_button_disable_during_execution` | 97 | `assert True` with comment "Implementation verified" |
-| `test_button_re_enable_after_timeout` | 104 | `assert True` with comment "Implementation verified" |
-| `test_button_re_enable_after_success` | 111 | `assert True` with comment "Implementation verified" |
+| Test Name                              | Line | Issue                                                  |
+| -------------------------------------- | ---- | ------------------------------------------------------ |
+| `test_rapid_clicking_prevention`       | 90   | `assert True` with comment "Debouncing is implemented" |
+| `test_button_disable_during_execution` | 97   | `assert True` with comment "Implementation verified"   |
+| `test_button_re_enable_after_timeout`  | 104  | `assert True` with comment "Implementation verified"   |
+| `test_button_re_enable_after_success`  | 111  | `assert True` with comment "Implementation verified"   |
 
 **Severity:** HIGH  
 **Impact:** 4 performance tests provide zero validation. The docstrings claim to test specific behaviors that are NOT actually tested.
 
 **Evidence:**
+
 ```python
 def test_rapid_clicking_prevention(self):
     # sourcery skip: remove-assert-true
@@ -61,14 +62,15 @@ def test_rapid_clicking_prevention(self):
 #### HIGH: Integration Button State Test
 **File:** `src/tests/integration/test_button_state.py`
 
-| Test Name | Line | Issue |
-|-----------|------|-------|
-| `test_button_click_disables_button` | 33 | `assert True` with comment "Implementation verified" |
+| Test Name                           | Line | Issue                                                |
+| ----------------------------------- | ---- | ---------------------------------------------------- |
+| `test_button_click_disables_button` | 33   | `assert True` with comment "Implementation verified" |
 
 **Severity:** HIGH  
 **Impact:** Integration test claiming to verify button disable behavior does nothing.
 
 **Evidence:**
+
 ```python
 def test_button_click_disables_button(self):
     # sourcery skip: remove-assert-true
@@ -82,9 +84,9 @@ def test_button_click_disables_button(self):
 #### MEDIUM: Other `assert True` Usage
 **File:** `src/tests/unit/frontend/test_metrics_panel_coverage.py`
 
-| Test Name | Line | Issue |
-|-----------|------|-------|
-| `test_add_metrics_with_none` | 373 | `assert True` after calling function |
+| Test Name                    | Line | Issue                                |
+| ---------------------------- | ---- | ------------------------------------ |
+| `test_add_metrics_with_none` | 373  | `assert True` after calling function |
 
 **Severity:** MEDIUM  
 **Context:** This tests that no exception is raised, but a better pattern is `pytest.raises` context manager inverted or explicit `assert len(panel.metrics_history) >= 0`.
@@ -93,9 +95,9 @@ def test_button_click_disables_button(self):
 
 **File:** `src/tests/unit/test_dashboard_manager.py`
 
-| Test Name | Line | Issue |
-|-----------|------|-------|
-| Unknown test | 239 | `assert True` in exception handler |
+| Test Name    | Line | Issue                              |
+| ------------ | ---- | ---------------------------------- |
+| Unknown test | 239  | `assert True` in exception handler |
 
 **Severity:** LOW  
 **Context:** Appears to be in a try/except block verifying no exception; acceptable but could be improved.
@@ -108,18 +110,19 @@ These files are in the test directory but are manual scripts, not pytest-complia
 
 #### HIGH: Manual Scripts Masquerading as Tests
 
-| File | Issue | Lines |
-|------|-------|-------|
-| `src/tests/unit/test_yaml.py` | Script with print statements, no test functions | 1-16 |
-| `src/tests/unit/test_dashboard_init.py` | Manual verification script, no assertions | 1-24 |
+| File                                              | Issue                                                       | Lines |
+| ------------------------------------------------- | ----------------------------------------------------------- | ----- |
+| `src/tests/unit/test_yaml.py`                     | Script with print statements, no test functions             | 1-16  |
+| `src/tests/unit/test_dashboard_init.py`           | Manual verification script, no assertions                   | 1-24  |
 | `src/tests/unit/test_and_verify_button_layout.py` | Manual verification script with `if __name__ == "__main__"` | 1-188 |
-| `src/tests/unit/implementation_script.py` | Test runner script with global variables | 1-460 |
-| `src/tests/integration/test_config.py` | Script with print statements only | 1-14 |
+| `src/tests/unit/implementation_script.py`         | Test runner script with global variables                    | 1-460 |
+| `src/tests/integration/test_config.py`            | Script with print statements only                           | 1-14  |
 
 **Severity:** HIGH  
 **Impact:** These files contribute to test count in metrics but provide NO automated verification. pytest may collect some functions but they don't assert anything.
 
 **Evidence from `test_yaml.py`:**
+
 ```python
 try:
     print("Loading YAML file...")
@@ -131,6 +134,7 @@ except Exception as e:
 ```
 
 **Evidence from `test_config.py`:**
+
 ```python
 print("Step 1: Imported config_manager...")
 config = get_config()
@@ -145,15 +149,16 @@ These tests are skipped without conditional logic, meaning they NEVER run in CI:
 
 #### Unconditional `pytest.skip()` Calls
 
-| File | Test | Line | Skip Reason |
-|------|------|------|-------------|
-| `test_parameter_persistence.py` | `test_api_set_params_integration` | 225 | "Requires running server - run manually" |
-| `test_logger_coverage.py` | `test_verbose_logging` | 134 | "VERBOSE is custom level, not in standard logging" |
+| File                            | Test                              | Line | Skip Reason                                        |
+| ------------------------------- | --------------------------------- | ---- | -------------------------------------------------- |
+| `test_parameter_persistence.py` | `test_api_set_params_integration` | 225  | "Requires running server - run manually"           |
+| `test_logger_coverage.py`       | `test_verbose_logging`            | 134  | "VERBOSE is custom level, not in standard logging" |
 
 **Severity:** MEDIUM  
 **Issue:** The skip is at the start of the test function, not conditional on environment.
 
 **Evidence:**
+
 ```python
 async def test_api_set_params_integration():
     pytest.skip("Requires running server - run manually for full integration test")
@@ -164,11 +169,11 @@ async def test_api_set_params_integration():
 
 #### Unconditional `@pytest.mark.skip` Decorators
 
-| File | Tests Affected | Skip Reason |
-|------|----------------|-------------|
-| `test_demo_endpoints.py` | 3 tests | "WebSocket broadcasts require full async event loop" |
-| `test_hdf5_snapshots_api.py` | 2 tests | "Requires patching global _snapshots_dir" |
-| `test_main_api_endpoints.py` | 2 tests | "TestClient bypasses CORS middleware" |
+| File                         | Tests Affected | Skip Reason                                          |
+| ---------------------------- | -------------- | ---------------------------------------------------- |
+| `test_demo_endpoints.py`     | 3 tests        | "WebSocket broadcasts require full async event loop" |
+| `test_hdf5_snapshots_api.py` | 2 tests        | "Requires patching global _snapshots_dir"            |
+| `test_main_api_endpoints.py` | 2 tests        | "TestClient bypasses CORS middleware"                |
 
 **Severity:** MEDIUM  
 **Issue:** These tests have valid reasons but other WebSocket tests in the codebase work fine, suggesting these could be fixed rather than skipped.
@@ -177,9 +182,9 @@ async def test_api_set_params_integration():
 
 ### 1.4 Tests with Empty Bodies (Placeholder Tests)
 
-| File | Test | Line | Issue |
-|------|------|------|-------|
-| `test_hdf5_snapshots_api.py` | `test_lists_real_hdf5_files` | 235-240 | `@pytest.mark.skip` + `pass` body |
+| File                         | Test                          | Line    | Issue                             |
+| ---------------------------- | ----------------------------- | ------- | --------------------------------- |
+| `test_hdf5_snapshots_api.py` | `test_lists_real_hdf5_files`  | 235-240 | `@pytest.mark.skip` + `pass` body |
 | `test_hdf5_snapshots_api.py` | `test_ignores_non_hdf5_files` | 242-247 | `@pytest.mark.skip` + `pass` body |
 
 **Severity:** MEDIUM  
@@ -191,13 +196,13 @@ async def test_api_set_params_integration():
 
 These tests use `contextlib.suppress()` which causes them to pass regardless of outcome:
 
-| File | Test | Line | Pattern |
-|------|------|------|---------|
-| `test_network_visualizer.py` | `test_parse_empty_topology` | 166-167 | `contextlib.suppress(KeyError, ValueError)` |
-| `test_network_visualizer.py` | Multiple tests | 244-252 | `contextlib.suppress()` |
-| `test_decision_boundary.py` | `test_create_empty_plot` | 178-180 | `contextlib.suppress(ValueError, IndexError)` |
-| `test_decision_boundary.py` | Multiple tests | 269-280 | `contextlib.suppress()` |
-| `test_button_responsiveness.py` | `test_button_visual_feedback_latency` | 63 | `contextlib.suppress(Exception)` |
+| File                            | Test                                  | Line    | Pattern                                       |
+| ------------------------------- | ------------------------------------- | ------- | --------------------------------------------- |
+| `test_network_visualizer.py`    | `test_parse_empty_topology`           | 166-167 | `contextlib.suppress(KeyError, ValueError)`   |
+| `test_network_visualizer.py`    | Multiple tests                        | 244-252 | `contextlib.suppress()`                       |
+| `test_decision_boundary.py`     | `test_create_empty_plot`              | 178-180 | `contextlib.suppress(ValueError, IndexError)` |
+| `test_decision_boundary.py`     | Multiple tests                        | 269-280 | `contextlib.suppress()`                       |
+| `test_button_responsiveness.py` | `test_button_visual_feedback_latency` | 63      | `contextlib.suppress(Exception)`              |
 
 **Severity:** LOW  
 **Impact:** Tests pass even if the code throws exceptions, defeating the purpose of testing.
@@ -212,6 +217,7 @@ These tests use `contextlib.suppress()` which causes them to pass regardless of 
 **Issue:** This regression test has NO `assert` statements. It uses print statements to report pass/fail.
 
 **Evidence:**
+
 ```python
 if seen_candidate_phase:
     print("✓ SUCCESS: Candidate pool was activated and data is visible!")
@@ -221,6 +227,7 @@ else:
 ```
 
 **Additional Issues:**
+
 - Uses `requests.get()` to hardcoded `localhost:8050`
 - Returns early instead of `pytest.skip()` when server not running
 - Contains `for` loop making multiple network calls (flaky)
@@ -231,10 +238,10 @@ else:
 
 **File:** `src/tests/unit/test_logger_coverage_95.py`
 
-| Test | Line | Issue |
-|------|------|-------|
+| Test                   | Line    | Issue                                                     |
+| ---------------------- | ------- | --------------------------------------------------------- |
 | `test_verbose_logging` | 233-249 | Uses `pytest.raises(AttributeError)` to verify bug exists |
-| `test_empty_yaml_file` | 369-377 | Uses `pytest.raises(TypeError)` to verify bug exists |
+| `test_empty_yaml_file` | 369-377 | Uses `pytest.raises(TypeError)` to verify bug exists      |
 
 **Severity:** MEDIUM  
 **Issue:** These tests document that bugs exist in production code rather than testing that the code works correctly. They will FAIL if the bugs are fixed.
@@ -245,9 +252,9 @@ else:
 
 **File:** `src/tests/unit/test_max_epochs_parameter.py`
 
-| Test | Line | Issue |
-|------|------|-------|
-| `test_max_epochs_min_constraint` | 44-49 | Docstring claims to test min=10 but only checks element exists |
+| Test                             | Line  | Issue                                                            |
+| -------------------------------- | ----- | ---------------------------------------------------------------- |
+| `test_max_epochs_min_constraint` | 44-49 | Docstring claims to test min=10 but only checks element exists   |
 | `test_max_epochs_max_constraint` | 51-56 | Docstring claims to test max=1000 but only checks element exists |
 
 **Severity:** LOW  
@@ -297,6 +304,7 @@ bandit -r src -f sarif -o reports/security/bandit.sarif || true
 **Issue:** Bandit security scan failures are suppressed with `|| true`. Any security issues found will be ignored.
 
 #### Positive Findings
+
 - ✅ Multi-Python version testing (3.11, 3.12, 3.13, 3.14)
 - ✅ Coverage enforcement (80% fail-under)
 - ✅ Integration tests on main/develop/PRs
@@ -329,6 +337,7 @@ bandit -r src -f sarif -o reports/security/bandit.sarif || true
 ```
 
 **Issue:** Test files are excluded from:
+
 - Flake8 linting
 - MyPy type checking
 - Bandit security scanning
@@ -360,6 +369,7 @@ This means test code is not checked for code quality, type errors, or security i
 ```
 
 **Issue:** 15 MyPy error codes are disabled, including critical ones like:
+
 - `arg-type`: Wrong argument types
 - `return-value`: Wrong return types
 - `assignment`: Type mismatches in assignments
@@ -376,6 +386,7 @@ This effectively neuters type checking.
 ```
 
 **Issue:** Many potentially important warnings are ignored:
+
 - `E722`: Bare except clause (security risk)
 - `F401`: Unused imports
 - `C901`: Function too complex
@@ -393,7 +404,8 @@ This effectively neuters type checking.
 
 **Issue:** All documentation in `notes/` and `docs/` is excluded from markdown linting.
 
-#### Positive Findings
+#### Positive Findings: Issue 4
+
 - ✅ YAML, TOML, JSON syntax checking
 - ✅ Trailing whitespace and EOF fixes
 - ✅ Merge conflict detection
@@ -486,42 +498,42 @@ exclude = [
 
 ### 3.2 High Priority (Fix This Sprint)
 
-4. **Enable linting for test files**
+1. **Enable linting for test files**
    - Remove `exclude: ^src/tests/` from flake8, mypy, bandit in pre-commit
    - Tests should have the same code quality standards as production code
 
-5. **Reduce MyPy error suppression**
+2. **Reduce MyPy error suppression**
    - Remove at minimum: `arg-type`, `return-value`, `assignment`
    - Fix the underlying type issues in the codebase
 
-6. **Fail builds on security issues**
+3. **Fail builds on security issues**
    - Remove `|| true` from bandit command
    - Remove `|| echo "::warning::"` from pip-audit (use proper `|| exit 1`)
 
 ### 3.3 Medium Priority (Fix Next Sprint)
 
-7. **Fix or remove unconditionally skipped tests**
+1. **Fix or remove unconditionally skipped tests**
    - Investigate if WebSocket tests can be made async-compatible
    - Add proper `skipif` conditions based on environment
 
-8. **Replace `contextlib.suppress` with proper assertions**
+2. **Replace `contextlib.suppress` with proper assertions**
    - Tests should assert behavior, not suppress all exceptions
 
-9. **Remove empty placeholder tests**
+3. **Remove empty placeholder tests**
    - Delete `pass`-only test bodies or implement them
 
-10. **Standardize coverage threshold**
+4. **Standardize coverage threshold**
     - Pick 60% or 80% and use consistently across all config files
 
 ### 3.4 Low Priority (Technical Debt)
 
-11. **Update test docstrings to match actual assertions**
+1. **Update test docstrings to match actual assertions**
     - `test_max_epochs_parameter.py` tests claim to verify constraints but don't
 
-12. **Enable markdown linting for documentation**
+2. **Enable markdown linting for documentation**
     - Remove exclusion of `notes/` and `docs/`
 
-13. **Re-enable pytest warnings**
+3. **Re-enable pytest warnings**
     - Remove `-p no:warnings` from pytest addopts
     - Address warnings rather than silencing them
 
@@ -531,7 +543,7 @@ exclude = [
 
 ### A.1 Tests with `assert True` (Always Pass)
 
-```
+```bash
 src/tests/performance/test_button_responsiveness.py:90
 src/tests/performance/test_button_responsiveness.py:97
 src/tests/performance/test_button_responsiveness.py:104
@@ -544,7 +556,7 @@ src/tests/unit/test_config_refactoring.py:111
 
 ### A.2 Non-Test Files in Test Directory
 
-```
+```bash
 src/tests/unit/test_yaml.py
 src/tests/unit/test_dashboard_init.py
 src/tests/unit/test_and_verify_button_layout.py
@@ -554,7 +566,7 @@ src/tests/integration/test_config.py
 
 ### A.3 Tests with Unconditional Skip
 
-```
+```bash
 src/tests/integration/test_parameter_persistence.py:225
 src/tests/integration/test_demo_endpoints.py:91
 src/tests/integration/test_demo_endpoints.py:103
@@ -567,7 +579,7 @@ src/tests/unit/test_logger_coverage.py:134
 
 ### A.4 Tests with Exception Suppression
 
-```
+```bash
 src/tests/unit/test_network_visualizer.py:166-167
 src/tests/unit/test_decision_boundary.py:178-180
 src/tests/performance/test_button_responsiveness.py:63
@@ -577,31 +589,31 @@ src/tests/performance/test_button_responsiveness.py:63
 
 ## Appendix B: CI/CD Configuration Issues Summary
 
-| File | Issue | Line | Severity |
-|------|-------|------|----------|
-| `ci.yml` | `continue-on-error: true` on security | 419 | MEDIUM |
-| `ci.yml` | pip-audit warnings don't fail | 428 | MEDIUM |
-| `ci.yml` | Bandit failures suppressed | 412 | MEDIUM |
-| `.pre-commit-config.yaml` | Tests excluded from linting | 134,164,181 | HIGH |
-| `.pre-commit-config.yaml` | 15 MyPy errors disabled | 148-162 | HIGH |
-| `.pre-commit-config.yaml` | Many Flake8 ignores | 126 | MEDIUM |
-| `pyproject.toml` | Pytest warnings suppressed | 148 | MEDIUM |
-| `.coveragerc` | Inconsistent fail_under | 26 | LOW |
+| File                      | Issue                                 | Line        | Severity |
+| ------------------------- | ------------------------------------- | ----------- | -------- |
+| `ci.yml`                  | `continue-on-error: true` on security | 419         | MEDIUM   |
+| `ci.yml`                  | pip-audit warnings don't fail         | 428         | MEDIUM   |
+| `ci.yml`                  | Bandit failures suppressed            | 412         | MEDIUM   |
+| `.pre-commit-config.yaml` | Tests excluded from linting           | 134,164,181 | HIGH     |
+| `.pre-commit-config.yaml` | 15 MyPy errors disabled               | 148-162     | HIGH     |
+| `.pre-commit-config.yaml` | Many Flake8 ignores                   | 126         | MEDIUM   |
+| `pyproject.toml`          | Pytest warnings suppressed            | 148         | MEDIUM   |
+| `.coveragerc`             | Inconsistent fail_under               | 26          | LOW      |
 
 ---
 
 ## Appendix C: Test Count by Category
 
-| Category | Count | % of Total |
-|----------|-------|------------|
-| Properly implemented tests | ~110 | 85% |
-| Always-pass tests (`assert True`) | 8 | 6% |
-| Non-test files | 5 | 4% |
-| Unconditionally skipped | 8 | 6% |
-| Empty placeholder tests | 2 | 2% |
+| Category                          | Count | % of Total |
+| --------------------------------- | ----- | ---------- |
+| Properly implemented tests        | ~110  | 85%        |
+| Always-pass tests (`assert True`) | 8     | 6%         |
+| Non-test files                    | 5     | 4%         |
+| Unconditionally skipped           | 8     | 6%         |
+| Empty placeholder tests           | 2     | 2%         |
 
 **Note:** Some tests have multiple issues and are counted in multiple categories.
 
 ---
 
-*End of Audit Report*
+*End of Audit Report:*
