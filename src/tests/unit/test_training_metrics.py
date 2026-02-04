@@ -99,14 +99,8 @@ class TestTrainingMetricsCallbacks:
         from dash import Dash
 
         app = Dash(__name__)
-
-        try:
-            metrics.setup_callbacks(app)
-            success = True
-        except Exception:
-            success = False
-
-        assert success
+        # Should not raise - direct call without try/except
+        metrics.setup_callbacks(app)
 
 
 class TestTrainingMetricsDataHandling:

@@ -102,14 +102,8 @@ class TestDatasetPlotterCallbacks:
         from dash import Dash
 
         app = Dash(__name__)
-
-        try:
-            plotter.register_callbacks(app)
-            success = True
-        except Exception:
-            success = False
-
-        assert success
+        # Should not raise - direct call without try/except
+        plotter.register_callbacks(app)
 
 
 class TestDatasetPlotterScatterPlot:

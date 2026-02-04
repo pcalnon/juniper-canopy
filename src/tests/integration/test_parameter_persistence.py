@@ -222,20 +222,17 @@ class TestParameterPersistence:
         assert current_state["max_hidden_units"] == 12
 
 
+@pytest.mark.e2e
+@pytest.mark.requires_server
 @pytest.mark.asyncio
 async def test_api_set_params_integration():
     """Integration test for /api/set_params endpoint (requires running server)."""
-    # This test requires a running server instance
-    # Skip if server not available
-    pytest.skip("Requires running server - run manually for full integration test")
 
     import httpx
 
     async with httpx.AsyncClient() as client:
         # Set parameters via API
-        response = await client.post(
-            "http://localhost:8050/api/set_params", json={"learning_rate": 0.08, "max_hidden_units": 6}
-        )
+        response = await client.post("http://localhost:8050/api/set_params", json={"learning_rate": 0.08, "max_hidden_units": 6})
 
         assert response.status_code == 200
         data = response.json()

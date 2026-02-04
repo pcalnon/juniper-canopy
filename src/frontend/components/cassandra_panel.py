@@ -40,7 +40,7 @@
 #   - Initial implementation for Cassandra monitoring
 #
 #####################################################################################################################################################################################################
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import dash_bootstrap_components as dbc
 import requests

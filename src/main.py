@@ -43,11 +43,11 @@ import os
 # import sys
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 # import dash
 import uvicorn
 
-# from pathlib import Path
 # from fastapi.staticfiles import StaticFiles
 from a2wsgi import WSGIMiddleware
 
@@ -134,10 +134,7 @@ async def lifespan(app: FastAPI):
         if demo_mode_instance.training_state:
             demo_state = demo_mode_instance.training_state.get_state()
             training_state.update_state(**demo_state)
-            system_logger.info(
-                f"Global training_state initialized with demo defaults: LR={demo_state.get('learning_rate')}, "
-                f"MaxHidden={demo_state.get('max_hidden_units')}, Epochs={demo_state.get('max_epochs')}"
-            )
+            system_logger.info(f"Global training_state initialized with demo defaults: LR={demo_state.get('learning_rate')}, " f"MaxHidden={demo_state.get('max_hidden_units')}, Epochs={demo_state.get('max_epochs')}")
 
         # Start demo training simulation
         demo_mode_instance.start()
@@ -398,9 +395,7 @@ async def websocket_control_endpoint(websocket: WebSocket):
                 system_logger.info("Demo mode initialized in WebSocket handler")
 
             # Debug logging
-            system_logger.info(
-                f"demo_mode_active={demo_mode_active}, demo_mode_instance={demo_mode_instance is not None}"
-            )
+            system_logger.info(f"demo_mode_active={demo_mode_active}, demo_mode_instance={demo_mode_instance is not None}")
 
             if demo_mode_instance:
                 try:
@@ -683,9 +678,7 @@ async def get_topology():
         # Input nodes
         nodes.extend({"id": f"input_{i}", "type": "input", "layer": 0} for i in range(network.input_size))
         # Hidden nodes
-        nodes.extend(
-            {"id": f"hidden_{h_idx}", "type": "hidden", "layer": 1} for h_idx in range(len(network.hidden_units))
-        )
+        nodes.extend({"id": f"hidden_{h_idx}", "type": "hidden", "layer": 1} for h_idx in range(len(network.hidden_units)))
         # Output nodes
         nodes.extend({"id": f"output_{o}", "type": "output", "layer": 2} for o in range(network.output_size))
 
@@ -784,9 +777,7 @@ async def get_decision_boundary():
         if predict_fn := cascor_integration.get_prediction_function():
             # TODO: Add Similar logic for real cascor network
             system_logger = get_system_logger()
-            system_logger.info(
-                f"main.py: get_decision_boundary: Decision boundary data available: Predict Function: {predict_fn}"
-            )
+            system_logger.info(f"main.py: get_decision_boundary: Decision boundary data available: Predict Function: {predict_fn}")
             # pass
 
     return JSONResponse({"error": "No decision boundary data available"}, status_code=503)
@@ -1005,11 +996,7 @@ async def get_snapshot_detail(snapshot_id: str):
 
     # Search by file stem
     snapshot_file = next(
-        (
-            f
-            for f in path.iterdir()
-            if f.is_file() and f.suffix.lower() in SNAPSHOT_EXTENSIONS and f.stem == snapshot_id
-        ),
+        (f for f in path.iterdir() if f.is_file() and f.suffix.lower() in SNAPSHOT_EXTENSIONS and f.stem == snapshot_id),
         None,
     )
 
@@ -1422,7 +1409,6 @@ def _get_layouts_file() -> "Path":
 def _load_layouts() -> dict:
     """Load all saved layouts from disk."""
     import json
-    from pathlib import Path
 
     layouts_file = _get_layouts_file()
     if layouts_file.exists():
@@ -1725,10 +1711,9 @@ async def api_train_start(reset: bool = False):
             schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, message)))
             return JSONResponse({"error": message}, status_code=400)
 
-        if started := cascor_integration.start_training_background():
-            success = True
+        if cascor_integration.start_training_background():
             message = "Training started successfully"
-            schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", success, message)))
+            schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", True, message)))
             return {"status": "started", "message": message}
         else:
             message = "Failed to start training"
@@ -1793,7 +1778,7 @@ async def api_train_stop():
     # P1-NEW-003: Support stop for cascor_integration (best-effort)
     if cascor_integration:
         if cascor_integration.is_training_in_progress():
-            if requested := cascor_integration.request_training_stop():
+            if cascor_integration.request_training_stop():
                 message = "Training stop requested (best-effort)"
                 schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", True, message)))
                 return {"status": "stop_requested", "message": message}

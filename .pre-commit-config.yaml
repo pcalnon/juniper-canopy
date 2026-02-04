@@ -115,6 +115,7 @@ repos:
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Python Linting - Flake8 (source code)
+  # Re-enabled B905 (zip strict=), F401 (unused imports), B008 (func in defaults)
   # ═══════════════════════════════════════════════════════════════════════════
   - repo: https://github.com/pycqa/flake8
     rev: 7.1.1
@@ -123,7 +124,7 @@ repos:
         name: Lint with Flake8
         args:
           - --max-line-length=512
-          - --extend-ignore=E203,E265,E266,E501,W503,E722,E402,E226,C409,C901,B008,B904,B905,B907,F401
+          - --extend-ignore=E203,E265,E266,E501,W503,E722,E402,E226,C409,C901,B904,B907
           - --max-complexity=15
           - --select=B,C,E,F,W,T4,B9
         additional_dependencies:

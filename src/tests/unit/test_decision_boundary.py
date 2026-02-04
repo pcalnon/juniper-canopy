@@ -114,14 +114,8 @@ class TestDecisionBoundaryCallbacks:
         from dash import Dash
 
         app = Dash(__name__)
-
-        try:
-            boundary.register_callbacks(app)
-            success = True
-        except Exception:
-            success = False
-
-        assert success
+        # Should not raise - direct call without try/except
+        boundary.register_callbacks(app)
 
 
 class TestDecisionBoundaryGridGeneration:

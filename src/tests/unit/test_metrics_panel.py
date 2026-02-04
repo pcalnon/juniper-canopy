@@ -154,14 +154,8 @@ class TestMetricsPanelCallbacks:
         from dash import Dash
 
         app = Dash(__name__)
-
-        try:
-            metrics_panel.register_callbacks(app)
-            success = True
-        except Exception:
-            success = False
-
-        assert success
+        # Should not raise - direct call without try/except
+        metrics_panel.register_callbacks(app)
 
 
 class TestMetricsPanelDataFormatting:

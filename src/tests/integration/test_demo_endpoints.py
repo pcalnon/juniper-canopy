@@ -87,8 +87,8 @@ class TestWebSocketTrainingEndpoint:
             assert data["type"] == "connection_established"
             assert "client_id" in data
 
+    @pytest.mark.e2e
     @pytest.mark.requires_server
-    @pytest.mark.skip(reason="WebSocket broadcasts require full async event loop (use manual testing)")
     def test_training_websocket_receives_state_messages(self, test_client):
         """Test WebSocket receives training state messages."""
         with test_client.websocket_connect("/ws/training") as websocket:
@@ -107,8 +107,8 @@ class TestWebSocketTrainingEndpoint:
                         break
             assert state_received, "No state messages received from demo mode"
 
+    @pytest.mark.e2e
     @pytest.mark.requires_server
-    @pytest.mark.skip(reason="WebSocket broadcasts require full async event loop (use manual testing)")
     def test_training_websocket_receives_metrics_messages(self, test_client):
         """Test WebSocket receives training metrics messages."""
         with test_client.websocket_connect("/ws/training") as websocket:
@@ -272,7 +272,7 @@ class TestRootEndpoint:
 class TestDataFlowIntegration:
     """Test that data flows through WebSocket channels in demo mode."""
 
-    @pytest.mark.skip(reason="WebSocket broadcasts require full async event loop (use manual testing)")
+    @pytest.mark.e2e
     def test_demo_mode_broadcasts_data(self, test_client):
         """Test demo mode broadcasts data through WebSocket."""
         with test_client.websocket_connect("/ws/training") as websocket:

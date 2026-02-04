@@ -188,8 +188,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 ),
                 # Description
                 html.P(
-                    "View and manage HDF5 training state snapshots. Snapshots contain saved network states "
-                    "that can be loaded for analysis or resumed training.",
+                    "View and manage HDF5 training state snapshots. Snapshots contain saved network states " "that can be loaded for analysis or resumed training.",
                     style={"fontSize": "14px", "color": "#6c757d", "marginBottom": "20px"},
                 ),
                 html.Hr(),
@@ -754,7 +753,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 # Fallback: find the button with highest n_clicks
                 max_clicks = 0
                 selected_id = None
-                for n, id_obj in zip(n_clicks_list, ids):
+                for n, id_obj in zip(n_clicks_list, ids, strict=True):
                     if n and n > max_clicks:
                         max_clicks = n
                         selected_id = id_obj.get("index")
@@ -858,9 +857,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                     )
                     for k, v in attrs.items()
                 ]
-                items.append(
-                    html.Ul(attr_items, style={"listStyleType": "disc", "paddingLeft": "20px", "fontSize": "0.9rem"})
-                )
+                items.append(html.Ul(attr_items, style={"listStyleType": "disc", "paddingLeft": "20px", "fontSize": "0.9rem"}))
 
             return html.Div(items)
 
@@ -900,6 +897,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 return False, "", None
 
             import json
+
             with contextlib.suppress(json.JSONDecodeError, IndexError):
                 id_str = prop_id.rsplit(".", 1)[0]
                 id_dict = json.loads(id_str)

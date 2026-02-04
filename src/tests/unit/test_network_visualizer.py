@@ -129,14 +129,8 @@ class TestNetworkVisualizerCallbacks:
         from dash import Dash
 
         app = Dash(__name__)
-
-        try:
-            visualizer.register_callbacks(app)
-            success = True
-        except Exception:
-            success = False
-
-        assert success
+        # Should not raise - direct call without try/except
+        visualizer.register_callbacks(app)
 
 
 class TestNetworkVisualizerTopologyParsing:

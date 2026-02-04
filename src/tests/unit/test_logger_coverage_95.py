@@ -360,21 +360,23 @@ class TestLoggingConfigLoadBranches:
         # Should fall back to default
         assert "logging" in config.config
 
+    @pytest.mark.xfail(reason="Known bug: LoggingConfig doesn't handle empty YAML files - see Epic 3.6 CQ-001")
     def test_empty_yaml_file(self, tmp_path):
-        """Should reveal bug when YAML file is empty.
+        """Empty YAML file should fall back to defaults, not raise TypeError.
 
-        This test exposes a bug in LoggingConfig._load_config:
-        When yaml.safe_load returns None for an empty file, the code attempts
-        `if "logging" in config` which raises TypeError since None is not iterable.
-        This exercises line 516 branch.
+        Bug: LoggingConfig._load_config doesn't handle the case when yaml.safe_load
+        returns None for an empty file. The code attempts `if "logging" in config`
+        which raises TypeError since None is not iterable.
+
+        Expected: Fall back to default configuration
+        Actual: Raises TypeError at line 516
         """
         empty_yaml = tmp_path / "empty.yaml"
         empty_yaml.write_text("")
 
-        # yaml.safe_load returns None for empty file
-        # The code doesn't handle this case and raises TypeError at line 516
-        with pytest.raises(TypeError, match="argument of type 'NoneType' is not"):
-            LoggingConfig(config_path=str(empty_yaml))
+        # When bug is fixed, this should create a LoggingConfig with default settings
+        config = LoggingConfig(config_path=str(empty_yaml))
+        assert config.config is not None  # Should have default config
 
 
 class TestGetLoggerConfig:

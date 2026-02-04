@@ -200,13 +200,7 @@ class CascorIntegration:
         self.logger.debug(f"Resolved backend path: {path}")
         if not path.exists():
             self.logger.error(f"CasCor backend not found at: {path}")
-            raise FileNotFoundError(
-                f"CasCor backend not found at: {path}\n"
-                f"Original path: {backend_path}\n"
-                f"Expanded path: {backend_path_expanded}\n"
-                f"Please set CASCOR_BACKEND_PATH environment variable or "
-                f"update conf/app_config.yaml"
-            )
+            raise FileNotFoundError(f"CasCor backend not found at: {path}\n" f"Original path: {backend_path}\n" f"Expanded path: {backend_path_expanded}\n" f"Please set CASCOR_BACKEND_PATH environment variable or " f"update conf/app_config.yaml")
         self.logger.info(f"CasCor backend found at: {path}")
         return path
 
@@ -339,11 +333,7 @@ class CascorIntegration:
             self._remote_workers_active = False
 
         except ImportError as e:
-            raise ImportError(
-                f"Failed to import CasCor backend modules: {e}\n"
-                f"Backend path: {self.backend_path}\n"
-                f"Ensure CasCor prototype is properly installed"
-            ) from e
+            raise ImportError(f"Failed to import CasCor backend modules: {e}\n" f"Backend path: {self.backend_path}\n" f"Ensure CasCor prototype is properly installed") from e
 
     def create_network(self, config: Optional[Dict[str, Any]] = None) -> Any:
         """
@@ -389,9 +379,7 @@ class CascorIntegration:
         # Create network instance
         self.network = self.CascadeCorrelationNetwork(config=backend_config)
         self.cascade_correlation_instance = self.network  # Alias
-        self.logger.info(
-            f"Network created: input_size={self.network.input_size}, output_size={self.network.output_size}"
-        )
+        self.logger.info(f"Network created: input_size={self.network.input_size}, output_size={self.network.output_size}")
         return self.network
 
     def connect_to_network(self, network: Any):
@@ -411,9 +399,7 @@ class CascorIntegration:
         """
         self.network = network
         self.cascade_correlation_instance = network  # Alias
-        self.logger.info(
-            f"Connected to network: input_size={self.network.input_size}, output_size={self.network.output_size}"
-        )
+        self.logger.info(f"Connected to network: input_size={self.network.input_size}, output_size={self.network.output_size}")
         return True
 
     # Alias for backward compatibility
@@ -567,9 +553,7 @@ class CascorIntegration:
             if self._training_future is not None and not self._training_future.done():
                 raise RuntimeError("Training already in progress. Wait for completion or request stop.")
             self._training_stop_requested = False
-            self._training_future = loop.run_in_executor(
-                self._training_executor, lambda: self._run_fit_sync(*args, **kwargs)
-            )
+            self._training_future = loop.run_in_executor(self._training_executor, lambda: self._run_fit_sync(*args, **kwargs))
 
         try:
             result = await self._training_future
@@ -843,9 +827,7 @@ class CascorIntegration:
             "type": "phase_end",
             "phase": "output",
             "loss": loss,
-            "accuracy": (
-                self.network.history["train_accuracy"][-1] if self.network.history.get("train_accuracy") else 0.0
-            ),
+            "accuracy": (self.network.history["train_accuracy"][-1] if self.network.history.get("train_accuracy") else 0.0),
             "hidden_units": len(self.network.hidden_units),
             "epoch": len(self.network.history.get("train_loss", [])),
             "timestamp": datetime.now().isoformat(),
@@ -965,9 +947,7 @@ class CascorIntegration:
             return
         self.monitoring_interval = interval
         self.monitoring_active = True
-        self.monitoring_thread = threading.Thread(
-            target=self._monitoring_loop, args=(interval,), daemon=True, name="CascorMonitoringThread"
-        )
+        self.monitoring_thread = threading.Thread(target=self._monitoring_loop, args=(interval,), daemon=True, name="CascorMonitoringThread")
         self.monitoring_thread.start()
         self.logger.info(f"Monitoring thread started (interval={interval}s)")
 
@@ -1128,11 +1108,7 @@ class CascorIntegration:
                                 "activation": unit.get("activation_fn", torch.sigmoid).__name__,
                             }
                         )
-            self.logger.debug(
-                f"Extracted topology: {topology['input_size']} inputs, "
-                f"{len(topology['hidden_units'])} hidden, "
-                f"{topology['output_size']} outputs"
-            )
+            self.logger.debug(f"Extracted topology: {topology['input_size']} inputs, " f"{len(topology['hidden_units'])} hidden, " f"{topology['output_size']} outputs")
             return topology
         except Exception as e:
             self.logger.error(f"Failed to extract network topology: {e}", exc_info=True)
@@ -1208,9 +1184,7 @@ class CascorIntegration:
             current_epoch=current_epoch,
         )
 
-    def get_dataset_info(
-        self, x: Optional[torch.Tensor] = None, y: Optional[torch.Tensor] = None
-    ) -> Optional[Dict[str, Any]]:
+    def get_dataset_info(self, x: Optional[torch.Tensor] = None, y: Optional[torch.Tensor] = None) -> Optional[Dict[str, Any]]:
         """
         Description:
             Get information about dataset for visualization.
@@ -1280,9 +1254,7 @@ class CascorIntegration:
 
         return self._generate_dataset_local()
 
-    def _generate_dataset_from_juniper_data(
-        self, juniper_data_url: str, algorithm: Optional[str] = None
-    ) -> Optional[Dict[str, Any]]:
+    def _generate_dataset_from_juniper_data(self, juniper_data_url: str, algorithm: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Generate dataset using JuniperData service.
 
@@ -1341,7 +1313,7 @@ class CascorIntegration:
         num_samples = len(features)
 
         unique, counts = np.unique(labels, return_counts=True)
-        class_distribution = {int(k): int(v) for k, v in zip(unique, counts)}
+        class_distribution = {int(k): int(v) for k, v in zip(unique, counts, strict=True)}
 
         self.logger.info(f"Generated spiral dataset via JuniperData: {num_samples} samples")
 

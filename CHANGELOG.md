@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.30.0] - 2026-02-04
 
-**Summary**: Test Suite & CI/CD Enhancement - Phase 3 Progress. Fixed logically weak tests, removed duplicate test classes.
+**Summary**: Test Suite & CI/CD Enhancement - Phase 3 Complete. Fixed logically weak tests, unconditional skips, exception suppression, re-enabled Flake8 checks, removed duplicate test classes, and converted bug-documenting tests to xfail.
 
 ### Changed: [0.30.0]
 
@@ -27,6 +27,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Reduced `in [200, 503]`/`in [200, 400, 500]` patterns from 21 to 5
   - Remaining 5 patterns are legitimately variable (network data may be unavailable)
 
+- **Epic 3.2: Address Unconditional Skips**
+  - `src/tests/integration/test_demo_endpoints.py`
+    - Converted 3 WebSocket broadcast tests from unconditional `@pytest.mark.skip` to conditional `@pytest.mark.e2e` + `@pytest.mark.requires_server`
+  - `src/tests/integration/test_parameter_persistence.py`
+    - Converted 1 server test from unconditional skip to `@pytest.mark.e2e` + `@pytest.mark.requires_server`
+  - `docs/testing/ADR_001_VALID_TEST_SKIPS.md`
+    - Created ADR documenting valid skips: VERBOSE logging, HDF5 patching, TestClient CORS bypass
+
+- **Epic 3.3: Fix Exception Suppression in Tests**
+  - Fixed 5 tests using try/except/success antipattern:
+    - `src/tests/unit/test_network_visualizer.py` - `test_register_callbacks_with_mock_app`
+    - `src/tests/unit/test_decision_boundary.py` - `test_register_callbacks_with_mock_app`
+    - `src/tests/unit/test_metrics_panel.py` - `test_register_callbacks_with_mock_app`
+    - `src/tests/unit/test_training_metrics.py` - `test_setup_callbacks_with_mock_app`
+    - `src/tests/unit/test_dataset_plotter.py` - `test_register_callbacks_with_mock_app`
+  - Converted to direct assertions - pytest will catch exceptions
+
+- **Epic 3.4: Re-enable Additional Flake8 Checks**
+  - `.pre-commit-config.yaml`
+    - Re-enabled B905 (zip without strict=) for source code
+    - Re-enabled F401 (unused imports) for source code
+    - Re-enabled B008 (function calls in default arguments) for source code
+  - `src/backend/cascor_integration.py` - Added `strict=True` to zip() call
+  - `src/frontend/components/hdf5_snapshots_panel.py` - Added `strict=True` to zip() call
+  - `src/frontend/components/cassandra_panel.py` - Removed unused `Optional` import
+  - `src/main.py`
+    - Added `Path` import (fixing F821 undefined name)
+    - Removed unused walrus assignments in start/stop training endpoints (F841)
+    - Removed redundant `from pathlib import Path` in `_load_layouts()` (F401)
+
 - **Epic 3.5: Removed Duplicate Test Classes**
   - `src/tests/unit/test_main_coverage_95.py`
     - Removed 4 duplicate classes that were exact copies of test_main_coverage.py:
@@ -36,11 +66,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       - TestRootEndpoint (14 lines removed)
     - Total: 111 lines of duplicate code removed
 
+- **Epic 3.6: Convert Bug-Documenting Tests to xfail**
+  - `src/tests/unit/test_logger_coverage_95.py`
+    - Converted `test_empty_yaml_file` from documenting bug to proper `@pytest.mark.xfail` marker
+    - Test now clearly indicates expected vs actual behavior
+    - Will auto-pass when the underlying LoggingConfig bug is fixed
+
 ### Technical Notes: [0.30.0]
 
 - **SemVer impact**: MINOR - Test quality improvements; no API changes
-- Implements partial Phase 3 of TEST_SUITE_CICD_ENHANCEMENT_DEVELOPMENT_PLAN.md
-- 177 modified tests pass; pre-existing errors in unmodified files
+- Implements Phase 3 (all 6 epics complete) of TEST_SUITE_CICD_ENHANCEMENT_DEVELOPMENT_PLAN.md
+- All modified tests pass; pre-existing errors in unmodified files
 
 ---
 
