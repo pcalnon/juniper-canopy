@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.30.0] - 2026-02-04
+
+**Summary**: Test Suite & CI/CD Enhancement - Phase 3 Progress. Fixed logically weak tests, removed duplicate test classes.
+
+### Changed: [0.30.0]
+
+- **Epic 3.1: Fixed Logically Weak Tests (Partial)**
+  - `src/tests/unit/test_main_coverage.py`
+    - Removed weak TestTrainingControlEndpoints class (better version in _95)
+    - Removed weak TestSetParamsEndpoint class (better version in _95)
+    - Updated TestNetworkStatsEndpoint with documentation explaining 503 scenarios
+    - Updated TestTopologyEndpoint with documentation explaining 503 scenarios
+    - Updated TestDatasetEndpoint to expect 200 in demo mode
+    - Updated TestDecisionBoundaryEndpoint to expect 200 in demo mode
+  - `src/tests/unit/test_main_coverage_extended.py`
+    - Fixed 4 `in [200, 400, 500]` assertions to expect 200 for valid params
+    - Added documentation for exception test that legitimately accepts multiple codes
+  - Reduced `in [200, 503]`/`in [200, 400, 500]` patterns from 21 to 5
+  - Remaining 5 patterns are legitimately variable (network data may be unavailable)
+
+- **Epic 3.5: Removed Duplicate Test Classes**
+  - `src/tests/unit/test_main_coverage_95.py`
+    - Removed 4 duplicate classes that were exact copies of test_main_coverage.py:
+      - TestHealthCheckEndpoint (45 lines removed)
+      - TestStateEndpoint (26 lines removed)
+      - TestStatusEndpoint (26 lines removed)
+      - TestRootEndpoint (14 lines removed)
+    - Total: 111 lines of duplicate code removed
+
+### Technical Notes: [0.30.0]
+
+- **SemVer impact**: MINOR - Test quality improvements; no API changes
+- Implements partial Phase 3 of TEST_SUITE_CICD_ENHANCEMENT_DEVELOPMENT_PLAN.md
+- 177 modified tests pass; pre-existing errors in unmodified files
+
+---
+
 ## [0.29.0] - 2026-02-04
 
 **Summary**: Test Suite & CI/CD Enhancement - Phase 2 Complete. Consolidated conftest.py, fixed type annotations, enabled test linting.

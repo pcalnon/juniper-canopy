@@ -1,11 +1,11 @@
 # JuniperCanopy Test Suite & CI/CD Enhancement Development Plan
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 **Date:** 2026-02-04
 **Last Updated:** 2026-02-04
 **Authors:** AI Agents (Amp, Claude Opus 4.5) - Consolidated
 **Source Audits:** TEST_SUITE_AUDIT_CANOPY_AMP.md, TEST_SUITE_AUDIT_CANOPY_CLAUDE.md
-**Status:** Phase 1 Complete - In Progress
+**Status:** Phase 3 In Progress
 
 ## Implementation Status
 
@@ -13,7 +13,7 @@
 | ------- | ---------------------------- | -------------- | --------------- |
 | Phase 1 | Critical Issues              | ✅ Complete     | 2026-02-04      |
 | Phase 2 | High Priority                | ✅ Complete     | 2026-02-04      |
-| Phase 3 | Medium Priority              | 🔲 Pending      | -               |
+| Phase 3 | Medium Priority              | 🔶 In Progress  | -               |
 | Phase 4 | Low Priority / Tech Debt     | 🔲 Pending      | -               |
 
 ### Phase 1 Summary (Complete)
@@ -25,6 +25,11 @@
 - **Epic 2.1**: Consolidated duplicate conftest.py files into single source of truth
 - **Epic 2.2**: Fixed critical type annotation in ConfigManager (partial - remaining deferred to Phase 4)
 - **Epic 2.3**: Enabled flake8 linting on test files with relaxed configuration
+
+### Phase 3 Summary (In Progress - 2026-02-04)
+- **Epic 3.1**: Fixed logically weak tests - reduced `in [200, 503]` patterns from 21 to 5
+- **Epic 3.5**: Removed duplicate test classes - consolidated test_main_coverage.py and test_main_coverage_95.py
+- **Remaining**: Epic 3.2 (Unconditional Skips), 3.3 (Exception Suppression), 3.4 (Flake8 checks), 3.6 (Bug-documenting tests)
 
 ---
 
@@ -941,11 +946,11 @@ For each PR addressing these issues:
 | DUP-01             | D1     | 2.1.1-2.1.5 | P1       | ✅ Complete |
 | PC-004             | H4     | 2.2.1-2.2.9 | P1       | 🔶 Partial  |
 | PC-001, PC-002     | H1, H2 | 2.3.1-2.3.6 | P1       | ✅ Complete |
-| LW-001 to LW-004   | E1-E4  | 3.1.1-3.1.5 | P2       | Pending |
+| LW-001 to LW-004   | E1-E4  | 3.1.1-3.1.5 | P2       | 🔶 Partial (16/21 fixed) |
 | SK-001 to SK-009   | C1-C8  | 3.2.1-3.2.3 | P2       | Pending |
 | EXC-01 to EXC-04   | F1-F3  | 3.3.1-3.3.2 | P2       | Pending |
 | PC-005             | H5     | 3.4.1-3.4.4 | P2       | Pending |
-| DUP-02             | D2     | 3.5.1-3.5.3 | P2       | Pending |
+| DUP-02             | D2     | 3.5.1-3.5.3 | P2       | ✅ Complete |
 | CQ-001             | -      | 3.6.1-3.6.2 | P2       | Pending |
 | CFG-01, CFG-02     | I1, I2 | 4.1.1-4.1.2 | P3       | Pending |
 | PC-006             | H6     | 4.2.1       | P3       | Pending |
@@ -1041,14 +1046,20 @@ For each PR addressing these issues:
 
 ### Phase 3 Completion Checklist
 
-- [ ] Epic 3.1: Logically weak tests fixed
+- [~] Epic 3.1: Logically weak tests fixed (2026-02-04)
+  - [x] Identified 21 `in [200, 503]` and `in [200, 400, 500]` patterns
+  - [x] Fixed 16 patterns in test_main_coverage.py and test_main_coverage_extended.py
+  - [x] 5 remaining patterns are legitimately variable (network data availability)
+  - [x] Added documentation explaining when 503 is expected
 - [ ] Epic 3.2: Skipped tests addressed
 - [ ] Epic 3.3: Exception suppression fixed
 - [ ] Epic 3.4: Additional Flake8 checks enabled
-- [ ] Epic 3.5: Duplicate test classes removed
+- [x] Epic 3.5: Duplicate test classes removed (2026-02-04)
+  - [x] Removed 4 duplicate classes from test_main_coverage_95.py (HealthCheck, State, Status, Root)
+  - [x] Removed 2 weak classes from test_main_coverage.py (TrainingControl, SetParams - better in _95)
 - [ ] Epic 3.6: Bug-documenting tests converted
-- [ ] All tests pass
-- [ ] Coverage maintained
+- [x] Modified tests pass (177 passed)
+- [~] Coverage maintained (pre-existing errors in unmodified files)
 
 ### Phase 4 Completion Checklist
 

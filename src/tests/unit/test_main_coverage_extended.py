@@ -75,7 +75,7 @@ class TestCascorInitializationExceptions:
         """Test FileNotFoundError triggers demo mode fallback."""
         with patch("backend.cascor_integration.CascorIntegration") as mock_cascor:
             mock_cascor.side_effect = FileNotFoundError("Backend not found")
-            with pytest.raises(FileNotFoundError):
+            with pytest.raises(FileNotFoundError):  # noqa: B908
                 from backend.cascor_integration import CascorIntegration
 
                 CascorIntegration("invalid/path")
@@ -85,7 +85,7 @@ class TestCascorInitializationExceptions:
         """Test generic Exception triggers demo mode fallback."""
         with patch("backend.cascor_integration.CascorIntegration") as mock_cascor:
             mock_cascor.side_effect = Exception("Unexpected error")
-            with pytest.raises(Exception):
+            with pytest.raises(Exception):  # noqa: B017, B908 - testing generic exception handler
                 from backend.cascor_integration import CascorIntegration
 
                 CascorIntegration("bad/path")
@@ -281,9 +281,7 @@ class TestHiddenUnitTopologyConnections:
         if response.status_code == 200:
             data = response.json()
             if "connections" in data:
-                cascade_connections = [
-                    c for c in data["connections"] if "hidden" in c.get("from", "") and "hidden" in c.get("to", "")
-                ]
+                cascade_connections = [c for c in data["connections"] if "hidden" in c.get("from", "") and "hidden" in c.get("to", "")]
                 assert isinstance(cascade_connections, list)
 
 
@@ -293,7 +291,8 @@ class TestWebSocketDisconnectHandler:
     @pytest.mark.unit
     def test_ws_endpoint_disconnect(self, app_client):
         """Test /ws endpoint handles disconnect properly."""
-        with app_client.websocket_connect("/ws") as ws:
+        with app_client.websocket_connect("/ws"):
+            # Just test that connection/disconnect works
             pass
 
     @pytest.mark.unit
@@ -320,9 +319,9 @@ class TestSetParamsExceptionHandling:
 
     @pytest.mark.unit
     def test_set_params_with_valid_params_succeeds(self, app_client):
-        """Test valid params are accepted."""
+        """Test valid params are accepted in demo mode."""
         response = app_client.post("/api/set_params", json={"learning_rate": 0.01})
-        assert response.status_code in [200, 400, 500]
+        assert response.status_code == 200, f"Expected 200 for valid params, got {response.status_code}"
 
 
 class TestMainFunction:
@@ -715,11 +714,17 @@ class TestSetParamsExceptionBranch:
 
     @pytest.mark.unit
     def test_set_params_exception_returns_500(self, app_client):
-        """Test exception during set_params returns 500."""
+        """Test exception during set_params returns 500.
+
+        Note: This test attempts to mock training_state to raise an exception.
+        In demo mode, the training_state is managed differently and the mock
+        may not trigger. We expect 500 if mock works, or 200 if normal path.
+        """
         with patch("main.training_state") as mock_state:
             mock_state.set_parameter.side_effect = Exception("Database error")
             response = app_client.post("/api/set_params", json={"learning_rate": 0.01})
-            assert response.status_code in [200, 400, 500]
+            # 500 if mock triggers exception, 200 if normal demo mode path
+            assert response.status_code in [200, 500], f"Expected 200 or 500, got {response.status_code}"
 
     @pytest.mark.unit
     def test_set_params_value_error_handling(self):
@@ -1080,17 +1085,15 @@ class TestSetParamsEndpointBranches:
 
     @pytest.mark.unit
     def test_set_params_with_all_params(self, app_client):
-        """Test set_params with all parameters."""
-        response = app_client.post(
-            "/api/set_params", json={"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 100}
-        )
-        assert response.status_code in [200, 400, 500]
+        """Test set_params with all parameters in demo mode."""
+        response = app_client.post("/api/set_params", json={"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 100})
+        assert response.status_code == 200, f"Expected 200 for valid params, got {response.status_code}"
 
     @pytest.mark.unit
     def test_set_params_with_only_learning_rate(self, app_client):
-        """Test set_params with only learning_rate."""
+        """Test set_params with only learning_rate in demo mode."""
         response = app_client.post("/api/set_params", json={"learning_rate": 0.05})
-        assert response.status_code in [200, 400, 500]
+        assert response.status_code == 200, f"Expected 200 for valid params, got {response.status_code}"
 
 
 class TestLateInitDemoMode:
@@ -1213,9 +1216,7 @@ class TestTopologyHiddenUnitConnections:
         if response.status_code == 200:
             data = response.json()
             assert "connections" in data
-            input_output = [
-                c for c in data["connections"] if "input" in c.get("from", "") and "output" in c.get("to", "")
-            ]
+            input_output = [c for c in data["connections"] if "input" in c.get("from", "") and "output" in c.get("to", "")]
             assert len(input_output) >= 0
 
     @pytest.mark.unit
@@ -1233,10 +1234,11 @@ class TestSetParamsExceptionPath:
     """Test set_params exception path (lines 960-962)."""
 
     @pytest.mark.unit
-    def test_set_params_returns_error_on_exception(self, app_client):
-        """Test set_params returns 500 on internal error."""
+    def test_set_params_valid_params_succeeds(self, app_client):
+        """Test set_params with valid params succeeds in demo mode."""
         response = app_client.post("/api/set_params", json={"learning_rate": 0.01})
-        assert response.status_code in [200, 400, 500]
+        # In demo mode with valid params, this should succeed
+        assert response.status_code == 200, f"Expected 200 for valid params, got {response.status_code}"
 
     @pytest.mark.unit
     def test_set_params_error_response_format(self):

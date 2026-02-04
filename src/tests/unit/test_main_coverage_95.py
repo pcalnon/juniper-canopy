@@ -134,9 +134,7 @@ class TestSetParamsEndpoint:
 
     def test_set_params_all(self, app_client):
         """Set all parameters at once."""
-        response = app_client.post(
-            "/api/set_params", json={"learning_rate": 0.02, "max_hidden_units": 20, "max_epochs": 300}
-        )
+        response = app_client.post("/api/set_params", json={"learning_rate": 0.02, "max_hidden_units": 20, "max_epochs": 300})
         assert response.status_code == 200
 
     def test_set_params_empty(self, app_client):
@@ -250,9 +248,8 @@ class TestWebSocketEndpoints:
 
     def test_websocket_training_connection(self, app_client):
         """Test training WebSocket connection."""
-        with app_client.websocket_connect("/ws/training") as websocket:
-            # Connection should succeed
-            # Just verify we can connect
+        with app_client.websocket_connect("/ws/training"):
+            # Connection should succeed - just verify we can connect
             pass
 
     def test_websocket_control_connection(self, app_client):
@@ -279,106 +276,6 @@ class TestRestoreSnapshotWhileTraining:
 
         # Stop training
         app_client.post("/api/train/stop")
-
-
-class TestHealthCheckEndpoint:
-    """Test health check endpoint."""
-
-    def test_health_check_returns_200(self, app_client):
-        """Health check should return 200."""
-        response = app_client.get("/health")
-        assert response.status_code == 200
-
-    def test_health_check_json_structure(self, app_client):
-        """Health check should return expected JSON."""
-        response = app_client.get("/health")
-        data = response.json()
-        assert "status" in data
-        assert "timestamp" in data
-        assert "version" in data
-        assert data["status"] == "healthy"
-
-    def test_health_check_includes_connections(self, app_client):
-        """Health check should include active connections."""
-        response = app_client.get("/health")
-        data = response.json()
-        assert "active_connections" in data
-        assert isinstance(data["active_connections"], int)
-
-    def test_health_check_includes_training_status(self, app_client):
-        """Health check should include training_active."""
-        response = app_client.get("/health")
-        data = response.json()
-        assert "training_active" in data
-        assert isinstance(data["training_active"], bool)
-
-    def test_health_check_includes_demo_mode(self, app_client):
-        """Health check should indicate demo_mode."""
-        response = app_client.get("/health")
-        data = response.json()
-        assert "demo_mode" in data
-        assert data["demo_mode"] is True
-
-    def test_health_alternative_path(self, app_client):
-        """/api/health should work too."""
-        response = app_client.get("/api/health")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "healthy"
-
-
-class TestStateEndpoint:
-    """Test /api/state endpoint."""
-
-    def test_state_returns_200(self, app_client):
-        """State endpoint should return 200."""
-        response = app_client.get("/api/state")
-        assert response.status_code == 200
-
-    def test_state_returns_json(self, app_client):
-        """State endpoint should return JSON."""
-        response = app_client.get("/api/state")
-        data = response.json()
-        assert isinstance(data, dict)
-
-    def test_state_has_learning_rate(self, app_client):
-        """State should include learning_rate."""
-        response = app_client.get("/api/state")
-        data = response.json()
-        assert "learning_rate" in data
-
-    def test_state_has_max_hidden_units(self, app_client):
-        """State should include max_hidden_units."""
-        response = app_client.get("/api/state")
-        data = response.json()
-        assert "max_hidden_units" in data
-
-
-class TestStatusEndpoint:
-    """Test /api/status endpoint."""
-
-    def test_status_returns_200(self, app_client):
-        """Status endpoint should return 200."""
-        response = app_client.get("/api/status")
-        assert response.status_code == 200
-
-    def test_status_returns_json(self, app_client):
-        """Status should return JSON dict."""
-        response = app_client.get("/api/status")
-        data = response.json()
-        assert isinstance(data, dict)
-
-    def test_status_has_is_training(self, app_client):
-        """Status should include is_training."""
-        response = app_client.get("/api/status")
-        data = response.json()
-        assert "is_training" in data
-
-    def test_status_has_current_epoch(self, app_client):
-        """Status should include current_epoch."""
-        response = app_client.get("/api/status")
-        data = response.json()
-        assert "current_epoch" in data
 
 
 class TestMetricsEndpoints:
@@ -425,19 +322,4 @@ class TestDecisionBoundaryEndpoints:
     def test_decision_boundary_returns_200(self, app_client):
         """Decision boundary endpoint should return 200."""
         response = app_client.get("/api/decision_boundary")
-        assert response.status_code == 200
-
-
-class TestRootEndpoint:
-    """Test root route."""
-
-    def test_root_redirects_to_dashboard(self, app_client):
-        """Root should redirect to /dashboard/."""
-        response = app_client.get("/", follow_redirects=False)
-        assert response.status_code == 307
-        assert "/dashboard/" in response.headers["location"]
-
-    def test_root_redirect_follows(self, app_client):
-        """Following redirect should reach dashboard."""
-        response = app_client.get("/", follow_redirects=True)
         assert response.status_code == 200
