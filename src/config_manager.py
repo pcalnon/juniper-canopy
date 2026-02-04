@@ -174,14 +174,12 @@ class ConfigManager:
         if value.lower() in {"false", "no", "0"}:
             return False
 
-        # Try integer
-        with contextlib.suppress(ValueError):
+        # Type coercion: try integer, then float, fallback to string
+        with contextlib.suppress(ValueError):  # Not an integer
             return int(value)
-        # Try float
-        with contextlib.suppress(ValueError):
+        with contextlib.suppress(ValueError):  # Not a float
             return float(value)
-        # Return as string
-        return value
+        return value  # Keep as string
 
     def _validate_config(self):
         """

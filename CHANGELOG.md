@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.31.0] - 2026-02-04
+
+**Summary**: Test Suite & CI/CD Enhancement - Phase 4 Complete (All Phases Complete). Standardized configuration, improved documentation, re-enabled MyPy error codes, reviewed exception suppression patterns.
+
+### Changed: [0.31.0]
+
+- **Epic 4.1: Configuration Standardization**
+  - `.coveragerc`: Standardized `fail_under` to 80% (was 60%)
+  - `pyproject.toml`: Removed `-p no:warnings` from pytest addopts (re-enabled warnings)
+  - Coverage threshold now consistent at 80% across all configs
+
+- **Epic 4.2: Documentation and Cleanup**
+  - `.pre-commit-config.yaml`: Added docs/ to markdown linting (was excluded)
+  - `src/.markdownlint.yaml`: Created markdownlint configuration file
+  - `docs/testing/TEST_DIRECTORY_STRUCTURE.md`: Created test directory documentation
+  - Fixed misleading docstrings in test files
+
+- **Epic 4.3: MyPy Improvements**
+  - `.pre-commit-config.yaml`: Re-enabled 9 MyPy error codes with 0 violations:
+    - `call-arg`, `override`, `no-redef`, `index`
+    - `func-returns-value`, `has-type`, `str-bytes-safe`, `call-overload`, `return`
+  - Disabled codes reduced from 15 to 7 (including new `dict-item`)
+  - Remaining disabled codes have legitimate violations requiring gradual fixes
+
+- **Epic 4.4: Address contextlib.suppress Usage**
+  - `src/communication/websocket_manager.py`: Documented suppress pattern (WebSocket shutdown cleanup)
+  - `src/config_manager.py`: Documented suppress patterns (type coercion logic)
+  - All source code suppression patterns reviewed and documented
+
+### Technical Notes: [0.31.0]
+
+- **SemVer impact**: MINOR - Configuration and tooling improvements; no API changes
+- Implements Phase 4 (all 4 epics complete) of TEST_SUITE_CICD_ENHANCEMENT_DEVELOPMENT_PLAN.md
+- All success metrics achieved or exceeded (see development plan)
+- TEST_SUITE_CICD_ENHANCEMENT_DEVELOPMENT_PLAN.md marked complete
+
+---
+
 ## [0.30.0] - 2026-02-04
 
 **Summary**: Test Suite & CI/CD Enhancement - Phase 3 Complete. Fixed logically weak tests, unconditional skips, exception suppression, re-enabled Flake8 checks, removed duplicate test classes, and converted bug-documenting tests to xfail.

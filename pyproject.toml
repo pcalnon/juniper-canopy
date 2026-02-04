@@ -145,7 +145,6 @@ timeout_method = "signal"
 addopts = [
     "-ra",
     "-q",
-    "-p", "no:warnings",
     "--strict-markers",
     "--strict-config",
     "--continue-on-collection-errors",

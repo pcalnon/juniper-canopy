@@ -167,21 +167,16 @@ repos:
           - --ignore-missing-imports
           - --no-strict-optional
           - --python-version=3.12
+          # Re-enabled (Epic 4.3): call-arg, override, no-redef, index,
+          # func-returns-value, has-type, str-bytes-safe, call-overload, return
+          # Still disabled due to existing errors requiring gradual fixes:
           - --disable-error-code=attr-defined
           - --disable-error-code=return-value
           - --disable-error-code=arg-type
           - --disable-error-code=assignment
-          - --disable-error-code=no-redef
-          - --disable-error-code=override
           - --disable-error-code=var-annotated
-          - --disable-error-code=index
           - --disable-error-code=misc
-          - --disable-error-code=call-arg
-          - --disable-error-code=func-returns-value
-          - --disable-error-code=has-type
-          - --disable-error-code=str-bytes-safe
-          - --disable-error-code=call-overload
-          - --disable-error-code=return
+          - --disable-error-code=dict-item
         files: ^src/
         exclude: ^src/tests/
         additional_dependencies:
@@ -214,7 +209,9 @@ repos:
           - --config=.markdownlint.yaml
           - --fix
         files: \.(md|markdown)$
-        exclude: ^(CHANGELOG\.md|notes/|docs/)
+        # Note: docs/ now included for linting (Epic 4.2.1)
+        # Excluding notes/ (development notes) and CHANGELOG.md (auto-generated format)
+        exclude: ^(CHANGELOG\.md|notes/|docs/history/)
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Shell Script Linting - shellcheck

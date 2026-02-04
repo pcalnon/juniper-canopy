@@ -223,13 +223,7 @@ class WebSocketManager:
         else:
             self.reconnect_delay = ws_config.get("reconnect_delay", WebSocketConstants.RECONNECT_DELAY_SEC)
 
-        self.logger.info(
-            f"WebSocketManager initialized: "
-            f"max_connections={self.max_connections}, "
-            f"heartbeat_interval={self.heartbeat_interval}s, "
-            f"reconnect_attempts={self.reconnect_attempts}, "
-            f"reconnect_delay={self.reconnect_delay}s"
-        )
+        self.logger.info(f"WebSocketManager initialized: " f"max_connections={self.max_connections}, " f"heartbeat_interval={self.heartbeat_interval}s, " f"reconnect_attempts={self.reconnect_attempts}, " f"reconnect_delay={self.reconnect_delay}s")
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
         """
@@ -288,10 +282,7 @@ class WebSocketManager:
             "last_message_at": None,
         }
 
-        self.logger.info(
-            f"Client connected: {self.connection_metadata[websocket]['client_id']} "
-            f"(Total: {len(self.active_connections)})"
-        )
+        self.logger.info(f"Client connected: {self.connection_metadata[websocket]['client_id']} " f"(Total: {len(self.active_connections)})")
 
         # Send initial connection acknowledgment
         await self.send_personal_message(
@@ -401,10 +392,7 @@ class WebSocketManager:
         for connection in disconnected:
             self.disconnect(connection)
 
-        self.logger.debug(
-            f"Broadcast message #{self.message_count} to {len(connections)} clients "
-            f"(type: {message.get('type', 'unknown')})"
-        )
+        self.logger.debug(f"Broadcast message #{self.message_count} to {len(connections)} clients " f"(type: {message.get('type', 'unknown')})")
 
     def broadcast_sync(self, message: dict):
         """
@@ -590,9 +578,9 @@ class WebSocketManager:
         # Send shutdown notice
         await self.broadcast({"type": "server_shutdown", "message": "Server is shutting down"})
 
-        # Close all connections
+        # Close all connections (suppress errors for already-closed connections)
         for websocket in list(self.active_connections):
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(Exception):  # Connection may already be closed
                 await websocket.close()
             self.disconnect(websocket)
 

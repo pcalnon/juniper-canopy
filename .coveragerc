@@ -22,8 +22,8 @@ show_missing = True
 skip_covered = False
 skip_empty = True
 
-# Coverage thresholds
-fail_under = 60
+# Coverage thresholds (standardized to 80% across all config files)
+fail_under = 80
 
 # Precision for coverage percentage
 precision = 2

@@ -1,0 +1,42 @@
+# Markdownlint Configuration
+# See: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+
+# Default: enable all rules
+default: true
+
+# MD013 - Line length
+# Disabled: We use long lines in documentation
+MD013: false
+
+# MD024 - Multiple headings with same content
+# Allow same content headings in different sections
+MD024:
+  siblings_only: true
+
+# MD033 - No inline HTML
+# Allow some HTML elements for formatting
+MD033:
+  allowed_elements:
+    - br
+    - sup
+    - sub
+    - details
+    - summary
+
+# MD034 - Bare URLs
+# Disabled: We sometimes use bare URLs in examples
+MD034: false
+
+# MD041 - First line should be top-level heading
+# Disabled: Files may start with YAML frontmatter or other content
+MD041: false
+
+# MD046 - Code block style
+# Consistent fenced code blocks
+MD046:
+  style: fenced
+
+# MD048 - Code fence style
+# Use backticks for code fences
+MD048:
+  style: backtick
