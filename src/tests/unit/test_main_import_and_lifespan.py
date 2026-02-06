@@ -92,8 +92,11 @@ class TestWebSocketEndpointsDemo:
 
     def test_websocket_training_connect_disconnect(self, app_client):
         """Test WebSocket training connection and disconnect."""
+        # Connect
         with app_client.websocket_connect("/ws/training") as ws:
-            pass  # Connect and disconnect
+            assert ws
+        # disconnect
+        assert not ws
 
     def test_websocket_control_connect_disconnect(self, app_client):
         """Test WebSocket control connection and disconnect."""
@@ -152,9 +155,7 @@ class TestRemoteWorkerEndpointsDemo:
 
     def test_remote_connect_demo_no_backend(self, app_client):
         """Remote connect returns 503 in demo mode."""
-        response = app_client.post(
-            "/api/remote/connect", params={"host": "localhost", "port": 5000, "authkey": "secret"}
-        )
+        response = app_client.post("/api/remote/connect", params={"host": "localhost", "port": 5000, "authkey": "secret"})
         assert response.status_code == 503
 
     def test_remote_start_workers_demo_no_backend(self, app_client):
@@ -193,9 +194,7 @@ class TestSetParamsEndpoint:
 
     def test_set_params_all(self, app_client):
         """Set all parameters."""
-        response = app_client.post(
-            "/api/set_params", json={"learning_rate": 0.02, "max_hidden_units": 20, "max_epochs": 300}
-        )
+        response = app_client.post("/api/set_params", json={"learning_rate": 0.02, "max_hidden_units": 20, "max_epochs": 300})
         assert response.status_code == 200
 
     def test_set_params_empty(self, app_client):

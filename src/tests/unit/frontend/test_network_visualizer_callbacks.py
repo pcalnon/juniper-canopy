@@ -217,9 +217,7 @@ class TestUpdateNetworkGraphCallback:
     @pytest.mark.unit
     def test_empty_topology_returns_empty_graph(self, visualizer, empty_topology):
         """Empty topology should return empty figure and zeros."""
-        result = self._simulate_update_network_graph(
-            visualizer, empty_topology, "hierarchical", ["show"], [], "light", [], None, None
-        )
+        result = self._simulate_update_network_graph(visualizer, empty_topology, "hierarchical", ["show"], [], "light", [], None, None)
         fig, input_ct, hidden_ct, output_ct, conn_ct, hash_val = result
         assert isinstance(fig, go.Figure)
         assert input_ct == "0"
@@ -231,9 +229,7 @@ class TestUpdateNetworkGraphCallback:
     @pytest.mark.unit
     def test_none_topology_returns_empty_graph(self, visualizer):
         """None topology should return empty figure."""
-        result = self._simulate_update_network_graph(
-            visualizer, None, "hierarchical", ["show"], [], "light", [], None, None
-        )
+        result = self._simulate_update_network_graph(visualizer, None, "hierarchical", ["show"], [], "light", [], None, None)
         fig, input_ct, hidden_ct, output_ct, conn_ct, hash_val = result
         assert isinstance(fig, go.Figure)
         assert hash_val is None
@@ -241,9 +237,7 @@ class TestUpdateNetworkGraphCallback:
     @pytest.mark.unit
     def test_valid_topology_returns_counts(self, visualizer, simple_topology):
         """Valid topology should return correct counts."""
-        result = self._simulate_update_network_graph(
-            visualizer, simple_topology, "hierarchical", ["show"], [], "light", [], None, None
-        )
+        result = self._simulate_update_network_graph(visualizer, simple_topology, "hierarchical", ["show"], [], "light", [], None, None)
         _, input_ct, hidden_ct, output_ct, conn_ct, _ = result
         assert input_ct == "2"
         assert hidden_ct == "1"
@@ -301,9 +295,7 @@ class TestUpdateNetworkGraphCallback:
     def test_view_state_applied_xaxis(self, visualizer, simple_topology):
         """Should apply xaxis_range from view_state."""
         view_state = {"xaxis_range": [-10, 10], "yaxis_range": None, "dragmode": "pan"}
-        result = self._simulate_update_network_graph(
-            visualizer, simple_topology, "hierarchical", [], [], "light", [], view_state, None
-        )
+        result = self._simulate_update_network_graph(visualizer, simple_topology, "hierarchical", [], [], "light", [], view_state, None)
         fig = result[0]
         assert isinstance(fig, go.Figure)
 
@@ -311,9 +303,7 @@ class TestUpdateNetworkGraphCallback:
     def test_view_state_applied_yaxis(self, visualizer, simple_topology):
         """Should apply yaxis_range from view_state."""
         view_state = {"xaxis_range": None, "yaxis_range": [-5, 5], "dragmode": "pan"}
-        result = self._simulate_update_network_graph(
-            visualizer, simple_topology, "hierarchical", [], [], "light", [], view_state, None
-        )
+        result = self._simulate_update_network_graph(visualizer, simple_topology, "hierarchical", [], [], "light", [], view_state, None)
         fig = result[0]
         assert isinstance(fig, go.Figure)
 
@@ -321,9 +311,7 @@ class TestUpdateNetworkGraphCallback:
     def test_view_state_applied_dragmode(self, visualizer, simple_topology):
         """Should apply dragmode from view_state."""
         view_state = {"xaxis_range": None, "yaxis_range": None, "dragmode": "zoom"}
-        result = self._simulate_update_network_graph(
-            visualizer, simple_topology, "hierarchical", [], [], "light", [], view_state, None
-        )
+        result = self._simulate_update_network_graph(visualizer, simple_topology, "hierarchical", [], [], "light", [], view_state, None)
         fig = result[0]
         assert isinstance(fig, go.Figure)
 
@@ -364,9 +352,7 @@ class TestUpdateNetworkGraphCallback:
                 newly_added_unit = curr_hidden - 1
 
         show_weight_labels = bool(show_weights) and ("show" in show_weights)
-        fig = visualizer._create_network_graph(
-            topology_data, layout_type, show_weight_labels, newly_added_unit, theme, selected_nodes
-        )
+        fig = visualizer._create_network_graph(topology_data, layout_type, show_weight_labels, newly_added_unit, theme, selected_nodes)
 
         if view_state:
             if view_state.get("xaxis_range"):
@@ -852,6 +838,7 @@ class TestDashTestClientIntegration:
             {"network_topology": {"hidden_units": 0}},
             {"network_topology": {"hidden_units": 1}},
         ]
+        assert metrics_data
         fig = visualizer._create_network_graph(
             simple_topology,
             "hierarchical",
@@ -859,6 +846,7 @@ class TestDashTestClientIntegration:
             newly_added_unit=0,
             theme="light",
             selected_nodes=[],
+            metrics_data=metrics_data,
         )
         assert isinstance(fig, go.Figure)
 
@@ -1073,9 +1061,7 @@ class TestCallbackInvocation:
         for key, callback_info in app.callback_map.items():
             if callback_key in key:
                 func = callback_info["callback"]
-                result = func.__wrapped__(
-                    simple_topology, "hierarchical", ["show"], "2d", metrics_data, "light", [], 0, None, None, None
-                )
+                result = func.__wrapped__(simple_topology, "hierarchical", ["show"], "2d", metrics_data, "light", [], 0, None, None, None)
                 fig, _, _, _, _, _, new_highlight = result
                 assert isinstance(fig, go.Figure)
                 # Should have detected new unit and created highlight
@@ -1116,9 +1102,7 @@ class TestCallbackInvocation:
         for key, callback_info in app.callback_map.items():
             if callback_key in key:
                 func = callback_info["callback"]
-                result = func.__wrapped__(
-                    simple_topology, "hierarchical", [], "2d", [], "light", [], 0, view_state, None, None
-                )
+                result = func.__wrapped__(simple_topology, "hierarchical", [], "2d", [], "light", [], 0, view_state, None, None)
                 fig, _, _, _, _, _, _ = result
                 assert isinstance(fig, go.Figure)
                 break

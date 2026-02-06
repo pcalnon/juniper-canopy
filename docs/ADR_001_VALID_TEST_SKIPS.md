@@ -79,6 +79,6 @@ The FastAPI TestClient makes requests directly to the ASGI application without g
 
 ## Updates
 
-| Date | Change |
-|------|--------|
+| Date       | Change              |
+| ---------- | ------------------- |
 | 2026-02-04 | Initial ADR created |

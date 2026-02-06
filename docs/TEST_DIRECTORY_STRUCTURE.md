@@ -79,14 +79,14 @@ Benchmark and performance tests.
 
 Some tests require specific environments or resources:
 
-| Marker | Environment Variable | Description |
-|--------|---------------------|-------------|
-| `@pytest.mark.requires_cascor` | `CASCOR_BACKEND_AVAILABLE=1` | Tests needing CasCor backend |
-| `@pytest.mark.requires_server` | `RUN_SERVER_TESTS=1` | Tests needing live server |
-| `@pytest.mark.requires_redis` | - | Tests needing Redis |
-| `@pytest.mark.requires_display` | `RUN_DISPLAY_TESTS=1` | Tests needing display |
-| `@pytest.mark.slow` | `ENABLE_SLOW_TESTS=1` | Tests taking >1 second |
-| `@pytest.mark.e2e` | `RUN_SERVER_TESTS=1` | End-to-end tests |
+| Marker                          | Environment Variable         | Description                  |
+| ------------------------------- | ---------------------------- | ---------------------------- |
+| `@pytest.mark.requires_cascor`  | `CASCOR_BACKEND_AVAILABLE=1` | Tests needing CasCor backend |
+| `@pytest.mark.requires_server`  | `RUN_SERVER_TESTS=1`         | Tests needing live server    |
+| `@pytest.mark.requires_redis`   | -                            | Tests needing Redis          |
+| `@pytest.mark.requires_display` | `RUN_DISPLAY_TESTS=1`        | Tests needing display        |
+| `@pytest.mark.slow`             | `ENABLE_SLOW_TESTS=1`        | Tests taking >1 second       |
+| `@pytest.mark.e2e`              | `RUN_SERVER_TESTS=1`         | End-to-end tests             |
 
 ## Key Fixtures
 

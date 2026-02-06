@@ -66,9 +66,7 @@ class TrainingMetricsComponent(BaseComponent):
         epochs = [m.get("epoch", 0) if isinstance(m, dict) else m.epoch for m in metrics_data]
         losses = [m.get("metrics", {}).get("loss", 0) if isinstance(m, dict) else m.loss for m in metrics_data]
 
-        fig.add_trace(
-            go.Scatter(x=epochs, y=losses, mode="lines", name="Training Loss", line={"color": "#1f77b4", "width": 2})
-        )
+        fig.add_trace(go.Scatter(x=epochs, y=losses, mode="lines", name="Training Loss", line={"color": "#1f77b4", "width": 2}))
 
         fig.update_layout(title="Training Loss Over Time", xaxis_title="Epoch", yaxis_title="Loss")
 

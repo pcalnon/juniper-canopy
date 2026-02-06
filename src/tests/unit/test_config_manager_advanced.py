@@ -171,9 +171,7 @@ class TestConfigValidation:
 
     def test_invalid_type_correction(self, tmp_path, caplog):
         """Test validation corrects invalid types."""
-        config_data = {
-            "application": {"server": {"host": 12345, "port": "not_a_number"}}  # Should be string  # Should be int
-        }
+        config_data = {"application": {"server": {"host": 12345, "port": "not_a_number"}}}  # Should be string  # Should be int
 
         config_file = tmp_path / "test_config.yaml"
         with open(config_file, "w") as f:

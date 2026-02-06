@@ -90,9 +90,7 @@ class TestCascorLoggerBasics:
 
     def test_logger_custom_levels(self, tmp_log_dir, test_config):
         """Should use custom log levels."""
-        logger = CascorLogger(
-            "test", console_level="ERROR", file_level="WARNING", log_dir=tmp_log_dir, config=test_config
-        )
+        logger = CascorLogger("test", console_level="ERROR", file_level="WARNING", log_dir=tmp_log_dir, config=test_config)
         assert logger.console_level == "ERROR"
         assert logger.file_level == "WARNING"
 
@@ -131,7 +129,6 @@ class TestLoggingLevels:
         logger = CascorLogger("test", log_dir=tmp_log_dir, config=test_config)
         logger.fatal("Test fatal message")
 
-    @pytest.mark.skip(reason="VERBOSE is custom level, not in standard logging module")
     def test_verbose_logging(self, tmp_log_dir, test_config):
         """Should log verbose messages."""
         logger = CascorLogger("test", log_dir=tmp_log_dir, config=test_config)

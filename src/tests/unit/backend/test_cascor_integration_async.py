@@ -72,9 +72,7 @@ class TestAsyncTrainingMethods:
 
                     loop = asyncio.get_running_loop()
                     with self._training_lock:
-                        self._training_future = loop.run_in_executor(
-                            self._training_executor, lambda: self._run_fit_sync(*args, **kwargs)
-                        )
+                        self._training_future = loop.run_in_executor(self._training_executor, lambda: self._run_fit_sync(*args, **kwargs))
 
                     try:
                         result = await self._training_future

@@ -72,12 +72,8 @@ class TestCascorBackendIntegration:
 
     def test_backend_import_successful(self, cascor_integration):
         """Test that backend modules import successfully."""
-        assert (
-            cascor_integration.cascade_correlation_class is not None
-        ), "CascadeCorrelationNetwork class should be imported"  # trunk-ignore(bandit/B101)
-        assert (
-            cascor_integration.cascade_correlation_config_class is not None
-        ), "CascadeCorrelationConfig class should be imported"  # trunk-ignore(bandit/B101)
+        assert cascor_integration.cascade_correlation_class is not None, "CascadeCorrelationNetwork class should be imported"  # trunk-ignore(bandit/B101)
+        assert cascor_integration.cascade_correlation_config_class is not None, "CascadeCorrelationConfig class should be imported"  # trunk-ignore(bandit/B101)
         print("✅ Backend modules imported successfully")
 
     def test_network_creation_with_config(self, cascor_integration):
@@ -93,9 +89,7 @@ class TestCascorBackendIntegration:
         network = cascor_integration.create_network(config)
 
         assert network is not None, "Network should be created"  # trunk-ignore(bandit/B101)
-        assert (
-            cascor_integration.cascade_correlation_instance is not None
-        ), "Network instance should be stored"  # trunk-ignore(bandit/B101)
+        assert cascor_integration.cascade_correlation_instance is not None, "Network instance should be stored"  # trunk-ignore(bandit/B101)
         assert hasattr(network, "input_size"), "Network should have input_size attribute"  # trunk-ignore(bandit/B101)
         assert network.input_size == 2, "Input size should be 2"  # trunk-ignore(bandit/B101)
 
@@ -115,9 +109,7 @@ class TestCascorBackendIntegration:
 
         assert network is not None, "Network should be created"  # trunk-ignore(bandit/B101)
         assert result is True, "Connection should succeed"  # trunk-ignore(bandit/B101)
-        assert (
-            cascor_integration.cascade_correlation_instance is network
-        ), "Connected network should match"  # trunk-ignore(bandit/B101)
+        assert cascor_integration.cascade_correlation_instance is network, "Connected network should match"  # trunk-ignore(bandit/B101)
 
         print("✅ Successfully connected to existing network")
 
@@ -133,9 +125,7 @@ class TestCascorBackendIntegration:
         assert network is not None, "Network should be created"  # trunk-ignore(bandit/B101)
         assert result is True, "Hook installation should succeed"  # trunk-ignore(bandit/B101)
         assert cascor_integration.monitoring_active is True, "Monitoring should be active"  # trunk-ignore(bandit/B101)
-        assert (
-            cascor_integration.original_fit is not None
-        ), "Original fit method should be stored"  # trunk-ignore(bandit/B101)
+        assert cascor_integration.original_fit is not None, "Original fit method should be stored"  # trunk-ignore(bandit/B101)
 
         print("✅ Monitoring hooks installed successfully")
 
@@ -171,10 +161,7 @@ class TestCascorBackendIntegration:
         assert topology["output_size"] == 1, "Output size should match"  # trunk-ignore(bandit/B101)
 
         hidden = len(topology["hidden_units"])
-        print(
-            f"✅ Topology extracted: {topology['input_size']} inputs, {hidden} hidden, "
-            f"{topology['output_size']} outputs"
-        )
+        print(f"✅ Topology extracted: {topology['input_size']} inputs, {hidden} hidden, " f"{topology['output_size']} outputs")
 
     def test_dataset_info_preparation(self, cascor_integration):
         """Test dataset info preparation for visualization."""
@@ -244,9 +231,7 @@ class TestCascorBackendIntegration:
                 assert history is not None, "Training history should be returned"  # trunk-ignore(bandit/B101)
 
                 # Verify broadcasts were made
-                assert (
-                    mock_websocket_manager.broadcast_sync.called
-                ), "WebSocket broadcast should be called during training"  # trunk-ignore(bandit/B101)
+                assert mock_websocket_manager.broadcast_sync.called, "WebSocket broadcast should be called during training"  # trunk-ignore(bandit/B101)
 
                 call_count = mock_websocket_manager.broadcast_sync.call_count
                 print(f"✅ Training completed with {call_count} WebSocket broadcasts")
@@ -260,9 +245,7 @@ class TestCascorBackendIntegration:
             except Exception as e:
                 print(f"⚠️  Training encountered issue (expected for small dataset): {e}")
                 # Still verify at least training_start was broadcast
-                assert (
-                    mock_websocket_manager.broadcast_sync.called
-                ), "Should have broadcast training_start even if training failed"  # trunk-ignore(bandit/B101)
+                assert mock_websocket_manager.broadcast_sync.called, "Should have broadcast training_start even if training failed"  # trunk-ignore(bandit/B101)
 
     def test_monitoring_thread_lifecycle(self, cascor_integration):
         """Test monitoring thread start and stop."""
@@ -273,12 +256,8 @@ class TestCascorBackendIntegration:
         # Start monitoring thread
         cascor_integration.start_monitoring_thread(interval=0.1)  # 100ms interval
 
-        assert (
-            cascor_integration.monitoring_thread is not None
-        ), "Monitoring thread should be created"  # trunk-ignore(bandit/B101)
-        assert (
-            cascor_integration.monitoring_thread.is_alive()
-        ), "Monitoring thread should be running"  # trunk-ignore(bandit/B101)
+        assert cascor_integration.monitoring_thread is not None, "Monitoring thread should be created"  # trunk-ignore(bandit/B101)
+        assert cascor_integration.monitoring_thread.is_alive(), "Monitoring thread should be running"  # trunk-ignore(bandit/B101)
 
         print("✅ Monitoring thread started")
 
@@ -294,12 +273,8 @@ class TestCascorBackendIntegration:
         time.sleep(0.2)
 
         # Check monitoring is inactive (thread reference cleared on stop)
-        assert (
-            not cascor_integration.monitoring_active
-        ), "Monitoring should be inactive after shutdown"  # trunk-ignore(bandit/B101)
-        assert (
-            cascor_integration.monitoring_thread is None
-        ), "Monitoring thread reference should be cleared"  # trunk-ignore(bandit/B101)
+        assert not cascor_integration.monitoring_active, "Monitoring should be inactive after shutdown"  # trunk-ignore(bandit/B101)
+        assert cascor_integration.monitoring_thread is None, "Monitoring thread reference should be cleared"  # trunk-ignore(bandit/B101)
 
         print("✅ Monitoring thread stopped cleanly")
 
@@ -353,9 +328,7 @@ class TestCascorBackendIntegration:
         cascor_integration.shutdown()
 
         # Method should be restored (or at least monitoring inactive)
-        assert (
-            cascor_integration.monitoring_active is False
-        ), "Monitoring should be inactive after shutdown"  # trunk-ignore(bandit/B101)
+        assert cascor_integration.monitoring_active is False, "Monitoring should be inactive after shutdown"  # trunk-ignore(bandit/B101)
 
         print("✅ Methods restored on shutdown")
 
@@ -437,9 +410,7 @@ class TestCascorWebSocketIntegration:
             assert mock_ws.broadcast_sync.called, "Should broadcast on training start"  # trunk-ignore(bandit/B101)
 
             call_args = mock_ws.broadcast_sync.call_args[0][0]
-            assert (
-                call_args["type"] == "training_start"
-            ), "Broadcast type should be training_start"  # trunk-ignore(bandit/B101)
+            assert call_args["type"] == "training_start", "Broadcast type should be training_start"  # trunk-ignore(bandit/B101)
 
             print("✅ Training start broadcast verified")
 

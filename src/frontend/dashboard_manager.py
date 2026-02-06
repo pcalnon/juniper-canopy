@@ -170,21 +170,15 @@ class DashboardManager:
         # Create component instances
         self.metrics_panel = MetricsPanel(self.config.get("metrics_panel", {}), component_id="metrics-panel")
 
-        self.network_visualizer = NetworkVisualizer(
-            self.config.get("network_visualizer", {}), component_id="network-visualizer"
-        )
+        self.network_visualizer = NetworkVisualizer(self.config.get("network_visualizer", {}), component_id="network-visualizer")
 
         self.dataset_plotter = DatasetPlotter(self.config.get("dataset_plotter", {}), component_id="dataset-plotter")
 
-        self.decision_boundary = DecisionBoundary(
-            self.config.get("decision_boundary", {}), component_id="decision-boundary"
-        )
+        self.decision_boundary = DecisionBoundary(self.config.get("decision_boundary", {}), component_id="decision-boundary")
 
         self.about_panel = AboutPanel(self.config.get("about_panel", {}), component_id="about-panel")
 
-        self.hdf5_snapshots_panel = HDF5SnapshotsPanel(
-            self.config.get("hdf5_snapshots_panel", {}), component_id="hdf5-snapshots-panel"
-        )
+        self.hdf5_snapshots_panel = HDF5SnapshotsPanel(self.config.get("hdf5_snapshots_panel", {}), component_id="hdf5-snapshots-panel")
 
         # P3-6: Redis Monitoring Panel
         self.redis_panel = RedisPanel(self.config.get("redis_panel", {}), component_id="redis-panel")
@@ -420,16 +414,10 @@ class DashboardManager:
                                                 dbc.Input(
                                                     id="learning-rate-input",
                                                     type="number",
-                                                    value=self.training_defaults.get(
-                                                        "learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE
-                                                    ),
+                                                    value=self.training_defaults.get("learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE),
                                                     step=0.001,
-                                                    min=self.config_mgr.get_training_param_config("learning_rate").get(
-                                                        "min", TrainingConstants.MIN_LEARNING_RATE
-                                                    ),
-                                                    max=self.config_mgr.get_training_param_config("learning_rate").get(
-                                                        "max", TrainingConstants.MAX_LEARNING_RATE
-                                                    ),
+                                                    min=self.config_mgr.get_training_param_config("learning_rate").get("min", TrainingConstants.MIN_LEARNING_RATE),
+                                                    max=self.config_mgr.get_training_param_config("learning_rate").get("max", TrainingConstants.MAX_LEARNING_RATE),
                                                     className="mb-2",
                                                     debounce=True,
                                                 ),
@@ -437,16 +425,10 @@ class DashboardManager:
                                                 dbc.Input(
                                                     id="max-hidden-units-input",
                                                     type="number",
-                                                    value=self.training_defaults.get(
-                                                        "hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS
-                                                    ),
+                                                    value=self.training_defaults.get("hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS),
                                                     step=1,
-                                                    min=self.config_mgr.get_training_param_config("hidden_units").get(
-                                                        "min", TrainingConstants.MIN_HIDDEN_UNITS
-                                                    ),
-                                                    max=self.config_mgr.get_training_param_config("hidden_units").get(
-                                                        "max", TrainingConstants.MAX_HIDDEN_UNITS
-                                                    ),
+                                                    min=self.config_mgr.get_training_param_config("hidden_units").get("min", TrainingConstants.MIN_HIDDEN_UNITS),
+                                                    max=self.config_mgr.get_training_param_config("hidden_units").get("max", TrainingConstants.MAX_HIDDEN_UNITS),
                                                     className="mb-2",
                                                     debounce=True,
                                                 ),
@@ -454,16 +436,10 @@ class DashboardManager:
                                                 dbc.Input(
                                                     id="max-epochs-input",
                                                     type="number",
-                                                    value=self.training_defaults.get(
-                                                        "epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS
-                                                    ),
+                                                    value=self.training_defaults.get("epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS),
                                                     step=1,
-                                                    min=self.config_mgr.get_training_param_config("epochs").get(
-                                                        "min", TrainingConstants.MIN_TRAINING_EPOCHS
-                                                    ),
-                                                    max=self.config_mgr.get_training_param_config("epochs").get(
-                                                        "max", TrainingConstants.MAX_TRAINING_EPOCHS
-                                                    ),
+                                                    min=self.config_mgr.get_training_param_config("epochs").get("min", TrainingConstants.MIN_TRAINING_EPOCHS),
+                                                    max=self.config_mgr.get_training_param_config("epochs").get("max", TrainingConstants.MAX_TRAINING_EPOCHS),
                                                     className="mb-2",
                                                     debounce=True,
                                                 ),
@@ -518,9 +494,7 @@ class DashboardManager:
                                                         },
                                                     ),
                                                     dbc.Collapse(
-                                                        html.Div(
-                                                            id="network-info-details-panel", style={"marginTop": "10px"}
-                                                        ),
+                                                        html.Div(id="network-info-details-panel", style={"marginTop": "10px"}),
                                                         id="network-info-details-collapse",
                                                         is_open=False,
                                                     ),
@@ -589,12 +563,8 @@ class DashboardManager:
                     ]
                 ),
                 # Update intervals
-                dcc.Interval(
-                    id="fast-update-interval", interval=DashboardConstants.FAST_UPDATE_INTERVAL_MS, n_intervals=0
-                ),
-                dcc.Interval(
-                    id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0
-                ),
+                dcc.Interval(id="fast-update-interval", interval=DashboardConstants.FAST_UPDATE_INTERVAL_MS, n_intervals=0),
+                dcc.Interval(id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0),
                 # Hidden div to store WebSocket data
                 html.Div(id="websocket-data", style={"display": "none"}),
                 dcc.Store(id="training-control-action", data=None),
@@ -825,9 +795,7 @@ class DashboardManager:
             ],
             prevent_initial_call=True,
         )
-        def handle_training_buttons(
-            start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, last_click, button_states, **kwargs
-        ):
+        def handle_training_buttons(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, last_click, button_states, **kwargs):
             """Handle training control button clicks with debouncing and optimistic UI."""
             return self._handle_training_buttons_handler(
                 start_clicks=start_clicks,
@@ -878,9 +846,7 @@ class DashboardManager:
         )
         def handle_button_timeout_and_acks(action, n_intervals, button_states):
             """Re-enable buttons after timeout (5s) or on control acknowledgment."""
-            return self._handle_button_timeout_and_acks_handler(
-                action=action, n_intervals=n_intervals, button_states=button_states
-            )
+            return self._handle_button_timeout_and_acks_handler(action=action, n_intervals=n_intervals, button_states=button_states)
 
     # Define backend callbacks
     def _setup_backend_callbacks(self):
@@ -916,9 +882,7 @@ class DashboardManager:
         )
         def handle_parameter_changes(learning_rate, max_hidden_units):
             """Handle parameter input changes - now just logs, actual send is via Apply button."""
-            return self._handle_parameter_changes_handler(
-                learning_rate=learning_rate, max_hidden_units=max_hidden_units
-            )
+            return self._handle_parameter_changes_handler(learning_rate=learning_rate, max_hidden_units=max_hidden_units)
 
         # Track parameter changes to enable/disable Apply button
         @self.app.callback(

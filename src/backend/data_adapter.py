@@ -218,21 +218,13 @@ class DataAdapter:
             for i in range(input_size):
                 for h in range(hidden_size):
                     weight = float(hidden_weights[h, i].item())
-                    connections.append(
-                        NetworkConnection(
-                            source_id=f"input_{i}", target_id=f"hidden_{h}", weight=weight, connection_type="cascade"
-                        )
-                    )
+                    connections.append(NetworkConnection(source_id=f"input_{i}", target_id=f"hidden_{h}", weight=weight, connection_type="cascade"))
 
         # Create connections from inputs to outputs
         for i in range(input_size):
             for o in range(output_size):
                 weight = float(input_weights[i, o].item())
-                connections.append(
-                    NetworkConnection(
-                        source_id=f"input_{i}", target_id=f"output_{o}", weight=weight, connection_type="feedforward"
-                    )
-                )
+                connections.append(NetworkConnection(source_id=f"input_{i}", target_id=f"output_{o}", weight=weight, connection_type="feedforward"))
 
         # Create connections from hidden to outputs
         if hidden_size > 0:
@@ -275,9 +267,7 @@ class DataAdapter:
         return nodes
 
     # Create hidden nodes (cascade units)
-    def create_hidden_nodes(
-        self, hidden_size: int = None, hidden_biases: Optional[torch.Tensor] = None, nodes: list = None
-    ):
+    def create_hidden_nodes(self, hidden_size: int = None, hidden_biases: Optional[torch.Tensor] = None, nodes: list = None):
         if nodes is None:
             nodes = []
         # Add hidden nodes to the list
@@ -297,9 +287,7 @@ class DataAdapter:
         return nodes
 
     # Create output nodes
-    def create_output_nodes(
-        self, output_size: int = None, output_biases: Optional[torch.Tensor] = None, nodes: list = None
-    ):
+    def create_output_nodes(self, output_size: int = None, output_biases: Optional[torch.Tensor] = None, nodes: list = None):
         if nodes is None:
             nodes = []
         # Add output nodes to the list
@@ -317,9 +305,7 @@ class DataAdapter:
             )
         return nodes
 
-    def prepare_dataset_for_visualization(
-        self, features: np.ndarray, labels: np.ndarray, dataset_name: str = "training"
-    ) -> Dict[str, Any]:
+    def prepare_dataset_for_visualization(self, features: np.ndarray, labels: np.ndarray, dataset_name: str = "training") -> Dict[str, Any]:
         """
         Prepare dataset for visualization.
 
@@ -395,27 +381,15 @@ class DataAdapter:
         all_weights = []
 
         if input_weights is not None:
-            weights_np = (
-                input_weights.cpu().detach().numpy()
-                if isinstance(input_weights, torch.Tensor)
-                else np.array(input_weights)
-            )
+            weights_np = input_weights.cpu().detach().numpy() if isinstance(input_weights, torch.Tensor) else np.array(input_weights)
             all_weights.append(weights_np.flatten())
 
         if hidden_weights is not None:
-            weights_np = (
-                hidden_weights.cpu().detach().numpy()
-                if isinstance(hidden_weights, torch.Tensor)
-                else np.array(hidden_weights)
-            )
+            weights_np = hidden_weights.cpu().detach().numpy() if isinstance(hidden_weights, torch.Tensor) else np.array(hidden_weights)
             all_weights.append(weights_np.flatten())
 
         if output_weights is not None:
-            weights_np = (
-                output_weights.cpu().detach().numpy()
-                if isinstance(output_weights, torch.Tensor)
-                else np.array(output_weights)
-            )
+            weights_np = output_weights.cpu().detach().numpy() if isinstance(output_weights, torch.Tensor) else np.array(output_weights)
             all_weights.append(weights_np.flatten())
 
         # Combine all weights

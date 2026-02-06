@@ -63,6 +63,7 @@ from config_manager import get_config
 config = get_config()
 value = config.get('section.key', default_value)  # Nested dot notation
 ```
+
 Config supports environment variable overrides with `CASCOR_` prefix (e.g., `CASCOR_SERVER_PORT=8080`).
 
 ### 2. Logging Pattern (Independent Console/File Levels)
@@ -71,6 +72,7 @@ Config supports environment variable overrides with `CASCOR_` prefix (e.g., `CAS
 from logging.logger import get_system_logger, get_training_logger, get_ui_logger
 logger = get_system_logger()  # or get_training_logger(), get_ui_logger()
 ```
+
 - Console/file log levels configured independently in `conf/app_config.yaml`
 - Categories: `system`, `training`, `ui`, `communication`
 - JSON format optional for structured logging
@@ -79,6 +81,7 @@ logger = get_system_logger()  # or get_training_logger(), get_ui_logger()
 ### 3. CasCor Integration Hook Pattern
 
 The integration uses method wrapping to inject monitoring without modifying CasCor source:
+
 ```python
 # In src/backend/cascor_integration.py
 cascor_integration.connect_to_cascor_network(network_instance)
@@ -150,7 +153,6 @@ exec "$CONDA_PREFIX/bin/uvicorn" main:app --host 0.0.0.0 --port 8050 --log-level
 
 ### Development Server
 
-
 ```bash
 ## Key Files & Their Roles
 
@@ -174,6 +176,7 @@ exec "$CONDA_PREFIX/bin/uvicorn" main:app --host 0.0.0.0 --port 8050 --log-level
 The config uses absolute paths for development. For portability across environments:
 
 **Environment Variable (Recommended)**:
+
 ```bash
 # Relative to frontend root
 export CASCOR_BACKEND_PATH_REL="../../JuniperCascor/juniper_cascor"
@@ -184,6 +187,7 @@ export CASCOR_BACKEND_PATH="${CASCOR_BACKEND_PATH_ABS}"
 ```
 
 **Config Override** (`conf/app_config.yaml`):
+
 ```yaml
 backend:
     cascor_integration:
@@ -191,6 +195,7 @@ backend:
 ```
 
 **Runtime Detection Pattern**:
+
 ```python
 # In src/backend/cascor_integration.py
 from pathlib import Path
@@ -203,11 +208,13 @@ cascor_path = Path(os.getenv(
 ```
 
 **Primary development:**
+
 - Platform: GPU Workstation
 - OS Name: Ubuntu 25.10
 - Dev Path: `/home/pcalnon/Development/...`
 
 **Secondary development:**
+
 - Platform: MacBook Pro, Intel, 2019
 - OS Name: MacOS 13
 - Dev Path: `/Users/pcalnon/Development/...`
@@ -243,6 +250,7 @@ backend.cache:
 ### Required Implementation
 
 **1. Redis Client Module** (`src/backend/redis_client.py`):
+
 ```python
 import redis
 from typing import Optional, Any
@@ -276,17 +284,20 @@ class RedisClient:
 - `src/main.py`: Initialize Redis client on startup, handle connection failures gracefully
 
 **3. Key Patterns**:
+
 - Metadata: `training:runs:<run_id>:meta`
 - Metrics stream: `training:runs:<run_id>:stream` (Redis Streams)
 - Latest snapshot: `training:latest` (hash)
 - Session data: `session:<session_id>` (TTL: 24h)
 
 **4. Deployment**:
+
 - Standalone: `redis-server --port 6379 --appendonly yes`
 - Docker: `docker-compose up redis` (see `conf/docker-compose.yaml`)
 - Ubuntu systemd: `sudo systemctl start redis-server`
 
 **5. Testing Requirements**:
+
 - Mock Redis in unit tests using `fakeredis`
 - Integration tests with real Redis container
 - Performance tests for cache hit/miss latency
@@ -305,6 +316,7 @@ See `notes/Redis_deployment.md` for full deployment guide.
 
 ## Design Documentation
 Comprehensive design rationale in `notes/`:
+
 - `architecture_design.md`: Technology stack analysis, system architecture diagrams
 - `technical_specifications.md`: Component specs, data schemas, performance requirements
 - `implementation_guide.md`: Step-by-step implementation, deployment, testing strategy
@@ -312,6 +324,7 @@ Comprehensive design rationale in `notes/`:
 
 ## Testing Philosophy
 Tests go in `src/tests/` with mocks, helpers, data, and reports. Pattern emphasizes:
+
 - Unit tests for individual components
 - Integration tests for CasCor hook installation
 - Performance tests for WebSocket latency and dashboard update rates
@@ -321,6 +334,7 @@ Tests go in `src/tests/` with mocks, helpers, data, and reports. Pattern emphasi
 ## Comprehensive Testing Framework (pytest)
 
 ### Directory Structure (To Be Created)
+
 ``` bash
 src/tests/
 ├── __init__.py
@@ -366,6 +380,7 @@ src/tests/
 
 ### Required Dependencies
 Add to `conf/requirements.txt`:
+
 ``` bash
 pytest>=7.4.0
 pytest-cov>=4.1.0
@@ -380,6 +395,7 @@ httpx>=0.24.0           # For FastAPI testing
 ### Core Test Configuration
 
 **`src/tests/pytest.ini`**:
+
 ```ini
 [pytest]
 testpaths = src/tests
@@ -408,6 +424,7 @@ markers =
 ```
 
 **`src/tests/conftest.py`** (Fixtures):
+
 ```python
 import pytest
 import asyncio
@@ -454,6 +471,7 @@ def logger():
 ### Example Test Files
 
 **`src/tests/unit/test_config_manager.py`**:
+
 ```python
 import pytest
 from config_manager import ConfigManager
@@ -477,6 +495,7 @@ class TestConfigManager:
 ```
 
 **`src/tests/integration/test_redis_integration.py`**:
+
 ```python
 import pytest
 from backend.redis_client import RedisClient
@@ -507,6 +526,7 @@ class TestRedisIntegration:
 ```
 
 **`src/tests/performance/test_websocket_latency.py`**:
+
 ```python
 import pytest
 import asyncio
@@ -530,6 +550,7 @@ class TestWebSocketPerformance:
 ### Command-Line Testing
 
 **Run all tests**:
+
 ```bash
 conda activate JuniperCanopy
 cd src/tests
@@ -537,6 +558,7 @@ pytest
 ```
 
 **Run specific test categories**:
+
 ```bash
 pytest -m unit                    # Unit tests only
 pytest -m integration             # Integration tests only
@@ -545,6 +567,7 @@ pytest -m "not slow"              # Exclude slow tests
 ```
 
 **Coverage report**:
+
 ```bash
 pytest --cov=src --cov-report=html
 # View: open src/tests/reports/coverage/index.html
@@ -552,6 +575,7 @@ pytest --cov=src --cov-report=html
 ```
 
 **Parallel execution**:
+
 ```bash
 pip install pytest-xdist
 pytest -n auto  # Use all CPU cores
@@ -560,6 +584,7 @@ pytest -n auto  # Use all CPU cores
 ### VS Code Integration
 
 **`.vscode/settings.json`** (add to workspace):
+
 ```json
 {
     "python.testing.pytestEnabled": true,
@@ -576,11 +601,13 @@ pytest -n auto  # Use all CPU cores
 ```
 
 **Install VS Code Extensions**:
+
 - Python Test Explorer
 - Coverage Gutters (for inline coverage)
 - Test Explorer UI
 
 **Run tests in VS Code**:
+
 1. Open Testing sidebar (beaker icon)
 2. Tests auto-discovered from `src/tests/`
 3. Click play button to run individual tests
@@ -589,12 +616,14 @@ pytest -n auto  # Use all CPU cores
 ### Continuous Testing Workflow
 
 **Watch mode** (auto-run on file changes):
+
 ```bash
 pip install pytest-watch
 ptw src/tests -- --testmon  # Only run affected tests
 ```
 
 **Pre-commit hook** (`.git/hooks/pre-commit`):
+
 ```bash
 #!/usr/bin/env bash
 conda activate JuniperCanopy
@@ -609,14 +638,15 @@ fi
 
 - **Target**: 90% coverage (`development.testing.coverage_threshold: 0.9` in config)
 - **Critical paths**: 100% coverage required for:
-    - `src/config_manager.py`
-    - `src/backend/cascor_integration.py`
-    - `src/communication/websocket_manager.py`
-    - `src/logging/logger.py`
+  - `src/config_manager.py`
+  - `src/backend/cascor_integration.py`
+  - `src/communication/websocket_manager.py`
+  - `src/logging/logger.py`
 
 ### Test Data Generation
 
 **Script**: `src/tests/helpers/generate_test_data.py`
+
 ```python
 #!/usr/bin/env python
 """Generate synthetic test data."""
@@ -643,12 +673,14 @@ if __name__ == "__main__":
 The `conf/Dockerfile` uses Python 3.9 slim base. For production:
 
 **Build image**:
+
 ```bash
 cd /path/to/juniper_canopy
 docker build -f conf/Dockerfile -t juniper_canopy:latest .
 ```
 
 **Standalone run**:
+
 ```bash
 docker run -d \
     --name juniper-canopy \
@@ -663,17 +695,20 @@ docker run -d \
 ### Docker Compose Orchestration
 
 **Full stack** (Frontend + Redis + optional CasCor backend):
+
 ```bash
 cd /path/to/juniper_canopy
 docker-compose -f conf/docker-compose.yaml up -d
 ```
 
 **Stack includes**:
+
 - `juniper-canopy`: Main application (port 8050)
 - `redis`: Redis 7 Alpine with persistence (port 6379)
 - `juniper_cascor:  the CasCor NN backend`: (Optional) CasCor network service (port 8000)
 
 **Environment variables** (create `.env` in project root):
+
 ```bash
 CASCOR_ENV=production
 CASCOR_DEBUG=false
@@ -683,6 +718,7 @@ JWT_SECRET_KEY=your-secret-key-here
 ```
 
 **Service management**:
+
 ```bash
 docker-compose -f conf/docker-compose.yaml ps        # Status
 docker-compose -f conf/docker-compose.yaml logs -f   # Follow logs
@@ -691,6 +727,7 @@ docker-compose -f conf/docker-compose.yaml restart juniper_canopy  # Restart ser
 ```
 
 **Volume persistence**:
+
 - `redis-data`: Redis persistent storage
 - `../logs`: Application logs (mounted from host)
 - `../data`: Datasets (mounted from host)
@@ -705,6 +742,7 @@ docker-compose -f conf/docker-compose.yaml restart juniper_canopy  # Restart ser
     - Configure CORS allowed origins (not `*`)
     - Use secrets management (not env vars for passwords)
 3. **Resource limits** (docker-compose.yaml):
+
     ```yaml
     services:
         juniper-canopy:
@@ -714,6 +752,7 @@ docker-compose -f conf/docker-compose.yaml restart juniper_canopy  # Restart ser
                         cpus: '2.0'
                         memory: 1G
     ```
+
 4. **Health checks**: Enabled in Dockerfile (`/health` endpoint)
 5. **Monitoring**: Add Prometheus metrics exporter
 6. **Backup strategy**: Redis RDB snapshots, log rotation
@@ -721,6 +760,7 @@ docker-compose -f conf/docker-compose.yaml restart juniper_canopy  # Restart ser
 ### Ubuntu 25.04 Systemd Service (Alternative to Docker)
 
 **Create service**: `/etc/systemd/system/juniper-canopy.service`
+
 ```ini
 [Unit]
 Description=Juniper Canopy Service
@@ -742,6 +782,7 @@ WantedBy=multi-user.target
 ```
 
 **Enable and start**:
+
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable juniper-canopy
@@ -750,6 +791,7 @@ sudo systemctl status juniper-canopy
 ```
 
 **Critical**: When creating new files, always place them in the appropriate directory:
+
 - Configuration → `conf/`
 - Documentation/design → `notes/`
 - Source code → `src/` (create subdirectories as needed)

@@ -67,14 +67,8 @@ def simple_topology():
 @pytest.fixture
 def large_topology():
     """Large network topology for stress testing."""
-    connections = [
-        {"from": f"input_{i}", "to": f"hidden_{h}", "weight": 0.1 * i}
-        for i, h in itertools.product(range(10), range(5))
-    ]
-    connections.extend(
-        {"from": f"hidden_{h}", "to": f"output_{o}", "weight": 0.2 * h}
-        for h, o in itertools.product(range(5), range(3))
-    )
+    connections = [{"from": f"input_{i}", "to": f"hidden_{h}", "weight": 0.1 * i} for i, h in itertools.product(range(10), range(5))]
+    connections.extend({"from": f"hidden_{h}", "to": f"output_{o}", "weight": 0.2 * h} for h, o in itertools.product(range(5), range(3)))
     return {
         "input_units": 10,
         "hidden_units": 5,
@@ -363,9 +357,7 @@ class TestNewUnitHighlighting:
 
     def test_no_highlight_when_none(self, visualizer, simple_topology):
         """Should not add highlight when newly_added_unit is None."""
-        fig = visualizer._create_network_graph(
-            simple_topology, "hierarchical", True, newly_added_unit=None, theme="light"
-        )
+        fig = visualizer._create_network_graph(simple_topology, "hierarchical", True, newly_added_unit=None, theme="light")
         assert isinstance(fig, go.Figure)
 
 

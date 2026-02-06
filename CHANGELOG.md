@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Analysis
+
+- **Integration Development Plan**: Comprehensive assessment of all outstanding integration work across JuniperCascor, JuniperCanopy, and JuniperData
+  - Evaluated 4 source documents: JUNIPER_CASCOR_SPIRAL_DATA_GEN_REFACTOR_PLAN.md, INTEGRATION_ROADMAP.md, PRE-DEPLOYMENT_ROADMAP.md, PRE-DEPLOYMENT_ROADMAP-2.md
+  - Rigorous source code review identified 17 issues (3 CRITICAL, 3 HIGH, 8 MEDIUM, 3 LOW)
+  - **CRITICAL**: Real backend control not implemented (main.py:433-442), decision boundary incomplete (main.py:779-788), `get_network_data()` missing from CascorIntegration
+  - **HIGH**: `save_snapshot()`/`load_snapshot()` missing, async boundary untested, no real backend test coverage, JuniperData client unused
+  - 30+ enhancement items catalogued (CAN-001 through CAN-021, CAS-001 through CAS-010)
+  - Created `notes/INTEGRATION_DEVELOPMENT_PLAN.md` with 53+ items in 4 prioritized phases
+
+- **Non-Passing Test Analysis (Rounds 1 & 2)**: Comprehensive analysis and fix of all non-passing tests
+  - Round 1: 67 non-passing tests (54 ERROR, 10 FAILED, 3 XFAIL) - 6 root causes identified
+  - Round 2: Additional 9 tests (5 skipping, 2 failing, 1 skipped, 1 race condition)
+  - Created analysis document in `notes/FIX_FAILING_TESTS.md`
+  - Final result: 3,215 passed, 0 failed, 0 errors, 0 xfail, 37 skipped (all legitimate)
+
+### Fixed
+
+- **P0 - Missing pytest-mock dependency**: Installed `pytest-mock>=3.12` (resolves 54 ERROR tests)
+- **P1 - Snapshot private attribute leakage**: Added `not key.startswith("_")` filter in `main.py` snapshot creation to exclude private/protected attributes from HDF5 files
+- **P2 - WebSocket control command race condition**: Fixed `test_control_command_sequence`, `test_control_start_with_reset_true`, and `test_unknown_command_returns_error` to drain interleaved broadcast messages before asserting on control response
+- **P4 - Logger VERBOSE level**: Changed `CascorLogger.verbose()` to use `self.VERBOSE_LEVEL` instead of non-existent `logging.VERBOSE` (Epic 3.6 CQ-001)
+- **P5 - LoggingConfig empty YAML**: Added null check after `yaml.safe_load()` in `LoggingConfig._load_config()` to handle empty YAML files (Epic 3.6 CQ-001)
+- Removed 3 `@pytest.mark.xfail` markers from `test_logger_coverage_95.py` (bugs now fixed)
+- **WebSocket state tests**: Added state message on `/ws/training` connect; rewrote `test_websocket_state.py` to consume deterministic connect sequence; removed `requires_server` marker
+- **WebSocket ping-pong tests**: Updated `test_main_coverage.py` and `test_main_ws.py` to drain 3rd connect message
+- **Logger coverage skip**: Removed `@pytest.mark.skip` from `test_verbose_logging` in `test_logger_coverage.py`
+- **DemoMode singleton isolation**: Extended `reset_singletons` fixture to also reset `demo_mode._demo_instance`
+
+### Unchanged
+
+- **P3 - Server-dependent tests**: 8 tests correctly marked `requires_server` - no code change needed (environmental configuration issue)
+
+---
+
 ## [0.31.0] - 2026-02-04
 
 **Summary**: Test Suite & CI/CD Enhancement - Phase 4 Complete (All Phases Complete). Standardized configuration, improved documentation, re-enabled MyPy error codes, reviewed exception suppression patterns.

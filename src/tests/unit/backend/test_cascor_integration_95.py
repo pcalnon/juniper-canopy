@@ -175,7 +175,8 @@ class TestRequestTrainingStop:
         result = integration.request_training_stop()
 
         assert result is True
-        assert integration._training_stop_requested is True
+        # assert integration._training_stop_requested is True
+        assert integration._training_stop_requested
 
 
 # ==============================================================================
@@ -207,7 +208,8 @@ class TestRunFitSync:
         integration_with_network._training_stop_requested = True
         integration_with_network._run_fit_sync()
         # Flag is reset in finally block
-        assert integration_with_network._training_stop_requested is False
+        # assert integration_with_network._training_stop_requested is False
+        assert not integration_with_network._training_stop_requested
 
     def test_resets_stop_flag_on_exception(self, integration_with_network):
         """Resets stop flag even when exception occurs."""
@@ -217,7 +219,8 @@ class TestRunFitSync:
         with pytest.raises(Exception, match="Training failed"):
             integration_with_network._run_fit_sync()
 
-        assert integration_with_network._training_stop_requested is False
+        # assert integration_with_network._training_stop_requested is False
+        assert not integration_with_network._training_stop_requested
 
 
 # ==============================================================================
@@ -273,7 +276,8 @@ class TestFitAsync:
         """Resets stop flag at start of async training."""
         integration_with_network._training_stop_requested = True
         await integration_with_network.fit_async()
-        assert integration_with_network._training_stop_requested is False
+        # assert integration_with_network._training_stop_requested is False
+        assert not integration_with_network._training_stop_requested
 
 
 # ==============================================================================
@@ -428,7 +432,8 @@ class TestStopRemoteWorkers:
         result = integration.stop_remote_workers(timeout=5)
 
         assert result is True
-        assert integration._remote_workers_active is False
+        # assert integration._remote_workers_active is False
+        assert not integration._remote_workers_active
         mock_client.stop_workers.assert_called_once_with(5)
 
     def test_returns_false_on_failure(self, integration):
@@ -462,7 +467,8 @@ class TestDisconnectRemoteWorkers:
 
         assert result is True
         assert integration._remote_client is None
-        assert integration._remote_workers_active is False
+        # assert integration._remote_workers_active is False
+        assert not integration._remote_workers_active
         mock_client.disconnect.assert_called_once()
 
     def test_returns_false_on_failure(self, integration):
@@ -590,10 +596,9 @@ class TestShutdownEdgeCases:
 
         # Reset shutdown state
         integration._shutdown_called = False
-
         integration.shutdown()
-
         assert integration._training_executor is None
+        assert executor
 
     def test_shutdown_idempotent(self, integration):
         """Shutdown is idempotent - can be called multiple times."""
@@ -605,8 +610,11 @@ class TestShutdownEdgeCases:
         integration.shutdown()
         second_call = integration._shutdown_called
 
-        assert first_call is True
-        assert second_call is True
+        # assert first_call is True
+        assert first_call
+
+        # assert second_call is True
+        assert second_call
 
     def test_shutdown_requests_training_stop(self, integration_with_network):
         """Shutdown requests training stop if training in progress."""
@@ -645,11 +653,7 @@ class TestRemoteWorkerClientImport:
                 mock_rwc = Mock()
                 with patch(
                     "builtins.__import__",
-                    side_effect=lambda name, *args, **kwargs: (
-                        Mock(remote_client=Mock(RemoteWorkerClient=mock_rwc))
-                        if "remote_client" in name
-                        else __import__(name, *args, **kwargs)
-                    ),
+                    side_effect=lambda name, *args, **kwargs: (Mock(remote_client=Mock(RemoteWorkerClient=mock_rwc)) if "remote_client" in name else __import__(name, *args, **kwargs)),
                 ):
                     # This tests the import path indirectly
                     pass

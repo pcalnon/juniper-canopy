@@ -207,13 +207,9 @@ class TestCascorIntegrationPaths:
             "sys.modules",
             {
                 "cascade_correlation": MagicMock(),
-                "cascade_correlation.cascade_correlation": MagicMock(
-                    CascadeCorrelationNetwork=mock_network_class, TrainingResults=mock_results_class
-                ),
+                "cascade_correlation.cascade_correlation": MagicMock(CascadeCorrelationNetwork=mock_network_class, TrainingResults=mock_results_class),
                 "cascade_correlation.cascade_correlation_config": MagicMock(),
-                "cascade_correlation.cascade_correlation_config.cascade_correlation_config": MagicMock(
-                    CascadeCorrelationConfig=mock_config_class
-                ),
+                "cascade_correlation.cascade_correlation_config.cascade_correlation_config": MagicMock(CascadeCorrelationConfig=mock_config_class),
             },
         ):
             self._checking_cascor_network_creation_with_results(
@@ -228,9 +224,7 @@ class TestCascorIntegrationPaths:
         mock_config_class: MagicMock = None,
         mock_results_class: MagicMock = None,
     ):
-        integration = self._check_magic_mocks_against_cascor_network_and_config(
-            mock_network_class=mock_network_class, mock_config_class=mock_config_class
-        )
+        integration = self._check_magic_mocks_against_cascor_network_and_config(mock_network_class=mock_network_class, mock_config_class=mock_config_class)
         # trunk-ignore(bandit/B101)
         assert integration.TrainingResults == mock_results_class
 
@@ -250,25 +244,17 @@ class TestCascorIntegrationPaths:
                 "cascade_correlation": MagicMock(),
                 "cascade_correlation.cascade_correlation": mock_cc_module,
                 "cascade_correlation.cascade_correlation_config": MagicMock(),
-                "cascade_correlation.cascade_correlation_config.cascade_correlation_config": MagicMock(
-                    CascadeCorrelationConfig=mock_config_class
-                ),
+                "cascade_correlation.cascade_correlation_config.cascade_correlation_config": MagicMock(CascadeCorrelationConfig=mock_config_class),
             },
         ):
             self._checking_cascor_network_creation_no_results(mock_network_class, mock_config_class)
 
-    def _checking_cascor_network_creation_no_results(
-        self, mock_network_class: MagicMock = None, mock_config_class: MagicMock = None
-    ):
-        integration = self._check_magic_mocks_against_cascor_network_and_config(
-            mock_network_class=mock_network_class, mock_config_class=mock_config_class
-        )
+    def _checking_cascor_network_creation_no_results(self, mock_network_class: MagicMock = None, mock_config_class: MagicMock = None):
+        integration = self._check_magic_mocks_against_cascor_network_and_config(mock_network_class=mock_network_class, mock_config_class=mock_config_class)
         # trunk-ignore(bandit/B101)
         assert integration.TrainingResults is None
 
-    def _check_magic_mocks_against_cascor_network_and_config(
-        self, mock_network_class: MagicMock = None, mock_config_class: MagicMock = None
-    ):
+    def _check_magic_mocks_against_cascor_network_and_config(self, mock_network_class: MagicMock = None, mock_config_class: MagicMock = None):
         result = CascorIntegration.__new__(CascorIntegration)
         result.logger = MagicMock()
         result._import_backend_modules()

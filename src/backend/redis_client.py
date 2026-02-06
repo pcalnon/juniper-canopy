@@ -182,40 +182,19 @@ class RedisClient:
             True if connection initialized successfully, False otherwise.
         """
         if not REDIS_AVAILABLE:
-            self.logger.info("Redis library not installed - Redis integration disabled")
-            self._last_error = "redis-py library not installed"
-            return False
-
+            return self._no_pool_for_you(
+                "Redis library not installed - Redis integration disabled",
+                "redis-py library not installed",
+            )
         config = self._get_redis_config()
 
         if not config.get("enabled", False):
-            self.logger.info("Redis disabled in configuration")
-            self._last_error = "Redis disabled in configuration"
-            return False
-
-        try:
-            self._connection_pool = redis.ConnectionPool(
-                host=config["host"],
-                port=config["port"],
-                db=config["db"],
-                password=config.get("password"),
-                socket_timeout=config.get("socket_timeout", 5.0),
-                socket_connect_timeout=config.get("socket_connect_timeout", 5.0),
-                decode_responses=True,
+            return self._no_pool_for_you(
+                "Redis disabled in configuration",
+                "Redis disabled in configuration",
             )
-
-            self._client = redis.Redis(connection_pool=self._connection_pool)
-
-            # Test connection with ping
-            self._connection_attempts += 1
-            self._client.ping()
-            self._last_ping_time = time.time()
-            self._last_ping_success = True
-            self._last_error = None
-
-            self.logger.info(f"Redis connection established: {config['host']}:{config['port']}/{config['db']}")
-            return True
-
+        try:
+            return self._create_connection_pool(config)
         except (RedisConnectionError, RedisTimeoutError) as e:
             self._last_error = str(e)
             self._last_ping_success = False
@@ -227,6 +206,34 @@ class RedisClient:
             self._last_ping_success = False
             self.logger.error(f"Unexpected error connecting to Redis: {type(e).__name__}: {e}")
             return False
+
+    def _create_connection_pool(self, config):
+        self._connection_pool = redis.ConnectionPool(
+            host=config["host"],
+            port=config["port"],
+            db=config["db"],
+            password=config.get("password"),
+            socket_timeout=config.get("socket_timeout", 5.0),
+            socket_connect_timeout=config.get("socket_connect_timeout", 5.0),
+            decode_responses=True,
+        )
+        self._client = redis.Redis(connection_pool=self._connection_pool)
+
+        # Test connection with ping
+        self._connection_attempts += 1
+        # self._client.ping()
+        # self._last_ping_time = time.time()
+        # self._last_ping_success = True
+        # self._last_error = None
+        self._ping()
+
+        self.logger.info(f"Redis connection established: {config['host']}:{config['port']}/{config['db']}")
+        return True
+
+    def _no_pool_for_you(self, arg0, arg1):
+        self.logger.info(arg0)
+        self._last_error = arg1
+        return False
 
     def _ping(self) -> bool:
         """
@@ -245,13 +252,14 @@ class RedisClient:
             self._last_error = None
             return True
         except (RedisConnectionError, RedisTimeoutError) as e:
-            self._last_error = str(e)
-            self._last_ping_success = False
-            return False
+            return self._ping_get_no_pong(e)
         except Exception as e:
-            self._last_error = str(e)
-            self._last_ping_success = False
-            return False
+            return self._ping_get_no_pong(e)
+
+    def _ping_gets_no_pong(self, e):
+        self._last_error = str(e)
+        self._last_ping_success = False
+        return False
 
     def get_status(self) -> Dict[str, Any]:
         """
@@ -324,45 +332,7 @@ class RedisClient:
                 },
             }
 
-        # Test connection with ping
-        if self._ping():
-            # Get server info for details
-            try:
-                info = self._client.info(section="server")
-                memory_info = self._client.info(section="memory")
-                clients_info = self._client.info(section="clients")
-
-                return {
-                    "status": self.STATUS_UP,
-                    "mode": self.MODE_LIVE,
-                    "message": "Redis connection healthy",
-                    "timestamp": timestamp,
-                    "details": {
-                        "host": config.get("host", "localhost"),
-                        "port": config.get("port", 6379),
-                        "version": info.get("redis_version", "unknown"),
-                        "uptime_seconds": info.get("uptime_in_seconds", 0),
-                        "connected_clients": clients_info.get("connected_clients", 0),
-                        "used_memory_human": memory_info.get("used_memory_human", "unknown"),
-                        "last_ping_ms": (
-                            round((time.time() - self._last_ping_time) * 1000, 2) if self._last_ping_time else None
-                        ),
-                    },
-                }
-            except Exception as e:
-                self.logger.warning(f"Failed to get Redis info: {e}")
-                return {
-                    "status": self.STATUS_UP,
-                    "mode": self.MODE_LIVE,
-                    "message": "Redis connection healthy (limited info)",
-                    "timestamp": timestamp,
-                    "details": {
-                        "host": config.get("host", "localhost"),
-                        "port": config.get("port", 6379),
-                        "info_error": str(e),
-                    },
-                }
-        else:
+        if not self._ping():
             return {
                 "status": self.STATUS_DOWN,
                 "mode": self.MODE_LIVE,
@@ -373,6 +343,40 @@ class RedisClient:
                     "port": config.get("port", 6379),
                     "last_error": self._last_error,
                     "connection_attempts": self._connection_attempts,
+                },
+            }
+        # Get server info for details
+        try:
+            info = self._client.info(section="server")
+            memory_info = self._client.info(section="memory")
+            clients_info = self._client.info(section="clients")
+
+            return {
+                "status": self.STATUS_UP,
+                "mode": self.MODE_LIVE,
+                "message": "Redis connection healthy",
+                "timestamp": timestamp,
+                "details": {
+                    "host": config.get("host", "localhost"),
+                    "port": config.get("port", 6379),
+                    "version": info.get("redis_version", "unknown"),
+                    "uptime_seconds": info.get("uptime_in_seconds", 0),
+                    "connected_clients": clients_info.get("connected_clients", 0),
+                    "used_memory_human": memory_info.get("used_memory_human", "unknown"),
+                    "last_ping_ms": (round((time.time() - self._last_ping_time) * 1000, 2) if self._last_ping_time else None),
+                },
+            }
+        except Exception as e:
+            self.logger.warning(f"Failed to get Redis info: {e}")
+            return {
+                "status": self.STATUS_UP,
+                "mode": self.MODE_LIVE,
+                "message": "Redis connection healthy (limited info)",
+                "timestamp": timestamp,
+                "details": {
+                    "host": config.get("host", "localhost"),
+                    "port": config.get("port", 6379),
+                    "info_error": str(e),
                 },
             }
 
@@ -433,45 +437,7 @@ class RedisClient:
 
         # Get live metrics
         try:
-            memory_info = self._client.info(section="memory")
-            stats_info = self._client.info(section="stats")
-            clients_info = self._client.info(section="clients")
-            keyspace_info = self._client.info(section="keyspace")
-
-            # Calculate hit rate
-            hits = stats_info.get("keyspace_hits", 0)
-            misses = stats_info.get("keyspace_misses", 0)
-            total = hits + misses
-            hit_rate = round((hits / total) * 100, 2) if total > 0 else 0.0
-
-            return {
-                "status": self.STATUS_UP,
-                "mode": self.MODE_LIVE,
-                "message": "Redis metrics retrieved successfully",
-                "timestamp": timestamp,
-                "metrics": {
-                    "memory": {
-                        "used_memory_bytes": memory_info.get("used_memory", 0),
-                        "used_memory_human": memory_info.get("used_memory_human", "0B"),
-                        "used_memory_peak_human": memory_info.get("used_memory_peak_human", "0B"),
-                        "mem_fragmentation_ratio": memory_info.get("mem_fragmentation_ratio", 0),
-                    },
-                    "stats": {
-                        "total_connections_received": stats_info.get("total_connections_received", 0),
-                        "total_commands_processed": stats_info.get("total_commands_processed", 0),
-                        "instantaneous_ops_per_sec": stats_info.get("instantaneous_ops_per_sec", 0),
-                        "keyspace_hits": hits,
-                        "keyspace_misses": misses,
-                        "hit_rate_percent": hit_rate,
-                    },
-                    "clients": {
-                        "connected_clients": clients_info.get("connected_clients", 0),
-                        "blocked_clients": clients_info.get("blocked_clients", 0),
-                    },
-                    "keyspace": keyspace_info,
-                },
-            }
-
+            return self._get_live_metrics_for_moment(timestamp)
         except Exception as e:
             self.logger.error(f"Failed to get Redis metrics: {type(e).__name__}: {e}")
             return {
@@ -481,6 +447,46 @@ class RedisClient:
                 "timestamp": timestamp,
                 "metrics": None,
             }
+
+    def _get_live_metrics_for_moment(self, timestamp):
+        memory_info = self._client.info(section="memory")
+        stats_info = self._client.info(section="stats")
+        clients_info = self._client.info(section="clients")
+        keyspace_info = self._client.info(section="keyspace")
+
+        # Calculate hit rate
+        hits = stats_info.get("keyspace_hits", 0)
+        misses = stats_info.get("keyspace_misses", 0)
+        total = hits + misses
+        hit_rate = round((hits / total) * 100, 2) if total > 0 else 0.0
+
+        return {
+            "status": self.STATUS_UP,
+            "mode": self.MODE_LIVE,
+            "message": "Redis metrics retrieved successfully",
+            "timestamp": timestamp,
+            "metrics": {
+                "memory": {
+                    "used_memory_bytes": memory_info.get("used_memory", 0),
+                    "used_memory_human": memory_info.get("used_memory_human", "0B"),
+                    "used_memory_peak_human": memory_info.get("used_memory_peak_human", "0B"),
+                    "mem_fragmentation_ratio": memory_info.get("mem_fragmentation_ratio", 0),
+                },
+                "stats": {
+                    "total_connections_received": stats_info.get("total_connections_received", 0),
+                    "total_commands_processed": stats_info.get("total_commands_processed", 0),
+                    "instantaneous_ops_per_sec": stats_info.get("instantaneous_ops_per_sec", 0),
+                    "keyspace_hits": hits,
+                    "keyspace_misses": misses,
+                    "hit_rate_percent": hit_rate,
+                },
+                "clients": {
+                    "connected_clients": clients_info.get("connected_clients", 0),
+                    "blocked_clients": clients_info.get("blocked_clients", 0),
+                },
+                "keyspace": keyspace_info,
+            },
+        }
 
     def is_available(self) -> bool:
         """
@@ -492,10 +498,7 @@ class RedisClient:
         if self._demo_mode:
             return True
 
-        if not REDIS_AVAILABLE or self._client is None:
-            return False
-
-        return self._ping()
+        return False if not REDIS_AVAILABLE or self._client is None else self._ping()
 
     def close(self) -> None:
         """Close Redis connection and cleanup resources."""

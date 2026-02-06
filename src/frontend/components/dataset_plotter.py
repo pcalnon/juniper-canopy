@@ -316,9 +316,7 @@ class DatasetPlotter(BaseComponent):
                     )
                 )
 
-            fig.update_layout(
-                title="1D Dataset Visualization", xaxis_title="Feature 0", yaxis={"showticklabels": False}
-            )
+            fig.update_layout(title="1D Dataset Visualization", xaxis_title="Feature 0", yaxis={"showticklabels": False})
 
         elif n_features >= 2:
             # 2D scatter (use first two features)
@@ -337,9 +335,7 @@ class DatasetPlotter(BaseComponent):
                     )
                 )
 
-            fig.update_layout(
-                title="Dataset Scatter Plot (First 2 Features)", xaxis_title="Feature 0", yaxis_title="Feature 1"
-            )
+            fig.update_layout(title="Dataset Scatter Plot (First 2 Features)", xaxis_title="Feature 0", yaxis_title="Feature 1")
 
         is_dark = theme == "dark"
         fig.update_layout(

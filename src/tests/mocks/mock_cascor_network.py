@@ -139,9 +139,7 @@ class MockCascorNetwork:
         self._complete_training("output_training", result)
         return result
 
-    def train_candidate_units(
-        self, X: np.ndarray, residual_error: np.ndarray, n_candidates: int = 8, epochs: int = 10
-    ) -> Dict[str, Any]:
+    def train_candidate_units(self, X: np.ndarray, residual_error: np.ndarray, n_candidates: int = 8, epochs: int = 10) -> Dict[str, Any]:
         """
         Simulate training candidate hidden units.
 
@@ -364,11 +362,4 @@ class MockCascorNetwork:
 
     def __repr__(self) -> str:
         """String representation of the network."""
-        return (
-            f"MockCascorNetwork("
-            f"input={self.input_size}, "
-            f"hidden={len(self.hidden_units)}, "
-            f"output={self.output_size}, "
-            f"epochs={self.epochs_completed}"
-            f")"
-        )
+        return f"MockCascorNetwork(" f"input={self.input_size}, " f"hidden={len(self.hidden_units)}, " f"output={self.output_size}, " f"epochs={self.epochs_completed}" f")"

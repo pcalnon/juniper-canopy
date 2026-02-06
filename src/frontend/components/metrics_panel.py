@@ -132,12 +132,7 @@ class MetricsPanel(BaseComponent):
         # Data buffers
         self.metrics_history: List[Dict[str, Any]] = []
 
-        self.logger.info(
-            f"MetricsPanel initialized: "
-            f"update_interval={self.update_interval}ms, "
-            f"max_data_points={self.max_data_points}, "
-            f"smoothing_window={self.smoothing_window}"
-        )
+        self.logger.info(f"MetricsPanel initialized: " f"update_interval={self.update_interval}ms, " f"max_data_points={self.max_data_points}, " f"smoothing_window={self.smoothing_window}")
 
     def get_layout(self) -> html.Div:
         """
@@ -359,9 +354,7 @@ class MetricsPanel(BaseComponent):
                         html.Div(
                             [
                                 html.H5("Current Epoch"),
-                                html.H2(
-                                    id=f"{self.component_id}-current-epoch", children="0", style={"color": "#007bff"}
-                                ),
+                                html.H2(id=f"{self.component_id}-current-epoch", children="0", style={"color": "#007bff"}),
                             ],
                             className="metric-card",
                             style={"flex": "1", "textAlign": "center", "padding": "15px"},
@@ -369,9 +362,7 @@ class MetricsPanel(BaseComponent):
                         html.Div(
                             [
                                 html.H5("Loss"),
-                                html.H2(
-                                    id=f"{self.component_id}-current-loss", children="--", style={"color": "#dc3545"}
-                                ),
+                                html.H2(id=f"{self.component_id}-current-loss", children="--", style={"color": "#dc3545"}),
                             ],
                             className="metric-card",
                             style={"flex": "1", "textAlign": "center", "padding": "15px"},
@@ -391,9 +382,7 @@ class MetricsPanel(BaseComponent):
                         html.Div(
                             [
                                 html.H5("Hidden Units"),
-                                html.H2(
-                                    id=f"{self.component_id}-hidden-units", children="0", style={"color": "#17a2b8"}
-                                ),
+                                html.H2(id=f"{self.component_id}-hidden-units", children="0", style={"color": "#17a2b8"}),
                             ],
                             className="metric-card",
                             style={"flex": "1", "textAlign": "center", "padding": "15px"},
@@ -613,12 +602,8 @@ class MetricsPanel(BaseComponent):
                                     html.Div(
                                         [
                                             html.P([html.Strong("Size: "), str(pool.get("size", 0))]),
-                                            html.P(
-                                                [html.Strong("Top Candidate: "), pool.get("top_candidate_id", "N/A")]
-                                            ),
-                                            html.P(
-                                                [html.Strong("Score: "), f"{pool.get('top_candidate_score', 0.0):.4f}"]
-                                            ),
+                                            html.P([html.Strong("Top Candidate: "), pool.get("top_candidate_id", "N/A")]),
+                                            html.P([html.Strong("Score: "), f"{pool.get('top_candidate_score', 0.0):.4f}"]),
                                         ]
                                     ),
                                     style={"padding": "10px"},
@@ -634,9 +619,7 @@ class MetricsPanel(BaseComponent):
             if history_items:
                 return html.Div(
                     [
-                        html.H6(
-                            "Previous Pools", style={"marginTop": "15px", "marginBottom": "10px", "color": "#6c757d"}
-                        ),
+                        html.H6("Previous Pools", style={"marginTop": "15px", "marginBottom": "10px", "color": "#6c757d"}),
                         *history_items,
                     ]
                 )
@@ -1003,9 +986,7 @@ class MetricsPanel(BaseComponent):
 
         return self._create_candidate_pool_display(state), {"marginTop": "20px"}
 
-    def _update_metrics_display_handler(
-        self, metrics_data: List[Dict[str, Any]] = None, theme: str = None, view_state: Dict = None
-    ):
+    def _update_metrics_display_handler(self, metrics_data: List[Dict[str, Any]] = None, theme: str = None, view_state: Dict = None):
         """
         Update all metrics visualizations and displays.
 
@@ -1266,26 +1247,20 @@ class MetricsPanel(BaseComponent):
 
         return (epochs, losses, phases)
 
-    def _create_phase_colored_scatter(
-        self, fig: go.Figure = None, epochs: list = None, losses: list = None, phases: list = None
-    ) -> go.Figure:
+    def _create_phase_colored_scatter(self, fig: go.Figure = None, epochs: list = None, losses: list = None, phases: list = None) -> go.Figure:
         """
         Create phase-colored scatter plot from epochs, losses, and phases.
         """
         # Separate data by phase for coloring
         output_epochs = [out_epoch for out_epoch, phase in zip(epochs, phases, strict=False) if "output" in phase]
         output_losses = [out_loss for out_loss, phase in zip(losses, phases, strict=False) if "output" in phase]
-        candidate_epochs = [
-            cand_epoch for cand_epoch, phase in zip(epochs, phases, strict=False) if "candidate" in phase
-        ]
+        candidate_epochs = [cand_epoch for cand_epoch, phase in zip(epochs, phases, strict=False) if "candidate" in phase]
         candidate_losses = [cand_loss for cand_loss, phase in zip(losses, phases, strict=False) if "candidate" in phase]
         fig = self._output_add_trace(fig=fig, output_epochs=output_epochs, output_losses=output_losses)
         fig = self._candidate_add_trace(fig=fig, candidate_epochs=candidate_epochs, candidate_losses=candidate_losses)
         return fig
 
-    def _output_add_trace(
-        self, fig: go.Figure = None, output_epochs: list = None, output_losses: list = None
-    ) -> go.Figure:
+    def _output_add_trace(self, fig: go.Figure = None, output_epochs: list = None, output_losses: list = None) -> go.Figure:
         if output_epochs:
             fig.add_trace(
                 go.Scatter(
@@ -1299,9 +1274,7 @@ class MetricsPanel(BaseComponent):
             )
         return fig
 
-    def _candidate_add_trace(
-        self, fig: go.Figure = None, candidate_epochs: list = None, candidate_losses: list = None
-    ) -> go.Figure:
+    def _candidate_add_trace(self, fig: go.Figure = None, candidate_epochs: list = None, candidate_losses: list = None) -> go.Figure:
         if candidate_epochs:
             fig.add_trace(
                 go.Scatter(
@@ -1320,12 +1293,8 @@ class MetricsPanel(BaseComponent):
         # Add phase background bands
         current_phase = None
         phase_start = None
-        (fig, current_phase, phase_start) = self._end_prev_phase_band(
-            fig=fig, epochs=epochs, phases=phases, current_phase=current_phase, phase_start=phase_start
-        )
-        (fig, current_phase, phase_start) = self._candidate_final_band(
-            fig=fig, epochs=epochs, current_phase=current_phase, phase_start=phase_start
-        )
+        (fig, current_phase, phase_start) = self._end_prev_phase_band(fig=fig, epochs=epochs, phases=phases, current_phase=current_phase, phase_start=phase_start)
+        (fig, current_phase, phase_start) = self._candidate_final_band(fig=fig, epochs=epochs, current_phase=current_phase, phase_start=phase_start)
         return fig
 
     def _end_prev_phase_band(
@@ -1355,9 +1324,7 @@ class MetricsPanel(BaseComponent):
                 phase_start = epoch
         return (fig, current_phase, phase_start)
 
-    def _candidate_final_band(
-        self, fig: go.Figure = None, epochs: list = None, current_phase: str = None, phase_start: float = None
-    ) -> Tuple[go.Figure, str, float]:
+    def _candidate_final_band(self, fig: go.Figure = None, epochs: list = None, current_phase: str = None, phase_start: float = None) -> Tuple[go.Figure, str, float]:
         # Final band if ended in candidate
         if current_phase is not None and "candidate" in current_phase and phase_start is not None:
             fig.add_shape(
@@ -1373,16 +1340,12 @@ class MetricsPanel(BaseComponent):
             )
         return (fig, current_phase, phase_start)
 
-    def _add_hidden_unit_markers(
-        self, metrics_data: List[Dict[str, Any]], fig: go.Figure = None, theme: str = "light", epochs: list = None
-    ) -> Tuple[go.Figure, list]:
+    def _add_hidden_unit_markers(self, metrics_data: List[Dict[str, Any]], fig: go.Figure = None, theme: str = "light", epochs: list = None) -> Tuple[go.Figure, list]:
         (fig) = self._hidden_unit_addition_markers(metrics_data=metrics_data, fig=fig, theme=theme)
         fig = self._training_loss_per_time(fig=fig, theme=theme)
         return (fig, epochs)
 
-    def _hidden_unit_addition_markers(
-        self, metrics_data: List[Dict[str, Any]], fig: go.Figure = None, theme: str = "light"
-    ) -> go.Figure:
+    def _hidden_unit_addition_markers(self, metrics_data: List[Dict[str, Any]], fig: go.Figure = None, theme: str = "light") -> go.Figure:
         # Add hidden unit addition markers
         for i in range(1, len(metrics_data)):
             prev_hidden = metrics_data[i - 1].get("network_topology", {}).get("hidden_units", 0)

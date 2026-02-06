@@ -127,10 +127,13 @@ class TestLayoutTypeCircular:
         pos = visualizer._layout_type_circular(G, scale=1.0)
         assert len(pos) == 6
         for node, coords in pos.items():
+            assert node
             assert hasattr(coords, "__iter__")
             x, y = coords
-            assert isinstance(float(x), float)
-            assert isinstance(float(y), float)
+            # assert isinstance(float(x), float)
+            assert isinstance(x, float)
+            # assert isinstance(float(y), float)
+            assert isinstance(y, float)
 
     def test_circular_layout_with_scale(self, visualizer):
         """Circular layout should respect scale parameter."""
@@ -159,6 +162,7 @@ class TestLayoutTypeSprint:
         pos = visualizer._layout_type_sprint(G, k=2, iterations=50, seed=42)
         assert len(pos) == 5
         for node, coords in pos.items():
+            assert node
             x, y = coords
             assert isinstance(x, float)
             assert isinstance(y, float)
@@ -168,6 +172,7 @@ class TestLayoutTypeSprint:
         G = build_test_graph(2, 0, 1)
         pos = visualizer._layout_type_sprint(G, k=2, iterations=50, seed=42)
         for node, (x, y) in pos.items():
+            assert node
             assert abs(x) <= 15 or abs(y) <= 15
 
     def test_spring_layout_deterministic(self, visualizer):
@@ -506,9 +511,7 @@ class TestIntegration:
                 {"from": "hidden_0", "to": "output_0", "weight": 0.8},
             ],
         }
-        fig = visualizer._create_network_graph(
-            topology, "hierarchical", show_weights=False, selected_nodes=["hidden_0"]
-        )
+        fig = visualizer._create_network_graph(topology, "hierarchical", show_weights=False, selected_nodes=["hidden_0"])
         assert isinstance(fig, go.Figure)
         trace_names = [t.name for t in fig.data if t.name]
         assert any("Selected" in str(name) for name in trace_names)

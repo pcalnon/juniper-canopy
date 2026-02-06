@@ -323,9 +323,7 @@ class TestCallbackHandlerReturns:
         }
 
         def mock_get(url, **kwargs):
-            if "health" in url:
-                return mock_health
-            return mock_status
+            return mock_health if "health" in url else mock_status
 
         mocker.patch("requests.get", side_effect=mock_get)
 
@@ -604,9 +602,7 @@ class TestAdditionalHandlerCases:
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             all_buttons = ["start-button", "pause-button", "stop-button", "resume-button", "reset-button"]
             for button in all_buttons:
-                button_states = {
-                    b.replace("-button", ""): {"disabled": False, "loading": False, "timestamp": 0} for b in all_buttons
-                }
+                button_states = {b.replace("-button", ""): {"disabled": False, "loading": False, "timestamp": 0} for b in all_buttons}
                 action, states = dashboard_manager._handle_training_buttons_handler(
                     start_clicks=1 if button == "start-button" else None,
                     pause_clicks=1 if button == "pause-button" else None,
@@ -640,9 +636,10 @@ class TestAdditionalHandlerCases:
             }
 
             def mock_get(url, **kwargs):
-                if "health" in url:
-                    return mock_health
-                return mock_status
+                # mock_health: MagicMock = kwargs.get("mock_health")
+                # mock_status: MagicMock = kwargs.get("mock_status")
+                # return mock_health if "health" in url else mock_status
+                return kwargs.get("mock_health") if "health" in url else kwargs.get("mock_status")
 
             mocker.patch("requests.get", side_effect=mock_get)
 

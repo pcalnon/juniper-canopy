@@ -73,9 +73,7 @@ class TestThreadSafeAsyncBroadcasting:
 
             def schedule_broadcast(coro):
                 """Helper to schedule broadcasts."""
-                if (
-                    loop_holder["loop"] and not loop_holder["loop"].is_closed()
-                ):  # sourcery skip: no-conditionals-in-tests
+                if loop_holder["loop"] and not loop_holder["loop"].is_closed():  # sourcery skip: no-conditionals-in-tests
                     asyncio.run_coroutine_threadsafe(coro, loop_holder["loop"])
 
             def callback_from_thread():
@@ -144,9 +142,7 @@ class TestThreadSafeAsyncBroadcasting:
             loop_holder = {"loop": loop}
 
             def schedule_broadcast(coro):
-                if (
-                    loop_holder["loop"] and not loop_holder["loop"].is_closed()
-                ):  # sourcery skip: no-conditionals-in-tests
+                if loop_holder["loop"] and not loop_holder["loop"].is_closed():  # sourcery skip: no-conditionals-in-tests
                     asyncio.run_coroutine_threadsafe(coro, loop_holder["loop"])
 
             def worker(worker_id):

@@ -65,6 +65,7 @@ if [[ "${COVERAGE_REPORT}" == "${FALSE}" ]]; then
     log_verbose "RUN_TESTS_NO_COV_RPT: ${RUN_TESTS_NO_COV_RPT}"
     eval "${RUN_TESTS_NO_COV_RPT}"; SUCCESS="$?"
 elif [[ "${COVERAGE_REPORT}" == "${TRUE}" ]]; then
+    # RUN_TESTS_WITH_COV_RPT="pytest --check-untyped-defs \
     RUN_TESTS_WITH_COV_RPT="pytest -vv ./src/tests \
         --cov=src \
         --cov-report=xml:src/tests/reports/coverage.xml \

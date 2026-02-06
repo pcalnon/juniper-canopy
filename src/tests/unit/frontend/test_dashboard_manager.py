@@ -1064,18 +1064,14 @@ class TestDashboardManagerMiscMethods:
         """Test parameter changes handler with learning-rate-input trigger."""
         import dash
 
-        result = dashboard_manager._handle_parameter_changes_handler(
-            learning_rate=0.05, max_hidden_units=10, trigger="learning-rate-input"
-        )
+        result = dashboard_manager._handle_parameter_changes_handler(learning_rate=0.05, max_hidden_units=10, trigger="learning-rate-input")
         assert result == dash.no_update
 
     def test_handle_parameter_changes_hu_trigger(self, dashboard_manager):
         """Test parameter changes handler with max-hidden-units-input trigger."""
         import dash
 
-        result = dashboard_manager._handle_parameter_changes_handler(
-            learning_rate=0.01, max_hidden_units=20, trigger="max-hidden-units-input"
-        )
+        result = dashboard_manager._handle_parameter_changes_handler(learning_rate=0.01, max_hidden_units=20, trigger="max-hidden-units-input")
         assert result == dash.no_update
 
     def test_update_metrics_store_non_list_non_dict(self, dashboard_manager, mocker):

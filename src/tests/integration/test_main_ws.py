@@ -69,7 +69,8 @@ class TestWebSocketEndpoints:
     def test_ws_training_ping_pong(self, client):
         """Test ping/pong functionality on /ws/training."""
         with client.websocket_connect("/ws/training") as websocket:
-            # Skip connection and initial status messages
+            # Skip connection, initial status, and state messages
+            websocket.receive_json()
             websocket.receive_json()
             websocket.receive_json()
 

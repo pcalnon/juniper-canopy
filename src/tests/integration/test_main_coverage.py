@@ -337,8 +337,9 @@ class TestWebSocketTrainingEndpoint:
     def test_ws_training_ping_pong(self, client):
         """WebSocket /ws/training should respond to ping with pong."""
         with client.websocket_connect("/ws/training") as ws:
-            ws.receive_json()
-            ws.receive_json()
+            ws.receive_json()  # connection_established
+            ws.receive_json()  # initial_status
+            ws.receive_json()  # state
             ws.send_json({"type": "ping"})
             response = ws.receive_json()
             assert response["type"] == "pong"
@@ -347,8 +348,9 @@ class TestWebSocketTrainingEndpoint:
     def test_ws_training_other_message(self, client):
         """WebSocket /ws/training should handle other message types."""
         with client.websocket_connect("/ws/training") as ws:
-            ws.receive_json()
-            ws.receive_json()
+            ws.receive_json()  # connection_established
+            ws.receive_json()  # initial_status
+            ws.receive_json()  # state
             ws.send_json({"type": "custom", "data": "test"})
 
 

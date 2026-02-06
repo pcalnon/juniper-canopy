@@ -36,23 +36,11 @@ class TestConstantsIntegration:
     def test_training_constants_consistency(self):
         """Test that training constants are internally consistent."""
         # Verify defaults fall within valid ranges
-        assert (
-            TrainingConstants.MIN_TRAINING_EPOCHS
-            <= TrainingConstants.DEFAULT_TRAINING_EPOCHS
-            <= TrainingConstants.MAX_TRAINING_EPOCHS
-        )
+        assert TrainingConstants.MIN_TRAINING_EPOCHS <= TrainingConstants.DEFAULT_TRAINING_EPOCHS <= TrainingConstants.MAX_TRAINING_EPOCHS
 
-        assert (
-            TrainingConstants.MIN_LEARNING_RATE
-            <= TrainingConstants.DEFAULT_LEARNING_RATE
-            <= TrainingConstants.MAX_LEARNING_RATE
-        )
+        assert TrainingConstants.MIN_LEARNING_RATE <= TrainingConstants.DEFAULT_LEARNING_RATE <= TrainingConstants.MAX_LEARNING_RATE
 
-        assert (
-            TrainingConstants.MIN_HIDDEN_UNITS
-            <= TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS
-            <= TrainingConstants.MAX_HIDDEN_UNITS
-        )
+        assert TrainingConstants.MIN_HIDDEN_UNITS <= TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS <= TrainingConstants.MAX_HIDDEN_UNITS
 
     def test_dashboard_constants_consistency(self):
         """Test that dashboard constants are internally consistent."""

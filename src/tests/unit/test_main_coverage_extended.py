@@ -1066,7 +1066,12 @@ class TestControlWebSocketBranches:
         with app_client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
             ws.send_json({"command": "start", "reset": True})
-            response = ws.receive_json()
+            # The control ack may be interleaved with broadcast messages
+            # from the training thread. Drain messages until we find it.
+            for _ in range(10):
+                response = ws.receive_json()
+                if "ok" in response:
+                    break
             assert "ok" in response
 
     @pytest.mark.unit
@@ -1076,8 +1081,13 @@ class TestControlWebSocketBranches:
             ws.receive_json()
 
             ws.send_json({"command": "start"})
-            response = ws.receive_json()
-            assert "ok" in response or "state" in response
+            # The control ack may be interleaved with broadcast messages
+            # from the training thread. Drain messages until we find it.
+            for _ in range(10):
+                response = ws.receive_json()
+                if "ok" in response:
+                    break
+            assert "ok" in response
 
 
 class TestSetParamsEndpointBranches:
@@ -1195,7 +1205,12 @@ class TestControlCommandErrorHandling:
         with app_client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
             ws.send_json({"command": "invalid_command_xyz"})
-            response = ws.receive_json()
+            # The control response may be interleaved with broadcast messages
+            # from the training thread. Drain messages until we find it.
+            for _ in range(10):
+                response = ws.receive_json()
+                if "ok" in response:
+                    break
             assert response.get("ok") is False
 
     @pytest.mark.unit

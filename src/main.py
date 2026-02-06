@@ -328,6 +328,11 @@ async def websocket_training_endpoint(websocket: WebSocket):
 
         await websocket_manager.send_personal_message({"type": "initial_status", "data": status}, websocket)
 
+        # Send a properly formatted state message so clients receive current state immediately
+        # Use TrainingState.get_state() for standardized field names (status, phase, learning_rate, etc.)
+        state_data = training_state.get_state() if training_state else status
+        await websocket_manager.send_personal_message({"type": "state", "timestamp": time.time(), "data": state_data}, websocket)
+
         # Message handling loop
         while True:
             try:
@@ -1151,7 +1156,7 @@ async def create_snapshot(
                     if training_state:
                         state_group = f.create_group("training_state")
                         for key, value in training_state.__dict__.items():
-                            if isinstance(value, (int, float, str, bool)):
+                            if not key.startswith("_") and isinstance(value, (int, float, str, bool)):
                                 state_group.attrs[key] = value
 
             except ImportError as e:

@@ -190,11 +190,7 @@ class CassandraClient:
             - details: Service-specific data (hosts, keyspace, etc.)
         """
         now = datetime.now()
-        if (
-            self._cached_status is not None
-            and self._last_status_check is not None
-            and (now - self._last_status_check).total_seconds() < self._status_cache_ttl_seconds
-        ):
+        if self._cached_status is not None and self._last_status_check is not None and (now - self._last_status_check).total_seconds() < self._status_cache_ttl_seconds:
             return self._cached_status
 
         if self._demo_mode:
@@ -465,9 +461,7 @@ class CassandraClient:
                     "keyspaces": keyspaces,
                     "cluster_stats": {
                         "total_nodes": len(list(self._cluster.metadata.all_hosts())) if self._cluster else 0,
-                        "live_nodes": (
-                            len([h for h in self._cluster.metadata.all_hosts() if h.is_up]) if self._cluster else 0
-                        ),
+                        "live_nodes": (len([h for h in self._cluster.metadata.all_hosts() if h.is_up]) if self._cluster else 0),
                     },
                 },
             }

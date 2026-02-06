@@ -62,9 +62,7 @@ class TestTrainingStateSerialization:
     def test_to_json_contains_all_fields(self):
         """Test to_json() contains all required fields."""
         state = TrainingState()
-        state.update_state(
-            status="Started", phase="Output", learning_rate=0.01, max_hidden_units=10, current_epoch=5, current_step=100
-        )
+        state.update_state(status="Started", phase="Output", learning_rate=0.01, max_hidden_units=10, current_epoch=5, current_step=100)
 
         json_str = state.to_json()
         parsed = json.loads(json_str)

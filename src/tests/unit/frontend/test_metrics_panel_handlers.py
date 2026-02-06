@@ -201,37 +201,34 @@ class TestToggleCandidateSection:
         """Should toggle from closed to open state."""
         n_clicks = 1
         is_open = False
-
-        new_state = not is_open
+        new_state = not is_open if n_clicks else is_open
         icon = "▼" if new_state else "▶"
-
-        assert new_state is True
+        # assert new_state is True
+        assert new_state
         assert icon == "▼"
 
     def test_toggle_from_open_to_closed(self, metrics_panel):
         """Should toggle from open to closed state."""
         n_clicks = 1
         is_open = True
-
-        new_state = not is_open
+        new_state = not is_open if n_clicks else is_open
         icon = "▼" if new_state else "▶"
-
-        assert new_state is False
+        # assert new_state is False
+        assert not new_state
         assert icon == "▶"
 
     def test_toggle_no_clicks_returns_current_state(self, metrics_panel):
         """Should return current state when no clicks."""
         n_clicks = None
         is_open = True
-
         if n_clicks:
             new_state = not is_open
             icon = "▼" if new_state else "▶"
         else:
             new_state = is_open
             icon = "▼"
-
-        assert new_state is True
+        # assert new_state is True
+        assert new_state
         assert icon == "▼"
 
 
@@ -245,18 +242,18 @@ class TestUpdateCandidateHistory:
         history = [{"epoch": 10}]
 
         result = history or []
+        assert not state
         assert result == [{"epoch": 10}]
 
     def test_update_history_with_empty_state(self, metrics_panel):
         """Should return empty list when state is empty and no history."""
         state = {}
         history = None
-
-        if not state:
-            result = history or []
-        else:
-            result = history or []
-
+        # if not state:
+        #     result = history or []
+        # else:
+        #     result = history or []
+        result = history if state else []
         assert result == []
 
     def test_update_history_inactive_pool(self, metrics_panel, sample_training_state):
@@ -287,10 +284,7 @@ class TestUpdateCandidateHistory:
                 "size": state.get("candidate_pool_size", 0),
             }
             existing = next((p for p in history if p.get("epoch") == current_epoch), None)
-            if not existing:
-                result = [pool_snapshot] + history[:9]
-            else:
-                result = history
+            result = history if existing else [pool_snapshot] + history[:9]
         else:
             result = history
 
@@ -309,10 +303,7 @@ class TestUpdateCandidateHistory:
         if pool_status != "Inactive":
             pool_snapshot = {"epoch": current_epoch}
             existing = next((p for p in history if p.get("epoch") == current_epoch), None)
-            if not existing:
-                result = [pool_snapshot] + history[:9]
-            else:
-                result = history
+            result = history if existing else [pool_snapshot] + history[:9]
         else:
             result = history
 
@@ -337,22 +328,16 @@ class TestRenderCandidateHistory:
     def test_render_empty_history(self, metrics_panel):
         """Should return empty list for empty history."""
         history = []
-        if not history or len(history) <= 1:
-            result = []
-        else:
-            result = ["items"]
-
-        assert result == []
+        result = [] if not history or len(history) <= 1 else ["items"]
+        # assert result == []
+        assert not result
 
     def test_render_single_entry_history(self, metrics_panel):
         """Should return empty list for single entry (current pool only)."""
         history = [{"epoch": 42}]
-        if not history or len(history) <= 1:
-            result = []
-        else:
-            result = ["items"]
-
-        assert result == []
+        result = [] if not history or len(history) <= 1 else ["items"]
+        # assert result == []
+        assert not result
 
     def test_render_multiple_entries(self, metrics_panel):
         """Should render items for multiple history entries."""
@@ -362,11 +347,7 @@ class TestRenderCandidateHistory:
             {"epoch": 20, "top_candidate_id": "C003", "top_candidate_score": 0.75},
         ]
 
-        if not history or len(history) <= 1:
-            result = []
-        else:
-            result = history[1:]
-
+        result = [] if not history or len(history) <= 1 else history[1:]
         assert len(result) == 2
         assert result[0]["epoch"] == 30
 
@@ -441,11 +422,15 @@ class TestToggleReplayVisibility:
     """Tests for toggle_replay_visibility callback logic."""
 
     def test_show_replay_when_stopped(self, metrics_panel):
+        # sourcery skip: equality-identity, inline-variable
         """Should show replay controls when training is stopped."""
         state = {"status": "STOPPED"}
-        theme = "dark"
+        _LIGHT_THEME = "light"
+        _DARK_THEME = "dark"
+        theme = _DARK_THEME
 
-        is_dark = theme == "dark"
+        # is_dark = theme == "dark"
+        is_dark = theme == _DARK_THEME and theme != _LIGHT_THEME
         base_style = {
             "marginBottom": "15px",
             "padding": "10px",
@@ -485,6 +470,7 @@ class TestToggleReplayVisibility:
         assert result["backgroundColor"] == "#f8f9fa"
 
     def test_show_replay_when_state_none(self, metrics_panel):
+        # sourcery skip: equality-identity, inline-variable
         """Should show replay controls when state is None."""
         state = None
         theme = "dark"
@@ -497,11 +483,7 @@ class TestToggleReplayVisibility:
             "borderRadius": "5px",
         }
 
-        if not state:
-            result = {**base_style, "display": "block"}
-        else:
-            result = base_style
-
+        result = base_style if state else {**base_style, "display": "block"}
         assert result["display"] == "block"
 
     def test_show_replay_when_paused(self, metrics_panel):
@@ -511,7 +493,8 @@ class TestToggleReplayVisibility:
         status = state.get("status", "STOPPED").upper()
         visible = status in ["STOPPED", "PAUSED", "COMPLETED", "FAILED"]
 
-        assert visible is True
+        # assert visible is True
+        assert visible
 
     def test_show_replay_when_completed(self, metrics_panel):
         """Should show replay controls when training is completed."""
@@ -520,7 +503,8 @@ class TestToggleReplayVisibility:
         status = state.get("status", "STOPPED").upper()
         visible = status in ["STOPPED", "PAUSED", "COMPLETED", "FAILED"]
 
-        assert visible is True
+        # assert visible is True
+        assert visible
 
 
 @pytest.mark.unit
@@ -662,12 +646,12 @@ class TestHandleReplayControls:
     def test_slider_updates_position(self, metrics_panel, sample_metrics_data):
         """Should update position from slider value."""
         max_index = len(sample_metrics_data) - 1
-        slider_value = 50  # 50%
         current_state = {"mode": "playing", "speed": 1.0, "current_index": 0}
         trigger = "test-panel-replay-slider"
 
         state = current_state.copy()
         if "replay-slider" in trigger:
+            slider_value = 50  # 50%
             state["current_index"] = int((slider_value / 100) * max_index) if max_index > 0 else 0
             state["mode"] = "paused"
 
@@ -755,9 +739,10 @@ class TestUpdateReplayUI:
     def test_update_slider_position(self, metrics_panel, sample_metrics_data):
         """Should calculate correct slider position."""
         max_index = len(sample_metrics_data) - 1
-        current_index = 25
-        state = {"current_index": current_index}
+        testing_index = 25
+        state = {"current_index": testing_index}
 
+        current_index = state.get("current_index", 0)
         slider_value = (current_index / max_index * 100) if max_index > 0 else 0
         position_text = f"{current_index} / {max_index}"
 
@@ -867,9 +852,7 @@ class TestUpdateMetricsDisplayHandler:
             ]
         }
 
-        result = metrics_panel._update_metrics_display_handler(
-            metrics_data=metrics_data, theme="light", view_state=None
-        )
+        result = metrics_panel._update_metrics_display_handler(metrics_data=metrics_data, theme="light", view_state=None)
 
         assert len(result) == 8
         assert result[2] == "2"
@@ -897,9 +880,7 @@ class TestUpdateMetricsDisplayHandler:
         """Should return empty state for empty dict."""
         metrics_data = {}
 
-        result = metrics_panel._update_metrics_display_handler(
-            metrics_data=metrics_data, theme="light", view_state=None
-        )
+        result = metrics_panel._update_metrics_display_handler(metrics_data=metrics_data, theme="light", view_state=None)
 
         assert len(result) == 8
         assert result[2] == "0"
@@ -910,9 +891,7 @@ class TestUpdateMetricsDisplayHandler:
         """Should return empty state for invalid types."""
         metrics_data = "invalid"
 
-        result = metrics_panel._update_metrics_display_handler(
-            metrics_data=metrics_data, theme="light", view_state=None
-        )
+        result = metrics_panel._update_metrics_display_handler(metrics_data=metrics_data, theme="light", view_state=None)
 
         assert len(result) == 8
         assert result[2] == "0"
@@ -937,9 +916,7 @@ class TestUpdateMetricsDisplayHandler:
             for i in range(10)
         ]
 
-        result = metrics_panel._update_metrics_display_handler(
-            metrics_data=metrics_with_full_data, theme="light", view_state=None
-        )
+        result = metrics_panel._update_metrics_display_handler(metrics_data=metrics_with_full_data, theme="light", view_state=None)
 
         assert len(result) == 8
         assert result[2] == "9"
@@ -957,9 +934,7 @@ class TestUpdateMetricsDisplayHandler:
         ]
         view_state = {"loss_xaxis_range": [5, 15]}
 
-        result = metrics_panel._update_metrics_display_handler(
-            metrics_data=metrics, theme="light", view_state=view_state
-        )
+        result = metrics_panel._update_metrics_display_handler(metrics_data=metrics, theme="light", view_state=view_state)
 
         assert len(result) == 8
 
@@ -976,9 +951,7 @@ class TestUpdateMetricsDisplayHandler:
         ]
         view_state = {"loss_yaxis_range": [0.1, 0.9]}
 
-        result = metrics_panel._update_metrics_display_handler(
-            metrics_data=metrics, theme="dark", view_state=view_state
-        )
+        result = metrics_panel._update_metrics_display_handler(metrics_data=metrics, theme="dark", view_state=view_state)
 
         assert len(result) == 8
 
@@ -995,9 +968,7 @@ class TestUpdateMetricsDisplayHandler:
         ]
         view_state = {"accuracy_xaxis_range": [2, 8]}
 
-        result = metrics_panel._update_metrics_display_handler(
-            metrics_data=metrics, theme="light", view_state=view_state
-        )
+        result = metrics_panel._update_metrics_display_handler(metrics_data=metrics, theme="light", view_state=view_state)
 
         assert len(result) == 8
 
@@ -1014,9 +985,7 @@ class TestUpdateMetricsDisplayHandler:
         ]
         view_state = {"accuracy_yaxis_range": [0.2, 0.8]}
 
-        result = metrics_panel._update_metrics_display_handler(
-            metrics_data=metrics, theme="light", view_state=view_state
-        )
+        result = metrics_panel._update_metrics_display_handler(metrics_data=metrics, theme="light", view_state=view_state)
 
         assert len(result) == 8
 
@@ -1059,8 +1028,7 @@ class TestRegisteredCallbacks:
         """Test toggle_candidate_section callback opens section."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("toggle_candidate_section")
-        if func:
+        if func := callbacks.get("toggle_candidate_section"):
             result = func(1, False)
             assert result == (True, "▼")
 
@@ -1068,8 +1036,7 @@ class TestRegisteredCallbacks:
         """Test toggle_candidate_section callback closes section."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("toggle_candidate_section")
-        if func:
+        if func := callbacks.get("toggle_candidate_section"):
             result = func(1, True)
             assert result == (False, "▶")
 
@@ -1077,8 +1044,7 @@ class TestRegisteredCallbacks:
         """Test toggle_candidate_section callback with no clicks."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("toggle_candidate_section")
-        if func:
+        if func := callbacks.get("toggle_candidate_section"):
             result = func(None, True)
             assert result == (True, "▼")
 
@@ -1086,8 +1052,7 @@ class TestRegisteredCallbacks:
         """Test update_candidate_history with empty state."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("update_candidate_history")
-        if func:
+        if func := callbacks.get("update_candidate_history"):
             result = func(None, [])
             assert result == []
 
@@ -1095,8 +1060,7 @@ class TestRegisteredCallbacks:
         """Test update_candidate_history with inactive pool."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("update_candidate_history")
-        if func:
+        if func := callbacks.get("update_candidate_history"):
             state = {"candidate_pool_status": "Inactive", "current_epoch": 10}
             result = func(state, [])
             assert result == []
@@ -1105,8 +1069,7 @@ class TestRegisteredCallbacks:
         """Test update_candidate_history with active pool."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("update_candidate_history")
-        if func:
+        if func := callbacks.get("update_candidate_history"):
             state = {
                 "candidate_pool_status": "Active",
                 "candidate_pool_phase": "Training",
@@ -1126,8 +1089,7 @@ class TestRegisteredCallbacks:
         """Test update_candidate_history doesn't duplicate existing epoch."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("update_candidate_history")
-        if func:
+        if func := callbacks.get("update_candidate_history"):
             state = {
                 "candidate_pool_status": "Active",
                 "current_epoch": 42,
@@ -1140,8 +1102,7 @@ class TestRegisteredCallbacks:
         """Test update_candidate_history limits to 10 entries."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("update_candidate_history")
-        if func:
+        if func := callbacks.get("update_candidate_history"):
             state = {
                 "candidate_pool_status": "Active",
                 "current_epoch": 100,
@@ -1155,8 +1116,7 @@ class TestRegisteredCallbacks:
         """Test render_candidate_history with empty history."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("render_candidate_history")
-        if func:
+        if func := callbacks.get("render_candidate_history"):
             result = func([])
             assert result == []
 
@@ -1164,8 +1124,7 @@ class TestRegisteredCallbacks:
         """Test render_candidate_history with single entry."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("render_candidate_history")
-        if func:
+        if func := callbacks.get("render_candidate_history"):
             result = func([{"epoch": 42}])
             assert result == []
 
@@ -1173,8 +1132,7 @@ class TestRegisteredCallbacks:
         """Test render_candidate_history with multiple entries."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("render_candidate_history")
-        if func:
+        if func := callbacks.get("render_candidate_history"):
             history = [
                 {"epoch": 42, "top_candidate_id": "C001", "top_candidate_score": 0.95, "size": 8},
                 {"epoch": 30, "top_candidate_id": "C002", "top_candidate_score": 0.88, "size": 6},
@@ -1186,8 +1144,7 @@ class TestRegisteredCallbacks:
         """Test capture_view_state with no trigger."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("capture_view_state")
-        if func:
+        if func := callbacks.get("capture_view_state"):
             with patch("dash.callback_context") as mock_ctx:
                 mock_ctx.triggered = []
                 result = func(None, None, {"existing": "data"})
@@ -1197,8 +1154,7 @@ class TestRegisteredCallbacks:
         """Test capture_view_state captures loss x-axis range."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("capture_view_state")
-        if func:
+        if func := callbacks.get("capture_view_state"):
             with patch("dash.callback_context") as mock_ctx:
                 mock_ctx.triggered = [{"prop_id": "test-panel-loss-plot.relayoutData"}]
                 result = func({"xaxis.range[0]": 0, "xaxis.range[1]": 100}, None, {})
@@ -1208,8 +1164,7 @@ class TestRegisteredCallbacks:
         """Test capture_view_state captures loss y-axis range."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("capture_view_state")
-        if func:
+        if func := callbacks.get("capture_view_state"):
             with patch("dash.callback_context") as mock_ctx:
                 mock_ctx.triggered = [{"prop_id": "test-panel-loss-plot.relayoutData"}]
                 result = func({"yaxis.range[0]": 0.1, "yaxis.range[1]": 0.9}, None, {})
@@ -1219,8 +1174,7 @@ class TestRegisteredCallbacks:
         """Test capture_view_state clears range on autorange."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("capture_view_state")
-        if func:
+        if func := callbacks.get("capture_view_state"):
             with patch("dash.callback_context") as mock_ctx:
                 mock_ctx.triggered = [{"prop_id": "test-panel-loss-plot.relayoutData"}]
                 result = func({"xaxis.autorange": True}, None, {"loss_xaxis_range": [0, 50]})
@@ -1230,8 +1184,7 @@ class TestRegisteredCallbacks:
         """Test capture_view_state captures accuracy x-axis range."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("capture_view_state")
-        if func:
+        if func := callbacks.get("capture_view_state"):
             with patch("dash.callback_context") as mock_ctx:
                 mock_ctx.triggered = [{"prop_id": "test-panel-accuracy-plot.relayoutData"}]
                 result = func(None, {"xaxis.range[0]": 10, "xaxis.range[1]": 50}, {})
@@ -1241,8 +1194,7 @@ class TestRegisteredCallbacks:
         """Test capture_view_state captures accuracy y-axis range."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("capture_view_state")
-        if func:
+        if func := callbacks.get("capture_view_state"):
             with patch("dash.callback_context") as mock_ctx:
                 mock_ctx.triggered = [{"prop_id": "test-panel-accuracy-plot.relayoutData"}]
                 result = func(None, {"yaxis.range[0]": 0.2, "yaxis.range[1]": 0.8}, {})
@@ -1252,8 +1204,7 @@ class TestRegisteredCallbacks:
         """Test capture_view_state clears accuracy range on autorange."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("capture_view_state")
-        if func:
+        if func := callbacks.get("capture_view_state"):
             with patch("dash.callback_context") as mock_ctx:
                 mock_ctx.triggered = [{"prop_id": "test-panel-accuracy-plot.relayoutData"}]
                 result = func(
@@ -1268,8 +1219,7 @@ class TestRegisteredCallbacks:
         """Test toggle_replay_visibility shows controls when stopped."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("toggle_replay_visibility")
-        if func:
+        if func := callbacks.get("toggle_replay_visibility"):
             result = func({"status": "STOPPED"}, "dark")
             assert result["display"] == "block"
 
@@ -1277,8 +1227,7 @@ class TestRegisteredCallbacks:
         """Test toggle_replay_visibility hides controls when running."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("toggle_replay_visibility")
-        if func:
+        if func := callbacks.get("toggle_replay_visibility"):
             result = func({"status": "RUNNING"}, "light")
             assert result["display"] == "none"
 
@@ -1286,8 +1235,7 @@ class TestRegisteredCallbacks:
         """Test toggle_replay_visibility shows controls when state is None."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("toggle_replay_visibility")
-        if func:
+        if func := callbacks.get("toggle_replay_visibility"):
             result = func(None, "dark")
             assert result["display"] == "block"
 
@@ -1295,8 +1243,7 @@ class TestRegisteredCallbacks:
         """Test toggle_replay_visibility shows controls when paused."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("toggle_replay_visibility")
-        if func:
+        if func := callbacks.get("toggle_replay_visibility"):
             result = func({"status": "PAUSED"}, "light")
             assert result["display"] == "block"
 
@@ -1304,8 +1251,7 @@ class TestRegisteredCallbacks:
         """Test handle_replay_controls play button."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("handle_replay_controls")
-        if func:
+        if func := callbacks.get("handle_replay_controls"):
             with patch("dash.callback_context") as mock_ctx:
                 mock_ctx.triggered = [{"prop_id": "test-panel-replay-play.n_clicks"}]
                 current_state = {"mode": "stopped", "speed": 1.0, "current_index": 0}
@@ -1317,8 +1263,7 @@ class TestRegisteredCallbacks:
         """Test handle_replay_controls step back button."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("handle_replay_controls")
-        if func:
+        if func := callbacks.get("handle_replay_controls"):
             with patch("dash.callback_context") as mock_ctx:
                 mock_ctx.triggered = [{"prop_id": "test-panel-step-back.n_clicks"}]
                 current_state = {"mode": "playing", "speed": 1.0, "current_index": 10}
@@ -1331,8 +1276,7 @@ class TestRegisteredCallbacks:
         """Test handle_replay_controls step forward button."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("handle_replay_controls")
-        if func:
+        if func := callbacks.get("handle_replay_controls"):
             with patch("dash.callback_context") as mock_ctx:
                 mock_ctx.triggered = [{"prop_id": "test-panel-step-forward.n_clicks"}]
                 current_state = {"mode": "stopped", "speed": 1.0, "current_index": 10}
@@ -1345,8 +1289,7 @@ class TestRegisteredCallbacks:
         """Test handle_replay_controls start button."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("handle_replay_controls")
-        if func:
+        if func := callbacks.get("handle_replay_controls"):
             with patch("dash.callback_context") as mock_ctx:
                 mock_ctx.triggered = [{"prop_id": "test-panel-replay-start.n_clicks"}]
                 current_state = {"mode": "playing", "speed": 1.0, "current_index": 25, "start_index": 0}
@@ -1359,8 +1302,7 @@ class TestRegisteredCallbacks:
         """Test handle_replay_controls end button."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("handle_replay_controls")
-        if func:
+        if func := callbacks.get("handle_replay_controls"):
             with patch("dash.callback_context") as mock_ctx:
                 mock_ctx.triggered = [{"prop_id": "test-panel-replay-end.n_clicks"}]
                 current_state = {"mode": "playing", "speed": 1.0, "current_index": 10, "end_index": None}
@@ -1373,8 +1315,7 @@ class TestRegisteredCallbacks:
         """Test handle_replay_controls speed 2x button."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("handle_replay_controls")
-        if func:
+        if func := callbacks.get("handle_replay_controls"):
             with patch("dash.callback_context") as mock_ctx:
                 mock_ctx.triggered = [{"prop_id": "test-panel-speed-2x.n_clicks"}]
                 current_state = {"mode": "playing", "speed": 1.0, "current_index": 0}
@@ -1387,8 +1328,7 @@ class TestRegisteredCallbacks:
         """Test handle_replay_controls slider change."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("handle_replay_controls")
-        if func:
+        if func := callbacks.get("handle_replay_controls"):
             with patch("dash.callback_context") as mock_ctx:
                 mock_ctx.triggered = [{"prop_id": "test-panel-replay-slider.value"}]
                 current_state = {"mode": "playing", "speed": 1.0, "current_index": 0}
@@ -1401,8 +1341,7 @@ class TestRegisteredCallbacks:
         """Test replay_tick advances index during playback."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("replay_tick")
-        if func:
+        if func := callbacks.get("replay_tick"):
             state = {"mode": "playing", "current_index": 10, "end_index": 49}
             metrics_data = [{"epoch": i} for i in range(50)]
             result = func(1, state, metrics_data)
@@ -1412,8 +1351,7 @@ class TestRegisteredCallbacks:
         """Test replay_tick stops at end index."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("replay_tick")
-        if func:
+        if func := callbacks.get("replay_tick"):
             state = {"mode": "playing", "current_index": 49, "end_index": 49}
             metrics_data = [{"epoch": i} for i in range(50)]
             result = func(1, state, metrics_data)
@@ -1424,8 +1362,7 @@ class TestRegisteredCallbacks:
         """Test replay_tick ignores non-playing state."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("replay_tick")
-        if func:
+        if func := callbacks.get("replay_tick"):
             state = {"mode": "paused", "current_index": 10, "end_index": 49}
             metrics_data = [{"epoch": i} for i in range(50)]
             result = func(1, state, metrics_data)
@@ -1435,8 +1372,7 @@ class TestRegisteredCallbacks:
         """Test update_replay_ui calculates slider position."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("update_replay_ui")
-        if func:
+        if func := callbacks.get("update_replay_ui"):
             state = {"current_index": 25}
             metrics_data = [{"epoch": i} for i in range(50)]
             result = func(state, metrics_data)
@@ -1448,8 +1384,7 @@ class TestRegisteredCallbacks:
         """Test update_play_button shows pause when playing."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("update_play_button")
-        if func:
+        if func := callbacks.get("update_play_button"):
             result = func({"mode": "playing"})
             assert result == "⏸"
 
@@ -1457,7 +1392,6 @@ class TestRegisteredCallbacks:
         """Test update_play_button shows play when paused."""
         panel, callbacks = registered_callbacks
 
-        func = callbacks.get("update_play_button")
-        if func:
+        if func := callbacks.get("update_play_button"):
             result = func({"mode": "paused"})
             assert result == "▶"

@@ -224,14 +224,13 @@ class TestLogPathIsFile:
 class TestVerboseLogging:
     """Test verbose() logging method (line 313).
 
-    Note: The verbose() method in logger.py uses logging.VERBOSE which doesn't exist
-    in standard Python logging. The code registers VERBOSE_LEVEL=5 but then tries to
-    use logging.VERBOSE. This test exercises the code path even though it will hit
-    the AttributeError - demonstrating the bug exists and triggering line 313.
+    Fixed Bug (Epic 3.6 CQ-001): The verbose() method in logger.py previously used
+    logging.VERBOSE which doesn't exist in standard Python logging. Fixed to use
+    self.VERBOSE_LEVEL, matching the pattern used by the trace() method.
     """
 
     def test_verbose_logging(self, tmp_log_dir, fresh_logger_name):
-        """Should log at VERBOSE level - tests line 313 which has a bug."""
+        """Test verbose logging works with VERBOSE_LEVEL class constant."""
         config = {
             "console": {"enabled": True, "level": "DEBUG", "colored": False},
             "file": {"enabled": True, "level": "DEBUG"},
@@ -242,14 +241,13 @@ class TestVerboseLogging:
         # Ensure VERBOSE level is registered with correct name
         assert logging.getLevelName("VERBOSE") == CascorLogger.VERBOSE_LEVEL
 
-        # The verbose() method has a bug - it uses logging.VERBOSE instead of
+        # When bug is fixed, this should work without raising AttributeError
+        # Currently fails because logger.py uses logging.VERBOSE instead of
         # CascorLogger.VERBOSE_LEVEL or self.VERBOSE_LEVEL
-        # We still call it to execute line 313 for coverage
-        with pytest.raises(AttributeError, match="module 'logging' has no attribute 'VERBOSE'"):
-            logger.verbose("Test verbose message")
+        logger.verbose("Test verbose message")
 
     def test_verbose_with_context(self, tmp_log_dir, fresh_logger_name):
-        """Should log verbose with context data - exercises line 313."""
+        """Test verbose logging with context data."""
         config = {
             "console": {"enabled": False},
             "file": {"enabled": True, "level": "DEBUG"},
@@ -257,9 +255,8 @@ class TestVerboseLogging:
 
         logger = CascorLogger(fresh_logger_name, log_dir=tmp_log_dir, config=config)
 
-        # Call verbose and expect the AttributeError due to logging.VERBOSE bug
-        with pytest.raises(AttributeError):
-            logger.verbose("Verbose with context", key="value", count=42)
+        # When bug is fixed, this should work without raising AttributeError
+        logger.verbose("Verbose with context", key="value", count=42)
 
 
 class TestLoggingConfigLoadBranches:
@@ -360,16 +357,11 @@ class TestLoggingConfigLoadBranches:
         # Should fall back to default
         assert "logging" in config.config
 
-    @pytest.mark.xfail(reason="Known bug: LoggingConfig doesn't handle empty YAML files - see Epic 3.6 CQ-001")
     def test_empty_yaml_file(self, tmp_path):
-        """Empty YAML file should fall back to defaults, not raise TypeError.
+        """Empty YAML file should fall back to defaults.
 
-        Bug: LoggingConfig._load_config doesn't handle the case when yaml.safe_load
-        returns None for an empty file. The code attempts `if "logging" in config`
-        which raises TypeError since None is not iterable.
-
-        Expected: Fall back to default configuration
-        Actual: Raises TypeError at line 516
+        Fixed Bug (Epic 3.6 CQ-001): LoggingConfig._load_config now handles the case
+        when yaml.safe_load returns None for an empty file by falling back to defaults.
         """
         empty_yaml = tmp_path / "empty.yaml"
         empty_yaml.write_text("")

@@ -681,15 +681,11 @@ class NetworkVisualizer(BaseComponent):
         elif layout_type == "hierarchical":  # Hierarchical layout with layers
             return self._layout_type_hierarchical(G=G, n_input=n_input, n_hidden=n_hidden, n_output=n_output)
         elif layout_type == "spring":  # Spring layout with constraints
-            return self._layout_type_sprint(
-                G=G, k=2, iterations=50, seed=42
-            )  # TODO: Convert these magic numbers into constants
+            return self._layout_type_sprint(G=G, k=2, iterations=50, seed=42)  # TODO: Convert these magic numbers into constants
         elif layout_type == "staggered":
             return self._layout_type_staggered(G=G, n_input=n_input, n_hidden=n_hidden, n_output=n_output)
         else:  # Default to hierarchical
-            return self._calculate_layout(
-                G=G, layout_type="hierarchical", n_input=n_input, n_hidden=n_hidden, n_output=n_output
-            )
+            return self._calculate_layout(G=G, layout_type="hierarchical", n_input=n_input, n_hidden=n_hidden, n_output=n_output)
 
     def _layout_type_circular(self, G: nx.DiGraph, scale: float = None):
         return nx.circular_layout(G, scale=scale)
@@ -777,9 +773,7 @@ class NetworkVisualizer(BaseComponent):
             y = (i - n_hidden / 2) * 1.5
             pos[f"hidden_{i}"] = (hidden_x_positions[i], y)
 
-    def _create_edge_traces(
-        self, G: nx.DiGraph, pos: Dict[str, Tuple[float, float]], show_weights: bool
-    ) -> List[go.Scatter]:
+    def _create_edge_traces(self, G: nx.DiGraph, pos: Dict[str, Tuple[float, float]], show_weights: bool) -> List[go.Scatter]:
         """
         Create edge traces for the graph.
 
@@ -871,9 +865,7 @@ class NetworkVisualizer(BaseComponent):
 
         return node_traces
 
-    def _create_node_trace(
-        self, nodes: List[str], pos: Dict[str, Tuple[float, float]], color: str, name: str
-    ) -> go.Scatter:
+    def _create_node_trace(self, nodes: List[str], pos: Dict[str, Tuple[float, float]], color: str, name: str) -> go.Scatter:
         """
         Create a scatter trace for a group of nodes.
 
@@ -903,9 +895,7 @@ class NetworkVisualizer(BaseComponent):
             name=name,
         )
 
-    def _create_selection_highlight(
-        self, pos: Dict[str, Tuple[float, float]], selected_nodes: List[str]
-    ) -> List[go.Scatter]:
+    def _create_selection_highlight(self, pos: Dict[str, Tuple[float, float]], selected_nodes: List[str]) -> List[go.Scatter]:
         """
         Create highlight traces for selected nodes.
 
@@ -1286,9 +1276,7 @@ class NetworkVisualizer(BaseComponent):
 
         return current_highlight
 
-    def _calculate_highlight_properties(
-        self, highlight: Optional[Dict[str, Any]], n_intervals: int
-    ) -> Optional[Dict[str, Any]]:
+    def _calculate_highlight_properties(self, highlight: Optional[Dict[str, Any]], n_intervals: int) -> Optional[Dict[str, Any]]:
         """
         Calculate visual properties for the new node highlight (P2-1).
 
@@ -1376,8 +1364,10 @@ class NetworkVisualizer(BaseComponent):
                         line={
                             "width": 6,
                             "color": f"rgba(23, 162, 184, {edge_opacity})",  # Cyan with opacity
+                            "data": data,
                         },
-                        hoverinfo="skip",
+                        # hoverinfo="skip",
+                        hoverinfo=data,
                         showlegend=False,
                         name="New Unit Edges",
                     )

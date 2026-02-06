@@ -164,9 +164,13 @@ repos:
       - id: mypy
         name: Type check with MyPy
         args:
+          # - --install-types
+          # - --non-interactive
           - --ignore-missing-imports
           - --no-strict-optional
-          - --python-version=3.12
+          - --python-executable=/opt/miniforge3/envs/JuniperCanopy/bin/python
+          - --python-version=3.14
+          # - --python-version=3.12
           # Re-enabled (Epic 4.3): call-arg, override, no-redef, index,
           # func-returns-value, has-type, str-bytes-safe, call-overload, return
           # Still disabled due to existing errors requiring gradual fixes:

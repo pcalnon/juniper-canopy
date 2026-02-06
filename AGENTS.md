@@ -2229,6 +2229,58 @@ All new or modified code must meet these requirements before merging:
 
 ## Recent Changes
 
+### 2026-02-05: Integration Development Plan - Comprehensive Assessment Complete
+
+**Scope**: Evaluated 4 planning documents + rigorous source code review across JuniperCascor, JuniperCanopy, and JuniperData to consolidate all outstanding integration work.
+
+**Source Documents Evaluated**:
+
+- `JUNIPER_CASCOR_SPIRAL_DATA_GEN_REFACTOR_PLAN.md` (Phases 0-4 Complete, Phase 5 Deferred)
+- `INTEGRATION_ROADMAP.md` (Most issues RESOLVED)
+- `PRE-DEPLOYMENT_ROADMAP.md` (P0-P1 RESOLVED, some P2-P3 remaining)
+- `PRE-DEPLOYMENT_ROADMAP-2.md` (74% complete, 26% remaining)
+
+**Key Findings**:
+
+- **3 CRITICAL code issues**: Real backend control not implemented (`main.py:433-442`), decision boundary incomplete for real backend (`main.py:779-788`), `get_network_data()` method missing from CascorIntegration (`main.py:627`)
+- **3 HIGH issues**: `save_snapshot()`/`load_snapshot()` missing, async/sync boundary untested, no tests exercise real backend paths
+- **8 MEDIUM issues**: Coverage gaps, type errors, remote workers untested, Cassandra/Redis integration gaps, monitoring race conditions, legacy code cleanup
+- **30+ enhancement items**: CAN-001 through CAN-021 (Canopy), CAS-001 through CAS-010 (Cascor)
+
+**Deliverable**: [notes/INTEGRATION_DEVELOPMENT_PLAN.md](notes/INTEGRATION_DEVELOPMENT_PLAN.md) - 53+ items organized into 4 prioritized phases
+
+---
+
+### 2026-02-04: Non-Passing Test Analysis and Remediation - Complete (Rounds 1 & 2)
+
+**Round 1:** Analyzed and fixed 67 non-passing tests (54 ERROR, 10 FAILED, 3 XFAIL). Result: 3,207 passed.
+
+**Round 1 Fixes:**
+
+- **P0**: Installed `pytest-mock>=3.12` (resolved 54 ERROR tests in dashboard handler tests)
+- **P1**: `main.py` - Added `not key.startswith("_")` filter in HDF5 snapshot creation (data integrity fix)
+- **P2**: `test_main_coverage_extended.py` - Fixed race condition by draining broadcast messages before asserting control response
+- **P3**: No change needed - 8 server-dependent tests correctly skip when `RUN_SERVER_TESTS` not set
+- **P4**: `logger/logger.py` - Changed `logging.VERBOSE` to `self.VERBOSE_LEVEL` in `verbose()` method (Epic 3.6 CQ-001)
+- **P5**: `logger/logger.py` - Added null check for empty YAML files in `LoggingConfig._load_config()` (Epic 3.6 CQ-001)
+
+**Round 2:** Fixed additional test failures (5 skipping, 2 failing, 1 skipped, 1 race condition).
+
+**Round 2 Fixes:**
+
+- `main.py` - Added state message on `/ws/training` connect using `training_state.get_state()` format
+- `test_websocket_state.py` - Rewrote 7 tests to consume deterministic connect sequence; removed `requires_server` marker
+- `test_main_coverage.py`, `test_main_ws.py` - Updated ping-pong tests to drain 3rd connect message
+- `test_logger_coverage.py` - Removed skip marker from `test_verbose_logging`
+- `test_main_coverage_extended.py` - Fixed `test_unknown_command_returns_error` race condition
+- `conftest.py` - Extended `reset_singletons` to reset `demo_mode._demo_instance` singleton
+
+**Final result: 3,215 passed, 0 failed, 0 errors, 0 xfail, 37 skipped (all legitimate):**
+
+**See:** [notes/FIX_FAILING_TESTS.md](notes/FIX_FAILING_TESTS.md)
+
+---
+
 ### 2026-02-04: Test Suite & CI/CD Enhancement - Phase 2 Complete
 
 **Conftest Consolidation (Epic 2.1):**

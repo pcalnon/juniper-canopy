@@ -131,9 +131,7 @@ class TestDashboardPlotRendering:
             }
         ]
         loss_dark = mp._create_loss_plot(test_data, "dark")
-        assert (
-            str(loss_dark.layout.template) == "plotly_dark" or loss_dark.layout.plot_bgcolor == "#242424"
-        ), f"Expected dark theme, got template={loss_dark.layout.template}, bgcolor={loss_dark.layout.plot_bgcolor}"
+        assert str(loss_dark.layout.template) == "plotly_dark" or loss_dark.layout.plot_bgcolor == "#242424", f"Expected dark theme, got template={loss_dark.layout.template}, bgcolor={loss_dark.layout.plot_bgcolor}"
 
         # Dataset plotter
         dp = DatasetPlotter({})
@@ -185,9 +183,7 @@ class TestDashboardPlotRendering:
         if dark_css_path.exists():
             content = dark_css_path.read_text()
             # The global * selector should not be present
-            assert (
-                "\n* {" not in content and "\n*{" not in content
-            ), "dark_mode.css should not have global * selector that breaks Plotly rendering"
+            assert "\n* {" not in content and "\n*{" not in content, "dark_mode.css should not have global * selector that breaks Plotly rendering"
 
         # Check that plotly_fix.css exists with protective rules
         plotly_css_path = css_dir / "plotly_fix.css"
@@ -196,6 +192,4 @@ class TestDashboardPlotRendering:
         plotly_css = plotly_css_path.read_text()
         assert ".js-plotly-plot" in plotly_css, "plotly_fix.css should target Plotly containers"
         assert "opacity: 1 !important" in plotly_css, "plotly_fix.css should force visibility"
-        assert (
-            "transition: none !important" in plotly_css
-        ), "plotly_fix.css should disable transitions on Plotly elements"
+        assert "transition: none !important" in plotly_css, "plotly_fix.css should disable transitions on Plotly elements"

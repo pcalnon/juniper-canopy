@@ -154,8 +154,10 @@ class TestCandidatePoolHistoryBuilding:
 
     def test_update_candidate_history_with_none_history_returns_empty(self, metrics_panel):
         """None history should be treated as empty list."""
+        pool_status = None
         if state := {"candidate_pool_status": "Inactive"}:
             pool_status = state.get("candidate_pool_status", "Inactive")
+        assert pool_status
         history = None
         result = history or []
         assert result == []
@@ -471,7 +473,7 @@ class TestToggleReplayVisibility:
     def test_paused_status_shows_controls(self, metrics_panel):
         """PAUSED status should show replay controls."""
         state = {"status": "paused"}
-        theme = "light"
+        # theme = "light"
 
         status = state.get("status", "STOPPED").upper()
         result_display = "block" if status in ["STOPPED", "PAUSED", "COMPLETED", "FAILED"] else "none"
@@ -481,7 +483,7 @@ class TestToggleReplayVisibility:
     def test_completed_status_shows_controls(self, metrics_panel):
         """COMPLETED status should show replay controls."""
         state = {"status": "completed"}
-        theme = "light"
+        # theme = "light"
 
         status = state.get("status", "STOPPED").upper()
         result_display = "block" if status in ["STOPPED", "PAUSED", "COMPLETED", "FAILED"] else "none"
@@ -490,7 +492,7 @@ class TestToggleReplayVisibility:
 
     def test_dark_theme_uses_dark_background(self, metrics_panel):
         """Dark theme should use dark background color."""
-        state = {"status": "stopped"}
+        # state = {"status": "stopped"}
         theme = "dark"
         is_dark = theme == "dark" if theme else False
         base_style = {
@@ -504,7 +506,7 @@ class TestToggleReplayVisibility:
 
     def test_light_theme_uses_light_background(self, metrics_panel):
         """Light theme should use light background color."""
-        state = {"status": "stopped"}
+        # state = {"status": "stopped"}
         theme = "light"
         is_dark = theme == "dark" if theme else False
         base_style = {
@@ -526,7 +528,7 @@ class TestHandleReplayControls:
     def test_no_trigger_returns_current_state(self, metrics_panel):
         """No trigger should return current state unchanged."""
         current_state = {"mode": "stopped", "speed": 1.0, "current_index": 5}
-        metrics_data = [{"epoch": i} for i in range(10)]
+        # metrics_data = [{"epoch": i} for i in range(10)]
         ctx_triggered = []
 
         if not ctx_triggered:
@@ -725,9 +727,7 @@ class TestUpdateMetricsDisplayHandler:
 
     def test_dict_with_history_key_is_normalized(self, metrics_panel):
         """Dict with 'history' key should be normalized to list."""
-        metrics_dict = {
-            "history": [{"epoch": 1, "phase": "output_training", "metrics": {"loss": 0.5, "accuracy": 0.8}}]
-        }
+        metrics_dict = {"history": [{"epoch": 1, "phase": "output_training", "metrics": {"loss": 0.5, "accuracy": 0.8}}]}
         result = metrics_panel._update_metrics_display_handler(metrics_data=metrics_dict, theme="light", view_state={})
 
         assert result[2] == "1"
@@ -741,17 +741,12 @@ class TestUpdateMetricsDisplayHandler:
 
     def test_view_state_applied_to_loss_plot(self, metrics_panel):
         """View state should be applied to loss plot."""
-        metrics_data = [
-            {"epoch": i, "phase": "output_training", "metrics": {"loss": 0.5 - i * 0.01, "accuracy": 0.5 + i * 0.01}}
-            for i in range(10)
-        ]
+        metrics_data = [{"epoch": i, "phase": "output_training", "metrics": {"loss": 0.5 - i * 0.01, "accuracy": 0.5 + i * 0.01}} for i in range(10)]
         view_state = {
             "loss_xaxis_range": [2, 8],
             "loss_yaxis_range": [0.1, 0.5],
         }
-        result = metrics_panel._update_metrics_display_handler(
-            metrics_data=metrics_data, theme="light", view_state=view_state
-        )
+        result = metrics_panel._update_metrics_display_handler(metrics_data=metrics_data, theme="light", view_state=view_state)
 
         loss_fig = result[0]
         assert list(loss_fig.layout.xaxis.range) == [2, 8]
@@ -759,17 +754,12 @@ class TestUpdateMetricsDisplayHandler:
 
     def test_view_state_applied_to_accuracy_plot(self, metrics_panel):
         """View state should be applied to accuracy plot."""
-        metrics_data = [
-            {"epoch": i, "phase": "output_training", "metrics": {"loss": 0.5, "accuracy": 0.5 + i * 0.01}}
-            for i in range(10)
-        ]
+        metrics_data = [{"epoch": i, "phase": "output_training", "metrics": {"loss": 0.5, "accuracy": 0.5 + i * 0.01}} for i in range(10)]
         view_state = {
             "accuracy_xaxis_range": [1, 9],
             "accuracy_yaxis_range": [0.4, 0.6],
         }
-        result = metrics_panel._update_metrics_display_handler(
-            metrics_data=metrics_data, theme="light", view_state=view_state
-        )
+        result = metrics_panel._update_metrics_display_handler(metrics_data=metrics_data, theme="light", view_state=view_state)
 
         accuracy_fig = result[1]
         assert list(accuracy_fig.layout.xaxis.range) == [1, 9]
@@ -888,7 +878,7 @@ class TestReplayTick:
     def test_none_state_returns_unchanged(self, metrics_panel):
         """None state should return unchanged."""
         state = None
-        metrics_data = [{"epoch": i} for i in range(10)]
+        # metrics_data = [{"epoch": i} for i in range(10)]
 
         if not state or state.get("mode") != "playing":
             result = state
@@ -897,7 +887,7 @@ class TestReplayTick:
     def test_not_playing_returns_unchanged(self, metrics_panel):
         """Non-playing mode should return state unchanged."""
         state = {"mode": "paused", "current_index": 5}
-        metrics_data = [{"epoch": i} for i in range(10)]
+        # metrics_data = [{"epoch": i} for i in range(10)]
 
         if not state or state.get("mode") != "playing":
             result = state
@@ -979,5 +969,5 @@ class TestUpdateReplayUI:
 
         max_index = len(metrics_data) - 1 if metrics_data else 0
         current_index = state.get("current_index", 0) if state else 0
-
+        assert current_index <= max_index
         assert current_index == 0

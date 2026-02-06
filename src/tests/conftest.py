@@ -318,6 +318,7 @@ def reset_singletons():
     """Reset singleton instances before each test for proper isolation."""
     # Import here to avoid circular imports
     with contextlib.suppress(ImportError):
+        import demo_mode as demo_mode_module
         from config_manager import ConfigManager
         from demo_mode import DemoMode
 
@@ -341,6 +342,13 @@ def reset_singletons():
                         instance.stop()
             DemoMode._instances.clear()
 
+        # Reset module-level _demo_instance singleton used by get_demo_mode()
+        if hasattr(demo_mode_module, "_demo_instance"):
+            if demo_mode_module._demo_instance is not None and hasattr(demo_mode_module._demo_instance, "stop"):
+                with contextlib.suppress(Exception):
+                    demo_mode_module._demo_instance.stop()
+            demo_mode_module._demo_instance = None
+
     # Reset callback context adapter
     with contextlib.suppress(ImportError):
         from frontend.callback_context import CallbackContextAdapter
@@ -350,6 +358,7 @@ def reset_singletons():
 
     # Clean up after test
     with contextlib.suppress(ImportError):
+        import demo_mode as demo_mode_module
         from config_manager import ConfigManager
         from demo_mode import DemoMode
 
@@ -370,6 +379,13 @@ def reset_singletons():
                     with contextlib.suppress(Exception):
                         instance.stop()
             DemoMode._instances.clear()
+
+        # Reset module-level _demo_instance singleton used by get_demo_mode()
+        if hasattr(demo_mode_module, "_demo_instance"):
+            if demo_mode_module._demo_instance is not None and hasattr(demo_mode_module._demo_instance, "stop"):
+                with contextlib.suppress(Exception):
+                    demo_mode_module._demo_instance.stop()
+            demo_mode_module._demo_instance = None
 
 
 # Fake backend root fixture for testing CasCor integration

@@ -216,16 +216,12 @@ class CascorLogger:
 
             if self.config.get("console", {}).get("colored", True):
                 console_formatter = ColoredFormatter(
-                    fmt=self.config.get("console", {}).get(
-                        "format", "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
-                    ),
+                    fmt=self.config.get("console", {}).get("format", "%(asctime)s | %(name)s | %(levelname)s | %(message)s"),
                     datefmt=self.config.get("global", {}).get("date_format", "%Y-%m-%d %H:%M:%S"),
                 )
             else:
                 console_formatter = logging.Formatter(
-                    fmt=self.config.get("console", {}).get(
-                        "format", "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
-                    ),
+                    fmt=self.config.get("console", {}).get("format", "%(asctime)s | %(name)s | %(levelname)s | %(message)s"),
                     datefmt=self.config.get("global", {}).get("date_format", "%Y-%m-%d %H:%M:%S"),
                 )
 
@@ -270,9 +266,7 @@ class CascorLogger:
     def _log_with_context(self, level: int, message: str, **kwargs):
         """Internal method to log with context data."""
         # Create log record
-        record = self.logger.makeRecord(
-            name=self.logger.name, level=level, fn="", lno=0, msg=message, args=(), exc_info=None
-        )
+        record = self.logger.makeRecord(name=self.logger.name, level=level, fn="", lno=0, msg=message, args=(), exc_info=None)
 
         # Add context data
         record.context_data = kwargs
@@ -310,7 +304,7 @@ class CascorLogger:
 
     def verbose(self, message: str, **kwargs):
         """Log detailed debugging information."""
-        self._log_with_context(logging.VERBOSE, message, **kwargs)
+        self._log_with_context(self.VERBOSE_LEVEL, message, **kwargs)
 
     def trace(self, message: str, **kwargs):
         """Log detailed tracing information."""
@@ -346,9 +340,7 @@ class TrainingLogger(CascorLogger):
 
     def log_epoch_start(self, epoch: int, total_epochs: int):
         """Log training epoch initiation."""
-        self.info(
-            f"Starting epoch {epoch}/{total_epochs}", epoch=epoch, total_epochs=total_epochs, event_type="epoch_start"
-        )
+        self.info(f"Starting epoch {epoch}/{total_epochs}", epoch=epoch, total_epochs=total_epochs, event_type="epoch_start")
 
     def log_epoch_metrics(self, epoch: int, metrics: Dict[str, float]):
         """Log training metrics for completed epoch."""
@@ -357,9 +349,7 @@ class TrainingLogger(CascorLogger):
 
     def log_cascade_event(self, event_type: str, details: Dict):
         """Log cascade correlation specific events."""
-        self.info(
-            f"Cascade event: {event_type}", cascade_event_type=event_type, details=details, event_type="cascade_event"
-        )
+        self.info(f"Cascade event: {event_type}", cascade_event_type=event_type, details=details, event_type="cascade_event")
 
     def log_network_topology_change(self, old_structure: Dict, new_structure: Dict):
         """Log changes in network topology."""
@@ -415,15 +405,11 @@ class SystemLogger(CascorLogger):
 
     def log_startup_sequence(self, components: List[str]):
         """Log application startup sequence."""
-        self.info(
-            f"Application startup - Components: {', '.join(components)}", components=components, event_type="startup"
-        )
+        self.info(f"Application startup - Components: {', '.join(components)}", components=components, event_type="startup")
 
     def log_performance_metrics(self, component: str, metrics: Dict[str, float]):
         """Log performance timing and resource usage."""
-        self.debug(
-            f"Performance metrics for {component}", component=component, metrics=metrics, event_type="performance"
-        )
+        self.debug(f"Performance metrics for {component}", component=component, metrics=metrics, event_type="performance")
 
     def log_websocket_connection(self, client_id: str, event_type: str):
         """Log WebSocket connection events."""
@@ -512,11 +498,13 @@ class LoggingConfig:
             # Fallback to default config if YAML is invalid
             return self._get_default_config()
 
+        # Handle empty YAML file (yaml.safe_load returns None)
+        if not config:
+            return self._get_default_config()
+
         # Environment variable overrides
         if "logging" in config:
-            config["logging"]["console"]["level"] = os.getenv(
-                "CASCOR_CONSOLE_LOG_LEVEL", config["logging"]["console"]["level"]
-            )
+            config["logging"]["console"]["level"] = os.getenv("CASCOR_CONSOLE_LOG_LEVEL", config["logging"]["console"]["level"])
 
             config["logging"]["file"]["level"] = os.getenv("CASCOR_FILE_LOG_LEVEL", config["logging"]["file"]["level"])
 

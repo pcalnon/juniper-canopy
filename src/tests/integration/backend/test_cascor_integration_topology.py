@@ -178,9 +178,7 @@ class TestCascorIntegrationTopology:
                 network.output_size = 1
                 network.output_weights = torch.tensor([[1.0, 2.0, 3.0]])
                 network.output_bias = torch.tensor([0.5])
-                network.hidden_units = [
-                    {"weights": torch.tensor([0.1, 0.2]), "bias": 0.3, "activation_fn": torch.sigmoid}
-                ]
+                network.hidden_units = [{"weights": torch.tensor([0.1, 0.2]), "bias": 0.3, "activation_fn": torch.sigmoid}]
 
                 integration.network = network
 

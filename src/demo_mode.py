@@ -225,9 +225,7 @@ class DemoMode:
                 self.logger.info(f"Max hidden units from env: {self.max_hidden_units}")
             except ValueError:
                 self.logger.warning(f"Invalid CASCOR_TRAINING_HIDDEN_UNITS: {hidden_units_env}")
-                self.max_hidden_units = training_defaults.get(
-                    "hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS
-                )
+                self.max_hidden_units = training_defaults.get("hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)
         else:
             self.max_hidden_units = training_defaults.get("hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)
 
@@ -244,13 +242,7 @@ class DemoMode:
         # Metrics buffer for realistic curves
         self.metrics_history = deque(maxlen=1000)
 
-        self.logger.info(
-            f"DemoMode configuration: "
-            f"max_epochs={self.max_epochs}, "
-            f"max_hidden_units={self.max_hidden_units}, "
-            f"cascade_every={self.cascade_every}, "
-            f"update_interval={self.update_interval}s"
-        )
+        self.logger.info(f"DemoMode configuration: " f"max_epochs={self.max_epochs}, " f"max_hidden_units={self.max_hidden_units}, " f"cascade_every={self.cascade_every}, " f"update_interval={self.update_interval}s")
 
         # TrainingState instance
         try:
@@ -817,10 +809,7 @@ class DemoMode:
     def pause(self):
         """Pause demo training simulation."""
         # Save candidate state if in candidate phase (only if not already saved)
-        if (
-            self.state_machine.get_phase() == TrainingPhase.CANDIDATE
-            and self.state_machine.get_candidate_state() is None
-        ):
+        if self.state_machine.get_phase() == TrainingPhase.CANDIDATE and self.state_machine.get_candidate_state() is None:
             candidate_state = {
                 "epoch": self.current_epoch,
                 "loss": self.current_loss,

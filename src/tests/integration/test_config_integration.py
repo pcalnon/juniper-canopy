@@ -128,9 +128,7 @@ class TestWebSocketIntegration:
 
     def test_websocket_env_override(self):
         """Test WebSocket manager respects environment overrides."""
-        with patch.dict(
-            os.environ, {"CASCOR_WEBSOCKET_MAX_CONNECTIONS": "200", "CASCOR_WEBSOCKET_HEARTBEAT_INTERVAL": "45"}
-        ):
+        with patch.dict(os.environ, {"CASCOR_WEBSOCKET_MAX_CONNECTIONS": "200", "CASCOR_WEBSOCKET_HEARTBEAT_INTERVAL": "45"}):
             max_conn_env = os.getenv("CASCOR_WEBSOCKET_MAX_CONNECTIONS")
             heartbeat_env = os.getenv("CASCOR_WEBSOCKET_HEARTBEAT_INTERVAL")
 

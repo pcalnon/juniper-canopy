@@ -231,6 +231,12 @@ async def test_api_set_params_integration():
     import httpx
 
     async with httpx.AsyncClient() as client:
+        # Check server reachability first
+        try:
+            await client.get("http://localhost:8050/health", timeout=2)
+        except (httpx.ConnectError, httpx.TimeoutException):
+            pytest.skip("Server not reachable at localhost:8050 (start with ./demo)")
+
         # Set parameters via API
         response = await client.post("http://localhost:8050/api/set_params", json={"learning_rate": 0.08, "max_hidden_units": 6})
 

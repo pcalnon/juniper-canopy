@@ -735,9 +735,7 @@ class TestTrainingStatus:
             integration.network = mock_network
             integration.monitoring_active = True
 
-            integration.training_monitor.get_current_state = Mock(
-                return_value={"is_training": True, "current_epoch": 42}
-            )
+            integration.training_monitor.get_current_state = Mock(return_value={"is_training": True, "current_epoch": 42})
 
             status = integration.get_training_status()
 
@@ -853,9 +851,7 @@ class TestPathResolutionEdgeCases:
             with patch.object(CascorIntegration, "_import_backend_modules"):
                 integration = CascorIntegration()
 
-                assert (
-                    "yaml" in str(integration.backend_path).lower() or "config" in str(integration.backend_path).lower()
-                )
+                assert "yaml" in str(integration.backend_path).lower() or "config" in str(integration.backend_path).lower()
 
     @patch("backend.cascor_integration.Path.exists")
     @patch("backend.cascor_integration.ConfigManager")

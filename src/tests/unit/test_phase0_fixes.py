@@ -317,9 +317,7 @@ class TestNetworkVisualizerLegendP09:
         from frontend.components.network_visualizer import NetworkVisualizer
 
         visualizer = NetworkVisualizer({})
-        fig = visualizer._create_network_graph(
-            sample_topology, layout_type="hierarchical", show_weights=False, theme="light"
-        )
+        fig = visualizer._create_network_graph(sample_topology, layout_type="hierarchical", show_weights=False, theme="light")
 
         legend = fig.layout.legend
         assert legend.x == 0.02
@@ -332,9 +330,7 @@ class TestNetworkVisualizerLegendP09:
         from frontend.components.network_visualizer import NetworkVisualizer
 
         visualizer = NetworkVisualizer({})
-        fig = visualizer._create_network_graph(
-            sample_topology, layout_type="hierarchical", show_weights=False, theme="dark"
-        )
+        fig = visualizer._create_network_graph(sample_topology, layout_type="hierarchical", show_weights=False, theme="dark")
 
         legend = fig.layout.legend
         assert legend.bgcolor == "rgba(36, 36, 36, 0.7)"
@@ -345,9 +341,7 @@ class TestNetworkVisualizerLegendP09:
         from frontend.components.network_visualizer import NetworkVisualizer
 
         visualizer = NetworkVisualizer({})
-        fig = visualizer._create_network_graph(
-            sample_topology, layout_type="hierarchical", show_weights=False, theme="light"
-        )
+        fig = visualizer._create_network_graph(sample_topology, layout_type="hierarchical", show_weights=False, theme="light")
 
         legend = fig.layout.legend
         assert legend.bgcolor == "rgba(248, 249, 250, 0.7)"
@@ -360,15 +354,11 @@ class TestNetworkVisualizerLegendP09:
         visualizer = NetworkVisualizer({})
 
         # Test dark mode
-        fig_dark = visualizer._create_network_graph(
-            sample_topology, layout_type="hierarchical", show_weights=False, theme="dark"
-        )
+        fig_dark = visualizer._create_network_graph(sample_topology, layout_type="hierarchical", show_weights=False, theme="dark")
         assert "0.7)" in fig_dark.layout.legend.bgcolor
 
         # Test light mode
-        fig_light = visualizer._create_network_graph(
-            sample_topology, layout_type="hierarchical", show_weights=False, theme="light"
-        )
+        fig_light = visualizer._create_network_graph(sample_topology, layout_type="hierarchical", show_weights=False, theme="light")
         assert "0.7)" in fig_light.layout.legend.bgcolor
 
 

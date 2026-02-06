@@ -57,9 +57,7 @@ class TestTrainingMetricsExtraction:
 
         adapter = DataAdapter()
 
-        metrics = adapter.extract_training_metrics(
-            epoch=5, loss=0.3, accuracy=0.85, learning_rate=0.02, validation_loss=0.4, validation_accuracy=0.82
-        )
+        metrics = adapter.extract_training_metrics(epoch=5, loss=0.3, accuracy=0.85, learning_rate=0.02, validation_loss=0.4, validation_accuracy=0.82)
 
         assert metrics.validation_loss == 0.4
         assert metrics.validation_accuracy == 0.82
@@ -70,9 +68,7 @@ class TestTrainingMetricsExtraction:
 
         adapter = DataAdapter()
 
-        metrics = adapter.extract_training_metrics(
-            epoch=20, loss=0.2, accuracy=0.95, learning_rate=0.01, hidden_units=5, cascade_phase="candidate"
-        )
+        metrics = adapter.extract_training_metrics(epoch=20, loss=0.2, accuracy=0.95, learning_rate=0.01, hidden_units=5, cascade_phase="candidate")
 
         assert metrics.hidden_units == 5
         assert metrics.cascade_phase == "candidate"
@@ -402,9 +398,7 @@ class TestNetworkStatistics:
         hidden_weights = torch.randn(4, 3)
         output_weights = torch.randn(2, 7)
 
-        stats = adapter.get_network_statistics(
-            input_weights=input_weights, hidden_weights=hidden_weights, output_weights=output_weights
-        )
+        stats = adapter.get_network_statistics(input_weights=input_weights, hidden_weights=hidden_weights, output_weights=output_weights)
 
         assert "weight_statistics" in stats
         assert "total_nodes" in stats
@@ -431,9 +425,7 @@ class TestNetworkStatistics:
         input_weights = torch.randn(2, 1)
         output_weights = torch.randn(1, 2)
 
-        stats = adapter.get_network_statistics(
-            input_weights=input_weights, output_weights=output_weights, topology=topology
-        )
+        stats = adapter.get_network_statistics(input_weights=input_weights, output_weights=output_weights, topology=topology)
 
         assert stats["total_nodes"] == 3
         assert stats["total_connections"] == 2
@@ -461,9 +453,7 @@ class TestDataStructures:
         """Test NetworkNode to_dict conversion."""
         from backend.data_adapter import NetworkNode
 
-        node = NetworkNode(
-            id="test_node", layer=1, node_type="hidden", position=(10, 20), activation_function="relu", bias=0.5
-        )
+        node = NetworkNode(id="test_node", layer=1, node_type="hidden", position=(10, 20), activation_function="relu", bias=0.5)
 
         result = node.to_dict()
 
@@ -518,9 +508,7 @@ class TestEdgeCases:
 
         adapter = DataAdapter()
 
-        metrics = adapter.extract_training_metrics(
-            epoch=1, loss=0.5, accuracy=0.8, learning_rate=0.01, validation_loss=None, validation_accuracy=None
-        )
+        metrics = adapter.extract_training_metrics(epoch=1, loss=0.5, accuracy=0.8, learning_rate=0.01, validation_loss=None, validation_accuracy=None)
 
         assert metrics.validation_loss is None
         assert metrics.validation_accuracy is None

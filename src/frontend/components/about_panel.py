@@ -104,13 +104,11 @@ class AboutPanel(BaseComponent):
                 html.Div(
                     [
                         html.P(
-                            "Juniper Canopy is a real-time monitoring and diagnostic frontend for the "
-                            "Cascade Correlation Neural Network (CasCor) prototype.",
+                            "Juniper Canopy is a real-time monitoring and diagnostic frontend for the " "Cascade Correlation Neural Network (CasCor) prototype.",
                             style={"fontSize": "15px", "lineHeight": "1.6"},
                         ),
                         html.P(
-                            "It provides interactive visualization of network training, topology, "
-                            "decision boundaries, and dataset analysis.",
+                            "It provides interactive visualization of network training, topology, " "decision boundaries, and dataset analysis.",
                             style={"fontSize": "15px", "lineHeight": "1.6", "marginBottom": "20px"},
                         ),
                     ]
@@ -136,11 +134,7 @@ class AboutPanel(BaseComponent):
                                     style={"color": "#6c757d"},
                                 ),
                                 html.P(
-                                    "Permission is hereby granted, free of charge, to any person obtaining a copy "
-                                    "of this software and associated documentation files, to deal in the Software "
-                                    "without restriction, including without limitation the rights to use, copy, "
-                                    "modify, merge, publish, distribute, sublicense, and/or sell copies of the "
-                                    "Software.",
+                                    "Permission is hereby granted, free of charge, to any person obtaining a copy " "of this software and associated documentation files, to deal in the Software " "without restriction, including without limitation the rights to use, copy, " "modify, merge, publish, distribute, sublicense, and/or sell copies of the " "Software.",
                                     style={"fontSize": "12px", "color": "#6c757d", "fontStyle": "italic"},
                                 ),
                             ]
@@ -168,8 +162,7 @@ class AboutPanel(BaseComponent):
                                         html.Li(
                                             [
                                                 html.Strong("CasCor Algorithm: "),
-                                                "Based on the Cascade-Correlation learning architecture "
-                                                "by Scott E. Fahlman and Christian Lebiere (1990)",
+                                                "Based on the Cascade-Correlation learning architecture " "by Scott E. Fahlman and Christian Lebiere (1990)",
                                             ]
                                         ),
                                         html.Li(
@@ -327,9 +320,7 @@ class AboutPanel(BaseComponent):
         )
         def toggle_system_info(n_clicks, is_open):
             """Toggle system information section."""
-            if n_clicks:
-                return not is_open
-            return is_open
+            return not is_open if n_clicks else is_open
 
         @app.callback(
             Output(f"{self.component_id}-system-info-content", "children"),

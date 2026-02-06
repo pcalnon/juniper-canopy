@@ -209,9 +209,7 @@ class TestApplyButtonDashboardIntegration:
         # Float precision error that occurs after multiple step increments
         # e.g., 0.01 + 0.001 * 50 = 0.06000000000000004
         lr_with_precision_error = 0.06000000000000004
-        disabled, status = manager._track_param_changes_handler(
-            lr=lr_with_precision_error, hu=10, epochs=200, applied=applied
-        )
+        disabled, status = manager._track_param_changes_handler(lr=lr_with_precision_error, hu=10, epochs=200, applied=applied)
         assert disabled is True, f"Should be disabled but got {disabled} for {lr_with_precision_error}"
         assert status == "", f"Should have no status but got '{status}'"
 

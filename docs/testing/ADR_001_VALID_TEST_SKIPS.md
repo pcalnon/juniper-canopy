@@ -49,7 +49,7 @@ These tests are designed to verify real HDF5 file listing from the filesystem. I
 
 The FastAPI TestClient makes requests directly to the ASGI application without going through HTTP middleware layers. CORS headers are added by the `CORSMiddleware` which only activates for actual HTTP requests with `Origin` headers.
 
-**Reference:** https://github.com/tiangolo/fastapi/discussions/7726
+**Reference:** <https://github.com/tiangolo/fastapi/discussions/7726>
 
 **Alternative:** Use `httpx` with a running server for CORS testing (requires `@pytest.mark.requires_server`).
 

@@ -186,9 +186,8 @@ class TestCassandraPanelLayout:
 
         def find_text_containing(component, text):
             found = []
-            if isinstance(component, html.H5):
-                if hasattr(component, "children") and text in str(component.children):
-                    found.append(component)
+            if isinstance(component, html.H5) and (hasattr(component, "children") and text in str(component.children)):
+                found.append(component)
             if hasattr(component, "children"):
                 if isinstance(component.children, list):
                     for child in component.children:

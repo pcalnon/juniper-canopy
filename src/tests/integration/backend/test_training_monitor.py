@@ -171,9 +171,7 @@ class TestTrainingMonitor:
         callback = MagicMock()
         monitor.register_callback("epoch_end", callback)
 
-        monitor.on_epoch_end(
-            epoch=1, loss=0.5, accuracy=0.8, learning_rate=0.01, validation_loss=0.6, validation_accuracy=0.75
-        )
+        monitor.on_epoch_end(epoch=1, loss=0.5, accuracy=0.8, learning_rate=0.01, validation_loss=0.6, validation_accuracy=0.75)
 
         assert len(monitor.metrics_buffer) == 1
         assert monitor.metrics_buffer[0].epoch == 1
