@@ -83,7 +83,10 @@ class TestRedisClientDisabledByConfig:
         assert "message" in status
 
     def test_disabled_config_returns_disabled_metrics(self, mock_config_manager):
-        """When cache.enabled=False, get_metrics returns DISABLED with no metrics."""
+        """
+        When cache.enabled=False,
+        get_metrics returns DISABLED with no metrics.
+        """
         from backend.redis_client import RedisClient
 
         client = RedisClient(mock_config_manager)
@@ -146,51 +149,42 @@ class TestRedisClientDemoMode:
 
         assert status["status"] == "UP"
         assert status["mode"] == "DEMO"
-        assert "simulated" in status["message"].lower() or "demo" in status["message"].lower()
+        assert "simulated" in (status["message"].lower()) or "demo" in (status["message"].lower())
         assert "timestamp" in status
 
     def test_demo_mode_returns_synthetic_metrics(self, mock_config_manager, monkeypatch):
         """In demo mode, get_metrics returns synthetic data."""
         monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
-
         from backend.redis_client import RedisClient
 
         client = RedisClient(mock_config_manager)
         metrics = client.get_metrics()
-
         assert metrics["status"] == "UP"
         assert metrics["mode"] == "DEMO"
         assert metrics["metrics"] is not None
-
         memory = metrics["metrics"]["memory"]
         assert "used_memory_bytes" in memory
         assert "used_memory_human" in memory
-
         stats = metrics["metrics"]["stats"]
         assert "total_connections_received" in stats
         assert "keyspace_hits" in stats
         assert "hit_rate_percent" in stats
-
         clients = metrics["metrics"]["clients"]
         assert "connected_clients" in clients
-
         assert "keyspace" in metrics["metrics"]
 
     def test_demo_mode_is_available_true(self, mock_config_manager, monkeypatch):
         """In demo mode, is_available returns True."""
         monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
-
         from backend.redis_client import RedisClient
 
         client = RedisClient(mock_config_manager)
-
         assert client.is_available() is True
 
     def test_demo_mode_true_values(self, mock_config_manager, monkeypatch):
         """Demo mode recognizes various truthy values."""
         for demo_val in ["1", "true", "yes", "on"]:
             monkeypatch.setenv("CASCOR_DEMO_MODE", demo_val)
-
             from backend.redis_client import RedisClient
 
             client = RedisClient(mock_config_manager)
@@ -581,7 +575,9 @@ class TestPingErrorHandling:
         assert result is False
 
     def test_ping_handles_timeout_error(self, enabled_redis_config):
-        """_ping() handles RedisTimeoutError and returns False (lines 243-246)."""
+        """
+        _ping() handles RedisTimeoutError and returns False (lines 243-246)
+        """
         mock_redis = MagicMock()
         mock_pool = MagicMock()
         mock_redis.ConnectionPool.return_value = mock_pool
@@ -637,7 +633,10 @@ class TestGetStatusInfoRetrievalError:
     """Test get_status() when info retrieval fails (lines 330-354)."""
 
     def test_get_status_returns_limited_info_on_info_error(self, enabled_redis_config):
-        """get_status returns limited info when info() raises exception (lines 352-364)."""
+        """
+        get_status returns limited info
+          when info() raises exception (lines 352-364).
+        """
         mock_redis = MagicMock()
         mock_pool = MagicMock()
         mock_redis.ConnectionPool.return_value = mock_pool
@@ -661,7 +660,10 @@ class TestGetStatusInfoRetrievalError:
                 assert "INFO command failed" in status["details"]["info_error"]
 
     def test_get_status_with_full_info_success(self, enabled_redis_config):
-        """get_status returns full info when all info() calls succeed (lines 330-351)."""
+        """
+        get_status returns full info when all info() calls succeed
+        (lines 330-351).
+        """
         mock_redis = MagicMock()
         mock_pool = MagicMock()
         mock_redis.ConnectionPool.return_value = mock_pool
@@ -697,7 +699,10 @@ class TestGetStatusInfoRetrievalError:
                 assert status["details"]["used_memory_human"] == "10.5M"
 
     def test_get_status_unavailable_when_client_none_but_enabled(self, enabled_redis_config):
-        """get_status returns UNAVAILABLE when client is None but config enabled (lines 312-325)."""
+        """
+        get_status returns UNAVAILABLE when client is None
+        but config enabled (lines 312-325).
+        """
         with patch("backend.redis_client.REDIS_AVAILABLE", True):
             mock_redis = MagicMock()
             mock_redis.ConnectionPool.side_effect = Exception("Pool creation failed")
