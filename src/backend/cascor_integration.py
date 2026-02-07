@@ -1194,15 +1194,14 @@ class CascorIntegration:
         Raises: None
         Notes:
             If x or y are not provided, attempts to extract from connected network.
-            If no dataset is available, generates a mock spiral dataset for demo purposes.
-            Dictionary with dataset information:
+            If no dataset is available, fetches from JuniperData service.
+            Returns canonical schema with 'inputs' and 'targets' keys:
             {
-                'features': list,  # 2D array
-                'labels': list,    # 1D array
+                'inputs': list,       # 2D array of features
+                'targets': list,      # 1D array of class labels
                 'num_samples': int,
                 'num_features': int,
                 'num_classes': int,
-                'class_distribution': dict
             }
         Returns:
             Optional[Dictionary] - Dataset information dictionary
@@ -1224,7 +1223,7 @@ class CascorIntegration:
                 x = x.cpu().numpy()
             if isinstance(y, torch.Tensor):
                 y = y.cpu().numpy()
-            return self.data_adapter.prepare_dataset_for_visualization(features=x, labels=y, dataset_name="training")
+            return self.data_adapter.prepare_dataset_for_visualization(inputs=x, targets=y, dataset_name="training")
         except Exception as e:
             self.logger.error(f"Failed to get dataset info: {e}", exc_info=True)
             import traceback
@@ -1235,26 +1234,28 @@ class CascorIntegration:
     def _generate_missing_dataset_info(self):
         """
         Description:
-            Generate mock dataset information when no real dataset is available.
+            Generate dataset information when no real dataset is available.
+            Uses JuniperData service exclusively (JUNIPER_DATA_URL is required).
         Args: None
-        Raises: None
+        Raises:
+            JuniperDataConfigurationError: If JUNIPER_DATA_URL is not set
         Notes:
-            Uses JuniperData service if JUNIPER_DATA_URL is set, otherwise generates
-            a simple spiral dataset locally for demonstration purposes.
+            JuniperData service is mandatory. No local fallback is provided.
         Returns:
-            Dictionary with mock dataset information
+            Dictionary with dataset information
         Example:
             dataset_info = integration._generate_missing_dataset_info()
         """
-        if juniper_data_url := os.environ.get("JUNIPER_DATA_URL"):
-            dataset = self._generate_dataset_from_juniper_data(juniper_data_url)
-            if dataset is not None:
-                return dataset
-            self.logger.warning("JuniperData service unavailable, falling back to local generation")
+        from juniper_data_client.exceptions import JuniperDataConfigurationError
 
-        return self._generate_dataset_local()
+        juniper_data_url = os.environ.get("JUNIPER_DATA_URL")
+        if not juniper_data_url:
+            raise JuniperDataConfigurationError("JUNIPER_DATA_URL environment variable is required. " "All datasets must be fetched from the JuniperData service. " "Set JUNIPER_DATA_URL=http://localhost:8100 to connect to a local instance.")
 
-    def _generate_dataset_from_juniper_data(self, juniper_data_url: str, algorithm: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        self.logger.info(f"Fetching dataset from JuniperData at {juniper_data_url}")
+        return self._generate_dataset_from_juniper_data(juniper_data_url)
+
+    def _generate_dataset_from_juniper_data(self, juniper_data_url: str, algorithm: Optional[str] = None) -> Dict[str, Any]:
         """
         Generate dataset using JuniperData service.
 
@@ -1263,28 +1264,39 @@ class CascorIntegration:
             algorithm: Optional algorithm name for backward compatibility
 
         Returns:
-            Dataset dictionary or None if service unavailable
+            Dataset dictionary with canonical schema (inputs/targets)
+
+        Raises:
+            JuniperDataClientError: If the JuniperData request fails
         """
-        try:
-            return self._create_juniper_dataset(juniper_data_url, algorithm=algorithm)
-        except ImportError:
-            self.logger.warning("juniper_data_client not available")
-            return None
-        except Exception as e:
-            self.logger.warning(f"JuniperData request failed: {type(e).__name__}: {e}")
-            return None
+        return self._create_juniper_dataset(juniper_data_url, algorithm=algorithm)
 
     # TODO Rename this here and in `_generate_dataset_from_juniper_data`
     def _create_juniper_dataset(self, juniper_data_url, algorithm: Optional[str] = None):
+        """
+        Create dataset via JuniperData service.
+
+        Returns canonical schema with 'inputs' and 'targets' keys for frontend compatibility.
+
+        Args:
+            juniper_data_url: URL of the JuniperData service
+            algorithm: Optional algorithm name
+
+        Returns:
+            Dataset dictionary with canonical schema
+
+        Raises:
+            JuniperDataClientError: If the JuniperData request fails
+        """
         from juniper_data_client import JuniperDataClient
 
         client = JuniperDataClient(base_url=juniper_data_url)
 
-        n_samples = 100
+        n_samples = 200
         params = {
-            "n_points_per_spiral": n_samples,
+            "n_points_per_spiral": n_samples // 2,
             "n_spirals": 2,
-            "noise": 0.0,
+            "noise": 0.1,
             "seed": 42,
         }
         if algorithm is not None:
@@ -1297,44 +1309,53 @@ class CascorIntegration:
 
         dataset_id = response.get("dataset_id")
         if not dataset_id:
-            self.logger.warning("JuniperData response missing dataset_id")
-            return None
+            raise ValueError("JuniperData response missing dataset_id")
 
         npz_data = client.download_artifact_npz(dataset_id)
 
-        features = npz_data.get("X_full")
+        inputs = npz_data.get("X_full")
         labels_one_hot = npz_data.get("y_full")
 
-        if features is None or labels_one_hot is None:
-            self.logger.warning("JuniperData artifact missing X_full/y_full")
-            return None
+        if inputs is None or labels_one_hot is None:
+            raise ValueError("JuniperData artifact missing required keys: X_full, y_full")
 
-        labels = np.argmax(labels_one_hot, axis=1).astype(np.float32)
-        num_samples = len(features)
+        targets = np.argmax(labels_one_hot, axis=1).astype(np.float32)
+        num_samples = len(inputs)
 
-        unique, counts = np.unique(labels, return_counts=True)
+        unique, counts = np.unique(targets, return_counts=True)
         class_distribution = {int(k): int(v) for k, v in zip(unique, counts, strict=True)}
 
         self.logger.info(f"Generated spiral dataset via JuniperData: {num_samples} samples")
 
         return {
-            "features": features.tolist(),
-            "labels": labels.tolist(),
+            "inputs": inputs.tolist(),
+            "targets": targets.tolist(),
             "num_samples": num_samples,
-            "num_features": features.shape[1] if len(features.shape) > 1 else 2,
+            "num_features": inputs.shape[1] if len(inputs.shape) > 1 else 2,
             "num_classes": len(unique),
             "class_distribution": class_distribution,
             "dataset_name": "Spiral Dataset (JuniperData)",
-            "mock_mode": False,
         }
 
     def _generate_dataset_local(self) -> Dict[str, Any]:
         """
         Generate mock spiral dataset locally.
 
+        .. deprecated::
+            This method is deprecated and will be removed in a future release.
+            Dataset generation is now handled by the JuniperData service.
+
         Returns:
             Dictionary with mock dataset information
         """
+        import warnings
+
+        warnings.warn(
+            "CascorIntegration._generate_dataset_local() is deprecated and will be removed in a future release. " "Dataset generation is now handled by the JuniperData service.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         self.logger.info("No dataset available, generating mock spiral dataset")
 
         n_samples = 100
@@ -1348,14 +1369,13 @@ class CascorIntegration:
         labels = np.concatenate([np.zeros(n_samples), np.ones(n_samples)])
 
         return {
-            "features": features.tolist(),
-            "labels": labels.tolist(),
+            "inputs": features.tolist(),
+            "targets": labels.tolist(),
             "num_samples": 2 * n_samples,
             "num_features": 2,
             "num_classes": 2,
             "class_distribution": {0: n_samples, 1: n_samples},
             "dataset_name": "Mock Spiral Dataset",
-            "mock_mode": True,
         }
 
     def get_prediction_function(self) -> Optional[Callable]:

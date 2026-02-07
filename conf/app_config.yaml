@@ -265,6 +265,23 @@ backend:
     # backend_path: ~/Development/python/JuniperCascor/juniper_cascor
     backend_path: "${CASCOR_BACKEND_PATH:../../JuniperCascor/juniper_cascor}"
 
+  # JuniperData service integration (CAN-INT-004)
+  # All datasets are fetched from JuniperData - JUNIPER_DATA_URL is REQUIRED
+  juniper_data:
+    enabled: true
+    url: "${JUNIPER_DATA_URL:http://localhost:8100}"
+    api_key: "${JUNIPER_DATA_API_KEY:}"
+    timeout: 30
+    retry_attempts: 3
+    retry_backoff_base: 0.5
+    health_check_on_startup: true
+    default_generator: spiral
+    default_params:
+      n_points_per_spiral: 100
+      n_spirals: 2
+      noise: 0.1
+      seed: 42
+
   # Communication settings
   communication:
     websocket:

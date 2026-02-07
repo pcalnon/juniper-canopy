@@ -359,101 +359,102 @@ class DemoMode:
 
     def _generate_spiral_dataset(self, n_samples: int = 200, algorithm: Optional[str] = None) -> Dict[str, Any]:
         """
-        Generate two-class spiral dataset.
+        Generate two-class spiral dataset from JuniperData service.
 
-        Uses JuniperData service if JUNIPER_DATA_URL environment variable is set,
-        otherwise falls back to local generation.
+        JuniperData service is REQUIRED. The JUNIPER_DATA_URL environment variable
+        must be set. No local fallback is provided.
 
         Args:
-            n_samples: Number of samples per class
+            n_samples: Number of total samples (split across classes)
             algorithm: Optional algorithm parameter for backward compatibility
 
         Returns:
-            Dataset dictionary
-        """
-        juniper_data_url = os.environ.get("JUNIPER_DATA_URL")
-        if juniper_data_url:
-            dataset = self._generate_spiral_dataset_from_juniper_data(n_samples, juniper_data_url, algorithm=algorithm)
-            if dataset is not None:
-                return dataset
-            self.logger.warning("JuniperData service unavailable, falling back to local generation")
+            Dataset dictionary with keys: inputs, targets, inputs_tensor, targets_tensor,
+            num_samples, num_features, num_classes
 
-        return self._generate_spiral_dataset_local(n_samples)
+        Raises:
+            JuniperDataConfigurationError: If JUNIPER_DATA_URL is not set
+        """
+        from juniper_data_client.exceptions import JuniperDataConfigurationError
+
+        juniper_data_url = os.environ.get("JUNIPER_DATA_URL")
+        if not juniper_data_url:
+            raise JuniperDataConfigurationError("JUNIPER_DATA_URL environment variable is required. " "All datasets must be fetched from the JuniperData service. " "Set JUNIPER_DATA_URL=http://localhost:8100 to connect to a local instance.")
+
+        self.logger.info(f"Fetching dataset from JuniperData at {juniper_data_url}")
+        return self._generate_spiral_dataset_from_juniper_data(n_samples, juniper_data_url, algorithm=algorithm)
 
     def _generate_spiral_dataset_from_juniper_data(
         self,
         n_samples: int,
         juniper_data_url: str,
         algorithm: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """
         Generate spiral dataset using JuniperData service.
 
         Args:
-            n_samples: Number of samples per class
+            n_samples: Number of total samples (split across classes)
             juniper_data_url: URL of the JuniperData service
             algorithm: Optional algorithm parameter for backward compatibility
 
         Returns:
-            Dataset dictionary or None if service unavailable
+            Dataset dictionary
+
+        Raises:
+            JuniperDataClientError: If the JuniperData request fails
         """
-        try:
-            from juniper_data_client import JuniperDataClient
+        from juniper_data_client import JuniperDataClient
 
-            client = JuniperDataClient(base_url=juniper_data_url)
+        client = JuniperDataClient(base_url=juniper_data_url)
 
-            params = {
-                "n_points_per_spiral": n_samples // 2,
-                "n_spirals": 2,
-                "noise": 0.1,
-                "seed": 42,
-            }
-            if algorithm is not None:
-                params["algorithm"] = algorithm
+        params = {
+            "n_points_per_spiral": n_samples // 2,
+            "n_spirals": 2,
+            "noise": 0.1,
+            "seed": 42,
+        }
+        if algorithm is not None:
+            params["algorithm"] = algorithm
 
-            response = client.create_dataset(
-                generator="spiral",
-                params=params,
-                persist=False,
-            )
+        response = client.create_dataset(
+            generator="spiral",
+            params=params,
+            persist=False,
+        )
 
-            dataset_id = response.get("dataset_id")
-            if not dataset_id:
-                self.logger.warning("JuniperData response missing dataset_id")
-                return None
+        dataset_id = response.get("dataset_id")
+        if not dataset_id:
+            raise ValueError("JuniperData response missing dataset_id")
 
-            npz_data = client.download_artifact_npz(dataset_id)
+        npz_data = client.download_artifact_npz(dataset_id)
 
-            inputs = npz_data.get("X_full")
-            targets_one_hot = npz_data.get("y_full")
-            if inputs is None or targets_one_hot is None:
-                self.logger.warning("JuniperData artifact missing X_full/y_full")
-                return None
+        inputs = npz_data.get("X_full")
+        targets_one_hot = npz_data.get("y_full")
+        if inputs is None or targets_one_hot is None:
+            raise ValueError("JuniperData artifact missing required keys: X_full, y_full")
 
-            targets = np.argmax(targets_one_hot, axis=1).astype(np.float32)
+        targets = np.argmax(targets_one_hot, axis=1).astype(np.float32)
 
-            self.logger.info(f"Generated spiral dataset via JuniperData: {len(inputs)} samples")
+        self.logger.info(f"Generated spiral dataset via JuniperData: {len(inputs)} samples")
 
-            return {
-                "inputs": inputs,
-                "targets": targets,
-                "inputs_tensor": torch.from_numpy(inputs).float(),
-                "targets_tensor": torch.from_numpy(targets).float().unsqueeze(1),
-                "num_samples": len(inputs),
-                "num_features": inputs.shape[1] if len(inputs.shape) > 1 else 2,
-                "num_classes": 2,
-            }
-
-        except ImportError:
-            self.logger.warning("juniper_data_client not available")
-            return None
-        except Exception as e:
-            self.logger.warning(f"JuniperData request failed: {type(e).__name__}: {e}")
-            return None
+        return {
+            "inputs": inputs,
+            "targets": targets,
+            "inputs_tensor": torch.from_numpy(inputs).float(),
+            "targets_tensor": torch.from_numpy(targets).float().unsqueeze(1),
+            "num_samples": len(inputs),
+            "num_features": inputs.shape[1] if len(inputs.shape) > 1 else 2,
+            "num_classes": 2,
+        }
 
     def _generate_spiral_dataset_local(self, n_samples: int = 200) -> Dict[str, Any]:
         """
         Generate two-class spiral dataset locally.
+
+        .. deprecated::
+            This method is deprecated and will be removed in a future release.
+            Dataset generation is now handled by the JuniperData service.
 
         Args:
             n_samples: Number of samples per class
@@ -461,6 +462,14 @@ class DemoMode:
         Returns:
             Dataset dictionary
         """
+        import warnings
+
+        warnings.warn(
+            "DemoMode._generate_spiral_dataset_local() is deprecated and will be removed in a future release. " "Dataset generation is now handled by the JuniperData service.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         np.random.seed(42)
 
         n_per_class = n_samples // 2

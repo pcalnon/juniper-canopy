@@ -305,25 +305,35 @@ class DataAdapter:
             )
         return nodes
 
-    def prepare_dataset_for_visualization(self, features: np.ndarray, labels: np.ndarray, dataset_name: str = "training") -> Dict[str, Any]:
+    def prepare_dataset_for_visualization(self, inputs: np.ndarray = None, targets: np.ndarray = None, dataset_name: str = "training", features: np.ndarray = None, labels: np.ndarray = None) -> Dict[str, Any]:
         """
-        Prepare dataset for visualization.
+        Prepare dataset for visualization using canonical schema.
+
+        Uses 'inputs'/'targets' as the canonical key names for frontend compatibility.
 
         Args:
-            features: Feature array (N x D)
-            labels: Label array (N,)
+            inputs: Feature array (N x D) - preferred parameter name
+            targets: Label array (N,) - preferred parameter name
             dataset_name: Name of dataset
+            features: Feature array (N x D) - deprecated alias for 'inputs'
+            labels: Label array (N,) - deprecated alias for 'targets'
 
         Returns:
-            Dictionary with visualization data
+            Dictionary with canonical visualization data schema
         """
+        # Support deprecated parameter names for backward compatibility
+        if inputs is None and features is not None:
+            inputs = features
+        if targets is None and labels is not None:
+            targets = labels
+
         return {
-            "name": dataset_name,
-            "features": features.tolist() if isinstance(features, np.ndarray) else features,
-            "labels": labels.tolist() if isinstance(labels, np.ndarray) else labels,
-            "num_samples": len(features),
-            "num_features": features.shape[1] if len(features.shape) > 1 else 1,
-            "num_classes": len(np.unique(labels)),
+            "dataset_name": dataset_name,
+            "inputs": inputs.tolist() if isinstance(inputs, np.ndarray) else inputs,
+            "targets": targets.tolist() if isinstance(targets, np.ndarray) else targets,
+            "num_samples": len(inputs),
+            "num_features": inputs.shape[1] if len(inputs.shape) > 1 else 1,
+            "num_classes": len(np.unique(targets)),
         }
 
     def serialize_network_state(self, network_state: Dict[str, Any]) -> Dict[str, Any]:
