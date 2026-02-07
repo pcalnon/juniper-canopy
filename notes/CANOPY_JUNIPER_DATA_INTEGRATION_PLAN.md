@@ -16,43 +16,43 @@ All datasets used by JuniperCanopy MUST be received from JuniperData via API cal
 
 ## Current State Summary
 
-| Component                    | Status               | Notes                                                                     |
-| ---------------------------- | -------------------- | ------------------------------------------------------------------------- |
-| `JuniperDataClient`          | EXISTS (basic)       | `src/juniper_data_client/client.py` - Basic REST client, no auth/retry    |
-| Demo mode dataset generation | LOCAL (with fallback) | `src/demo_mode.py` - Tries JuniperData first, falls back to local        |
-| CascorIntegration dataset    | LOCAL (with fallback) | `src/backend/cascor_integration.py` - Same fallback pattern              |
-| `JUNIPER_DATA_URL` in config | NOT CONFIGURED       | Only env var driven, not in `app_config.yaml`                             |
-| Dataset selector dropdown    | NON-FUNCTIONAL       | `DatasetPlotter` has dropdown with `options=[]`, never populated          |
-| Dataset API endpoints        | MINIMAL              | Only `GET /api/dataset` returns single current dataset                    |
-| Client test coverage         | 0%                   | `juniper_data_client/` package entirely untested                          |
-| Schema consistency           | BROKEN               | Demo mode: `inputs/targets`, CascorIntegration: `features/labels`         |
-| Docker JuniperData service   | NOT CONFIGURED       | No JuniperData entry in `conf/docker-compose.yaml`                        |
-| JuniperData mandatory        | NO                   | Still uses optional fallback pattern (unlike JuniperCascor which is mandatory) |
-| Full test suite              | 3,215 passed         | 0 failed, 0 errors, 37 skipped (all legitimate)                          |
+| Component                    | Status                | Notes                                                                          |
+| ---------------------------- | --------------------- | ------------------------------------------------------------------------------ |
+| `JuniperDataClient`          | EXISTS (basic)        | `src/juniper_data_client/client.py` - Basic REST client, no auth/retry         |
+| Demo mode dataset generation | LOCAL (with fallback) | `src/demo_mode.py` - Tries JuniperData first, falls back to local              |
+| CascorIntegration dataset    | LOCAL (with fallback) | `src/backend/cascor_integration.py` - Same fallback pattern                    |
+| `JUNIPER_DATA_URL` in config | NOT CONFIGURED        | Only env var driven, not in `app_config.yaml`                                  |
+| Dataset selector dropdown    | NON-FUNCTIONAL        | `DatasetPlotter` has dropdown with `options=[]`, never populated               |
+| Dataset API endpoints        | MINIMAL               | Only `GET /api/dataset` returns single current dataset                         |
+| Client test coverage         | 0%                    | `juniper_data_client/` package entirely untested                               |
+| Schema consistency           | BROKEN                | Demo mode: `inputs/targets`, CascorIntegration: `features/labels`              |
+| Docker JuniperData service   | NOT CONFIGURED        | No JuniperData entry in `conf/docker-compose.yaml`                             |
+| JuniperData mandatory        | NO                    | Still uses optional fallback pattern (unlike JuniperCascor which is mandatory) |
+| Full test suite              | 3,215 passed          | 0 failed, 0 errors, 37 skipped (all legitimate)                                |
 
 ### Cross-Project Integration Status
 
-| Project       | JuniperData Integration | Plan Document                                             |
-| ------------- | ----------------------- | --------------------------------------------------------- |
-| JuniperData   | Service ready (v0.4.0)  | `JuniperData/juniper_data/notes/INTEGRATION_DEVELOPMENT_PLAN.md`     |
+| Project       | JuniperData Integration | Plan Document                                                                |
+| ------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| JuniperData   | Service ready (v0.4.0)  | `JuniperData/juniper_data/notes/INTEGRATION_DEVELOPMENT_PLAN.md`             |
 | JuniperCascor | 8/9 tasks COMPLETE      | `JuniperCascor/juniper_cascor/notes/CASCOR_JUNIPER_DATA_INTEGRATION_PLAN.md` |
-| JuniperCanopy | NOT STARTED             | This document                                              |
+| JuniperCanopy | NOT STARTED             | This document                                                                |
 
 ### JuniperData Service Capabilities (v0.4.0)
 
-| Feature                   | Status    | Notes                                          |
-| ------------------------- | --------- | ---------------------------------------------- |
-| REST API (`/v1/`)         | AVAILABLE | Full CRUD for datasets                         |
-| Generators                | 4 types   | spiral, xor, gaussian, circles                 |
-| Storage backends          | 5 types   | memory, localfs, cached, redis, huggingface    |
-| NPZ artifact download     | AVAILABLE | Standardized schema: X_train/y_train/X_test/y_test/X_full/y_full |
-| API key authentication    | AVAILABLE | Header-based: `X-API-Key`                      |
-| Rate limiting             | AVAILABLE | Per-client fixed-window                        |
-| Health endpoints          | AVAILABLE | `/v1/health`, `/v1/health/live`, `/v1/health/ready` |
-| Dataset lifecycle         | AVAILABLE | TTL, tags, filtering, batch delete, stats      |
-| Shared client package     | AVAILABLE | `juniper-data-client` pip package (DATA-012)   |
-| Dockerfile                | AVAILABLE | Multi-stage, port 8100                         |
-| Parameter aliases         | AVAILABLE | `n_points`→`n_points_per_spiral`, `noise_level`→`noise` |
+| Feature                | Status    | Notes                                                            |
+| ---------------------- | --------- | ---------------------------------------------------------------- |
+| REST API (`/v1/`)      | AVAILABLE | Full CRUD for datasets                                           |
+| Generators             | 4 types   | spiral, xor, gaussian, circles                                   |
+| Storage backends       | 5 types   | memory, localfs, cached, redis, huggingface                      |
+| NPZ artifact download  | AVAILABLE | Standardized schema: X_train/y_train/X_test/y_test/X_full/y_full |
+| API key authentication | AVAILABLE | Header-based: `X-API-Key`                                        |
+| Rate limiting          | AVAILABLE | Per-client fixed-window                                          |
+| Health endpoints       | AVAILABLE | `/v1/health`, `/v1/health/live`, `/v1/health/ready`              |
+| Dataset lifecycle      | AVAILABLE | TTL, tags, filtering, batch delete, stats                        |
+| Shared client package  | AVAILABLE | `juniper-data-client` pip package (DATA-012)                     |
+| Dockerfile             | AVAILABLE | Multi-stage, port 8100                                           |
+| Parameter aliases      | AVAILABLE | `n_points`→`n_points_per_spiral`, `noise_level`→`noise`          |
 
 ---
 
@@ -102,9 +102,11 @@ The current `src/juniper_data_client/client.py` is a basic client with only 3 me
 **Changes Required**:
 
 1. Install `juniper-data-client` package:
+
    ```bash
    pip install -e /path/to/JuniperData/juniper_data/juniper_data_client/[test]
    ```
+
 2. Add `juniper-data-client` to `conf/requirements.txt`
 3. Update all imports from `from juniper_data_client import JuniperDataClient` (should work without changes due to same package name)
 4. Remove `src/juniper_data_client/` directory entirely
@@ -172,16 +174,17 @@ Currently, both `demo_mode.py` and `cascor_integration.py` check for `JUNIPER_DA
 
 Three different schemas are in use:
 
-| Source               | Feature Key | Label Key | Format       | Additional Keys                      |
-| -------------------- | ----------- | --------- | ------------ | ------------------------------------ |
-| Demo mode            | `inputs`    | `targets` | numpy arrays | `inputs_tensor`, `targets_tensor`    |
-| CascorIntegration    | `features`  | `labels`  | Python lists | `class_distribution`, `dataset_name` |
-| DataAdapter          | `features`  | `labels`  | Python lists | `name`                               |
-| Frontend (expected)  | `inputs`    | `targets` | Python lists | `num_samples`, `num_features`, `num_classes` |
+| Source              | Feature Key | Label Key | Format       | Additional Keys                              |
+| ------------------- | ----------- | --------- | ------------ | -------------------------------------------- |
+| Demo mode           | `inputs`    | `targets` | numpy arrays | `inputs_tensor`, `targets_tensor`            |
+| CascorIntegration   | `features`  | `labels`  | Python lists | `class_distribution`, `dataset_name`         |
+| DataAdapter         | `features`  | `labels`  | Python lists | `name`                                       |
+| Frontend (expected) | `inputs`    | `targets` | Python lists | `num_samples`, `num_features`, `num_classes` |
 
 **Changes Required**:
 
 1. **Standardize on a canonical schema** for the `/api/dataset` endpoint response:
+
    ```python
    {
        "inputs": [[x1, y1], [x2, y2], ...],   # Feature coordinates
@@ -235,6 +238,7 @@ The `JUNIPER_DATA_URL` environment variable is used but not documented in `conf/
 **Changes Required**:
 
 1. Add `juniper_data` section to `conf/app_config.yaml`:
+
    ```yaml
    backend:
      juniper_data:
@@ -425,6 +429,7 @@ JuniperData now has a Dockerfile (DATA-006). Add it to Canopy's docker-compose.
 **Changes Required**:
 
 1. Add `juniper-data` service to `conf/docker-compose.yaml`:
+
    ```yaml
    services:
      juniper-data:
@@ -461,6 +466,7 @@ JuniperData now has a Dockerfile (DATA-006). Add it to Canopy's docker-compose.
 **Changes Required**:
 
 1. Add `JuniperDataConstants` class to `src/constants.py`:
+
    ```python
    class JuniperDataConstants:
        DEFAULT_URL = "http://localhost:8100"
@@ -728,6 +734,7 @@ In `demo_mode.py` line 401, a new `JuniperDataClient` is instantiated every time
 **Blocks Additional Progress**: Blocks real backend visualization
 
 In `main.py` lines 779-788, the real backend path for decision boundary is incomplete (marked with TODO):
+
 ```python
 # Real backend - try to get predictions
 if cascor_integration:
@@ -764,13 +771,13 @@ if cascor_integration:
 
 ### Items Referenced from JuniperData Plan (CAN-REF-*)
 
-| ID          | Item                                   | Status in This Plan | Mapped To         |
-| ----------- | -------------------------------------- | ------------------- | ----------------- |
-| CAN-REF-001 | JuniperData client not actively used   | ADDRESSED           | CAN-INT-001, 002  |
-| CAN-REF-002 | No JUNIPER_DATA_URL in app_config.yaml | ADDRESSED           | CAN-INT-004       |
-| CAN-REF-003 | No JuniperData in docker-compose.yaml  | ADDRESSED           | CAN-INT-010       |
+| ID          | Item                                   | Status in This Plan | Mapped To            |
+| ----------- | -------------------------------------- | ------------------- | -------------------- |
+| CAN-REF-001 | JuniperData client not actively used   | ADDRESSED           | CAN-INT-001, 002     |
+| CAN-REF-002 | No JUNIPER_DATA_URL in app_config.yaml | ADDRESSED           | CAN-INT-004          |
+| CAN-REF-003 | No JuniperData in docker-compose.yaml  | ADDRESSED           | CAN-INT-010          |
 | CAN-REF-004 | Parameter inconsistencies (noise)      | ADDRESSED           | CAN-INT-003, NEW-002 |
-| CAN-REF-005 | CAN-001 through CAN-021 enhancements  | ADDRESSED           | Various items     |
+| CAN-REF-005 | CAN-001 through CAN-021 enhancements   | ADDRESSED           | Various items        |
 
 ### Items That Affect JuniperData (Upstream Changes)
 
@@ -841,23 +848,24 @@ if cascor_integration:
 
 ## Summary Statistics
 
-| Category                    | Count                                                                  |
-| --------------------------- | ---------------------------------------------------------------------- |
-| Total Tasks                 | 19                                                                     |
-| CRITICAL Priority           | 3 (CAN-INT-001, 002, 003)                                             |
-| HIGH Priority               | 7 (CAN-INT-004, 005, 006, 007, 008, 009, 017)                        |
-| MEDIUM Priority             | 7 (CAN-INT-010, 011, 012, 013, 014, 018, 019)                        |
-| LOW Priority                | 1 (CAN-INT-016)                                                       |
-| MEDIUM (in low phase)       | 1 (CAN-INT-015)                                                       |
-| NOT STARTED                 | 19 (all)                                                               |
-| Newly Identified Issues     | 6 (NEW-001 through NEW-006)                                           |
-| Deferred Items              | 3 (CAN-DEF-001, 002, 003)                                             |
-| Cross-Project Refs Mapped   | 5 (CAN-REF-001 through CAN-REF-005)                                   |
+| Category                  | Count                                         |
+| ------------------------- | --------------------------------------------- |
+| Total Tasks               | 19                                            |
+| CRITICAL Priority         | 3 (CAN-INT-001, 002, 003)                     |
+| HIGH Priority             | 7 (CAN-INT-004, 005, 006, 007, 008, 009, 017) |
+| MEDIUM Priority           | 7 (CAN-INT-010, 011, 012, 013, 014, 018, 019) |
+| LOW Priority              | 1 (CAN-INT-016)                               |
+| MEDIUM (in low phase)     | 1 (CAN-INT-015)                               |
+| NOT STARTED               | 19 (all)                                      |
+| Newly Identified Issues   | 6 (NEW-001 through NEW-006)                   |
+| Deferred Items            | 3 (CAN-DEF-001, 002, 003)                     |
+| Cross-Project Refs Mapped | 5 (CAN-REF-001 through CAN-REF-005)           |
 
 ---
 
 ## Document History
 
-| Date       | Author   | Changes                                                                   |
-| ---------- | -------- | ------------------------------------------------------------------------- |
+| Date       | Author   | Changes                                                                            |
+| ---------- | -------- | ---------------------------------------------------------------------------------- |
 | 2026-02-07 | AI Agent | Initial creation from comprehensive codebase evaluation and cross-project analysis |
+|            |          |                                                                                    |
