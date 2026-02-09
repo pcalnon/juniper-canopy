@@ -101,7 +101,7 @@ class TestConfigEnvOverrides:
         config_file = self._save_config_data_to_disk(tmp_path, config_data, "8080")
         os.environ["CASCOR_DEBUG"] = "true"
         os.environ["CASCOR_TIMEOUT"] = "30.5"
-        os.environ["CASCOR_NAME"] = "test"
+        os.environ["CASCOR_LABEL"] = "test"
 
         config = ConfigManager(str(config_file))
 
@@ -114,12 +114,12 @@ class TestConfigEnvOverrides:
         assert config.get("timeout") == 30.5
         assert isinstance(config.get("timeout"), float)
 
-        assert config.get("name") == "test"
-        assert isinstance(config.get("name"), str)
+        assert config.get("label") == "test"
+        assert isinstance(config.get("label"), str)
 
         # Cleanup
         # sourcery skip: no-loop-in-tests
-        for key in ["CASCOR_SERVER_PORT", "CASCOR_DEBUG", "CASCOR_TIMEOUT", "CASCOR_NAME"]:
+        for key in ["CASCOR_SERVER_PORT", "CASCOR_DEBUG", "CASCOR_TIMEOUT", "CASCOR_LABEL"]:
             del os.environ[key]
 
     def test_nested_override_collision(self, tmp_path):

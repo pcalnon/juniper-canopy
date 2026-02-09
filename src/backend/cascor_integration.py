@@ -1120,6 +1120,45 @@ class CascorIntegration:
     # Alias for compatibility with existing code
     extract_network_topology = get_network_topology
 
+    def get_network_data(self) -> Dict:
+        """
+        Extract raw network weight data for statistics computation.
+
+        Returns:
+            Dictionary with input_weights, hidden_weights, output_weights,
+            hidden_biases, output_biases, threshold_function, and optimizer.
+        """
+        if self.network is None:
+            self.logger.warning("No network connected")
+            return {}
+        try:
+            with self.topology_lock:
+                with torch.no_grad():
+                    hidden_weights = None
+                    hidden_biases = None
+                    if self.network.hidden_units:
+                        hidden_weights = self.network.hidden_units[0]["weights"].detach().cpu()
+                        hidden_biases = torch.stack([u["bias"].detach().cpu().squeeze() for u in self.network.hidden_units])
+
+                    activation_fn = "sigmoid"
+                    if self.network.hidden_units:
+                        fn = self.network.hidden_units[0].get("activation_fn")
+                        if fn is not None and hasattr(fn, "__name__"):
+                            activation_fn = fn.__name__
+
+                    return {
+                        "input_weights": self.network.input_weights.detach().cpu(),
+                        "hidden_weights": hidden_weights,
+                        "output_weights": self.network.output_weights.detach().cpu(),
+                        "hidden_biases": hidden_biases,
+                        "output_biases": self.network.output_bias.detach().cpu(),
+                        "threshold_function": activation_fn,
+                        "optimizer": "sgd",
+                    }
+        except Exception as e:
+            self.logger.error(f"Failed to extract network data: {e}", exc_info=True)
+            return {}
+
     def extract_cascor_topology(self) -> Optional[Dict]:
         """
         Description:
