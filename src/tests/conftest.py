@@ -22,6 +22,8 @@ import pytest
 
 # CRITICAL: Set demo mode BEFORE any imports of main.py
 os.environ["CASCOR_DEMO_MODE"] = "1"
+# CRITICAL: Set JuniperData URL BEFORE any imports (CAN-INT-002: mandatory)
+os.environ["JUNIPER_DATA_URL"] = "http://localhost:8100"
 
 # Add src directory to Python path IMMEDIATELY (before pytest rewrites imports)
 # This MUST happen at module load time, not in fixtures
@@ -111,6 +113,59 @@ def event_loop():
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def mock_juniper_data_client():
+    """
+    Mock JuniperDataClient for all tests.
+
+    Since JUNIPER_DATA_URL is now mandatory (CAN-INT-002), all code paths that
+    create datasets go through JuniperDataClient. This fixture provides a mock
+    that returns realistic spiral dataset data without requiring a live service.
+    """
+    from unittest.mock import MagicMock, patch
+
+    import numpy as np
+
+    # Create realistic spiral-like test data
+    rng = np.random.RandomState(42)
+    n_samples = 200
+    n_per_class = n_samples // 2
+
+    # Generate 2D spiral features
+    theta = np.linspace(0, 4 * np.pi, n_per_class)
+    r = theta / (4 * np.pi)
+    x0 = r * np.cos(theta) + rng.randn(n_per_class) * 0.1
+    y0 = r * np.sin(theta) + rng.randn(n_per_class) * 0.1
+    x1 = -r * np.cos(theta) + rng.randn(n_per_class) * 0.1
+    y1 = -r * np.sin(theta) + rng.randn(n_per_class) * 0.1
+
+    X = np.vstack([np.column_stack([x0, y0]), np.column_stack([x1, y1])]).astype(np.float32)
+    y_one_hot = np.zeros((n_samples, 2), dtype=np.float32)
+    y_one_hot[:n_per_class, 0] = 1.0
+    y_one_hot[n_per_class:, 1] = 1.0
+
+    # Train/test split (80/20)
+    train_end = int(n_samples * 0.8)
+
+    mock_client_instance = MagicMock()
+    mock_client_instance.create_dataset.return_value = {"dataset_id": "mock-dataset-001"}
+    mock_client_instance.download_artifact_npz.return_value = {
+        "X_full": X,
+        "y_full": y_one_hot,
+        "X_train": X[:train_end],
+        "y_train": y_one_hot[:train_end],
+        "X_test": X[train_end:],
+        "y_test": y_one_hot[train_end:],
+    }
+    mock_client_instance.health_check.return_value = {"status": "healthy"}
+    mock_client_instance.is_ready.return_value = True
+
+    mock_client_class = MagicMock(return_value=mock_client_instance)
+
+    with patch("juniper_data_client.client.JuniperDataClient", mock_client_class), patch("juniper_data_client.JuniperDataClient", mock_client_class):
+        yield mock_client_instance
 
 
 @pytest.fixture(scope="module")

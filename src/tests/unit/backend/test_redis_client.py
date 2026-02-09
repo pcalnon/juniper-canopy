@@ -162,16 +162,18 @@ class TestRedisClientDemoMode:
         assert metrics["status"] == "UP"
         assert metrics["mode"] == "DEMO"
         assert metrics["metrics"] is not None
-        memory = metrics["metrics"]["memory"]
-        assert "used_memory_bytes" in memory
-        assert "used_memory_human" in memory
-        stats = metrics["metrics"]["stats"]
-        assert "total_connections_received" in stats
-        assert "keyspace_hits" in stats
+        memory = self._get_synthetic_metrics(metrics, "memory", "used_memory_bytes", "used_memory_human")
+        assert memory
+        stats = self._get_synthetic_metrics(metrics, "stats", "total_connections_received", "keyspace_hits")
         assert "hit_rate_percent" in stats
-        clients = metrics["metrics"]["clients"]
-        assert "connected_clients" in clients
+        assert "connected_clients" in metrics["metrics"]["clients"]
         assert "keyspace" in metrics["metrics"]
+
+    def _get_synthetic_metrics(self, metrics, arg1, arg2, arg3):
+        result = metrics["metrics"][arg1]
+        assert arg2 in result
+        assert arg3 in result
+        return result
 
     def test_demo_mode_is_available_true(self, mock_config_manager, monkeypatch):
         """In demo mode, is_available returns True."""
@@ -202,27 +204,26 @@ class TestRedisClientConnectionFailure:
         mock_pool = MagicMock()
         mock_redis.ConnectionPool.return_value = mock_pool
         mock_redis.Redis.return_value.ping.side_effect = Exception("Connection refused")
-
         with patch("backend.redis_client.REDIS_AVAILABLE", True):
             with patch("backend.redis_client.redis", mock_redis):
-                from backend.redis_client import RedisClient
+                self._get_redis_error_status(enabled_redis_config)
 
-                client = RedisClient(enabled_redis_config)
-                status = client.get_status()
+    def _get_redis_error_status(self, enabled_redis_config):
+        from backend.redis_client import RedisClient
 
-                assert status["status"] in ["UNAVAILABLE", "DOWN"]
-                assert status["mode"] == "LIVE"
-                assert "host" in status["details"]
-                assert "port" in status["details"]
+        client = RedisClient(enabled_redis_config)
+        status = client.get_status()
+        assert status["status"] in ["UNAVAILABLE", "DOWN"]
+        assert status["mode"] == "LIVE"
+        assert "host" in status["details"]
+        assert "port" in status["details"]
 
     def test_connection_timeout_handles_gracefully(self, enabled_redis_config):
         """When connection times out, client handles gracefully."""
         mock_redis = MagicMock()
         mock_redis.ConnectionPool.return_value = MagicMock()
-
         timeout_error = type("RedisTimeoutError", (Exception,), {})
         mock_redis.Redis.return_value.ping.side_effect = timeout_error("Connection timed out")
-
         with patch("backend.redis_client.REDIS_AVAILABLE", True):
             with patch("backend.redis_client.redis", mock_redis):
                 with patch("backend.redis_client.RedisTimeoutError", timeout_error):
@@ -230,7 +231,6 @@ class TestRedisClientConnectionFailure:
 
                     client = RedisClient(enabled_redis_config)
                     status = client.get_status()
-
                     assert status["status"] in ["UNAVAILABLE", "DOWN"]
 
 
@@ -241,12 +241,10 @@ class TestGetStatus:
     def test_status_contains_required_fields(self, mock_config_manager, monkeypatch):
         """get_status returns all required fields."""
         monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
-
         from backend.redis_client import RedisClient
 
         client = RedisClient(mock_config_manager)
         status = client.get_status()
-
         required_fields = ["status", "mode", "message", "timestamp"]
         for field in required_fields:
             assert field in status, f"Missing required field: {field}"
@@ -257,7 +255,6 @@ class TestGetStatus:
 
         client = RedisClient(mock_config_manager)
         status = client.get_status()
-
         valid_statuses = ["UP", "DOWN", "DISABLED", "UNAVAILABLE"]
         assert status["status"] in valid_statuses
 
@@ -267,19 +264,16 @@ class TestGetStatus:
 
         client = RedisClient(mock_config_manager)
         status = client.get_status()
-
         valid_modes = ["DEMO", "LIVE", "DISABLED"]
         assert status["mode"] in valid_modes
 
     def test_status_timestamp_iso_format(self, mock_config_manager, monkeypatch):
         """Timestamp is in ISO 8601 format."""
         monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
-
         from backend.redis_client import RedisClient
 
         client = RedisClient(mock_config_manager)
         status = client.get_status()
-
         timestamp = status["timestamp"]
         assert timestamp.endswith("Z")
         assert "T" in timestamp
@@ -494,7 +488,6 @@ class TestConfigParsing:
 
             client = RedisClient(mock_config)
             config = client._get_redis_config()
-
             assert config["enabled"] is True
             assert config["host"] == "myhost"
             assert config["port"] == 6380
@@ -503,23 +496,23 @@ class TestConfigParsing:
     def test_redis_url_env_override(self, monkeypatch):
         """REDIS_URL env var overrides config."""
         monkeypatch.setenv("REDIS_URL", "redis://envhost:6381/3")
-
         mock_config = Mock()
         mock_config.get.return_value = {
             "enabled": True,
             "type": "redis",
             "redis_url": "redis://confighost:6379/0",
         }
-
         with patch("backend.redis_client.REDIS_AVAILABLE", False):
-            from backend.redis_client import RedisClient
+            self._override_redis_url(mock_config)
 
-            client = RedisClient(mock_config)
-            config = client._get_redis_config()
+    def _override_redis_url(self, mock_config):
+        from backend.redis_client import RedisClient
 
-            assert config["host"] == "envhost"
-            assert config["port"] == 6381
-            assert config["db"] == 3
+        client = RedisClient(mock_config)
+        config = client._get_redis_config()
+        assert config["host"] == "envhost"
+        assert config["port"] == 6381
+        assert config["db"] == 3
 
     def test_non_redis_cache_type_disabled(self):
         """Cache type != 'redis' returns disabled config."""
@@ -528,12 +521,10 @@ class TestConfigParsing:
             "enabled": True,
             "type": "memory",
         }
-
         from backend.redis_client import RedisClient
 
         client = RedisClient(mock_config)
         config = client._get_redis_config()
-
         assert config["enabled"] is False
 
 
@@ -569,9 +560,7 @@ class TestPingErrorHandling:
 
         client = RedisClient(mock_config_manager)
         client._client = None
-
         result = client._ping()
-
         assert result is False
 
     def test_ping_handles_timeout_error(self, enabled_redis_config):
@@ -581,51 +570,47 @@ class TestPingErrorHandling:
         mock_redis = MagicMock()
         mock_pool = MagicMock()
         mock_redis.ConnectionPool.return_value = mock_pool
-
         mock_client = MagicMock()
         mock_client.ping.return_value = True
         mock_redis.Redis.return_value = mock_client
-
         timeout_error = type("RedisTimeoutError", (Exception,), {})
-
         with patch("backend.redis_client.REDIS_AVAILABLE", True):
             with patch("backend.redis_client.redis", mock_redis):
                 with patch("backend.redis_client.RedisTimeoutError", timeout_error):
-                    from backend.redis_client import RedisClient
+                    self._ping_with_timeout(enabled_redis_config, timeout_error, mock_client)
 
-                    client = RedisClient(enabled_redis_config)
-                    mock_client.ping.side_effect = timeout_error("Connection timed out")
+    def _ping_with_timeout(self, enabled_redis_config, timeout_error, mock_client):
+        from backend.redis_client import RedisClient
 
-                    result = client._ping()
-
-                    assert result is False
-                    assert client._last_ping_success is False
-                    assert "timed out" in client._last_error
+        client = RedisClient(enabled_redis_config)
+        mock_client.ping.side_effect = timeout_error("Connection timed out")
+        result = client._ping()
+        assert result is False
+        assert client._last_ping_success is False
+        assert "timed out" in client._last_error
 
     def test_ping_handles_connection_error(self, enabled_redis_config):
         """_ping() handles RedisConnectionError and returns False."""
         mock_redis = MagicMock()
         mock_pool = MagicMock()
         mock_redis.ConnectionPool.return_value = mock_pool
-
         mock_client = MagicMock()
         mock_client.ping.return_value = True
         mock_redis.Redis.return_value = mock_client
-
         connection_error = type("RedisConnectionError", (Exception,), {})
-
         with patch("backend.redis_client.REDIS_AVAILABLE", True):
             with patch("backend.redis_client.redis", mock_redis):
                 with patch("backend.redis_client.RedisConnectionError", connection_error):
-                    from backend.redis_client import RedisClient
+                    self._get_ping_connection_error(enabled_redis_config, connection_error, mock_client)
 
-                    client = RedisClient(enabled_redis_config)
-                    mock_client.ping.side_effect = connection_error("Connection refused")
+    def _get_ping_connection_error(self, enabled_redis_config, connection_error, mock_client):
+        from backend.redis_client import RedisClient
 
-                    result = client._ping()
-
-                    assert result is False
-                    assert client._last_ping_success is False
+        client = RedisClient(enabled_redis_config)
+        mock_client.ping.side_effect = connection_error("Connection refused")
+        result = client._ping()
+        assert result is False
+        assert client._last_ping_success is False
 
 
 @pytest.mark.unit
@@ -635,29 +620,29 @@ class TestGetStatusInfoRetrievalError:
     def test_get_status_returns_limited_info_on_info_error(self, enabled_redis_config):
         """
         get_status returns limited info
-          when info() raises exception (lines 352-364).
+        when info() raises exception (lines 352-364).
         """
         mock_redis = MagicMock()
         mock_pool = MagicMock()
         mock_redis.ConnectionPool.return_value = mock_pool
-
         mock_client = MagicMock()
         mock_client.ping.return_value = True
         mock_client.info.side_effect = Exception("INFO command failed")
         mock_redis.Redis.return_value = mock_client
-
         with patch("backend.redis_client.REDIS_AVAILABLE", True):
             with patch("backend.redis_client.redis", mock_redis):
-                from backend.redis_client import RedisClient
+                self._get_status_info_on_error(enabled_redis_config)
 
-                client = RedisClient(enabled_redis_config)
-                status = client.get_status()
+    def _get_status_info_on_error(self, enabled_redis_config):
+        from backend.redis_client import RedisClient
 
-                assert status["status"] == "UP"
-                assert status["mode"] == "LIVE"
-                assert "limited info" in status["message"]
-                assert "info_error" in status["details"]
-                assert "INFO command failed" in status["details"]["info_error"]
+        client = RedisClient(enabled_redis_config)
+        status = client.get_status()
+        assert status["status"] == "UP"
+        assert status["mode"] == "LIVE"
+        assert "limited info" in status["message"]
+        assert "info_error" in status["details"]
+        assert "INFO command failed" in status["details"]["info_error"]
 
     def test_get_status_with_full_info_success(self, enabled_redis_config):
         """
@@ -706,20 +691,20 @@ class TestGetStatusInfoRetrievalError:
         with patch("backend.redis_client.REDIS_AVAILABLE", True):
             mock_redis = MagicMock()
             mock_redis.ConnectionPool.side_effect = Exception("Pool creation failed")
-
             with patch("backend.redis_client.redis", mock_redis):
-                from backend.redis_client import RedisClient
+                self._get_status_for_enabled_none_client(enabled_redis_config)
 
-                client = RedisClient(enabled_redis_config)
-                client._client = None
-                client._last_error = "Connection refused"
+    def _get_status_for_enabled_none_client(self, enabled_redis_config):
+        from backend.redis_client import RedisClient
 
-                status = client.get_status()
-
-                assert status["status"] == "UNAVAILABLE"
-                assert status["mode"] == "LIVE"
-                assert "Connection refused" in status["message"]
-                assert status["details"]["last_error"] == "Connection refused"
+        client = RedisClient(enabled_redis_config)
+        client._client = None
+        client._last_error = "Connection refused"
+        status = client.get_status()
+        assert status["status"] == "UNAVAILABLE"
+        assert status["mode"] == "LIVE"
+        assert "Connection refused" in status["message"]
+        assert status["details"]["last_error"] == "Connection refused"
 
 
 @pytest.mark.unit
@@ -829,15 +814,18 @@ class TestGetMetricsLivePath:
 
         with patch("backend.redis_client.REDIS_AVAILABLE", True):
             with patch("backend.redis_client.redis", mock_redis):
-                from backend.redis_client import RedisClient
+                self._get_metrics_on_failure(enabled_redis_config)
 
-                client = RedisClient(enabled_redis_config)
-                metrics = client.get_metrics()
+    def _get_metrics_on_failure(self, enabled_redis_config):
+        from backend.redis_client import RedisClient
 
-                assert metrics["status"] == "DOWN"
-                assert metrics["mode"] == "LIVE"
-                assert "Failed to retrieve" in metrics["message"]
-                assert metrics["metrics"] is None
+        client = RedisClient(enabled_redis_config)
+        metrics = client.get_metrics()
+
+        assert metrics["status"] == "DOWN"
+        assert metrics["mode"] == "LIVE"
+        assert "Failed to retrieve" in metrics["message"]
+        assert metrics["metrics"] is None
 
 
 @pytest.mark.unit

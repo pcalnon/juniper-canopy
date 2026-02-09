@@ -112,6 +112,24 @@ class WebSocketConstants:
     RECONNECT_DELAY_SEC: Final[int] = 2
 
 
+class JuniperDataConstants:
+    """JuniperData service integration constants.
+
+    Defines default values for connecting to and interacting with the
+    JuniperData dataset generation service.
+    """
+
+    DEFAULT_URL: Final[str] = "http://localhost:8100"
+    DEFAULT_TIMEOUT_S: Final[int] = 30
+    DEFAULT_RETRY_ATTEMPTS: Final[int] = 3
+    DEFAULT_RETRY_BACKOFF_BASE_S: Final[float] = 0.5
+    DEFAULT_DATASET_SAMPLES: Final[int] = 200
+    DEFAULT_DATASET_NOISE: Final[float] = 0.1
+    DEFAULT_DATASET_SEED: Final[int] = 42
+    DEFAULT_GENERATOR: Final[str] = "spiral"
+    API_VERSION: Final[str] = "v1"
+
+
 # Convenience imports at module level for commonly used constants
 MIN_TRAINING_EPOCHS = TrainingConstants.MIN_TRAINING_EPOCHS
 MAX_TRAINING_EPOCHS = TrainingConstants.MAX_TRAINING_EPOCHS

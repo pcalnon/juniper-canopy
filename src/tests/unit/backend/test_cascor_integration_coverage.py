@@ -394,9 +394,9 @@ class TestCascorIntegrationDatasetInfo:
 
             result = integration.get_dataset_info()
 
-            # Should generate mock spiral dataset
+            # Should generate spiral dataset via JuniperData (canonical schema)
             assert result is not None
-            assert "mock_mode" in result or "features" in result
+            assert "inputs" in result or "targets" in result
 
 
 class TestCascorIntegrationPredictionFunction:

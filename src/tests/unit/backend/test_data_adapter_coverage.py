@@ -242,12 +242,12 @@ class TestDatasetPreparation:
 
         result = adapter.prepare_dataset_for_visualization(features, labels, "training")
 
-        assert result["name"] == "training"
+        assert result["dataset_name"] == "training"
         assert result["num_samples"] == 100
         assert result["num_features"] == 2
         assert result["num_classes"] == 2
-        assert isinstance(result["features"], list)
-        assert isinstance(result["labels"], list)
+        assert isinstance(result["inputs"], list)
+        assert isinstance(result["targets"], list)
 
     def test_prepare_dataset_with_lists(self):
         """Test preparing dataset with Python lists."""
@@ -260,7 +260,7 @@ class TestDatasetPreparation:
 
         result = adapter.prepare_dataset_for_visualization(np.array(features), np.array(labels), "test")
 
-        assert result["name"] == "test"
+        assert result["dataset_name"] == "test"
         assert result["num_samples"] == 3
 
     def test_prepare_dataset_1d_features(self):
