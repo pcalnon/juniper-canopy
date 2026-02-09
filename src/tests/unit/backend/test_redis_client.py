@@ -484,14 +484,9 @@ class TestConfigParsing:
         }
 
         with patch("backend.redis_client.REDIS_AVAILABLE", False):
-            from backend.redis_client import RedisClient
-
-            client = RedisClient(mock_config)
-            config = client._get_redis_config()
+            config = self._get_redis_client_config(mock_config)
             assert config["enabled"] is True
-            assert config["host"] == "myhost"
-            assert config["port"] == 6380
-            assert config["db"] == 2
+            self._override_url_in_redis_config(config, "myhost", 6380, 2)
 
     def test_redis_url_env_override(self, monkeypatch):
         """REDIS_URL env var overrides config."""
@@ -506,13 +501,13 @@ class TestConfigParsing:
             self._override_redis_url(mock_config)
 
     def _override_redis_url(self, mock_config):
-        from backend.redis_client import RedisClient
+        config = self._get_redis_client_config(mock_config)
+        self._override_url_in_redis_config(config, "envhost", 6381, 3)
 
-        client = RedisClient(mock_config)
-        config = client._get_redis_config()
-        assert config["host"] == "envhost"
-        assert config["port"] == 6381
-        assert config["db"] == 3
+    def _override_url_in_redis_config(self, config, arg1, arg2, arg3):
+        assert config["host"] == arg1
+        assert config["port"] == arg2
+        assert config["db"] == arg3
 
     def test_non_redis_cache_type_disabled(self):
         """Cache type != 'redis' returns disabled config."""
@@ -521,11 +516,14 @@ class TestConfigParsing:
             "enabled": True,
             "type": "memory",
         }
+        config = self._get_redis_client_config(mock_config)
+        assert config["enabled"] is False
+
+    def _get_redis_client_config(self, mock_config):
         from backend.redis_client import RedisClient
 
         client = RedisClient(mock_config)
-        config = client._get_redis_config()
-        assert config["enabled"] is False
+        return client._get_redis_config()
 
 
 @pytest.mark.unit

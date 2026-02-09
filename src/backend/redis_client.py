@@ -252,9 +252,9 @@ class RedisClient:
             self._last_error = None
             return True
         except (RedisConnectionError, RedisTimeoutError) as e:
-            return self._ping_get_no_pong(e)
+            return self._ping_gets_no_pong(e)
         except Exception as e:
-            return self._ping_get_no_pong(e)
+            return self._ping_gets_no_pong(e)
 
     def _ping_gets_no_pong(self, e):
         self._last_error = str(e)
