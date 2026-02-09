@@ -122,6 +122,18 @@ async def lifespan(app: FastAPI):
 
     if demo_mode_active:
         system_logger.info("Initializing demo mode")
+
+        juniper_data_url = os.getenv("JUNIPER_DATA_URL")
+        if not juniper_data_url:
+            config_url = config.get("backend.juniper_data.url")
+            if config_url and not str(config_url).startswith("$"):
+                juniper_data_url = str(config_url)
+                os.environ["JUNIPER_DATA_URL"] = juniper_data_url
+                system_logger.info(f"JUNIPER_DATA_URL resolved from config: {juniper_data_url}")
+        if not juniper_data_url:
+            system_logger.error("JUNIPER_DATA_URL is not set and could not be resolved from config. " "Set JUNIPER_DATA_URL=http://localhost:8100 or ensure JuniperData service is running.")
+            raise RuntimeError("JUNIPER_DATA_URL is required for demo mode. " "Set JUNIPER_DATA_URL=http://localhost:8100 or start JuniperData service.")
+
         from demo_mode import get_demo_mode
 
         demo_mode_instance = get_demo_mode(update_interval=1.0)

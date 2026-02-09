@@ -135,10 +135,62 @@ log_trace "✓ All files present"
 
 
 #####################################################################################################################################################################################################
+# Ensure JuniperData service is available
+#####################################################################################################################################################################################################
+export JUNIPER_DATA_URL="${JUNIPER_DATA_URL:-http://localhost:8100}"
+JUNIPER_DATA_HEALTH="${JUNIPER_DATA_URL}/v1/health/ready"
+log_info "Checking JuniperData service at ${JUNIPER_DATA_URL}"
+
+JUNIPER_DATA_RUNNING=false
+if curl -sf "${JUNIPER_DATA_HEALTH}" > /dev/null 2>&1; then
+    JUNIPER_DATA_RUNNING=true
+    echo -e "${GREEN}✓ JuniperData service is running${NC}"
+    log_info "JuniperData service is already running at ${JUNIPER_DATA_URL}"
+else
+    echo -e "${YELLOW}⚠ JuniperData service not running, attempting to start...${NC}"
+    log_info "JuniperData service not running, attempting auto-start"
+    if python -m juniper_data --port 8100 > /dev/null 2>&1 &
+    then
+        JUNIPER_DATA_PID=$!
+        log_info "JuniperData service started with PID: ${JUNIPER_DATA_PID}"
+        RETRIES=0
+        MAX_RETRIES=15
+        while [ $RETRIES -lt $MAX_RETRIES ]; do
+            if curl -sf "${JUNIPER_DATA_HEALTH}" > /dev/null 2>&1; then
+                JUNIPER_DATA_RUNNING=true
+                echo -e "${GREEN}✓ JuniperData service started successfully${NC}"
+                log_info "JuniperData service ready after ${RETRIES} retries"
+                break
+            fi
+            RETRIES=$((RETRIES + 1))
+            sleep 1
+        done
+        if [ "${JUNIPER_DATA_RUNNING}" != "true" ]; then
+            echo -e "${RED}✗ JuniperData service failed to start within ${MAX_RETRIES}s${NC}"
+            log_error "JuniperData service failed to start"
+            kill "${JUNIPER_DATA_PID}" 2>/dev/null
+        fi
+    else
+        echo -e "${RED}✗ Failed to launch JuniperData (is juniper-data installed?)${NC}"
+        log_error "Failed to launch JuniperData service"
+    fi
+fi
+
+if [ "${JUNIPER_DATA_RUNNING}" != "true" ]; then
+    echo -e "${RED}✗ JuniperData service is required but not available${NC}"
+    echo -e "${YELLOW}  Install: pip install juniper-data${NC}"
+    echo -e "${YELLOW}  Or set JUNIPER_DATA_URL to a running instance${NC}"
+    log_error "JuniperData service not available, cannot continue"
+    exit 1
+fi
+
+
+#####################################################################################################################################################################################################
 # Export demo mode env var and Start the application
 #####################################################################################################################################################################################################
 log_trace "Export demo mode env var and Start the application"
-export CASCOR_DEMO_MODE="${FALSE}"
+export CASCOR_DEMO_MODE="1"
+export JUNIPER_DATA_URL="${JUNIPER_DATA_URL:-http://localhost:8100}"
 echo ""
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║  Starting Juniper Canopy in Demo Mode...                   ║${NC}"
@@ -157,6 +209,9 @@ echo ""
 # Run using uvicorn for proper ASGI server support & Launch using exec for proper signal handling
 #####################################################################################################################################################################################################
 log_debug "Run using uvicorn for proper ASGI server support & Launch using exec for proper signal handling"
+if [ -n "${JUNIPER_DATA_PID:-}" ]; then
+    trap 'kill "${JUNIPER_DATA_PID}" 2>/dev/null' EXIT
+fi
 exec "$CONDA_PREFIX/bin/uvicorn" main:app --host 0.0.0.0 --port 8050 --log-level info
 
 exit $(( TRUE ))

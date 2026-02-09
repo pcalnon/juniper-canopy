@@ -80,6 +80,13 @@ fi
 
 
 #####################################################################################################################################################################################################
+# Ensure JuniperData service URL is set
+#####################################################################################################################################################################################################
+export JUNIPER_DATA_URL="${JUNIPER_DATA_URL:-http://localhost:8100}"
+log_info "JuniperData URL: ${JUNIPER_DATA_URL}"
+
+
+#####################################################################################################################################################################################################
 # Launch the Main function of the Juniper Canopy Application
 #####################################################################################################################################################################################################
 if [[ "${DEMO_MODE}" == "${TRUE}" ]]; then
@@ -88,6 +95,26 @@ if [[ "${DEMO_MODE}" == "${TRUE}" ]]; then
     ${LAUNCH_DEMO_MODE}
 else
     log_trace "Launching ${CURRENT_PROJECT} in Main Mode with real CasCor backend"
+    # Ensure JuniperData service is available
+    JUNIPER_DATA_HEALTH="${JUNIPER_DATA_URL}/v1/health/ready"
+    log_info "Checking JuniperData service at ${JUNIPER_DATA_URL}"
+    JUNIPER_DATA_PID=""
+    if ! curl -sf "${JUNIPER_DATA_HEALTH}" > /dev/null 2>&1; then
+        log_info "JuniperData not running, attempting auto-start"
+        nohup python -m juniper_data --port 8100 > /dev/null 2>&1 &
+        JUNIPER_DATA_PID="$!"
+        log_info "JuniperData launched with PID: ${JUNIPER_DATA_PID}"
+        RETRIES=0
+        while [ $RETRIES -lt 15 ]; do
+            if curl -sf "${JUNIPER_DATA_HEALTH}" > /dev/null 2>&1; then
+                log_info "JuniperData ready"
+                break
+            fi
+            RETRIES=$((RETRIES + 1))
+            sleep 1
+        done
+    fi
+
     log_trace "pgrep -f \"${CASCOR_PROCESS_NAME}\" 2>/dev/null"
     CASCOR_PIDS=$(pgrep -f "${CASCOR_PROCESS_NAME}" 2>/dev/null)
     log_verbose "Cascor Process Pid: \"${CASCOR_PIDS}\""
@@ -112,7 +139,12 @@ else
     log_info "Killing CasCor Backend with pid: ${PID}"
     log_debug "kill -KILL ${PID} && rm -f nohup.out"
     kill -KILL "${PID}" && rm -f nohup.out
+    if [ -n "${JUNIPER_DATA_PID}" ]; then
+        log_info "Killing JuniperData with pid: ${JUNIPER_DATA_PID}"
+        kill "${JUNIPER_DATA_PID}" 2>/dev/null
+    fi
 fi
+
 
 log_info "Completed Launch of the Juniper Canopy Application Main function"
 exit $(( TRUE ))

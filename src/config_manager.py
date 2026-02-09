@@ -39,12 +39,45 @@
 import contextlib
 import logging
 import os
+import re
 
 # import traceback
 from pathlib import Path
 from typing import Any, Dict, Optional, TypedDict, Union
 
 import yaml
+
+_SHELL_ONLY_VARS = frozenset(
+    {
+        "CASCOR_MAIN_FILE",
+        "CASCOR_MAIN_FILE_NAME",
+        "CASCOR_SOURCE_DIR",
+        "CASCOR_SOURCE_DIR_NAME",
+        "CASCOR_CONFIG_DIR",
+        "CASCOR_CONF_DIR_NAME",
+        "CASCOR_UTIL_DIR",
+        "CASCOR_UTIL_DIR_NAME",
+        "CASCOR_SOURCE_PATH",
+        "CASCOR_PATH",
+        "CASCOR_PARENT_PATH",
+        "CASCOR_NAME",
+        "CASCOR_PROCESS_NAME",
+        "CASCOR_PROJECT_NAME",
+        "CASCOR_SUBPROJECT_NAME",
+        "CASCOR_SUBPROJECT_SUFFIX",
+        "CASCOR_APPLICATION_NAME",
+        "CASCOR_DEV_DIR_NAME",
+        "CASCOR_PROTOTYPE_DIR_NAME",
+        "CASCOR_SCRIPT_PROJECT_DIR",
+        "CASCOR_SCRIPT_SUBPROJECT_DIR",
+        "CASCOR_SCRIPT_APPLICATION_DIR",
+        "CASCOR_SCRIPT_CONF_DIR",
+        "CASCOR_SCRIPT_SOURCE_DIR",
+        "CASCOR_SCRIPT_UTIL_DIR",
+        "CASCOR_SCRIPT_DIR",
+        "CASCOR_SCRIPT_PATH",
+    }
+)
 
 
 class TrainingParamConfig(TypedDict):
@@ -113,20 +146,24 @@ class ConfigManager:
         """
         Recursively expand environment variables in configuration values.
 
-        Supports ${VAR} and $VAR syntax in string values.
+        Supports ${VAR:default}, ${VAR} and $VAR syntax in string values.
         """
+        _default_pattern = re.compile(r"\$\{([^}:]+):([^}]*)\}")
 
-        def expand_value(value):
-            """Recursively expand environment variables."""
+        def _replacer(match):
+            return os.environ.get(match.group(1), match.group(2))
+
+        def _expand_with_defaults(value):
             if isinstance(value, str):
-                return os.path.expandvars(value)
+                expanded = _default_pattern.sub(_replacer, value)
+                return os.path.expandvars(expanded)
             elif isinstance(value, dict):
-                return {k: expand_value(v) for k, v in value.items()}
+                return {k: _expand_with_defaults(v) for k, v in value.items()}
             elif isinstance(value, list):
-                return [expand_value(item) for item in value]
+                return [_expand_with_defaults(item) for item in value]
             return value
 
-        self.config = expand_value(self.config)
+        self.config = _expand_with_defaults(self.config)
         self.logger.debug("Environment variables expanded in configuration")
 
     def _apply_environment_overrides(self):
@@ -140,6 +177,8 @@ class ConfigManager:
 
         for env_var, value in os.environ.items():
             if env_var.startswith(prefix):
+                if env_var in _SHELL_ONLY_VARS:
+                    continue
                 # Remove prefix and convert to lowercase
                 key_path = env_var[len(prefix) :].lower().split("_")
 

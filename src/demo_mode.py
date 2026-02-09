@@ -378,6 +378,14 @@ class DemoMode:
         from juniper_data_client.exceptions import JuniperDataConfigurationError
 
         juniper_data_url = os.environ.get("JUNIPER_DATA_URL")
+
+        if not juniper_data_url:
+            config_mgr = ConfigManager()
+            config_url = config_mgr.config.get("backend", {}).get("juniper_data", {}).get("url")
+            if config_url and not config_url.startswith("$"):
+                juniper_data_url = config_url
+                self.logger.info(f"Using JUNIPER_DATA_URL from config: {juniper_data_url}")
+
         if not juniper_data_url:
             raise JuniperDataConfigurationError("JUNIPER_DATA_URL environment variable is required. " "All datasets must be fetched from the JuniperData service. " "Set JUNIPER_DATA_URL=http://localhost:8100 to connect to a local instance.")
 
