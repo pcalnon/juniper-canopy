@@ -2,6 +2,25 @@
 version: '3.8'
 
 services:
+  # JuniperData dataset generation service
+  juniper-data:
+    build:
+      context: ../../../JuniperData/juniper_data
+      dockerfile: Dockerfile
+    ports:
+      - 8100:8100
+    environment:
+      - JUNIPER_DATA_STORAGE_TYPE=memory
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - cascor-network
+
   # Main application
   juniper_canopy:
     build:
@@ -13,12 +32,14 @@ services:
       - CASCOR_ENV=production
       - REDIS_URL=redis://redis:6379/0
       - CASCOR_BACKEND_URL=http://cascor-backend:8000
+      - JUNIPER_DATA_URL=http://juniper-data:8100
     volumes:
       - ../logs:/app/logs
       - ../data:/app/data
       - ../images:/app/images
     depends_on:
       - redis
+      - juniper-data
     restart: unless-stopped
     networks:
       - cascor-network

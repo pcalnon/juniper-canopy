@@ -57,6 +57,12 @@ Documentation = "https://github.com/USERNAME/REPO/docs"
 Repository = "https://github.com/USERNAME/REPO"
 Issues = "https://github.com/USERNAME/REPO/issues"
 
+[project.optional-dependencies]
+juniper-data = [
+    "juniper-data-client>=0.2.0",
+    "requests>=2.28.0",
+]
+
 # ==========================================
 # Black Configuration
 # ==========================================

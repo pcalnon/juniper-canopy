@@ -6,21 +6,20 @@
 # Purpose:       Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
 #
 # Author:        Paul Calnon
-# Version:       0.2.0
+# Version:       0.2.1
 # File Name:     __init__.py
 # File Path:     ${HOME}/Development/python/JuniperCanopy/juniper_canopy/src/juniper_data_client/
 #
 # Date Created:  2026-01-31
-# Last Modified: 2026-02-07
+# Last Modified: 2026-02-12
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-2026 Paul Calnon
 #
 # Description:
 #    Package initialization for juniper_data_client module.
-#    Provides REST API client for JuniperData service integration.
-#    Replaced local basic client with shared juniper-data-client package code
-#    from JuniperData (DATA-012) for feature parity across the Juniper ecosystem.
+#    Re-exports from the shared juniper-data-client package (DATA-012).
+#    Falls back to local implementation if shared package is not installed.
 #
 #####################################################################################################################################################################################################
 
@@ -39,17 +38,32 @@ Features:
     - Full type hints
 """
 
-from .client import JuniperDataClient
-from .exceptions import (
-    JuniperDataClientError,
-    JuniperDataConfigurationError,
-    JuniperDataConnectionError,
-    JuniperDataNotFoundError,
-    JuniperDataTimeoutError,
-    JuniperDataValidationError,
-)
+try:
+    from juniper_data_client import (
+        JuniperDataClient,
+        JuniperDataClientError,
+        JuniperDataConfigurationError,
+        JuniperDataConnectionError,
+        JuniperDataNotFoundError,
+        JuniperDataTimeoutError,
+        JuniperDataValidationError,
+        __version__,
+    )
 
-__version__ = "0.2.0"
+    _USING_SHARED_PACKAGE = True
+except ImportError:
+    from .client import JuniperDataClient
+    from .exceptions import (
+        JuniperDataClientError,
+        JuniperDataConfigurationError,
+        JuniperDataConnectionError,
+        JuniperDataNotFoundError,
+        JuniperDataTimeoutError,
+        JuniperDataValidationError,
+    )
+
+    _USING_SHARED_PACKAGE = False
+    __version__ = "0.2.1-local"
 
 __all__ = [
     "JuniperDataClient",
@@ -60,4 +74,5 @@ __all__ = [
     "JuniperDataTimeoutError",
     "JuniperDataValidationError",
     "__version__",
+    "_USING_SHARED_PACKAGE",
 ]
