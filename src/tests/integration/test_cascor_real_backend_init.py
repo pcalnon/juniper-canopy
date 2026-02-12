@@ -70,19 +70,7 @@ class TestRealBackendInit:
 
     def test_real_backend_creates_network(self):
         """Verify create_network is called with config-driven defaults."""
-        mock_integration = _make_mock_integration()
-
-        with (
-            patch("main.demo_mode_active", False),
-            patch("main.cascor_integration", mock_integration),
-            patch("main.setup_monitoring_callbacks") as mock_setup_cb,
-        ):
-            from main import app
-
-            with TestClient(app):
-                pass
-
-        mock_setup_cb.assert_called_once()
+        mock_integration = self._create_mock_integration()
         mock_integration.create_network.assert_called_once()
         network_config = mock_integration.create_network.call_args[0][0]
         assert "input_size" in network_config
@@ -125,19 +113,20 @@ class TestRealBackendInit:
 
     def test_real_backend_setup_monitoring_callbacks(self):
         """Verify setup_monitoring_callbacks is invoked to register WebSocket broadcast callbacks."""
-        mock_integration = _make_mock_integration()
+        mock_integration = self._create_mock_integration()
+        assert mock_integration
 
-        with (
-            patch("main.demo_mode_active", False),
-            patch("main.cascor_integration", mock_integration),
-            patch("main.setup_monitoring_callbacks") as mock_setup_cb,
-        ):
+    # TODO Rename this here and in `test_real_backend_creates_network` and `test_real_backend_setup_monitoring_callbacks`
+    # def _extracted_from_test_real_backend_setup_monitoring_callbacks_3(self):
+    def _create_mock_integration(self):
+        result = _make_mock_integration()
+        with patch("main.demo_mode_active", False), patch("main.cascor_integration", result), patch("main.setup_monitoring_callbacks") as mock_setup_cb:
             from main import app
 
             with TestClient(app):
                 pass
-
         mock_setup_cb.assert_called_once()
+        return result
 
     def test_real_backend_fetches_dataset(self):
         """Verify get_dataset_info is called during backend initialization."""
