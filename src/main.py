@@ -69,7 +69,11 @@ from canopy_constants import ServerConstants
 from communication.websocket_manager import websocket_manager
 from config_manager import get_config
 from frontend.dashboard_manager import DashboardManager
-from logger.logger import get_system_logger, get_training_logger, get_ui_logger
+from logger.logger import (
+    get_system_logger,
+    get_training_logger,
+    get_ui_logger,
+)
 
 # import logging
 
@@ -175,8 +179,7 @@ async def lifespan(app: FastAPI):
 
                 # Fetch dataset from JuniperData for the network
                 try:
-                    dataset = cascor_integration.get_dataset_info()
-                    if dataset:
+                    if dataset := cascor_integration.get_dataset_info():
                         system_logger.info(f"Dataset loaded: {dataset.get('num_samples', '?')} samples, " f"{dataset.get('num_classes', '?')} classes")
                 except Exception as e:
                     system_logger.warning(f"Could not load dataset from JuniperData: {e}")

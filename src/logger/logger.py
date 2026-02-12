@@ -430,7 +430,7 @@ class SystemLogger(CascorLogger):
         )
 
 
-class PerformanceLogger:
+class PerformanceLogger(CascorLogger):
     """Specialized logger for performance monitoring."""
 
     def __init__(self, base_logger: CascorLogger):
@@ -598,7 +598,7 @@ class LoggerFactory:
 
 
 # Global logger factory instance
-logger_factory = LoggerFactory()
+logger_factory = LoggerFactory(config_path="conf/logging_config.yaml")
 
 
 # Convenience functions for getting common loggers

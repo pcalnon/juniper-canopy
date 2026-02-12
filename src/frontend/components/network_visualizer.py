@@ -1319,6 +1319,7 @@ class NetworkVisualizer(BaseComponent):
             "opacity": opacity,
         }
 
+    # TODO: this is throwing a logging error
     def _create_new_node_highlight_traces(
         self,
         G: "nx.DiGraph",
@@ -1352,8 +1353,8 @@ class NetworkVisualizer(BaseComponent):
 
         # Edge highlights (draw first, behind node)
         edge_opacity = 0.5 * opacity  # More muted than node
-        for from_node, to_node, data in G.edges(data=True):
-            self.log_verbose(f"Edge Data: {data}")
+        for from_node, to_node, _data in G.edges(data=True):
+            # self.logger.verbose(f"Edge Data: {data}")
             if (from_node == node_id or to_node == node_id) and from_node in pos and to_node in pos:
                 x0, y0 = pos[from_node]
                 x1, y1 = pos[to_node]
