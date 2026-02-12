@@ -41,7 +41,7 @@ class TrainingConstants:
     # Epoch limits
     MIN_TRAINING_EPOCHS: Final[int] = 10
     MAX_TRAINING_EPOCHS: Final[int] = 1000
-    DEFAULT_TRAINING_EPOCHS: Final[int] = 200
+    DEFAULT_TRAINING_EPOCHS: Final[int] = 300
 
     # Learning rate defaults
     DEFAULT_LEARNING_RATE: Final[float] = 0.01
@@ -49,7 +49,7 @@ class TrainingConstants:
     MAX_LEARNING_RATE: Final[float] = 1.0
 
     # Hidden units defaults
-    DEFAULT_MAX_HIDDEN_UNITS: Final[int] = 10
+    DEFAULT_MAX_HIDDEN_UNITS: Final[int] = 20
     MIN_HIDDEN_UNITS: Final[int] = 0
     MAX_HIDDEN_UNITS: Final[int] = 20
 
