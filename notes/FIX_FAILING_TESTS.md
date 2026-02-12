@@ -24,12 +24,12 @@
 
 Analysis of the full test suite (3,252 tests total) identified **67 non-passing tests** across 6 distinct root causes:
 
-| Status  | Count | Root Causes |
-|---------|-------|-------------|
-| ERROR   | 54    | 1 (missing pytest-mock dependency) |
+| Status  | Count | Root Causes                                         |
+| ------- | ----- | --------------------------------------------------- |
+| ERROR   | 54    | 1 (missing pytest-mock dependency)                  |
 | FAILED  | 10    | 3 (source code bug, race condition, missing server) |
-| XFAIL   | 3     | 2 (missing log level, empty YAML handling) |
-| WARNING | 1     | (standard pytest deprecation - not actionable) |
+| XFAIL   | 3     | 2 (missing log level, empty YAML handling)          |
+| WARNING | 1     | (standard pytest deprecation - not actionable)      |
 
 **Critical finding:** 54 of the 67 non-passing tests (81%) share a single root cause: the `pytest-mock` package is not installed in the current environment. Installing it would immediately resolve all 54 ERROR tests.
 
@@ -37,7 +37,7 @@ Analysis of the full test suite (3,252 tests total) identified **67 non-passing 
 
 ## Test Results Overview
 
-```
+```bash
 Total Tests:    3,252
 Passed:         3,151  (96.9%)
 Failed:            10  (0.3%)
@@ -68,26 +68,26 @@ All 54 ERROR tests use the `mocker` fixture from `pytest-mock`:
 
 #### FAILED (10 tests) - Source Code and Environment Issues
 
-| Test | Error Type | Category |
-|------|-----------|----------|
-| `test_demo_endpoints.py::test_training_websocket_receives_state_messages` | AssertionError: No state messages | Server-dependent |
-| `test_demo_endpoints.py::test_training_websocket_receives_metrics_messages` | AssertionError: No metrics messages | Server-dependent |
-| `test_demo_endpoints.py::test_demo_mode_broadcasts_data` | AssertionError: No messages received | Server-dependent |
-| `test_parameter_persistence.py::test_api_set_params_integration` | httpx.ConnectError | Server-dependent |
-| `test_candidate_visibility.py::test_server_health` | requests.ConnectionError | Server-dependent |
-| `test_candidate_visibility.py::test_state_endpoint_returns_data` | requests.ConnectionError | Server-dependent |
-| `test_candidate_visibility.py::test_candidate_pool_becomes_active` | requests.ConnectionError | Server-dependent |
-| `test_candidate_visibility.py::test_pool_metrics_available_when_active` | requests.ConnectionError | Server-dependent |
-| `test_main_coverage_extended.py::test_control_command_sequence` | AssertionError: 'ok' not in response | Race condition |
-| `test_main_snapshot_coverage.py::test_create_snapshot_stores_training_state` | AssertionError: '_private' in attrs | Source code bug |
+| Test                                                                         | Error Type                           | Category         |
+| ---------------------------------------------------------------------------- | ------------------------------------ | ---------------- |
+| `test_demo_endpoints.py::test_training_websocket_receives_state_messages`    | AssertionError: No state messages    | Server-dependent |
+| `test_demo_endpoints.py::test_training_websocket_receives_metrics_messages`  | AssertionError: No metrics messages  | Server-dependent |
+| `test_demo_endpoints.py::test_demo_mode_broadcasts_data`                     | AssertionError: No messages received | Server-dependent |
+| `test_parameter_persistence.py::test_api_set_params_integration`             | httpx.ConnectError                   | Server-dependent |
+| `test_candidate_visibility.py::test_server_health`                           | requests.ConnectionError             | Server-dependent |
+| `test_candidate_visibility.py::test_state_endpoint_returns_data`             | requests.ConnectionError             | Server-dependent |
+| `test_candidate_visibility.py::test_candidate_pool_becomes_active`           | requests.ConnectionError             | Server-dependent |
+| `test_candidate_visibility.py::test_pool_metrics_available_when_active`      | requests.ConnectionError             | Server-dependent |
+| `test_main_coverage_extended.py::test_control_command_sequence`              | AssertionError: 'ok' not in response | Race condition   |
+| `test_main_snapshot_coverage.py::test_create_snapshot_stores_training_state` | AssertionError: '_private' in attrs  | Source code bug  |
 
 #### XFAIL (3 tests) - Known Bugs
 
-| Test | Reason |
-|------|--------|
-| `test_logger_coverage_95.py::test_verbose_logging` | `logging.VERBOSE` attribute doesn't exist |
+| Test                                                    | Reason                                    |
+| ------------------------------------------------------- | ----------------------------------------- |
+| `test_logger_coverage_95.py::test_verbose_logging`      | `logging.VERBOSE` attribute doesn't exist |
 | `test_logger_coverage_95.py::test_verbose_with_context` | `logging.VERBOSE` attribute doesn't exist |
-| `test_logger_coverage_95.py::test_empty_yaml_file` | `LoggingConfig` doesn't handle empty YAML |
+| `test_logger_coverage_95.py::test_empty_yaml_file`      | `LoggingConfig` doesn't handle empty YAML |
 
 ---
 
@@ -95,14 +95,14 @@ All 54 ERROR tests use the `mocker` fixture from `pytest-mock`:
 
 Issues are prioritized by: severity of failure, importance of component, potential for software defects, and development impact.
 
-| Priority | Issue | Impact | Effort | Tests Affected |
-|----------|-------|--------|--------|----------------|
-| **P0 - Critical** | Missing pytest-mock dependency | Blocks 54 tests from running; zero coverage of dashboard handler logic | Trivial (pip install) | 54 |
-| **P1 - High** | Snapshot private attribute leakage | Security/data integrity bug in production code; private state stored in HDF5 files | Low (add filter) | 1 |
-| **P2 - Medium** | WebSocket control race condition | Intermittent test failure; masks real regressions | Medium (fix test or source) | 1 |
-| **P3 - Low** | Server-dependent tests run without server | Tests correctly marked; environmental configuration issue | None (documentation) | 8 |
-| **P4 - Low** | Logger VERBOSE level not registered | Logger feature incomplete; tests correctly marked xfail | Low (register level attribute) | 2 |
-| **P5 - Low** | LoggingConfig empty YAML handling | Edge case; test correctly marked xfail | Low (null check) | 1 |
+| Priority          | Issue                                     | Impact                                                                             | Effort                         | Tests Affected |
+| ----------------- | ----------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------ | -------------- |
+| **P0 - Critical** | Missing pytest-mock dependency            | Blocks 54 tests from running; zero coverage of dashboard handler logic             | Trivial (pip install)          | 54             |
+| **P1 - High**     | Snapshot private attribute leakage        | Security/data integrity bug in production code; private state stored in HDF5 files | Low (add filter)               | 1              |
+| **P2 - Medium**   | WebSocket control race condition          | Intermittent test failure; masks real regressions                                  | Medium (fix test or source)    | 1              |
+| **P3 - Low**      | Server-dependent tests run without server | Tests correctly marked; environmental configuration issue                          | None (documentation)           | 8              |
+| **P4 - Low**      | Logger VERBOSE level not registered       | Logger feature incomplete; tests correctly marked xfail                            | Low (register level attribute) | 2              |
+| **P5 - Low**      | LoggingConfig empty YAML handling         | Edge case; test correctly marked xfail                                             | Low (null check)               | 1              |
 
 ---
 
@@ -115,17 +115,20 @@ Issues are prioritized by: severity of failure, importance of component, potenti
 ### Affected Tests
 
 All tests in:
+
 - `src/tests/unit/frontend/test_dashboard_manager.py` (classes: `TestDashboardManagerHandlersWithMocking`, `TestTrainingButtonHandlers`, `TestParameterHandlers`, `TestHandleTrainingButtons`, `TestDashboardManagerMiscMethods`)
 - `src/tests/unit/frontend/test_dashboard_manager_95.py` (classes: `TestInitAppliedParamsNon200`, `TestTrainingButtonsDebounce`, `TestAllButtonHandlerSuccessCases`, `TestCallbackHandlerReturns`, `TestSyncBackendParamsHandler`, `TestApplyParametersHandler`, `TestAdditionalHandlerCases`)
 
 ### Root Cause
 
 The `pytest-mock` package is **not installed** in the current Python environment despite being listed in:
+
 - `conf/requirements.txt` (`pytest-mock==3.15.1`)
 - `conf/requirements_ci.txt` (`pytest-mock>=3.12`)
 - `conf/conda_environment.yaml` (`pytest-mock>=3.12`)
 
 **Verification:**
+
 ```bash
 $ python -c "import pytest_mock"
 ModuleNotFoundError: No module named 'pytest_mock'
@@ -146,6 +149,7 @@ This exact issue was identified and resolved on 2026-01-12 (see `notes/VALIDATIO
 ### Proposed Fix
 
 **Immediate fix:**
+
 ```bash
 pip install pytest-mock>=3.12
 ```
@@ -170,11 +174,11 @@ None - this is an environment issue, not a code issue.
 
 ### Error Message
 
-```
+```bash
 assert '_private' not in <Attributes of HDF5 object at 135852546231968>
 ```
 
-### Root Cause
+### Root Cause: issue 2
 
 In `src/main.py:1151-1155`, the HDF5 snapshot creation iterates over **all** attributes of the training state object without filtering private/protected attributes:
 
@@ -189,14 +193,14 @@ if training_state:
 
 The code stores every attribute from `training_state.__dict__` that has a serializable type, including attributes prefixed with `_` (private/protected). The test creates a `MockTrainingState` with `self._private = "should_be_ignored"` and correctly expects it to be excluded, but the source code has no filter.
 
-### Impact
+### Impact: issue 2
 
 - **Data integrity**: Internal implementation details leak into persistent HDF5 snapshots
 - **Security**: Private state attributes (potentially containing sensitive data) are stored in snapshot files
 - **Compatibility**: Future changes to private attributes could break snapshot restore operations
 - **Convention violation**: Python convention is that `_`-prefixed attributes are implementation details
 
-### Proposed Fix
+### Proposed Fix: issue 2
 
 **Fix in `src/main.py`** - Add a filter to exclude private/protected attributes:
 
@@ -212,7 +216,7 @@ for key, value in training_state.__dict__.items():
         state_group.attrs[key] = value
 ```
 
-### Files to Modify
+### Files to Modify: issue 2
 
 - `src/main.py` (line 1153-1155) - Add `not key.startswith("_")` filter
 
@@ -224,17 +228,17 @@ for key, value in training_state.__dict__.items():
 ### Priority: P2 - Medium
 ### Severity: Flaky test that masks real regressions
 
-### Affected Test
+### Affected Test: issue 3
 
 `src/tests/unit/test_main_coverage_extended.py::TestControlWebSocketBranches::test_control_command_sequence`
 
-### Error Message
+### Error Message: issue 3
 
-```
+```bash
 assert ('ok' in {'data': {'epoch': 1, 'metrics': {'accuracy': 0.5230504803625288, 'loss': 0.94524787551855, 'val_accuracy': 0.4926881115361997, 'val_loss': 1.0437171844941882}, 'network_topology': {'hid...
 ```
 
-### Root Cause
+### Root Cause: issue 3
 
 This is a **race condition** between the control response and training broadcast messages:
 
@@ -260,15 +264,15 @@ def test_control_command_sequence(self, app_client):
         assert "ok" in response or "state" in response
 ```
 
-### Impact
+### Impact: issue 3
 
 - Intermittent CI failures reduce confidence in test suite reliability
 - Other developers may dismiss real failures as "just that flaky test"
 - The test provides no reliable coverage of the control command flow
 
-### Proposed Fix
+### Proposed Fix: issue 3
 
-**Option A (Recommended): Fix the test to handle the race condition**
+**Option A (Recommended): Fix the test to handle the race condition:**
 
 Consume messages in a loop until the control response is found or timeout:
 
@@ -290,11 +294,11 @@ def test_control_command_sequence(self, app_client):
         assert control_response["ok"] is True
 ```
 
-**Option B: Fix the source code to exclude control clients from broadcasts**
+**Option B: Fix the source code to exclude control clients from broadcasts:**
 
 Add an `exclude` parameter to `broadcast` calls in the demo mode training loop, excluding control WebSocket clients. This is a larger change and may not be desirable since control clients may legitimately want to receive training updates.
 
-**Option C: Send personal response before starting the training thread**
+**Option C: Send personal response before starting the training thread:**
 
 Reorder the control handler to send the response before calling `demo_mode_instance.start()`:
 
@@ -305,7 +309,7 @@ await websocket_manager.send_personal_message(response, websocket)
 state = demo_mode_instance.start(reset=reset)  # Start after response sent
 ```
 
-### Files to Modify
+### Files to Modify: issue 3
 
 - **Option A**: `src/tests/unit/test_main_coverage_extended.py` (line 1073-1080)
 - **Option B**: `src/main.py` and `src/communication/websocket_manager.py`
@@ -315,25 +319,27 @@ state = demo_mode_instance.start(reset=reset)  # Start after response sent
 
 ## Issue 4: Server-Dependent Tests Without Running Server (8 FAILED Tests)
 
-### Status: FAILED
+### Status: FAILED: issue 4
 ### Priority: P3 - Low
 ### Severity: Environmental/configuration issue, not a code defect
 
-### Affected Tests
+### Affected Tests: issue 4
 
 **WebSocket broadcast tests (3 tests):**
+
 - `test_demo_endpoints.py::TestWebSocketTrainingEndpoint::test_training_websocket_receives_state_messages`
 - `test_demo_endpoints.py::TestWebSocketTrainingEndpoint::test_training_websocket_receives_metrics_messages`
 - `test_demo_endpoints.py::TestDataFlowIntegration::test_demo_mode_broadcasts_data`
 
 **HTTP connection tests (5 tests):**
+
 - `test_parameter_persistence.py::test_api_set_params_integration`
 - `test_candidate_visibility.py::TestCandidateVisibility::test_server_health`
 - `test_candidate_visibility.py::TestCandidateVisibility::test_state_endpoint_returns_data`
 - `test_candidate_visibility.py::TestCandidateVisibility::test_candidate_pool_becomes_active`
 - `test_candidate_visibility.py::TestCandidateVisibility::test_pool_metrics_available_when_active`
 
-### Root Cause
+### Root Cause: issue 4
 
 All 8 tests require a live running server at `localhost:8050` and are correctly marked with `@pytest.mark.requires_server`. The `conftest.py` skip logic properly skips these when `RUN_SERVER_TESTS` is not set:
 
@@ -344,7 +350,8 @@ if not os.getenv("RUN_SERVER_TESTS"):
 ```
 
 **Verified:** When `RUN_SERVER_TESTS` is not set, all 8 tests are skipped:
-```
+
+```bash
 SKIPPED [4] - Server tests disabled (set RUN_SERVER_TESTS=1)
 ```
 
@@ -353,6 +360,7 @@ The failures occur only when `RUN_SERVER_TESTS=1` is set in the environment but 
 ### WebSocket broadcast failures (tests 1-3)
 
 These tests cannot work under `TestClient` even with the server running in-process because:
+
 - `broadcast_from_thread()` uses `asyncio.run_coroutine_threadsafe()` to schedule broadcasts
 - The TestClient's event loop is synchronously blocked in the WebSocket receive handler
 - The broadcast coroutine never gets a chance to execute
@@ -362,13 +370,13 @@ These tests cannot work under `TestClient` even with the server running in-proce
 
 These tests use raw `httpx.AsyncClient()` or `requests.get()` to connect to `http://localhost:8050`. They require an actual server process running.
 
-### Impact
+### Impact: issue 4
 
 - No code defect exists
 - Skip logic works correctly
 - Failures only occur with improper environment configuration
 
-### Proposed Fix
+### Proposed Fix: issue 4
 
 **No code changes required.** The test markers and skip logic are correct.
 
@@ -383,7 +391,7 @@ export RUN_SERVER_TESTS=1
 cd src && pytest -m requires_server -v
 ```
 
-### Files to Modify
+### Files to Modify: issue 4
 
 None (documentation-only update in CLAUDE.md).
 
@@ -395,12 +403,12 @@ None (documentation-only update in CLAUDE.md).
 ### Priority: P4 - Low
 ### Severity: Incomplete feature implementation in logger module
 
-### Affected Tests
+### Affected Tests: issue 5
 
 - `test_logger_coverage_95.py::TestVerboseLogging::test_verbose_logging`
 - `test_logger_coverage_95.py::TestVerboseLogging::test_verbose_with_context`
 
-### Root Cause
+### Root Cause: issue 5
 
 The `CascorLogger` class registers custom log level **names** via `logging.addLevelName()` but does not register the corresponding **attributes** on the `logging` module:
 
@@ -418,13 +426,13 @@ The `verbose()` method at line 307 calls `self._log_with_context(logging.VERBOSE
 
 Contrast with the `trace()` method at line 311 which correctly uses `self.TRACE_LEVEL` (the class attribute) instead of `logging.TRACE`.
 
-### Impact
+### Impact: issue 5
 
 - The `CascorLogger.verbose()` method raises `AttributeError` when called
 - Any code calling `logger.verbose(...)` will crash
 - The `fatal()` method works only because Python's `logging.FATAL` happens to already exist (it's an alias for `logging.CRITICAL`)
 
-### Proposed Fix
+### Proposed Fix: issue 5
 
 **Option A (Recommended): Use the class constant in `verbose()` method, matching `trace()`:**
 
@@ -448,7 +456,7 @@ if not hasattr(logging, 'VERBOSE'):
 
 Option A is preferred because it follows the existing pattern used by `trace()` and doesn't modify the global `logging` module.
 
-### Files to Modify
+### Files to Modify: issue 5
 
 - `src/logger/logger.py` (line 307) - Change `logging.VERBOSE` to `self.VERBOSE_LEVEL`
 - `src/tests/unit/test_logger_coverage_95.py` - Remove `xfail` marker from affected tests
@@ -457,15 +465,15 @@ Option A is preferred because it follows the existing pattern used by `trace()` 
 
 ## Issue 6: LoggingConfig Empty YAML Handling (1 XFAIL Test)
 
-### Status: XFAIL
+### Status: XFAIL: issue 6
 ### Priority: P5 - Low
 ### Severity: Edge case in configuration loading
 
-### Affected Test
+### Affected Test: issue 6
 
 - `test_logger_coverage_95.py::TestLoggingConfigLoadBranches::test_empty_yaml_file`
 
-### Root Cause
+### Root Cause: issue 6
 
 `LoggingConfig._load_config()` in `src/logger/logger.py` does not handle the case where `yaml.safe_load()` returns `None` for an empty YAML file:
 
@@ -488,12 +496,12 @@ def _load_config(self) -> Dict:
 
 When the YAML file exists but is empty, `yaml.safe_load()` returns `None` (not an empty dict). The code catches `Exception` from `yaml.safe_load()` but `None` is a valid return, not an exception. The subsequent `if "logging" in config:` check then raises `TypeError` because `None` is not iterable.
 
-### Impact
+### Impact: issue 6
 
 - If an empty `logging_config.yaml` file exists, the application will crash during logger initialization
 - Edge case unlikely in production but represents a defensive programming gap
 
-### Proposed Fix
+### Proposed Fix: issue 6
 
 Add a null check after `yaml.safe_load()`:
 
@@ -504,7 +512,7 @@ if not config:  # Handle empty file (None) or empty document ({})
     return self._get_default_config()
 ```
 
-### Files to Modify
+### Files to Modify: issue 6
 
 - `src/logger/logger.py` (after line 496) - Add null/empty check
 - `src/tests/unit/test_logger_coverage_95.py` - Remove `xfail` marker from affected test
@@ -515,19 +523,19 @@ if not config:  # Handle empty file (None) or empty document ({})
 
 ### All Fixes Applied and Verified
 
-| Priority | Action | Status | Files Modified |
-|----------|--------|--------|----------------|
-| P0 | Installed `pytest-mock>=3.12` | DONE | Environment only |
-| P1 | Added `not key.startswith("_")` filter in snapshot creation | DONE | `src/main.py` |
-| P2 | Fixed test to drain broadcast messages before asserting | DONE | `src/tests/unit/test_main_coverage_extended.py` |
-| P3 | Server-dependent tests (no code change needed) | N/A | Already correctly marked |
-| P4 | Changed `logging.VERBOSE` to `self.VERBOSE_LEVEL` | DONE | `src/logger/logger.py` |
-| P5 | Added null check after `yaml.safe_load()` | DONE | `src/logger/logger.py` |
-| - | Removed 3 `@pytest.mark.xfail` markers | DONE | `src/tests/unit/test_logger_coverage_95.py` |
+| Priority | Action                                                      | Status | Files Modified                                  |
+| -------- | ----------------------------------------------------------- | ------ | ----------------------------------------------- |
+| P0       | Installed `pytest-mock>=3.12`                               | DONE   | Environment only                                |
+| P1       | Added `not key.startswith("_")` filter in snapshot creation | DONE   | `src/main.py`                                   |
+| P2       | Fixed test to drain broadcast messages before asserting     | DONE   | `src/tests/unit/test_main_coverage_extended.py` |
+| P3       | Server-dependent tests (no code change needed)              | N/A    | Already correctly marked                        |
+| P4       | Changed `logging.VERBOSE` to `self.VERBOSE_LEVEL`           | DONE   | `src/logger/logger.py`                          |
+| P5       | Added null check after `yaml.safe_load()`                   | DONE   | `src/logger/logger.py`                          |
+| -        | Removed 3 `@pytest.mark.xfail` markers                      | DONE   | `src/tests/unit/test_logger_coverage_95.py`     |
 
 ### Verified Results (Round 1)
 
-```
+```bash
 Before: 3,151 passed, 10 failed, 54 errors, 3 xfailed, 34 skipped, 1 warning (294.63s)
 After:  3,207 passed, 0 failed, 0 errors, 0 xfailed, 45 skipped, 1 warning (145.25s)
 
@@ -545,6 +553,7 @@ Additional test failures found after further environment updates (h5py installed
 **Root Cause:** Tests waited for `broadcast_from_thread()` state messages that can't be delivered through TestClient's threading model. Tests used `pytest.skip("No state messages received")` as fallback.
 
 **Fix:**
+
 1. Added `{"type": "state", ...}` personal message sent on `/ws/training` connect in `main.py` handler
 2. State data uses `training_state.get_state()` for standardized field format
 3. Rewrote `test_websocket_state.py` to consume deterministic connect sequence (connection_established → initial_status → state)
@@ -588,17 +597,17 @@ Additional test failures found after further environment updates (h5py installed
 
 ### Round 2 Remediation Summary
 
-| Issue | Action | Status | Files Modified |
-|-------|--------|--------|----------------|
-| #7 | State message on WS connect + test rewrite | DONE | `src/main.py`, `src/tests/integration/test_websocket_state.py` |
-| #8 | Drain 3rd connect message in ping-pong tests | DONE | `src/tests/integration/test_main_coverage.py`, `test_main_ws.py` |
-| #9 | Remove skip marker from test_verbose_logging | DONE | `src/tests/unit/test_logger_coverage.py` |
-| #10 | Message-draining loop for unknown command test | DONE | `src/tests/unit/test_main_coverage_extended.py` |
-| #11 | Reset `_demo_instance` in `reset_singletons` | DONE | `src/tests/conftest.py` |
+| Issue | Action                                         | Status | Files Modified                                                   |
+| ----- | ---------------------------------------------- | ------ | ---------------------------------------------------------------- |
+| #7    | State message on WS connect + test rewrite     | DONE   | `src/main.py`, `src/tests/integration/test_websocket_state.py`   |
+| #8    | Drain 3rd connect message in ping-pong tests   | DONE   | `src/tests/integration/test_main_coverage.py`, `test_main_ws.py` |
+| #9    | Remove skip marker from test_verbose_logging   | DONE   | `src/tests/unit/test_logger_coverage.py`                         |
+| #10   | Message-draining loop for unknown command test | DONE   | `src/tests/unit/test_main_coverage_extended.py`                  |
+| #11   | Reset `_demo_instance` in `reset_singletons`   | DONE   | `src/tests/conftest.py`                                          |
 
 ### Verified Results (Round 2)
 
-```
+```bash
 Final: 3,215 passed, 0 failed, 0 errors, 0 xfailed, 37 skipped (123.90s)
 
 All 37 skips are legitimate:

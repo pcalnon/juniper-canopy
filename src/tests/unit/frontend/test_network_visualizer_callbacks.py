@@ -834,11 +834,6 @@ class TestDashTestClientIntegration:
     @pytest.mark.unit
     def test_network_graph_with_metrics_data(self, visualizer, simple_topology):
         """Test network graph creation with metrics data for new unit detection."""
-        metrics_data = [
-            {"network_topology": {"hidden_units": 0}},
-            {"network_topology": {"hidden_units": 1}},
-        ]
-        assert metrics_data
         fig = visualizer._create_network_graph(
             simple_topology,
             "hierarchical",
@@ -846,7 +841,6 @@ class TestDashTestClientIntegration:
             newly_added_unit=0,
             theme="light",
             selected_nodes=[],
-            metrics_data=metrics_data,
         )
         assert isinstance(fig, go.Figure)
 

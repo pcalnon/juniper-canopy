@@ -19,20 +19,20 @@ All items are prioritized into phases based on severity, blocking potential, int
 
 ### Source Documents Evaluated
 
-| Document | Location | Status |
-| --- | --- | --- |
-| JUNIPER_CASCOR_SPIRAL_DATA_GEN_REFACTOR_PLAN.md | JuniperCascor/notes/ | Phases 0-4 Complete, Phase 5 Deferred |
-| INTEGRATION_ROADMAP.md | JuniperCascor/notes/ (symlinked to JuniperData/notes/) | Most issues RESOLVED |
-| PRE-DEPLOYMENT_ROADMAP.md | JuniperCascor/notes/ (symlinked to JuniperData/notes/) | P0-P1 RESOLVED, some P2-P3 remaining |
-| PRE-DEPLOYMENT_ROADMAP-2.md | JuniperCascor/notes/ (symlinked to JuniperData/notes/) | 74% complete, 26% remaining |
+| Document                                        | Location                                               | Status                                |
+| ----------------------------------------------- | ------------------------------------------------------ | ------------------------------------- |
+| JUNIPER_CASCOR_SPIRAL_DATA_GEN_REFACTOR_PLAN.md | JuniperCascor/notes/                                   | Phases 0-4 Complete, Phase 5 Deferred |
+| INTEGRATION_ROADMAP.md                          | JuniperCascor/notes/ (symlinked to JuniperData/notes/) | Most issues RESOLVED                  |
+| PRE-DEPLOYMENT_ROADMAP.md                       | JuniperCascor/notes/ (symlinked to JuniperData/notes/) | P0-P1 RESOLVED, some P2-P3 remaining  |
+| PRE-DEPLOYMENT_ROADMAP-2.md                     | JuniperCascor/notes/ (symlinked to JuniperData/notes/) | 74% complete, 26% remaining           |
 
 ### Outstanding Work Summary
 
-| Category | Critical | High | Medium | Low | Total |
-| --- | --- | --- | --- | --- | --- |
-| Code Issues (from source review) | 3 | 3 | 8 | 3 | 17 |
-| Documentation Items (from roadmaps) | 0 | 1 | 5 | 30+ | 36+ |
-| **Total** | **3** | **4** | **13** | **33+** | **53+** |
+| Category                            | Critical | High  | Medium | Low     | Total   |
+| ----------------------------------- | -------- | ----- | ------ | ------- | ------- |
+| Code Issues (from source review)    | 3        | 3     | 8      | 3       | 17      |
+| Documentation Items (from roadmaps) | 0        | 1     | 5      | 30+     | 36+     |
+| **Total**                           | **3**    | **4** | **13** | **33+** | **53+** |
 
 ---
 
@@ -243,13 +243,13 @@ These items represent significant functional gaps or architectural risks that sh
 
 **Current Coverage by Module**:
 
-| Module | Current | Target |
-| --- | --- | --- |
-| `cascade_correlation.py` | ~61% | 85% |
-| `candidate_unit.py` | ~81% | 90% |
-| `snapshot_serializer.py` | ~80% | 90% |
-| `profiling/` | ~90% | 80% (met) |
-| `log_config/` | ~60% | 80% |
+| Module                   | Current | Target    |
+| ------------------------ | ------- | --------- |
+| `cascade_correlation.py` | ~61%    | 85%       |
+| `candidate_unit.py`      | ~81%    | 90%       |
+| `snapshot_serializer.py` | ~80%    | 90%       |
+| `profiling/`             | ~90%    | 80% (met) |
+| `log_config/`            | ~60%    | 80%       |
 
 **Required Actions**:
 
@@ -517,30 +517,30 @@ These items represent significant functional gaps or architectural risks that sh
 
 These are pre-beta Canopy enhancements from PRE-DEPLOYMENT_ROADMAP-2 Section 7.1. All are **NOT STARTED**.
 
-| ID | Module | Name | Description | Effort Est. |
-| --- | --- | --- | --- | --- |
-| CAN-001 | Training Metrics | Training Loss Time Window | Moving window dropdown for Training Loss graph | S |
-| CAN-002 | Training Metrics | Custom Rolling Time Window | Custom time window input for Training Loss graph | S |
-| CAN-003 | Training Metrics | Candidate Pool Availability | Retain and display candidate pool data per node addition | M |
-| CAN-004 | Meta Param Tuning | Meta Param Tuning Tab | New tab for all exposed meta parameter tuning | L |
-| CAN-005 | Meta Param Tuning | Pin/Unpin Meta Params | Pin selected params from Tuning tab to side menu | M |
-| CAN-006 | Meta Param Tuning | Network Train Epoch Param | Tunable: epochs before next candidate addition | S |
-| CAN-007 | Meta Param Tuning | Candidate Pool Train Epoch | Tunable: candidate pool training epochs | S |
-| CAN-008 | Meta Param Tuning | Candidate Pool Node Count | Tunable: number of prospective nodes in pool | S |
-| CAN-009 | Meta Param Tuning | Correlation Threshold | Tunable: correlation threshold for candidates | S |
-| CAN-010 | Meta Param Tuning | Optimizer Type | Tunable: network optimizer selection | S |
-| CAN-011 | Meta Param Tuning | Activation Function | Tunable: activation function selection | S |
-| CAN-012 | Meta Param Tuning | Candidate Node Select Num | Tunable: number of top candidates selected | S |
-| CAN-013 | Meta Param Tuning | Candidate Node Integration | Tunable: connection pattern for added nodes | M |
-| CAN-014 | Training Metrics | Snapshot Captures Tuning | Snapshots capture meta param values throughout session | M-L |
-| CAN-015 | Training Metrics | Snapshot Replay with Tuning | Replay snapshots with tunable params, fork into new session | L |
-| CAN-016a | All | Layout Save/Load | Save/load complete dashboard state and customizations | M |
-| CAN-016b | Dataset | Import/Generate Dataset | New Dataset button: local file, remote URL, or JuniperData | M |
-| CAN-017 | All | Tooltips | Hover tooltips for all dashboard controls | M |
-| CAN-018 | All | Tutorial Text | Right-click detailed tutorial descriptions with doc links | M-L |
-| CAN-019 | All | Tutorial Walkthrough | Step-by-step highlighted tutorial mode | L |
-| CAN-020 | All | Hierarchy Level Selection | Network selection at hierarchy level > 0 | M-L |
-| CAN-021 | All | Population Selection | Network selection within population at a hierarchy | M |
+| ID       | Module            | Name                        | Description                                                 | Effort Est. |
+| -------- | ----------------- | --------------------------- | ----------------------------------------------------------- | ----------- |
+| CAN-001  | Training Metrics  | Training Loss Time Window   | Moving window dropdown for Training Loss graph              | S           |
+| CAN-002  | Training Metrics  | Custom Rolling Time Window  | Custom time window input for Training Loss graph            | S           |
+| CAN-003  | Training Metrics  | Candidate Pool Availability | Retain and display candidate pool data per node addition    | M           |
+| CAN-004  | Meta Param Tuning | Meta Param Tuning Tab       | New tab for all exposed meta parameter tuning               | L           |
+| CAN-005  | Meta Param Tuning | Pin/Unpin Meta Params       | Pin selected params from Tuning tab to side menu            | M           |
+| CAN-006  | Meta Param Tuning | Network Train Epoch Param   | Tunable: epochs before next candidate addition              | S           |
+| CAN-007  | Meta Param Tuning | Candidate Pool Train Epoch  | Tunable: candidate pool training epochs                     | S           |
+| CAN-008  | Meta Param Tuning | Candidate Pool Node Count   | Tunable: number of prospective nodes in pool                | S           |
+| CAN-009  | Meta Param Tuning | Correlation Threshold       | Tunable: correlation threshold for candidates               | S           |
+| CAN-010  | Meta Param Tuning | Optimizer Type              | Tunable: network optimizer selection                        | S           |
+| CAN-011  | Meta Param Tuning | Activation Function         | Tunable: activation function selection                      | S           |
+| CAN-012  | Meta Param Tuning | Candidate Node Select Num   | Tunable: number of top candidates selected                  | S           |
+| CAN-013  | Meta Param Tuning | Candidate Node Integration  | Tunable: connection pattern for added nodes                 | M           |
+| CAN-014  | Training Metrics  | Snapshot Captures Tuning    | Snapshots capture meta param values throughout session      | M-L         |
+| CAN-015  | Training Metrics  | Snapshot Replay with Tuning | Replay snapshots with tunable params, fork into new session | L           |
+| CAN-016a | All               | Layout Save/Load            | Save/load complete dashboard state and customizations       | M           |
+| CAN-016b | Dataset           | Import/Generate Dataset     | New Dataset button: local file, remote URL, or JuniperData  | M           |
+| CAN-017  | All               | Tooltips                    | Hover tooltips for all dashboard controls                   | M           |
+| CAN-018  | All               | Tutorial Text               | Right-click detailed tutorial descriptions with doc links   | M-L         |
+| CAN-019  | All               | Tutorial Walkthrough        | Step-by-step highlighted tutorial mode                      | L           |
+| CAN-020  | All               | Hierarchy Level Selection   | Network selection at hierarchy level > 0                    | M-L         |
+| CAN-021  | All               | Population Selection        | Network selection within population at a hierarchy          | M           |
 
 **Recommended Priority Order** (for pre-beta):
 
@@ -560,18 +560,18 @@ These are pre-beta Canopy enhancements from PRE-DEPLOYMENT_ROADMAP-2 Section 7.1
 
 These are pre-beta Cascor enhancements from PRE-DEPLOYMENT_ROADMAP-2 Section 7.2. All are **NOT STARTED** unless noted.
 
-| ID | Module | Name | Description | Effort Est. | Notes |
-| --- | --- | --- | --- | --- | --- |
-| CAS-001 | Data Generation | Extract Spiral Generator | Extract spiral generator into JuniperData | L | Phases 0-4 COMPLETE (JUNIPER_CASCOR_SPIRAL_DATA_GEN_REFACTOR_PLAN) |
-| CAS-002 | Epoch Definition | Separate Epoch Limits | Separate epoch limits for full network vs candidate nodes | M | NOT STARTED |
-| CAS-003 | Training Iterations | Max Train Session Iterations | Limit total iterations per training session | S-M | NOT STARTED |
-| CAS-004 | Remote Workers | Extract Remote Worker Code | Extract into JuniperBranch application | L-XL | Deferred (see INT-DEF-005) |
-| CAS-005 | Common Modules | Extract Common Dependencies | Shared modules for Cascor and Branch | M-L | Deferred (depends on CAS-004) |
-| CAS-006 | Auto-Snapshot | Accuracy Ratchet | Auto-snapshot on new best accuracy | M | NOT STARTED |
-| CAS-007 | Testing | Optimize Slow Tests | Reduce 45-min test suite to <= 5 min | L | NOT STARTED |
-| CAS-008 | Network Hierarchy | Hierarchy Management | Multi-hierarchical CasCor network training | XL | NOT STARTED |
-| CAS-009 | Network Population | Population Management | Population initialization at hierarchy level | XL | NOT STARTED |
-| CAS-010 | Snapshot Storage | Vector DB Storage | Store snapshots in vector DB indexed by UUID | M-L | NOT STARTED |
+| ID      | Module              | Name                         | Description                                               | Effort Est. | Notes                                                              |
+| ------- | ------------------- | ---------------------------- | --------------------------------------------------------- | ----------- | ------------------------------------------------------------------ |
+| CAS-001 | Data Generation     | Extract Spiral Generator     | Extract spiral generator into JuniperData                 | L           | Phases 0-4 COMPLETE (JUNIPER_CASCOR_SPIRAL_DATA_GEN_REFACTOR_PLAN) |
+| CAS-002 | Epoch Definition    | Separate Epoch Limits        | Separate epoch limits for full network vs candidate nodes | M           | NOT STARTED                                                        |
+| CAS-003 | Training Iterations | Max Train Session Iterations | Limit total iterations per training session               | S-M         | NOT STARTED                                                        |
+| CAS-004 | Remote Workers      | Extract Remote Worker Code   | Extract into JuniperBranch application                    | L-XL        | Deferred (see INT-DEF-005)                                         |
+| CAS-005 | Common Modules      | Extract Common Dependencies  | Shared modules for Cascor and Branch                      | M-L         | Deferred (depends on CAS-004)                                      |
+| CAS-006 | Auto-Snapshot       | Accuracy Ratchet             | Auto-snapshot on new best accuracy                        | M           | NOT STARTED                                                        |
+| CAS-007 | Testing             | Optimize Slow Tests          | Reduce 45-min test suite to <= 5 min                      | L           | NOT STARTED                                                        |
+| CAS-008 | Network Hierarchy   | Hierarchy Management         | Multi-hierarchical CasCor network training                | XL          | NOT STARTED                                                        |
+| CAS-009 | Network Population  | Population Management        | Population initialization at hierarchy level              | XL          | NOT STARTED                                                        |
+| CAS-010 | Snapshot Storage    | Vector DB Storage            | Store snapshots in vector DB indexed by UUID              | M-L         | NOT STARTED                                                        |
 
 **Recommended Priority Order** (for pre-beta):
 
@@ -588,31 +588,31 @@ These are pre-beta Cascor enhancements from PRE-DEPLOYMENT_ROADMAP-2 Section 7.2
 
 This table maps each outstanding item back to its source document for traceability.
 
-| Item ID | Source Document | Original ID | Status in Source |
-| --- | --- | --- | --- |
-| INT-CRIT-001 | Code review | N/A (TODO in main.py:435) | Newly identified |
-| INT-CRIT-002 | Code review | N/A (TODO in main.py:783) | Newly identified |
-| INT-CRIT-003 | Code review | N/A (main.py:627) | Newly identified |
-| INT-HIGH-001 | Code review | N/A (main.py:1137,1330) | Newly identified |
-| INT-HIGH-002 | PRE-DEPLOYMENT_ROADMAP-2 | P1-NEW-003 action item | Partially complete |
-| INT-HIGH-003 | Code review | N/A | Newly identified |
-| INT-HIGH-004 | SPIRAL_DATA_GEN_REFACTOR_PLAN | Section 14, Item 3 | Not started |
-| INT-MED-001 | PRE-DEPLOYMENT_ROADMAP, ROADMAP-2 | CASCOR-P2-001, P2-NEW-001 | In progress |
-| INT-MED-002 | PRE-DEPLOYMENT_ROADMAP-2 | P2-NEW-002 | Not started |
-| INT-MED-003 | PRE-DEPLOYMENT_ROADMAP-2 | P2-NEW-006 | In progress |
-| INT-MED-004 | PRE-DEPLOYMENT_ROADMAP | P3-001 | Partial |
-| INT-MED-005 | PRE-DEPLOYMENT_ROADMAP-2 | P1-NEW-002 future items | Deferred |
-| INT-MED-006 | Code review | N/A | Newly identified |
-| INT-MED-007 | Code review (related to CANOPY-P1-003) | N/A | Newly identified |
-| INT-MED-008 | SPIRAL_DATA_GEN_REFACTOR_PLAN | Section 14, Item 1 | Not started |
-| INT-DEF-001 | PRE-DEPLOYMENT_ROADMAP-2 | P1-NEW-001 | Deferred |
-| INT-DEF-002 | PRE-DEPLOYMENT_ROADMAP, ROADMAP-2 | P3-003, P3-NEW-003 | Not started |
-| INT-DEF-003 | PRE-DEPLOYMENT_ROADMAP-2 | P3-NEW-004 | Not started |
-| INT-DEF-004 | SPIRAL_DATA_GEN_REFACTOR_PLAN | Section 14, Item 2 | Not started |
-| INT-DEF-005 | PRE-DEPLOYMENT_ROADMAP-2, CAS-004 | P1-NEW-002 deferred | Deferred |
-| INT-DEF-006 | SPIRAL_DATA_GEN_REFACTOR_PLAN | Phase 5 | Deferred |
-| CAN-001..021 | PRE-DEPLOYMENT_ROADMAP-2 | Section 7.1 | Not started |
-| CAS-001..010 | PRE-DEPLOYMENT_ROADMAP-2 | Section 7.2 | Mixed (CAS-001 complete) |
+| Item ID      | Source Document                        | Original ID               | Status in Source         |
+| ------------ | -------------------------------------- | ------------------------- | ------------------------ |
+| INT-CRIT-001 | Code review                            | N/A (TODO in main.py:435) | Newly identified         |
+| INT-CRIT-002 | Code review                            | N/A (TODO in main.py:783) | Newly identified         |
+| INT-CRIT-003 | Code review                            | N/A (main.py:627)         | Newly identified         |
+| INT-HIGH-001 | Code review                            | N/A (main.py:1137,1330)   | Newly identified         |
+| INT-HIGH-002 | PRE-DEPLOYMENT_ROADMAP-2               | P1-NEW-003 action item    | Partially complete       |
+| INT-HIGH-003 | Code review                            | N/A                       | Newly identified         |
+| INT-HIGH-004 | SPIRAL_DATA_GEN_REFACTOR_PLAN          | Section 14, Item 3        | Not started              |
+| INT-MED-001  | PRE-DEPLOYMENT_ROADMAP, ROADMAP-2      | CASCOR-P2-001, P2-NEW-001 | In progress              |
+| INT-MED-002  | PRE-DEPLOYMENT_ROADMAP-2               | P2-NEW-002                | Not started              |
+| INT-MED-003  | PRE-DEPLOYMENT_ROADMAP-2               | P2-NEW-006                | In progress              |
+| INT-MED-004  | PRE-DEPLOYMENT_ROADMAP                 | P3-001                    | Partial                  |
+| INT-MED-005  | PRE-DEPLOYMENT_ROADMAP-2               | P1-NEW-002 future items   | Deferred                 |
+| INT-MED-006  | Code review                            | N/A                       | Newly identified         |
+| INT-MED-007  | Code review (related to CANOPY-P1-003) | N/A                       | Newly identified         |
+| INT-MED-008  | SPIRAL_DATA_GEN_REFACTOR_PLAN          | Section 14, Item 1        | Not started              |
+| INT-DEF-001  | PRE-DEPLOYMENT_ROADMAP-2               | P1-NEW-001                | Deferred                 |
+| INT-DEF-002  | PRE-DEPLOYMENT_ROADMAP, ROADMAP-2      | P3-003, P3-NEW-003        | Not started              |
+| INT-DEF-003  | PRE-DEPLOYMENT_ROADMAP-2               | P3-NEW-004                | Not started              |
+| INT-DEF-004  | SPIRAL_DATA_GEN_REFACTOR_PLAN          | Section 14, Item 2        | Not started              |
+| INT-DEF-005  | PRE-DEPLOYMENT_ROADMAP-2, CAS-004      | P1-NEW-002 deferred       | Deferred                 |
+| INT-DEF-006  | SPIRAL_DATA_GEN_REFACTOR_PLAN          | Phase 5                   | Deferred                 |
+| CAN-001..021 | PRE-DEPLOYMENT_ROADMAP-2               | Section 7.1               | Not started              |
+| CAS-001..010 | PRE-DEPLOYMENT_ROADMAP-2               | Section 7.2               | Mixed (CAS-001 complete) |
 
 ---
 
@@ -620,16 +620,16 @@ This table maps each outstanding item back to its source document for traceabili
 
 ### Recommended Execution Order
 
-| Phase | Duration | Items | Prerequisite |
-| --- | --- | --- | --- |
-| Phase 1 | 1-2 weeks | INT-CRIT-001, INT-CRIT-002, INT-CRIT-003 | None |
-| Phase 2 | 2-3 weeks | INT-HIGH-001 through INT-HIGH-004 | Phase 1 |
-| Phase 3 | 3-4 weeks | INT-MED-001 through INT-MED-008 | Phase 1 |
-| Phase 4 | Ongoing | INT-DEF-*, CAN-*, CAS-* | Phase 2 |
+| Phase   | Duration  | Items                                    | Prerequisite |
+| ------- | --------- | ---------------------------------------- | ------------ |
+| Phase 1 | 1-2 weeks | INT-CRIT-001, INT-CRIT-002, INT-CRIT-003 | None         |
+| Phase 2 | 2-3 weeks | INT-HIGH-001 through INT-HIGH-004        | Phase 1      |
+| Phase 3 | 3-4 weeks | INT-MED-001 through INT-MED-008          | Phase 1      |
+| Phase 4 | Ongoing   | INT-DEF-*, CAN-*, CAS-*                  | Phase 2      |
 
 ### Phase 1 Critical Path
 
-```
+```bash
 INT-CRIT-003 (get_network_data)
     ↓
 INT-CRIT-001 (backend control)  ←→  INT-CRIT-002 (decision boundary)
@@ -641,6 +641,6 @@ INT-HIGH-003 (backend path tests) — validates all Phase 1 fixes
 
 ## Document History
 
-| Date | Version | Author | Changes |
-| --- | --- | --- | --- |
-| 2026-02-05 | 1.0.0 | Development Team | Initial creation from 4 source documents + code review |
+| Date       | Version | Author           | Changes                                                |
+| ---------- | ------- | ---------------- | ------------------------------------------------------ |
+| 2026-02-05 | 1.0.0   | Development Team | Initial creation from 4 source documents + code review |

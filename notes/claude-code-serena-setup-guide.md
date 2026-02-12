@@ -5,6 +5,7 @@ This guide walks you through installing Claude Code, the `uv` package manager, a
 ---
 
 ## Table of Contents
+
 1. [Prerequisites](#1-prerequisites)
 2. [Install Claude Code](#2-install-claude-code)
 3. [Authenticate Claude Code](#3-authenticate-claude-code)
@@ -20,12 +21,12 @@ This guide walks you through installing Claude Code, the `uv` package manager, a
 
 Before starting, ensure your system meets these requirements:
 
-| Requirement | Specification |
-|-------------|---------------|
+| Requirement      | Specification                   |
+| ---------------- | ------------------------------- |
 | Operating System | Ubuntu 25.10 (or Ubuntu 20.04+) |
-| RAM | 4GB minimum |
-| Network | Internet connection required |
-| Shell | Bash or Zsh recommended |
+| RAM              | 4GB minimum                     |
+| Network          | Internet connection required    |
+| Shell            | Bash or Zsh recommended         |
 
 ### Update Your System
 
@@ -54,6 +55,7 @@ curl -fsSL https://claude.ai/install.sh | bash
 ```
 
 This command downloads and runs the official installer script, which:
+
 - Downloads the Claude Code binary
 - Installs it to `~/.local/bin/claude`
 - Adds the binary location to your PATH
@@ -107,13 +109,14 @@ claude
 
 On first launch, Claude Code will guide you through authentication. You have several options:
 
-| Authentication Method | Description |
-|----------------------|-------------|
-| **Claude Console (Default)** | Connect via OAuth with your Anthropic Console account. Requires active billing at console.anthropic.com |
-| **Claude Pro/Max Plan** | Use your Claude.ai subscription (includes both web and CLI access) |
-| **Enterprise (Bedrock/Vertex)** | Connect via AWS Bedrock or Google Vertex AI |
+| Authentication Method           | Description                                                                                             |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Claude Console (Default)**    | Connect via OAuth with your Anthropic Console account. Requires active billing at console.anthropic.com |
+| **Claude Pro/Max Plan**         | Use your Claude.ai subscription (includes both web and CLI access)                                      |
+| **Enterprise (Bedrock/Vertex)** | Connect via AWS Bedrock or Google Vertex AI                                                             |
 
 Follow the on-screen prompts to:
+
 1. Open the authentication URL in your browser
 2. Log in to your Anthropic account
 3. Authorize Claude Code
@@ -172,10 +175,10 @@ uvx --help
 
 Now you'll configure Serena to work with Claude Code. There are two configuration approaches:
 
-| Approach | Use Case |
-|----------|----------|
+| Approach                | Use Case                                       |
+| ----------------------- | ---------------------------------------------- |
 | **Global (User-level)** | Serena available in all projects automatically |
-| **Per-Project** | Serena configured for specific projects only |
+| **Per-Project**         | Serena configured for specific projects only   |
 
 For your requirement (auto-start when Claude Code launches in a project directory), we'll use the **Global configuration with project-from-cwd**.
 
@@ -188,6 +191,7 @@ claude mcp add --scope user serena -- uvx --from git+https://github.com/oraios/s
 ```
 
 **What this command does:**
+
 - `claude mcp add`: Adds a new MCP server configuration
 - `--scope user`: Makes it available across all projects (stored in `~/.claude.json`)
 - `serena`: The name/identifier for this MCP server
@@ -256,7 +260,7 @@ claude
 
 Inside Claude Code, run:
 
-```
+```bash
 /mcp
 ```
 
@@ -266,13 +270,13 @@ Inside Claude Code, run:
 
 Try asking Claude to use Serena's capabilities:
 
-```
+```bash
 List the available Serena tools
 ```
 
 Or:
 
-```
+```bash
 Use Serena to analyze the current project structure
 ```
 
@@ -280,7 +284,7 @@ Use Serena to analyze the current project structure
 
 Serena runs a web dashboard by default. Open your browser to:
 
-```
+```bash
 http://localhost:24282/dashboard/index.html
 ```
 
@@ -361,13 +365,13 @@ source ~/.bashrc
 
 ### Key File Locations
 
-| File | Purpose |
-|------|---------|
-| `~/.local/bin/claude` | Claude Code binary |
-| `~/.claude/settings.json` | Global Claude Code settings |
-| `~/.claude.json` | MCP server configurations (user scope) |
-| `.mcp.json` (in project) | Project-specific MCP configurations |
-| `~/.claude/CLAUDE.md` | Global instructions for Claude Code |
+| File                      | Purpose                                |
+| ------------------------- | -------------------------------------- |
+| `~/.local/bin/claude`     | Claude Code binary                     |
+| `~/.claude/settings.json` | Global Claude Code settings            |
+| `~/.claude.json`          | MCP server configurations (user scope) |
+| `.mcp.json` (in project)  | Project-specific MCP configurations    |
+| `~/.claude/CLAUDE.md`     | Global instructions for Claude Code    |
 
 ### Alternative: Per-Project Configuration
 
@@ -419,10 +423,10 @@ Serena will now automatically start whenever you run `claude` in any directory, 
 
 ## Resources
 
-| Resource | URL |
-|----------|-----|
-| Claude Code Documentation | https://code.claude.com/docs |
-| Serena GitHub Repository | https://github.com/oraios/serena |
-| Serena User Guide | https://oraios.github.io/serena |
-| uv Documentation | https://docs.astral.sh/uv |
-| MCP Protocol Specification | https://modelcontextprotocol.io |
+| Resource                   | URL                                |
+| -------------------------- | ---------------------------------- |
+| Claude Code Documentation  | <https://code.claude.com/docs>     |
+| Serena GitHub Repository   | <https://github.com/oraios/serena> |
+| Serena User Guide          | <https://oraios.github.io/serena>  |
+| uv Documentation           | <https://docs.astral.sh/uv>        |
+| MCP Protocol Specification | <https://modelcontextprotocol.io>  |

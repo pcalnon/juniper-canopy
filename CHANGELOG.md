@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **RC-1/RC-2 - CasCor In-Process Backend Initialization**: Real backend mode now creates a network, installs monitoring hooks, starts monitoring thread, fetches dataset from JuniperData, and registers WebSocket callbacks during lifespan startup — CasCor runs in-process, not as a separate OS process
+- **RC-3 - WebSocket Control Commands for Real Backend**: `/ws/control` endpoint now handles start/stop/reset commands for CasCor backend (pause/resume return "not supported" since CasCor training is atomic per phase)
+- **RC-4 - Startup Script External Process Launch**: Removed `nohup` background CasCor process launch from `util/juniper_canopy.bash`; CasCor now runs in-process via `CascorIntegration`
+- **RC-5 - JUNIPER_DATA_URL Validation in All Modes**: Moved JUNIPER_DATA_URL validation before the demo/real mode branch so both modes validate the URL at startup
+- **CF-1 - Mode Flag Synchronization**: Startup script now exports `CASCOR_DEMO_MODE` based on shell `DEMO_MODE` for consistent mode detection between shell and Python
+- **CF-3 - CasCor Backend Path for In-Process Integration**: Startup script exports `CASCOR_BACKEND_PATH` so CascorIntegration can locate CasCor modules for import
+
+### Added
+
+- **Integration Tests** (42 new tests):
+  - `test_cascor_real_backend_init.py` — 7 tests for in-process backend initialization lifecycle
+  - `test_cascor_ws_control.py` — 9 tests for WebSocket control commands with CasCor backend
+  - `test_cascor_lifecycle.py` — 8 tests for CascorIntegration create/hook/monitor/shutdown lifecycle
+- **Unit Tests**:
+  - `test_juniper_data_url_validation.py` — 5 tests for JUNIPER_DATA_URL validation in both modes
+- **Regression Tests**:
+  - `test_mode_flag_consistency.py` — 13 tests for CASCOR_DEMO_MODE flag parsing consistency
+
 ### Analysis
 
 - **Integration Development Plan**: Comprehensive assessment of all outstanding integration work across JuniperCascor, JuniperCanopy, and JuniperData

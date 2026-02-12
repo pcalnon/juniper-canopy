@@ -120,26 +120,26 @@ async def lifespan(app: FastAPI):
     # Initialize demo mode or real backend
     global demo_mode_active, demo_mode_instance, cascor_integration, training_state
 
+    # Fix 4 (RC-5): Validate JUNIPER_DATA_URL for ALL modes, not just demo mode.
+    # JuniperData is mandatory for both demo and real backend (CAN-INT-002).
+    juniper_data_url = os.getenv("JUNIPER_DATA_URL")
+    if not juniper_data_url:
+        config_url = config.get("backend.juniper_data.url")
+        if config_url and not str(config_url).startswith("$"):
+            juniper_data_url = str(config_url)
+            os.environ["JUNIPER_DATA_URL"] = juniper_data_url
+            system_logger.info(f"JUNIPER_DATA_URL resolved from config: {juniper_data_url}")
+    if not juniper_data_url:
+        system_logger.error("JUNIPER_DATA_URL is not set and could not be resolved from config. " "Set JUNIPER_DATA_URL=http://localhost:8100 or ensure JuniperData service is running.")
+        raise RuntimeError("JUNIPER_DATA_URL is required. " "Set JUNIPER_DATA_URL=http://localhost:8100 or start JuniperData service.")
+
     if demo_mode_active:
         system_logger.info("Initializing demo mode")
-
-        juniper_data_url = os.getenv("JUNIPER_DATA_URL")
-        if not juniper_data_url:
-            config_url = config.get("backend.juniper_data.url")
-            if config_url and not str(config_url).startswith("$"):
-                juniper_data_url = str(config_url)
-                os.environ["JUNIPER_DATA_URL"] = juniper_data_url
-                system_logger.info(f"JUNIPER_DATA_URL resolved from config: {juniper_data_url}")
-        if not juniper_data_url:
-            system_logger.error("JUNIPER_DATA_URL is not set and could not be resolved from config. " "Set JUNIPER_DATA_URL=http://localhost:8100 or ensure JuniperData service is running.")
-            raise RuntimeError("JUNIPER_DATA_URL is required for demo mode. " "Set JUNIPER_DATA_URL=http://localhost:8100 or start JuniperData service.")
 
         from demo_mode import get_demo_mode
 
         demo_mode_instance = get_demo_mode(update_interval=1.0)
 
-        # Create minimal integration wrapper for demo mode. Don't need full CascorIntegration,
-        # just basic structure for APIs
         system_logger.info("Demo mode network created")
 
         # Initialize global training_state with demo mode defaults
@@ -152,12 +152,51 @@ async def lifespan(app: FastAPI):
         demo_mode_instance.start()
         system_logger.info("Demo mode started with simulated training")
     else:
-        system_logger.info("CasCor backend mode active")
+        # Fix 1 (RC-1, RC-2): In-process real backend initialization.
+        # CasCor runs within Canopy's process via module import and method wrapping,
+        # NOT as a separate OS process. Create a network, install monitoring hooks,
+        # and prepare for user-initiated training via dashboard controls.
+        system_logger.info("CasCor backend mode active — initializing in-process integration")
         demo_mode_instance = None
 
-        # Initialize monitoring callbacks for real backend
         if cascor_integration:
-            setup_monitoring_callbacks()
+            try:
+                # Create network with configuration-driven defaults
+                state = training_state.get_state()
+                network_config = {
+                    "input_size": 2,
+                    "output_size": 1,
+                    "learning_rate": state.get("learning_rate", 0.01),
+                    "max_hidden_units": state.get("max_hidden_units", 10),
+                    "max_epochs": state.get("max_epochs", 200),
+                }
+                cascor_integration.create_network(network_config)
+                system_logger.info(f"CasCor network created: {network_config}")
+
+                # Fetch dataset from JuniperData for the network
+                try:
+                    dataset = cascor_integration.get_dataset_info()
+                    if dataset:
+                        system_logger.info(f"Dataset loaded: {dataset.get('num_samples', '?')} samples, " f"{dataset.get('num_classes', '?')} classes")
+                except Exception as e:
+                    system_logger.warning(f"Could not load dataset from JuniperData: {e}")
+
+                # Install monitoring hooks on network training methods
+                if cascor_integration.install_monitoring_hooks():
+                    system_logger.info("Monitoring hooks installed on CasCor network")
+                else:
+                    system_logger.warning("Failed to install monitoring hooks")
+
+                # Start background monitoring thread for polling metrics
+                cascor_integration.start_monitoring_thread(interval=1.0)
+
+                # Register WebSocket broadcast callbacks
+                setup_monitoring_callbacks()
+
+                system_logger.info("CasCor backend fully initialized — ready for training via dashboard")
+            except Exception as e:
+                system_logger.error(f"Failed to initialize CasCor backend: {e}", exc_info=True)
+                system_logger.info("Backend integration created but network initialization failed. " "Training can be started manually via /api/train/start.")
 
     system_logger.info("Application startup complete")
 
@@ -442,16 +481,50 @@ async def websocket_control_endpoint(websocket: WebSocket):
                     system_logger.error(f"Command execution error: {e}")
                     await websocket_manager.send_personal_message({"ok": False, "error": str(e)}, websocket)
 
-            # Handle real CasCor backend commands
+            # Fix 3 (RC-3): Handle real CasCor backend commands
             elif cascor_integration:
-                # TODO: Implement real backend control
-                await websocket_manager.send_personal_message(
-                    {
-                        "ok": False,
-                        "error": "Real backend control not yet implemented",
-                    },
-                    websocket,
-                )
+                try:
+                    if command == "start":
+                        if cascor_integration.network is None:
+                            response = {"ok": False, "command": command, "error": "No network configured. Create or load a network first."}
+                        elif cascor_integration.is_training_in_progress():
+                            response = {"ok": False, "command": command, "error": "Training already in progress"}
+                        else:
+                            success = cascor_integration.start_training_background()
+                            if success:
+                                response = {"ok": True, "command": command, "state": cascor_integration.get_training_status()}
+                            else:
+                                response = {"ok": False, "command": command, "error": "Failed to start training"}
+                    elif command == "stop":
+                        if cascor_integration.is_training_in_progress():
+                            success = cascor_integration.request_training_stop()
+                            response = {"ok": success, "command": command, "state": cascor_integration.get_training_status()}
+                        else:
+                            response = {"ok": True, "command": command, "state": cascor_integration.get_training_status()}
+                    elif command == "pause":
+                        response = {"ok": False, "command": command, "error": "Pause not supported for CasCor backend (training is atomic per phase)"}
+                    elif command == "resume":
+                        response = {"ok": False, "command": command, "error": "Resume not supported for CasCor backend"}
+                    elif command == "reset":
+                        cascor_integration.restore_original_methods()
+                        state = training_state.get_state()
+                        network_config = {
+                            "input_size": 2,
+                            "output_size": 1,
+                            "learning_rate": state.get("learning_rate", 0.01),
+                            "max_hidden_units": state.get("max_hidden_units", 10),
+                            "max_epochs": state.get("max_epochs", 200),
+                        }
+                        cascor_integration.create_network(network_config)
+                        cascor_integration.install_monitoring_hooks()
+                        response = {"ok": True, "command": command, "state": cascor_integration.get_training_status()}
+                    else:
+                        response = {"ok": False, "error": f"Unknown command: {command}"}
+
+                    await websocket_manager.send_personal_message(response, websocket)
+                except Exception as e:
+                    system_logger.error(f"CasCor command execution error: {e}")
+                    await websocket_manager.send_personal_message({"ok": False, "error": str(e)}, websocket)
             else:
                 await websocket_manager.send_personal_message(
                     {"ok": False, "error": "No backend available"},

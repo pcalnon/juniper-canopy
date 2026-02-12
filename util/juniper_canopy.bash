@@ -87,6 +87,18 @@ log_info "JuniperData URL: ${JUNIPER_DATA_URL}"
 
 
 #####################################################################################################################################################################################################
+# Fix 5 (CF-1): Synchronize mode flag between shell and Python
+# Shell uses DEMO_MODE (TRUE="0"/FALSE="1"), Python uses CASCOR_DEMO_MODE ("1"/"0")
+#####################################################################################################################################################################################################
+if [[ "${DEMO_MODE}" == "${TRUE}" ]]; then
+    export CASCOR_DEMO_MODE=1
+else
+    export CASCOR_DEMO_MODE=0
+fi
+log_info "Mode synchronization: DEMO_MODE=${DEMO_MODE}, CASCOR_DEMO_MODE=${CASCOR_DEMO_MODE}"
+
+
+#####################################################################################################################################################################################################
 # Launch the Main function of the Juniper Canopy Application
 #####################################################################################################################################################################################################
 if [[ "${DEMO_MODE}" == "${TRUE}" ]]; then
@@ -94,7 +106,15 @@ if [[ "${DEMO_MODE}" == "${TRUE}" ]]; then
     log_debug "Launch Demo Mode: ${LAUNCH_DEMO_MODE}"
     ${LAUNCH_DEMO_MODE}
 else
-    log_trace "Launching ${CURRENT_PROJECT} in Main Mode with real CasCor backend"
+    log_trace "Launching ${CURRENT_PROJECT} in Main Mode with real CasCor backend (in-process)"
+
+    # Fix 2 (RC-1): Set CASCOR_BACKEND_PATH for in-process integration.
+    # CasCor runs within Canopy's Python process via module import and method wrapping,
+    # NOT as a separate OS process. Canopy's CascorIntegration uses CASCOR_BACKEND_PATH
+    # to locate CasCor modules for import.
+    export CASCOR_BACKEND_PATH="${CASCOR_SCRIPT_APPLICATION_DIR}"
+    log_info "CasCor backend path for in-process integration: ${CASCOR_BACKEND_PATH}"
+
     # Ensure JuniperData service is available
     JUNIPER_DATA_HEALTH="${JUNIPER_DATA_URL}/v1/health/ready"
     log_info "Checking JuniperData service at ${JUNIPER_DATA_URL}"
@@ -115,30 +135,12 @@ else
         done
     fi
 
-    log_trace "pgrep -f \"${CASCOR_PROCESS_NAME}\" 2>/dev/null"
-    CASCOR_PIDS=$(pgrep -f "${CASCOR_PROCESS_NAME}" 2>/dev/null)
-    log_verbose "Cascor Process Pid: \"${CASCOR_PIDS}\""
-
-    if [[ "${CASCOR_PIDS}" != "" ]]; then
-        PID="$(pgrep -f "${CASCOR_PROCESS_NAME}" 2>/dev/null | head -1)"
-        log_info "CasCor Backend is already running with pid: ${PID}"
-    else
-        log_info "CasCor Backend is not running, launching ${CASCOR_NAME} in Main Mode with real CasCor backend: ${CASCOR_MAIN_FILE}"
-        log_debug "nohup ${LANGUAGE_PATH} \"${CASCOR_MAIN_FILE}\" > /dev/null 2>&1 &"
-        nohup "${LANGUAGE_PATH}" "${CASCOR_MAIN_FILE}" > /dev/null 2>&1 &
-        PID="$!"
-        log_info "CasCor Backend was launched with pid: ${PID}"
-    fi
-
-    # Launch juniper_canopy main function
-    log_info "Launching ${CURRENT_PROJECT} in Main Mode with real CasCor backend"
+    # Launch juniper_canopy main function (CasCor runs in-process via CascorIntegration)
+    log_info "Launching ${CURRENT_PROJECT} in Main Mode with in-process CasCor backend"
     log_debug "${LANGUAGE_PATH} \"${MAIN_FILE}\""
     ${LANGUAGE_PATH} "${MAIN_FILE}"
 
-    # Kill the CasCor Backend
-    log_info "Killing CasCor Backend with pid: ${PID}"
-    log_debug "kill -KILL ${PID} && rm -f nohup.out"
-    kill -KILL "${PID}" && rm -f nohup.out
+    # Clean up JuniperData service if we started it
     if [ -n "${JUNIPER_DATA_PID}" ]; then
         log_info "Killing JuniperData with pid: ${JUNIPER_DATA_PID}"
         kill "${JUNIPER_DATA_PID}" 2>/dev/null

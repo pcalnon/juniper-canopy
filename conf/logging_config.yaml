@@ -49,20 +49,48 @@ formatters:
 handlers:
   handler_console:
     class: logging.StreamHandler
-    level: INFO
+    level: TRACE
+    # level: VERBOSE
+    # level: DEBUG
+    # level: INFO
+    # level: WARNING
+    # level: ERROR
+    # level: CRITICAL
+    # level: FATAL
     formatter: formatter_console
     stream: ext://sys.stdout
   handler_file:
     class: logging.FileHandler
-    level: INFO
+    level: TRACE
+    # level: VERBOSE
+    # level: DEBUG
+    # level: INFO
+    # level: WARNING
+    # level: ERROR
+    # level: CRITICAL
+    # level: FATAL
     formatter: formatter_file
     filename: logs/juniper_canopy.log
     mode: w
 loggers:
   juniper:
-    level: INFO
+    level: TRACE
+    # level: VERBOSE
+    # level: DEBUG
+    # level: INFO
+    # level: WARNING
+    # level: ERROR
+    # level: CRITICAL
+    # level: FATAL
     propagate: true
     handlers: [handler_console, handler_file]
 root:
   handlers: [handler_console, handler_file]
-  level: INFO
+  level: TRACE
+  # level: VERBOSE
+  # level: DEBUG
+  # level: INFO
+  # level: WARNING
+  # level: ERROR
+  # level: CRITICAL
+  # level: FATAL
