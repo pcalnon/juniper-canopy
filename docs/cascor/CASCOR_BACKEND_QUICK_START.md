@@ -572,11 +572,11 @@ from backend.cascor_integration import CascorIntegration
 
 integration = CascorIntegration()
 
-# Connect to remote worker
-integration.connect_remote_worker(host="192.168.1.100", port=5000)
+# Connect to remote workers
+integration.connect_remote_workers(host="192.168.1.100", port=5000)
 
 # Start distributed training
-integration.start_remote_training(x_train, y_train, worker_count=4)
+integration.start_remote_workers(x_train, y_train, worker_count=4)
 
 # Monitor remote worker status
 status = integration.get_remote_worker_status()
