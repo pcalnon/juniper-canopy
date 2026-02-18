@@ -1,5 +1,9 @@
-# Markdownlint Configuration
+# Markdownlint Configuration (src/)
 # See: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+# Note:
+# - The root `.markdownlint.yaml` is used by pre-commit and CI for the whole repo.
+# - This `src/.markdownlint.yaml` is intentionally scoped to Markdown files under `src/`,
+#   for tools/editors that prefer the nearest config file.
 
 # Default: enable all rules
 default: true
