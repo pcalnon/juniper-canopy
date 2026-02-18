@@ -168,7 +168,6 @@ repos:
           # - --non-interactive
           - --ignore-missing-imports
           - --no-strict-optional
-          - --python-executable=/opt/miniforge3/envs/JuniperCanopy/bin/python
           - --python-version=3.14
           # - --python-version=3.12
           # Re-enabled (Epic 4.3): call-arg, override, no-redef, index,
