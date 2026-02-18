@@ -56,7 +56,6 @@ channels:
   - conda-forge
   # - conda-forge/label/python_rc  # Optional: enable only if RC builds are explicitly required
   - pytorch
-  - nvidia
   - plotly
   - RMG
   - numba
