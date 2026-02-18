@@ -56,6 +56,17 @@ data/MNIST/raw/
 target/
 dist/
 
+# SERENA Memory Dirs
+.serena
+.serena/
+.serena/*
+.serena/**
+
+**/.serena
+**/.serena/
+**/.serena/*
+**/.serena/**
+
 # Data files
 *ubyte
 
