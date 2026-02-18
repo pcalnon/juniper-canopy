@@ -266,7 +266,7 @@ backend:
     backend_path: "${CASCOR_BACKEND_PATH:../../JuniperCascor/juniper_cascor}"
 
   # JuniperData service integration (CAN-INT-004)
-  # All datasets are fetched from JuniperData - JUNIPER_DATA_URL is REQUIRED
+  # All datasets are fetched from JuniperData - configurable via JUNIPER_DATA_URL (defaults to http://localhost:8100 if unset)
   juniper_data:
     enabled: true
     url: "${JUNIPER_DATA_URL:http://localhost:8100}"
