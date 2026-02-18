@@ -96,8 +96,10 @@ which python
 
 ```bash
 # Run from project root
-cd /home/pcalnon/Development/python/Juniper/JuniperCanopy/juniper_canopy
+cd /path/to/juniper_canopy  # replace with your local path to the repo
 
+# (Optional) If you're already inside the repo, this prints the project root:
+# git rev-parse --show-toplevel
 # Check pytest configuration
 cat src/tests/pytest.ini
 ```
