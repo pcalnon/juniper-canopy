@@ -166,7 +166,7 @@ dependencies:
   - click
   - colorama
   - conda-gcc-specs
-  - ontourpy
+  - contourpy
   - coverage
   - cpython>=3.14.2
   - cryptography
