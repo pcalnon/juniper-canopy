@@ -212,7 +212,7 @@ dependencies:
   - cuda-profiler-api
   - cuda-runtime
   - cuda-sanitizer-api
-  - cuda-tileiras
+  - cuda-libraries
   - cuda-toolkit
   - cuda-tools
   - cuda-version
