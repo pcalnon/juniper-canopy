@@ -190,7 +190,12 @@ class CassandraClient:
             - details: Service-specific data (hosts, keyspace, etc.)
         """
         now = datetime.now()
-        if self._cached_status is not None and self._last_status_check is not None and (now - self._last_status_check).total_seconds() < self._status_cache_ttl_seconds:
+        cache_valid = (
+            self._cached_status is not None
+            and self._last_status_check is not None
+            and (now - self._last_status_check).total_seconds() < self._status_cache_ttl_seconds
+        )
+        if cache_valid:
             return self._cached_status
 
         if self._demo_mode:
