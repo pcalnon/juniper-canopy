@@ -1,1 +1,1 @@
-AGENTS.md
+This file intentionally redirects to [AGENTS.md](AGENTS.md); see that file for full documentation.
