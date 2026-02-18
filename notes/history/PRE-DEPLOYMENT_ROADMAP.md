@@ -1,1 +1,1 @@
-/home/pcalnon/Development/python/Juniper/JuniperCascor/juniper_cascor/notes/PRE-DEPLOYMENT_ROADMAP.md
+../PRE-DEPLOYMENT_ROADMAP.md
