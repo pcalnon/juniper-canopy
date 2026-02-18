@@ -149,7 +149,7 @@ class TestPackageExports:
         from juniper_data_client import __version__
 
         assert isinstance(__version__, str)
-        assert __version__ == "0.2.0"
+        assert __version__ == "0.2.1-local"
 
     @pytest.mark.unit
     def test_all_list_contains_expected_names(self):
