@@ -1,1 +1,1 @@
-../../../JuniperData/juniper_data/notes/INTEGRATION_DEVELOPMENT_PLAN.md
+The canonical integration development plan is maintained in the JuniperData repository at `JuniperData/juniper_data/notes/INTEGRATION_DEVELOPMENT_PLAN.md`.
