@@ -543,13 +543,18 @@ integration.request_training_stop()
 ```python
 import asyncio
 
-# Non-blocking fit (returns Future)
-future = integration.fit_async(x_train, y_train, epochs=100)
+async def main():
+    # Non-blocking fit (awaitable coroutine)
+    training_task = asyncio.create_task(
+        integration.fit_async(x_train, y_train, epochs=100)
+    )
 
-# Do other work while training runs...
+    # Do other work while training runs...
 
-# Wait for completion when needed
-result = future.result()
+    # Wait for completion when needed
+    result = await training_task
+
+asyncio.run(main())
 ```
 
 **Note:** Background training runs in a `ThreadPoolExecutor`, allowing the UI to remain responsive during training.
