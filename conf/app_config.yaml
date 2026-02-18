@@ -425,3 +425,5 @@ environment_variables:
   - REDIS_URL
   - CASCOR_BACKEND_URL
   - CASCOR_BACKEND_PATH  # Integration Issue 4.1: Path to Cascor backend for integration
+  - JUNIPER_DATA_URL      # Base URL for JuniperData service
+  - JUNIPER_DATA_API_KEY  # API key for JuniperData service authentication
