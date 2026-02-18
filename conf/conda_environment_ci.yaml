@@ -18,7 +18,7 @@
 # Description:
 #     This script pulls together a report on the source files in the current Application.
 #     This is a lightweight environment for GitHub Actions testing.
-#     CUDA packages are excluded since GPU testing is not available on runners.
+#     GPU testing is not performed on CI runners; CUDA-related packages may still be present for compatibility.
 #
 #####################################################################################################################################################################################################
 # Notes:
