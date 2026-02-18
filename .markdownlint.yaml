@@ -89,23 +89,19 @@
 #
 #####################################################################################################################################################################################################
 
-# Set custom configuration settings
-config:
-  ol-prefix: false  # MD029/ol-prefix: Ordered list item prefix [Expected: 1; Actual: 7; Style: 1/2/3]
-  line-length: 512  # MD013/line-length: Line length [Expected: 80; Actual: 89]
-  code-block-style: consistent  # MD046/code-block-style: Code block style [Expected: fenced; Actual: indented]
-  emphasis-style: false  # MD036: Emphasis used instead of a header
+# Markdownlint rule configuration for markdownlint-cli
+default: true
 
-# Fix any fixable errors
-fix: true
+# MD029/ol-prefix: disable ordered list item prefix rule
+MD029: false
 
-# Ignore any files included within .gitignore
-gitignore: true
+# MD013/line-length: increase allowed line length
+MD013:
+  line_length: 512
 
-# Ignore any files included within .markdownlintignore
-markdownlintignore: true
+# MD046/code-block-style: use a consistent code block style
+MD046:
+  style: consistent
 
-# Ignore specific files
-ignore:
-  .gitignore
-  .markdownlintignore
+# MD036/no-emphasis-as-heading: allow emphasis used instead of a heading
+MD036: false
