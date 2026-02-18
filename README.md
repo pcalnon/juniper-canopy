@@ -47,7 +47,7 @@ Demo mode runs without the CasCor backend, simulating training data for developm
 cd juniper_canopy
 
 # Activate environment
-conda activate JuniperPython
+conda activate JuniperCanopy
 
 # Launch demo mode
 ./demo
