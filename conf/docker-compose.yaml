@@ -4,6 +4,15 @@ version: '3.8'
 services:
   # JuniperData dataset generation service
   juniper-data:
+    # NOTE: The JuniperData source is expected to live outside this repository.
+    # Expected workspace layout:
+    #   <workspace-root>/
+    #     this-repo/                  (repository containing this file)
+    #       conf/docker-compose.yaml  (current file)
+    #     JuniperData/
+    #       juniper_data/             (build context used below)
+    # Run `docker compose -f conf/docker-compose.yaml up` from the root of this repo
+    # so that the relative build context path resolves correctly.
     build:
       context: ../../../JuniperData/juniper_data
       dockerfile: Dockerfile
