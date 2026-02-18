@@ -9,7 +9,8 @@
 
 ## Summary
 
-This PR consolidates all integration and enhancement work on the `subproject.juniper_canopy.integration_and_enhancements` branch, spanning 80 commits over 5 weeks. It delivers CasCor backend integration (async training, remote workers, in-process initialization), JuniperData service integration (REST client, Docker Compose), a comprehensive 4-phase test suite and CI/CD enhancement program, non-passing test remediation (67 tests fixed), CI/CD parity across all Juniper applications, and a post-release development roadmap consolidating 55 items from a full codebase audit.
+This PR consolidates all integration and enhancement work on the `subproject.juniper_canopy.integration_and_enhancements` branch, spanning 80 commits over 5 weeks.
+It delivers CasCor backend integration (async training, remote workers, in-process initialization), JuniperData service integration (REST client, Docker Compose), a comprehensive 4-phase test suite and CI/CD enhancement program, non-passing test remediation (67 tests fixed), CI/CD parity across all Juniper applications, and a post-release development roadmap consolidating 55 items from a full codebase audit.
 
 **SemVer Impact:** MINOR
 **Breaking Changes:** None
@@ -36,25 +37,25 @@ Following the completion of the Phase 0-3 refactoring (v0.24.0), this branch add
 
 ## Priority & Work Status
 
-| Priority | Work Item | Owner | Status |
-| -------- | --------- | ----- | ------ |
-| P0 | CasCor in-process backend initialization (RC-1/RC-2) | Development Team | ✅ Complete |
-| P0 | WebSocket control commands for real backend (RC-3) | Development Team | ✅ Complete |
-| P0 | Missing pytest-mock dependency | Development Team | ✅ Complete |
-| P0 | Non-passing test remediation (67 tests) | Development Team | ✅ Complete |
-| P1 | Async training boundary (P1-NEW-003) | Development Team | ✅ Complete |
-| P1 | RemoteWorkerClient integration (P1-NEW-002) | Development Team | ✅ Complete |
-| P1 | JuniperData service integration | Development Team | ✅ Complete |
-| P1 | JuniperData API contract fixes | Development Team | ✅ Complete |
-| P1 | JUNIPER_DATA_URL validation in all modes (RC-5) | Development Team | ✅ Complete |
-| P1 | CI/CD parity across all Juniper applications | Development Team | ✅ Complete |
-| P2 | Test Suite & CI/CD Enhancement Phase 1 (false positives) | Development Team | ✅ Complete |
-| P2 | Test Suite & CI/CD Enhancement Phase 2 (conftest, linting) | Development Team | ✅ Complete |
-| P2 | Test Suite & CI/CD Enhancement Phase 3 (weak tests, skips) | Development Team | ✅ Complete |
-| P2 | Test Suite & CI/CD Enhancement Phase 4 (config, MyPy) | Development Team | ✅ Complete |
-| P2 | Post-release development roadmap audit | Development Team | ✅ Complete |
-| P3 | Mode flag synchronization (CF-1) | Development Team | ✅ Complete |
-| P3 | Startup script cleanup (RC-4) | Development Team | ✅ Complete |
+| Priority | Work Item                                                  | Owner            | Status      |
+| -------- | ---------------------------------------------------------- | ---------------- | ----------- |
+| P0       | CasCor in-process backend initialization (RC-1/RC-2)       | Development Team | ✅ Complete |
+| P0       | WebSocket control commands for real backend (RC-3)         | Development Team | ✅ Complete |
+| P0       | Missing pytest-mock dependency                             | Development Team | ✅ Complete |
+| P0       | Non-passing test remediation (67 tests)                    | Development Team | ✅ Complete |
+| P1       | Async training boundary (P1-NEW-003)                       | Development Team | ✅ Complete |
+| P1       | RemoteWorkerClient integration (P1-NEW-002)                | Development Team | ✅ Complete |
+| P1       | JuniperData service integration                            | Development Team | ✅ Complete |
+| P1       | JuniperData API contract fixes                             | Development Team | ✅ Complete |
+| P1       | JUNIPER_DATA_URL validation in all modes (RC-5)            | Development Team | ✅ Complete |
+| P1       | CI/CD parity across all Juniper applications               | Development Team | ✅ Complete |
+| P2       | Test Suite & CI/CD Enhancement Phase 1 (false positives)   | Development Team | ✅ Complete |
+| P2       | Test Suite & CI/CD Enhancement Phase 2 (conftest, linting) | Development Team | ✅ Complete |
+| P2       | Test Suite & CI/CD Enhancement Phase 3 (weak tests, skips) | Development Team | ✅ Complete |
+| P2       | Test Suite & CI/CD Enhancement Phase 4 (config, MyPy)      | Development Team | ✅ Complete |
+| P2       | Post-release development roadmap audit                     | Development Team | ✅ Complete |
+| P3       | Mode flag synchronization (CF-1)                           | Development Team | ✅ Complete |
+| P3       | Startup script cleanup (RC-4)                              | Development Team | ✅ Complete |
 
 ### Priority Legend
 
@@ -86,7 +87,7 @@ Following the completion of the Phase 0-3 refactoring (v0.24.0), this branch add
   - HDF5 snapshot filter excluding private attributes
 
 - **JuniperData Integration**
-  - New module: `src/juniper_data_client/` (client.py, exceptions.py, __init__.py)
+  - New module: `src/juniper_data_client/` (client.py, exceptions.py, "\__init__\".py)
     - `JuniperDataClient.create_dataset()`, `download_artifact_npz()`, `get_preview()`
   - `src/demo_mode.py`: `_generate_spiral_dataset_from_juniper_data()` with fallback to local generation
   - `src/backend/cascor_integration.py`: `_generate_dataset_from_juniper_data()` with fallback
@@ -215,28 +216,28 @@ Following the completion of the Phase 0-3 refactoring (v0.24.0), this branch add
 
 ### Test Summary
 
-| Test Type | Passed | Failed | Skipped | Notes |
-| --------- | ------ | ------ | ------- | ----- |
-| Unit | ~2400 | 0 | 0 | All unit tests passing |
-| Integration | ~800 | 0 | 37 | Skipped require CASCOR_BACKEND, server, display |
-| Regression | 30+ | 0 | 0 | Mode flag, startup, candidate visibility |
-| Performance | 4+ | 0 | 0 | Button responsiveness tests |
+| Test Type   | Passed | Failed | Skipped | Notes                                           |
+| ----------- | ------ | ------ | ------- | ----------------------------------------------- |
+| Unit        | ~2400  | 0      | 0       | All unit tests passing                          |
+| Integration | ~800   | 0      | 37      | Skipped require CASCOR_BACKEND, server, display |
+| Regression  | 30+    | 0      | 0       | Mode flag, startup, candidate visibility        |
+| Performance | 4+     | 0      | 0       | Button responsiveness tests                     |
 
 **Total Tests:** 3,215+ passed, 0 failed, 0 errors, 37 skipped (all legitimate)
 
 ### Coverage
 
-| Component | Before (v0.24.0) | After | Target | Status |
-| --------- | ----------------- | ----- | ------ | ------ |
-| data_adapter.py | 100% | 100% | 95% | ✅ Exceeded |
-| cascor_integration.py | 100% | 100% | 95% | ✅ Exceeded |
-| websocket_manager.py | 94% | 100% | 95% | ✅ Exceeded |
-| dashboard_manager.py | 93% | 95% | 95% | ✅ Met |
-| redis_panel.py | 49% | 100% | 95% | ✅ Exceeded |
-| redis_client.py | 76% | 97% | 95% | ✅ Exceeded |
-| cassandra_client.py | 75% | 97% | 95% | ✅ Exceeded |
-| statistics.py | 91% | 100% | 95% | ✅ Exceeded |
-| main.py | 79% | 84% | 95% | ⚠️ Near target |
+| Component             | Before (v0.24.0) | After | Target | Status           |
+| --------------------- | ---------------- | ----- | ------ | ---------------- |
+| data_adapter.py       | 100%             | 100%  | 95%    | ✅ Exceeded      |
+| cascor_integration.py | 100%             | 100%  | 95%    | ✅ Exceeded      |
+| websocket_manager.py  | 94%              | 100%  | 95%    | ✅ Exceeded      |
+| dashboard_manager.py  | 93%              | 95%   | 95%    | ✅ Met           |
+| redis_panel.py        | 49%              | 100%  | 95%    | ✅ Exceeded      |
+| redis_client.py       | 76%              | 97%   | 95%    | ✅ Exceeded      |
+| cassandra_client.py   | 75%              | 97%   | 95%    | ✅ Exceeded      |
+| statistics.py         | 91%              | 100%  | 95%    | ✅ Exceeded      |
+| main.py               | 79%              | 84%   | 95%    | ⚠️ Near target   |
 
 ### Environments Tested
 
@@ -263,35 +264,35 @@ Following the completion of the Phase 0-3 refactoring (v0.24.0), this branch add
 
 ### New Endpoints
 
-| Method | Endpoint | Description | Breaking? |
-| ------ | -------- | ----------- | --------- |
-| POST | /api/train/start | Start training (uses `start_training_background()`) | No |
-| POST | /api/train/stop | Stop training (supports cascor_integration) | No |
-| GET | /api/train/status | Get training status | No |
-| GET | /api/remote/status | Check remote worker status | No |
-| POST | /api/remote/connect | Connect to remote worker manager | No |
-| POST | /api/remote/start_workers | Start remote workers | No |
-| POST | /api/remote/stop_workers | Stop remote workers | No |
-| POST | /api/remote/disconnect | Disconnect from remote manager | No |
+| Method | Endpoint                  | Description                                         | Breaking? |
+| ------ | ------------------------- | --------------------------------------------------- | --------- |
+| POST   | /api/train/start          | Start training (uses `start_training_background()`) | No        |
+| POST   | /api/train/stop           | Stop training (supports cascor_integration)         | No        |
+| GET    | /api/train/status         | Get training status                                 | No        |
+| GET    | /api/remote/status        | Check remote worker status                          | No        |
+| POST   | /api/remote/connect       | Connect to remote worker manager                    | No        |
+| POST   | /api/remote/start_workers | Start remote workers                                | No        |
+| POST   | /api/remote/stop_workers  | Stop remote workers                                 | No        |
+| POST   | /api/remote/disconnect    | Disconnect from remote manager                      | No        |
 
 ### New Methods
 
-| Module | Method | Description |
-| ------ | ------ | ----------- |
-| cascor_integration.py | fit_async() | Async training via run_in_executor |
-| cascor_integration.py | start_training_background() | Fire-and-forget training |
-| cascor_integration.py | is_training_in_progress() | Check training status |
-| cascor_integration.py | request_training_stop() | Best-effort stop request |
-| cascor_integration.py | connect_remote_workers() | Connect to remote manager |
-| cascor_integration.py | start_remote_workers() | Start N workers |
-| cascor_integration.py | stop_remote_workers() | Stop workers with timeout |
-| cascor_integration.py | disconnect_remote_workers() | Disconnect from manager |
-| cascor_integration.py | get_remote_worker_status() | Get worker status dict |
-| data_adapter.py | normalize_metrics() | Cascor → Canopy key mapping |
-| data_adapter.py | denormalize_metrics() | Canopy → Cascor key mapping |
-| JuniperDataClient | create_dataset() | Create/generate dataset |
-| JuniperDataClient | download_artifact_npz() | Download NPZ artifact |
-| JuniperDataClient | get_preview() | Get dataset preview |
+| Module                | Method                      | Description                        |
+| --------------------- | --------------------------- | ---------------------------------- |
+| cascor_integration.py | fit_async()                 | Async training via run_in_executor |
+| cascor_integration.py | start_training_background() | Fire-and-forget training           |
+| cascor_integration.py | is_training_in_progress()   | Check training status              |
+| cascor_integration.py | request_training_stop()     | Best-effort stop request           |
+| cascor_integration.py | connect_remote_workers()    | Connect to remote manager          |
+| cascor_integration.py | start_remote_workers()      | Start N workers                    |
+| cascor_integration.py | stop_remote_workers()       | Stop workers with timeout          |
+| cascor_integration.py | disconnect_remote_workers() | Disconnect from manager            |
+| cascor_integration.py | get_remote_worker_status()  | Get worker status dict             |
+| data_adapter.py       | normalize_metrics()         | Cascor → Canopy key mapping        |
+| data_adapter.py       | denormalize_metrics()       | Canopy → Cascor key mapping        |
+| JuniperDataClient     | create_dataset()            | Create/generate dataset            |
+| JuniperDataClient     | download_artifact_npz()     | Download NPZ artifact              |
+| JuniperDataClient     | get_preview()               | Get dataset preview                |
 
 ### Response Codes
 
@@ -406,14 +407,14 @@ All new endpoints follow existing conventions:
 
 ### Remaining Items
 
-| Feature | Status | Priority |
-| ------- | ------ | -------- |
-| Decision boundary for real backend (CAN-CRIT-001) | Blocked by CasCor Prediction Grid API | P0 |
-| save_snapshot() / load_snapshot() (CAN-CRIT-002) | Blocked by CasCor Serialization API | P0 |
-| Real backend integration tests with live CasCor | Not started | P1 |
-| Coverage improvement to 90% (main.py target) | In progress | P2 |
-| Dashboard enhancements (CAN-001 through CAN-021) | Roadmapped | P3 |
-| Full IPC architecture (INT-P1-004) | Deferred | P4 |
+| Feature                                           | Status                                | Priority |
+| ------------------------------------------------- | ------------------------------------- | -------- |
+| Decision boundary for real backend (CAN-CRIT-001) | Blocked by CasCor Prediction Grid API | P0       |
+| save_snapshot() / load_snapshot() (CAN-CRIT-002)  | Blocked by CasCor Serialization API   | P0       |
+| Real backend integration tests with live CasCor   | Not started                           | P1       |
+| Coverage improvement to 90% (main.py target)      | In progress                           | P2       |
+| Dashboard enhancements (CAN-001 through CAN-021)  | Roadmapped                            | P3       |
+| Full IPC architecture (INT-P1-004)                | Deferred                              | P4       |
 
 See [JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md](../JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md) for the complete 55-item prioritized roadmap.
 
