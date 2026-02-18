@@ -19,7 +19,7 @@ pytest --version
 
 ```bash
 # From project root
-cd /home/pcalnon/Development/python/Juniper/JuniperCanopy/juniper_canopy
+cd /path/to/juniper_canopy
 
 # Run all tests
 pytest
