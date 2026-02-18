@@ -114,23 +114,21 @@ class TestAbstractMethodEnforcement:
     def test_missing_get_layout_raises_error(self):
         """Test missing get_layout implementation raises TypeError."""
 
+        class IncompleteComponent1(BaseComponent):
+            def register_callbacks(self, app):
+                pass
+
         with pytest.raises(TypeError):
-
-            class IncompleteComponent1(BaseComponent):
-                def register_callbacks(self, app):
-                    pass
-
             IncompleteComponent1(config={}, component_id="test")
 
     def test_missing_register_callbacks_raises_error(self):
         """Test missing register_callbacks implementation raises TypeError."""
 
+        class IncompleteComponent2(BaseComponent):
+            def get_layout(self):
+                return None
+
         with pytest.raises(TypeError):
-
-            class IncompleteComponent2(BaseComponent):
-                def get_layout(self):
-                    return None
-
             IncompleteComponent2(config={}, component_id="test")
 
 

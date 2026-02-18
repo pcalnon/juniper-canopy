@@ -591,7 +591,7 @@ class TestCassandraClientTryConnectWithAuth:
                     mock_auth_cls.return_value = mock_auth_instance
                     mock_cluster_cls.return_value = mock_cluster_instance
 
-                    client = cc_module.CassandraClient(config_manager=enabled_config_manager)
+                    cc_module.CassandraClient(config_manager=enabled_config_manager)
 
                     mock_auth_cls.assert_called_once_with(
                         username="testuser",

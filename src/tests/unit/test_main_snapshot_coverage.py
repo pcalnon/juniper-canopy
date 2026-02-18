@@ -274,7 +274,7 @@ class TestRestoreSnapshotRealMode:
     @pytest.mark.unit
     def test_restore_snapshot_with_cascor_integration(self, app_client, snapshot_dir, create_test_hdf5):
         """Test restoring snapshot when cascor_integration.load_snapshot is available."""
-        snapshot_path = create_test_hdf5("restore_test.h5")
+        create_test_hdf5("restore_test.h5")
 
         import main
 
@@ -301,7 +301,7 @@ class TestRestoreSnapshotRealMode:
     @pytest.mark.unit
     def test_restore_snapshot_h5_extension(self, app_client, snapshot_dir, create_test_hdf5):
         """Test restoring snapshot with .h5 extension found on filesystem."""
-        snapshot_path = create_test_hdf5("test_h5_ext.h5")
+        create_test_hdf5("test_h5_ext.h5")
 
         import main
 
@@ -514,7 +514,7 @@ class TestSnapshotActivityLogging:
     @pytest.mark.unit
     def test_log_snapshot_activity_restore(self, app_client, snapshot_dir, create_test_hdf5):
         """Test that snapshot restoration logs activity."""
-        snapshot_path = create_test_hdf5("restore_log_test.h5")
+        create_test_hdf5("restore_log_test.h5")
 
         import main
 

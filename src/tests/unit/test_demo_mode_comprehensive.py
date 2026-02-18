@@ -267,7 +267,7 @@ class TestDemoModeFSMFailures:
         demo.start()
         time.sleep(0.1)
 
-        result = demo.start(reset=False)
+        demo.start(reset=False)
 
         assert demo.is_running
         demo.stop()

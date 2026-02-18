@@ -215,7 +215,7 @@ class TestCandidatePoolUpdatePoolBranches:
         pool = CandidatePool()
 
         pool.update_pool(status="Active", phase="Training", size=5)
-        state = pool.get_state()
+        pool.get_state()
 
         # Update with None - should not change values
         pool.update_pool(status=None, phase=None, size=None)

@@ -55,9 +55,6 @@ class TestUpdateBoundaryPlotCallback:
 
         # Simulate callback inputs
         boundary_data = None
-        dataset = None
-        resolution = 50
-        show_confidence = ["show"]
         theme = "light"
 
         # Call internal logic that callback would execute

@@ -285,8 +285,6 @@ class TestExceptionHandling:
         """Test z-score fallback when std_dev is 0 (bypasses constant check)."""
         weights = np.array([1.0, 2.0, 3.0])
 
-        original_std = np.std
-
         def mock_std(arr, ddof=0):
             return 0.0
 

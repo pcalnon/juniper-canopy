@@ -652,7 +652,6 @@ class TestUpdateDatasetPlotsCallback:
 
         # Access the registered callback
         callbacks = app.callback_map
-        callback_id = f"{component.component_id}-scatter-plot.figure"
 
         # The callback should be registered
         assert any(component.component_id in key for key in callbacks.keys())
@@ -759,7 +758,7 @@ class TestUpdateDatasetPlotsCallback:
         from frontend.components.dataset_plotter import DatasetPlotter
 
         config = {}
-        component = DatasetPlotter(config)
+        DatasetPlotter(config)
 
         dataset = {
             "inputs": [],
@@ -1031,7 +1030,6 @@ class TestCallbackDirectInvocation:
             "split_indices": {"train": [0, 1], "test": []},
         }
         split = "test"
-        theme = "light"
 
         filtered_data = component._filter_by_split(dataset, split)
 
@@ -1074,7 +1072,6 @@ class TestCallbackDirectInvocation:
             "targets": [0],
         }
         split = "all"
-        theme = "light"
 
         filtered_data = component._filter_by_split(dataset, split)
         n_samples = len(filtered_data.get("inputs", []))
@@ -1107,7 +1104,7 @@ class TestCallbackDirectInvocation:
         from frontend.components.dataset_plotter import DatasetPlotter
 
         config = {}
-        component = DatasetPlotter(config)
+        DatasetPlotter(config)
 
         dataset = {
             "inputs": [[i, i] for i in range(10)],

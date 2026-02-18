@@ -184,6 +184,7 @@ repos:
         exclude: ^src/tests/
         additional_dependencies:
           - types-PyYAML
+          - types-redis
           - types-requests
 
   # ═══════════════════════════════════════════════════════════════════════════
