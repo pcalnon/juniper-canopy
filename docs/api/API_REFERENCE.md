@@ -950,11 +950,10 @@ curl http://127.0.0.1:8050/api/remote/status
 
 **Description:** Connect to a remote CandidateTrainingManager
 
-**Parameters:**
+**Request Body (JSON):**
 
-- `host` (string, query, required) - Remote manager host address
-- `port` (integer, query, required) - Remote manager port
-- `authkey` (string, query, required) - Authentication key for secure connection
+- `address` (string, required) - Remote manager address in `host:port` format
+- `authkey` (string, optional) - Authentication key for secure connection
 
 **Response Schema (Success):**
 
