@@ -149,7 +149,7 @@ class TestPackageExports:
         from juniper_data_client import __version__
 
         assert isinstance(__version__, str)
-        assert __version__ == "0.2.1-local"
+        assert "local" not in __version__, "Should use shared package, not local fallback"
 
     @pytest.mark.unit
     def test_all_list_contains_expected_names(self):
@@ -235,7 +235,6 @@ class TestClientErrorMapping:
     def test_connection_error_mapped(self):
         """requests.ConnectionError maps to JuniperDataConnectionError."""
         import requests
-
         from juniper_data_client.exceptions import JuniperDataConnectionError
 
         # Create a minimal _request-like function for testing the mapping
@@ -337,8 +336,9 @@ class TestDemoModeMandatoryUrl:
     @pytest.mark.unit
     def test_generate_spiral_dataset_raises_without_url(self):
         """_generate_spiral_dataset must raise JuniperDataConfigurationError when JUNIPER_DATA_URL is unset."""
-        from demo_mode import DemoMode
         from juniper_data_client.exceptions import JuniperDataConfigurationError
+
+        from demo_mode import DemoMode
 
         demo = DemoMode.__new__(DemoMode)
         demo.logger = MagicMock()
@@ -394,8 +394,9 @@ class TestCascorIntegrationMandatoryUrl:
     @pytest.mark.unit
     def test_generate_missing_dataset_raises_without_url(self):
         """_generate_missing_dataset_info must raise JuniperDataConfigurationError when JUNIPER_DATA_URL is unset."""
-        from backend.cascor_integration import CascorIntegration
         from juniper_data_client.exceptions import JuniperDataConfigurationError
+
+        from backend.cascor_integration import CascorIntegration
 
         integration = CascorIntegration.__new__(CascorIntegration)
         integration.logger = MagicMock()
