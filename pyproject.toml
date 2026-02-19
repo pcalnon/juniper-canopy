@@ -59,7 +59,7 @@ Issues = "https://github.com/USERNAME/REPO/issues"
 
 [project.optional-dependencies]
 juniper-data = [
-    "juniper-data-client>=0.2.0",
+    "juniper-data-client>=0.3.0",
     "requests>=2.28.0",
 ]
 
