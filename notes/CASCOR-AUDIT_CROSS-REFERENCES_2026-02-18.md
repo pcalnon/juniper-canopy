@@ -38,6 +38,7 @@
 **Description**: CasCor's `fit()` method is synchronous and blocks the FastAPI event loop. An async wrapper using `loop.run_in_executor()` is needed in `CascorIntegration`.
 
 **Action for JuniperCanopy**: Coordinate with CasCor on the async training API design. Key sub-tasks:
+
 - Add `ThreadPoolExecutor` and training task state to `CascorIntegration`
 - Implement cancellation strategy ("stop requested" flag)
 - Make WebSocket broadcasting thread-safe
@@ -83,6 +84,7 @@
 **Source**: PRE-DEPLOYMENT_ROADMAP-2.md (JuniperCascor)
 
 **Description**: 21 Canopy enhancement items were documented in the CasCor pre-deployment roadmap:
+
 - CAN-001 through CAN-005: Training Metrics dashboard improvements
 - CAN-006 through CAN-010: Meta Parameter Tuning tab
 - CAN-011 through CAN-015: Tooltips and tutorials

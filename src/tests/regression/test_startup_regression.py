@@ -42,9 +42,9 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from juniper_data_client.exceptions import JuniperDataConfigurationError
 
 from demo_mode import DemoMode
-from juniper_data_client.exceptions import JuniperDataConfigurationError
 
 
 @pytest.mark.regression

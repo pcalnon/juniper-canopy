@@ -153,6 +153,12 @@ Thumbs.db
 *.whl
 *.tar.gz
 
+# Build artifacts
+*.egg-info/
+**/*.egg-info/
+dist/
+build/
+
 # Coverage artifacts
 .coverage
 **/.coverage
@@ -161,6 +167,11 @@ Thumbs.db
 **/reports/junit/
 **/reports/coverage.xml
 **/reports/htmlcov/
+results.xml
+**/results.xml
 
 # Snapshot artifacts
 **/snapshots/snapshot_history.jsonl
+
+# Claude Code session files
+__RESUME_CLAUDE_SESSION__
