@@ -152,3 +152,15 @@ Thumbs.db
 *.rpm
 *.whl
 *.tar.gz
+
+# Coverage artifacts
+.coverage
+**/.coverage
+
+# Test reports and coverage reports
+**/reports/junit/
+**/reports/coverage.xml
+**/reports/htmlcov/
+
+# Snapshot artifacts
+**/snapshots/snapshot_history.jsonl
