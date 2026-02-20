@@ -175,3 +175,6 @@ results.xml
 
 # Claude Code session files
 __RESUME_CLAUDE_SESSION__
+
+# MCP server config (contains API keys)
+.mcp.json
