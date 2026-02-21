@@ -1521,6 +1521,7 @@ def _save_layouts(layouts: dict) -> None:
     try:
         with open(layouts_file, "w") as f:
             json.dump(layouts, f, indent=2)
+            f.write("\n")
     except Exception as e:
         system_logger.error(f"Failed to save layouts file: {e}")
         raise

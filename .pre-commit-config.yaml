@@ -240,6 +240,23 @@ repos:
         args: [--format, parsable, -d, relaxed]
         types: [yaml]
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Code Coverage Gate - Unit + Integration Tests with Coverage Enforcement
+  # Runs all tests (excluding slow) and enforces 80% coverage threshold.
+  # Uses system Python (conda JuniperPython env) for dash/fastapi dependencies.
+  # Coverage config sourced from pyproject.toml [tool.coverage.*] sections.
+  # ═══════════════════════════════════════════════════════════════════════════
+  - repo: local
+    hooks:
+      - id: pytest-coverage
+        name: Unit tests with coverage gate (80%)
+        entry: bash -c 'cd src && /opt/miniforge3/envs/JuniperPython/bin/python -m pytest -m "not slow" tests/ -q --tb=short --no-header -p no:warnings --cov=. --cov-report=term-missing:skip-covered --cov-fail-under=80'
+        language: system
+        pass_filenames: false
+        always_run: true
+        types: [python]
+        stages: [pre-commit]
+
 # CI configuration (for pre-commit.ci service, if used)
 ci:
   autofix_prs: false

@@ -350,6 +350,25 @@ logging:
     return config_file
 
 
+# Preserve metrics_layouts.json across test runs (tests create/delete layouts via the real file)
+@pytest.fixture(scope="session", autouse=True)
+def preserve_metrics_layouts():
+    """Backup and restore conf/layouts/metrics_layouts.json so tests don't pollute the working tree."""
+    import shutil
+
+    layouts_file = Path(__file__).resolve().parents[2] / "conf" / "layouts" / "metrics_layouts.json"
+    backup_file = layouts_file.with_suffix(".json.test-backup")
+
+    if layouts_file.exists():
+        shutil.copy2(layouts_file, backup_file)
+
+    yield
+
+    if backup_file.exists():
+        shutil.copy2(backup_file, layouts_file)
+        backup_file.unlink()
+
+
 # Test data directory management
 @pytest.fixture(scope="session", autouse=True)
 def ensure_test_data_directory():

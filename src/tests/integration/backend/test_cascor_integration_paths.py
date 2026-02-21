@@ -190,11 +190,16 @@ class TestCascorIntegrationPaths:
         backend_src = backend_dir / "src"
         backend_src.mkdir(parents=True, exist_ok=True)
         integration = self._extracted_from_test_import_backend_modules_missing_raises_error_8(backend_dir)
-        with pytest.raises(ImportError) as exc_info:
-            integration._import_backend_modules()
+        # Remove cascade_correlation from sys.modules AND patch sys.path so the import
+        # actually fails (juniper-cascor may be installed as a package)
+        with patch.dict(sys.modules), patch("backend.cascor_integration.sys.path", [str(backend_src)]):
+            for key in [k for k in sys.modules if k.startswith("cascade_correlation")]:
+                del sys.modules[key]
+            with pytest.raises(ImportError) as exc_info:
+                integration._import_backend_modules()
 
-        # trunk-ignore(bandit/B101)
-        assert "Failed to import CasCor backend modules" in str(exc_info.value)
+            # trunk-ignore(bandit/B101)
+            assert "Failed to import CasCor backend modules" in str(exc_info.value)
 
     def test_import_backend_modules_success(self, tmp_path):
         """Test _import_backend_modules successfully imports mocked modules."""

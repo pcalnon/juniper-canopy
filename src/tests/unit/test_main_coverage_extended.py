@@ -178,7 +178,12 @@ class TestWebSocketControlEndpoint:
         with app_client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
             ws.send_json({"command": "start", "reset": False})
-            response = ws.receive_json()
+            # Drain messages until we find the control response (training
+            # thread broadcasts can interleave with control responses)
+            for _ in range(10):
+                response = ws.receive_json()
+                if "ok" in response:
+                    break
             assert "ok" in response
 
     @pytest.mark.unit
@@ -187,7 +192,12 @@ class TestWebSocketControlEndpoint:
         with app_client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
             ws.send_json({"command": "stop"})
-            response = ws.receive_json()
+            # Drain messages until we find the control response (training
+            # thread broadcasts can interleave with control responses)
+            for _ in range(10):
+                response = ws.receive_json()
+                if "ok" in response:
+                    break
             assert "ok" in response
 
     @pytest.mark.unit
@@ -196,7 +206,12 @@ class TestWebSocketControlEndpoint:
         with app_client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
             ws.send_json({"command": "pause"})
-            response = ws.receive_json()
+            # Drain messages until we find the control response (training
+            # thread broadcasts can interleave with control responses)
+            for _ in range(10):
+                response = ws.receive_json()
+                if "ok" in response:
+                    break
             assert "ok" in response
 
     @pytest.mark.unit
@@ -205,7 +220,12 @@ class TestWebSocketControlEndpoint:
         with app_client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
             ws.send_json({"command": "resume"})
-            response = ws.receive_json()
+            # Drain messages until we find the control response (training
+            # thread broadcasts can interleave with control responses)
+            for _ in range(10):
+                response = ws.receive_json()
+                if "ok" in response:
+                    break
             assert "ok" in response
 
     @pytest.mark.unit
@@ -214,7 +234,12 @@ class TestWebSocketControlEndpoint:
         with app_client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
             ws.send_json({"command": "reset"})
-            response = ws.receive_json()
+            # Drain messages until we find the control response (training
+            # thread broadcasts can interleave with control responses)
+            for _ in range(10):
+                response = ws.receive_json()
+                if "ok" in response:
+                    break
             assert "ok" in response
 
     @pytest.mark.unit
@@ -223,7 +248,12 @@ class TestWebSocketControlEndpoint:
         with app_client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
             ws.send_json({"command": "invalid_command"})
-            response = ws.receive_json()
+            # Drain messages until we find the control response (training
+            # thread broadcasts can interleave with control responses)
+            for _ in range(10):
+                response = ws.receive_json()
+                if "ok" in response or "error" in response:
+                    break
             assert response.get("ok") is False
             assert "error" in response
 
@@ -1192,7 +1222,12 @@ class TestControlWebSocketLateInit:
         with app_client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
             ws.send_json({"command": "start"})
-            response = ws.receive_json()
+            # Drain messages until we find the control response (training
+            # thread broadcasts can interleave with control responses)
+            for _ in range(10):
+                response = ws.receive_json()
+                if "ok" in response or "state" in response:
+                    break
             assert "ok" in response or "state" in response
 
 

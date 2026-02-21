@@ -376,7 +376,12 @@ class TestWebSocketControlEndpoint:
         with client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
             ws.send_json({"command": "start"})
-            response = ws.receive_json()
+            # Drain messages until we find the control response (training
+            # thread broadcasts can interleave with control responses)
+            for _ in range(10):
+                response = ws.receive_json()
+                if "ok" in response:
+                    break
             assert response["ok"] is True
             assert response["command"] == "start"
 
@@ -386,7 +391,12 @@ class TestWebSocketControlEndpoint:
         with client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
             ws.send_json({"command": "stop"})
-            response = ws.receive_json()
+            # Drain messages until we find the control response (training
+            # thread broadcasts can interleave with control responses)
+            for _ in range(10):
+                response = ws.receive_json()
+                if "ok" in response:
+                    break
             assert response["ok"] is True
             assert response["command"] == "stop"
 
@@ -396,7 +406,12 @@ class TestWebSocketControlEndpoint:
         with client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
             ws.send_json({"command": "pause"})
-            response = ws.receive_json()
+            # Drain messages until we find the control response (training
+            # thread broadcasts can interleave with control responses)
+            for _ in range(10):
+                response = ws.receive_json()
+                if "ok" in response:
+                    break
             assert response["ok"] is True
             assert response["command"] == "pause"
 
@@ -406,7 +421,12 @@ class TestWebSocketControlEndpoint:
         with client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
             ws.send_json({"command": "resume"})
-            response = ws.receive_json()
+            # Drain messages until we find the control response (training
+            # thread broadcasts can interleave with control responses)
+            for _ in range(10):
+                response = ws.receive_json()
+                if "ok" in response:
+                    break
             assert response["ok"] is True
             assert response["command"] == "resume"
 
@@ -416,7 +436,12 @@ class TestWebSocketControlEndpoint:
         with client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
             ws.send_json({"command": "reset"})
-            response = ws.receive_json()
+            # Drain messages until we find the control response (training
+            # thread broadcasts can interleave with control responses)
+            for _ in range(10):
+                response = ws.receive_json()
+                if "ok" in response:
+                    break
             assert response["ok"] is True
             assert response["command"] == "reset"
 
@@ -426,7 +451,12 @@ class TestWebSocketControlEndpoint:
         with client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
             ws.send_json({"command": "invalid_cmd"})
-            response = ws.receive_json()
+            # Drain messages until we find the control response (training
+            # thread broadcasts can interleave with control responses)
+            for _ in range(10):
+                response = ws.receive_json()
+                if "ok" in response or "error" in response:
+                    break
             assert response["ok"] is False
             assert "error" in response
 
@@ -1321,7 +1351,12 @@ class TestWebSocketWithCascorIntegration:
             with client.websocket_connect("/ws/control") as ws:
                 ws.receive_json()
                 ws.send_json({"command": "start"})
-                response = ws.receive_json()
+                # Drain messages until we find the control response (training
+                # thread broadcasts can interleave with control responses)
+                for _ in range(10):
+                    response = ws.receive_json()
+                    if "ok" in response:
+                        break
                 assert response["ok"] is False
         finally:
             main_module.demo_mode_active = original_demo

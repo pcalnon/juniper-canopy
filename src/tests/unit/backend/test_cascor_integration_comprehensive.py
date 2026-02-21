@@ -17,6 +17,7 @@ Tests focus on previously untested code paths:
 - Error handling throughout
 """
 import os
+import sys
 import threading
 import time
 from unittest.mock import MagicMock, Mock, patch
@@ -55,7 +56,11 @@ class TestBackendImportErrors:
         mock_config_instance.config = {}
         mock_config_mgr.return_value = mock_config_instance
 
-        with patch("backend.cascor_integration.sys.path"):
+        # Remove cascade_correlation from sys.modules so the import actually fails
+        # (juniper-cascor may be installed, making these modules importable regardless of sys.path)
+        with patch("backend.cascor_integration.sys.path"), patch.dict(sys.modules):
+            for key in [k for k in sys.modules if k.startswith("cascade_correlation")]:
+                del sys.modules[key]
             with pytest.raises(ImportError) as exc_info:
                 CascorIntegration(backend_path="/tmp/fake_backend")
 
