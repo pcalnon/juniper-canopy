@@ -62,6 +62,9 @@ juniper-data = [
     "juniper-data-client>=0.3.0",
     "requests>=2.28.0",
 ]
+juniper-cascor = [
+    "juniper-cascor-client>=0.1.0",
+]
 
 # ==========================================
 # Black Configuration

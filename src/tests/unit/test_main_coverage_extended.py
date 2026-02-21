@@ -913,22 +913,22 @@ class TestDirectSetupMonitoringCallbacks:
         """Test calling setup_monitoring_callbacks with mocked integration."""
         import main
 
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
         mock_integration = MagicMock()
-        main.cascor_integration = mock_integration
+        main.backend = mock_integration
 
         try:
             main.setup_monitoring_callbacks()
             assert mock_integration.create_monitoring_callback.call_count == 3
         finally:
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
     @pytest.mark.unit
     def test_setup_monitoring_callbacks_captures_on_metrics_update(self):
         """Test on_metrics_update callback is registered and callable."""
         import main
 
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
         callbacks_captured = {}
 
         def capture_callback(event_name, callback):
@@ -936,7 +936,7 @@ class TestDirectSetupMonitoringCallbacks:
 
         mock_integration = MagicMock()
         mock_integration.create_monitoring_callback.side_effect = capture_callback
-        main.cascor_integration = mock_integration
+        main.backend = mock_integration
 
         try:
             main.setup_monitoring_callbacks()
@@ -946,14 +946,14 @@ class TestDirectSetupMonitoringCallbacks:
             with patch("main.schedule_broadcast"):
                 on_metrics_update(metrics={"epoch": 10, "loss": 0.5})
         finally:
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
     @pytest.mark.unit
     def test_setup_monitoring_callbacks_on_topology_change(self):
         """Test on_topology_change callback is registered and callable."""
         import main
 
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
         callbacks_captured = {}
 
         def capture_callback(event_name, callback):
@@ -961,7 +961,7 @@ class TestDirectSetupMonitoringCallbacks:
 
         mock_integration = MagicMock()
         mock_integration.create_monitoring_callback.side_effect = capture_callback
-        main.cascor_integration = mock_integration
+        main.backend = mock_integration
 
         try:
             main.setup_monitoring_callbacks()
@@ -971,14 +971,14 @@ class TestDirectSetupMonitoringCallbacks:
             with patch("main.schedule_broadcast"):
                 on_topology_change(topology={"nodes": [], "connections": []})
         finally:
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
     @pytest.mark.unit
     def test_setup_monitoring_callbacks_on_cascade_add(self):
         """Test on_cascade_add callback is registered and callable."""
         import main
 
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
         callbacks_captured = {}
 
         def capture_callback(event_name, callback):
@@ -986,7 +986,7 @@ class TestDirectSetupMonitoringCallbacks:
 
         mock_integration = MagicMock()
         mock_integration.create_monitoring_callback.side_effect = capture_callback
-        main.cascor_integration = mock_integration
+        main.backend = mock_integration
 
         try:
             main.setup_monitoring_callbacks()
@@ -996,14 +996,14 @@ class TestDirectSetupMonitoringCallbacks:
             with patch("main.schedule_broadcast"):
                 on_cascade_add(event={"hidden_unit": 3, "correlation": 0.8})
         finally:
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
     @pytest.mark.unit
     def test_on_metrics_update_with_to_dict_method(self):
         """Test on_metrics_update handles objects with to_dict method."""
         import main
 
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
         callbacks_captured = {}
 
         def capture_callback(event_name, callback):
@@ -1011,7 +1011,7 @@ class TestDirectSetupMonitoringCallbacks:
 
         mock_integration = MagicMock()
         mock_integration.create_monitoring_callback.side_effect = capture_callback
-        main.cascor_integration = mock_integration
+        main.backend = mock_integration
 
         class MetricsWithToDict:
             def to_dict(self):
@@ -1023,14 +1023,14 @@ class TestDirectSetupMonitoringCallbacks:
             with patch("main.schedule_broadcast"):
                 on_metrics_update(metrics=MetricsWithToDict())
         finally:
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
     @pytest.mark.unit
     def test_on_cascade_add_with_non_dict_event(self):
         """Test on_cascade_add handles non-dict events."""
         import main
 
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
         callbacks_captured = {}
 
         def capture_callback(event_name, callback):
@@ -1038,7 +1038,7 @@ class TestDirectSetupMonitoringCallbacks:
 
         mock_integration = MagicMock()
         mock_integration.create_monitoring_callback.side_effect = capture_callback
-        main.cascor_integration = mock_integration
+        main.backend = mock_integration
 
         try:
             main.setup_monitoring_callbacks()
@@ -1046,7 +1046,7 @@ class TestDirectSetupMonitoringCallbacks:
             with patch("main.schedule_broadcast"):
                 on_cascade_add(event="non_dict_event")
         finally:
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
 
 class TestWebSocketDisconnectPath:
@@ -1069,14 +1069,14 @@ class TestCascorIntegrationWebSocketBranch:
 
         original_demo = main.demo_mode_active
         original_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         mock_cascor = MagicMock()
         mock_cascor.get_training_status.return_value = {"is_training": False, "current_epoch": 0}
 
         main.demo_mode_active = False
         main.demo_mode_instance = None
-        main.cascor_integration = mock_cascor
+        main.backend = mock_cascor
 
         try:
             status = mock_cascor.get_training_status()
@@ -1084,7 +1084,7 @@ class TestCascorIntegrationWebSocketBranch:
         finally:
             main.demo_mode_active = original_demo
             main.demo_mode_instance = original_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
 
 class TestControlWebSocketBranches:

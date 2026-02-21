@@ -122,7 +122,7 @@ async def lifespan(app: FastAPI):
     websocket_manager.set_event_loop(loop_holder["loop"])
 
     # Initialize demo mode or real backend
-    global demo_mode_active, demo_mode_instance, cascor_integration, training_state
+    global demo_mode_active, demo_mode_instance, backend, training_state
 
     # Fix 4 (RC-5): Validate JUNIPER_DATA_URL for ALL modes, not just demo mode.
     # JuniperData is mandatory for both demo and real backend (CAN-INT-002).
@@ -156,50 +156,63 @@ async def lifespan(app: FastAPI):
         demo_mode_instance.start()
         system_logger.info("Demo mode started with simulated training")
     else:
-        # Fix 1 (RC-1, RC-2): In-process real backend initialization.
-        # CasCor runs within Canopy's process via module import and method wrapping,
-        # NOT as a separate OS process. Create a network, install monitoring hooks,
-        # and prepare for user-initiated training via dashboard controls.
-        system_logger.info("CasCor backend mode active — initializing in-process integration")
         demo_mode_instance = None
 
-        if cascor_integration:
-            try:
-                # Create network with configuration-driven defaults
-                state = training_state.get_state()
-                network_config = {
-                    "input_size": 2,
-                    "output_size": 1,
-                    "learning_rate": state.get("learning_rate", 0.01),
-                    "max_hidden_units": state.get("max_hidden_units", 10),
-                    "max_epochs": state.get("max_epochs", 200),
-                }
-                cascor_integration.create_network(network_config)
-                system_logger.info(f"CasCor network created: {network_config}")
-
-                # Fetch dataset from JuniperData for the network
+        if backend:
+            # Check if this is a service adapter (REST/WS) or legacy in-process integration
+            if getattr(backend, "_is_service_adapter", False) is True:
+                # Service mode: connect to remote CasCor service
+                system_logger.info("CasCor service mode active — connecting to remote service")
                 try:
-                    if dataset := cascor_integration.get_dataset_info():
-                        system_logger.info(f"Dataset loaded: {dataset.get('num_samples', '?')} samples, " f"{dataset.get('num_classes', '?')} classes")
+                    connected = await backend.connect()
+                    if connected:
+                        system_logger.info("Connected to CasCor service")
+                        await backend.start_metrics_relay()
+                        system_logger.info("CasCor service fully initialized — metrics relay active")
+                    else:
+                        system_logger.warning("CasCor service not ready — training can be started when service is available")
                 except Exception as e:
-                    system_logger.warning(f"Could not load dataset from JuniperData: {e}")
+                    system_logger.error(f"Failed to connect to CasCor service: {e}", exc_info=True)
+                    system_logger.info("Service adapter created but connection failed. Will retry on demand.")
+            else:
+                # Legacy mode: in-process CasCor integration
+                system_logger.info("CasCor backend mode active — initializing in-process integration")
+                try:
+                    # Create network with configuration-driven defaults
+                    state = training_state.get_state()
+                    network_config = {
+                        "input_size": 2,
+                        "output_size": 1,
+                        "learning_rate": state.get("learning_rate", 0.01),
+                        "max_hidden_units": state.get("max_hidden_units", 10),
+                        "max_epochs": state.get("max_epochs", 200),
+                    }
+                    backend.create_network(network_config)
+                    system_logger.info(f"CasCor network created: {network_config}")
 
-                # Install monitoring hooks on network training methods
-                if cascor_integration.install_monitoring_hooks():
-                    system_logger.info("Monitoring hooks installed on CasCor network")
-                else:
-                    system_logger.warning("Failed to install monitoring hooks")
+                    # Fetch dataset from JuniperData for the network
+                    try:
+                        if dataset := backend.get_dataset_info():
+                            system_logger.info(f"Dataset loaded: {dataset.get('num_samples', '?')} samples, " f"{dataset.get('num_classes', '?')} classes")
+                    except Exception as e:
+                        system_logger.warning(f"Could not load dataset from JuniperData: {e}")
 
-                # Start background monitoring thread for polling metrics
-                cascor_integration.start_monitoring_thread(interval=1.0)
+                    # Install monitoring hooks on network training methods
+                    if backend.install_monitoring_hooks():
+                        system_logger.info("Monitoring hooks installed on CasCor network")
+                    else:
+                        system_logger.warning("Failed to install monitoring hooks")
 
-                # Register WebSocket broadcast callbacks
-                setup_monitoring_callbacks()
+                    # Start background monitoring thread for polling metrics
+                    backend.start_monitoring_thread(interval=1.0)
 
-                system_logger.info("CasCor backend fully initialized — ready for training via dashboard")
-            except Exception as e:
-                system_logger.error(f"Failed to initialize CasCor backend: {e}", exc_info=True)
-                system_logger.info("Backend integration created but network initialization failed. " "Training can be started manually via /api/train/start.")
+                    # Register WebSocket broadcast callbacks
+                    setup_monitoring_callbacks()
+
+                    system_logger.info("CasCor backend fully initialized — ready for training via dashboard")
+                except Exception as e:
+                    system_logger.error(f"Failed to initialize CasCor backend: {e}", exc_info=True)
+                    system_logger.info("Backend integration created but network initialization failed. " "Training can be started manually via /api/train/start.")
 
     system_logger.info("Application startup complete")
 
@@ -216,9 +229,11 @@ async def lifespan(app: FastAPI):
     # Shutdown WebSocket connections
     await websocket_manager.shutdown()
 
-    # Shutdown CasCor integration
-    if cascor_integration:
-        cascor_integration.shutdown()
+    # Shutdown backend (stop relay for service mode, then close)
+    if backend:
+        if getattr(backend, "_is_service_adapter", False) is True:
+            await backend.stop_metrics_relay()
+        backend.shutdown()
 
     system_logger.info("Application shutdown complete")
 
@@ -240,34 +255,56 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize backend integration
-cascor_backend_path = config.get(
-    "backend.cascor_integration.backend_path",
-    os.getenv("CASCOR_BACKEND_PATH", "../cascor"),
-)
+# Initialize backend integration — three-mode priority:
+#   1. CASCOR_DEMO_MODE=1 → Demo mode (highest priority)
+#   2. CASCOR_SERVICE_URL set → Service mode via CascorServiceAdapter (REST/WS)
+#   3. CASCOR_BACKEND_PATH set → Legacy mode via CascorIntegration (in-process)
+#   4. Neither → fallback to Demo mode
 
-# Check if demo mode is explicitly requested via environment variable
 force_demo_mode = os.getenv("CASCOR_DEMO_MODE", "0") in ("1", "true", "True", "yes", "Yes")
+cascor_service_url = os.getenv("CASCOR_SERVICE_URL")
 
 if force_demo_mode:
     system_logger.info("Demo mode explicitly enabled via CASCOR_DEMO_MODE environment variable")
-    cascor_integration = None
+    backend = None
     demo_mode_active = True
-else:
-    # Try to initialize CasCor integration, fallback to demo mode
+elif cascor_service_url:
+    # Service mode: communicate with CasCor over REST/WebSocket
     try:
-        cascor_integration = CascorIntegration(cascor_backend_path)
+        from backend.cascor_service_adapter import CascorServiceAdapter
+
+        cascor_api_key = os.getenv("CASCOR_SERVICE_API_KEY")
+        backend = CascorServiceAdapter(service_url=cascor_service_url, api_key=cascor_api_key)
         demo_mode_active = False
-        system_logger.info("CasCor backend integration initialized successfully")
+        system_logger.info(f"CasCor service adapter initialized: {cascor_service_url}")
+    except ImportError:
+        system_logger.warning("juniper-cascor-client not installed, falling back to demo mode")
+        backend = None
+        demo_mode_active = True
+    except Exception as e:
+        system_logger.error(f"Failed to initialize CasCor service adapter: {e}")
+        system_logger.info("Falling back to demo mode")
+        backend = None
+        demo_mode_active = True
+else:
+    # Legacy mode: in-process CasCor integration
+    cascor_backend_path = config.get(
+        "backend.cascor_integration.backend_path",
+        os.getenv("CASCOR_BACKEND_PATH", "../cascor"),
+    )
+    try:
+        backend = CascorIntegration(cascor_backend_path)
+        demo_mode_active = False
+        system_logger.info("CasCor backend integration initialized successfully (legacy mode)")
     except FileNotFoundError as e:
         system_logger.warning(f"CasCor backend not found: {e}")
         system_logger.info("Falling back to demo mode for frontend development")
-        cascor_integration = None
+        backend = None
         demo_mode_active = True
     except Exception as e:
         system_logger.error(f"Failed to initialize CasCor backend: {e}")
         system_logger.info("Falling back to demo mode")
-        cascor_integration = None
+        backend = None
         demo_mode_active = True
 
 # Initialize Dash dashboard (standalone with its own Flask server)
@@ -345,9 +382,9 @@ def setup_monitoring_callbacks():
             schedule_broadcast(websocket_manager.broadcast(create_event_message("cascade_add", details)))
 
     # Register synchronous callbacks
-    cascor_integration.create_monitoring_callback("epoch_end", on_metrics_update)
-    cascor_integration.create_monitoring_callback("topology_change", on_topology_change)
-    cascor_integration.create_monitoring_callback("cascade_add", on_cascade_add)
+    backend.create_monitoring_callback("epoch_end", on_metrics_update)
+    backend.create_monitoring_callback("topology_change", on_topology_change)
+    backend.create_monitoring_callback("cascade_add", on_cascade_add)
 
     system_logger.info("Monitoring callbacks registered (thread-safe)")
 
@@ -375,8 +412,8 @@ async def websocket_training_endpoint(websocket: WebSocket):
         global demo_mode_instance, demo_mode_active
         if demo_mode_active and demo_mode_instance:
             status = demo_mode_instance.get_current_state()
-        elif cascor_integration:
-            status = cascor_integration.get_training_status()
+        elif backend:
+            status = backend.get_training_status()
         else:
             status = {"error": "No backend available"}
 
@@ -485,31 +522,31 @@ async def websocket_control_endpoint(websocket: WebSocket):
                     await websocket_manager.send_personal_message({"ok": False, "error": str(e)}, websocket)
 
             # Fix 3 (RC-3): Handle real CasCor backend commands
-            elif cascor_integration:
+            elif backend:
                 try:
                     if command == "start":
-                        if cascor_integration.network is None:
+                        if backend.network is None:
                             response = {"ok": False, "command": command, "error": "No network configured. Create or load a network first."}
-                        elif cascor_integration.is_training_in_progress():
+                        elif backend.is_training_in_progress():
                             response = {"ok": False, "command": command, "error": "Training already in progress"}
                         else:
-                            success = cascor_integration.start_training_background()
+                            success = backend.start_training_background()
                             if success:
-                                response = {"ok": True, "command": command, "state": cascor_integration.get_training_status()}
+                                response = {"ok": True, "command": command, "state": backend.get_training_status()}
                             else:
                                 response = {"ok": False, "command": command, "error": "Failed to start training"}
                     elif command == "stop":
-                        if cascor_integration.is_training_in_progress():
-                            success = cascor_integration.request_training_stop()
-                            response = {"ok": success, "command": command, "state": cascor_integration.get_training_status()}
+                        if backend.is_training_in_progress():
+                            success = backend.request_training_stop()
+                            response = {"ok": success, "command": command, "state": backend.get_training_status()}
                         else:
-                            response = {"ok": True, "command": command, "state": cascor_integration.get_training_status()}
+                            response = {"ok": True, "command": command, "state": backend.get_training_status()}
                     elif command == "pause":
                         response = {"ok": False, "command": command, "error": "Pause not supported for CasCor backend (training is atomic per phase)"}
                     elif command == "resume":
                         response = {"ok": False, "command": command, "error": "Resume not supported for CasCor backend"}
                     elif command == "reset":
-                        cascor_integration.restore_original_methods()
+                        backend.restore_original_methods()
                         state = training_state.get_state()
                         network_config = {
                             "input_size": 2,
@@ -518,9 +555,9 @@ async def websocket_control_endpoint(websocket: WebSocket):
                             "max_hidden_units": state.get("max_hidden_units", 10),
                             "max_epochs": state.get("max_epochs", 200),
                         }
-                        cascor_integration.create_network(network_config)
-                        cascor_integration.install_monitoring_hooks()
-                        response = {"ok": True, "command": command, "state": cascor_integration.get_training_status()}
+                        backend.create_network(network_config)
+                        backend.install_monitoring_hooks()
+                        response = {"ok": True, "command": command, "state": backend.get_training_status()}
                     else:
                         response = {"ok": False, "error": f"Unknown command: {command}"}
 
@@ -554,8 +591,8 @@ async def health_check():
     training_active = False
     if demo_mode_instance:
         training_active = demo_mode_instance.get_current_state()["is_running"]
-    elif cascor_integration and hasattr(cascor_integration, "training_monitor"):
-        training_active = cascor_integration.training_monitor.is_training
+    elif backend and hasattr(backend, "training_monitor"):
+        training_active = backend.training_monitor.is_training
 
     return {
         "status": "healthy",
@@ -626,8 +663,8 @@ async def get_status():
         }
 
     # Real cascor status
-    if cascor_integration:
-        return cascor_integration.get_training_status()
+    if backend:
+        return backend.get_training_status()
 
     return {
         "is_training": False,
@@ -655,8 +692,8 @@ async def get_metrics():
     if demo_mode_instance:
         return demo_mode_instance.get_current_state()
     # Fall back to cascor integration
-    if cascor_integration and hasattr(cascor_integration, "training_monitor"):
-        metrics = cascor_integration.training_monitor.get_current_metrics()
+    if backend and hasattr(backend, "training_monitor"):
+        metrics = backend.training_monitor.get_current_metrics()
         return metrics.to_dict() if hasattr(metrics, "to_dict") else metrics
 
     return {}
@@ -674,9 +711,9 @@ async def get_metrics_history():
     if demo_mode_instance:
         history = demo_mode_instance.get_metrics_history()
         return {"history": history}
-    if cascor_integration and hasattr(cascor_integration, "training_monitor"):
-        metrics = cascor_integration.training_monitor.get_recent_metrics(100)
-        return {"history": [m.to_dict() for m in metrics]}
+    if backend and hasattr(backend, "training_monitor"):
+        metrics = backend.training_monitor.get_recent_metrics(100)
+        return {"history": [m.to_dict() if hasattr(m, "to_dict") else m for m in metrics]}
     return JSONResponse({"error": "No backend available"}, status_code=503)
 
 
@@ -710,9 +747,9 @@ async def get_network_stats():
             threshold_function=threshold_function,
             optimizer_name=optimizer_name,
         )
-    if cascor_integration:
-        # Get network parameters from cascor integration
-        network_data = cascor_integration.get_network_data()
+    if backend:
+        # Get network parameters from backend
+        network_data = backend.get_network_data()
         return adapter.get_network_statistics(
             input_weights=network_data.get("input_weights"),
             hidden_weights=network_data.get("hidden_weights"),
@@ -784,9 +821,11 @@ async def get_topology():
             "total_connections": len(connections),
         }
 
-    if cascor_integration:
-        topology = cascor_integration.extract_network_topology()
-        return topology.to_dict() if topology else JSONResponse({"error": "No topology available"}, status_code=503)
+    if backend:
+        topology = backend.extract_network_topology()
+        if not topology:
+            return JSONResponse({"error": "No topology available"}, status_code=503)
+        return topology.to_dict() if hasattr(topology, "to_dict") else topology
 
     return JSONResponse({"error": "No topology available"}, status_code=503)
 
@@ -812,8 +851,8 @@ async def get_dataset():
         }
 
     # Fall back to cascor integration
-    if cascor_integration:
-        dataset = cascor_integration.get_dataset_info()
+    if backend:
+        dataset = backend.get_dataset_info()
         return dataset or JSONResponse({"error": "No dataset available"}, status_code=503)
 
     return JSONResponse({"error": "No dataset available"}, status_code=503)
@@ -865,9 +904,9 @@ async def get_decision_boundary():
         }
 
     # Fall back to cascor integration
-    if cascor_integration:
+    if backend:
         # if predict_fn:
-        if predict_fn := cascor_integration.get_prediction_function():
+        if predict_fn := backend.get_prediction_function():
             # TODO: Add Similar logic for real cascor network
             system_logger = get_system_logger()
             system_logger.info(f"main.py: get_decision_boundary: Decision boundary data available: Predict Function: {predict_fn}")
@@ -971,7 +1010,7 @@ async def get_snapshots():
         snapshots = []
 
     # Demo mode or no real snapshots available → return mock data
-    if (demo_mode_active or not snapshots) and not cascor_integration:
+    if (demo_mode_active or not snapshots) and not backend:
         # Combine session-created demo snapshots with mock snapshots
         mock_snapshots = _generate_mock_snapshots()
 
@@ -1055,7 +1094,7 @@ async def get_snapshot_detail(snapshot_id: str):
     global demo_mode_active
 
     # Demo mode: return synthetic details
-    if demo_mode_active or not cascor_integration:
+    if demo_mode_active or not backend:
         # Check session-created demo snapshots first
         for s in _demo_snapshots:
             if s["id"] == snapshot_id:
@@ -1192,7 +1231,7 @@ async def create_snapshot(
     snapshot_name = f"{snapshot_id}.h5"
 
     # Demo mode: create mock snapshot entry
-    if demo_mode_active or not cascor_integration:
+    if demo_mode_active or not backend:
         size_bytes = 1024 * 1024 + int(now.timestamp()) % (512 * 1024)  # ~1-1.5 MB mock size
 
         snapshot = {
@@ -1222,14 +1261,14 @@ async def create_snapshot(
             "message": "Demo snapshot created successfully",
         }
 
-    # Real mode: create actual HDF5 file via cascor_integration
+    # Real mode: create actual HDF5 file via backend
     try:
         snapshot_path = Path(_snapshots_dir) / snapshot_name
         Path(_snapshots_dir).mkdir(parents=True, exist_ok=True)
 
         # Attempt to create HDF5 snapshot via CasCor integration
-        if hasattr(cascor_integration, "save_snapshot"):
-            cascor_integration.save_snapshot(str(snapshot_path), description=description)
+        if hasattr(backend, "save_snapshot"):
+            backend.save_snapshot(str(snapshot_path), description=description)
         else:
             # Fallback: create a minimal HDF5 file with current state
             try:
@@ -1330,7 +1369,7 @@ async def restore_snapshot(snapshot_id: str):
     )
 
     # Check mock demo snapshots if not found
-    if not snapshot_data and (demo_mode_active or not cascor_integration):
+    if not snapshot_data and (demo_mode_active or not backend):
         # Check against generated mock snapshots
         for s in _generate_mock_snapshots():
             if s["id"] == snapshot_id:
@@ -1342,7 +1381,7 @@ async def restore_snapshot(snapshot_id: str):
                 break
 
     # Check real file system if in real mode
-    if not snapshot_data and not demo_mode_active and cascor_integration:
+    if not snapshot_data and not demo_mode_active and backend:
         snapshot_path = Path(_snapshots_dir) / f"{snapshot_id}.h5"
         if not snapshot_path.exists():
             snapshot_path = Path(_snapshots_dir) / f"{snapshot_id}.hdf5"
@@ -1364,7 +1403,7 @@ async def restore_snapshot(snapshot_id: str):
         now = datetime.now(UTC)
 
         # Demo mode: simulate restore by resetting training state
-        if demo_mode_active or not cascor_integration:
+        if demo_mode_active or not backend:
             # Reset demo mode state
             if demo_mode_instance:
                 demo_mode_instance.reset()
@@ -1417,8 +1456,8 @@ async def restore_snapshot(snapshot_id: str):
         # Real mode: load from HDF5 file
         snapshot_path = Path(snapshot_data.get("path", f"{_snapshots_dir}/{snapshot_id}.h5"))
 
-        if hasattr(cascor_integration, "load_snapshot"):
-            cascor_integration.load_snapshot(str(snapshot_path))
+        if hasattr(backend, "load_snapshot"):
+            backend.load_snapshot(str(snapshot_path))
         else:
             # Fallback: read HDF5 file and restore state
             try:
@@ -1791,21 +1830,21 @@ async def api_train_start(reset: bool = False):
         # Send control acknowledgment via WebSocket
         schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", success, message)))
         return {"status": "started", **state}
-    if cascor_integration:
+    if backend:
         # success = False
         # message = "Start command not implemented for cascor"
         # P1-NEW-003: Use async training to avoid blocking event loop
-        if cascor_integration.is_training_in_progress():
+        if backend.is_training_in_progress():
             message = "Training already in progress"
             schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, message)))
             return {"status": "busy", "message": message}
 
-        if cascor_integration.network is None:
+        if backend.network is None:
             message = "No network configured. Create or load a network first."
             schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, message)))
             return JSONResponse({"error": message}, status_code=400)
 
-        if cascor_integration.start_training_background():
+        if backend.start_training_background():
             message = "Training started successfully"
             schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", True, message)))
             return {"status": "started", "message": message}
@@ -1869,10 +1908,10 @@ async def api_train_stop():
         schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", True, "Training stopped")))
         return {"status": "stopped"}
 
-    # P1-NEW-003: Support stop for cascor_integration (best-effort)
-    if cascor_integration:
-        if cascor_integration.is_training_in_progress():
-            if cascor_integration.request_training_stop():
+    # P1-NEW-003: Support stop for backend (best-effort)
+    if backend:
+        if backend.is_training_in_progress():
+            if backend.request_training_stop():
                 message = "Training stop requested (best-effort)"
                 schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", True, message)))
                 return {"status": "stop_requested", "message": message}
@@ -1913,11 +1952,11 @@ async def api_train_status():
     if demo_mode_instance:
         return {"backend": "demo", **demo_mode_instance.get_current_state()}
 
-    if cascor_integration:
-        status = cascor_integration.get_training_status()
+    if backend:
+        status = backend.get_training_status()
         status["backend"] = "cascor"
-        status["training_in_progress"] = cascor_integration.is_training_in_progress()
-        status["stop_requested"] = cascor_integration._training_stop_requested
+        status["training_in_progress"] = backend.is_training_in_progress()
+        status["stop_requested"] = backend._training_stop_requested
         return status
 
     return {"backend": None, "status": "no_backend"}
@@ -1986,8 +2025,8 @@ async def api_remote_status():
     Returns:
         Dictionary with remote worker status information.
     """
-    if cascor_integration:
-        return cascor_integration.get_remote_worker_status()
+    if backend:
+        return backend.get_remote_worker_status()
     return {"available": False, "connected": False, "workers_active": False, "error": "No backend"}
 
 
@@ -2002,11 +2041,11 @@ async def api_remote_connect(host: str, port: int, authkey: str):
     Returns:
         Connection status.
     """
-    if not cascor_integration:
+    if not backend:
         return JSONResponse({"error": "No backend available"}, status_code=503)
 
     try:
-        success = cascor_integration.connect_remote_workers((host, port), authkey)
+        success = backend.connect_remote_workers((host, port), authkey)
         if success:
             return {"status": "connected", "address": f"{host}:{port}"}
         return JSONResponse({"error": "Connection failed"}, status_code=500)
@@ -2023,10 +2062,10 @@ async def api_remote_start_workers(num_workers: int = 1):
     Returns:
         Worker start status.
     """
-    if not cascor_integration:
+    if not backend:
         return JSONResponse({"error": "No backend available"}, status_code=503)
 
-    success = cascor_integration.start_remote_workers(num_workers)
+    success = backend.start_remote_workers(num_workers)
     if success:
         return {"status": "started", "num_workers": num_workers}
     return JSONResponse({"error": "Failed to start workers"}, status_code=500)
@@ -2041,10 +2080,10 @@ async def api_remote_stop_workers(timeout: int = 10):
     Returns:
         Worker stop status.
     """
-    if not cascor_integration:
+    if not backend:
         return JSONResponse({"error": "No backend available"}, status_code=503)
 
-    success = cascor_integration.stop_remote_workers(timeout)
+    success = backend.stop_remote_workers(timeout)
     if success:
         return {"status": "stopped"}
     return JSONResponse({"error": "Failed to stop workers"}, status_code=500)
@@ -2057,10 +2096,10 @@ async def api_remote_disconnect():
     Returns:
         Disconnection status.
     """
-    if not cascor_integration:
+    if not backend:
         return JSONResponse({"error": "No backend available"}, status_code=503)
 
-    success = cascor_integration.disconnect_remote_workers()
+    success = backend.disconnect_remote_workers()
     if success:
         return {"status": "disconnected"}
     return JSONResponse({"error": "Failed to disconnect"}, status_code=500)

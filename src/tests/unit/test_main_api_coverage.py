@@ -143,11 +143,11 @@ class TestTopologyEndpointDirect:
         mock_cascor.extract_network_topology.return_value = mock_topology
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = mock_cascor
+            main.backend = mock_cascor
 
             result = await main.get_topology()
 
@@ -155,7 +155,7 @@ class TestTopologyEndpointDirect:
             assert result == mock_topology.to_dict.return_value
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
     @pytest.mark.asyncio
     async def test_topology_cascor_mode_no_topology_returns_503(self):
@@ -168,11 +168,11 @@ class TestTopologyEndpointDirect:
         mock_cascor.extract_network_topology.return_value = None
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = mock_cascor
+            main.backend = mock_cascor
 
             result = await main.get_topology()
 
@@ -180,7 +180,7 @@ class TestTopologyEndpointDirect:
             assert result.status_code == 503
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
     @pytest.mark.asyncio
     async def test_topology_no_backend_returns_503(self):
@@ -190,11 +190,11 @@ class TestTopologyEndpointDirect:
         import main
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = None
+            main.backend = None
 
             result = await main.get_topology()
 
@@ -202,7 +202,7 @@ class TestTopologyEndpointDirect:
             assert result.status_code == 503
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
 
 # =============================================================================
@@ -224,11 +224,11 @@ class TestDatasetEndpointDirect:
         }
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = mock_cascor
+            main.backend = mock_cascor
 
             result = await main.get_dataset()
 
@@ -236,7 +236,7 @@ class TestDatasetEndpointDirect:
             assert result["num_samples"] == 2
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
     @pytest.mark.asyncio
     async def test_dataset_cascor_mode_no_data_returns_503(self):
@@ -249,11 +249,11 @@ class TestDatasetEndpointDirect:
         mock_cascor.get_dataset_info.return_value = None
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = mock_cascor
+            main.backend = mock_cascor
 
             result = await main.get_dataset()
 
@@ -261,7 +261,7 @@ class TestDatasetEndpointDirect:
             assert result.status_code == 503
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
     @pytest.mark.asyncio
     async def test_dataset_no_backend_returns_503(self):
@@ -271,11 +271,11 @@ class TestDatasetEndpointDirect:
         import main
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = None
+            main.backend = None
 
             result = await main.get_dataset()
 
@@ -283,7 +283,7 @@ class TestDatasetEndpointDirect:
             assert result.status_code == 503
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
 
 # =============================================================================
@@ -304,11 +304,11 @@ class TestDecisionBoundaryEndpointDirect:
         mock_cascor.get_prediction_function.return_value = mock_predict_fn
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = mock_cascor
+            main.backend = mock_cascor
 
             result = await main.get_decision_boundary()
 
@@ -318,7 +318,7 @@ class TestDecisionBoundaryEndpointDirect:
             assert result.status_code == 503
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
     @pytest.mark.asyncio
     async def test_decision_boundary_no_backend_returns_503(self):
@@ -328,11 +328,11 @@ class TestDecisionBoundaryEndpointDirect:
         import main
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = None
+            main.backend = None
 
             result = await main.get_decision_boundary()
 
@@ -340,7 +340,7 @@ class TestDecisionBoundaryEndpointDirect:
             assert result.status_code == 503
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
 
 # =============================================================================
@@ -385,12 +385,12 @@ class TestTrainingControlEndpointsDirect:
         mock_cascor.is_training_in_progress.return_value = True
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = mock_cascor
+            main.backend = mock_cascor
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
@@ -401,7 +401,7 @@ class TestTrainingControlEndpointsDirect:
             assert "already in progress" in result["message"]
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
             main.loop_holder["loop"] = original_loop
 
     @pytest.mark.asyncio
@@ -415,12 +415,12 @@ class TestTrainingControlEndpointsDirect:
         mock_cascor.start_training_background.return_value = True
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = mock_cascor
+            main.backend = mock_cascor
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
@@ -430,7 +430,7 @@ class TestTrainingControlEndpointsDirect:
             assert result["status"] == "started"
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
             main.loop_holder["loop"] = original_loop
 
     @pytest.mark.asyncio
@@ -441,12 +441,12 @@ class TestTrainingControlEndpointsDirect:
         import main
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = None
+            main.backend = None
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
@@ -457,7 +457,7 @@ class TestTrainingControlEndpointsDirect:
             assert result.status_code == 503
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
             main.loop_holder["loop"] = original_loop
 
     # ---- /api/train/pause ----
@@ -493,12 +493,12 @@ class TestTrainingControlEndpointsDirect:
         import main
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = None
+            main.backend = None
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
@@ -509,7 +509,7 @@ class TestTrainingControlEndpointsDirect:
             assert result.status_code == 503
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
             main.loop_holder["loop"] = original_loop
 
     # ---- /api/train/resume ----
@@ -545,12 +545,12 @@ class TestTrainingControlEndpointsDirect:
         import main
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = None
+            main.backend = None
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
@@ -561,7 +561,7 @@ class TestTrainingControlEndpointsDirect:
             assert result.status_code == 503
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
             main.loop_holder["loop"] = original_loop
 
     # ---- /api/train/stop ----
@@ -597,12 +597,12 @@ class TestTrainingControlEndpointsDirect:
         import main
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = None
+            main.backend = None
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
@@ -613,7 +613,7 @@ class TestTrainingControlEndpointsDirect:
             assert result.status_code == 503
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
             main.loop_holder["loop"] = original_loop
 
     # ---- /api/train/reset ----
@@ -650,12 +650,12 @@ class TestTrainingControlEndpointsDirect:
         import main
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = None
+            main.backend = None
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
@@ -666,7 +666,7 @@ class TestTrainingControlEndpointsDirect:
             assert result.status_code == 503
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
             main.loop_holder["loop"] = original_loop
 
 
@@ -693,11 +693,11 @@ class TestMetricsHistoryEndpointDirect:
         mock_cascor.training_monitor = mock_training_monitor
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = mock_cascor
+            main.backend = mock_cascor
 
             result = await main.get_metrics_history()
 
@@ -705,7 +705,7 @@ class TestMetricsHistoryEndpointDirect:
             assert len(result["history"]) == 2
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
     @pytest.mark.asyncio
     async def test_metrics_history_no_backend_returns_503(self):
@@ -715,11 +715,11 @@ class TestMetricsHistoryEndpointDirect:
         import main
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = None
+            main.backend = None
 
             result = await main.get_metrics_history()
 
@@ -727,7 +727,7 @@ class TestMetricsHistoryEndpointDirect:
             assert result.status_code == 503
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
 
 # =============================================================================
@@ -751,18 +751,18 @@ class TestMetricsEndpointDirect:
         mock_cascor.training_monitor = mock_training_monitor
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = mock_cascor
+            main.backend = mock_cascor
 
             result = await main.get_metrics()
 
             assert result["epoch"] == 5
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
     @pytest.mark.asyncio
     async def test_metrics_cascor_mode_without_to_dict(self):
@@ -779,18 +779,18 @@ class TestMetricsEndpointDirect:
         mock_cascor.training_monitor = mock_training_monitor
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = mock_cascor
+            main.backend = mock_cascor
 
             result = await main.get_metrics()
 
             assert result["epoch"] == 10
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
     @pytest.mark.asyncio
     async def test_metrics_no_backend_returns_empty(self):
@@ -798,18 +798,18 @@ class TestMetricsEndpointDirect:
         import main
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = None
+            main.backend = None
 
             result = await main.get_metrics()
 
             assert result == {}
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
 
 # =============================================================================
@@ -831,11 +831,11 @@ class TestStatusEndpointDirect:
         }
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = mock_cascor
+            main.backend = mock_cascor
 
             result = await main.get_status()
 
@@ -843,7 +843,7 @@ class TestStatusEndpointDirect:
             assert result["is_training"] is True
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
     @pytest.mark.asyncio
     async def test_status_no_backend_returns_inactive(self):
@@ -851,11 +851,11 @@ class TestStatusEndpointDirect:
         import main
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = None
+            main.backend = None
 
             result = await main.get_status()
 
@@ -863,7 +863,7 @@ class TestStatusEndpointDirect:
             assert result["network_connected"] is False
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
 
 # =============================================================================
@@ -891,18 +891,18 @@ class TestNetworkStatsEndpointDirect:
         }
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = mock_cascor
+            main.backend = mock_cascor
 
             await main.get_network_stats()
 
             mock_cascor.get_network_data.assert_called_once()
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
     @pytest.mark.asyncio
     async def test_network_stats_no_backend_returns_503(self):
@@ -912,11 +912,11 @@ class TestNetworkStatsEndpointDirect:
         import main
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = None
+            main.backend = None
 
             result = await main.get_network_stats()
 
@@ -924,7 +924,7 @@ class TestNetworkStatsEndpointDirect:
             assert result.status_code == 503
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
 
 # =============================================================================
@@ -945,18 +945,18 @@ class TestHealthEndpointDirect:
         mock_cascor.training_monitor = mock_training_monitor
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = mock_cascor
+            main.backend = mock_cascor
 
             result = await main.health_check()
 
             assert result["training_active"] is True
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
     @pytest.mark.asyncio
     async def test_health_no_backend_returns_inactive(self):
@@ -964,18 +964,18 @@ class TestHealthEndpointDirect:
         import main
 
         original_demo_instance = main.demo_mode_instance
-        original_cascor = main.cascor_integration
+        original_cascor = main.backend
 
         try:
             main.demo_mode_instance = None
-            main.cascor_integration = None
+            main.backend = None
 
             result = await main.health_check()
 
             assert result["training_active"] is False
         finally:
             main.demo_mode_instance = original_demo_instance
-            main.cascor_integration = original_cascor
+            main.backend = original_cascor
 
 
 # =============================================================================

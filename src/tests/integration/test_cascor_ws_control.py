@@ -83,18 +83,18 @@ def cascor_client(mock_cascor):
     """
     original_demo_instance = main_module.demo_mode_instance
     original_demo_active = main_module.demo_mode_active
-    original_cascor = main_module.cascor_integration
+    original_cascor = main_module.backend
 
     main_module.demo_mode_instance = None
     main_module.demo_mode_active = False
-    main_module.cascor_integration = mock_cascor
+    main_module.backend = mock_cascor
 
     with TestClient(app) as client:
         yield client
 
     main_module.demo_mode_instance = original_demo_instance
     main_module.demo_mode_active = original_demo_active
-    main_module.cascor_integration = original_cascor
+    main_module.backend = original_cascor
 
 
 def _send_ws_command(client, command, **extra):

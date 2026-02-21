@@ -85,7 +85,7 @@ class TestRealBackendInit:
 
         with (
             patch("main.demo_mode_active", False),
-            patch("main.cascor_integration", mock_integration),
+            patch("main.backend", mock_integration),
             patch("main.setup_monitoring_callbacks"),
         ):
             from main import app
@@ -101,7 +101,7 @@ class TestRealBackendInit:
 
         with (
             patch("main.demo_mode_active", False),
-            patch("main.cascor_integration", mock_integration),
+            patch("main.backend", mock_integration),
             patch("main.setup_monitoring_callbacks"),
         ):
             from main import app
@@ -120,7 +120,7 @@ class TestRealBackendInit:
     # def _extracted_from_test_real_backend_setup_monitoring_callbacks_3(self):
     def _create_mock_integration(self):
         result = _make_mock_integration()
-        with patch("main.demo_mode_active", False), patch("main.cascor_integration", result), patch("main.setup_monitoring_callbacks") as mock_setup_cb:
+        with patch("main.demo_mode_active", False), patch("main.backend", result), patch("main.setup_monitoring_callbacks") as mock_setup_cb:
             from main import app
 
             with TestClient(app):
@@ -134,7 +134,7 @@ class TestRealBackendInit:
 
         with (
             patch("main.demo_mode_active", False),
-            patch("main.cascor_integration", mock_integration),
+            patch("main.backend", mock_integration),
             patch("main.setup_monitoring_callbacks"),
         ):
             from main import app
@@ -151,7 +151,7 @@ class TestRealBackendInit:
 
         with (
             patch("main.demo_mode_active", False),
-            patch("main.cascor_integration", mock_integration),
+            patch("main.backend", mock_integration),
             patch("main.setup_monitoring_callbacks"),
         ):
             from main import app
@@ -170,7 +170,7 @@ class TestRealBackendInit:
 
         with (
             patch("main.demo_mode_active", False),
-            patch("main.cascor_integration", mock_integration),
+            patch("main.backend", mock_integration),
             patch("main.setup_monitoring_callbacks"),
         ):
             from main import app

@@ -69,14 +69,14 @@ def _force_demo_mode():
 
 @pytest.fixture
 def _force_real_mode():
-    """Ensure demo_mode_active is False and cascor_integration is None."""
+    """Ensure demo_mode_active is False and backend is None."""
     orig_active = main_module.demo_mode_active
-    orig_cascor = main_module.cascor_integration
+    orig_cascor = main_module.backend
     main_module.demo_mode_active = False
-    main_module.cascor_integration = None
+    main_module.backend = None
     yield
     main_module.demo_mode_active = orig_active
-    main_module.cascor_integration = orig_cascor
+    main_module.backend = orig_cascor
 
 
 class TestJuniperDataUrlValidation:

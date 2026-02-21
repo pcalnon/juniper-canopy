@@ -132,7 +132,7 @@ class TestCreateSnapshotRealMode:
 
         with (
             patch.object(main, "demo_mode_active", False),
-            patch.object(main, "cascor_integration", fake_integration),
+            patch.object(main, "backend", fake_integration),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
         ):
             response = app_client.post("/api/v1/snapshots?name=test_snapshot&description=Test%20description")
@@ -159,7 +159,7 @@ class TestCreateSnapshotRealMode:
 
         with (
             patch.object(main, "demo_mode_active", False),
-            patch.object(main, "cascor_integration", fake_integration),
+            patch.object(main, "backend", fake_integration),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
         ):
             response = app_client.post("/api/v1/snapshots")
@@ -180,7 +180,7 @@ class TestCreateSnapshotRealMode:
 
         with (
             patch.object(main, "demo_mode_active", False),
-            patch.object(main, "cascor_integration", FakeIntegrationNoMethods()),
+            patch.object(main, "backend", FakeIntegrationNoMethods()),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
         ):
             response = app_client.post("/api/v1/snapshots?name=h5py_test&description=H5py%20fallback%20test")
@@ -216,7 +216,7 @@ class TestCreateSnapshotRealMode:
 
         with (
             patch.object(main, "demo_mode_active", False),
-            patch.object(main, "cascor_integration", FakeIntegrationNoMethods()),
+            patch.object(main, "backend", FakeIntegrationNoMethods()),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
             patch.object(builtins, "__import__", side_effect=mock_import),
         ):
@@ -237,7 +237,7 @@ class TestCreateSnapshotRealMode:
 
         with (
             patch.object(main, "demo_mode_active", False),
-            patch.object(main, "cascor_integration", fake_integration),
+            patch.object(main, "backend", fake_integration),
             patch.object(main, "_snapshots_dir", str(non_existent_dir)),
         ):
             response = app_client.post("/api/v1/snapshots?name=dir_test")
@@ -259,7 +259,7 @@ class TestCreateSnapshotRealMode:
 
         with (
             patch.object(main, "demo_mode_active", False),
-            patch.object(main, "cascor_integration", FailingIntegration()),
+            patch.object(main, "backend", FailingIntegration()),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
         ):
             response = app_client.post("/api/v1/snapshots?name=fail_test")
@@ -282,7 +282,7 @@ class TestRestoreSnapshotRealMode:
 
         with (
             patch.object(main, "demo_mode_active", False),
-            patch.object(main, "cascor_integration", fake_integration),
+            patch.object(main, "backend", fake_integration),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
             patch.object(main, "demo_mode_instance", None),
         ):
@@ -309,7 +309,7 @@ class TestRestoreSnapshotRealMode:
 
         with (
             patch.object(main, "demo_mode_active", False),
-            patch.object(main, "cascor_integration", fake_integration),
+            patch.object(main, "backend", fake_integration),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
             patch.object(main, "demo_mode_instance", None),
         ):
@@ -336,7 +336,7 @@ class TestRestoreSnapshotRealMode:
 
         with (
             patch.object(main, "demo_mode_active", False),
-            patch.object(main, "cascor_integration", fake_integration),
+            patch.object(main, "backend", fake_integration),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
             patch.object(main, "demo_mode_instance", None),
         ):
@@ -364,7 +364,7 @@ class TestRestoreSnapshotRealMode:
 
         with (
             patch.object(main, "demo_mode_active", False),
-            patch.object(main, "cascor_integration", FakeIntegrationNoMethods()),
+            patch.object(main, "backend", FakeIntegrationNoMethods()),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
             patch.object(main, "demo_mode_instance", None),
         ):
@@ -392,7 +392,7 @@ class TestRestoreSnapshotRealMode:
 
         with (
             patch.object(main, "demo_mode_active", False),
-            patch.object(main, "cascor_integration", FakeIntegrationNoMethods()),
+            patch.object(main, "backend", FakeIntegrationNoMethods()),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
             patch.object(main, "demo_mode_instance", None),
         ):
@@ -421,7 +421,7 @@ class TestRestoreSnapshotRealMode:
 
         with (
             patch.object(main, "demo_mode_active", False),
-            patch.object(main, "cascor_integration", FakeIntegrationNoMethods()),
+            patch.object(main, "backend", FakeIntegrationNoMethods()),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
             patch.object(main, "demo_mode_instance", None),
             patch.object(builtins, "__import__", side_effect=mock_import),
@@ -438,7 +438,7 @@ class TestRestoreSnapshotRealMode:
 
         with (
             patch.object(main, "demo_mode_active", False),
-            patch.object(main, "cascor_integration", FakeIntegration()),
+            patch.object(main, "backend", FakeIntegration()),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
             patch.object(main, "demo_mode_instance", None),
         ):
@@ -470,7 +470,7 @@ class TestRestoreSnapshotRealMode:
 
         with (
             patch.object(main, "demo_mode_active", False),
-            patch.object(main, "cascor_integration", FailingLoadIntegration()),
+            patch.object(main, "backend", FailingLoadIntegration()),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
             patch.object(main, "demo_mode_instance", None),
         ):
@@ -492,7 +492,7 @@ class TestSnapshotActivityLogging:
 
         with (
             patch.object(main, "demo_mode_active", False),
-            patch.object(main, "cascor_integration", fake_integration),
+            patch.object(main, "backend", fake_integration),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
         ):
             response = app_client.post("/api/v1/snapshots?name=log_test")
@@ -522,7 +522,7 @@ class TestSnapshotActivityLogging:
 
         with (
             patch.object(main, "demo_mode_active", False),
-            patch.object(main, "cascor_integration", fake_integration),
+            patch.object(main, "backend", fake_integration),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
             patch.object(main, "demo_mode_instance", None),
         ):
@@ -617,7 +617,7 @@ class TestCreateSnapshotWithTrainingState:
 
             with (
                 patch.object(main, "demo_mode_active", False),
-                patch.object(main, "cascor_integration", FakeIntegrationNoMethods()),
+                patch.object(main, "backend", FakeIntegrationNoMethods()),
                 patch.object(main, "_snapshots_dir", str(snapshot_dir)),
             ):
                 response = app_client.post("/api/v1/snapshots?name=state_test")

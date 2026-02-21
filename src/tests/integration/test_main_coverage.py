@@ -1189,80 +1189,80 @@ class TestNoBackendPaths:
     def test_get_metrics_history_no_backend(self, client):
         """GET /api/metrics/history should return 503 without backend."""
         original_instance = main_module.demo_mode_instance
-        original_cascor = main_module.cascor_integration
+        original_cascor = main_module.backend
         try:
             main_module.demo_mode_instance = None
-            main_module.cascor_integration = None
+            main_module.backend = None
             response = client.get("/api/metrics/history")
             assert response.status_code == 503
         finally:
             main_module.demo_mode_instance = original_instance
-            main_module.cascor_integration = original_cascor
+            main_module.backend = original_cascor
 
     @pytest.mark.integration
     def test_get_topology_no_backend(self, client):
         """GET /api/topology should return 503 without backend."""
         original_instance = main_module.demo_mode_instance
-        original_cascor = main_module.cascor_integration
+        original_cascor = main_module.backend
         try:
             main_module.demo_mode_instance = None
-            main_module.cascor_integration = None
+            main_module.backend = None
             response = client.get("/api/topology")
             assert response.status_code == 503
         finally:
             main_module.demo_mode_instance = original_instance
-            main_module.cascor_integration = original_cascor
+            main_module.backend = original_cascor
 
     @pytest.mark.integration
     def test_get_dataset_no_backend(self, client):
         """GET /api/dataset should return 503 without backend."""
         original_instance = main_module.demo_mode_instance
-        original_cascor = main_module.cascor_integration
+        original_cascor = main_module.backend
         try:
             main_module.demo_mode_instance = None
-            main_module.cascor_integration = None
+            main_module.backend = None
             response = client.get("/api/dataset")
             assert response.status_code == 503
         finally:
             main_module.demo_mode_instance = original_instance
-            main_module.cascor_integration = original_cascor
+            main_module.backend = original_cascor
 
     @pytest.mark.integration
     def test_get_decision_boundary_no_backend(self, client):
         """GET /api/decision_boundary should return 503 without backend."""
         original_instance = main_module.demo_mode_instance
-        original_cascor = main_module.cascor_integration
+        original_cascor = main_module.backend
         try:
             main_module.demo_mode_instance = None
-            main_module.cascor_integration = None
+            main_module.backend = None
             response = client.get("/api/decision_boundary")
             assert response.status_code == 503
         finally:
             main_module.demo_mode_instance = original_instance
-            main_module.cascor_integration = original_cascor
+            main_module.backend = original_cascor
 
     @pytest.mark.integration
     def test_get_network_stats_no_backend(self, client):
         """GET /api/network/stats should return 503 without backend."""
         original_instance = main_module.demo_mode_instance
-        original_cascor = main_module.cascor_integration
+        original_cascor = main_module.backend
         try:
             main_module.demo_mode_instance = None
-            main_module.cascor_integration = None
+            main_module.backend = None
             response = client.get("/api/network/stats")
             assert response.status_code == 503
         finally:
             main_module.demo_mode_instance = original_instance
-            main_module.cascor_integration = original_cascor
+            main_module.backend = original_cascor
 
     @pytest.mark.integration
     def test_get_status_no_backend(self, client):
         """GET /api/status should return minimal status without backend."""
         original_instance = main_module.demo_mode_instance
-        original_cascor = main_module.cascor_integration
+        original_cascor = main_module.backend
         try:
             main_module.demo_mode_instance = None
-            main_module.cascor_integration = None
+            main_module.backend = None
             response = client.get("/api/status")
             assert response.status_code == 200
             data = response.json()
@@ -1270,7 +1270,7 @@ class TestNoBackendPaths:
             assert data["network_connected"] is False
         finally:
             main_module.demo_mode_instance = original_instance
-            main_module.cascor_integration = original_cascor
+            main_module.backend = original_cascor
 
     @pytest.mark.integration
     def test_get_state_no_backend(self, client):
@@ -1319,12 +1319,12 @@ class TestWebSocketWithCascorIntegration:
 
         mock_cascor = MagicMock()
         mock_cascor.get_training_status.return_value = {"status": "idle", "epoch": 0}
-        original_cascor = main_module.cascor_integration
+        original_cascor = main_module.backend
 
         try:
             main_module.demo_mode_active = False
             main_module.demo_mode_instance = None
-            main_module.cascor_integration = mock_cascor
+            main_module.backend = mock_cascor
 
             with client.websocket_connect("/ws/training") as ws:
                 data = ws.receive_json()
@@ -1332,7 +1332,7 @@ class TestWebSocketWithCascorIntegration:
         finally:
             main_module.demo_mode_active = original_demo
             main_module.demo_mode_instance = original_instance
-            main_module.cascor_integration = original_cascor
+            main_module.backend = original_cascor
 
     @pytest.mark.integration
     def test_ws_control_with_cascor(self, client):
@@ -1341,12 +1341,12 @@ class TestWebSocketWithCascorIntegration:
         original_instance = main_module.demo_mode_instance
 
         mock_cascor = MagicMock()
-        original_cascor = main_module.cascor_integration
+        original_cascor = main_module.backend
 
         try:
             main_module.demo_mode_active = False
             main_module.demo_mode_instance = None
-            main_module.cascor_integration = mock_cascor
+            main_module.backend = mock_cascor
 
             with client.websocket_connect("/ws/control") as ws:
                 ws.receive_json()
@@ -1361,7 +1361,7 @@ class TestWebSocketWithCascorIntegration:
         finally:
             main_module.demo_mode_active = original_demo
             main_module.demo_mode_instance = original_instance
-            main_module.cascor_integration = original_cascor
+            main_module.backend = original_cascor
 
 
 # =============================================================================
@@ -1379,11 +1379,11 @@ class TestTrainEndpointsWithCascor:
         mock_cascor = MagicMock()
         # P1-NEW-003: Async training - mock returns True for is_training_in_progress
         mock_cascor.is_training_in_progress.return_value = True
-        original_cascor = main_module.cascor_integration
+        original_cascor = main_module.backend
 
         try:
             main_module.demo_mode_instance = None
-            main_module.cascor_integration = mock_cascor
+            main_module.backend = mock_cascor
 
             response = client.post("/api/train/start")
             assert response.status_code == 200
@@ -1391,7 +1391,7 @@ class TestTrainEndpointsWithCascor:
             assert "already in progress" in response.json()["message"]
         finally:
             main_module.demo_mode_instance = original_demo
-            main_module.cascor_integration = original_cascor
+            main_module.backend = original_cascor
 
     @pytest.mark.integration
     def test_train_start_with_cascor_no_network(self, client):
@@ -1400,18 +1400,18 @@ class TestTrainEndpointsWithCascor:
         mock_cascor = MagicMock()
         mock_cascor.is_training_in_progress.return_value = False
         mock_cascor.network = None  # No network configured
-        original_cascor = main_module.cascor_integration
+        original_cascor = main_module.backend
 
         try:
             main_module.demo_mode_instance = None
-            main_module.cascor_integration = mock_cascor
+            main_module.backend = mock_cascor
 
             response = client.post("/api/train/start")
             assert response.status_code == 400
             assert "No network configured" in response.json()["error"]
         finally:
             main_module.demo_mode_instance = original_demo
-            main_module.cascor_integration = original_cascor
+            main_module.backend = original_cascor
 
     @pytest.mark.integration
     def test_train_start_with_cascor_success(self, client):
@@ -1421,18 +1421,18 @@ class TestTrainEndpointsWithCascor:
         mock_cascor.is_training_in_progress.return_value = False
         mock_cascor.network = MagicMock()  # Network exists
         mock_cascor.start_training_background.return_value = True
-        original_cascor = main_module.cascor_integration
+        original_cascor = main_module.backend
 
         try:
             main_module.demo_mode_instance = None
-            main_module.cascor_integration = mock_cascor
+            main_module.backend = mock_cascor
 
             response = client.post("/api/train/start")
             assert response.status_code == 200
             assert response.json()["status"] == "started"
         finally:
             main_module.demo_mode_instance = original_demo
-            main_module.cascor_integration = original_cascor
+            main_module.backend = original_cascor
 
 
 # =============================================================================
@@ -1543,14 +1543,14 @@ class TestRealSnapshotFiles:
         """GET /api/v1/snapshots should list real HDF5 files."""
         original_dir = main_module._snapshots_dir
         original_demo = main_module.demo_mode_active
-        original_cascor = main_module.cascor_integration
+        original_cascor = main_module.backend
 
         mock_cascor = MagicMock()
 
         try:
             main_module._snapshots_dir = str(temp_snapshots_dir)
             main_module.demo_mode_active = False
-            main_module.cascor_integration = mock_cascor
+            main_module.backend = mock_cascor
 
             response = client.get("/api/v1/snapshots")
             assert response.status_code == 200
@@ -1563,21 +1563,21 @@ class TestRealSnapshotFiles:
         finally:
             main_module._snapshots_dir = original_dir
             main_module.demo_mode_active = original_demo
-            main_module.cascor_integration = original_cascor
+            main_module.backend = original_cascor
 
     @pytest.mark.integration
     def test_get_real_snapshot_detail(self, client, temp_snapshots_dir):
         """GET /api/v1/snapshots/{id} should return real file details."""
         original_dir = main_module._snapshots_dir
         original_demo = main_module.demo_mode_active
-        original_cascor = main_module.cascor_integration
+        original_cascor = main_module.backend
 
         mock_cascor = MagicMock()
 
         try:
             main_module._snapshots_dir = str(temp_snapshots_dir)
             main_module.demo_mode_active = False
-            main_module.cascor_integration = mock_cascor
+            main_module.backend = mock_cascor
 
             response = client.get("/api/v1/snapshots/test_snapshot_001")
             assert response.status_code == 200
@@ -1590,42 +1590,42 @@ class TestRealSnapshotFiles:
         finally:
             main_module._snapshots_dir = original_dir
             main_module.demo_mode_active = original_demo
-            main_module.cascor_integration = original_cascor
+            main_module.backend = original_cascor
 
     @pytest.mark.integration
     def test_get_snapshot_detail_not_found(self, client, temp_snapshots_dir):
         """GET /api/v1/snapshots/{id} should return 404 for missing file."""
         original_dir = main_module._snapshots_dir
         original_demo = main_module.demo_mode_active
-        original_cascor = main_module.cascor_integration
+        original_cascor = main_module.backend
 
         mock_cascor = MagicMock()
 
         try:
             main_module._snapshots_dir = str(temp_snapshots_dir)
             main_module.demo_mode_active = False
-            main_module.cascor_integration = mock_cascor
+            main_module.backend = mock_cascor
 
             response = client.get("/api/v1/snapshots/nonexistent_snapshot")
             assert response.status_code == 404
         finally:
             main_module._snapshots_dir = original_dir
             main_module.demo_mode_active = original_demo
-            main_module.cascor_integration = original_cascor
+            main_module.backend = original_cascor
 
     @pytest.mark.integration
     def test_list_empty_snapshot_directory(self, client, tmp_path):
         """GET /api/v1/snapshots should return empty list for empty dir."""
         original_dir = main_module._snapshots_dir
         original_demo = main_module.demo_mode_active
-        original_cascor = main_module.cascor_integration
+        original_cascor = main_module.backend
 
         mock_cascor = MagicMock()
 
         try:
             main_module._snapshots_dir = str(tmp_path)
             main_module.demo_mode_active = False
-            main_module.cascor_integration = mock_cascor
+            main_module.backend = mock_cascor
 
             response = client.get("/api/v1/snapshots")
             assert response.status_code == 200
@@ -1636,7 +1636,7 @@ class TestRealSnapshotFiles:
         finally:
             main_module._snapshots_dir = original_dir
             main_module.demo_mode_active = original_demo
-            main_module.cascor_integration = original_cascor
+            main_module.backend = original_cascor
 
 
 # =============================================================================
@@ -1652,18 +1652,18 @@ class TestSnapshotDetailMissingDir:
         """GET /api/v1/snapshots/{id} should return 404 when dir missing."""
         original_dir = main_module._snapshots_dir
         original_demo = main_module.demo_mode_active
-        original_cascor = main_module.cascor_integration
+        original_cascor = main_module.backend
 
         mock_cascor = MagicMock()
 
         try:
             main_module._snapshots_dir = "/nonexistent/snapshots/path"
             main_module.demo_mode_active = False
-            main_module.cascor_integration = mock_cascor
+            main_module.backend = mock_cascor
 
             response = client.get("/api/v1/snapshots/some_snapshot")
             assert response.status_code == 404
         finally:
             main_module._snapshots_dir = original_dir
             main_module.demo_mode_active = original_demo
-            main_module.cascor_integration = original_cascor
+            main_module.backend = original_cascor
