@@ -21,11 +21,11 @@
 #####################################################################################################################################################################################################
 
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "juniper_canopy"
+name = "juniper-canopy"
 version = "0.2.1"
 description = "Real-time monitoring dashboard for Cascade Correlation Neural Network"
 readme = "README.md"
@@ -52,10 +52,10 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/USERNAME/REPO"
-Documentation = "https://github.com/USERNAME/REPO/docs"
-Repository = "https://github.com/USERNAME/REPO"
-Issues = "https://github.com/USERNAME/REPO/issues"
+Homepage = "https://github.com/pcalnon/Juniper"
+Documentation = "https://github.com/pcalnon/Juniper#juniper-canopy"
+Repository = "https://github.com/pcalnon/Juniper"
+Issues = "https://github.com/pcalnon/Juniper/issues"
 
 [project.optional-dependencies]
 juniper-data = [
