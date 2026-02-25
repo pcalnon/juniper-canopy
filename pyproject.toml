@@ -52,10 +52,10 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/pcalnon/Juniper"
-Documentation = "https://github.com/pcalnon/Juniper#juniper-canopy"
-Repository = "https://github.com/pcalnon/Juniper"
-Issues = "https://github.com/pcalnon/Juniper/issues"
+Homepage = "https://github.com/pcalnon/juniper-canopy"
+Documentation = "https://github.com/pcalnon/juniper-canopy#readme"
+Repository = "https://github.com/pcalnon/juniper-canopy"
+Issues = "https://github.com/pcalnon/juniper-canopy/issues"
 
 [project.optional-dependencies]
 juniper-data = [
@@ -116,7 +116,7 @@ skips = ["B101", "B311"]
 # MyPy Type Checker Configuration
 # ==========================================
 [tool.mypy]
-python_version = "3.14"
+python_version = "3.13"
 warn_return_any = false
 warn_unused_configs = true
 ignore_missing_imports = true

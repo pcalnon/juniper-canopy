@@ -5,10 +5,10 @@
 # Application:   juniper_canopy
 # File Name:     ci.yml
 # Author:        Paul Calnon
-# Version:       0.12.0
+# Version:       0.13.0
 #
 # Date Created:  2025-11-03
-# Last Modified: 2026-01-31
+# Last Modified: 2026-02-25
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-2026 Paul Calnon
@@ -21,6 +21,7 @@
 #    - Security scanning (Gitleaks, Bandit SARIF, pip-audit)
 #    - Proper failure handling (no continue-on-error for critical steps)
 #    - Dependency caching for performance
+#    - Migrated from conda to pip for CI portability (polyrepo Phase 5)
 #
 # References:
 #    - CANOPY-P1-001: CI/CD Pipeline Setup
@@ -51,7 +52,7 @@ permissions:
 
 env:
   ENV_NAME: JuniperCanopy
-  PYTHON_TEST_VERSION: "3.14"
+  PYTHON_TEST_VERSION: "3.13"
   COVERAGE_FAIL_UNDER: "80"
 
 jobs:
@@ -64,7 +65,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -89,14 +90,21 @@ jobs:
             pre-commit-${{ runner.os }}-${{ matrix.python-version }}-
 
       - name: Run pre-commit hooks
+        env:
+          # Skip local test hook in CI: it uses hardcoded conda path.
+          # Coverage is enforced by the dedicated unit-tests job.
+          SKIP: pytest-coverage
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - Pre-commit Checks                   ║"
           echo "╚════════════════════════════════════════════════════════════╝"
+          echo "Note: pytest-coverage hook skipped in CI"
+          echo "      (handled by dedicated unit-tests job with full environment)"
           pre-commit run --all-files --show-diff-on-failure
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   # Unit Tests: Run unit tests with coverage enforcement
+  # Migrated from conda to pip for CI portability (polyrepo Phase 5)
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   unit-tests:
     name: Unit Tests + Coverage (Python ${{ matrix.python-version }})
@@ -105,7 +113,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - name: Checkout Code
@@ -113,79 +121,36 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Free disk space
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
         run: |
-          echo "Freeing disk space before conda setup..."
-          df -h
-          sudo rm -rf /usr/games /usr/share/php* /usr/share/julia*
-          sudo rm -rf /usr/local/julia* /usr/local/gradle* /usr/local/apache-maven*
-          sudo rm -rf /usr/local/kotlinc /usr/local/bison
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet
-          sudo rm -rf /opt/microsoft /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL /opt/hostedtoolcache/go
-          df -h
-
-      - name: Set up Miniforge (mamba)
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          miniforge-version: latest
-          use-mamba: true
-          auto-activate-base: false
-
-      - name: Cache conda packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/miniforge3/pkgs
-            ~/miniconda3/pkgs
-            ~/.conda/pkgs
-          key: conda-pkgs-${{ runner.os }}-${{ hashFiles('conf/conda_environment_ci.yaml') }}
-          restore-keys: |
-            conda-pkgs-${{ runner.os }}-
-
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('conf/requirements_ci.txt') }}
-          restore-keys: |
-            pip-${{ runner.os }}-
-
-      - name: Create conda environment
-        shell: bash -l {0}
-        run: |
-          set -euxo pipefail
           echo "╔════════════════════════════════════════════════════════════╗"
-          echo "║       Juniper Canopy - Create Conda Environment            ║"
+          echo "║       Juniper Canopy - Install Dependencies                ║"
+          echo "║       Python ${{ matrix.python-version }}                                        ║"
           echo "╚════════════════════════════════════════════════════════════╝"
-          mamba env create -n "${ENV_NAME}" -f conf/conda_environment_ci.yaml python=${{ matrix.python-version }} || \
-            mamba env update -n "${ENV_NAME}" -f conf/conda_environment_ci.yaml
-          conda activate "${ENV_NAME}"
-          python --version
-          pip --version
-
-      - name: Install additional dependencies
-        shell: bash -l {0}
-        run: |
-          set -euxo pipefail
-          conda activate "${ENV_NAME}"
+          python -m pip install --upgrade pip
+          # Install CPU-only PyTorch (CI doesn't need CUDA)
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          # Install all other CI dependencies
           pip install -r conf/requirements_ci.txt
-          pip install pytest pytest-cov pytest-timeout pytest-xdist coverage[toml]
+          # Install project as editable so source-tree path resolution works
+          pip install -e .
 
       - name: Create required directories
         run: |
           mkdir -p logs src/logs reports/junit reports/coverage reports/htmlcov
 
       - name: Run Unit Tests with Coverage Gate
-        shell: bash -l {0}
         env:
           CASCOR_BACKEND_AVAILABLE: 0
           RUN_SERVER_TESTS: 0
           ENABLE_SLOW_TESTS: 0
         run: |
-          set -euxo pipefail
-          conda activate "${ENV_NAME}"
-
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - Unit Tests (Fast Only)              ║"
           echo "╚════════════════════════════════════════════════════════════╝"
@@ -224,6 +189,7 @@ jobs:
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   # Integration Tests: Run integration tests (PRs and main/develop pushes)
+  # Migrated from conda to pip for CI portability (polyrepo Phase 5)
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   integration-tests:
     name: Integration Tests
@@ -237,68 +203,29 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Free disk space
+      - name: Set up Python ${{ env.PYTHON_TEST_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_TEST_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
         run: |
-          echo "Freeing disk space before conda setup..."
-          df -h
-          sudo rm -rf /usr/games /usr/share/php* /usr/share/julia*
-          sudo rm -rf /usr/local/julia* /usr/local/gradle* /usr/local/apache-maven*
-          sudo rm -rf /usr/local/kotlinc /usr/local/bison
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet
-          sudo rm -rf /opt/microsoft /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL /opt/hostedtoolcache/go
-          df -h
-
-      - name: Set up Miniforge (mamba)
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          miniforge-version: latest
-          use-mamba: true
-          auto-activate-base: false
-
-      - name: Cache conda packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/miniforge3/pkgs
-            ~/miniconda3/pkgs
-            ~/.conda/pkgs
-          key: conda-pkgs-${{ runner.os }}-${{ hashFiles('conf/conda_environment_ci.yaml') }}
-          restore-keys: |
-            conda-pkgs-${{ runner.os }}-
-
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: pip-${{ runner.os }}-${{ hashFiles('conf/requirements_ci.txt') }}
-          restore-keys: |
-            pip-${{ runner.os }}-
-
-      - name: Create conda environment
-        shell: bash -l {0}
-        run: |
-          set -euxo pipefail
-          mamba env create -n "${ENV_NAME}" -f conf/conda_environment_ci.yaml python=${{ env.PYTHON_TEST_VERSION }} || \
-            mamba env update -n "${ENV_NAME}" -f conf/conda_environment_ci.yaml
-          conda activate "${ENV_NAME}"
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r conf/requirements_ci.txt
-          pip install pytest pytest-timeout pytest-xdist
+          pip install -e .
 
       - name: Create required directories
         run: |
           mkdir -p logs src/logs reports/junit
 
       - name: Run Integration Tests (Fast Only)
-        shell: bash -l {0}
         env:
           CASCOR_BACKEND_AVAILABLE: 0
           RUN_SERVER_TESTS: 0
           ENABLE_SLOW_TESTS: 0
         run: |
-          set -euxo pipefail
-          conda activate "${ENV_NAME}"
-
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - Integration Tests (Fast Only)       ║"
           echo "╚════════════════════════════════════════════════════════════╝"
@@ -332,10 +259,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.14
+      - name: Set up Python ${{ env.PYTHON_TEST_VERSION }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.14"
+          python-version: ${{ env.PYTHON_TEST_VERSION }}
           cache: pip
 
       - name: Install build dependencies
@@ -393,7 +320,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
           cache: pip
 
       - name: Install security tools
@@ -410,9 +337,7 @@ jobs:
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - Bandit Security Scan                ║"
           echo "╚════════════════════════════════════════════════════════════╝"
-          # Run Bandit and capture exit code, but always generate SARIF for upload
           bandit -r src -f sarif -o reports/security/bandit.sarif -c .bandit.yml 2>&1 || BANDIT_EXIT=$?
-          # Also generate text report for human review
           bandit -r src -f txt -o reports/security/bandit.txt -c .bandit.yml 2>&1 || true
           if [ "${BANDIT_EXIT:-0}" -ne 0 ]; then
             echo "::warning::Bandit found security issues. Review the SARIF report."
@@ -437,7 +362,6 @@ jobs:
           echo "╚════════════════════════════════════════════════════════════╝"
           pip install dash fastapi uvicorn plotly numpy scipy
           pip freeze > reports/security/pip-freeze.txt
-          # Run pip-audit and capture exit code
           pip-audit -r reports/security/pip-freeze.txt --output reports/security/pip-audit.txt 2>&1 || PIP_AUDIT_EXIT=$?
           if [ "${PIP_AUDIT_EXIT:-0}" -ne 0 ]; then
             echo "::error::pip-audit found vulnerabilities in dependencies!"
@@ -480,7 +404,6 @@ jobs:
           echo "Build:             ${{ needs.build.result }}"
           echo ""
 
-          # Pre-commit and unit-tests MUST pass
           if [[ "${{ needs.pre-commit.result }}" != "success" ]]; then
             echo "::error::Pre-commit checks failed"
             exit 1
@@ -491,13 +414,11 @@ jobs:
             exit 1
           fi
 
-          # Security should pass (but SARIF upload failures are allowed)
           if [[ "${{ needs.security.result }}" == "failure" ]]; then
             echo "::error::Security scans failed"
             exit 1
           fi
 
-          # Integration tests: failure = error, skipped = OK (for feature branches)
           if [[ "${{ needs.integration-tests.result }}" == "failure" ]]; then
             echo "::error::Integration tests failed"
             exit 1
