@@ -49,6 +49,7 @@ else:
 try:
     import juniper_data_client  # noqa: F401
 except ImportError:
+    import types
     from unittest.mock import MagicMock
 
     class _JuniperDataClientError(Exception):
@@ -69,7 +70,8 @@ except ImportError:
     class _JuniperDataValidationError(_JuniperDataClientError):
         pass
 
-    _mock_jdc_exceptions = MagicMock()
+    # Use types.ModuleType so __all__ and other module attributes work correctly
+    _mock_jdc_exceptions = types.ModuleType("juniper_data_client.exceptions")
     _mock_jdc_exceptions.JuniperDataClientError = _JuniperDataClientError
     _mock_jdc_exceptions.JuniperDataConfigurationError = _JuniperDataConfigurationError
     _mock_jdc_exceptions.JuniperDataConnectionError = _JuniperDataConnectionError
@@ -77,14 +79,26 @@ except ImportError:
     _mock_jdc_exceptions.JuniperDataNotFoundError = _JuniperDataNotFoundError
     _mock_jdc_exceptions.JuniperDataValidationError = _JuniperDataValidationError
 
-    _mock_jdc_client_mod = MagicMock()
-    _mock_jdc_client_mod.JuniperDataClient = MagicMock()
+    _stub_client_class = MagicMock()
 
-    _mock_jdc = MagicMock()
-    _mock_jdc.JuniperDataClient = _mock_jdc_client_mod.JuniperDataClient
-    _mock_jdc.client = _mock_jdc_client_mod
-    _mock_jdc.exceptions = _mock_jdc_exceptions
-    _mock_jdc.__version__ = "0.0.0-stub"
+    _mock_jdc_client_mod = types.ModuleType("juniper_data_client.client")
+    _mock_jdc_client_mod.JuniperDataClient = _stub_client_class  # type: ignore[attr-defined]
+
+    _mock_jdc = types.ModuleType("juniper_data_client")
+    _mock_jdc.JuniperDataClient = _stub_client_class  # type: ignore[attr-defined]
+    _mock_jdc.client = _mock_jdc_client_mod  # type: ignore[attr-defined]
+    _mock_jdc.exceptions = _mock_jdc_exceptions  # type: ignore[attr-defined]
+    _mock_jdc.__version__ = "0.0.0-stub"  # type: ignore[attr-defined]
+    _mock_jdc.__all__ = [  # type: ignore[attr-defined]
+        "JuniperDataClient",
+        "JuniperDataClientError",
+        "JuniperDataConfigurationError",
+        "JuniperDataConnectionError",
+        "JuniperDataNotFoundError",
+        "JuniperDataTimeoutError",
+        "JuniperDataValidationError",
+        "__version__",
+    ]
 
     sys.modules["juniper_data_client"] = _mock_jdc
     sys.modules["juniper_data_client.client"] = _mock_jdc_client_mod
