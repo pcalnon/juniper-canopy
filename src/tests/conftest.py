@@ -43,6 +43,54 @@ if str(src_dir) not in sys.path:
 else:
     print(f"[src/tests/conftest.py] {src_dir} already in sys.path")
 
+# Inject stub juniper_data_client into sys.modules when not installed.
+# This allows test collection (module-level imports) and fixture patch() calls
+# to work in CI environments where the package is not yet on PyPI.
+try:
+    import juniper_data_client  # noqa: F401
+except ImportError:
+    from unittest.mock import MagicMock
+
+    class _JuniperDataClientError(Exception):
+        pass
+
+    class _JuniperDataConfigurationError(_JuniperDataClientError):
+        pass
+
+    class _JuniperDataConnectionError(_JuniperDataClientError):
+        pass
+
+    class _JuniperDataTimeoutError(_JuniperDataClientError):
+        pass
+
+    class _JuniperDataNotFoundError(_JuniperDataClientError):
+        pass
+
+    class _JuniperDataValidationError(_JuniperDataClientError):
+        pass
+
+    _mock_jdc_exceptions = MagicMock()
+    _mock_jdc_exceptions.JuniperDataClientError = _JuniperDataClientError
+    _mock_jdc_exceptions.JuniperDataConfigurationError = _JuniperDataConfigurationError
+    _mock_jdc_exceptions.JuniperDataConnectionError = _JuniperDataConnectionError
+    _mock_jdc_exceptions.JuniperDataTimeoutError = _JuniperDataTimeoutError
+    _mock_jdc_exceptions.JuniperDataNotFoundError = _JuniperDataNotFoundError
+    _mock_jdc_exceptions.JuniperDataValidationError = _JuniperDataValidationError
+
+    _mock_jdc_client_mod = MagicMock()
+    _mock_jdc_client_mod.JuniperDataClient = MagicMock()
+
+    _mock_jdc = MagicMock()
+    _mock_jdc.JuniperDataClient = _mock_jdc_client_mod.JuniperDataClient
+    _mock_jdc.client = _mock_jdc_client_mod
+    _mock_jdc.exceptions = _mock_jdc_exceptions
+    _mock_jdc.__version__ = "0.0.0-stub"
+
+    sys.modules["juniper_data_client"] = _mock_jdc
+    sys.modules["juniper_data_client.client"] = _mock_jdc_client_mod
+    sys.modules["juniper_data_client.exceptions"] = _mock_jdc_exceptions
+    print("[src/tests/conftest.py] juniper_data_client not installed; injected stub into sys.modules")
+
 
 def pytest_configure(config):
     """Configure pytest with custom markers and settings."""
