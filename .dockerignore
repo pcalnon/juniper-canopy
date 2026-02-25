@@ -1,0 +1,98 @@
+# =============================================================================
+# JuniperCanopy — Docker build context exclusions
+# =============================================================================
+
+# Version control
+.git/
+.gitignore
+
+# CI/CD and tooling config
+.github/
+.pre-commit-config.yaml
+.bandit.yml
+.codecov.yml
+.coveragerc
+.markdownlint.json
+.markdownlint.yaml
+.yamllint.yaml
+.trunk/
+.mypy_cache/
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+
+# Documentation and notes
+notes/
+docs/
+images/
+AGENTS.md
+CLAUDE.md
+CHANGELOG.md
+LICENSE
+README.md
+markdown.css
+
+# Tests (not needed in production image)
+src/tests/
+conftest.py
+
+# Development artifacts
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+data/
+logs/
+reports/
+*.prof
+*.log
+*.out
+
+# Coverage
+.coverage
+**/.coverage
+coverage.xml
+coverage.json
+
+# Conda (not used in Docker — pip only)
+conda_environment.yaml
+conda_environment_ci.yaml
+
+# Conf files not needed in image
+conf/*.conf
+conf/*_functions.conf
+conf/__pycache__/
+conf/backups/
+conf/docker-compose.yaml
+conf/conda_environment*.yaml
+conf/requirements*.txt
+conf/setup-miniconda-patched-conda_environment.yaml
+
+# Sensitive / local-only
+.env
+.mcp.json
+.serena/
+__RESUME_CLAUDE_SESSION__
+.claude/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Archives and binaries
+*.gz
+*.tgz
+*.tar
+*.zip
+*.whl
+*.deb
+*.rpm
+
+# Demo launcher script (not needed in container)
+demo
