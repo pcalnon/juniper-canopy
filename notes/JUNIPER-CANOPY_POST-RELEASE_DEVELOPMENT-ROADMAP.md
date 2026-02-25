@@ -2,7 +2,7 @@
 
 **Project**: JuniperCanopy - Web-based Monitoring Frontend
 **Created**: 2026-02-17
-**Last Updated**: 2026-02-17
+**Last Updated**: 2026-02-25
 **Author**: Paul Calnon
 **Status**: Active - Comprehensive Post-Release Assessment
 **Source**: Full codebase audit of all notes/ files with validation against source code (2026-02-17)
@@ -77,41 +77,41 @@ Items that affect core functionality when running with a real CasCor backend.
 **Priority**: CRITICAL
 **Source**: INTEGRATION_ROADMAP-01.md (INT-CRIT-002), INTEGRATION_DEVELOPMENT_PLAN.md
 **Module**: `src/main.py`
-**Validation**: Confirmed — `main.py:871` contains a TODO comment. The `/api/decision_boundary` endpoint only returns demo data; no real backend path exists.
+**Validation**: Confirmed — `main.py:822` contains a TODO comment. The `/api/decision_boundary` endpoint only returns demo data; no real backend path exists.
 
 **Description**: The decision boundary visualization endpoint has no implementation for real CasCor backend data. When `CASCOR_DEMO_MODE` is not set, the endpoint returns empty or incorrect data. This is a core visualization feature that is non-functional in production mode.
 
 **Design Options**:
 
-- **Option A (Recommended)**: Add `get_decision_boundary_data()` method to `CascorIntegration` that queries the real CasCor backend for grid predictions, then format the response identically to the demo mode output. Minimal frontend changes required.
+- **Option A (Recommended)**: Add `get_decision_boundary_data()` method to `CascorServiceAdapter` that queries the real CasCor backend for grid predictions, then format the response identically to the demo mode output. Minimal frontend changes required.
 - **Option B**: Implement a generic prediction endpoint that accepts arbitrary input grids, then have the frontend compute the decision boundary visualization client-side. More flexible but requires frontend changes.
 - **Option C**: Add a WebSocket channel for streaming decision boundary updates during training. Better real-time UX but higher implementation complexity.
 
 **Estimated Scope**: Medium (1-2 files, ~100-200 lines)
 **Dependencies**: Requires understanding of CasCor's prediction API
-**Files**: `src/main.py`, `src/backend/cascor_integration.py`
+**Files**: `src/main.py`, `src/backend/cascor_service_adapter.py`
 
 ---
 
-### CAN-CRIT-002: Save/Load Snapshot Missing from CascorIntegration
+### CAN-CRIT-002: Save/Load Snapshot Missing from CascorServiceAdapter
 
 **Status**: NOT IMPLEMENTED
 **Priority**: CRITICAL
 **Source**: INTEGRATION_ROADMAP-01.md (INT-HIGH-001), INTEGRATION_DEVELOPMENT_PLAN.md
-**Module**: `src/backend/cascor_integration.py`
-**Validation**: Confirmed — `save_snapshot()` and `load_snapshot()` methods do not exist in `CascorIntegration`. HDF5 snapshot creation exists in `main.py` but only for demo mode state.
+**Module**: `src/backend/cascor_service_adapter.py`
+**Validation**: Confirmed — `save_snapshot()` and `load_snapshot()` methods do not exist in `CascorServiceAdapter`. HDF5 snapshot creation exists in `main.py` but only for demo mode state.
 
-**Description**: The `CascorIntegration` class has no methods for persisting and restoring training state via the real CasCor backend. This prevents training session recovery, checkpoint-based resumption, and the snapshot features planned in CAN-014/CAN-015.
+**Description**: The `CascorServiceAdapter` class has no methods for persisting and restoring training state via the real CasCor backend. This prevents training session recovery, checkpoint-based resumption, and the snapshot features planned in CAN-014/CAN-015.
 
 **Design Options**:
 
-- **Option A (Recommended)**: Add `save_snapshot(path)` and `load_snapshot(path)` methods to `CascorIntegration` that delegate to CasCor's native serialization (PyTorch `state_dict` or custom format). Store metadata (epoch, metrics, timestamp) in a sidecar JSON.
+- **Option A (Recommended)**: Add `save_snapshot(path)` and `load_snapshot(path)` methods to `CascorServiceAdapter` that delegate to CasCor's native serialization (PyTorch `state_dict` or custom format). Store metadata (epoch, metrics, timestamp) in a sidecar JSON.
 - **Option B**: Use HDF5 format matching the existing demo mode snapshot format. Provides format consistency but may not capture all CasCor internal state.
 - **Option C**: Implement a snapshot service that manages versioned snapshots with metadata indexing. More robust but higher complexity.
 
 **Estimated Scope**: Medium (1-2 files, ~150-250 lines)
 **Dependencies**: CasCor serialization API
-**Files**: `src/backend/cascor_integration.py`, potentially `src/main.py` snapshot endpoints
+**Files**: `src/backend/cascor_service_adapter.py`, potentially `src/main.py` snapshot endpoints
 
 ---
 
@@ -144,13 +144,13 @@ Items that affect testing coverage, backend integration reliability, or producti
 **Status**: PARTIALLY IMPLEMENTED
 **Priority**: HIGH
 **Source**: CANOPY_JUNIPER_DATA_INTEGRATION_PLAN.md (CAN-INT-007)
-**Module**: `src/backend/cascor_integration.py`
+**Module**: `src/backend/cascor_service_adapter.py`
 **Validation**: Confirmed partial — key existence checks are implemented but dtype and shape validation are not.
 
 **Description**: When loading NPZ dataset files, the code verifies that required keys exist but does not validate array dtypes or expected shapes. Malformed data could cause cryptic errors downstream during training.
 
 **Estimated Scope**: Small (1 file, ~20-40 lines)
-**Files**: `src/backend/cascor_integration.py`
+**Files**: `src/backend/cascor_service_adapter.py`
 
 ---
 
@@ -161,7 +161,7 @@ Items that affect testing coverage, backend integration reliability, or producti
 **Source**: INTEGRATION_ROADMAP-01.md (INT-HIGH-002), INTEGRATION_DEVELOPMENT_PLAN.md
 **Module**: `src/tests/`
 
-**Description**: The ThreadPoolExecutor-based async/sync bridge (`fit_async()`, `start_training_background()`) has no dedicated tests. Edge cases like concurrent start requests, executor shutdown during training, and exception propagation across the boundary are untested.
+**Description**: The ThreadPoolExecutor-based async/sync bridge (`start_training_background()`) has no dedicated tests. Edge cases like concurrent start requests, executor shutdown during training, and exception propagation across the boundary are untested.
 
 **Estimated Scope**: Medium (1-2 new test files, ~200-300 lines)
 **Files**: `src/tests/integration/test_async_boundary.py` (new)
@@ -175,7 +175,7 @@ Items that affect testing coverage, backend integration reliability, or producti
 **Source**: INTEGRATION_ROADMAP-01.md (INT-HIGH-003), INTEGRATION_DEVELOPMENT_PLAN.md
 **Module**: `src/tests/`
 
-**Description**: No tests exercise the real backend code paths in `main.py` or `CascorIntegration`. All tests run with `CASCOR_DEMO_MODE=1`. While this is correct for CI, there should be integration tests (gated behind `CASCOR_BACKEND_AVAILABLE`) that verify real backend behavior.
+**Description**: No tests exercise the real backend code paths in `main.py` or `CascorServiceAdapter`. All tests run with `CASCOR_DEMO_MODE=1`. While this is correct for CI, there should be integration tests (gated behind `CASCOR_BACKEND_AVAILABLE`) that verify real backend behavior.
 
 **Estimated Scope**: Large (2-3 new test files, ~400-600 lines)
 **Files**: `src/tests/integration/test_real_backend.py` (new)
@@ -187,13 +187,13 @@ Items that affect testing coverage, backend integration reliability, or producti
 **Status**: NOT IMPLEMENTED
 **Priority**: HIGH
 **Source**: INTEGRATION_ROADMAP-01.md (INT-HIGH-004), INTEGRATION_DEVELOPMENT_PLAN.md
-**Module**: `src/backend/cascor_integration.py`
+**Module**: `src/backend/cascor_service_adapter.py`
 
 **Description**: `RemoteWorkerClient` integration is referenced in architecture docs but has no test coverage or verified integration path. Distributed training via remote workers is a planned capability.
 
 **Estimated Scope**: Large (2-3 files, ~300-500 lines)
 **Dependencies**: RemoteWorkerClient implementation in JuniperCascor
-**Files**: `src/backend/cascor_integration.py`, new test files
+**Files**: `src/backend/cascor_service_adapter.py`, new test files
 
 ---
 
@@ -207,7 +207,7 @@ Items that affect testing coverage, backend integration reliability, or producti
 **Description**: Standardize error handling for all JuniperData REST API interactions. Map HTTP status codes to user-friendly error messages. Implement consistent retry and timeout patterns.
 
 **Estimated Scope**: Medium (2-3 files, ~100-200 lines)
-**Files**: `src/backend/cascor_integration.py`, `src/main.py`
+**Files**: `src/backend/cascor_service_adapter.py`, `src/main.py`
 
 ---
 
@@ -215,19 +215,18 @@ Items that affect testing coverage, backend integration reliability, or producti
 
 **Status**: NOT STARTED
 **Priority**: HIGH
-**Source**: TEST_SUITE_CICD_ENHANCEMENT_DEVELOPMENT_PLAN.md (SK-005, SK-006, SK-007, SK-009)
+**Source**: TEST_SUITE_CICD_ENHANCEMENT_DEVELOPMENT_PLAN.md (SK-005, SK-006, SK-007)
 **Module**: `src/tests/`
 
-**Description**: Four WebSocket test groups are currently skipped with `requires_server` marker. These should be converted to work with the `TestClient` WebSocket interface for CI compatibility.
+**Description**: Three WebSocket test groups are currently skipped with `requires_server` marker. These should be converted to work with the `TestClient` WebSocket interface for CI compatibility.
 
 | ID     | Test                             | Current Reason  |
 | ------ | -------------------------------- | --------------- |
-| SK-005 | test_websocket_training.py       | requires_server |
-| SK-006 | test_websocket_control.py        | requires_server |
-| SK-007 | test_main_ws.py (subset)         | requires_server |
-| SK-009 | test_websocket_state.py (subset) | requires_server |
+| SK-005 | test_websocket_control.py        | requires_server |
+| SK-006 | test_main_ws.py (subset)         | requires_server |
+| SK-007 | test_websocket_state.py (subset) | requires_server |
 
-**Estimated Scope**: Medium (4 files, ~200-300 lines modified)
+**Estimated Scope**: Medium (3 files, ~150-250 lines modified)
 **Files**: Various test files in `src/tests/integration/`
 
 ---
@@ -256,9 +255,9 @@ Items that improve code quality, CI/CD reliability, or developer experience.
 **Priority**: MEDIUM
 **Source**: TEST_SUITE_CICD_ENHANCEMENT_DEVELOPMENT_PLAN.md (PC-004)
 **Module**: `.pre-commit-config.yaml`
-**Validation**: Confirmed — 4 of 7 codes re-enabled (`call-arg`, `override`, `no-redef`, `index`). Three remain disabled: `arg-type`, `return-value`, `assignment`.
+**Validation**: Confirmed — 4 codes re-enabled (`call-arg`, `override`, `no-redef`, `index`). Seven remain disabled: `attr-defined`, `return-value`, `arg-type`, `assignment`, `var-annotated`, `misc`, `dict-item`.
 
-**Description**: Re-enable the remaining MyPy error codes (`arg-type`, `return-value`, `assignment`) by fixing the underlying type annotation issues in the codebase. Each code requires identifying and fixing the specific violations.
+**Description**: Re-enable the remaining MyPy error codes (`attr-defined`, `return-value`, `arg-type`, `assignment`, `var-annotated`, `misc`, `dict-item`) by fixing the underlying type annotation issues in the codebase. Each code requires identifying and fixing the specific violations.
 
 **Estimated Scope**: Medium (5-10 files, ~50-100 line changes)
 **Files**: `.pre-commit-config.yaml`, various source files with type violations
@@ -361,7 +360,7 @@ Items that improve code quality, CI/CD reliability, or developer experience.
 **Description**: Implement circuit breaker pattern for JuniperData REST API calls. After N consecutive failures, stop attempting calls for a cooldown period. Prevents cascade failures when JuniperData is unavailable.
 
 **Estimated Scope**: Medium (1-2 files, ~100-150 lines)
-**Files**: `src/backend/cascor_integration.py` or new `src/backend/circuit_breaker.py`
+**Files**: `src/backend/cascor_service_adapter.py` or new `src/backend/circuit_breaker.py`
 
 ---
 
@@ -375,7 +374,7 @@ Items that improve code quality, CI/CD reliability, or developer experience.
 **Description**: Add structured logging and metrics for JuniperData API interactions (request count, latency, error rate). Enables monitoring and debugging of the integration.
 
 **Estimated Scope**: Small-Medium (2-3 files, ~50-100 lines)
-**Files**: `src/backend/cascor_integration.py`, `src/logger/logger.py`
+**Files**: `src/backend/cascor_service_adapter.py`, `src/logger/logger.py`
 
 ---
 
@@ -419,7 +418,7 @@ Items that improve code quality, CI/CD reliability, or developer experience.
 **Description**: Standardize error handling patterns across the codebase. Define consistent error response formats for API endpoints. Ensure all user-facing errors provide actionable information.
 
 **Estimated Scope**: Medium (5-10 files, ~100-200 lines)
-**Files**: `src/main.py`, `src/backend/cascor_integration.py`, various
+**Files**: `src/main.py`, `src/backend/cascor_service_adapter.py`, various
 
 ---
 
@@ -440,7 +439,7 @@ Items that improve code quality, CI/CD reliability, or developer experience.
 ### CAN-MED-014: Test Docstrings
 
 **Status**: NOT STARTED
-**Priority**: LOW-MEDIUM
+**Priority**: MEDIUM
 **Source**: TEST_SUITE_CICD_ENHANCEMENT_DEVELOPMENT_PLAN.md (CQ-002)
 **Module**: `src/tests/`
 
@@ -802,8 +801,6 @@ Items that are deferred due to scope, dependencies, or architectural decisions.
 
 ---
 
----
-
 ## Validated as Complete
 
 The following items were found in notes files as non-completed but were confirmed as implemented during codebase validation. They are documented here for audit trail purposes.
@@ -811,14 +808,14 @@ The following items were found in notes files as non-completed but were confirme
 ### INT-CRIT-001: Real Backend Control (COMPLETE)
 
 **Source**: INTEGRATION_ROADMAP-01.md
-**Validation**: `main.py:487-530` has full command routing for real backend (start, stop, pause, resume, reset). Implemented.
+**Validation**: `main.py:420-463` has full command routing for real backend (start, stop, pause, resume, reset). Implemented.
 
 ---
 
 ### INT-CRIT-003: get_network_data() Missing (COMPLETE)
 
 **Source**: INTEGRATION_ROADMAP-01.md
-**Validation**: `cascor_integration.py:1122-1159` implements `get_network_data()`. Implemented.
+**Validation**: `cascor_service_adapter.py:234` implements `get_network_data()`. Implemented.
 
 ---
 
@@ -860,7 +857,7 @@ The following items were found in notes files as non-completed but were confirme
 ### INTEG-004: Blocking Training in FastAPI Async Context (COMPLETE)
 
 **Source**: INTEGRATION_ROADMAP-01.md
-**Validation**: ThreadPoolExecutor with max_workers=1 implemented. `fit_async()` and `start_training_background()` methods exist. Implemented.
+**Validation**: ThreadPoolExecutor with max_workers=1 implemented. `start_training_background()` method exists in `CascorServiceAdapter`. Implemented.
 
 ---
 
@@ -905,13 +902,13 @@ See: `JuniperData/juniper_data/notes/JUNIPER-DATA_POST-RELEASE_DEVELOPMENT-ROADM
 
 | Phase     | Category                      | Total  | Not Started | Partial | Complete | Deferred |
 | --------- | ----------------------------- | ------ | ----------- | ------- | -------- | -------- |
-| 0         | Critical Integration Gaps     | 2      | 1           | 0       | 0        | 0        |
+| 0         | Critical Integration Gaps     | 2      | 2           | 0       | 0        | 0        |
 | 0         | Critical (validated complete) | —      | —           | —       | 10       | —        |
 | 1         | High: Backend/Testing         | 8      | 7           | 1       | 0        | 0        |
-| 2         | Medium: Code Quality/CI       | 14     | 11          | 2       | 0        | 0        |
+| 2         | Medium: Code Quality/CI       | 14     | 12          | 2       | 0        | 0        |
 | 3         | Enhancement: Dashboard        | 23     | 23          | 0       | 0        | 0        |
 | 4         | Future: Deferred              | 8      | 0           | 0       | 0        | 8        |
-| **Total** |                               | **55** | **42**      | **3**   | **10**   | **8**    |
+| **Total** |                               | **55** | **44**      | **3**   | **0**    | **8**    |
 
 ### Priority Distribution
 
@@ -922,7 +919,6 @@ See: `JuniperData/juniper_data/notes/JUNIPER-DATA_POST-RELEASE_DEVELOPMENT-ROADM
 | MEDIUM      | 14    | Code quality, CI/CD, developer experience  |
 | ENHANCEMENT | 23    | New dashboard features and UX improvements |
 | DEFERRED    | 8     | Future architectural and integration items |
-|             |       |                                            |
 
 ### Dependency Graph (Key Chains)
 
@@ -955,11 +951,11 @@ CAN-HIGH-005 (remote worker integration)
 
 ### Architecture Considerations
 
-**Current State**: JuniperCanopy is a monolithic FastAPI + Dash application with embedded CasCor backend integration via `CascorIntegration` class. Training runs in a `ThreadPoolExecutor` thread. WebSocket communication provides real-time updates. Demo mode simulates the full backend for development.
+**Current State**: JuniperCanopy is a monolithic FastAPI + Dash application with embedded CasCor backend integration via `CascorServiceAdapter` class. Training runs in a `ThreadPoolExecutor` thread. WebSocket communication provides real-time updates. Demo mode simulates the full backend for development.
 
 **Key Design Decisions for Phase 0-1**:
 
-1. **Decision Boundary Implementation (CAN-CRIT-001)**: The recommended approach (Option A) adds a method to `CascorIntegration` that queries the real CasCor backend for predictions over a grid. This maintains the existing pattern where backend-specific logic lives in `CascorIntegration` and the API endpoints remain backend-agnostic. The frontend requires zero changes.
+1. **Decision Boundary Implementation (CAN-CRIT-001)**: The recommended approach (Option A) adds a method to `CascorServiceAdapter` that queries the real CasCor backend for predictions over a grid. This maintains the existing pattern where backend-specific logic lives in `CascorServiceAdapter` and the API endpoints remain backend-agnostic. The frontend requires zero changes.
 
 2. **Snapshot Persistence (CAN-CRIT-002)**: The recommended approach (Option A) uses CasCor's native serialization format (PyTorch `state_dict`) with a JSON metadata sidecar. This captures complete training state including optimizer state and learning rate schedules. HDF5 (Option B) provides format consistency with demo mode but may lose CasCor-specific state.
 
@@ -977,7 +973,7 @@ CAN-HIGH-005 (remote worker integration)
 
 | Risk                                     | Likelihood | Impact | Mitigation                                               |
 | ---------------------------------------- | ---------- | ------ | -------------------------------------------------------- |
-| CasCor serialization API changes         | Medium     | High   | Abstract behind interface in CascorIntegration           |
+| CasCor serialization API changes         | Medium     | High   | Abstract behind interface in CascorServiceAdapter           |
 | WebSocket race conditions during scaling | Medium     | Medium | Audit lock ordering (CAN-MED-006) before adding features |
 | Dashboard feature scope creep            | High       | Medium | Strict dependency chains — implement in order            |
 | Test coverage regression                 | Low        | High   | Maintain coverage gates in CI (80% min)                  |
@@ -991,3 +987,4 @@ CAN-HIGH-005 (remote worker integration)
 | ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-02-17 | AI Agent | Initial creation from JuniperData codebase audit                                                                                                        |
 | 2026-02-17 | AI Agent | Comprehensive rewrite: full notes/ audit, codebase validation, prioritization, and design analysis. Expanded from 28 items to 55 items across 5 phases. |
+| 2026-02-25 | AI Agent | Codebase re-validation: Updated all `cascor_integration.py`/`CascorIntegration` refs to `cascor_service_adapter.py`/`CascorServiceAdapter` (post-polyrepo migration). Fixed summary table arithmetic (Phase 0 NS 1→2, Phase 2 NS 11→12, Grand Total NS 42→44, Complete 10→0). Corrected MyPy disabled code counts (3→7 remaining). Fixed stale line refs (CAN-CRIT-001 :871→:822, INT-CRIT-001 :487-530→:420-463, INT-CRIT-003 :1122-1159→:234). Removed non-existent `fit_async()` refs, fixed CAN-HIGH-007 test file list, normalized CAN-MED-014 priority to MEDIUM. Minor formatting fixes. |
