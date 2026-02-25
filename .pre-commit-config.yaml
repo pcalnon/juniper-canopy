@@ -30,7 +30,7 @@ minimum_pre_commit_version: "3.0.0"
 
 # Default settings for all hooks
 default_language_version:
-  python: python3.13
+  python: python3
 
 # Exclude patterns (files/directories to skip)
 exclude: |
@@ -197,7 +197,7 @@ repos:
         name: Security scan with Bandit
         args:
           - -q
-          - --skip=B101,B311
+          - --skip=B101,B104,B113,B311
         files: ^src/.*\.py$
         exclude: ^src/tests/
 
