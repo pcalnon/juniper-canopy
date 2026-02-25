@@ -475,6 +475,7 @@ async def websocket_control_endpoint(websocket: WebSocket):
 
 @app.get("/health")
 @app.get("/api/health")
+@app.get("/v1/health")
 async def health_check():
     """
     Health check endpoint.
@@ -497,6 +498,21 @@ async def health_check():
         "active_connections": websocket_manager.get_connection_count(),
         "training_active": training_active,
         "demo_mode": demo_mode_active,
+    }
+
+
+@app.get("/v1/health/live")
+async def liveness_probe():
+    """Liveness probe — confirms the process is running."""
+    return {"status": "alive"}
+
+
+@app.get("/v1/health/ready")
+async def readiness_probe():
+    """Readiness probe — confirms the service is ready to handle requests."""
+    return {
+        "status": "ready",
+        "version": config.get("application.version", "1.0.0"),
     }
 
 
