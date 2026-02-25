@@ -89,6 +89,13 @@ except ImportError:
     _mock_jdc.client = _mock_jdc_client_mod  # type: ignore[attr-defined]
     _mock_jdc.exceptions = _mock_jdc_exceptions  # type: ignore[attr-defined]
     _mock_jdc.__version__ = "0.0.0-stub"  # type: ignore[attr-defined]
+    # Re-export exception classes at the package root (mirrors real package API)
+    _mock_jdc.JuniperDataClientError = _JuniperDataClientError  # type: ignore[attr-defined]
+    _mock_jdc.JuniperDataConfigurationError = _JuniperDataConfigurationError  # type: ignore[attr-defined]
+    _mock_jdc.JuniperDataConnectionError = _JuniperDataConnectionError  # type: ignore[attr-defined]
+    _mock_jdc.JuniperDataTimeoutError = _JuniperDataTimeoutError  # type: ignore[attr-defined]
+    _mock_jdc.JuniperDataNotFoundError = _JuniperDataNotFoundError  # type: ignore[attr-defined]
+    _mock_jdc.JuniperDataValidationError = _JuniperDataValidationError  # type: ignore[attr-defined]
     _mock_jdc.__all__ = [  # type: ignore[attr-defined]
         "JuniperDataClient",
         "JuniperDataClientError",
