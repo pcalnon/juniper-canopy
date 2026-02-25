@@ -17,6 +17,13 @@ from pathlib import Path
 import pytest
 import requests
 
+try:
+    import juniper_cascor_client  # noqa: F401
+
+    _HAS_CASCOR_CLIENT = True
+except ImportError:
+    _HAS_CASCOR_CLIENT = False
+
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -195,11 +202,12 @@ class TestAPIEndpoints:
 class TestBackendIntegration:
     """Test backend integration functionality."""
 
-    def test_cascor_integration_import(self):
-        """Test CascorIntegration can be imported."""
-        from backend.cascor_integration import CascorIntegration
+    @pytest.mark.skipif(not _HAS_CASCOR_CLIENT, reason="juniper-cascor-client not installed")
+    def test_service_adapter_import(self):
+        """Test CascorServiceAdapter can be imported."""
+        from backend.cascor_service_adapter import CascorServiceAdapter
 
-        assert CascorIntegration is not None  # trunk-ignore(bandit/B101)
+        assert CascorServiceAdapter is not None  # trunk-ignore(bandit/B101)
 
     def test_path_resolution_with_tilde(self):
         """Test that tilde expansion works in path resolution."""

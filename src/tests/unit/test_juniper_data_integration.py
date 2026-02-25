@@ -384,45 +384,6 @@ class TestDemoModeMandatoryUrl:
 
 
 # ---------------------------------------------------------------------------
-# CAN-INT-002: Mandatory JUNIPER_DATA_URL enforcement (CascorIntegration)
-# ---------------------------------------------------------------------------
-
-
-class TestCascorIntegrationMandatoryUrl:
-    """Test that CascorIntegration enforces JUNIPER_DATA_URL (CAN-INT-002)."""
-
-    @pytest.mark.unit
-    def test_generate_missing_dataset_raises_without_url(self):
-        """_generate_missing_dataset_info must raise JuniperDataConfigurationError when JUNIPER_DATA_URL is unset."""
-        from juniper_data_client.exceptions import JuniperDataConfigurationError
-
-        from backend.cascor_integration import CascorIntegration
-
-        integration = CascorIntegration.__new__(CascorIntegration)
-        integration.logger = MagicMock()
-
-        env = os.environ.copy()
-        env.pop("JUNIPER_DATA_URL", None)
-        with patch.dict(os.environ, env, clear=True):
-            with pytest.raises(JuniperDataConfigurationError, match="JUNIPER_DATA_URL"):
-                integration._generate_missing_dataset_info()
-
-    @pytest.mark.unit
-    def test_generate_missing_dataset_delegates_when_url_set(self):
-        """_generate_missing_dataset_info delegates to _generate_dataset_from_juniper_data when URL is set."""
-        from backend.cascor_integration import CascorIntegration
-
-        integration = CascorIntegration.__new__(CascorIntegration)
-        integration.logger = MagicMock()
-        mock_result = {"inputs": [[1, 2]], "targets": [0], "dataset_name": "test"}
-
-        with patch.dict(os.environ, {"JUNIPER_DATA_URL": "http://localhost:8100"}):
-            with patch.object(integration, "_generate_dataset_from_juniper_data", return_value=mock_result) as mock_gen:
-                result = integration._generate_missing_dataset_info()
-                mock_gen.assert_called_once_with("http://localhost:8100")
-                assert result == mock_result
-
-
 # ---------------------------------------------------------------------------
 # CAN-INT-003: Dataset schema canonicalization (DemoMode)
 # ---------------------------------------------------------------------------
@@ -504,108 +465,6 @@ class TestDemoModeDatasetSchema:
         with patch("juniper_data_client.JuniperDataClient", mock_client_class):
             with pytest.raises(ValueError, match="X_full"):
                 demo._generate_spiral_dataset_from_juniper_data(200, "http://localhost:8100")
-
-
-# ---------------------------------------------------------------------------
-# CAN-INT-003: Dataset schema canonicalization (CascorIntegration)
-# ---------------------------------------------------------------------------
-
-
-class TestCascorIntegrationDatasetSchema:
-    """Test CascorIntegration generates datasets with canonical schema (CAN-INT-003)."""
-
-    @pytest.mark.unit
-    def test_create_juniper_dataset_has_canonical_keys(self):
-        """_create_juniper_dataset returns canonical 'inputs'/'targets' schema."""
-        from backend.cascor_integration import CascorIntegration
-
-        integration = CascorIntegration.__new__(CascorIntegration)
-        integration.logger = MagicMock()
-
-        # The conftest mock handles JuniperDataClient globally
-        result = integration._create_juniper_dataset("http://localhost:8100")
-
-        assert "inputs" in result
-        assert "targets" in result
-        assert "features" not in result
-        assert "labels" not in result
-        assert "mock_mode" not in result
-        assert "dataset_name" in result
-        assert result["num_samples"] == 200
-        assert result["num_features"] == 2
-        assert result["num_classes"] == 2
-        assert "class_distribution" in result
-
-    @pytest.mark.unit
-    def test_create_juniper_dataset_values_are_lists(self):
-        """_create_juniper_dataset converts numpy arrays to lists for JSON serialization."""
-        from backend.cascor_integration import CascorIntegration
-
-        integration = CascorIntegration.__new__(CascorIntegration)
-        integration.logger = MagicMock()
-
-        result = integration._create_juniper_dataset("http://localhost:8100")
-
-        assert isinstance(result["inputs"], list)
-        assert isinstance(result["targets"], list)
-
-    @pytest.mark.unit
-    def test_create_juniper_dataset_forwards_algorithm(self):
-        """_create_juniper_dataset passes algorithm param to create_dataset call."""
-        from backend.cascor_integration import CascorIntegration
-
-        integration = CascorIntegration.__new__(CascorIntegration)
-        integration.logger = MagicMock()
-
-        mock_client_class = MagicMock()
-        mock_client_instance = MagicMock()
-        mock_client_instance.create_dataset.return_value = {"dataset_id": "ci-003"}
-        X_full = np.random.randn(200, 2).astype(np.float32)
-        y_full = np.eye(2, dtype=np.float32)[np.random.randint(0, 2, 200)]
-        mock_client_instance.download_artifact_npz.return_value = {"X_full": X_full, "y_full": y_full}
-        mock_client_class.return_value = mock_client_instance
-
-        with patch("juniper_data_client.JuniperDataClient", mock_client_class):
-            integration._create_juniper_dataset("http://localhost:8100", algorithm="fermat")
-
-        call_kwargs = mock_client_instance.create_dataset.call_args
-        params = call_kwargs[1].get("params", {})
-        assert params.get("algorithm") == "fermat"
-
-    @pytest.mark.unit
-    def test_create_juniper_dataset_missing_dataset_id(self):
-        """Missing dataset_id in response raises ValueError."""
-        from backend.cascor_integration import CascorIntegration
-
-        integration = CascorIntegration.__new__(CascorIntegration)
-        integration.logger = MagicMock()
-
-        mock_client_class = MagicMock()
-        mock_client_instance = MagicMock()
-        mock_client_instance.create_dataset.return_value = {}
-        mock_client_class.return_value = mock_client_instance
-
-        with patch("juniper_data_client.JuniperDataClient", mock_client_class):
-            with pytest.raises(ValueError, match="dataset_id"):
-                integration._create_juniper_dataset("http://localhost:8100")
-
-    @pytest.mark.unit
-    def test_create_juniper_dataset_missing_npz_keys(self):
-        """Missing NPZ keys raises ValueError."""
-        from backend.cascor_integration import CascorIntegration
-
-        integration = CascorIntegration.__new__(CascorIntegration)
-        integration.logger = MagicMock()
-
-        mock_client_class = MagicMock()
-        mock_client_instance = MagicMock()
-        mock_client_instance.create_dataset.return_value = {"dataset_id": "ci-004"}
-        mock_client_instance.download_artifact_npz.return_value = {"X_train": np.zeros((10, 2))}
-        mock_client_class.return_value = mock_client_instance
-
-        with patch("juniper_data_client.JuniperDataClient", mock_client_class):
-            with pytest.raises(ValueError, match="X_full"):
-                integration._create_juniper_dataset("http://localhost:8100")
 
 
 # ---------------------------------------------------------------------------
@@ -843,20 +702,6 @@ class TestDeprecatedLocalMethods:
         with pytest.warns(DeprecationWarning, match="deprecated"):
             try:
                 demo._generate_spiral_dataset_local()
-            except Exception:
-                pass  # Method may fail without full init, we only care about the warning
-
-    @pytest.mark.unit
-    def test_cascor_integration_local_method_emits_deprecation_warning(self):
-        """CascorIntegration._generate_dataset_local emits DeprecationWarning."""
-        from backend.cascor_integration import CascorIntegration
-
-        integration = CascorIntegration.__new__(CascorIntegration)
-        integration.logger = MagicMock()
-
-        with pytest.warns(DeprecationWarning, match="deprecated"):
-            try:
-                integration._generate_dataset_local()
             except Exception:
                 pass  # Method may fail without full init, we only care about the warning
 

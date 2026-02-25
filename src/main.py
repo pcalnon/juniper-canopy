@@ -60,11 +60,9 @@ from fastapi.responses import JSONResponse, RedirectResponse
 # Add src directory to Python path
 # src_dir = Path(__file__).parent
 # sys.path.insert(0, str(src_dir))
-from backend.cascor_integration import CascorIntegration
-
 # from backend.training_monitor import TrainingMonitor  trunk-ignore(ruff/E402)
 # from backend.data_adapter import DataAdapter  trunk-ignore(ruff/E402)
-from backend.training_monitor import TrainingState
+from backend.training_monitor import TrainingState  # trunk-ignore(ruff/E402)
 from canopy_constants import ServerConstants
 from communication.websocket_manager import websocket_manager
 from config_manager import get_config
@@ -98,10 +96,7 @@ ui_logger = get_ui_logger()
 loop_holder = {"loop": None}
 
 # Demo mode tracking (global variables for startup/shutdown).
-# ***IMPORTANT NOTE: demo_mode_active is set in the CascorIntegration initialization above.***  ????
 demo_mode_active = False
-
-# ***IMPORTANT NOTE: Do NOT reset it here or demo mode will not start!!!***
 demo_mode_instance = None
 training_state = TrainingState()  # Global TrainingState instance
 
@@ -160,59 +155,19 @@ async def lifespan(app: FastAPI):
 
         if backend:
             # Check if this is a service adapter (REST/WS) or legacy in-process integration
-            if getattr(backend, "_is_service_adapter", False) is True:
-                # Service mode: connect to remote CasCor service
-                system_logger.info("CasCor service mode active — connecting to remote service")
-                try:
-                    connected = await backend.connect()
-                    if connected:
-                        system_logger.info("Connected to CasCor service")
-                        await backend.start_metrics_relay()
-                        system_logger.info("CasCor service fully initialized — metrics relay active")
-                    else:
-                        system_logger.warning("CasCor service not ready — training can be started when service is available")
-                except Exception as e:
-                    system_logger.error(f"Failed to connect to CasCor service: {e}", exc_info=True)
-                    system_logger.info("Service adapter created but connection failed. Will retry on demand.")
-            else:
-                # Legacy mode: in-process CasCor integration
-                system_logger.info("CasCor backend mode active — initializing in-process integration")
-                try:
-                    # Create network with configuration-driven defaults
-                    state = training_state.get_state()
-                    network_config = {
-                        "input_size": 2,
-                        "output_size": 1,
-                        "learning_rate": state.get("learning_rate", 0.01),
-                        "max_hidden_units": state.get("max_hidden_units", 10),
-                        "max_epochs": state.get("max_epochs", 200),
-                    }
-                    backend.create_network(network_config)
-                    system_logger.info(f"CasCor network created: {network_config}")
-
-                    # Fetch dataset from JuniperData for the network
-                    try:
-                        if dataset := backend.get_dataset_info():
-                            system_logger.info(f"Dataset loaded: {dataset.get('num_samples', '?')} samples, " f"{dataset.get('num_classes', '?')} classes")
-                    except Exception as e:
-                        system_logger.warning(f"Could not load dataset from JuniperData: {e}")
-
-                    # Install monitoring hooks on network training methods
-                    if backend.install_monitoring_hooks():
-                        system_logger.info("Monitoring hooks installed on CasCor network")
-                    else:
-                        system_logger.warning("Failed to install monitoring hooks")
-
-                    # Start background monitoring thread for polling metrics
-                    backend.start_monitoring_thread(interval=1.0)
-
-                    # Register WebSocket broadcast callbacks
-                    setup_monitoring_callbacks()
-
-                    system_logger.info("CasCor backend fully initialized — ready for training via dashboard")
-                except Exception as e:
-                    system_logger.error(f"Failed to initialize CasCor backend: {e}", exc_info=True)
-                    system_logger.info("Backend integration created but network initialization failed. " "Training can be started manually via /api/train/start.")
+            # Service mode: connect to remote CasCor service
+            system_logger.info("CasCor service mode active — connecting to remote service")
+            try:
+                connected = await backend.connect()
+                if connected:
+                    system_logger.info("Connected to CasCor service")
+                    await backend.start_metrics_relay()
+                    system_logger.info("CasCor service fully initialized — metrics relay active")
+                else:
+                    system_logger.warning("CasCor service not ready — training can be started when service is available")
+            except Exception as e:
+                system_logger.error(f"Failed to connect to CasCor service: {e}", exc_info=True)
+                system_logger.info("Service adapter created but connection failed. Will retry on demand.")
 
     system_logger.info("Application startup complete")
 
@@ -229,7 +184,7 @@ async def lifespan(app: FastAPI):
     # Shutdown WebSocket connections
     await websocket_manager.shutdown()
 
-    # Shutdown backend (stop relay for service mode, then close)
+    # Shutdown backend (stop metrics relay, then close)
     if backend:
         if getattr(backend, "_is_service_adapter", False) is True:
             await backend.stop_metrics_relay()
@@ -258,8 +213,7 @@ app.add_middleware(
 # Initialize backend integration — three-mode priority:
 #   1. CASCOR_DEMO_MODE=1 → Demo mode (highest priority)
 #   2. CASCOR_SERVICE_URL set → Service mode via CascorServiceAdapter (REST/WS)
-#   3. CASCOR_BACKEND_PATH set → Legacy mode via CascorIntegration (in-process)
-#   4. Neither → fallback to Demo mode
+#   3. Neither → Demo mode (default)
 
 force_demo_mode = os.getenv("CASCOR_DEMO_MODE", "0") in ("1", "true", "True", "yes", "Yes")
 cascor_service_url = os.getenv("CASCOR_SERVICE_URL")
@@ -287,25 +241,10 @@ elif cascor_service_url:
         backend = None
         demo_mode_active = True
 else:
-    # Legacy mode: in-process CasCor integration
-    cascor_backend_path = config.get(
-        "backend.cascor_integration.backend_path",
-        os.getenv("CASCOR_BACKEND_PATH", "../cascor"),
-    )
-    try:
-        backend = CascorIntegration(cascor_backend_path)
-        demo_mode_active = False
-        system_logger.info("CasCor backend integration initialized successfully (legacy mode)")
-    except FileNotFoundError as e:
-        system_logger.warning(f"CasCor backend not found: {e}")
-        system_logger.info("Falling back to demo mode for frontend development")
-        backend = None
-        demo_mode_active = True
-    except Exception as e:
-        system_logger.error(f"Failed to initialize CasCor backend: {e}")
-        system_logger.info("Falling back to demo mode")
-        backend = None
-        demo_mode_active = True
+    # No config — default to demo mode
+    system_logger.info("No CasCor service URL configured, defaulting to demo mode")
+    backend = None
+    demo_mode_active = True
 
 # Initialize Dash dashboard (standalone with its own Flask server)
 dashboard_manager = DashboardManager(config.get_section("frontend"))
@@ -344,49 +283,6 @@ async def root():
         Redirect response to /dashboard/
     """
     return RedirectResponse(url="/dashboard/")
-
-
-def setup_monitoring_callbacks():
-    """
-    Set up monitoring callbacks for training events.
-    These callbacks are invoked from training threads (non-async context).
-    They schedule broadcasts onto FastAPI's event loop using run_coroutine_threadsafe.
-    """
-
-    def on_metrics_update(**kwargs):
-        """Handle training metrics update (synchronous callback)."""
-        from communication.websocket_manager import create_metrics_message
-
-        metrics = kwargs.get("metrics")
-        if metrics:
-            metrics_data = metrics.to_dict() if hasattr(metrics, "to_dict") else metrics
-            schedule_broadcast(websocket_manager.broadcast(create_metrics_message(metrics_data)))
-
-    def on_topology_change(**kwargs):
-        """Handle network topology change (synchronous callback)."""
-        from communication.websocket_manager import create_topology_message
-
-        topology = kwargs.get("topology")
-        if topology:
-            topology_data = topology.to_dict() if hasattr(topology, "to_dict") else topology
-            schedule_broadcast(websocket_manager.broadcast(create_topology_message(topology_data)))
-
-    def on_cascade_add(**kwargs):
-        """Handle cascade unit addition (synchronous callback)."""
-        from communication.websocket_manager import create_event_message
-
-        event = kwargs.get("event")
-        if event:
-            # Extract event details from the event dict
-            details = event if isinstance(event, dict) else {}
-            schedule_broadcast(websocket_manager.broadcast(create_event_message("cascade_add", details)))
-
-    # Register synchronous callbacks
-    backend.create_monitoring_callback("epoch_end", on_metrics_update)
-    backend.create_monitoring_callback("topology_change", on_topology_change)
-    backend.create_monitoring_callback("cascade_add", on_cascade_add)
-
-    system_logger.info("Monitoring callbacks registered (thread-safe)")
 
 
 @app.websocket("/ws/training")
