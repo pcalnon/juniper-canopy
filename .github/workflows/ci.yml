@@ -382,13 +382,66 @@ jobs:
           retention-days: 30
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # Dependency Documentation: Generate pip, conda, and other dependency records
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  dependency-docs:
+    name: Dependency Documentation
+    runs-on: ubuntu-latest
+    needs: [build]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_TEST_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_TEST_VERSION }}
+          cache: pip
+
+      - name: Set up Conda (Miniforge)
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          auto-activate-base: true
+          python-version: ${{ env.PYTHON_TEST_VERSION }}
+
+      - name: Install project dependencies
+        shell: bash -l {0}
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r conf/requirements_ci.txt
+          pip install -e .
+
+      - name: Generate Dependency Documentation
+        shell: bash -l {0}
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Dependency Documentation            ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          bash scripts/generate_dep_docs.sh
+
+      - name: Upload Dependency Documentation
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-docs
+          path: |
+            conf/requirements_ci.txt
+            conf/requirements_ci_*.txt
+            conf/conda_environment_ci.yaml
+            conf/conda_environment_ci_*.yaml
+          retention-days: 90
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
   # Required Checks Aggregator: Final quality gate
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   required-checks:
     name: Quality Gate
     runs-on: ubuntu-latest
     if: always()
-    needs: [pre-commit, unit-tests, integration-tests, security, build]
+    needs: [pre-commit, unit-tests, integration-tests, security, build, dependency-docs]
 
     steps:
       - name: Check Quality Gate Status
@@ -402,6 +455,7 @@ jobs:
           echo "Integration Tests: ${{ needs.integration-tests.result }}"
           echo "Security:          ${{ needs.security.result }}"
           echo "Build:             ${{ needs.build.result }}"
+          echo "Dependency Docs:   ${{ needs.dependency-docs.result }}"
           echo ""
 
           if [[ "${{ needs.pre-commit.result }}" != "success" ]]; then
@@ -421,6 +475,12 @@ jobs:
 
           if [[ "${{ needs.integration-tests.result }}" == "failure" ]]; then
             echo "::error::Integration tests failed"
+            exit 1
+          fi
+
+          # Dependency docs: failure = error, skipped = OK (non-blocking)
+          if [[ "${{ needs.dependency-docs.result }}" == "failure" ]]; then
+            echo "::error::Dependency documentation generation failed"
             exit 1
           fi
 
