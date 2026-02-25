@@ -17,11 +17,6 @@ skips:
   # during development. Production code should not rely on assert.
   # - B101
 
-  # B104: hardcoded_bind_all_interfaces
-  # Justification: Development server binds to 0.0.0.0 intentionally for
-  # local network access during development/testing.
-  - B104
-
   # B311: random - pseudo-random generators not suitable for security/crypto
   # Justification: Random is used for demo mode data generation and testing,
   # not for cryptographic purposes.

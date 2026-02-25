@@ -1,19 +1,18 @@
 #####################################################################################################################################################################################################
 # Project:       Juniper
-# Sub-Project:   JuniperCanopy
-# Application:   juniper_canopy
-# Purpose:       Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
+# Application:   <Repo Name>
+# Purpose:       <<Repo Name> Application Description>
 #
 # Author:        Paul Calnon
-# Version:       0.1.4 (0.7.3)
-# File Name:     requirements.txt
-# File Path:     <Project>/<Sub-Project>/<Application>/conf/
+# Version:       <X.Y.Z  Major, Minor, Point Version for Repo>
+# File Name:     requirements_ci.txt
+# File Path:     Juniper/<Repo Name>/conf/
 #
 # Date:          2025-12-06
-# Last Modified: 2026-01-28
+# Last Modified: <YYYY-MM-dd for Current date>
 #
 # License:       MIT License
-# Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
+# Copyright:     Copyright (c) 2024-<YYYY for Current Year> Paul Calnon
 #
 # Description:
 #     This file lists python requirements that can be installed via pip
@@ -21,19 +20,17 @@
 #####################################################################################################################################################################################################
 # Notes:
 #
-#     created-by: pip 25.3
+#     created-by: pip <Pip Version>
 #     platform: linux-64
-#     python: 3.14
+#     python: <Python Version>
 #
-#     This file may be used to create the Juniper Canopy environment with pip using:
-#         create:  $ pip list --format=freeze >requirements-pip.txt
-#         install: $ pip install -r requirements-pip.txt
+#     This file may be used to create the Juniper Project, <Repo Name> Application environment with pip using:
+#         create:  $ pip list --format=freeze >requirements_ci.txt
+#         install: $ pip install -r requirements_ci.txt
 #
-#     Juniper Canopy - CI/CD Requirements (No CUDA)
+#     Juniper Project - CI/CD Requirements (No CUDA)
 #     This is a lightweight requirements file for GitHub Actions testing.
 #     NVIDIA CUDA packages are excluded since GPU testing is not available on runners.
-#####################################################################################################################################################################################################
-# References:
 #
 ########################################################################################################)#############################################################################################
 # References:
@@ -45,6 +42,11 @@
 # COMPLETED:
 #
 #####################################################################################################################################################################################################
+
+# PyTorch CPU-only (much smaller than GPU version)
+# Use --extra-index-url to add PyTorch CPU index while keeping PyPI as primary
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
 
 # Core dependencies - using flexible versions for Python 3.14 compatibility
 a2wsgi>=1.10
@@ -105,6 +107,7 @@ pytest-mock>=3.12
 pytest-timeout>=0.5
 python-dateutil>=2.8
 python-dotenv>=1.0
+python-multipart>=0.0.7
 PyYAML>=6.0
 requests>=2.30
 rich>=14.0

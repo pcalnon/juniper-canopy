@@ -41,7 +41,6 @@ import queue
 import threading
 import time
 from datetime import datetime
-from threading import _LockType
 from typing import Any, Callable, Dict, List, Optional
 
 from .data_adapter import DataAdapter, NetworkTopology, TrainingMetrics
@@ -57,7 +56,7 @@ class CandidatePool:
 
     def __init__(self):
         """Initialize candidate pool."""
-        self.__lock: _LockType = threading.Lock()
+        self.__lock: Any = threading.Lock()
         self.__status: str = "Inactive"
         self.__phase: str = "Idle"
         self.__size: int = 0
