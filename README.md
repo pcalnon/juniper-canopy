@@ -5,6 +5,17 @@
 
 Juniper is an AI/ML research platform for investigating dynamic neural network architectures and novel learning paradigms.  The project emphasizes ground-up implementations from primary literature, enabling a more transparent exploration of fundamental algorithms.
 
+## Ecosystem Compatibility
+
+This service is part of the [Juniper](https://github.com/pcalnon/juniper-ml) ecosystem.
+Verified compatible versions:
+
+| juniper-data | juniper-cascor | juniper-canopy | data-client | cascor-client | cascor-worker |
+|---|---|---|---|---|---|
+| 0.4.x | 0.3.x | 0.2.x | >=0.3.1 | >=0.1.0 | >=0.1.0 |
+
+For full-stack Docker deployment and integration tests, see [juniper-deploy](https://github.com/pcalnon/juniper-deploy).
+
 ## Active Research Components
 
 **juniper_cascor**:  Cascade Correlation Neural Network
