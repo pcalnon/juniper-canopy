@@ -43,8 +43,9 @@ Juniper prioritizes **transparency over convenience** and **understanding over a
 Demo mode runs without the CasCor backend, simulating training data for development and testing.
 
 ```bash
-# Navigate to project
-cd juniper_canopy
+# Clone the repository
+git clone https://github.com/pcalnon/juniper-canopy.git
+cd juniper-canopy
 
 # Activate environment
 conda activate JuniperCanopy

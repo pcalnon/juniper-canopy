@@ -2352,7 +2352,7 @@ All three Juniper applications (JuniperCascor, JuniperData, JuniperCanopy) now u
 - `.github/workflows/ci.yml` (v0.12.0)
 - `pyproject.toml` (v0.2.3)
 
-**See:** [JUNIPER_CASCOR_SPIRAL_DATA_GEN_REFACTOR_PLAN.md](../../../JuniperCascor/juniper_cascor/notes/JUNIPER_CASCOR_SPIRAL_DATA_GEN_REFACTOR_PLAN.md#15-cicd-parity-status)
+**See:** `JuniperCascor/juniper_cascor/notes/JUNIPER_CASCOR_SPIRAL_DATA_GEN_REFACTOR_PLAN.md#15-cicd-parity-status` (external repo — see [pcalnon/juniper-cascor](https://github.com/pcalnon/juniper-cascor))
 
 ---
 
