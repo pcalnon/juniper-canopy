@@ -422,6 +422,18 @@ jobs:
           echo "╚════════════════════════════════════════════════════════════╝"
           bash scripts/generate_dep_docs.sh
 
+      - name: Validate Generated YAML
+        shell: bash -l {0}
+        run: |
+          python -c "
+          import yaml
+          with open('conf/conda_environment_ci.yaml') as f:
+              data = yaml.safe_load(f)
+          deps = data.get('dependencies', [])
+          print(f'  Validated: {len(deps)} dependencies in conda_environment_ci.yaml')
+          assert len(deps) > 0, 'No dependencies found — generation may have failed'
+          "
+
       - name: Upload Dependency Documentation
         uses: actions/upload-artifact@v4
         if: always()

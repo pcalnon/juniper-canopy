@@ -32,8 +32,8 @@
 #         e.g., $ conda create --name JuniperPython --file juniper-canopy/conf/conda_environment_ci.yaml
 #     Update env: conda env update --name [env] --file [filename]
 #         e.g., $ conda env update --name JuniperPython --file juniper-canopy/conf/conda_environment_ci.yaml
-#     Generate deps: conda list --explicit > [filename]
-#         e.g., $ conda list -e >> juniper-canopy/conf/conda_environment_ci.yaml
+#     Generate deps: conda env export --no-builds (via generate_dep_docs.sh)
+#         e.g., $ bash scripts/generate_dep_docs.sh
 #
 #####################################################################################################################################################################################################
 # TODO :
