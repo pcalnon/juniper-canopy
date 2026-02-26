@@ -41,6 +41,8 @@ on:
     branches:
       - main
       - develop
+  repository_dispatch:
+    types: [data-client-updated, cascor-client-updated]
   workflow_dispatch:
 
 concurrency:
