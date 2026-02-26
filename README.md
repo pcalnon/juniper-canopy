@@ -16,6 +16,61 @@ Verified compatible versions:
 
 For full-stack Docker deployment and integration tests, see [juniper-deploy](https://github.com/pcalnon/juniper-deploy).
 
+## Architecture
+
+JuniperCanopy is the **monitoring dashboard** of the Juniper ecosystem. It depends on both JuniperData and JuniperCascor to display real-time training data.
+
+```text
+┌─────────────────────┐     REST+WS      ┌──────────────────────┐
+│   JuniperCanopy     │ ◄──────────────► │    JuniperCascor     │
+│   Dashboard  ◄─here │                  │    Training Svc      │
+│   Port 8050         │                  │    Port 8200         │
+└──────────┬──────────┘                  └──────────┬───────────┘
+           │ REST                                    │ REST
+           ▼                                         ▼
+┌──────────────────────────────────────────────────────────────┐
+│                      JuniperData                              │
+│                   Dataset Service  ·  Port 8100               │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Modes**: *Service mode* (live CasCor backend via `CASCOR_SERVICE_URL`) or *Demo mode* (`CASCOR_DEMO_MODE=1`, no backend required).
+
+## Related Services
+
+| Service | Relationship | Notes |
+|---------|-------------|-------|
+| [juniper-cascor](https://github.com/pcalnon/juniper-cascor) | Canopy monitors CasCor training | Set `CASCOR_SERVICE_URL` to activate service mode |
+| [juniper-data](https://github.com/pcalnon/juniper-data) | Canopy fetches datasets for visualization | Set `JUNIPER_DATA_URL` |
+| [juniper-cascor-client](https://github.com/pcalnon/juniper-cascor-client) | REST+WS client used internally by Canopy | `pip install juniper-cascor-client` |
+
+### Service Configuration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `CASCOR_SERVICE_URL` | Yes\* | — | JuniperCascor URL — activates service mode |
+| `JUNIPER_DATA_URL` | No | `http://localhost:8100` | JuniperData URL |
+| `CASCOR_DEMO_MODE` | No | — | Set to `1` to run without a backend |
+| `CANOPY_HOST` | No | `0.0.0.0` | Listen address |
+| `CANOPY_PORT` | No | `8050` | Service port |
+
+\* Required for service mode. Omit to fall back to demo mode.
+
+### Docker Deployment
+
+```bash
+# Full stack (recommended):
+git clone https://github.com/pcalnon/juniper-deploy.git
+cd juniper-deploy && docker compose up --build
+
+# Standalone (service mode):
+docker build -t juniper-canopy:latest .
+docker run -p 8050:8050 \
+  -e CASCOR_SERVICE_URL=http://host.docker.internal:8200 \
+  -e JUNIPER_DATA_URL=http://host.docker.internal:8100 \
+  juniper-canopy:latest
+```
+
 ## Active Research Components
 
 **juniper_cascor**:  Cascade Correlation Neural Network
