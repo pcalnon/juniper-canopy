@@ -260,10 +260,9 @@ backend:
     state_polling_interval_ms: 500
     # Integration Issue 4.1: Use environment variable for flexible backend path configuration
     # The path can be set via CASCOR_BACKEND_PATH environment variable
-    # Default fallback: ../../JuniperCascor/juniper_cascor (relative to Juniper workspace)
-    # backend_path: ~/Development/python/JuniperCanopy/juniper_cascor
-    # backend_path: ~/Development/python/JuniperCascor/juniper_cascor
-    backend_path: "${CASCOR_BACKEND_PATH:../../JuniperCascor/juniper_cascor}"
+    # Default fallback: ../juniper-cascor (relative to Juniper workspace)
+    # backend_path: ~/Development/python/Juniper/juniper-cascor
+    backend_path: "${CASCOR_BACKEND_PATH:../juniper-cascor}"
 
   # JuniperData service integration (CAN-INT-004)
   # All datasets are fetched from JuniperData - configurable via JUNIPER_DATA_URL (defaults to http://localhost:8100 if unset)

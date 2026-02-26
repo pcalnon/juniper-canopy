@@ -8,7 +8,7 @@
 # Author:        Paul Calnon
 # Version:       0.8.0
 # File Name:     main.py
-# File Path:     ${HOME}/Development/python/JuniperCanopy/juniper_canopy/src/
+# File Path:     ${HOME}/Development/python/Juniper/juniper-canopy/src/
 #
 # Date Created:  2025-10-11
 # Last Modified: 2026-01-09

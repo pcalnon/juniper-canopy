@@ -51,7 +51,7 @@ permissions:
   contents: read
 
 env:
-  ENV_NAME: JuniperCanopy
+  ENV_NAME: juniper-canopy
   PYTHON_TEST_VERSION: "3.13"
   COVERAGE_FAIL_UNDER: "80"
 

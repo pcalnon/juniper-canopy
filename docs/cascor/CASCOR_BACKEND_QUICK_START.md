@@ -91,7 +91,7 @@ JuniperCanopy/
 **Verify path:**
 
 ```bash
-cd ~/Development/python/JuniperCanopy/juniper_canopy
+cd ~/Development/python/Juniper/juniper-canopy
 ls ../cascor/src/cascade_correlation/cascade_correlation.py
 # Should exist
 ```
@@ -108,7 +108,7 @@ Default path in `conf/app_config.yaml`:
 backend:
   cascor_integration:
     enabled: true
-    backend_path: ~/Development/python/JuniperCanopy/cascor
+    backend_path: ~/Development/python/Juniper/juniper-cascor
 ```
 
 No configuration needed if CasCor is at default location.
@@ -215,7 +215,7 @@ backend:
     state_polling_interval_ms: 500
 
     # Backend path (supports ~, $HOME, environment variables)
-    backend_path: ~/Development/python/JuniperCanopy/cascor
+    backend_path: ~/Development/python/Juniper/juniper-cascor
 ```
 
 ### Environment Variables

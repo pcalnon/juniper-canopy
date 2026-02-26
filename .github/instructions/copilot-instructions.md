@@ -139,9 +139,9 @@ python ./src/main.py  # Starts FastAPI + Dash on localhost:8050
 
 ```bash
 # Fully defined launch command
-exec "/opt/miniforge3/envs/JuniperCanopy/bin/uvicorn" main:app --host 0.0.0.0 --port 8050 --log-level debug
+exec "/opt/miniforge3/envs/juniper-canopy/bin/uvicorn" main:app --host 0.0.0.0 --port 8050 --log-level debug
 
-# Using Conda Environment Variable (export CONDA_PREFIX=/opt/miniforge3/envs/JuniperCanopy)
+# Using Conda Environment Variable (export CONDA_PREFIX=/opt/miniforge3/envs/juniper-canopy)
 exec "$CONDA_PREFIX/bin/uvicorn" main:app --host 0.0.0.0 --port 8050 --log-level debug
 
 # Using Launch Script
@@ -770,9 +770,9 @@ After=network.target redis.service
 Type=simple
 User=pcalnon
 Group=pcalnon
-WorkingDirectory=/home/pcalnon/Development/python/JuniperCanopy/juniper_canopy/src
+WorkingDirectory=/home/pcalnon/Development/python/Juniper/juniper-canopy/src
 Environment="PATH=/home/pcalnon/miniconda3/envs/JuniperPython/bin"
-Environment="CASCOR_BACKEND_PATH=/home/pcalnon/Development/python/JuniperCascor/juniper_cascor/src"
+Environment="CASCOR_BACKEND_PATH=/home/pcalnon/Development/python/Juniper/juniper-cascor/src"
 ExecStart=/home/pcalnon/miniconda3/envs/JuniperPython/bin/python main.py
 Restart=on-failure
 RestartSec=10

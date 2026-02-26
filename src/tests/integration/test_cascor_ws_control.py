@@ -8,7 +8,7 @@
 # Author:        Paul Calnon
 # Version:       0.1.0
 # File Name:     test_cascor_ws_control.py
-# File Path:     ${HOME}/Development/python/JuniperCanopy/juniper_canopy/src/tests/integration/
+# File Path:     ${HOME}/Development/python/Juniper/juniper-canopy/src/tests/integration/
 #
 # Date Created:  2026-02-11
 # Last Modified: 2026-02-11

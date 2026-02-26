@@ -4,7 +4,7 @@
 **Last Updated:** January 29, 2026  
 **Version:** v0.25.0  
 **Project**: juniper_canopy prototype  
-**Location**: /home/pcalnon/Development/python/Juniper/JuniperCanopy/juniper_canopy
+**Location**: /home/pcalnon/Development/python/Juniper/juniper-canopy
 
 ## Executive Summary
 

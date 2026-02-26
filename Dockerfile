@@ -1,5 +1,5 @@
 # =============================================================================
-# JuniperCanopy — Monitoring Dashboard
+# juniper-canopy — Monitoring Dashboard
 # Multi-stage Dockerfile for production deployment
 # =============================================================================
 # Build: docker build -t juniper-canopy:latest .
@@ -40,8 +40,8 @@ RUN pip install --no-cache-dir ".[juniper-data,juniper-cascor]"
 # -----------------------------------------------------------------------------
 FROM python:3.12-slim AS runtime
 
-LABEL org.opencontainers.image.title="JuniperCanopy"
-LABEL org.opencontainers.image.description="Real-time monitoring dashboard for JuniperCascor"
+LABEL org.opencontainers.image.title="juniper-canopy"
+LABEL org.opencontainers.image.description="Real-time monitoring dashboard for juniper-cascor"
 LABEL org.opencontainers.image.authors="Paul Calnon"
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.source="https://github.com/pcalnon/juniper-canopy"
