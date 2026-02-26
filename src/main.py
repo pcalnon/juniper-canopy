@@ -97,6 +97,7 @@ loop_holder = {"loop": None}
 
 # Demo mode tracking (global variables for startup/shutdown).
 demo_mode_active = False
+juniper_data_available = False
 demo_mode_instance = None
 training_state = TrainingState()  # Global TrainingState instance
 
@@ -131,6 +132,22 @@ async def lifespan(app: FastAPI):
     if not juniper_data_url:
         system_logger.error("JUNIPER_DATA_URL is not set and could not be resolved from config. " "Set JUNIPER_DATA_URL=http://localhost:8100 or ensure JuniperData service is running.")
         raise RuntimeError("JUNIPER_DATA_URL is required. " "Set JUNIPER_DATA_URL=http://localhost:8100 or start JuniperData service.")
+
+    # CAN-HIGH-001: Probe JuniperData health at startup (non-blocking).
+    global juniper_data_available
+    health_url = f"{juniper_data_url.rstrip('/')}/health"
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(health_url, method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            if resp.status == 200:
+                juniper_data_available = True
+                system_logger.info(f"JuniperData health check passed: {health_url}")
+            else:
+                system_logger.warning(f"JuniperData health check returned status {resp.status} — data operations may fail")
+    except Exception as e:
+        system_logger.warning(f"JuniperData unreachable at {health_url}: {e} — data operations will fail until service is available")
 
     if demo_mode_active:
         system_logger.info("Initializing demo mode")
@@ -498,6 +515,7 @@ async def health_check():
         "active_connections": websocket_manager.get_connection_count(),
         "training_active": training_active,
         "demo_mode": demo_mode_active,
+        "juniper_data_available": juniper_data_available,
     }
 
 
@@ -513,6 +531,7 @@ async def readiness_probe():
     return {
         "status": "ready",
         "version": config.get("application.version", "1.0.0"),
+        "juniper_data_available": juniper_data_available,
     }
 
 
