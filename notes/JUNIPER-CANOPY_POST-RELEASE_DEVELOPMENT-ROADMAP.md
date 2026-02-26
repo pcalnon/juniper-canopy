@@ -226,22 +226,23 @@ Items that affect testing coverage, backend integration reliability, or producti
 
 ---
 
-### CAN-HIGH-007: Convert Skipped WebSocket Tests
+### CAN-HIGH-007: Convert Skipped Integration Tests
 
-**Status**: NOT STARTED
+**Status**: PARTIALLY ADDRESSED
 **Priority**: HIGH
 **Source**: TEST_SUITE_CICD_ENHANCEMENT_DEVELOPMENT_PLAN.md (SK-005, SK-006, SK-007)
 **Module**: `src/tests/`
 
-**Description**: Three WebSocket test groups are currently skipped with `requires_server` marker. These should be converted to work with the `TestClient` WebSocket interface for CI compatibility.
+**Description**: The original WebSocket test groups (SK-005/006/007: `test_websocket_control.py`, `test_main_ws.py`, `test_websocket_state.py`) have already been converted to use `TestClient` and run in CI. However, four integration test files still use the `requires_server` marker and are skipped in CI:
 
-| ID     | Test                             | Current Reason  |
-| ------ | -------------------------------- | --------------- |
-| SK-005 | test_websocket_control.py        | requires_server |
-| SK-006 | test_main_ws.py (subset)         | requires_server |
-| SK-007 | test_websocket_state.py (subset) | requires_server |
+| File                              | Marker           | Status  |
+| --------------------------------- | ---------------- | ------- |
+| test_candidate_visibility.py      | requires_server  | Skipped |
+| test_mvp_functionality.py         | requires_server  | Skipped |
+| test_parameter_persistence.py     | requires_server  | Skipped |
+| test_demo_endpoints.py            | requires_server  | Skipped |
 
-**Estimated Scope**: Medium (3 files, ~150-250 lines modified)
+**Estimated Scope**: Medium (4 files, ~150-250 lines modified)
 **Files**: Various test files in `src/tests/integration/`
 
 ---
@@ -868,17 +869,17 @@ The following items were found in notes files as non-completed but were confirme
 
 ---
 
-### -p no:warnings Removed (COMPLETE)
+### -p no:warnings Removed (PARTIALLY COMPLETE)
 
 **Source**: TEST_SUITE_CICD_ENHANCEMENT_DEVELOPMENT_PLAN.md
-**Validation**: `pyproject.toml` no longer contains `-p no:warnings`. Fixed.
+**Validation**: `pyproject.toml` no longer contains `-p no:warnings`, but `-p no:warnings` remains in `.pre-commit-config.yaml` line 253 (pytest-coverage hook). Partially fixed.
 
 ---
 
 ### INTEG-004: Blocking Training in FastAPI Async Context (COMPLETE)
 
 **Source**: INTEGRATION_ROADMAP-01.md
-**Validation**: ThreadPoolExecutor with max_workers=1 implemented. start_training_background() exists. Post-migration: async training delegated to CascorServiceAdapter via juniper-cascor-client. Implemented.
+**Validation**: Blocking training resolved via REST delegation — `CascorServiceAdapter.start_training_background()` delegates to the remote CasCor service via `juniper-cascor-client`, which returns immediately. No `ThreadPoolExecutor` is used. Implemented.
 
 ---
 
@@ -925,11 +926,11 @@ See: juniper-data repo → notes/JUNIPER-DATA_POST-RELEASE_DEVELOPMENT-ROADMAP.m
 | --------- | ----------------------------- | ------ | ----------- | ------- | -------- | -------- |
 | 0         | Critical Integration Gaps     | 2      | 0           | 2       | 0        | 0        |
 | 0         | Critical (validated complete) | —      | —           | —       | 10       | —        |
-| 1         | High: Backend/Testing         | 8      | 5           | 3       | 0        | 0        |
+| 1         | High: Backend/Testing         | 8      | 4           | 4       | 0        | 0        |
 | 2         | Medium: Code Quality/CI       | 14     | 11          | 2       | 0        | 0        |
 | 3         | Enhancement: Dashboard        | 23     | 23          | 0       | 0        | 0        |
 | 4         | Future: Deferred              | 8      | 0           | 1       | 1        | 6        |
-| **Total** |                               | **55** | **39**      | **8**   | **11**   | **6**    |
+| **Total** |                               | **55** | **38**      | **9**   | **11**   | **6**    |
 
 ### Priority Distribution
 
@@ -1040,3 +1041,4 @@ The Juniper ecosystem completed a polyrepo migration (2026-02-22 to 2026-02-25) 
 | 2026-02-17 | AI Agent | Initial creation from JuniperData codebase audit                                                                                                        |
 | 2026-02-17 | AI Agent | Comprehensive rewrite: full notes/ audit, codebase validation, prioritization, and design analysis. Expanded from 28 items to 55 items across 5 phases. |
 | 2026-02-25 | AI Agent | Polyrepo migration impact analysis: updated status of 8 items (CAN-CRIT-001/002, CAN-HIGH-003/004/005/006, CAN-DEF-001/004), added migration notes, updated summary tables, revised design analysis for microservices architecture. |
+| 2026-02-25 | AI Agent | Codebase re-validation: fixed INTEG-004 validation (REST delegation, not ThreadPoolExecutor), corrected CAN-HIGH-007 test file list (WebSocket tests already converted; actual `requires_server` files identified), updated `-p no:warnings` to PARTIALLY COMPLETE (still in .pre-commit-config.yaml), corrected summary table arithmetic. |
