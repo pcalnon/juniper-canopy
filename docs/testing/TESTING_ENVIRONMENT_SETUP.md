@@ -45,7 +45,7 @@ which python
 ### 1. Clone Repository
 
 ```bash
-cd ~/Development/python/JuniperCanopy
+cd ~/Development/python/Juniper/juniper-canopy
 git clone <repository-url> juniper_canopy
 cd juniper_canopy
 ```
@@ -464,7 +464,7 @@ pip install -r conf/requirements.txt
 echo $PYTHONPATH
 
 # Add src directory to path
-export PYTHONPATH="${PYTHONPATH}:/home/pcalnon/Development/python/Juniper/JuniperCanopy/juniper_canopy/src"
+export PYTHONPATH="${PYTHONPATH}:/home/pcalnon/Development/python/Juniper/juniper-canopy/src"
 
 # Or activate conda environment
 conda activate JuniperPython

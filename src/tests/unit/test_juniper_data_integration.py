@@ -8,7 +8,7 @@
 # Author:        Paul Calnon
 # Version:       0.1.0
 # File Name:     test_juniper_data_integration.py
-# File Path:     ${HOME}/Development/python/JuniperCanopy/juniper_canopy/src/tests/unit/
+# File Path:     ${HOME}/Development/python/Juniper/juniper-canopy/src/tests/unit/
 #
 # Date Created:  2026-02-07
 # Last Modified: 2026-02-07

@@ -36,7 +36,7 @@ services:
       - cascor-network
 
   # Main application
-  juniper_canopy:
+  juniper-canopy:
     build:
       context: ..
       dockerfile: conf/Dockerfile

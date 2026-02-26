@@ -37,9 +37,9 @@
 #     This file may be used to create the Juniper Canopy environment
 #         with conda and miniforge3 using:
 #     create env: conda create --name <env> --file <file>
-#         e.g., $ conda create --name JuniperCanopy --file juniper_canopy/conf/conda_environment.yaml
+#         e.g., $ conda create --name juniper-canopy --file juniper_canopy/conf/conda_environment.yaml
 #     Update env: conda env update --name <env> --file <file>
-#         e.g., $ conda env update --name JuniperCanopy --file juniper_canopy/conf/conda_environment.yaml
+#         e.g., $ conda env update --name juniper-canopy --file juniper_canopy/conf/conda_environment.yaml
 #     Generate deps: conda list --explicit > <file>
 #         e.g., $ conda list -e >> juniper_canopy/conf/conda_environment.yaml
 #
@@ -51,7 +51,7 @@
 # COMPLETED:
 #
 #####################################################################################################################################################################################################
-name: JuniperCanopy
+name: juniper-canopy
 channels:
   - conda-forge
   # - conda-forge/label/python_rc  # Optional: enable only if RC builds are explicitly required

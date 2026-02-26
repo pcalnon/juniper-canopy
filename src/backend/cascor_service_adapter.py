@@ -8,7 +8,7 @@
 # Author:        Paul Calnon
 # Version:       0.1.0
 # File Name:     cascor_service_adapter.py
-# File Path:     JuniperCanopy/juniper_canopy/src/backend/
+# File Path:     Juniper/juniper-canopy/src/backend/
 #
 # Date Created:  2026-02-21
 # Last Modified: 2026-02-21

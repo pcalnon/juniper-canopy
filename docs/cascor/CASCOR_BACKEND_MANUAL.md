@@ -160,7 +160,7 @@ start_monitoring_thread(interval=1.0)
 1. **CasCor backend installed:**
 
    ```bash
-   cd ~/Development/python/JuniperCanopy
+   cd ~/Development/python/Juniper/juniper-canopy
    ls cascor/src/cascade_correlation/cascade_correlation.py
    ```
 
@@ -188,7 +188,7 @@ backend:
     enabled: true
     monitoring_hooks: true
     state_polling_interval_ms: 500
-    backend_path: ~/Development/python/JuniperCanopy/cascor
+    backend_path: ~/Development/python/Juniper/juniper-cascor
 ```
 
 **Environment variables:**

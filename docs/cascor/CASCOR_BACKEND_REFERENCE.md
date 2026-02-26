@@ -591,7 +591,7 @@ backend:
     enabled: boolean (default: true)
     monitoring_hooks: boolean (default: true)
     state_polling_interval_ms: integer (default: 500)
-    backend_path: string (default: "~/Development/python/JuniperCanopy/cascor")
+    backend_path: string (default: "~/Development/python/Juniper/juniper-cascor")
 ```
 
 ### Environment Variables

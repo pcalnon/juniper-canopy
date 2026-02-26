@@ -1,6 +1,6 @@
 # Docker configuration for Juniper Canopy
-# Build: docker build -t juniper_canopy .
-# Run: docker run -p 8050:8050 juniper_canopy
+# Build: docker build -t juniper-canopy .
+# Run: docker run -p 8050:8050 juniper-canopy
 FROM python:3.9-slim
 
 RUN useradd -d /home/juniper -m -s /bin/bash juniper

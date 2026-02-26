@@ -82,7 +82,7 @@ TOTAL                          2341    622    73%
 ```
 
 **View HTML report:**
-<file:///home/pcalnon/Development/python/JuniperCanopy/juniper_canopy/src/tests/reports/coverage/index.html>
+<file:///home/pcalnon/Development/python/Juniper/juniper-canopy/src/tests/reports/coverage/index.html>
 
 ---
 

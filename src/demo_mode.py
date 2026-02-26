@@ -8,7 +8,7 @@
 # Author:        Paul Calnon
 # Version:       0.1.1
 # File Name:     demo_mode.py
-# File Path:     ${HOME}/Development/python/JuniperCanopy/juniper_canopy/src/
+# File Path:     ${HOME}/Development/python/Juniper/juniper-canopy/src/
 #
 # Date Created:  2025-10-22
 # Last Modified: 2025-12-13
