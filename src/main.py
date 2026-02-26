@@ -136,18 +136,21 @@ async def lifespan(app: FastAPI):
     # CAN-HIGH-001: Probe JuniperData health at startup (non-blocking).
     global juniper_data_available
     health_url = f"{juniper_data_url.rstrip('/')}/health"
-    try:
-        import urllib.request
+    if not health_url.startswith(("http://", "https://")):
+        system_logger.warning(f"JuniperData health check skipped — unsupported scheme in URL: {health_url}")
+    else:
+        try:
+            import urllib.request
 
-        req = urllib.request.Request(health_url, method="GET")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            if resp.status == 200:
-                juniper_data_available = True
-                system_logger.info(f"JuniperData health check passed: {health_url}")
-            else:
-                system_logger.warning(f"JuniperData health check returned status {resp.status} — data operations may fail")
-    except Exception as e:
-        system_logger.warning(f"JuniperData unreachable at {health_url}: {e} — data operations will fail until service is available")
+            req = urllib.request.Request(health_url, method="GET")
+            with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310 — URL scheme validated above
+                if resp.status == 200:
+                    juniper_data_available = True
+                    system_logger.info(f"JuniperData health check passed: {health_url}")
+                else:
+                    system_logger.warning(f"JuniperData health check returned status {resp.status} — data operations may fail")
+        except Exception as e:
+            system_logger.warning(f"JuniperData unreachable at {health_url}: {e} — data operations will fail until service is available")
 
     if demo_mode_active:
         system_logger.info("Initializing demo mode")
