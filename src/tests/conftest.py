@@ -492,6 +492,12 @@ def reset_singletons():
                     demo_mode_module._demo_instance.stop()
             demo_mode_module._demo_instance = None
 
+    # Reset security singletons
+    with contextlib.suppress(ImportError):
+        from security import reset_security_state
+
+        reset_security_state()
+
     # Reset callback context adapter
     with contextlib.suppress(ImportError):
         from frontend.callback_context import CallbackContextAdapter
@@ -529,6 +535,12 @@ def reset_singletons():
                 with contextlib.suppress(Exception):
                     demo_mode_module._demo_instance.stop()
             demo_mode_module._demo_instance = None
+
+    # Reset security singletons after test
+    with contextlib.suppress(ImportError):
+        from security import reset_security_state
+
+        reset_security_state()
 
 
 # Fake backend root fixture for testing CasCor integration

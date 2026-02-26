@@ -230,6 +230,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add security middleware (API key auth + rate limiting)
+from middleware import SecurityMiddleware
+from security import get_api_key_auth, get_rate_limiter
+
+api_key_auth = get_api_key_auth()
+rate_limiter = get_rate_limiter()
+app.add_middleware(SecurityMiddleware, api_key_auth=api_key_auth, rate_limiter=rate_limiter)
+
 # Initialize backend integration — three-mode priority:
 #   1. CASCOR_DEMO_MODE=1 → Demo mode (highest priority)
 #   2. CASCOR_SERVICE_URL set → Service mode via CascorServiceAdapter (REST/WS)
