@@ -230,8 +230,8 @@ class TestAPITopologyEndpoint:
         response = test_client.get("/api/topology")
         data = response.json()
 
-        assert "input_units" in data
-        assert "output_units" in data
+        assert "input_size" in data
+        assert "output_size" in data
         assert "nodes" in data or "error" not in data
 
 

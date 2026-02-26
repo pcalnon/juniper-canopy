@@ -496,22 +496,21 @@ class TestDecisionBoundaryEndpoint:
         response = client.get("/api/decision_boundary")
         data = response.json()
 
-        assert "xx" in data
-        assert "yy" in data
-        assert "Z" in data
-        assert "bounds" in data
+        assert "x" in data
+        assert "y" in data
+        assert "z" in data
+        assert "resolution" in data
 
     @pytest.mark.integration
     def test_decision_boundary_bounds_structure(self, client):
-        """GET /api/decision_boundary bounds should have min/max."""
+        """GET /api/decision_boundary should have min/max bounds."""
         response = client.get("/api/decision_boundary")
         data = response.json()
-        bounds = data["bounds"]
 
-        assert "x_min" in bounds
-        assert "x_max" in bounds
-        assert "y_min" in bounds
-        assert "y_max" in bounds
+        assert "x_min" in data
+        assert "x_max" in data
+        assert "y_min" in data
+        assert "y_max" in data
 
 
 # =============================================================================
@@ -892,18 +891,18 @@ class TestTopologyWithHiddenUnits:
     """Test topology endpoint with different network states."""
 
     @pytest.mark.integration
-    def test_topology_has_input_units(self, client):
-        """Topology should report input units."""
+    def test_topology_has_input_size(self, client):
+        """Topology should report input size."""
         response = client.get("/api/topology")
         data = response.json()
-        assert data["input_units"] > 0
+        assert data["input_size"] > 0
 
     @pytest.mark.integration
-    def test_topology_has_output_units(self, client):
-        """Topology should report output units."""
+    def test_topology_has_output_size(self, client):
+        """Topology should report output size."""
         response = client.get("/api/topology")
         data = response.json()
-        assert data["output_units"] > 0
+        assert data["output_size"] > 0
 
     @pytest.mark.integration
     def test_topology_connections_from_to(self, client):
@@ -1110,180 +1109,138 @@ class TestLayoutsWithHyperparameters:
 
 
 class TestNoBackendPaths:
-    """Test endpoints when no backend is available (mocked demo_mode_instance)."""
+    """Test endpoints when backend returns None/error for various calls."""
 
     @pytest.mark.integration
-    def test_train_start_no_backend(self, client):
-        """POST /api/train/start should return 503 without backend."""
-        original_instance = main_module.demo_mode_instance
-        try:
-            main_module.demo_mode_instance = None
-            response = client.post("/api/train/start")
-            assert response.status_code == 503
-            assert "No backend available" in response.json()["error"]
-        finally:
-            main_module.demo_mode_instance = original_instance
+    def test_train_start_with_backend(self, client):
+        """POST /api/train/start should succeed (backend always available)."""
+        response = client.post("/api/train/start")
+        assert response.status_code == 200
+        assert response.json()["status"] == "started"
 
     @pytest.mark.integration
-    def test_train_pause_no_backend(self, client):
-        """POST /api/train/pause should return 503 without backend."""
-        original_instance = main_module.demo_mode_instance
-        try:
-            main_module.demo_mode_instance = None
-            response = client.post("/api/train/pause")
-            assert response.status_code == 503
-            assert "No backend available" in response.json()["error"]
-        finally:
-            main_module.demo_mode_instance = original_instance
+    def test_train_pause_with_backend(self, client):
+        """POST /api/train/pause should succeed (backend always available)."""
+        client.post("/api/train/start")
+        response = client.post("/api/train/pause")
+        assert response.status_code == 200
+        assert response.json()["status"] == "paused"
 
     @pytest.mark.integration
-    def test_train_resume_no_backend(self, client):
-        """POST /api/train/resume should return 503 without backend."""
-        original_instance = main_module.demo_mode_instance
-        try:
-            main_module.demo_mode_instance = None
-            response = client.post("/api/train/resume")
-            assert response.status_code == 503
-            assert "No backend available" in response.json()["error"]
-        finally:
-            main_module.demo_mode_instance = original_instance
+    def test_train_resume_with_backend(self, client):
+        """POST /api/train/resume should succeed (backend always available)."""
+        client.post("/api/train/start")
+        client.post("/api/train/pause")
+        response = client.post("/api/train/resume")
+        assert response.status_code == 200
+        assert response.json()["status"] == "running"
 
     @pytest.mark.integration
-    def test_train_stop_no_backend(self, client):
-        """POST /api/train/stop should return 503 without backend."""
-        original_instance = main_module.demo_mode_instance
-        try:
-            main_module.demo_mode_instance = None
-            response = client.post("/api/train/stop")
-            assert response.status_code == 503
-            assert "No backend available" in response.json()["error"]
-        finally:
-            main_module.demo_mode_instance = original_instance
+    def test_train_stop_with_backend(self, client):
+        """POST /api/train/stop should succeed (backend always available)."""
+        client.post("/api/train/start")
+        response = client.post("/api/train/stop")
+        assert response.status_code == 200
+        assert response.json()["status"] == "stopped"
 
     @pytest.mark.integration
-    def test_train_reset_no_backend(self, client):
-        """POST /api/train/reset should return 503 without backend."""
-        original_instance = main_module.demo_mode_instance
-        try:
-            main_module.demo_mode_instance = None
-            response = client.post("/api/train/reset")
-            assert response.status_code == 503
-            assert "No backend available" in response.json()["error"]
-        finally:
-            main_module.demo_mode_instance = original_instance
+    def test_train_reset_with_backend(self, client):
+        """POST /api/train/reset should succeed (backend always available)."""
+        response = client.post("/api/train/reset")
+        assert response.status_code == 200
+        assert response.json()["status"] == "reset"
 
     @pytest.mark.integration
-    def test_get_metrics_no_backend(self, client):
-        """GET /api/metrics should return empty dict without backend."""
-        original_instance = main_module.demo_mode_instance
-        try:
-            main_module.demo_mode_instance = None
-            response = client.get("/api/metrics")
-            assert response.status_code == 200
-            data = response.json()
-            assert data == {}
-        finally:
-            main_module.demo_mode_instance = original_instance
+    def test_get_metrics_returns_data(self, client):
+        """GET /api/metrics should return metrics from backend."""
+        response = client.get("/api/metrics")
+        assert response.status_code == 200
 
     @pytest.mark.integration
-    def test_get_metrics_history_no_backend(self, client):
-        """GET /api/metrics/history should return 503 without backend."""
-        original_instance = main_module.demo_mode_instance
-        original_cascor = main_module.backend
+    def test_get_metrics_history_returns_none(self, client):
+        """GET /api/metrics/history should work when backend returns empty."""
+        mock_backend = MagicMock()
+        mock_backend.get_metrics_history.return_value = []
+        original_backend = main_module.backend
         try:
-            main_module.demo_mode_instance = None
-            main_module.backend = None
+            main_module.backend = mock_backend
             response = client.get("/api/metrics/history")
-            assert response.status_code == 503
+            assert response.status_code == 200
+            assert response.json()["history"] == []
         finally:
-            main_module.demo_mode_instance = original_instance
-            main_module.backend = original_cascor
+            main_module.backend = original_backend
 
     @pytest.mark.integration
-    def test_get_topology_no_backend(self, client):
-        """GET /api/topology should return 503 without backend."""
-        original_instance = main_module.demo_mode_instance
-        original_cascor = main_module.backend
+    def test_get_topology_returns_none(self, client):
+        """GET /api/topology should return 503 when backend returns None."""
+        mock_backend = MagicMock()
+        mock_backend.get_network_topology.return_value = None
+        original_backend = main_module.backend
         try:
-            main_module.demo_mode_instance = None
-            main_module.backend = None
+            main_module.backend = mock_backend
             response = client.get("/api/topology")
             assert response.status_code == 503
         finally:
-            main_module.demo_mode_instance = original_instance
-            main_module.backend = original_cascor
+            main_module.backend = original_backend
 
     @pytest.mark.integration
-    def test_get_dataset_no_backend(self, client):
-        """GET /api/dataset should return 503 without backend."""
-        original_instance = main_module.demo_mode_instance
-        original_cascor = main_module.backend
+    def test_get_dataset_returns_none(self, client):
+        """GET /api/dataset should return 503 when backend returns None."""
+        mock_backend = MagicMock()
+        mock_backend.get_dataset.return_value = None
+        original_backend = main_module.backend
         try:
-            main_module.demo_mode_instance = None
-            main_module.backend = None
+            main_module.backend = mock_backend
             response = client.get("/api/dataset")
             assert response.status_code == 503
         finally:
-            main_module.demo_mode_instance = original_instance
-            main_module.backend = original_cascor
+            main_module.backend = original_backend
 
     @pytest.mark.integration
-    def test_get_decision_boundary_no_backend(self, client):
-        """GET /api/decision_boundary should return 503 without backend."""
-        original_instance = main_module.demo_mode_instance
-        original_cascor = main_module.backend
+    def test_get_decision_boundary_returns_none(self, client):
+        """GET /api/decision_boundary should return 503 when backend returns None."""
+        mock_backend = MagicMock()
+        mock_backend.get_decision_boundary.return_value = None
+        original_backend = main_module.backend
         try:
-            main_module.demo_mode_instance = None
-            main_module.backend = None
+            main_module.backend = mock_backend
             response = client.get("/api/decision_boundary")
             assert response.status_code == 503
         finally:
-            main_module.demo_mode_instance = original_instance
-            main_module.backend = original_cascor
+            main_module.backend = original_backend
 
     @pytest.mark.integration
-    def test_get_network_stats_no_backend(self, client):
-        """GET /api/network/stats should return 503 without backend."""
-        original_instance = main_module.demo_mode_instance
-        original_cascor = main_module.backend
+    def test_get_network_stats_no_data(self, client):
+        """GET /api/network/stats should return 503 when backend has no network data."""
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        # hasattr check for _adapter passes because MagicMock has it,
+        # but get_network_data returns a MagicMock. Remove _adapter so the
+        # endpoint falls through to the 503 path.
+        del mock_backend._adapter
+        original_backend = main_module.backend
         try:
-            main_module.demo_mode_instance = None
-            main_module.backend = None
+            main_module.backend = mock_backend
             response = client.get("/api/network/stats")
             assert response.status_code == 503
         finally:
-            main_module.demo_mode_instance = original_instance
-            main_module.backend = original_cascor
+            main_module.backend = original_backend
 
     @pytest.mark.integration
-    def test_get_status_no_backend(self, client):
-        """GET /api/status should return minimal status without backend."""
-        original_instance = main_module.demo_mode_instance
-        original_cascor = main_module.backend
-        try:
-            main_module.demo_mode_instance = None
-            main_module.backend = None
-            response = client.get("/api/status")
-            assert response.status_code == 200
-            data = response.json()
-            assert data["is_training"] is False
-            assert data["network_connected"] is False
-        finally:
-            main_module.demo_mode_instance = original_instance
-            main_module.backend = original_cascor
+    def test_get_status_with_backend(self, client):
+        """GET /api/status should return status from backend."""
+        response = client.get("/api/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert "fsm_status" in data
 
     @pytest.mark.integration
-    def test_get_state_no_backend(self, client):
-        """GET /api/state should return training_state without demo mode."""
-        original_instance = main_module.demo_mode_instance
-        try:
-            main_module.demo_mode_instance = None
-            response = client.get("/api/state")
-            assert response.status_code == 200
-            data = response.json()
-            assert "status" in data or "learning_rate" in data
-        finally:
-            main_module.demo_mode_instance = original_instance
+    def test_get_state_with_backend(self, client):
+        """GET /api/state should return training state from backend."""
+        response = client.get("/api/state")
+        assert response.status_code == 200
+        data = response.json()
+        assert "status" in data or "learning_rate" in data
 
 
 # =============================================================================
@@ -1309,44 +1266,36 @@ class TestHealthWithMockedCascor:
 
 
 class TestWebSocketWithCascorIntegration:
-    """Test WebSocket endpoints with mocked cascor integration."""
+    """Test WebSocket endpoints with mocked service backend."""
 
     @pytest.mark.integration
-    def test_ws_training_with_cascor_status(self, client):
-        """WebSocket training should work with cascor integration path."""
-        original_demo = main_module.demo_mode_active
-        original_instance = main_module.demo_mode_instance
-
-        mock_cascor = MagicMock()
-        mock_cascor.get_training_status.return_value = {"status": "idle", "epoch": 0}
-        original_cascor = main_module.backend
+    def test_ws_training_with_service_backend(self, client):
+        """WebSocket training should work with service backend."""
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.get_status.return_value = {"status": "idle", "epoch": 0}
+        mock_backend.is_training_active.return_value = False
+        original_backend = main_module.backend
 
         try:
-            main_module.demo_mode_active = False
-            main_module.demo_mode_instance = None
-            main_module.backend = mock_cascor
+            main_module.backend = mock_backend
 
             with client.websocket_connect("/ws/training") as ws:
                 data = ws.receive_json()
                 assert data["type"] == "connection_established"
         finally:
-            main_module.demo_mode_active = original_demo
-            main_module.demo_mode_instance = original_instance
-            main_module.backend = original_cascor
+            main_module.backend = original_backend
 
     @pytest.mark.integration
-    def test_ws_control_with_cascor(self, client):
-        """WebSocket control should handle cascor integration path."""
-        original_demo = main_module.demo_mode_active
-        original_instance = main_module.demo_mode_instance
-
-        mock_cascor = MagicMock()
-        original_cascor = main_module.backend
+    def test_ws_control_with_service_backend(self, client):
+        """WebSocket control should handle service backend path."""
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.start_training.side_effect = Exception("Service error")
+        original_backend = main_module.backend
 
         try:
-            main_module.demo_mode_active = False
-            main_module.demo_mode_instance = None
-            main_module.backend = mock_cascor
+            main_module.backend = mock_backend
 
             with client.websocket_connect("/ws/control") as ws:
                 ws.receive_json()
@@ -1359,9 +1308,7 @@ class TestWebSocketWithCascorIntegration:
                         break
                 assert response["ok"] is False
         finally:
-            main_module.demo_mode_active = original_demo
-            main_module.demo_mode_instance = original_instance
-            main_module.backend = original_cascor
+            main_module.backend = original_backend
 
 
 # =============================================================================
@@ -1370,69 +1317,50 @@ class TestWebSocketWithCascorIntegration:
 
 
 class TestTrainEndpointsWithCascor:
-    """Test training endpoints with mocked cascor integration."""
+    """Test training endpoints with mocked backend."""
 
     @pytest.mark.integration
-    def test_train_start_with_cascor_busy(self, client):
-        """POST /api/train/start should return busy when training in progress."""
-        original_demo = main_module.demo_mode_instance
-        mock_cascor = MagicMock()
-        # P1-NEW-003: Async training - mock returns True for is_training_in_progress
-        mock_cascor.is_training_in_progress.return_value = True
-        original_cascor = main_module.backend
+    def test_train_start_with_mock_backend(self, client):
+        """POST /api/train/start should call backend.start_training."""
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.start_training.return_value = {"epoch": 0}
+        original_backend = main_module.backend
 
         try:
-            main_module.demo_mode_instance = None
-            main_module.backend = mock_cascor
-
-            response = client.post("/api/train/start")
-            assert response.status_code == 200
-            assert response.json()["status"] == "busy"
-            assert "already in progress" in response.json()["message"]
-        finally:
-            main_module.demo_mode_instance = original_demo
-            main_module.backend = original_cascor
-
-    @pytest.mark.integration
-    def test_train_start_with_cascor_no_network(self, client):
-        """POST /api/train/start should return error when no network configured."""
-        original_demo = main_module.demo_mode_instance
-        mock_cascor = MagicMock()
-        mock_cascor.is_training_in_progress.return_value = False
-        mock_cascor.network = None  # No network configured
-        original_cascor = main_module.backend
-
-        try:
-            main_module.demo_mode_instance = None
-            main_module.backend = mock_cascor
-
-            response = client.post("/api/train/start")
-            assert response.status_code == 400
-            assert "No network configured" in response.json()["error"]
-        finally:
-            main_module.demo_mode_instance = original_demo
-            main_module.backend = original_cascor
-
-    @pytest.mark.integration
-    def test_train_start_with_cascor_success(self, client):
-        """POST /api/train/start should start training when conditions met."""
-        original_demo = main_module.demo_mode_instance
-        mock_cascor = MagicMock()
-        mock_cascor.is_training_in_progress.return_value = False
-        mock_cascor.network = MagicMock()  # Network exists
-        mock_cascor.start_training_background.return_value = True
-        original_cascor = main_module.backend
-
-        try:
-            main_module.demo_mode_instance = None
-            main_module.backend = mock_cascor
+            main_module.backend = mock_backend
 
             response = client.post("/api/train/start")
             assert response.status_code == 200
             assert response.json()["status"] == "started"
+            mock_backend.start_training.assert_called_once_with(reset=False)
         finally:
-            main_module.demo_mode_instance = original_demo
-            main_module.backend = original_cascor
+            main_module.backend = original_backend
+
+    @pytest.mark.integration
+    def test_train_start_with_reset(self, client):
+        """POST /api/train/start?reset=true should pass reset=True."""
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.start_training.return_value = {"epoch": 0}
+        original_backend = main_module.backend
+
+        try:
+            main_module.backend = mock_backend
+
+            response = client.post("/api/train/start?reset=true")
+            assert response.status_code == 200
+            assert response.json()["status"] == "started"
+            mock_backend.start_training.assert_called_once_with(reset=True)
+        finally:
+            main_module.backend = original_backend
+
+    @pytest.mark.integration
+    def test_train_start_success_with_demo(self, client):
+        """POST /api/train/start should succeed with demo backend."""
+        response = client.post("/api/train/start")
+        assert response.status_code == 200
+        assert response.json()["status"] == "started"
 
 
 # =============================================================================
@@ -1542,15 +1470,14 @@ class TestRealSnapshotFiles:
     def test_list_real_snapshot_files(self, client, temp_snapshots_dir):
         """GET /api/v1/snapshots should list real HDF5 files."""
         original_dir = main_module._snapshots_dir
-        original_demo = main_module.demo_mode_active
-        original_cascor = main_module.backend
+        original_backend = main_module.backend
 
-        mock_cascor = MagicMock()
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
 
         try:
             main_module._snapshots_dir = str(temp_snapshots_dir)
-            main_module.demo_mode_active = False
-            main_module.backend = mock_cascor
+            main_module.backend = mock_backend
 
             response = client.get("/api/v1/snapshots")
             assert response.status_code == 200
@@ -1562,22 +1489,20 @@ class TestRealSnapshotFiles:
             assert "not_a_snapshot.txt" not in snapshot_names
         finally:
             main_module._snapshots_dir = original_dir
-            main_module.demo_mode_active = original_demo
-            main_module.backend = original_cascor
+            main_module.backend = original_backend
 
     @pytest.mark.integration
     def test_get_real_snapshot_detail(self, client, temp_snapshots_dir):
         """GET /api/v1/snapshots/{id} should return real file details."""
         original_dir = main_module._snapshots_dir
-        original_demo = main_module.demo_mode_active
-        original_cascor = main_module.backend
+        original_backend = main_module.backend
 
-        mock_cascor = MagicMock()
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
 
         try:
             main_module._snapshots_dir = str(temp_snapshots_dir)
-            main_module.demo_mode_active = False
-            main_module.backend = mock_cascor
+            main_module.backend = mock_backend
 
             response = client.get("/api/v1/snapshots/test_snapshot_001")
             assert response.status_code == 200
@@ -1589,43 +1514,39 @@ class TestRealSnapshotFiles:
             assert "timestamp" in data
         finally:
             main_module._snapshots_dir = original_dir
-            main_module.demo_mode_active = original_demo
-            main_module.backend = original_cascor
+            main_module.backend = original_backend
 
     @pytest.mark.integration
     def test_get_snapshot_detail_not_found(self, client, temp_snapshots_dir):
         """GET /api/v1/snapshots/{id} should return 404 for missing file."""
         original_dir = main_module._snapshots_dir
-        original_demo = main_module.demo_mode_active
-        original_cascor = main_module.backend
+        original_backend = main_module.backend
 
-        mock_cascor = MagicMock()
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
 
         try:
             main_module._snapshots_dir = str(temp_snapshots_dir)
-            main_module.demo_mode_active = False
-            main_module.backend = mock_cascor
+            main_module.backend = mock_backend
 
             response = client.get("/api/v1/snapshots/nonexistent_snapshot")
             assert response.status_code == 404
         finally:
             main_module._snapshots_dir = original_dir
-            main_module.demo_mode_active = original_demo
-            main_module.backend = original_cascor
+            main_module.backend = original_backend
 
     @pytest.mark.integration
     def test_list_empty_snapshot_directory(self, client, tmp_path):
         """GET /api/v1/snapshots should return empty list for empty dir."""
         original_dir = main_module._snapshots_dir
-        original_demo = main_module.demo_mode_active
-        original_cascor = main_module.backend
+        original_backend = main_module.backend
 
-        mock_cascor = MagicMock()
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
 
         try:
             main_module._snapshots_dir = str(tmp_path)
-            main_module.demo_mode_active = False
-            main_module.backend = mock_cascor
+            main_module.backend = mock_backend
 
             response = client.get("/api/v1/snapshots")
             assert response.status_code == 200
@@ -1635,8 +1556,7 @@ class TestRealSnapshotFiles:
             assert "No snapshots available" in data.get("message", "")
         finally:
             main_module._snapshots_dir = original_dir
-            main_module.demo_mode_active = original_demo
-            main_module.backend = original_cascor
+            main_module.backend = original_backend
 
 
 # =============================================================================
@@ -1651,19 +1571,17 @@ class TestSnapshotDetailMissingDir:
     def test_detail_missing_directory_404(self, client):
         """GET /api/v1/snapshots/{id} should return 404 when dir missing."""
         original_dir = main_module._snapshots_dir
-        original_demo = main_module.demo_mode_active
-        original_cascor = main_module.backend
+        original_backend = main_module.backend
 
-        mock_cascor = MagicMock()
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
 
         try:
             main_module._snapshots_dir = "/nonexistent/snapshots/path"
-            main_module.demo_mode_active = False
-            main_module.backend = mock_cascor
+            main_module.backend = mock_backend
 
             response = client.get("/api/v1/snapshots/some_snapshot")
             assert response.status_code == 404
         finally:
             main_module._snapshots_dir = original_dir
-            main_module.demo_mode_active = original_demo
-            main_module.backend = original_cascor
+            main_module.backend = original_backend

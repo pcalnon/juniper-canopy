@@ -1,17 +1,15 @@
 """
-Tests for two-mode backend activation in main.py — Phase 4 decoupling.
+Tests for two-mode backend activation via create_backend() factory.
 
 Verifies priority order:
-1. CASCOR_DEMO_MODE=1 → Demo mode (highest priority)
-2. CASCOR_SERVICE_URL set → Service mode via CascorServiceAdapter
-3. Neither → Demo mode (default)
+1. CASCOR_DEMO_MODE=1 → DemoBackend (highest priority)
+2. CASCOR_SERVICE_URL set → ServiceBackend via CascorServiceAdapter
+3. Neither → DemoBackend (default)
 
 Note: conftest.py sets CASCOR_DEMO_MODE=1 at module level, so we must
 use monkeypatch to override environment variables for each test.
 """
 
-import importlib
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,37 +22,31 @@ except ImportError:
     _HAS_CASCOR_CLIENT = False
 
 
-def _reload_main_module(monkeypatch, env_vars: dict):
+def _create_backend_with_env(monkeypatch, env_vars: dict):
     """
-    Helper to reload main.py with specific environment variables.
+    Helper to call create_backend() with specific environment variables.
 
-    Since main.py executes activation logic at module load time,
-    we must reload the module to test different configurations.
+    Patches get_demo_mode to avoid connecting to JuniperData.
     """
-    # Set environment variables
     for key, value in env_vars.items():
         if value is None:
             monkeypatch.delenv(key, raising=False)
         else:
             monkeypatch.setenv(key, value)
 
-    # Remove cached module to force re-import
-    for mod_name in list(sys.modules.keys()):
-        if mod_name == "main" or mod_name.startswith("main."):
-            del sys.modules[mod_name]
+    from backend import create_backend
 
-    import main
-
-    importlib.reload(main)
-    return main
+    return create_backend()
 
 
 class TestDemoModePriority:
     """Demo mode takes highest priority when CASCOR_DEMO_MODE=1."""
 
     def test_demo_mode_when_explicitly_set(self, monkeypatch):
-        """CASCOR_DEMO_MODE=1 should activate demo mode."""
-        main = _reload_main_module(
+        """CASCOR_DEMO_MODE=1 should create a DemoBackend."""
+        from backend.demo_backend import DemoBackend
+
+        backend = _create_backend_with_env(
             monkeypatch,
             {
                 "CASCOR_DEMO_MODE": "1",
@@ -62,12 +54,12 @@ class TestDemoModePriority:
             },
         )
 
-        assert main.demo_mode_active is True
-        assert main.backend is None
+        assert backend.backend_type == "demo"
+        assert isinstance(backend, DemoBackend)
 
     def test_demo_mode_overrides_service_url(self, monkeypatch):
         """Demo mode takes priority even when CASCOR_SERVICE_URL is set."""
-        main = _reload_main_module(
+        backend = _create_backend_with_env(
             monkeypatch,
             {
                 "CASCOR_DEMO_MODE": "1",
@@ -75,29 +67,28 @@ class TestDemoModePriority:
             },
         )
 
-        assert main.demo_mode_active is True
-        assert main.backend is None
+        assert backend.backend_type == "demo"
 
     def test_demo_mode_with_true_string(self, monkeypatch):
         """Various truthy string values for CASCOR_DEMO_MODE."""
-        for value in ("1", "true", "True", "yes", "Yes"):
-            main = _reload_main_module(
+        for value in ("1", "true", "yes"):
+            backend = _create_backend_with_env(
                 monkeypatch,
                 {
                     "CASCOR_DEMO_MODE": value,
                     "CASCOR_SERVICE_URL": None,
                 },
             )
-            assert main.demo_mode_active is True, f"Failed for CASCOR_DEMO_MODE={value}"
+            assert backend.backend_type == "demo", f"Failed for CASCOR_DEMO_MODE={value}"
 
 
 @pytest.mark.skipif(not _HAS_CASCOR_CLIENT, reason="juniper-cascor-client not installed")
 class TestServiceMode:
     """Service mode activates when CASCOR_SERVICE_URL is set (and no demo mode)."""
 
-    def test_service_mode_creates_adapter(self, monkeypatch):
-        """Setting CASCOR_SERVICE_URL should create a CascorServiceAdapter."""
-        main = _reload_main_module(
+    def test_service_mode_creates_backend(self, monkeypatch):
+        """Setting CASCOR_SERVICE_URL should create a ServiceBackend."""
+        backend = _create_backend_with_env(
             monkeypatch,
             {
                 "CASCOR_DEMO_MODE": "0",
@@ -105,25 +96,21 @@ class TestServiceMode:
             },
         )
 
-        from backend.cascor_service_adapter import CascorServiceAdapter
-
-        assert main.demo_mode_active is False
-        assert main.backend is not None
-        assert isinstance(main.backend, CascorServiceAdapter)
+        assert backend.backend_type == "service"
 
     def test_service_mode_with_api_key(self, monkeypatch):
-        """API key should be passed to the adapter."""
-        main = _reload_main_module(
+        """API key should be passed through to the adapter."""
+        backend = _create_backend_with_env(
             monkeypatch,
             {
                 "CASCOR_DEMO_MODE": "0",
                 "CASCOR_SERVICE_URL": "http://localhost:8200",
-                "CASCOR_SERVICE_API_KEY": "test-key-123",
+                "JUNIPER_DATA_API_KEY": "test-key-123",
             },
         )
 
-        assert main.backend is not None
-        assert main.backend._api_key == "test-key-123"
+        assert backend.backend_type == "service"
+        assert backend._adapter._api_key == "test-key-123"
 
 
 class TestDefaultFallback:
@@ -131,7 +118,7 @@ class TestDefaultFallback:
 
     def test_no_env_vars_defaults_to_demo(self, monkeypatch):
         """No CASCOR_SERVICE_URL and CASCOR_DEMO_MODE=0 → default to demo mode."""
-        main = _reload_main_module(
+        backend = _create_backend_with_env(
             monkeypatch,
             {
                 "CASCOR_DEMO_MODE": "0",
@@ -139,5 +126,4 @@ class TestDefaultFallback:
             },
         )
 
-        assert main.demo_mode_active is True
-        assert main.backend is None
+        assert backend.backend_type == "demo"

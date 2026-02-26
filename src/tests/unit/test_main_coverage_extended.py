@@ -832,28 +832,23 @@ class TestCascorIntegrationWebSocketBranch:
     """Test cascor_integration branch in WebSocket endpoint."""
 
     @pytest.mark.unit
-    def test_websocket_initial_status_with_cascor(self):
-        """Test initial status uses cascor_integration when available."""
+    def test_websocket_initial_status_with_service_backend(self):
+        """Test initial status uses backend.get_status() when service backend."""
         import main
 
-        original_demo = main.demo_mode_active
-        original_instance = main.demo_mode_instance
-        original_cascor = main.backend
+        original_backend = main.backend
 
-        mock_cascor = MagicMock()
-        mock_cascor.get_training_status.return_value = {"is_training": False, "current_epoch": 0}
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.get_status.return_value = {"is_training": False, "current_epoch": 0}
 
-        main.demo_mode_active = False
-        main.demo_mode_instance = None
-        main.backend = mock_cascor
+        main.backend = mock_backend
 
         try:
-            status = mock_cascor.get_training_status()
+            status = mock_backend.get_status()
             assert "is_training" in status
         finally:
-            main.demo_mode_active = original_demo
-            main.demo_mode_instance = original_instance
-            main.backend = original_cascor
+            main.backend = original_backend
 
 
 class TestControlWebSocketBranches:

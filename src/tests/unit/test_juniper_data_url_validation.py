@@ -59,24 +59,18 @@ from main import app
 
 
 @pytest.fixture
-def _force_demo_mode():
-    """Ensure demo_mode_active is True for tests that need demo mode."""
-    original = main_module.demo_mode_active
-    main_module.demo_mode_active = True
+def _force_demo_mode(monkeypatch):
+    """Ensure demo mode via environment for tests that need it."""
+    monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
     yield
-    main_module.demo_mode_active = original
 
 
 @pytest.fixture
-def _force_real_mode():
-    """Ensure demo_mode_active is False and backend is None."""
-    orig_active = main_module.demo_mode_active
-    orig_cascor = main_module.backend
-    main_module.demo_mode_active = False
-    main_module.backend = None
+def _force_real_mode(monkeypatch):
+    """Ensure no demo mode and no backend for real-mode URL validation tests."""
+    monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
+    monkeypatch.delenv("CASCOR_SERVICE_URL", raising=False)
     yield
-    main_module.demo_mode_active = orig_active
-    main_module.backend = orig_cascor
 
 
 class TestJuniperDataUrlValidation:

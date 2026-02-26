@@ -95,10 +95,8 @@ ui_logger = get_ui_logger()
 # Event loop holder for thread-safe async scheduling from training callbacks
 loop_holder = {"loop": None}
 
-# Demo mode tracking (global variables for startup/shutdown).
-demo_mode_active = False
+# Global state tracking
 juniper_data_available = False
-demo_mode_instance = None
 training_state = TrainingState()  # Global TrainingState instance
 
 
@@ -117,8 +115,12 @@ async def lifespan(app: FastAPI):
     # Set event loop on websocket_manager for thread-safe broadcasting
     websocket_manager.set_event_loop(loop_holder["loop"])
 
-    # Initialize demo mode or real backend
-    global demo_mode_active, demo_mode_instance, backend, training_state
+    # Initialize backend via factory
+    global backend, training_state
+
+    from backend import create_backend
+
+    backend = create_backend()
 
     # Fix 4 (RC-5): Validate JUNIPER_DATA_URL for ALL modes, not just demo mode.
     # JuniperData is mandatory for both demo and real backend (CAN-INT-002).
@@ -152,43 +154,18 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             system_logger.warning(f"JuniperData unreachable at {health_url}: {e} — data operations will fail until service is available")
 
-    if demo_mode_active:
-        system_logger.info("Initializing demo mode")
+    # Initialize the backend (demo: starts simulation; service: connects to CasCor)
+    await backend.initialize()
 
-        from demo_mode import get_demo_mode
-
-        demo_mode_instance = get_demo_mode(update_interval=1.0)
-
-        system_logger.info("Demo mode network created")
-
-        # Initialize global training_state with demo mode defaults
-        if demo_mode_instance.training_state:
-            demo_state = demo_mode_instance.training_state.get_state()
+    # Sync global training_state with demo defaults if applicable
+    if backend.backend_type == "demo" and hasattr(backend, "_demo"):
+        demo = backend._demo
+        if demo.training_state:
+            demo_state = demo.training_state.get_state()
             training_state.update_state(**demo_state)
-            system_logger.info(f"Global training_state initialized with demo defaults: LR={demo_state.get('learning_rate')}, " f"MaxHidden={demo_state.get('max_hidden_units')}, Epochs={demo_state.get('max_epochs')}")
+            system_logger.info(f"Global training_state synced with demo defaults: LR={demo_state.get('learning_rate')}, " f"MaxHidden={demo_state.get('max_hidden_units')}, Epochs={demo_state.get('max_epochs')}")
 
-        # Start demo training simulation
-        demo_mode_instance.start()
-        system_logger.info("Demo mode started with simulated training")
-    else:
-        demo_mode_instance = None
-
-        if backend:
-            # Check if this is a service adapter (REST/WS) or legacy in-process integration
-            # Service mode: connect to remote CasCor service
-            system_logger.info("CasCor service mode active — connecting to remote service")
-            try:
-                connected = await backend.connect()
-                if connected:
-                    system_logger.info("Connected to CasCor service")
-                    await backend.start_metrics_relay()
-                    system_logger.info("CasCor service fully initialized — metrics relay active")
-                else:
-                    system_logger.warning("CasCor service not ready — training can be started when service is available")
-            except Exception as e:
-                system_logger.error(f"Failed to connect to CasCor service: {e}", exc_info=True)
-                system_logger.info("Service adapter created but connection failed. Will retry on demand.")
-
+    system_logger.info(f"Backend initialized: {backend.backend_type}")
     system_logger.info("Application startup complete")
 
     yield
@@ -196,19 +173,10 @@ async def lifespan(app: FastAPI):
     # Shutdown
     system_logger.info("Shutting down Juniper Canopy application")
 
-    # Stop demo mode if active
-    if demo_mode_instance:
-        demo_mode_instance.stop()
-        system_logger.info("Demo mode stopped")
+    await backend.shutdown()
 
     # Shutdown WebSocket connections
     await websocket_manager.shutdown()
-
-    # Shutdown backend (stop metrics relay, then close)
-    if backend:
-        if getattr(backend, "_is_service_adapter", False) is True:
-            await backend.stop_metrics_relay()
-        backend.shutdown()
 
     system_logger.info("Application shutdown complete")
 
@@ -230,41 +198,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize backend integration — three-mode priority:
-#   1. CASCOR_DEMO_MODE=1 → Demo mode (highest priority)
-#   2. CASCOR_SERVICE_URL set → Service mode via CascorServiceAdapter (REST/WS)
-#   3. Neither → Demo mode (default)
-
-force_demo_mode = os.getenv("CASCOR_DEMO_MODE", "0") in ("1", "true", "True", "yes", "Yes")
-cascor_service_url = os.getenv("CASCOR_SERVICE_URL")
-
-if force_demo_mode:
-    system_logger.info("Demo mode explicitly enabled via CASCOR_DEMO_MODE environment variable")
-    backend = None
-    demo_mode_active = True
-elif cascor_service_url:
-    # Service mode: communicate with CasCor over REST/WebSocket
-    try:
-        from backend.cascor_service_adapter import CascorServiceAdapter
-
-        cascor_api_key = os.getenv("CASCOR_SERVICE_API_KEY")
-        backend = CascorServiceAdapter(service_url=cascor_service_url, api_key=cascor_api_key)
-        demo_mode_active = False
-        system_logger.info(f"CasCor service adapter initialized: {cascor_service_url}")
-    except ImportError:
-        system_logger.warning("juniper-cascor-client not installed, falling back to demo mode")
-        backend = None
-        demo_mode_active = True
-    except Exception as e:
-        system_logger.error(f"Failed to initialize CasCor service adapter: {e}")
-        system_logger.info("Falling back to demo mode")
-        backend = None
-        demo_mode_active = True
-else:
-    # No config — default to demo mode
-    system_logger.info("No CasCor service URL configured, defaulting to demo mode")
-    backend = None
-    demo_mode_active = True
+# Backend is initialized in lifespan via create_backend() factory
+backend = None
 
 # Initialize Dash dashboard (standalone with its own Flask server)
 dashboard_manager = DashboardManager(config.get_section("frontend"))
@@ -325,13 +260,7 @@ async def websocket_training_endpoint(websocket: WebSocket):
     await websocket_manager.connect(websocket, client_id=client_id)
     try:
         # Send initial status
-        global demo_mode_instance, demo_mode_active
-        if demo_mode_active and demo_mode_instance:
-            status = demo_mode_instance.get_current_state()
-        elif backend:
-            status = backend.get_training_status()
-        else:
-            status = {"error": "No backend available"}
+        status = backend.get_status()
 
         await websocket_manager.send_personal_message({"type": "initial_status", "data": status}, websocket)
 
@@ -393,99 +322,32 @@ async def websocket_control_endpoint(websocket: WebSocket):
             message = json.loads(data)
 
             command = message.get("command")
-            system_logger.info(f"Control command received: {command}")
+            system_logger.info(f"Control command received: {command} (backend={backend.backend_type})")
 
-            # Handle demo mode commands
-            global demo_mode_instance, demo_mode_active
+            try:
+                if command == "start":
+                    reset = message.get("reset", True)
+                    result = backend.start_training(reset=reset)
+                    response = {"ok": True, "command": command, "state": result}
+                elif command == "stop":
+                    result = backend.stop_training()
+                    response = {"ok": True, "command": command, "state": result}
+                elif command == "pause":
+                    result = backend.pause_training()
+                    response = {"ok": True, "command": command, "state": result}
+                elif command == "resume":
+                    result = backend.resume_training()
+                    response = {"ok": True, "command": command, "state": result}
+                elif command == "reset":
+                    result = backend.reset_training()
+                    response = {"ok": True, "command": command, "state": result}
+                else:
+                    response = {"ok": False, "error": f"Unknown command: {command}"}
 
-            # Initialize demo_mode_instance if needed (for testing)
-            if demo_mode_active and demo_mode_instance is None:
-                from demo_mode import get_demo_mode
-
-                demo_mode_instance = get_demo_mode(update_interval=1.0)
-                demo_mode_instance.start()
-                system_logger.info("Demo mode initialized in WebSocket handler")
-
-            # Debug logging
-            system_logger.info(f"demo_mode_active={demo_mode_active}, demo_mode_instance={demo_mode_instance is not None}")
-
-            if demo_mode_instance:
-                try:
-                    if command == "start":
-                        reset = message.get("reset", True)
-                        # start() returns state snapshot after reset
-                        state = demo_mode_instance.start(reset=reset)
-                        response = {"ok": True, "command": command, "state": state}
-                    elif command == "stop":
-                        demo_mode_instance.stop()
-                        response = {"ok": True, "command": command, "state": demo_mode_instance.get_current_state()}
-                    elif command == "pause":
-                        demo_mode_instance.pause()
-                        response = {"ok": True, "command": command, "state": demo_mode_instance.get_current_state()}
-                    elif command == "resume":
-                        demo_mode_instance.resume()
-                        response = {"ok": True, "command": command, "state": demo_mode_instance.get_current_state()}
-                    elif command == "reset":
-                        # reset() returns state snapshot after reset
-                        state = demo_mode_instance.reset()
-                        response = {"ok": True, "command": command, "state": state}
-                    else:
-                        response = {"ok": False, "error": f"Unknown command: {command}"}
-
-                    await websocket_manager.send_personal_message(response, websocket)
-                except Exception as e:
-                    system_logger.error(f"Command execution error: {e}")
-                    await websocket_manager.send_personal_message({"ok": False, "error": str(e)}, websocket)
-
-            # Fix 3 (RC-3): Handle real CasCor backend commands
-            elif backend:
-                try:
-                    if command == "start":
-                        if backend.network is None:
-                            response = {"ok": False, "command": command, "error": "No network configured. Create or load a network first."}
-                        elif backend.is_training_in_progress():
-                            response = {"ok": False, "command": command, "error": "Training already in progress"}
-                        else:
-                            success = backend.start_training_background()
-                            if success:
-                                response = {"ok": True, "command": command, "state": backend.get_training_status()}
-                            else:
-                                response = {"ok": False, "command": command, "error": "Failed to start training"}
-                    elif command == "stop":
-                        if backend.is_training_in_progress():
-                            success = backend.request_training_stop()
-                            response = {"ok": success, "command": command, "state": backend.get_training_status()}
-                        else:
-                            response = {"ok": True, "command": command, "state": backend.get_training_status()}
-                    elif command == "pause":
-                        response = {"ok": False, "command": command, "error": "Pause not supported for CasCor backend (training is atomic per phase)"}
-                    elif command == "resume":
-                        response = {"ok": False, "command": command, "error": "Resume not supported for CasCor backend"}
-                    elif command == "reset":
-                        backend.restore_original_methods()
-                        state = training_state.get_state()
-                        network_config = {
-                            "input_size": 2,
-                            "output_size": 1,
-                            "learning_rate": state.get("learning_rate", 0.01),
-                            "max_hidden_units": state.get("max_hidden_units", 10),
-                            "max_epochs": state.get("max_epochs", 200),
-                        }
-                        backend.create_network(network_config)
-                        backend.install_monitoring_hooks()
-                        response = {"ok": True, "command": command, "state": backend.get_training_status()}
-                    else:
-                        response = {"ok": False, "error": f"Unknown command: {command}"}
-
-                    await websocket_manager.send_personal_message(response, websocket)
-                except Exception as e:
-                    system_logger.error(f"CasCor command execution error: {e}")
-                    await websocket_manager.send_personal_message({"ok": False, "error": str(e)}, websocket)
-            else:
-                await websocket_manager.send_personal_message(
-                    {"ok": False, "error": "No backend available"},
-                    websocket,
-                )
+                await websocket_manager.send_personal_message(response, websocket)
+            except Exception as e:
+                system_logger.error(f"Command execution error: {e}")
+                await websocket_manager.send_personal_message({"ok": False, "error": str(e)}, websocket)
 
     except WebSocketDisconnect:
         system_logger.info(f"Control client disconnected: {client_id}")
@@ -502,22 +364,13 @@ async def health_check():
     Returns:
         Health status information
     """
-    global demo_mode_instance
-
-    # Check training status
-    training_active = False
-    if demo_mode_instance:
-        training_active = demo_mode_instance.get_current_state()["is_running"]
-    elif backend and hasattr(backend, "training_monitor"):
-        training_active = backend.training_monitor.is_training
-
     return {
         "status": "healthy",
         "timestamp": time.time(),
         "version": config.get("application.version", "1.0.0"),
         "active_connections": websocket_manager.get_connection_count(),
-        "training_active": training_active,
-        "demo_mode": demo_mode_active,
+        "training_active": backend.is_training_active(),
+        "demo_mode": backend.backend_type == "demo",
         "juniper_data_available": juniper_data_available,
     }
 
@@ -545,11 +398,9 @@ async def get_state():
     Returns:
         TrainingState as JSON
     """
-    global training_state, demo_mode_instance
-
-    # Return demo mode's training state if active
-    if demo_mode_instance and demo_mode_instance.training_state:
-        return demo_mode_instance.training_state.get_state()
+    # Return demo mode's live training state if available, otherwise global
+    if backend.backend_type == "demo" and hasattr(backend, "_demo") and backend._demo.training_state:
+        return backend._demo.training_state.get_state()
 
     return training_state.get_state()
 
@@ -561,56 +412,7 @@ async def get_status():
     Returns:
         Training status dictionary with FSM-based status and phase
     """
-    global demo_mode_instance
-
-    # Demo mode status - get proper FSM-based status and phase
-    if demo_mode_instance:
-        state = demo_mode_instance.get_current_state()
-        network = demo_mode_instance.get_network()
-
-        # Get FSM state for accurate status and phase
-        fsm_state = demo_mode_instance.state_machine.get_state_summary()
-        status_name = fsm_state["status"]  # "STARTED", "PAUSED", "STOPPED", "COMPLETED", "FAILED"
-
-        # Map FSM status to flags
-        is_running = status_name == "STARTED"
-        is_paused = status_name == "PAUSED"
-        is_completed = status_name == "COMPLETED"
-        is_failed = status_name == "FAILED"
-
-        return {
-            "is_training": is_running and not is_paused,
-            "is_running": is_running,
-            "is_paused": is_paused,
-            "completed": is_completed,
-            "failed": is_failed,
-            "fsm_status": status_name,
-            "current_epoch": state["current_epoch"],
-            "current_loss": state["current_loss"],
-            "current_accuracy": state["current_accuracy"],
-            "network_connected": True,
-            "monitoring_active": is_running,
-            "input_size": network.input_size,
-            "output_size": network.output_size,
-            "hidden_units": len(network.hidden_units),
-            "phase": fsm_state["phase"].lower(),  # 'output', 'candidate', 'idle'
-        }
-
-    # Real cascor status
-    if backend:
-        return backend.get_training_status()
-
-    return {
-        "is_training": False,
-        "is_running": False,
-        "is_paused": False,
-        "completed": False,
-        "failed": False,
-        "fsm_status": "STOPPED",
-        "network_connected": False,
-        "monitoring_active": False,
-        "phase": "idle",
-    }
+    return backend.get_status()
 
 
 @app.get("/api/metrics")
@@ -620,17 +422,7 @@ async def get_metrics():
     Returns:
         Current metrics dictionary
     """
-    global demo_mode_instance
-
-    # Try demo mode first
-    if demo_mode_instance:
-        return demo_mode_instance.get_current_state()
-    # Fall back to cascor integration
-    if backend and hasattr(backend, "training_monitor"):
-        metrics = backend.training_monitor.get_current_metrics()
-        return metrics.to_dict() if hasattr(metrics, "to_dict") else metrics
-
-    return {}
+    return backend.get_metrics()
 
 
 @app.get("/api/metrics/history")
@@ -640,15 +432,7 @@ async def get_metrics_history():
     Returns:
         Dictionary with history list
     """
-    global demo_mode_instance
-
-    if demo_mode_instance:
-        history = demo_mode_instance.get_metrics_history()
-        return {"history": history}
-    if backend and hasattr(backend, "training_monitor"):
-        metrics = backend.training_monitor.get_recent_metrics(100)
-        return {"history": [m.to_dict() if hasattr(m, "to_dict") else m for m in metrics]}
-    return JSONResponse({"error": "No backend available"}, status_code=503)
+    return {"history": backend.get_metrics_history(100)}
 
 
 @app.get("/api/network/stats")
@@ -658,17 +442,14 @@ async def get_network_stats():
     Returns:
         Dictionary with threshold function, optimizer, node/edge counts, and weight statistics
     """
-    global demo_mode_instance
     from backend.data_adapter import DataAdapter
 
     adapter = DataAdapter()
 
-    # Get from demo mode or real cascor
-    if demo_mode_instance:
-        network = demo_mode_instance.get_network()
-
-        # Get current state for optimizer and threshold function
-        state = demo_mode_instance.get_current_state()
+    # Demo mode: direct access to weight tensors for detailed statistics
+    if backend.backend_type == "demo" and hasattr(backend, "_demo"):
+        network = backend._demo.get_network()
+        state = backend._demo.get_current_state()
         threshold_function = state.get("activation_fn", "sigmoid")
         optimizer_name = state.get("optimizer", "sgd")
 
@@ -681,9 +462,10 @@ async def get_network_stats():
             threshold_function=threshold_function,
             optimizer_name=optimizer_name,
         )
-    if backend:
-        # Get network parameters from backend
-        network_data = backend.get_network_data()
+
+    # Service mode: get network data from adapter
+    if backend.backend_type == "service" and hasattr(backend, "_adapter"):
+        network_data = backend._adapter.get_network_data()
         return adapter.get_network_statistics(
             input_weights=network_data.get("input_weights"),
             hidden_weights=network_data.get("hidden_weights"),
@@ -703,65 +485,10 @@ async def get_topology():
     Returns:
         Network topology dictionary with nodes and connections
     """
-    global demo_mode_instance
-
-    # Extract from demo mode or real cascor
-    if demo_mode_instance:
-        network = demo_mode_instance.get_network()
-        connections = []
-
-        # Create connections list for network visualizer
-        # Input -> Output connections
-        for i in range(network.input_size):
-            for o in range(network.output_size):
-                weight = float(network.input_weights[i, o].item())
-                connections.append({"from": f"input_{i}", "to": f"output_{o}", "weight": weight})
-
-        # Hidden -> Output connections (if hidden units exist)
-        for h_idx, _ in enumerate(network.hidden_units):
-            for o in range(network.output_size):
-                # Output weights include contributions from hidden units
-                # They are stored in output_weights matrix
-                weight = float(network.output_weights[o, network.input_size + h_idx].item())
-                connections.append({"from": f"hidden_{h_idx}", "to": f"output_{o}", "weight": weight})
-
-        # Input -> Hidden (cascade correlation input connections)
-        for h_idx, unit in enumerate(network.hidden_units):
-            for i in range(network.input_size):
-                weight = float(unit["weights"][i].item())
-                connections.append({"from": f"input_{i}", "to": f"hidden_{h_idx}", "weight": weight})
-
-        # Hidden -> Hidden (cascade connections from previous hidden units)
-        for h_idx, unit in enumerate(network.hidden_units):
-            for prev in range(h_idx):
-                weight = float(unit["weights"][network.input_size + prev].item())
-                connections.append({"from": f"hidden_{prev}", "to": f"hidden_{h_idx}", "weight": weight})
-
-        # Manually construct topology for demo mode
-        nodes = []
-        # Input nodes
-        nodes.extend({"id": f"input_{i}", "type": "input", "layer": 0} for i in range(network.input_size))
-        # Hidden nodes
-        nodes.extend({"id": f"hidden_{h_idx}", "type": "hidden", "layer": 1} for h_idx in range(len(network.hidden_units)))
-        # Output nodes
-        nodes.extend({"id": f"output_{o}", "type": "output", "layer": 2} for o in range(network.output_size))
-
-        return {
-            "input_units": network.input_size,
-            "hidden_units": len(network.hidden_units),
-            "output_units": network.output_size,
-            "nodes": nodes,
-            "connections": connections,
-            "total_connections": len(connections),
-        }
-
-    if backend:
-        topology = backend.extract_network_topology()
-        if not topology:
-            return JSONResponse({"error": "No topology available"}, status_code=503)
-        return topology.to_dict() if hasattr(topology, "to_dict") else topology
-
-    return JSONResponse({"error": "No topology available"}, status_code=503)
+    topology = backend.get_network_topology()
+    if topology is None:
+        return JSONResponse({"error": "No topology available"}, status_code=503)
+    return topology
 
 
 @app.get("/api/dataset")
@@ -771,25 +498,10 @@ async def get_dataset():
     Returns:
         Dataset dictionary
     """
-    global demo_mode_instance
-
-    # Try demo mode first if active
-    if demo_mode_instance:
-        dataset = demo_mode_instance.get_dataset()
-        return {
-            "inputs": dataset["inputs"].tolist(),
-            "targets": dataset["targets"].tolist(),
-            "num_samples": dataset["num_samples"],
-            "num_features": dataset["num_features"],
-            "num_classes": dataset["num_classes"],
-        }
-
-    # Fall back to cascor integration
-    if backend:
-        dataset = backend.get_dataset_info()
-        return dataset or JSONResponse({"error": "No dataset available"}, status_code=503)
-
-    return JSONResponse({"error": "No dataset available"}, status_code=503)
+    dataset = backend.get_dataset()
+    if dataset is None:
+        return JSONResponse({"error": "No dataset available"}, status_code=503)
+    return dataset
 
 
 @app.get("/api/decision_boundary")
@@ -799,54 +511,10 @@ async def get_decision_boundary():
     Returns:
         Decision boundary dictionary with grid and predictions
     """
-    global demo_mode_instance
-
-    # Try demo mode first
-    if demo_mode_instance:
-        import numpy as np
-        import torch
-
-        network = demo_mode_instance.get_network()
-        dataset = demo_mode_instance.get_dataset()
-
-        # Get data bounds
-        inputs = dataset["inputs"]
-        x_min, x_max = inputs[:, 0].min() - 0.5, inputs[:, 0].max() + 0.5
-        y_min, y_max = inputs[:, 1].min() - 0.5, inputs[:, 1].max() + 0.5
-
-        # Create meshgrid for decision boundary
-        resolution = 100
-        xx, yy = np.meshgrid(np.linspace(x_min, x_max, resolution), np.linspace(y_min, y_max, resolution))
-
-        # Predict on grid
-        grid_points = np.c_[xx.ravel(), yy.ravel()]
-        with torch.no_grad():
-            grid_tensor = torch.from_numpy(grid_points).float()
-            predictions = network.forward(grid_tensor)
-            Z = predictions.cpu().numpy().reshape(xx.shape)
-
-        return {
-            "xx": xx.tolist(),
-            "yy": yy.tolist(),
-            "Z": Z.tolist(),
-            "bounds": {
-                "x_min": float(x_min),
-                "x_max": float(x_max),
-                "y_min": float(y_min),
-                "y_max": float(y_max),
-            },
-        }
-
-    # Fall back to cascor integration
-    if backend:
-        # if predict_fn:
-        if predict_fn := backend.get_prediction_function():
-            # TODO: Add Similar logic for real cascor network
-            system_logger = get_system_logger()
-            system_logger.info(f"main.py: get_decision_boundary: Decision boundary data available: Predict Function: {predict_fn}")
-            # pass
-
-    return JSONResponse({"error": "No decision boundary data available"}, status_code=503)
+    boundary = backend.get_decision_boundary(100)
+    if boundary is None:
+        return JSONResponse({"error": "No decision boundary data available"}, status_code=503)
+    return boundary
 
 
 @app.get("/api/statistics")
@@ -935,8 +603,6 @@ async def get_snapshots():
             - snapshots: list of snapshot metadata objects
             - message: optional status message
     """
-    global demo_mode_active
-
     try:
         snapshots = _list_snapshot_files()
     except Exception as e:
@@ -944,7 +610,7 @@ async def get_snapshots():
         snapshots = []
 
     # Demo mode or no real snapshots available → return mock data
-    if (demo_mode_active or not snapshots) and not backend:
+    if (backend.backend_type == "demo" or not snapshots) and backend.backend_type != "service":
         # Combine session-created demo snapshots with mock snapshots
         mock_snapshots = _generate_mock_snapshots()
 
@@ -1005,7 +671,7 @@ async def get_snapshot_history(limit: int = 50):
     return {
         "history": entries,
         "total": len(entries),
-        "message": "Demo mode history" if demo_mode_active else None,
+        "message": "Demo mode history" if backend.backend_type == "demo" else None,
     }
 
 
@@ -1025,10 +691,8 @@ async def get_snapshot_detail(snapshot_id: str):
 
     from fastapi import HTTPException
 
-    global demo_mode_active
-
     # Demo mode: return synthetic details
-    if demo_mode_active or not backend:
+    if backend.backend_type == "demo":
         # Check session-created demo snapshots first
         for s in _demo_snapshots:
             if s["id"] == snapshot_id:
@@ -1155,8 +819,6 @@ async def create_snapshot(
 
     from fastapi import HTTPException
 
-    global demo_mode_active
-
     now = datetime.now(UTC)
     timestamp_str = now.strftime("%Y%m%d_%H%M%S")
 
@@ -1165,7 +827,7 @@ async def create_snapshot(
     snapshot_name = f"{snapshot_id}.h5"
 
     # Demo mode: create mock snapshot entry
-    if demo_mode_active or not backend:
+    if backend.backend_type == "demo":
         size_bytes = 1024 * 1024 + int(now.timestamp()) % (512 * 1024)  # ~1-1.5 MB mock size
 
         snapshot = {
@@ -1201,8 +863,8 @@ async def create_snapshot(
         Path(_snapshots_dir).mkdir(parents=True, exist_ok=True)
 
         # Attempt to create HDF5 snapshot via CasCor integration
-        if hasattr(backend, "save_snapshot"):
-            backend.save_snapshot(str(snapshot_path), description=description)
+        if hasattr(backend, "_adapter") and hasattr(backend._adapter, "save_snapshot"):
+            backend._adapter.save_snapshot(str(snapshot_path), description=description)
         else:
             # Fallback: create a minimal HDF5 file with current state
             try:
@@ -1285,16 +947,14 @@ async def restore_snapshot(snapshot_id: str):
 
     from fastapi import HTTPException
 
-    global demo_mode_active, demo_mode_instance, training_state
+    global training_state
 
     # Check if training is running - only allow restore when paused/stopped
-    if demo_mode_instance:
-        fsm = demo_mode_instance.state_machine
-        if fsm.is_started():
-            raise HTTPException(
-                status_code=409,
-                detail="Cannot restore while training is running. Please pause or stop training first.",
-            )
+    if backend.is_training_active():
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot restore while training is running. Please pause or stop training first.",
+        )
 
     # Find the snapshot
     snapshot_data = next(
@@ -1303,7 +963,7 @@ async def restore_snapshot(snapshot_id: str):
     )
 
     # Check mock demo snapshots if not found
-    if not snapshot_data and (demo_mode_active or not backend):
+    if not snapshot_data and backend.backend_type == "demo":
         # Check against generated mock snapshots
         for s in _generate_mock_snapshots():
             if s["id"] == snapshot_id:
@@ -1314,8 +974,8 @@ async def restore_snapshot(snapshot_id: str):
                 }
                 break
 
-    # Check real file system if in real mode
-    if not snapshot_data and not demo_mode_active and backend:
+    # Check real file system if in service mode
+    if not snapshot_data and backend.backend_type == "service":
         snapshot_path = Path(_snapshots_dir) / f"{snapshot_id}.h5"
         if not snapshot_path.exists():
             snapshot_path = Path(_snapshots_dir) / f"{snapshot_id}.hdf5"
@@ -1337,10 +997,9 @@ async def restore_snapshot(snapshot_id: str):
         now = datetime.now(UTC)
 
         # Demo mode: simulate restore by resetting training state
-        if demo_mode_active or not backend:
+        if backend.backend_type == "demo":
             # Reset demo mode state
-            if demo_mode_instance:
-                demo_mode_instance.reset()
+            backend.reset_training()
 
             # Update training state with simulated restored values
             if training_state:
@@ -1390,8 +1049,8 @@ async def restore_snapshot(snapshot_id: str):
         # Real mode: load from HDF5 file
         snapshot_path = Path(snapshot_data.get("path", f"{_snapshots_dir}/{snapshot_id}.h5"))
 
-        if hasattr(backend, "load_snapshot"):
-            backend.load_snapshot(str(snapshot_path))
+        if hasattr(backend, "_adapter") and hasattr(backend._adapter, "load_snapshot"):
+            backend._adapter.load_snapshot(str(snapshot_path))
         else:
             # Fallback: read HDF5 file and restore state
             try:
@@ -1754,42 +1413,10 @@ async def api_train_start(reset: bool = False):
     """
     from communication.websocket_manager import create_control_ack_message
 
-    success = False
-    message = ""
-
-    if demo_mode_instance:
-        state = demo_mode_instance.start(reset=reset)
-        success = True
-        message = "Training started successfully"
-        # Send control acknowledgment via WebSocket
-        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", success, message)))
-        return {"status": "started", **state}
-    if backend:
-        # success = False
-        # message = "Start command not implemented for cascor"
-        # P1-NEW-003: Use async training to avoid blocking event loop
-        if backend.is_training_in_progress():
-            message = "Training already in progress"
-            schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, message)))
-            return {"status": "busy", "message": message}
-
-        if backend.network is None:
-            message = "No network configured. Create or load a network first."
-            schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, message)))
-            return JSONResponse({"error": message}, status_code=400)
-
-        if backend.start_training_background():
-            message = "Training started successfully"
-            schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", True, message)))
-            return {"status": "started", "message": message}
-        else:
-            message = "Failed to start training"
-            schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, message)))
-            return JSONResponse({"error": message}, status_code=500)
-            # return {"status": "unimplemented"}
-
-    schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, "No backend available")))
-    return JSONResponse({"error": "No backend available"}, status_code=503)
+    result = backend.start_training(reset=reset)
+    message = "Training started successfully"
+    schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", True, message)))
+    return {"status": "started", **result}
 
 
 @app.post("/api/train/pause")
@@ -1801,13 +1428,9 @@ async def api_train_pause():
     """
     from communication.websocket_manager import create_control_ack_message
 
-    if demo_mode_instance:
-        demo_mode_instance.pause()
-        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("pause", True, "Training paused")))
-        return {"status": "paused"}
-
-    schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("pause", False, "No backend available")))
-    return JSONResponse({"error": "No backend available"}, status_code=503)
+    backend.pause_training()
+    schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("pause", True, "Training paused")))
+    return {"status": "paused"}
 
 
 @app.post("/api/train/resume")
@@ -1819,13 +1442,9 @@ async def api_train_resume():
     """
     from communication.websocket_manager import create_control_ack_message
 
-    if demo_mode_instance:
-        demo_mode_instance.resume()
-        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("resume", True, "Training resumed")))
-        return {"status": "running"}
-
-    schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("resume", False, "No backend available")))
-    return JSONResponse({"error": "No backend available"}, status_code=503)
+    backend.resume_training()
+    schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("resume", True, "Training resumed")))
+    return {"status": "running"}
 
 
 @app.post("/api/train/stop")
@@ -1837,25 +1456,9 @@ async def api_train_stop():
     """
     from communication.websocket_manager import create_control_ack_message
 
-    if demo_mode_instance:
-        demo_mode_instance.stop()
-        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", True, "Training stopped")))
-        return {"status": "stopped"}
-
-    # P1-NEW-003: Support stop for backend (best-effort)
-    if backend:
-        if backend.is_training_in_progress():
-            if backend.request_training_stop():
-                message = "Training stop requested (best-effort)"
-                schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", True, message)))
-                return {"status": "stop_requested", "message": message}
-        else:
-            message = "No training in progress"
-            schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", True, message)))
-            return {"status": "stopped", "message": message}
-
-    schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", False, "No backend available")))
-    return JSONResponse({"error": "No backend available"}, status_code=503)
+    backend.stop_training()
+    schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", True, "Training stopped")))
+    return {"status": "stopped"}
 
 
 @app.post("/api/train/reset")
@@ -1867,13 +1470,9 @@ async def api_train_reset():
     """
     from communication.websocket_manager import create_control_ack_message
 
-    if demo_mode_instance:
-        state = demo_mode_instance.reset()
-        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("reset", True, "Training reset")))
-        return {"status": "reset", **state}
-
-    schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("reset", False, "No backend available")))
-    return JSONResponse({"error": "No backend available"}, status_code=503)
+    result = backend.reset_training()
+    schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("reset", True, "Training reset")))
+    return {"status": "reset", **result}
 
 
 @app.get("/api/train/status")
@@ -1883,17 +1482,7 @@ async def api_train_status():
     Returns:
         Training status dictionary with network info and training state.
     """
-    if demo_mode_instance:
-        return {"backend": "demo", **demo_mode_instance.get_current_state()}
-
-    if backend:
-        status = backend.get_training_status()
-        status["backend"] = "cascor"
-        status["training_in_progress"] = backend.is_training_in_progress()
-        status["stop_requested"] = backend._training_stop_requested
-        return status
-
-    return {"backend": None, "status": "no_backend"}
+    return {"backend": backend.backend_type, **backend.get_status()}
 
 
 @app.post("/api/set_params")
@@ -1905,8 +1494,6 @@ async def api_set_params(params: dict):
     Returns:
         Updated training state
     """
-    global demo_mode_instance, training_state
-
     try:
         learning_rate = params.get("learning_rate")
         max_hidden_units = params.get("max_hidden_units")
@@ -1921,27 +1508,17 @@ async def api_set_params(params: dict):
         if max_epochs is not None:
             updates["max_epochs"] = int(max_epochs)
 
-        # Check if any parameter was provided
-        has_params = bool(updates)
-
-        if has_params:
-            training_state.update_state(**updates)
-            system_logger.info(f"Parameters updated: {updates}")
-
-            # Apply to demo mode instance if active
-            if demo_mode_instance:
-                demo_mode_instance.apply_params(
-                    learning_rate=updates.get("learning_rate"),
-                    max_hidden_units=updates.get("max_hidden_units"),
-                    max_epochs=updates.get("max_epochs"),
-                )
-
-            # Broadcast state change
-            await websocket_manager.broadcast({"type": "state_change", "data": training_state.get_state()})
-
-            return {"status": "success", "state": training_state.get_state()}
-        else:
+        if not updates:
             return JSONResponse({"error": "No parameters provided"}, status_code=400)
+
+        training_state.update_state(**updates)
+        backend.apply_params(**updates)
+        system_logger.info(f"Parameters updated: {updates}")
+
+        # Broadcast state change
+        await websocket_manager.broadcast({"type": "state_change", "data": training_state.get_state()})
+
+        return {"status": "success", "state": training_state.get_state()}
     except Exception as e:
         system_logger.error(f"Failed to set parameters: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -1959,9 +1536,9 @@ async def api_remote_status():
     Returns:
         Dictionary with remote worker status information.
     """
-    if backend:
-        return backend.get_remote_worker_status()
-    return {"available": False, "connected": False, "workers_active": False, "error": "No backend"}
+    if backend.backend_type == "service" and hasattr(backend, "_adapter"):
+        return backend._adapter.get_remote_worker_status()
+    return {"available": False, "connected": False, "workers_active": False, "error": "Not available in demo mode"}
 
 
 @app.post("/api/remote/connect")
@@ -1975,11 +1552,11 @@ async def api_remote_connect(host: str, port: int, authkey: str):
     Returns:
         Connection status.
     """
-    if not backend:
-        return JSONResponse({"error": "No backend available"}, status_code=503)
+    if backend.backend_type != "service" or not hasattr(backend, "_adapter"):
+        return JSONResponse({"error": "Not available in demo mode"}, status_code=503)
 
     try:
-        success = backend.connect_remote_workers((host, port), authkey)
+        success = backend._adapter.connect_remote_workers((host, port), authkey)
         if success:
             return {"status": "connected", "address": f"{host}:{port}"}
         return JSONResponse({"error": "Connection failed"}, status_code=500)
@@ -1996,10 +1573,10 @@ async def api_remote_start_workers(num_workers: int = 1):
     Returns:
         Worker start status.
     """
-    if not backend:
-        return JSONResponse({"error": "No backend available"}, status_code=503)
+    if backend.backend_type != "service" or not hasattr(backend, "_adapter"):
+        return JSONResponse({"error": "Not available in demo mode"}, status_code=503)
 
-    success = backend.start_remote_workers(num_workers)
+    success = backend._adapter.start_remote_workers(num_workers)
     if success:
         return {"status": "started", "num_workers": num_workers}
     return JSONResponse({"error": "Failed to start workers"}, status_code=500)
@@ -2014,10 +1591,10 @@ async def api_remote_stop_workers(timeout: int = 10):
     Returns:
         Worker stop status.
     """
-    if not backend:
-        return JSONResponse({"error": "No backend available"}, status_code=503)
+    if backend.backend_type != "service" or not hasattr(backend, "_adapter"):
+        return JSONResponse({"error": "Not available in demo mode"}, status_code=503)
 
-    success = backend.stop_remote_workers(timeout)
+    success = backend._adapter.stop_remote_workers(timeout)
     if success:
         return {"status": "stopped"}
     return JSONResponse({"error": "Failed to stop workers"}, status_code=500)
@@ -2030,10 +1607,10 @@ async def api_remote_disconnect():
     Returns:
         Disconnection status.
     """
-    if not backend:
-        return JSONResponse({"error": "No backend available"}, status_code=503)
+    if backend.backend_type != "service" or not hasattr(backend, "_adapter"):
+        return JSONResponse({"error": "Not available in demo mode"}, status_code=503)
 
-    success = backend.disconnect_remote_workers()
+    success = backend._adapter.disconnect_remote_workers()
     if success:
         return {"status": "disconnected"}
     return JSONResponse({"error": "Failed to disconnect"}, status_code=500)

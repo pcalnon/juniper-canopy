@@ -40,14 +40,14 @@ os.environ["CASCOR_DEMO_MODE"] = "1"
 import pytest  # noqa: F401,E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from main import app, demo_mode_instance, training_state  # noqa: E402
+from main import app, backend, training_state  # noqa: E402
 
 
 def get_active_training_state():
     """Get the training state that /api/state actually returns."""
-    # In demo mode, /api/state returns demo_mode_instance.training_state
-    if demo_mode_instance and demo_mode_instance.training_state:
-        return demo_mode_instance.training_state
+    # In demo mode, /api/state returns backend._demo.training_state
+    if backend and backend.backend_type == "demo" and hasattr(backend, "_demo") and backend._demo.training_state:
+        return backend._demo.training_state
     return training_state
 
 

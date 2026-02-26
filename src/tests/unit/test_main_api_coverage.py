@@ -4,23 +4,25 @@
 # Prototype:     Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
 # File Name:     test_main_api_coverage.py
 # Author:        Paul Calnon (via Amp AI)
-# Version:       1.0.0
+# Version:       2.0.0
 # Date:          2025-12-13
-# Last Modified: 2025-12-13
+# Last Modified: 2026-02-26
 # License:       MIT License
-# Copyright:     Copyright (c) 2024-2025 Paul Calnon
+# Copyright:     Copyright (c) 2024-2026 Paul Calnon
 # Description:   Unit tests for main.py API endpoints focusing on backend-mode branches
 #                to improve coverage from 67% target.
+#                Updated for BackendProtocol pattern (Phase 5).
 #####################################################################
 """
 Unit tests for main.py API endpoints with focus on:
 - schedule_broadcast function edge cases
-- CasCor backend mode branches
-- No-backend (503) error paths
-- Training control endpoints in all modes
+- Backend protocol mode branches (demo vs service)
+- Protocol method return value handling (None → 503)
+- Training control endpoints via protocol
 
 These tests directly call the endpoint async functions to avoid lifespan
-initialization issues with demo mode.
+initialization issues with demo mode.  All tests save/restore `main.backend`
+instead of the removed `main.demo_mode_instance` / `main.demo_mode_active`.
 """
 import sys
 from pathlib import Path
@@ -126,12 +128,13 @@ class TestTopologyEndpointDirect:
     """Test /api/topology endpoint by calling async function directly."""
 
     @pytest.mark.asyncio
-    async def test_topology_cascor_mode_returns_topology(self):
-        """CasCor mode should call extract_network_topology."""
+    async def test_topology_returns_topology(self):
+        """Backend returning topology dict should be returned directly."""
         import main
 
-        mock_topology = MagicMock()
-        mock_topology.to_dict.return_value = {
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.get_network_topology.return_value = {
             "input_units": 3,
             "hidden_units": 2,
             "output_units": 1,
@@ -139,70 +142,64 @@ class TestTopologyEndpointDirect:
             "connections": [],
         }
 
-        mock_cascor = MagicMock()
-        mock_cascor.extract_network_topology.return_value = mock_topology
-
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
-
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = mock_cascor
+            main.backend = mock_backend
 
             result = await main.get_topology()
 
-            mock_cascor.extract_network_topology.assert_called_once()
-            assert result == mock_topology.to_dict.return_value
+            mock_backend.get_network_topology.assert_called_once()
+            assert result == mock_backend.get_network_topology.return_value
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
 
     @pytest.mark.asyncio
-    async def test_topology_cascor_mode_no_topology_returns_503(self):
-        """CasCor mode with no topology should return 503."""
+    async def test_topology_none_returns_503(self):
+        """Backend returning None for topology should yield 503."""
         from fastapi.responses import JSONResponse
 
         import main
 
-        mock_cascor = MagicMock()
-        mock_cascor.extract_network_topology.return_value = None
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.get_network_topology.return_value = None
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
-
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = mock_cascor
+            main.backend = mock_backend
 
             result = await main.get_topology()
 
             assert isinstance(result, JSONResponse)
             assert result.status_code == 503
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
 
     @pytest.mark.asyncio
-    async def test_topology_no_backend_returns_503(self):
-        """No backend available should return 503."""
-        from fastapi.responses import JSONResponse
-
+    async def test_topology_demo_mode_returns_topology(self):
+        """Demo backend returning topology dict should be returned directly."""
         import main
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "demo"
+        mock_backend.get_network_topology.return_value = {
+            "input_units": 2,
+            "hidden_units": 0,
+            "output_units": 1,
+            "nodes": [],
+            "connections": [],
+        }
 
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = None
+            main.backend = mock_backend
 
             result = await main.get_topology()
 
-            assert isinstance(result, JSONResponse)
-            assert result.status_code == 503
+            mock_backend.get_network_topology.assert_called_once()
+            assert result["input_units"] == 2
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
 
 
 # =============================================================================
@@ -212,78 +209,73 @@ class TestDatasetEndpointDirect:
     """Test /api/dataset endpoint by calling async function directly."""
 
     @pytest.mark.asyncio
-    async def test_dataset_cascor_mode_returns_data(self):
-        """CasCor mode should return dataset from get_dataset_info."""
+    async def test_dataset_returns_data(self):
+        """Backend returning dataset dict should be returned directly."""
         import main
 
-        mock_cascor = MagicMock()
-        mock_cascor.get_dataset_info.return_value = {
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.get_dataset.return_value = {
             "inputs": [[1.0, 2.0], [3.0, 4.0]],
             "targets": [0, 1],
             "num_samples": 2,
         }
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
-
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = mock_cascor
+            main.backend = mock_backend
 
             result = await main.get_dataset()
 
-            mock_cascor.get_dataset_info.assert_called_once()
+            mock_backend.get_dataset.assert_called_once()
             assert result["num_samples"] == 2
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
 
     @pytest.mark.asyncio
-    async def test_dataset_cascor_mode_no_data_returns_503(self):
-        """CasCor mode with no dataset should return 503."""
+    async def test_dataset_none_returns_503(self):
+        """Backend returning None for dataset should yield 503."""
         from fastapi.responses import JSONResponse
 
         import main
 
-        mock_cascor = MagicMock()
-        mock_cascor.get_dataset_info.return_value = None
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.get_dataset.return_value = None
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
-
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = mock_cascor
+            main.backend = mock_backend
 
             result = await main.get_dataset()
 
             assert isinstance(result, JSONResponse)
             assert result.status_code == 503
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
 
     @pytest.mark.asyncio
-    async def test_dataset_no_backend_returns_503(self):
-        """No backend available should return 503."""
-        from fastapi.responses import JSONResponse
-
+    async def test_dataset_demo_mode_returns_data(self):
+        """Demo backend returning dataset should be returned directly."""
         import main
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "demo"
+        mock_backend.get_dataset.return_value = {
+            "inputs": [[0.0, 1.0]],
+            "targets": [1],
+            "num_samples": 1,
+        }
 
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = None
+            main.backend = mock_backend
 
             result = await main.get_dataset()
 
-            assert isinstance(result, JSONResponse)
-            assert result.status_code == 503
+            assert result["num_samples"] == 1
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
 
 
 # =============================================================================
@@ -293,54 +285,50 @@ class TestDecisionBoundaryEndpointDirect:
     """Test /api/decision_boundary endpoint by calling async function directly."""
 
     @pytest.mark.asyncio
-    async def test_decision_boundary_cascor_mode_with_predict_fn(self):
-        """CasCor mode with predict function should log info then return 503."""
-        from fastapi.responses import JSONResponse
-
+    async def test_decision_boundary_returns_data(self):
+        """Backend returning boundary data should be returned directly."""
         import main
 
-        mock_predict_fn = MagicMock()
-        mock_cascor = MagicMock()
-        mock_cascor.get_prediction_function.return_value = mock_predict_fn
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "demo"
+        mock_backend.get_decision_boundary.return_value = {
+            "grid_x": [0.0, 1.0],
+            "grid_y": [0.0, 1.0],
+            "predictions": [[0.1, 0.9], [0.8, 0.2]],
+        }
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
-
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = mock_cascor
+            main.backend = mock_backend
 
             result = await main.get_decision_boundary()
 
-            mock_cascor.get_prediction_function.assert_called_once()
-            # Currently returns 503 as cascor path doesn't compute boundary
-            assert isinstance(result, JSONResponse)
-            assert result.status_code == 503
+            mock_backend.get_decision_boundary.assert_called_once_with(100)
+            assert "predictions" in result
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
 
     @pytest.mark.asyncio
-    async def test_decision_boundary_no_backend_returns_503(self):
-        """No backend available should return 503."""
+    async def test_decision_boundary_none_returns_503(self):
+        """Backend returning None for decision boundary should yield 503."""
         from fastapi.responses import JSONResponse
 
         import main
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.get_decision_boundary.return_value = None
 
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = None
+            main.backend = mock_backend
 
             result = await main.get_decision_boundary()
 
             assert isinstance(result, JSONResponse)
             assert result.status_code == 503
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
 
 
 # =============================================================================
@@ -355,318 +343,284 @@ class TestTrainingControlEndpointsDirect:
         """Demo mode start should return started status."""
         import main
 
-        mock_demo = MagicMock()
-        mock_demo.start.return_value = {"current_epoch": 0, "is_running": True}
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "demo"
+        mock_backend.start_training.return_value = {"current_epoch": 0, "is_running": True}
 
-        original_demo_instance = main.demo_mode_instance
+        original_backend = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
-            main.demo_mode_instance = mock_demo
+            main.backend = mock_backend
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
 
             result = await main.api_train_start(reset=False)
 
-            mock_demo.start.assert_called_once_with(reset=False)
+            mock_backend.start_training.assert_called_once_with(reset=False)
             assert result["status"] == "started"
         finally:
-            main.demo_mode_instance = original_demo_instance
+            main.backend = original_backend
             main.loop_holder["loop"] = original_loop
 
     @pytest.mark.asyncio
-    async def test_train_start_cascor_mode_busy(self):
-        """CasCor mode start should return busy when training in progress."""
+    async def test_train_start_service_mode_returns_started(self):
+        """Service mode start should return started status."""
         import main
 
-        mock_cascor = MagicMock()
-        # P1-NEW-003: Async training - mock returns True for is_training_in_progress
-        mock_cascor.is_training_in_progress.return_value = True
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.start_training.return_value = {"is_training": True}
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
+        original_backend = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
-            main.demo_mode_instance = None
-            main.backend = mock_cascor
+            main.backend = mock_backend
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
 
             result = await main.api_train_start(reset=False)
 
-            assert result["status"] == "busy"
-            assert "already in progress" in result["message"]
-        finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
-            main.loop_holder["loop"] = original_loop
-
-    @pytest.mark.asyncio
-    async def test_train_start_cascor_mode_success(self):
-        """CasCor mode start should return started when training begins."""
-        import main
-
-        mock_cascor = MagicMock()
-        mock_cascor.is_training_in_progress.return_value = False
-        mock_cascor.network = MagicMock()  # Network exists
-        mock_cascor.start_training_background.return_value = True
-
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
-        original_loop = main.loop_holder["loop"]
-
-        try:
-            main.demo_mode_instance = None
-            main.backend = mock_cascor
-            mock_loop = MagicMock()
-            mock_loop.is_closed.return_value = False
-            main.loop_holder["loop"] = mock_loop
-
-            result = await main.api_train_start(reset=False)
-
+            mock_backend.start_training.assert_called_once_with(reset=False)
             assert result["status"] == "started"
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
             main.loop_holder["loop"] = original_loop
 
     @pytest.mark.asyncio
-    async def test_train_start_no_backend_returns_503(self):
-        """No backend should return 503."""
-        from fastapi.responses import JSONResponse
-
+    async def test_train_start_with_reset(self):
+        """Start with reset=True should forward reset flag."""
         import main
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "demo"
+        mock_backend.start_training.return_value = {"current_epoch": 0, "is_running": True}
+
+        original_backend = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
-            main.demo_mode_instance = None
-            main.backend = None
+            main.backend = mock_backend
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
 
-            result = await main.api_train_start(reset=False)
+            result = await main.api_train_start(reset=True)
 
-            assert isinstance(result, JSONResponse)
-            assert result.status_code == 503
+            mock_backend.start_training.assert_called_once_with(reset=True)
+            assert result["status"] == "started"
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
             main.loop_holder["loop"] = original_loop
 
     # ---- /api/train/pause ----
     @pytest.mark.asyncio
-    async def test_train_pause_demo_mode_returns_paused(self):
-        """Demo mode pause should return paused status."""
+    async def test_train_pause_returns_paused(self):
+        """Pause should call backend.pause_training and return paused."""
         import main
 
-        mock_demo = MagicMock()
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "demo"
 
-        original_demo_instance = main.demo_mode_instance
+        original_backend = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
-            main.demo_mode_instance = mock_demo
+            main.backend = mock_backend
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
 
             result = await main.api_train_pause()
 
-            mock_demo.pause.assert_called_once()
+            mock_backend.pause_training.assert_called_once()
             assert result["status"] == "paused"
         finally:
-            main.demo_mode_instance = original_demo_instance
+            main.backend = original_backend
             main.loop_holder["loop"] = original_loop
 
     @pytest.mark.asyncio
-    async def test_train_pause_no_backend_returns_503(self):
-        """No backend should return 503."""
-        from fastapi.responses import JSONResponse
-
+    async def test_train_pause_service_mode_returns_paused(self):
+        """Service mode pause should return paused status."""
         import main
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+
+        original_backend = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
-            main.demo_mode_instance = None
-            main.backend = None
+            main.backend = mock_backend
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
 
             result = await main.api_train_pause()
 
-            assert isinstance(result, JSONResponse)
-            assert result.status_code == 503
+            mock_backend.pause_training.assert_called_once()
+            assert result["status"] == "paused"
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
             main.loop_holder["loop"] = original_loop
 
     # ---- /api/train/resume ----
     @pytest.mark.asyncio
-    async def test_train_resume_demo_mode_returns_running(self):
-        """Demo mode resume should return running status."""
+    async def test_train_resume_returns_running(self):
+        """Resume should call backend.resume_training and return running."""
         import main
 
-        mock_demo = MagicMock()
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "demo"
 
-        original_demo_instance = main.demo_mode_instance
+        original_backend = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
-            main.demo_mode_instance = mock_demo
+            main.backend = mock_backend
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
 
             result = await main.api_train_resume()
 
-            mock_demo.resume.assert_called_once()
+            mock_backend.resume_training.assert_called_once()
             assert result["status"] == "running"
         finally:
-            main.demo_mode_instance = original_demo_instance
+            main.backend = original_backend
             main.loop_holder["loop"] = original_loop
 
     @pytest.mark.asyncio
-    async def test_train_resume_no_backend_returns_503(self):
-        """No backend should return 503."""
-        from fastapi.responses import JSONResponse
-
+    async def test_train_resume_service_mode_returns_running(self):
+        """Service mode resume should return running status."""
         import main
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+
+        original_backend = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
-            main.demo_mode_instance = None
-            main.backend = None
+            main.backend = mock_backend
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
 
             result = await main.api_train_resume()
 
-            assert isinstance(result, JSONResponse)
-            assert result.status_code == 503
+            mock_backend.resume_training.assert_called_once()
+            assert result["status"] == "running"
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
             main.loop_holder["loop"] = original_loop
 
     # ---- /api/train/stop ----
     @pytest.mark.asyncio
-    async def test_train_stop_demo_mode_returns_stopped(self):
-        """Demo mode stop should return stopped status."""
+    async def test_train_stop_returns_stopped(self):
+        """Stop should call backend.stop_training and return stopped."""
         import main
 
-        mock_demo = MagicMock()
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "demo"
 
-        original_demo_instance = main.demo_mode_instance
+        original_backend = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
-            main.demo_mode_instance = mock_demo
+            main.backend = mock_backend
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
 
             result = await main.api_train_stop()
 
-            mock_demo.stop.assert_called_once()
+            mock_backend.stop_training.assert_called_once()
             assert result["status"] == "stopped"
         finally:
-            main.demo_mode_instance = original_demo_instance
+            main.backend = original_backend
             main.loop_holder["loop"] = original_loop
 
     @pytest.mark.asyncio
-    async def test_train_stop_no_backend_returns_503(self):
-        """No backend should return 503."""
-        from fastapi.responses import JSONResponse
-
+    async def test_train_stop_service_mode_returns_stopped(self):
+        """Service mode stop should return stopped status."""
         import main
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+
+        original_backend = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
-            main.demo_mode_instance = None
-            main.backend = None
+            main.backend = mock_backend
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
 
             result = await main.api_train_stop()
 
-            assert isinstance(result, JSONResponse)
-            assert result.status_code == 503
+            mock_backend.stop_training.assert_called_once()
+            assert result["status"] == "stopped"
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
             main.loop_holder["loop"] = original_loop
 
     # ---- /api/train/reset ----
     @pytest.mark.asyncio
-    async def test_train_reset_demo_mode_returns_reset_state(self):
-        """Demo mode reset should return reset status with state."""
+    async def test_train_reset_returns_reset_state(self):
+        """Reset should call backend.reset_training and return reset status."""
         import main
 
-        mock_demo = MagicMock()
-        mock_demo.reset.return_value = {"current_epoch": 0, "is_running": False}
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "demo"
+        mock_backend.reset_training.return_value = {"current_epoch": 0, "is_running": False}
 
-        original_demo_instance = main.demo_mode_instance
+        original_backend = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
-            main.demo_mode_instance = mock_demo
+            main.backend = mock_backend
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
 
             result = await main.api_train_reset()
 
-            mock_demo.reset.assert_called_once()
+            mock_backend.reset_training.assert_called_once()
             assert result["status"] == "reset"
+            assert result["current_epoch"] == 0
         finally:
-            main.demo_mode_instance = original_demo_instance
+            main.backend = original_backend
             main.loop_holder["loop"] = original_loop
 
     @pytest.mark.asyncio
-    async def test_train_reset_no_backend_returns_503(self):
-        """No backend should return 503."""
-        from fastapi.responses import JSONResponse
-
+    async def test_train_reset_service_mode_returns_reset(self):
+        """Service mode reset should return reset status."""
         import main
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.reset_training.return_value = {"is_training": False}
+
+        original_backend = main.backend
         original_loop = main.loop_holder["loop"]
 
         try:
-            main.demo_mode_instance = None
-            main.backend = None
+            main.backend = mock_backend
             mock_loop = MagicMock()
             mock_loop.is_closed.return_value = False
             main.loop_holder["loop"] = mock_loop
 
             result = await main.api_train_reset()
 
-            assert isinstance(result, JSONResponse)
-            assert result.status_code == 503
+            mock_backend.reset_training.assert_called_once()
+            assert result["status"] == "reset"
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
             main.loop_holder["loop"] = original_loop
 
 
@@ -677,57 +631,66 @@ class TestMetricsHistoryEndpointDirect:
     """Test /api/metrics/history by calling async function directly."""
 
     @pytest.mark.asyncio
-    async def test_metrics_history_cascor_mode_returns_history(self):
-        """CasCor mode should return history from training_monitor."""
+    async def test_metrics_history_returns_history(self):
+        """Backend returning history list should be wrapped in dict."""
         import main
 
-        mock_metric1 = MagicMock()
-        mock_metric1.to_dict.return_value = {"epoch": 1, "loss": 0.5}
-        mock_metric2 = MagicMock()
-        mock_metric2.to_dict.return_value = {"epoch": 2, "loss": 0.3}
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.get_metrics_history.return_value = [
+            {"epoch": 1, "loss": 0.5},
+            {"epoch": 2, "loss": 0.3},
+        ]
 
-        mock_training_monitor = MagicMock()
-        mock_training_monitor.get_recent_metrics.return_value = [mock_metric1, mock_metric2]
-
-        mock_cascor = MagicMock()
-        mock_cascor.training_monitor = mock_training_monitor
-
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
-
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = mock_cascor
+            main.backend = mock_backend
 
             result = await main.get_metrics_history()
 
+            mock_backend.get_metrics_history.assert_called_once_with(100)
             assert "history" in result
             assert len(result["history"]) == 2
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
 
     @pytest.mark.asyncio
-    async def test_metrics_history_no_backend_returns_503(self):
-        """No backend should return 503."""
-        from fastapi.responses import JSONResponse
-
+    async def test_metrics_history_empty_returns_empty_list(self):
+        """Backend returning empty list should yield empty history."""
         import main
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.get_metrics_history.return_value = []
 
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = None
+            main.backend = mock_backend
 
             result = await main.get_metrics_history()
 
-            assert isinstance(result, JSONResponse)
-            assert result.status_code == 503
+            assert result == {"history": []}
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
+
+    @pytest.mark.asyncio
+    async def test_metrics_history_demo_mode(self):
+        """Demo backend should also return history via protocol."""
+        import main
+
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "demo"
+        mock_backend.get_metrics_history.return_value = [{"epoch": 1, "loss": 0.4}]
+
+        original_backend = main.backend
+        try:
+            main.backend = mock_backend
+
+            result = await main.get_metrics_history()
+
+            assert len(result["history"]) == 1
+        finally:
+            main.backend = original_backend
 
 
 # =============================================================================
@@ -737,79 +700,63 @@ class TestMetricsEndpointDirect:
     """Test /api/metrics by calling async function directly."""
 
     @pytest.mark.asyncio
-    async def test_metrics_cascor_mode_with_to_dict(self):
-        """CasCor mode metrics with to_dict method."""
+    async def test_metrics_returns_dict(self):
+        """Backend returning metrics dict should be returned directly."""
         import main
 
-        mock_metrics = MagicMock()
-        mock_metrics.to_dict.return_value = {"epoch": 5, "loss": 0.2}
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.get_metrics.return_value = {"epoch": 5, "loss": 0.2}
 
-        mock_training_monitor = MagicMock()
-        mock_training_monitor.get_current_metrics.return_value = mock_metrics
-
-        mock_cascor = MagicMock()
-        mock_cascor.training_monitor = mock_training_monitor
-
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
-
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = mock_cascor
+            main.backend = mock_backend
 
             result = await main.get_metrics()
 
+            mock_backend.get_metrics.assert_called_once()
             assert result["epoch"] == 5
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
 
     @pytest.mark.asyncio
-    async def test_metrics_cascor_mode_without_to_dict(self):
-        """CasCor mode metrics without to_dict (returns dict directly)."""
+    async def test_metrics_empty_dict(self):
+        """Backend returning empty dict should yield empty metrics."""
         import main
 
-        # Use a plain dict without to_dict method
-        mock_metrics = {"epoch": 10, "loss": 0.1}
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.get_metrics.return_value = {}
 
-        mock_training_monitor = MagicMock()
-        mock_training_monitor.get_current_metrics.return_value = mock_metrics
-
-        mock_cascor = MagicMock()
-        mock_cascor.training_monitor = mock_training_monitor
-
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
-
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = mock_cascor
-
-            result = await main.get_metrics()
-
-            assert result["epoch"] == 10
-        finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
-
-    @pytest.mark.asyncio
-    async def test_metrics_no_backend_returns_empty(self):
-        """No backend should return empty dict."""
-        import main
-
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
-
-        try:
-            main.demo_mode_instance = None
-            main.backend = None
+            main.backend = mock_backend
 
             result = await main.get_metrics()
 
             assert result == {}
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
+
+    @pytest.mark.asyncio
+    async def test_metrics_demo_mode(self):
+        """Demo backend should return metrics via protocol."""
+        import main
+
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "demo"
+        mock_backend.get_metrics.return_value = {"epoch": 10, "loss": 0.1, "accuracy": 0.95}
+
+        original_backend = main.backend
+        try:
+            main.backend = mock_backend
+
+            result = await main.get_metrics()
+
+            assert result["epoch"] == 10
+            assert result["accuracy"] == 0.95
+        finally:
+            main.backend = original_backend
 
 
 # =============================================================================
@@ -819,51 +766,51 @@ class TestStatusEndpointDirect:
     """Test /api/status by calling async function directly."""
 
     @pytest.mark.asyncio
-    async def test_status_cascor_mode_returns_training_status(self):
-        """CasCor mode should call get_training_status."""
+    async def test_status_returns_status(self):
+        """Backend returning status dict should be returned directly."""
         import main
 
-        mock_cascor = MagicMock()
-        mock_cascor.get_training_status.return_value = {
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.get_status.return_value = {
             "is_training": True,
             "network_connected": True,
             "current_epoch": 50,
         }
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
-
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = mock_cascor
+            main.backend = mock_backend
 
             result = await main.get_status()
 
-            mock_cascor.get_training_status.assert_called_once()
+            mock_backend.get_status.assert_called_once()
             assert result["is_training"] is True
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
 
     @pytest.mark.asyncio
-    async def test_status_no_backend_returns_inactive(self):
-        """No backend should return is_training=False."""
+    async def test_status_inactive(self):
+        """Backend returning inactive status should be returned as-is."""
         import main
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.get_status.return_value = {
+            "is_training": False,
+            "network_connected": False,
+        }
 
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = None
+            main.backend = mock_backend
 
             result = await main.get_status()
 
             assert result["is_training"] is False
             assert result["network_connected"] is False
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
 
 
 # =============================================================================
@@ -873,14 +820,14 @@ class TestNetworkStatsEndpointDirect:
     """Test /api/network/stats by calling async function directly."""
 
     @pytest.mark.asyncio
-    async def test_network_stats_cascor_mode_returns_stats(self):
-        """CasCor mode should call get_network_data."""
+    async def test_network_stats_service_mode_returns_stats(self):
+        """Service mode should call _adapter.get_network_data and return stats."""
         import numpy as np
 
         import main
 
-        mock_cascor = MagicMock()
-        mock_cascor.get_network_data.return_value = {
+        mock_adapter = MagicMock()
+        mock_adapter.get_network_data.return_value = {
             "input_weights": np.array([[0.1, 0.2]]),
             "hidden_weights": None,
             "output_weights": np.array([[0.3]]),
@@ -890,41 +837,74 @@ class TestNetworkStatsEndpointDirect:
             "optimizer": "adam",
         }
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend._adapter = mock_adapter
 
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = mock_cascor
+            main.backend = mock_backend
 
             await main.get_network_stats()
 
-            mock_cascor.get_network_data.assert_called_once()
+            mock_adapter.get_network_data.assert_called_once()
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
 
     @pytest.mark.asyncio
-    async def test_network_stats_no_backend_returns_503(self):
-        """No backend should return 503."""
+    async def test_network_stats_demo_mode_returns_stats(self):
+        """Demo mode should call _demo.get_network and return stats."""
+        import numpy as np
+
+        import main
+
+        mock_network = MagicMock()
+        mock_network.input_weights = np.array([[0.1, 0.2]])
+        mock_network.hidden_units = []
+        mock_network.output_weights = np.array([[0.3]])
+        mock_network.output_bias = np.array([0.1])
+
+        mock_demo = MagicMock()
+        mock_demo.get_network.return_value = mock_network
+        mock_demo.get_current_state.return_value = {
+            "activation_fn": "sigmoid",
+            "optimizer": "sgd",
+        }
+
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "demo"
+        mock_backend._demo = mock_demo
+
+        original_backend = main.backend
+        try:
+            main.backend = mock_backend
+
+            await main.get_network_stats()
+
+            mock_demo.get_network.assert_called_once()
+        finally:
+            main.backend = original_backend
+
+    @pytest.mark.asyncio
+    async def test_network_stats_unknown_backend_type_returns_503(self):
+        """Backend with neither _demo nor _adapter should return 503."""
         from fastapi.responses import JSONResponse
 
         import main
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
+        mock_backend = MagicMock(spec=[])
+        mock_backend.backend_type = "unknown"
 
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = None
+            main.backend = mock_backend
 
             result = await main.get_network_stats()
 
             assert isinstance(result, JSONResponse)
             assert result.status_code == 503
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
 
 
 # =============================================================================
@@ -934,48 +914,64 @@ class TestHealthEndpointDirect:
     """Test /health by calling async function directly."""
 
     @pytest.mark.asyncio
-    async def test_health_cascor_mode_with_training_monitor(self):
-        """CasCor mode with training_monitor should check is_training."""
+    async def test_health_service_mode_with_training_active(self):
+        """Service mode with active training should report training_active=True."""
         import main
 
-        mock_training_monitor = MagicMock()
-        mock_training_monitor.is_training = True
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.is_training_active.return_value = True
 
-        mock_cascor = MagicMock()
-        mock_cascor.training_monitor = mock_training_monitor
-
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
-
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = mock_cascor
+            main.backend = mock_backend
 
             result = await main.health_check()
 
             assert result["training_active"] is True
+            assert result["demo_mode"] is False
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
 
     @pytest.mark.asyncio
-    async def test_health_no_backend_returns_inactive(self):
-        """No backend should return training_active=False."""
+    async def test_health_service_mode_inactive(self):
+        """Service mode with no training should report training_active=False."""
         import main
 
-        original_demo_instance = main.demo_mode_instance
-        original_cascor = main.backend
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.is_training_active.return_value = False
 
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
-            main.backend = None
+            main.backend = mock_backend
 
             result = await main.health_check()
 
             assert result["training_active"] is False
+            assert result["demo_mode"] is False
         finally:
-            main.demo_mode_instance = original_demo_instance
-            main.backend = original_cascor
+            main.backend = original_backend
+
+    @pytest.mark.asyncio
+    async def test_health_demo_mode(self):
+        """Demo backend should report demo_mode=True."""
+        import main
+
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "demo"
+        mock_backend.is_training_active.return_value = True
+
+        original_backend = main.backend
+        try:
+            main.backend = mock_backend
+
+            result = await main.health_check()
+
+            assert result["training_active"] is True
+            assert result["demo_mode"] is True
+        finally:
+            main.backend = original_backend
 
 
 # =============================================================================
@@ -986,23 +982,27 @@ class TestStateEndpointDirect:
 
     @pytest.mark.asyncio
     async def test_state_without_demo_mode_uses_global_training_state(self):
-        """When demo_mode_instance is None, should use global training_state."""
+        """When backend_type is 'service', should use global training_state."""
         import main
 
-        original_demo_instance = main.demo_mode_instance
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        # Ensure hasattr(backend, "_demo") is False for the service path
+        del mock_backend._demo
 
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = None
+            main.backend = mock_backend
 
             result = await main.get_state()
 
             assert isinstance(result, dict)
         finally:
-            main.demo_mode_instance = original_demo_instance
+            main.backend = original_backend
 
     @pytest.mark.asyncio
     async def test_state_with_demo_mode_uses_demo_training_state(self):
-        """When demo_mode_instance is active, should use its training_state."""
+        """When backend_type is 'demo', should use demo's training_state."""
         import main
 
         mock_training_state = MagicMock()
@@ -1011,14 +1011,112 @@ class TestStateEndpointDirect:
         mock_demo = MagicMock()
         mock_demo.training_state = mock_training_state
 
-        original_demo_instance = main.demo_mode_instance
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "demo"
+        mock_backend._demo = mock_demo
 
+        original_backend = main.backend
         try:
-            main.demo_mode_instance = mock_demo
+            main.backend = mock_backend
 
             result = await main.get_state()
 
             assert result["learning_rate"] == 0.05
             mock_training_state.get_state.assert_called_once()
         finally:
-            main.demo_mode_instance = original_demo_instance
+            main.backend = original_backend
+
+
+# =============================================================================
+# Test /api/train/status endpoint - direct async function calls
+# =============================================================================
+class TestTrainStatusEndpoint:
+    """Test /api/train/status by calling async function directly."""
+
+    @pytest.mark.asyncio
+    async def test_train_status_includes_backend_type(self):
+        """Train status should include backend type and status from protocol."""
+        import main
+
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "demo"
+        mock_backend.get_status.return_value = {"is_training": True, "current_epoch": 42}
+
+        original_backend = main.backend
+        try:
+            main.backend = mock_backend
+
+            result = await main.api_train_status()
+
+            assert result["backend"] == "demo"
+            assert result["is_training"] is True
+            assert result["current_epoch"] == 42
+        finally:
+            main.backend = original_backend
+
+    @pytest.mark.asyncio
+    async def test_train_status_service_mode(self):
+        """Service mode train status should include 'service' backend type."""
+        import main
+
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend.get_status.return_value = {"is_training": False}
+
+        original_backend = main.backend
+        try:
+            main.backend = mock_backend
+
+            result = await main.api_train_status()
+
+            assert result["backend"] == "service"
+            assert result["is_training"] is False
+        finally:
+            main.backend = original_backend
+
+
+# =============================================================================
+# Test /api/set_params endpoint - direct async function calls
+# =============================================================================
+class TestSetParamsEndpoint:
+    """Test /api/set_params by calling async function directly."""
+
+    @pytest.mark.asyncio
+    async def test_set_params_calls_backend_apply_params(self):
+        """set_params should call backend.apply_params with the updates."""
+        import main
+
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "demo"
+
+        original_backend = main.backend
+        try:
+            main.backend = mock_backend
+
+            result = await main.api_set_params({"learning_rate": 0.02})
+
+            mock_backend.apply_params.assert_called_once_with(learning_rate=0.02)
+            assert result["status"] == "success"
+        finally:
+            main.backend = original_backend
+
+    @pytest.mark.asyncio
+    async def test_set_params_no_params_returns_400(self):
+        """Empty params dict should return 400 error."""
+        from fastapi.responses import JSONResponse
+
+        import main
+
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "demo"
+
+        original_backend = main.backend
+        try:
+            main.backend = mock_backend
+
+            result = await main.api_set_params({})
+
+            assert isinstance(result, JSONResponse)
+            assert result.status_code == 400
+        finally:
+            main.backend = original_backend

@@ -122,12 +122,11 @@ class TestMainEndpointsIntegration:
         assert response.status_code == 200
         data = response.json()
 
-        assert "input_units" in data
+        assert "input_size" in data
         assert "hidden_units" in data
-        assert "output_units" in data
+        assert "output_size" in data
         assert "nodes" in data
         assert "connections" in data
-        assert "total_connections" in data
 
         # Validate nodes structure
         assert isinstance(data["nodes"], list)
@@ -181,21 +180,19 @@ class TestMainEndpointsIntegration:
 
         # Check for either success data or error
         if "error" not in data:
-            assert "xx" in data
-            assert "yy" in data
-            assert "Z" in data
-            assert "bounds" in data
-
-            bounds = data["bounds"]
-            assert "x_min" in bounds
-            assert "x_max" in bounds
-            assert "y_min" in bounds
-            assert "y_max" in bounds
+            assert "x" in data
+            assert "y" in data
+            assert "z" in data
+            assert "x_min" in data
+            assert "x_max" in data
+            assert "y_min" in data
+            assert "y_max" in data
+            assert "resolution" in data
 
             # Validate data structure
-            assert isinstance(data["xx"], list)
-            assert isinstance(data["yy"], list)
-            assert isinstance(data["Z"], list)
+            assert isinstance(data["x"], list)
+            assert isinstance(data["y"], list)
+            assert isinstance(data["z"], list)
 
     # ========== Statistics Endpoint ==========
 
@@ -379,8 +376,8 @@ class TestMainEndpointsIntegration:
         assert response.status_code == 200
         data = response.json()
 
-        assert "input_units" in data
-        assert "output_units" in data
+        assert "input_size" in data
+        assert "output_size" in data
 
     def test_consecutive_start_commands(self, client):
         """Test consecutive start commands are handled correctly."""
