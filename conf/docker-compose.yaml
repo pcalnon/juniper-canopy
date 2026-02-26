@@ -1,3 +1,8 @@
+# DEPRECATED: This per-service Compose file is superseded by the unified
+# orchestration in juniper-deploy/docker-compose.yml.
+# Use: cd juniper-deploy && make up
+# See: https://github.com/pcalnon/juniper-deploy
+#
 # Docker Compose configuration for Juniper Canopy with dependencies
 version: '3.8'
 
