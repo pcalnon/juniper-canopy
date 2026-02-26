@@ -39,7 +39,8 @@ RUN mkdir -p logs data images
 # Expose port
 EXPOSE 8050
 
-# Health check
+# Health check for container orchestration (liveness + readiness)
+# start-period=5s: Dash/FastAPI hybrid app with pre-installed deps starts quickly
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8050/health || exit 1
 
