@@ -35,6 +35,13 @@ __pycache__
 cascor_snapshot_*.h5
 
 # Sensitive files and dirs
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+.env.test
+.env.secrets
 */REAMDE.notes/*
 */encryption.bash
 */external_drive.readme
