@@ -71,6 +71,18 @@ docker run -p 8050:8050 \
   juniper-canopy:latest
 ```
 
+## Dependency Lockfile
+
+The `requirements.lock` file pins exact dependency versions for reproducible Docker builds. The `pyproject.toml` retains flexible `>=` ranges for local development.
+
+**Regenerate after changing dependencies in `pyproject.toml`:**
+
+```bash
+uv pip compile pyproject.toml --extra juniper-cascor -o requirements.lock
+```
+
+`juniper-data-client` is excluded from the lockfile (not yet on PyPI) and installed from git in the Dockerfile.
+
 ## Active Research Components
 
 **juniper_cascor**:  Cascade Correlation Neural Network
