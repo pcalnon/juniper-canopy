@@ -91,7 +91,7 @@ jobs:
         run: |
           VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           sleep 30
-          pip install --index-url https://pypi.org/simple/ --extra-index-url https://test.pypi.org/simple/ juniper-canopy==${VERSION}
+          pip install --no-deps --index-url https://test.pypi.org/simple/ juniper-canopy==${VERSION}
           python -c "from juniper_canopy import __version__; print(f'TestPyPI OK: v{__version__}')"
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
