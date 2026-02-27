@@ -201,10 +201,10 @@ class TestDemoModeControlTransitions:
         demo_mode.start(reset=True)
         time.sleep(0.3)
 
-        # Pause
+        # Pause and capture state after pause takes effect
+        demo_mode.pause()
         epoch_at_pause = demo_mode.current_epoch
         loss_at_pause = demo_mode.current_loss
-        demo_mode.pause()
 
         # Wait while paused
         time.sleep(0.2)
