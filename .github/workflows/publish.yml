@@ -85,13 +85,13 @@ jobs:
         with:
           repository-url: https://test.pypi.org/legacy/
           attestations: false
+          skip-existing: true
 
       - name: Verify TestPyPI install
         run: |
-          VERSION="${{ github.event.release.tag_name }}"
-          VERSION="${VERSION#v}"
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           sleep 30
-          pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ juniper-canopy==${VERSION}
+          pip install --index-url https://pypi.org/simple/ --extra-index-url https://test.pypi.org/simple/ juniper-canopy==${VERSION}
           python -c "from juniper_canopy import __version__; print(f'TestPyPI OK: v{__version__}')"
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
