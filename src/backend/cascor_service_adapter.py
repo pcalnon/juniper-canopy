@@ -11,7 +11,7 @@
 # File Path:     Juniper/juniper-canopy/src/backend/
 #
 # Date Created:  2026-02-21
-# Last Modified: 2026-02-21
+# Last Modified: 2026-02-27
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -97,10 +97,15 @@ class CascorServiceAdapter:
 
     _is_service_adapter = True
 
-    def __init__(self, service_url: str = "http://localhost:8200", api_key: Optional[str] = None):
+    def __init__(
+        self,
+        service_url: str = "http://localhost:8200",
+        api_key: Optional[str] = None,
+        client: Optional[JuniperCascorClient] = None,
+    ):
         self._service_url = service_url
         self._api_key = api_key
-        self._client = JuniperCascorClient(base_url=service_url, api_key=api_key)
+        self._client = client or JuniperCascorClient(base_url=service_url, api_key=api_key)
         self.training_monitor = _ServiceTrainingMonitor(self._client)
         self._training_stream: Optional[CascorTrainingStream] = None
         self._relay_task: Optional[asyncio.Task] = None
