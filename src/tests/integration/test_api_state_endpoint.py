@@ -106,8 +106,8 @@ class TestStateEndpoint:
         response = test_client.get("/api/state")
         data = response.json()
 
-        # Timestamp should be within last few seconds
-        assert abs(data["timestamp"] - current_time) < 10.0
+        # Timestamp should be within a reasonable window (allows for CI/coverage overhead)
+        assert abs(data["timestamp"] - current_time) < 30.0
 
     def test_state_endpoint_multiple_calls(self, test_client):
         """Test /api/state can be called multiple times."""

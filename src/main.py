@@ -72,6 +72,12 @@ from logger.logger import (
     get_training_logger,
     get_ui_logger,
 )
+from observability import (
+    RequestIdMiddleware,
+    configure_logging,
+    configure_sentry,
+    get_prometheus_app,
+)
 
 # import logging
 
@@ -103,7 +109,15 @@ training_state = TrainingState()  # Global TrainingState instance
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    # Startup
+    # Startup — observability
+    _log_format = os.environ.get("CANOPY_LOG_FORMAT", "text")
+    _log_level = os.environ.get("CASCOR_LOG_LEVEL", "INFO")
+    configure_logging(_log_level, _log_format, "juniper-canopy")
+
+    _sentry_dsn = os.environ.get("CANOPY_SENTRY_DSN")
+    _app_version = config.get("application.version", "1.0.0")
+    configure_sentry(_sentry_dsn, "juniper-canopy", _app_version)
+
     system_logger.info("Starting Juniper Canopy application")
     system_logger.info(f"Configuration loaded from: {config.config_path}")
     system_logger.info(f"Environment: {config.get('application.environment', 'unknown')}")
@@ -205,6 +219,14 @@ from security import get_api_key_auth, get_rate_limiter
 api_key_auth = get_api_key_auth()
 rate_limiter = get_rate_limiter()
 app.add_middleware(SecurityMiddleware, api_key_auth=api_key_auth, rate_limiter=rate_limiter)
+
+# Observability middleware (LIFO: last added runs first)
+app.add_middleware(RequestIdMiddleware)
+if os.environ.get("CANOPY_METRICS_ENABLED", "false").lower() in ("true", "1", "yes"):
+    from observability import PrometheusMiddleware
+
+    app.add_middleware(PrometheusMiddleware, service_name="juniper-canopy")
+    app.mount("/metrics", get_prometheus_app())
 
 # Backend is initialized in lifespan via create_backend() factory
 backend = None
