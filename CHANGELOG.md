@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.3.0] - 2026-02-26
+
+**Summary**: First PyPI release. Added packaging infrastructure for distribution via `pip install juniper-canopy`.
+
+### Added
+
+- `juniper_canopy/__init__.py` wrapper module with `__version__` for PyPI import verification
+- `.github/workflows/publish.yml` — 3-job publish pipeline (build → TestPyPI → PyPI) with OIDC trusted publishing
+- Core runtime dependencies declared in `pyproject.toml` (dash, fastapi, uvicorn, plotly, numpy, scipy, etc.)
+- `[tool.setuptools.packages.find]` configuration for automatic package discovery
+
+### Changed
+
+- Version bumped from 0.2.1 to 0.3.0 (40+ commits since last tag with significant changes)
+- Synchronized `src/__init__.py` version to 0.3.0
+
+---
+
 ### Fixed
 
 - **RC-1/RC-2 - CasCor In-Process Backend Initialization**: Real backend mode now creates a network, installs monitoring hooks, starts monitoring thread, fetches dataset from JuniperData, and registers WebSocket callbacks during lifespan startup — CasCor runs in-process, not as a separate OS process
