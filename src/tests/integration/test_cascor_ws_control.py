@@ -56,45 +56,31 @@ from main import app
 
 
 @pytest.fixture
-def mock_cascor():
-    """Create a mock CascorIntegration with sensible defaults."""
+def mock_service_backend():
+    """Create a mock BackendProtocol with service-mode defaults."""
     mock = MagicMock()
-    mock.network = MagicMock()
-    mock.is_training_in_progress.return_value = False
-    mock.start_training_background.return_value = True
-    mock.request_training_stop.return_value = True
-    mock.get_training_status.return_value = {
-        "is_training": False,
-        "network_connected": True,
-    }
-    mock.restore_original_methods.return_value = None
-    mock.create_network.return_value = None
-    mock.install_monitoring_hooks.return_value = True
+    mock.backend_type = "service"
+    mock.start_training.return_value = {"ok": True, "is_training": True}
+    mock.stop_training.return_value = {"ok": True}
+    mock.pause_training.return_value = {"ok": False, "error": "Pause not yet supported in service mode"}
+    mock.resume_training.return_value = {"ok": False, "error": "Resume not yet supported in service mode"}
+    mock.reset_training.return_value = {"ok": False, "error": "Reset not yet supported in service mode"}
+    mock.get_status.return_value = {"is_training": False, "network_connected": True}
+    mock.is_training_active.return_value = False
     return mock
 
 
 @pytest.fixture
-def cascor_client(mock_cascor):
+def cascor_client(mock_service_backend):
     """
-    TestClient with globals patched to simulate real CasCor backend mode.
-
-    Disables demo_mode_instance and demo_mode_active, injects mock_cascor
-    as the active cascor_integration.
+    TestClient with backend patched to simulate service mode.
     """
-    original_demo_instance = main_module.demo_mode_instance
-    original_demo_active = main_module.demo_mode_active
-    original_cascor = main_module.backend
-
-    main_module.demo_mode_instance = None
-    main_module.demo_mode_active = False
-    main_module.backend = mock_cascor
-
     with TestClient(app) as client:
+        # Set mock AFTER lifespan runs (lifespan creates the real backend)
+        original_backend = main_module.backend
+        main_module.backend = mock_service_backend
         yield client
-
-    main_module.demo_mode_instance = original_demo_instance
-    main_module.demo_mode_active = original_demo_active
-    main_module.backend = original_cascor
+        main_module.backend = original_backend
 
 
 def _send_ws_command(client, command, **extra):
@@ -107,98 +93,75 @@ def _send_ws_command(client, command, **extra):
 
 
 class TestCascorWsControl:
-    """Integration tests for CasCor backend WebSocket control commands (RC-3)."""
+    """Integration tests for service-mode WebSocket control commands via BackendProtocol."""
 
     @pytest.mark.integration
-    def test_cascor_start_command_starts_training(self, cascor_client, mock_cascor):
-        """'start' command calls start_training_background() and returns ok."""
+    def test_service_start_command_calls_protocol(self, cascor_client, mock_service_backend):
+        """'start' command calls backend.start_training() and returns ok."""
         response = _send_ws_command(cascor_client, "start")
 
         assert response["ok"] is True
         assert response["command"] == "start"
-        mock_cascor.start_training_background.assert_called_once()
+        mock_service_backend.start_training.assert_called_once_with(reset=True)
 
     @pytest.mark.integration
-    def test_cascor_start_no_network_returns_error(self, cascor_client, mock_cascor):
-        """'start' with no network configured returns an error."""
-        mock_cascor.network = None
+    def test_service_start_with_reset_false(self, cascor_client, mock_service_backend):
+        """'start' with reset=false passes reset param to protocol."""
+        response = _send_ws_command(cascor_client, "start", reset=False)
 
-        response = _send_ws_command(cascor_client, "start")
-
-        assert response["ok"] is False
-        assert "No network configured" in response["error"]
-        mock_cascor.start_training_background.assert_not_called()
+        assert response["ok"] is True
+        mock_service_backend.start_training.assert_called_once_with(reset=False)
 
     @pytest.mark.integration
-    def test_cascor_start_while_training_returns_busy(self, cascor_client, mock_cascor):
-        """'start' during active training returns an error."""
-        mock_cascor.is_training_in_progress.return_value = True
-
-        response = _send_ws_command(cascor_client, "start")
-
-        assert response["ok"] is False
-        assert "already in progress" in response["error"]
-        mock_cascor.start_training_background.assert_not_called()
-
-    @pytest.mark.integration
-    def test_cascor_stop_command_requests_stop(self, cascor_client, mock_cascor):
-        """'stop' command calls request_training_stop() when training is active."""
-        mock_cascor.is_training_in_progress.return_value = True
-
+    def test_service_stop_command_calls_protocol(self, cascor_client, mock_service_backend):
+        """'stop' command calls backend.stop_training()."""
         response = _send_ws_command(cascor_client, "stop")
 
         assert response["ok"] is True
         assert response["command"] == "stop"
-        mock_cascor.request_training_stop.assert_called_once()
+        mock_service_backend.stop_training.assert_called_once()
 
     @pytest.mark.integration
-    def test_cascor_stop_when_not_training(self, cascor_client, mock_cascor):
-        """'stop' when no training is active returns ok without calling stop."""
-        mock_cascor.is_training_in_progress.return_value = False
-
-        response = _send_ws_command(cascor_client, "stop")
-
-        assert response["ok"] is True
-        assert response["command"] == "stop"
-        mock_cascor.request_training_stop.assert_not_called()
-
-    @pytest.mark.integration
-    def test_cascor_pause_returns_unsupported(self, cascor_client, mock_cascor):
-        """'pause' returns an error indicating it is not supported."""
+    def test_service_pause_command_calls_protocol(self, cascor_client, mock_service_backend):
+        """'pause' command calls backend.pause_training()."""
         response = _send_ws_command(cascor_client, "pause")
 
-        assert response["ok"] is False
+        assert response["ok"] is True
         assert response["command"] == "pause"
-        assert "not supported" in response["error"].lower() or "Pause not supported" in response["error"]
+        mock_service_backend.pause_training.assert_called_once()
 
     @pytest.mark.integration
-    def test_cascor_resume_returns_unsupported(self, cascor_client, mock_cascor):
-        """'resume' returns an error indicating it is not supported."""
+    def test_service_resume_command_calls_protocol(self, cascor_client, mock_service_backend):
+        """'resume' command calls backend.resume_training()."""
         response = _send_ws_command(cascor_client, "resume")
 
-        assert response["ok"] is False
+        assert response["ok"] is True
         assert response["command"] == "resume"
-        assert "not supported" in response["error"].lower() or "Resume not supported" in response["error"]
+        mock_service_backend.resume_training.assert_called_once()
 
     @pytest.mark.integration
-    def test_cascor_reset_recreates_network(self, cascor_client, mock_cascor):
-        """'reset' calls restore_original_methods(), create_network(), and install_monitoring_hooks()."""
-        mock_cascor.restore_original_methods.reset_mock()
-        mock_cascor.create_network.reset_mock()
-        mock_cascor.install_monitoring_hooks.reset_mock()
-
+    def test_service_reset_command_calls_protocol(self, cascor_client, mock_service_backend):
+        """'reset' command calls backend.reset_training()."""
         response = _send_ws_command(cascor_client, "reset")
 
         assert response["ok"] is True
         assert response["command"] == "reset"
-        mock_cascor.restore_original_methods.assert_called_once()
-        mock_cascor.create_network.assert_called_once()
-        mock_cascor.install_monitoring_hooks.assert_called_once()
+        mock_service_backend.reset_training.assert_called_once()
 
     @pytest.mark.integration
-    def test_cascor_unknown_command_returns_error(self, cascor_client, mock_cascor):
+    def test_service_unknown_command_returns_error(self, cascor_client, mock_service_backend):
         """Unknown command returns an error response."""
         response = _send_ws_command(cascor_client, "explode")
 
         assert response["ok"] is False
         assert "Unknown command" in response.get("error", "")
+
+    @pytest.mark.integration
+    def test_service_command_exception_returns_error(self, cascor_client, mock_service_backend):
+        """Exception in command handler returns error to client."""
+        mock_service_backend.start_training.side_effect = RuntimeError("Test error")
+
+        response = _send_ws_command(cascor_client, "start")
+
+        assert response["ok"] is False
+        assert "Test error" in response.get("error", "")

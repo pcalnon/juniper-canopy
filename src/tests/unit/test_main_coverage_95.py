@@ -40,28 +40,28 @@ class TestRemoteWorkerEndpointsNoBackend:
         assert "connected" in data
 
     def test_remote_connect_no_backend(self, app_client):
-        """Remote connect should return 503 when no backend."""
+        """Remote connect should return 503 in demo mode."""
         response = app_client.post("/api/remote/connect", params={"host": "localhost", "port": 5000, "authkey": "test"})
         assert response.status_code == 503
-        assert "No backend" in response.json().get("error", "")
+        assert "Not available in demo mode" in response.json().get("error", "")
 
     def test_remote_start_workers_no_backend(self, app_client):
-        """Start workers should return 503 when no backend."""
+        """Start workers should return 503 in demo mode."""
         response = app_client.post("/api/remote/start_workers", params={"num_workers": 2})
         assert response.status_code == 503
-        assert "No backend" in response.json().get("error", "")
+        assert "Not available in demo mode" in response.json().get("error", "")
 
     def test_remote_stop_workers_no_backend(self, app_client):
-        """Stop workers should return 503 when no backend."""
+        """Stop workers should return 503 in demo mode."""
         response = app_client.post("/api/remote/stop_workers", params={"timeout": 5})
         assert response.status_code == 503
-        assert "No backend" in response.json().get("error", "")
+        assert "Not available in demo mode" in response.json().get("error", "")
 
     def test_remote_disconnect_no_backend(self, app_client):
-        """Disconnect should return 503 when no backend."""
+        """Disconnect should return 503 in demo mode."""
         response = app_client.post("/api/remote/disconnect")
         assert response.status_code == 503
-        assert "No backend" in response.json().get("error", "")
+        assert "Not available in demo mode" in response.json().get("error", "")
 
 
 class TestTrainingControlEndpoints:

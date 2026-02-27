@@ -190,8 +190,8 @@ class TestDecisionBoundaryEndpoint:
         response = client.get("/api/decision_boundary")
         data = response.json()
 
-        # Should have grid or prediction data (actual API returns xx/yy/Z)
-        assert any(key in data for key in ["xx", "yy", "Z", "bounds"])
+        # Should have grid or prediction data (API returns x/y/z/resolution)
+        assert any(key in data for key in ["x", "y", "z", "resolution"])
 
     def test_decision_boundary_with_resolution(self, client):
         """Decision boundary should accept resolution parameter."""

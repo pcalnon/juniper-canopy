@@ -6,7 +6,7 @@
 # Author:        Paul Calnon (via Amp AI)
 # Version:       1.0.0
 # Date:          2025-01-29
-# Last Modified: 2025-01-29
+# Last Modified: 2026-02-26
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-2025 Paul Calnon
 # Description:   Tests for main.py snapshot endpoints in real mode
@@ -61,6 +61,28 @@ class FakeIntegrationNoMethods:
 
     def shutdown(self):
         pass
+
+
+def _make_service_backend(adapter=None, is_training_active=False, reset_training_result=None):
+    """Create a MagicMock service backend with the given adapter and defaults.
+
+    Args:
+        adapter: Object to use as backend._adapter. If None, _adapter is not set.
+        is_training_active: Return value for backend.is_training_active().
+        reset_training_result: Return value for backend.reset_training(). Defaults to {}.
+    """
+    mock_svc = MagicMock()
+    mock_svc.backend_type = "service"
+    mock_svc.is_training_active.return_value = is_training_active
+    mock_svc.reset_training.return_value = reset_training_result if reset_training_result is not None else {}
+
+    if adapter is not None:
+        mock_svc._adapter = adapter
+    else:
+        # Remove _adapter so hasattr(backend, "_adapter") returns False
+        del mock_svc._adapter
+
+    return mock_svc
 
 
 @pytest.fixture
@@ -129,10 +151,10 @@ class TestCreateSnapshotRealMode:
         import main
 
         fake_integration = FakeIntegration()
+        mock_svc = _make_service_backend(adapter=fake_integration)
 
         with (
-            patch.object(main, "demo_mode_active", False),
-            patch.object(main, "backend", fake_integration),
+            patch.object(main, "backend", mock_svc),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
         ):
             response = app_client.post("/api/v1/snapshots?name=test_snapshot&description=Test%20description")
@@ -156,10 +178,10 @@ class TestCreateSnapshotRealMode:
         import main
 
         fake_integration = FakeIntegration()
+        mock_svc = _make_service_backend(adapter=fake_integration)
 
         with (
-            patch.object(main, "demo_mode_active", False),
-            patch.object(main, "backend", fake_integration),
+            patch.object(main, "backend", mock_svc),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
         ):
             response = app_client.post("/api/v1/snapshots")
@@ -178,9 +200,11 @@ class TestCreateSnapshotRealMode:
 
         import main
 
+        # No _adapter means hasattr(backend, "_adapter") is False → fallback path
+        mock_svc = _make_service_backend(adapter=None)
+
         with (
-            patch.object(main, "demo_mode_active", False),
-            patch.object(main, "backend", FakeIntegrationNoMethods()),
+            patch.object(main, "backend", mock_svc),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
         ):
             response = app_client.post("/api/v1/snapshots?name=h5py_test&description=H5py%20fallback%20test")
@@ -214,9 +238,11 @@ class TestCreateSnapshotRealMode:
                 raise ImportError("No module named 'h5py'")
             return original_import(name, *args, **kwargs)
 
+        # No _adapter means hasattr(backend, "_adapter") is False → fallback path (h5py)
+        mock_svc = _make_service_backend(adapter=None)
+
         with (
-            patch.object(main, "demo_mode_active", False),
-            patch.object(main, "backend", FakeIntegrationNoMethods()),
+            patch.object(main, "backend", mock_svc),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
             patch.object(builtins, "__import__", side_effect=mock_import),
         ):
@@ -234,10 +260,10 @@ class TestCreateSnapshotRealMode:
         assert not non_existent_dir.exists()
 
         fake_integration = FakeIntegration()
+        mock_svc = _make_service_backend(adapter=fake_integration)
 
         with (
-            patch.object(main, "demo_mode_active", False),
-            patch.object(main, "backend", fake_integration),
+            patch.object(main, "backend", mock_svc),
             patch.object(main, "_snapshots_dir", str(non_existent_dir)),
         ):
             response = app_client.post("/api/v1/snapshots?name=dir_test")
@@ -257,9 +283,10 @@ class TestCreateSnapshotRealMode:
             def shutdown(self):
                 pass
 
+        mock_svc = _make_service_backend(adapter=FailingIntegration())
+
         with (
-            patch.object(main, "demo_mode_active", False),
-            patch.object(main, "backend", FailingIntegration()),
+            patch.object(main, "backend", mock_svc),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
         ):
             response = app_client.post("/api/v1/snapshots?name=fail_test")
@@ -279,12 +306,11 @@ class TestRestoreSnapshotRealMode:
         import main
 
         fake_integration = FakeIntegration()
+        mock_svc = _make_service_backend(adapter=fake_integration)
 
         with (
-            patch.object(main, "demo_mode_active", False),
-            patch.object(main, "backend", fake_integration),
+            patch.object(main, "backend", mock_svc),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
-            patch.object(main, "demo_mode_instance", None),
         ):
             response = app_client.post("/api/v1/snapshots/restore_test/restore")
 
@@ -306,12 +332,11 @@ class TestRestoreSnapshotRealMode:
         import main
 
         fake_integration = FakeIntegration()
+        mock_svc = _make_service_backend(adapter=fake_integration)
 
         with (
-            patch.object(main, "demo_mode_active", False),
-            patch.object(main, "backend", fake_integration),
+            patch.object(main, "backend", mock_svc),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
-            patch.object(main, "demo_mode_instance", None),
         ):
             response = app_client.post("/api/v1/snapshots/test_h5_ext/restore")
 
@@ -333,12 +358,11 @@ class TestRestoreSnapshotRealMode:
             f.attrs["created"] = "2025-01-01T00:00:00"
 
         fake_integration = FakeIntegration()
+        mock_svc = _make_service_backend(adapter=fake_integration)
 
         with (
-            patch.object(main, "demo_mode_active", False),
-            patch.object(main, "backend", fake_integration),
+            patch.object(main, "backend", mock_svc),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
-            patch.object(main, "demo_mode_instance", None),
         ):
             response = app_client.post("/api/v1/snapshots/test_hdf5_ext/restore")
 
@@ -362,11 +386,12 @@ class TestRestoreSnapshotRealMode:
             state_group.attrs["current_epoch"] = 75
             state_group.attrs["learning_rate"] = 0.005
 
+        # No _adapter means hasattr(backend, "_adapter") is False → h5py fallback path
+        mock_svc = _make_service_backend(adapter=None)
+
         with (
-            patch.object(main, "demo_mode_active", False),
-            patch.object(main, "backend", FakeIntegrationNoMethods()),
+            patch.object(main, "backend", mock_svc),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
-            patch.object(main, "demo_mode_instance", None),
         ):
             response = app_client.post("/api/v1/snapshots/h5py_restore_test/restore")
 
@@ -390,11 +415,12 @@ class TestRestoreSnapshotRealMode:
             f.attrs["created"] = "2025-01-01T00:00:00"
             f.attrs["description"] = "No training state"
 
+        # No _adapter means hasattr(backend, "_adapter") is False → h5py fallback path
+        mock_svc = _make_service_backend(adapter=None)
+
         with (
-            patch.object(main, "demo_mode_active", False),
-            patch.object(main, "backend", FakeIntegrationNoMethods()),
+            patch.object(main, "backend", mock_svc),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
-            patch.object(main, "demo_mode_instance", None),
         ):
             response = app_client.post("/api/v1/snapshots/no_state_test/restore")
 
@@ -419,11 +445,12 @@ class TestRestoreSnapshotRealMode:
                 raise ImportError("No module named 'h5py'")
             return original_import(name, *args, **kwargs)
 
+        # No _adapter means hasattr(backend, "_adapter") is False → h5py fallback (which also fails)
+        mock_svc = _make_service_backend(adapter=None)
+
         with (
-            patch.object(main, "demo_mode_active", False),
-            patch.object(main, "backend", FakeIntegrationNoMethods()),
+            patch.object(main, "backend", mock_svc),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
-            patch.object(main, "demo_mode_instance", None),
             patch.object(builtins, "__import__", side_effect=mock_import),
         ):
             response = app_client.post("/api/v1/snapshots/no_h5py_restore/restore")
@@ -436,11 +463,12 @@ class TestRestoreSnapshotRealMode:
         """Test restoring non-existent snapshot returns 404."""
         import main
 
+        fake_integration = FakeIntegration()
+        mock_svc = _make_service_backend(adapter=fake_integration)
+
         with (
-            patch.object(main, "demo_mode_active", False),
-            patch.object(main, "backend", FakeIntegration()),
+            patch.object(main, "backend", mock_svc),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
-            patch.object(main, "demo_mode_instance", None),
         ):
             response = app_client.post("/api/v1/snapshots/nonexistent_snapshot/restore")
 
@@ -468,11 +496,11 @@ class TestRestoreSnapshotRealMode:
         with h5py.File(snapshot_path, "w") as f:
             f.attrs["created"] = "2025-01-01T00:00:00"
 
+        mock_svc = _make_service_backend(adapter=FailingLoadIntegration())
+
         with (
-            patch.object(main, "demo_mode_active", False),
-            patch.object(main, "backend", FailingLoadIntegration()),
+            patch.object(main, "backend", mock_svc),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
-            patch.object(main, "demo_mode_instance", None),
         ):
             response = app_client.post("/api/v1/snapshots/fail_restore/restore")
 
@@ -489,10 +517,10 @@ class TestSnapshotActivityLogging:
         import main
 
         fake_integration = FakeIntegration()
+        mock_svc = _make_service_backend(adapter=fake_integration)
 
         with (
-            patch.object(main, "demo_mode_active", False),
-            patch.object(main, "backend", fake_integration),
+            patch.object(main, "backend", mock_svc),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
         ):
             response = app_client.post("/api/v1/snapshots?name=log_test")
@@ -519,12 +547,11 @@ class TestSnapshotActivityLogging:
         import main
 
         fake_integration = FakeIntegration()
+        mock_svc = _make_service_backend(adapter=fake_integration)
 
         with (
-            patch.object(main, "demo_mode_active", False),
-            patch.object(main, "backend", fake_integration),
+            patch.object(main, "backend", mock_svc),
             patch.object(main, "_snapshots_dir", str(snapshot_dir)),
-            patch.object(main, "demo_mode_instance", None),
         ):
             response = app_client.post("/api/v1/snapshots/restore_log_test/restore")
 
@@ -615,9 +642,11 @@ class TestCreateSnapshotWithTrainingState:
         try:
             main.training_state = MockTrainingState()
 
+            # No _adapter means hasattr(backend, "_adapter") is False → h5py fallback path
+            mock_svc = _make_service_backend(adapter=None)
+
             with (
-                patch.object(main, "demo_mode_active", False),
-                patch.object(main, "backend", FakeIntegrationNoMethods()),
+                patch.object(main, "backend", mock_svc),
                 patch.object(main, "_snapshots_dir", str(snapshot_dir)),
             ):
                 response = app_client.post("/api/v1/snapshots?name=state_test")
