@@ -20,10 +20,6 @@ RUN pip install --no-cache-dir --upgrade pip wheel setuptools
 COPY requirements.lock ./
 RUN pip install --no-cache-dir -r requirements.lock
 
-# Install juniper-data-client from git (not yet on PyPI)
-RUN pip install --no-cache-dir --no-deps \
-    "juniper-data-client @ git+https://github.com/pcalnon/juniper-data-client.git@main"
-
 # Copy project files and install without deps (already installed above)
 COPY pyproject.toml README.md ./
 COPY src/ ./src/

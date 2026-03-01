@@ -18,22 +18,14 @@ WORKDIR /build
 
 RUN pip install --no-cache-dir --upgrade pip wheel setuptools
 
-# Install CPU-only PyTorch (Dash/Plotly imports torch for some visualizations)
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+# Install pinned dependencies from lockfile (best layer caching)
+COPY requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.lock
 
-# Copy project files
+# Copy project files and install without deps (already installed above)
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
-
-# Install juniper-data-client (not yet on PyPI)
-RUN pip install --no-cache-dir \
-    "juniper-data-client @ git+https://github.com/pcalnon/juniper-data-client.git@main"
-
-# Install juniper-cascor-client
-RUN pip install --no-cache-dir juniper-cascor-client
-
-# Install project with all extras
-RUN pip install --no-cache-dir ".[juniper-data,juniper-cascor]"
+RUN pip install --no-cache-dir --no-deps .
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime — Minimal production image

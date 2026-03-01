@@ -5,6 +5,9 @@ FakeCascorClient into CascorServiceAdapter via the new `client` parameter.
 """
 
 import pytest
+
+pytest.importorskip("juniper_cascor_client", reason="juniper-cascor-client not installed")
+
 from juniper_cascor_client.testing import FakeCascorClient
 
 from backend.cascor_service_adapter import CascorServiceAdapter
