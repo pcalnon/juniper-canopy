@@ -250,7 +250,7 @@ repos:
     hooks:
       - id: pytest-coverage
         name: Unit tests with coverage gate (80%)
-        entry: bash -c 'cd src && /opt/miniforge3/envs/JuniperPython/bin/python -m pytest -m "not slow" tests/ -q --tb=short --no-header -p no:warnings --cov=. --cov-report=term-missing:skip-covered --cov-fail-under=80'
+        entry: bash -c 'cd src && /opt/miniforge3/envs/JuniperPython/bin/python -m pytest -m "not slow" tests/ -q --tb=short --no-header -p no:warnings --cov=. --cov-report=term-missing:skip-covered --cov-fail-under=80; rc=$?; cd .. && git checkout -- conf/layouts/metrics_layouts.json 2>/dev/null; exit $rc'
         language: system
         pass_filenames: false
         always_run: true
