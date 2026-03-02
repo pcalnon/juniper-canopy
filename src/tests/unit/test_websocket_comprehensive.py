@@ -577,10 +577,15 @@ class TestEnvironmentVariableConfig:
             assert isinstance(manager.max_connections, int)
 
     def test_valid_max_connections_env(self):
-        """Test valid CASCOR_WEBSOCKET_MAX_CONNECTIONS value."""
-        with patch.dict(os.environ, {"CASCOR_WEBSOCKET_MAX_CONNECTIONS": "100"}):
+        """Test valid JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS value."""
+        from settings import get_settings
+
+        get_settings.cache_clear()
+        with patch.dict(os.environ, {"JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS": "100"}):
+            get_settings.cache_clear()
             manager = WebSocketManager()
             assert manager.max_connections == 100
+        get_settings.cache_clear()
 
     def test_invalid_heartbeat_interval_env(self):
         """Test invalid CASCOR_WEBSOCKET_HEARTBEAT_INTERVAL value."""
@@ -589,10 +594,15 @@ class TestEnvironmentVariableConfig:
             assert isinstance(manager.heartbeat_interval, int)
 
     def test_valid_heartbeat_interval_env(self):
-        """Test valid CASCOR_WEBSOCKET_HEARTBEAT_INTERVAL value."""
-        with patch.dict(os.environ, {"CASCOR_WEBSOCKET_HEARTBEAT_INTERVAL": "60"}):
+        """Test valid JUNIPER_CANOPY_WEBSOCKET__HEARTBEAT_INTERVAL value."""
+        from settings import get_settings
+
+        get_settings.cache_clear()
+        with patch.dict(os.environ, {"JUNIPER_CANOPY_WEBSOCKET__HEARTBEAT_INTERVAL": "60"}):
+            get_settings.cache_clear()
             manager = WebSocketManager()
             assert manager.heartbeat_interval == 60
+        get_settings.cache_clear()
 
     def test_invalid_reconnect_attempts_env(self):
         """Test invalid CASCOR_WEBSOCKET_RECONNECT_ATTEMPTS value."""
@@ -601,10 +611,15 @@ class TestEnvironmentVariableConfig:
             assert isinstance(manager.reconnect_attempts, int)
 
     def test_valid_reconnect_attempts_env(self):
-        """Test valid CASCOR_WEBSOCKET_RECONNECT_ATTEMPTS value."""
-        with patch.dict(os.environ, {"CASCOR_WEBSOCKET_RECONNECT_ATTEMPTS": "10"}):
+        """Test valid JUNIPER_CANOPY_WEBSOCKET__RECONNECT_ATTEMPTS value."""
+        from settings import get_settings
+
+        get_settings.cache_clear()
+        with patch.dict(os.environ, {"JUNIPER_CANOPY_WEBSOCKET__RECONNECT_ATTEMPTS": "10"}):
+            get_settings.cache_clear()
             manager = WebSocketManager()
             assert manager.reconnect_attempts == 10
+        get_settings.cache_clear()
 
     def test_invalid_reconnect_delay_env(self):
         """Test invalid CASCOR_WEBSOCKET_RECONNECT_DELAY value."""
@@ -613,10 +628,15 @@ class TestEnvironmentVariableConfig:
             assert isinstance(manager.reconnect_delay, int)
 
     def test_valid_reconnect_delay_env(self):
-        """Test valid CASCOR_WEBSOCKET_RECONNECT_DELAY value."""
-        with patch.dict(os.environ, {"CASCOR_WEBSOCKET_RECONNECT_DELAY": "5"}):
+        """Test valid JUNIPER_CANOPY_WEBSOCKET__RECONNECT_DELAY value."""
+        from settings import get_settings
+
+        get_settings.cache_clear()
+        with patch.dict(os.environ, {"JUNIPER_CANOPY_WEBSOCKET__RECONNECT_DELAY": "5"}):
+            get_settings.cache_clear()
             manager = WebSocketManager()
             assert manager.reconnect_delay == 5
+        get_settings.cache_clear()
 
 
 class TestDisconnectEdgeCases:

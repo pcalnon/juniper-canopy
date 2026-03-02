@@ -168,10 +168,7 @@ class WebSocketManager:
 
     def __init__(self):
         """Initialize WebSocket manager with config-driven settings."""
-        import os
-
-        from canopy_constants import WebSocketConstants
-        from config_manager import ConfigManager
+        from settings import get_settings
 
         self.active_connections: Set[WebSocket] = set()
         self.connection_metadata: Dict[WebSocket, dict] = {}
@@ -179,49 +176,11 @@ class WebSocketManager:
         self.message_count = 0
         self.event_loop: Optional[asyncio.AbstractEventLoop] = None
 
-        # Initialize ConfigManager
-        config_mgr = ConfigManager()
-        ws_config = config_mgr.config.get("backend", {}).get("communication", {}).get("websocket", {})
-
-        if max_conn_env := os.getenv("CASCOR_WEBSOCKET_MAX_CONNECTIONS"):
-            try:
-                self.max_connections = int(max_conn_env)
-                self.logger.info(f"Max connections from env: {self.max_connections}")
-            except ValueError:
-                self.logger.warning(f"Invalid CASCOR_WEBSOCKET_MAX_CONNECTIONS: {max_conn_env}")
-                self.max_connections = ws_config.get("max_connections", WebSocketConstants.MAX_CONNECTIONS)
-        else:
-            self.max_connections = ws_config.get("max_connections", WebSocketConstants.MAX_CONNECTIONS)
-
-        if heartbeat_env := os.getenv("CASCOR_WEBSOCKET_HEARTBEAT_INTERVAL"):
-            try:
-                self.heartbeat_interval = int(heartbeat_env)
-                self.logger.info(f"Heartbeat interval from env: {self.heartbeat_interval}s")
-            except ValueError:
-                self.logger.warning(f"Invalid CASCOR_WEBSOCKET_HEARTBEAT_INTERVAL: {heartbeat_env}")
-                self.heartbeat_interval = ws_config.get("heartbeat_interval", WebSocketConstants.HEARTBEAT_INTERVAL_SEC)
-        else:
-            self.heartbeat_interval = ws_config.get("heartbeat_interval", WebSocketConstants.HEARTBEAT_INTERVAL_SEC)
-
-        if reconnect_attempts_env := os.getenv("CASCOR_WEBSOCKET_RECONNECT_ATTEMPTS"):
-            try:
-                self.reconnect_attempts = int(reconnect_attempts_env)
-                self.logger.info(f"Reconnect attempts from env: {self.reconnect_attempts}")
-            except ValueError:
-                self.logger.warning(f"Invalid CASCOR_WEBSOCKET_RECONNECT_ATTEMPTS: {reconnect_attempts_env}")
-                self.reconnect_attempts = ws_config.get("reconnect_attempts", WebSocketConstants.RECONNECT_ATTEMPTS)
-        else:
-            self.reconnect_attempts = ws_config.get("reconnect_attempts", WebSocketConstants.RECONNECT_ATTEMPTS)
-
-        if reconnect_delay_env := os.getenv("CASCOR_WEBSOCKET_RECONNECT_DELAY"):
-            try:
-                self.reconnect_delay = int(reconnect_delay_env)
-                self.logger.info(f"Reconnect delay from env: {self.reconnect_delay}s")
-            except ValueError:
-                self.logger.warning(f"Invalid CASCOR_WEBSOCKET_RECONNECT_DELAY: {reconnect_delay_env}")
-                self.reconnect_delay = ws_config.get("reconnect_delay", WebSocketConstants.RECONNECT_DELAY_SEC)
-        else:
-            self.reconnect_delay = ws_config.get("reconnect_delay", WebSocketConstants.RECONNECT_DELAY_SEC)
+        _settings = get_settings()
+        self.max_connections = _settings.websocket.max_connections
+        self.heartbeat_interval = _settings.websocket.heartbeat_interval
+        self.reconnect_attempts = _settings.websocket.reconnect_attempts
+        self.reconnect_delay = _settings.websocket.reconnect_delay
 
         self.logger.info(f"WebSocketManager initialized: " f"max_connections={self.max_connections}, " f"heartbeat_interval={self.heartbeat_interval}s, " f"reconnect_attempts={self.reconnect_attempts}, " f"reconnect_delay={self.reconnect_delay}s")
 

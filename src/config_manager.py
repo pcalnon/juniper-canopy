@@ -94,6 +94,12 @@ class ConfigManager:
     """
     Central configuration manager for Juniper Canopy application.
 
+    .. deprecated::
+        ConfigManager is deprecated in favor of ``settings.get_settings()``
+        (Pydantic BaseSettings). It remains available for infrastructure config
+        (Redis cache, Cassandra) that has not yet been migrated. All new code
+        should use ``from settings import get_settings``.
+
     Supports:
     - YAML configuration files
     - Environment variable substitution

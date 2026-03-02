@@ -1379,9 +1379,9 @@ class TestMainFunction:
         assert callable(main)
 
     @pytest.mark.unit
-    def test_main_module_has_config(self):
-        """main module should have config object."""
-        assert main_module.config is not None
+    def test_main_module_has_settings(self):
+        """main module should have settings object."""
+        assert main_module.settings is not None
 
     @pytest.mark.unit
     def test_main_module_has_app(self):

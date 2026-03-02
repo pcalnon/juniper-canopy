@@ -63,25 +63,23 @@ class TestStartupRegression:
         """ST-2: DemoMode raises JuniperDataConfigurationError when URL is missing."""
         monkeypatch.delenv("JUNIPER_DATA_URL", raising=False)
 
-        mock_cm = MagicMock()
-        mock_cm.config = {}
-        mock_cm.get_training_defaults.return_value = {}
+        mock_settings = MagicMock()
+        mock_settings.juniper_data_url = ""
+        mock_settings.demo_update_interval = 1.0
+        mock_settings.demo_cascade_every = 30
+        mock_settings.get_training_defaults.return_value = {}
 
-        with patch("demo_mode.ConfigManager", return_value=mock_cm):
+        with patch("demo_mode.get_settings", return_value=mock_settings):
             with pytest.raises(JuniperDataConfigurationError, match="JUNIPER_DATA_URL"):
                 DemoMode(update_interval=1.0)
 
-    def test_demo_mode_init_with_config_fallback(self, monkeypatch):
-        """ST-3: DemoMode uses config fallback when env var is absent."""
+    def test_demo_mode_init_with_settings_default(self, monkeypatch):
+        """ST-3: DemoMode uses Settings default juniper_data_url when env var is absent."""
         monkeypatch.delenv("JUNIPER_DATA_URL", raising=False)
 
-        mock_cm = MagicMock()
-        mock_cm.config = {"backend": {"juniper_data": {"url": "http://localhost:8100"}}}
-        mock_cm.get_training_defaults.return_value = {}
-
-        with patch("demo_mode.ConfigManager", return_value=mock_cm):
-            demo = DemoMode(update_interval=1.0)
-            assert demo.dataset is not None
+        # Settings always provides a default juniper_data_url, so DemoMode should init fine
+        demo = DemoMode(update_interval=1.0)
+        assert demo.dataset is not None
 
     def test_app_startup_with_mocked_juniper_data(self):
         """ST-5: FastAPI app starts and /health returns 200."""

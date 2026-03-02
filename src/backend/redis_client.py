@@ -107,12 +107,12 @@ class RedisClient:
         Initialize Redis client wrapper.
 
         Args:
-            config_manager: ConfigManager instance for reading configuration.
+            config_manager: ConfigManager instance for reading cache configuration.
                            If None, creates a new ConfigManager instance.
         """
         self.logger = logging.getLogger(__name__)
 
-        # Import ConfigManager here to avoid circular imports
+        # ConfigManager is still used for backend.cache.* infrastructure config
         if config_manager is None:
             from config_manager import get_config
 
@@ -134,9 +134,10 @@ class RedisClient:
             self._initialize_connection()
 
     def _is_demo_mode(self) -> bool:
-        """Check if demo mode is active via environment variable."""
-        demo_env = os.getenv("CASCOR_DEMO_MODE", "").lower()
-        return demo_env in {"1", "true", "yes", "on"}
+        """Check if demo mode is active via Settings."""
+        from settings import get_settings
+
+        return get_settings().demo_mode
 
     def _get_redis_config(self) -> Dict[str, Any]:
         """

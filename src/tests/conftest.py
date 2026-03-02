@@ -464,6 +464,10 @@ def reset_singletons():
         import demo_mode as demo_mode_module
         from config_manager import ConfigManager
         from demo_mode import DemoMode
+        from settings import get_settings
+
+        # Reset Settings cache
+        get_settings.cache_clear()
 
         # Reset ConfigManager singleton
         if hasattr(ConfigManager, "_instance"):
@@ -510,6 +514,10 @@ def reset_singletons():
         import demo_mode as demo_mode_module
         from config_manager import ConfigManager
         from demo_mode import DemoMode
+        from settings import get_settings
+
+        # Reset Settings cache
+        get_settings.cache_clear()
 
         # Reset again after test
         if hasattr(ConfigManager, "_instance"):

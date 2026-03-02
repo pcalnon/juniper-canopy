@@ -47,7 +47,7 @@ from dash.dependencies import Input, Output
 from flask import request
 
 from canopy_constants import DashboardConstants, TrainingConstants
-from config_manager import ConfigManager
+from settings import get_settings
 
 from .base_component import BaseComponent
 from .callback_context import get_callback_context
@@ -81,8 +81,8 @@ class DashboardManager:
         self.logger = logging.getLogger(__name__)
         self.config = config
 
-        # Initialize ConfigManager for training defaults
-        self.config_mgr = ConfigManager()
+        # Initialize settings for training defaults
+        self._settings = get_settings()
 
         # Get training defaults with environment variable support
         self.training_defaults = self._get_training_defaults_with_env()
@@ -131,7 +131,7 @@ class DashboardManager:
         Returns:
             Dictionary with learning_rate, hidden_units, epochs
         """
-        defaults = self.config_mgr.get_training_defaults()
+        defaults = self._settings.get_training_defaults()
 
         # Apply environment variable overrides
         if lr_env := os.getenv("CASCOR_TRAINING_LEARNING_RATE"):
@@ -416,8 +416,8 @@ class DashboardManager:
                                                     type="number",
                                                     value=self.training_defaults.get("learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE),
                                                     step=0.001,
-                                                    min=self.config_mgr.get_training_param_config("learning_rate").get("min", TrainingConstants.MIN_LEARNING_RATE),
-                                                    max=self.config_mgr.get_training_param_config("learning_rate").get("max", TrainingConstants.MAX_LEARNING_RATE),
+                                                    min=self._settings.get_training_param_config("learning_rate")["min"],
+                                                    max=self._settings.get_training_param_config("learning_rate")["max"],
                                                     className="mb-2",
                                                     debounce=True,
                                                 ),
@@ -427,8 +427,8 @@ class DashboardManager:
                                                     type="number",
                                                     value=self.training_defaults.get("hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS),
                                                     step=1,
-                                                    min=self.config_mgr.get_training_param_config("hidden_units").get("min", TrainingConstants.MIN_HIDDEN_UNITS),
-                                                    max=self.config_mgr.get_training_param_config("hidden_units").get("max", TrainingConstants.MAX_HIDDEN_UNITS),
+                                                    min=self._settings.get_training_param_config("hidden_units")["min"],
+                                                    max=self._settings.get_training_param_config("hidden_units")["max"],
                                                     className="mb-2",
                                                     debounce=True,
                                                 ),
@@ -438,8 +438,8 @@ class DashboardManager:
                                                     type="number",
                                                     value=self.training_defaults.get("epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS),
                                                     step=1,
-                                                    min=self.config_mgr.get_training_param_config("epochs").get("min", TrainingConstants.MIN_TRAINING_EPOCHS),
-                                                    max=self.config_mgr.get_training_param_config("epochs").get("max", TrainingConstants.MAX_TRAINING_EPOCHS),
+                                                    min=self._settings.get_training_param_config("epochs")["min"],
+                                                    max=self._settings.get_training_param_config("epochs")["max"],
                                                     className="mb-2",
                                                     debounce=True,
                                                 ),

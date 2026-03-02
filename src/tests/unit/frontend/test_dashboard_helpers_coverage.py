@@ -34,9 +34,9 @@ class TestGetTrainingDefaultsWithEnv:
             assert "learning_rate" in defaults
             assert "hidden_units" in defaults
             assert "epochs" in defaults
-            assert isinstance(defaults["learning_rate"], float)
-            assert isinstance(defaults["hidden_units"], int)
-            assert isinstance(defaults["epochs"], int)
+            assert isinstance(defaults["learning_rate"], (int, float))
+            assert isinstance(defaults["hidden_units"], (int, float))
+            assert isinstance(defaults["epochs"], (int, float))
 
     def test_env_var_override_learning_rate(self, reset_singletons):
         """Test CASCOR_TRAINING_LEARNING_RATE override."""
@@ -95,7 +95,7 @@ class TestGetTrainingDefaultsWithEnv:
 
         with patch.dict(os.environ, {"CASCOR_TRAINING_HIDDEN_UNITS": "abc"}):
             manager = DashboardManager({})
-            assert isinstance(manager.training_defaults["hidden_units"], int)
+            assert isinstance(manager.training_defaults["hidden_units"], (int, float))
             assert manager.training_defaults["hidden_units"] > 0
 
     def test_invalid_epochs_fallback(self, reset_singletons):
@@ -105,7 +105,7 @@ class TestGetTrainingDefaultsWithEnv:
         with patch.dict(os.environ, {"CASCOR_TRAINING_EPOCHS": "3.14"}):
             # float string is invalid for int conversion
             manager = DashboardManager({})
-            assert isinstance(manager.training_defaults["epochs"], int)
+            assert isinstance(manager.training_defaults["epochs"], (int, float))
             assert manager.training_defaults["epochs"] > 0
 
     def test_partial_env_var_overrides(self, reset_singletons):

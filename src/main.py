@@ -63,9 +63,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 # from backend.training_monitor import TrainingMonitor  trunk-ignore(ruff/E402)
 # from backend.data_adapter import DataAdapter  trunk-ignore(ruff/E402)
 from backend.training_monitor import TrainingState  # trunk-ignore(ruff/E402)
-from canopy_constants import ServerConstants
 from communication.websocket_manager import websocket_manager
-from config_manager import get_config
 from frontend.dashboard_manager import DashboardManager
 from health import DependencyStatus, ReadinessResponse, probe_dependency
 from logger.logger import (
@@ -79,6 +77,7 @@ from observability import (
     configure_sentry,
     get_prometheus_app,
 )
+from settings import get_settings
 
 # import logging
 
@@ -92,7 +91,7 @@ from observability import (
 # )
 
 # Initialize configuration
-config = get_config()
+settings = get_settings()
 
 # Initialize loggers
 system_logger = get_system_logger()
@@ -111,17 +110,11 @@ training_state = TrainingState()  # Global TrainingState instance
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Startup — observability
-    _log_format = os.environ.get("CANOPY_LOG_FORMAT", "text")
-    _log_level = os.environ.get("CASCOR_LOG_LEVEL", "INFO")
-    configure_logging(_log_level, _log_format, "juniper-canopy")
-
-    _sentry_dsn = os.environ.get("CANOPY_SENTRY_DSN")
-    _app_version = config.get("application.version", "1.0.0")
-    configure_sentry(_sentry_dsn, "juniper-canopy", _app_version)
+    configure_logging(settings.log_level, settings.log_format, "juniper-canopy")
+    configure_sentry(settings.sentry_dsn, "juniper-canopy", "0.3.0")
 
     system_logger.info("Starting Juniper Canopy application")
-    system_logger.info(f"Configuration loaded from: {config.config_path}")
-    system_logger.info(f"Environment: {config.get('application.environment', 'unknown')}")
+    system_logger.info(f"Settings: server={settings.server.host}:{settings.server.port}, demo={settings.demo_mode}")
 
     # Capture the running event loop for thread-safe async scheduling
     loop_holder["loop"] = asyncio.get_running_loop()
@@ -137,18 +130,10 @@ async def lifespan(app: FastAPI):
 
     backend = create_backend()
 
-    # Fix 4 (RC-5): Validate JUNIPER_DATA_URL for ALL modes, not just demo mode.
-    # JuniperData is mandatory for both demo and real backend (CAN-INT-002).
-    juniper_data_url = os.getenv("JUNIPER_DATA_URL")
-    if not juniper_data_url:
-        config_url = config.get("backend.juniper_data.url")
-        if config_url and not str(config_url).startswith("$"):
-            juniper_data_url = str(config_url)
-            os.environ["JUNIPER_DATA_URL"] = juniper_data_url
-            system_logger.info(f"JUNIPER_DATA_URL resolved from config: {juniper_data_url}")
-    if not juniper_data_url:
-        system_logger.error("JUNIPER_DATA_URL is not set and could not be resolved from config. " "Set JUNIPER_DATA_URL=http://localhost:8100 or ensure JuniperData service is running.")
-        raise RuntimeError("JUNIPER_DATA_URL is required. " "Set JUNIPER_DATA_URL=http://localhost:8100 or start JuniperData service.")
+    # Validate JuniperData URL — mandatory for both demo and real backend (CAN-INT-002).
+    juniper_data_url = settings.juniper_data_url
+    # Propagate to env so downstream code (backend factory, etc.) can read it
+    os.environ.setdefault("JUNIPER_DATA_URL", juniper_data_url)
 
     # CAN-HIGH-001: Probe upstream services at startup using standardized probe.
     global juniper_data_available
@@ -160,7 +145,7 @@ async def lifespan(app: FastAPI):
         system_logger.warning(f"JuniperData unreachable at {juniper_data_url}: {data_probe.message}")
 
     # Probe JuniperCascor at startup (service mode only) — fallback to demo on failure.
-    cascor_url = os.getenv("CASCOR_SERVICE_URL")
+    cascor_url = settings.cascor_service_url
     if cascor_url and backend.backend_type == "service":
         cascor_probe = probe_dependency("JuniperCascor", f"{cascor_url.rstrip('/')}/v1/health/live")
         if cascor_probe.status == "healthy":
@@ -203,9 +188,9 @@ async def lifespan(app: FastAPI):
 
 # Initialize FastAPI
 app = FastAPI(
-    title=config.get("application.name", "Juniper Canopy"),
-    version=config.get("application.version", "1.0.0"),
-    description=config.get("application.description", "Real-time monitoring for CasCor networks"),
+    title="Juniper Canopy",
+    version="0.3.0",
+    description="Real-time monitoring for CasCor networks",
     lifespan=lifespan,
 )
 
@@ -228,7 +213,7 @@ app.add_middleware(SecurityMiddleware, api_key_auth=api_key_auth, rate_limiter=r
 
 # Observability middleware (LIFO: last added runs first)
 app.add_middleware(RequestIdMiddleware)
-if os.environ.get("CANOPY_METRICS_ENABLED", "false").lower() in ("true", "1", "yes"):
+if settings.metrics_enabled:
     from observability import PrometheusMiddleware
 
     app.add_middleware(PrometheusMiddleware, service_name="juniper-canopy")
@@ -238,7 +223,7 @@ if os.environ.get("CANOPY_METRICS_ENABLED", "false").lower() in ("true", "1", "y
 backend = None
 
 # Initialize Dash dashboard (standalone with its own Flask server)
-dashboard_manager = DashboardManager(config.get_section("frontend"))
+dashboard_manager = DashboardManager({})
 
 # Mount Dash's Flask server to FastAPI using WSGIMiddleware
 # This allows ASGI FastAPI to serve WSGI Dash application
@@ -398,7 +383,7 @@ async def health_check_deprecated():
     return {
         "status": "healthy",
         "timestamp": time.time(),
-        "version": config.get("application.version", "1.0.0"),
+        "version": "0.3.0",
         "active_connections": websocket_manager.get_connection_count(),
         "training_active": backend.is_training_active(),
         "demo_mode": backend.backend_type == "demo",
@@ -412,7 +397,7 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": time.time(),
-        "version": config.get("application.version", "1.0.0"),
+        "version": "0.3.0",
         "active_connections": websocket_manager.get_connection_count(),
         "training_active": backend.is_training_active(),
         "demo_mode": backend.backend_type == "demo",
@@ -433,21 +418,19 @@ async def readiness_probe() -> ReadinessResponse:
     Probes JuniperData and JuniperCascor health endpoints and reports
     overall readiness with per-dependency status.
     """
-    app_version = config.get("application.version", "1.0.0")
-
     # Probe JuniperData
-    data_url = os.getenv("JUNIPER_DATA_URL", "http://localhost:8100")
+    data_url = settings.juniper_data_url
     data_dep = probe_dependency("JuniperData Service", f"{data_url.rstrip('/')}/v1/health/live")
 
     # Probe JuniperCascor
-    cascor_url = os.getenv("CASCOR_SERVICE_URL")
-    if cascor_url:
-        cascor_dep = probe_dependency("JuniperCascor Service", f"{cascor_url.rstrip('/')}/v1/health/live")
+    ready_cascor_url = settings.cascor_service_url
+    if ready_cascor_url:
+        cascor_dep = probe_dependency("JuniperCascor Service", f"{ready_cascor_url.rstrip('/')}/v1/health/live")
     else:
         cascor_dep = DependencyStatus(
             name="JuniperCascor Service",
             status="not_configured",
-            message="CASCOR_SERVICE_URL not set (demo mode)",
+            message="JUNIPER_CANOPY_CASCOR_SERVICE_URL not set (demo mode)",
         )
 
     dependencies = {"juniper_data": data_dep, "juniper_cascor": cascor_dep}
@@ -460,7 +443,7 @@ async def readiness_probe() -> ReadinessResponse:
 
     return ReadinessResponse(
         status=overall,
-        version=app_version,
+        version="0.3.0",
         service="juniper-canopy",
         dependencies=dependencies,
         details={
@@ -613,7 +596,7 @@ async def get_statistics():
 
 # Snapshot configuration
 SNAPSHOT_EXTENSIONS = (".h5", ".hdf5")
-_snapshots_dir = os.getenv("CASCOR_SNAPSHOT_DIR", config.get("backend.snapshots.directory", "./snapshots"))
+_snapshots_dir = os.getenv("CASCOR_SNAPSHOT_DIR", "./snapshots")
 
 
 def _generate_mock_snapshots():
@@ -1701,32 +1684,12 @@ async def api_remote_disconnect():
 
 def main():
     """Main entry point."""
-    # Get server configuration with proper fallback hierarchy:
-    # 1. Environment variable (CASCOR_SERVER_*)
-    # 2. YAML configuration (conf/app_config.yaml)
-    # 3. Constants module (ServerConstants)
+    host = settings.server.host
+    port = settings.server.port
+    debug = settings.server.debug
 
-    host_config = config.get("application.server.host")
-    host = os.getenv("CASCOR_SERVER_HOST") or host_config or ServerConstants.DEFAULT_HOST
-
-    port_config = config.get("application.server.port")
-    port_env = os.getenv("CASCOR_SERVER_PORT")
-    port = int(port_env) if port_env else (port_config or ServerConstants.DEFAULT_PORT)
-
-    debug_config = config.get("application.server.debug")
-    debug_env = os.getenv("CASCOR_SERVER_DEBUG")
-    if debug_env:
-        debug = debug_env.lower() in ("1", "true", "yes")
-    else:
-        debug = debug_config if debug_config is not None else False
-
-    # Log configuration sources for transparency
-    host_source = "env" if os.getenv("CASCOR_SERVER_HOST") else ("config" if host_config else "constant")
-    port_source = "env" if port_env else ("config" if port_config else "constant")
-    debug_source = "env" if debug_env else ("config" if debug_config is not None else "default")
-
-    system_logger.info(f"Starting server on {host}:{port} (host source: {host_source}, port source: {port_source})")
-    system_logger.info(f"Debug mode: {debug} (source: {debug_source})")
+    system_logger.info(f"Starting server on {host}:{port}")
+    system_logger.info(f"Debug mode: {debug}")
     system_logger.info(f"Dashboard available at: http://{host}:{port}/dashboard/")
     system_logger.info(f"WebSocket endpoint: ws://{host}:{port}/ws")
     system_logger.info(f"API documentation: http://{host}:{port}/docs")

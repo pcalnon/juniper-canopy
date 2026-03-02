@@ -10,11 +10,16 @@ Provides:
     - create_backend(): Factory function selecting the appropriate backend
 """
 
+from __future__ import annotations
+
 import logging
 import os
+from typing import TYPE_CHECKING
 
-from backend.demo_backend import DemoBackend
 from backend.protocol import BackendProtocol
+
+if TYPE_CHECKING:
+    from backend.demo_backend import DemoBackend
 
 __all__ = [
     "BackendProtocol",
@@ -37,6 +42,7 @@ def create_backend() -> BackendProtocol:
     Returns:
         A BackendProtocol-conforming backend instance.
     """
+    from backend.demo_backend import DemoBackend
     from demo_mode import get_demo_mode
 
     force_demo = os.getenv("CASCOR_DEMO_MODE", "0").lower() in ("1", "true", "yes")

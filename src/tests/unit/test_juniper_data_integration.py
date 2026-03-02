@@ -335,23 +335,22 @@ class TestDemoModeMandatoryUrl:
 
     @pytest.mark.unit
     def test_generate_spiral_dataset_raises_without_url(self):
-        """_generate_spiral_dataset must raise JuniperDataConfigurationError when JUNIPER_DATA_URL is unset."""
+        """_generate_spiral_dataset must raise JuniperDataConfigurationError when juniper_data_url is empty."""
         from juniper_data_client.exceptions import JuniperDataConfigurationError
 
         from demo_mode import DemoMode
+        from settings import get_settings
 
         demo = DemoMode.__new__(DemoMode)
         demo.logger = MagicMock()
 
-        mock_config = MagicMock()
-        mock_config.config = {}
+        # Patch get_settings to return a settings object with empty juniper_data_url
+        mock_settings = MagicMock()
+        mock_settings.juniper_data_url = ""
 
-        env = os.environ.copy()
-        env.pop("JUNIPER_DATA_URL", None)
-        with patch.dict(os.environ, env, clear=True):
-            with patch("demo_mode.ConfigManager", return_value=mock_config):
-                with pytest.raises(JuniperDataConfigurationError, match="JUNIPER_DATA_URL"):
-                    demo._generate_spiral_dataset()
+        with patch("demo_mode.get_settings", return_value=mock_settings):
+            with pytest.raises(JuniperDataConfigurationError, match="JUNIPER_DATA_URL"):
+                demo._generate_spiral_dataset()
 
     @pytest.mark.unit
     def test_generate_spiral_dataset_delegates_to_juniper_data(self):

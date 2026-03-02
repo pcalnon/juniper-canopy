@@ -101,11 +101,16 @@ class TestDemoModeEnvironmentVariables:
     """Test environment variable handling."""
 
     def test_invalid_update_interval_env(self):
-        """Test invalid CASCOR_DEMO_UPDATE_INTERVAL falls back (lines 181-186)."""
+        """Test invalid CASCOR_DEMO_UPDATE_INTERVAL falls back to default via Settings."""
+        from settings import get_settings
+
+        get_settings.cache_clear()
         with patch.dict(os.environ, {"CASCOR_DEMO_UPDATE_INTERVAL": "invalid"}):
+            get_settings.cache_clear()
             demo = DemoMode()
             assert isinstance(demo.update_interval, (int, float))
             demo.stop()
+        get_settings.cache_clear()
 
     def test_valid_update_interval_env(self):
         """Test valid CASCOR_DEMO_UPDATE_INTERVAL is used."""
@@ -136,18 +141,33 @@ class TestDemoModeEnvironmentVariables:
             demo.stop()
 
     def test_valid_hidden_units_env(self):
-        """Test valid CASCOR_TRAINING_HIDDEN_UNITS is used."""
-        with patch.dict(os.environ, {"CASCOR_TRAINING_HIDDEN_UNITS": "15"}):
+        """Test custom hidden_units default is used via Settings."""
+        mock_settings = MagicMock()
+        mock_settings.demo_update_interval = 1.0
+        mock_settings.demo_cascade_every = 30
+        mock_settings.juniper_data_url = "http://localhost:8100"
+        mock_settings.get_training_defaults.return_value = {
+            "epochs": 500,
+            "learning_rate": 0.01,
+            "hidden_units": 15,
+        }
+
+        with patch("demo_mode.get_settings", return_value=mock_settings):
             demo = DemoMode()
             assert demo.max_hidden_units == 15
             demo.stop()
 
     def test_invalid_cascade_every_env(self):
-        """Test invalid CASCOR_DEMO_CASCADE_EVERY falls back (lines 234-239)."""
+        """Test invalid CASCOR_DEMO_CASCADE_EVERY falls back to default via Settings."""
+        from settings import get_settings
+
+        get_settings.cache_clear()
         with patch.dict(os.environ, {"CASCOR_DEMO_CASCADE_EVERY": "xyz"}):
+            get_settings.cache_clear()
             demo = DemoMode()
             assert isinstance(demo.cascade_every, int)
             demo.stop()
+        get_settings.cache_clear()
 
     def test_valid_cascade_every_env(self):
         """Test valid CASCOR_DEMO_CASCADE_EVERY is used."""

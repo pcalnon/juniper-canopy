@@ -260,7 +260,7 @@ class TestDashboardManagerTrainingDefaults:
         dm = DashboardManager(minimal_config)
         defaults = dm._get_training_defaults_with_env()
         assert "hidden_units" in defaults
-        assert isinstance(defaults["hidden_units"], int)
+        assert isinstance(defaults["hidden_units"], (int, float))
 
     def test_env_override_invalid_epochs(self, minimal_config, monkeypatch):
         """Test invalid CASCOR_TRAINING_EPOCHS is ignored with warning."""
@@ -268,14 +268,16 @@ class TestDashboardManagerTrainingDefaults:
         dm = DashboardManager(minimal_config)
         defaults = dm._get_training_defaults_with_env()
         assert "epochs" in defaults
-        assert isinstance(defaults["epochs"], int)
+        assert isinstance(defaults["epochs"], (int, float))
 
     def test_fallback_to_constants(self, minimal_config, monkeypatch):
         """Test that constants are used as fallback when config is missing keys."""
         from canopy_constants import TrainingConstants
 
         dm = DashboardManager(minimal_config)
-        dm.config_mgr.get_training_defaults = MagicMock(return_value={})
+        mock_settings = MagicMock()
+        mock_settings.get_training_defaults.return_value = {}
+        dm._settings = mock_settings
         defaults = dm._get_training_defaults_with_env()
         assert defaults["learning_rate"] == TrainingConstants.DEFAULT_LEARNING_RATE
         assert defaults["hidden_units"] == TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS

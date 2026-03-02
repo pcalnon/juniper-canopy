@@ -48,12 +48,11 @@
 #
 #####################################################################################################################################################################################################
 import logging
-import os
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from config_manager import ConfigManager
+from settings import get_settings
 
 CASSANDRA_AVAILABLE = False
 try:
@@ -82,16 +81,17 @@ class CassandraClient:
     - UNAVAILABLE: Driver not installed or cannot connect
     """
 
-    def __init__(self, config_manager: Optional[ConfigManager] = None):
+    def __init__(self, config_manager: Optional[Any] = None):
         """
         Initialize Cassandra client.
 
         Args:
-            config_manager: ConfigManager instance for configuration access.
+            config_manager: ConfigManager instance for Cassandra infrastructure config.
                           If None, creates a new instance.
         """
         self.logger = logging.getLogger(__name__)
 
+        # ConfigManager is still used for cassandra.* infrastructure config
         if config_manager is None:
             from config_manager import get_config
 
@@ -101,7 +101,7 @@ class CassandraClient:
         self._cluster: Optional[Any] = None
         self._session: Optional[Any] = None
 
-        self._demo_mode = os.getenv("CASCOR_DEMO_MODE", "").lower() in ("1", "true", "yes")
+        self._demo_mode = get_settings().demo_mode
 
         self._enabled = self._config_manager.get("cassandra.enabled", False)
         self._contact_points = self._config_manager.get("cassandra.contact_points", ["127.0.0.1"])
@@ -481,7 +481,7 @@ class CassandraClient:
 _cassandra_client_instance: Optional[CassandraClient] = None
 
 
-def get_cassandra_client(config_manager: Optional[ConfigManager] = None) -> CassandraClient:
+def get_cassandra_client(config_manager: Optional[Any] = None) -> CassandraClient:
     """
     Get global Cassandra client instance.
 

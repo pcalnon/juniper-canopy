@@ -117,9 +117,8 @@ class TestInvalidEnvVarFallback:
         panel = MetricsPanel({})
         assert panel.max_data_points == 1000
 
-    @patch.dict("os.environ", {"JUNIPER_CANOPY_METRICS_SMOOTHING_WINDOW": "bad_value"})
     def test_invalid_smoothing_window_falls_back_to_config_default(self):
-        """Invalid smoothing_window env var should fallback to config default."""
+        """MetricsPanel uses Settings default smoothing_window (Pydantic rejects invalid env vars)."""
         panel = MetricsPanel({})
         assert panel.smoothing_window == 10
 

@@ -52,7 +52,6 @@
 #
 #####################################################################################################################################################################################################
 import logging
-import os
 import threading
 import time
 from collections import deque
@@ -64,7 +63,7 @@ import torch
 
 from backend.training_state_machine import Command, TrainingPhase, TrainingStateMachine  # TrainingStatus,
 from canopy_constants import TrainingConstants
-from config_manager import ConfigManager
+from settings import get_settings
 
 # import copy
 
@@ -173,20 +172,11 @@ class DemoMode:
         """
         self.logger = logging.getLogger(__name__)
 
-        # Initialize ConfigManager for demo configuration
-        config_mgr = ConfigManager()
-        training_defaults = config_mgr.get_training_defaults()
-        demo_config = config_mgr.config.get("development", {}).get("demo_mode", {})
+        # Load settings for demo configuration
+        _settings = get_settings()
+        training_defaults = _settings.get_training_defaults()
 
-        if interval_env := os.getenv("CASCOR_DEMO_UPDATE_INTERVAL"):
-            try:
-                self.update_interval = float(interval_env)
-                self.logger.info(f"Demo update interval from env: {self.update_interval}s")
-            except ValueError:
-                self.logger.warning(f"Invalid CASCOR_DEMO_UPDATE_INTERVAL: {interval_env}")
-                self.update_interval = demo_config.get("simulation_interval_sec", update_interval)
-        else:
-            self.update_interval = demo_config.get("simulation_interval_sec", update_interval)
+        self.update_interval = _settings.demo_update_interval
 
         # Create mock network
         self.network = MockCascorNetwork(input_size=2, output_size=1)
@@ -209,35 +199,9 @@ class DemoMode:
         self._stop = threading.Event()
         self._pause = threading.Event()
 
-        if epochs_env := os.getenv("CASCOR_TRAINING_EPOCHS"):
-            try:
-                self.max_epochs = int(epochs_env)
-                self.logger.info(f"Max epochs from env: {self.max_epochs}")
-            except ValueError:
-                self.logger.warning(f"Invalid CASCOR_TRAINING_EPOCHS: {epochs_env}")
-                self.max_epochs = training_defaults.get("epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS)
-        else:
-            self.max_epochs = training_defaults.get("epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS)
-
-        if hidden_units_env := os.getenv("CASCOR_TRAINING_HIDDEN_UNITS"):
-            try:
-                self.max_hidden_units = int(hidden_units_env)
-                self.logger.info(f"Max hidden units from env: {self.max_hidden_units}")
-            except ValueError:
-                self.logger.warning(f"Invalid CASCOR_TRAINING_HIDDEN_UNITS: {hidden_units_env}")
-                self.max_hidden_units = training_defaults.get("hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)
-        else:
-            self.max_hidden_units = training_defaults.get("hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)
-
-        if cascade_every_env := os.getenv("CASCOR_DEMO_CASCADE_EVERY"):
-            try:
-                self.cascade_every = int(cascade_every_env)
-                self.logger.info(f"Cascade frequency from env: {self.cascade_every}")
-            except ValueError:
-                self.logger.warning(f"Invalid CASCOR_DEMO_CASCADE_EVERY: {cascade_every_env}")
-                self.cascade_every = demo_config.get("cascade_every", 30)
-        else:
-            self.cascade_every = demo_config.get("cascade_every", 30)
+        self.max_epochs = int(training_defaults.get("epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS))
+        self.max_hidden_units = int(training_defaults.get("hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS))
+        self.cascade_every = _settings.demo_cascade_every
 
         # Metrics buffer for realistic curves
         self.metrics_history = deque(maxlen=1000)
@@ -377,14 +341,7 @@ class DemoMode:
         """
         from juniper_data_client.exceptions import JuniperDataConfigurationError
 
-        juniper_data_url = os.environ.get("JUNIPER_DATA_URL")
-
-        if not juniper_data_url:
-            config_mgr = ConfigManager()
-            config_url = config_mgr.config.get("backend", {}).get("juniper_data", {}).get("url")
-            if config_url and not config_url.startswith("$"):
-                juniper_data_url = config_url
-                self.logger.info(f"Using JUNIPER_DATA_URL from config: {juniper_data_url}")
+        juniper_data_url = get_settings().juniper_data_url
 
         if not juniper_data_url:
             raise JuniperDataConfigurationError("JUNIPER_DATA_URL environment variable is required. " "All datasets must be fetched from the JuniperData service. " "Set JUNIPER_DATA_URL=http://localhost:8100 to connect to a local instance.")

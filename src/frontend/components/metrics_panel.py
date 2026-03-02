@@ -49,7 +49,7 @@ import plotly.graph_objects as go
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
-from config_manager import ConfigManager
+from settings import get_settings
 
 from ..base_component import BaseComponent
 
@@ -78,18 +78,8 @@ class MetricsPanel(BaseComponent):
         """
         super().__init__(config, component_id)
 
-        # Initialize ConfigManager for component configuration
-        self.config_mgr = ConfigManager()
-
-        # Get metrics panel configuration with environment variable support
-        # Configuration hierarchy:
-        # 1. Component config dict passed in (highest priority for test compatibility)
-        # 2. Environment variables (JUNIPER_CANOPY_METRICS_*)
-        # 3. Component defaults (1000 for both max_data_points and update_interval)
-        # Note: YAML config is NOT used for max_data_points and update_interval to maintain
-        # test compatibility and clear component defaults
-
-        metrics_config = self.config_mgr.config.get("frontend", {}).get("training_metrics", {})
+        # Initialize settings for component configuration
+        _settings = get_settings()
 
         # Update interval (milliseconds)
         # Priority: 1. Passed config, 2. Environment variable, 3. Default (1000ms)
@@ -119,15 +109,7 @@ class MetricsPanel(BaseComponent):
         else:
             self.max_data_points = 1000  # Default: 1000
 
-        if smoothing_env := os.getenv("JUNIPER_CANOPY_METRICS_SMOOTHING_WINDOW"):
-            try:
-                self.smoothing_window = int(smoothing_env)
-                self.logger.info(f"Smoothing window overridden by env var: {smoothing_env}")
-            except ValueError:
-                self.logger.warning(f"Invalid JUNIPER_CANOPY_METRICS_SMOOTHING_WINDOW: {smoothing_env}")
-                self.smoothing_window = metrics_config.get("smoothing_window", 10)
-        else:
-            self.smoothing_window = metrics_config.get("smoothing_window", 10)
+        self.smoothing_window = _settings.metrics_smoothing_window
 
         # Data buffers
         self.metrics_history: List[Dict[str, Any]] = []
