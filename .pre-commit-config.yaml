@@ -241,6 +241,18 @@ repos:
         types: [yaml]
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # SOPS: Block unencrypted .env files from being committed
+  # ═══════════════════════════════════════════════════════════════════════════
+  - repo: local
+    hooks:
+      - id: no-unencrypted-env
+        name: Block unencrypted .env files
+        entry: "bash -c 'echo ERROR - Unencrypted .env file detected. Use sops to encrypt. && exit 1'"
+        language: system
+        files: ^\.env(\.secrets)?$
+        types: [file]
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # Code Coverage Gate - Unit + Integration Tests with Coverage Enforcement
   # Runs all tests (excluding slow) and enforces 80% coverage threshold.
   # Uses system Python (conda JuniperPython env) for dash/fastapi dependencies.

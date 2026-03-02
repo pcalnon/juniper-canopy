@@ -30,7 +30,7 @@ For agents and subagents working on this codebase, follow this checklist:
    ```
 
 3. **Before changing configuration**
-   - Check `src/constants.py` and `conf/app_config.yaml`
+   - Check `src/canopy_constants.py` and `conf/app_config.yaml`
    - Respect the hierarchy: env vars (`CASCOR_*`) > YAML > constants
 
 4. **Before changing WebSocket or API routes**
@@ -46,7 +46,7 @@ For agents and subagents working on this codebase, follow this checklist:
 
 **Where to find more details:**
 
-- [Constants Guide](docs/CONSTANTS_GUIDE.md)
+- [Constants Guide](docs/cascor/CONSTANTS_GUIDE.md)
 - [Testing Docs](docs/testing/)
 - [CasCor Backend Integration](docs/cascor/)
 - [API Documentation](docs/api/)
@@ -318,7 +318,7 @@ juniper_canopy/
    - Thread-safe broadcasting
    - Async/sync bridge
 
-5. **Constants Module** (`src/constants.py`)
+5. **Constants Module** (`src/canopy_constants.py`)
    - Centralized application constants
    - Type-safe configuration values
    - Training parameters, UI settings, server config
@@ -394,7 +394,7 @@ docker compose -f conf/docker-compose.yaml up --build
 
 ### Using Constants
 
-All application constants are centralized in `src/constants.py` for maintainability and type safety.
+All application constants are centralized in `src/canopy_constants.py` for maintainability and type safety.
 
 **Import and use constants:**
 
@@ -422,7 +422,7 @@ interval = DashboardConstants.FAST_UPDATE_INTERVAL_MS
 
 **Adding new constants:**
 
-See the comprehensive [Constants Guide](docs/CONSTANTS_GUIDE.md) for detailed instructions on:
+See the comprehensive [Constants Guide](docs/cascor/CONSTANTS_GUIDE.md) for detailed instructions on:
 
 - How to add new constants
 - Naming conventions (include units: `_MS`, `_S`, `_PX`)
@@ -437,7 +437,7 @@ The juniper_canopy application uses a three-level configuration hierarchy (highe
 
 1. **Environment Variables** (CASCOR_*) - Runtime overrides
 2. **YAML Configuration** (conf/app_config.yaml) - Deployment-specific settings
-3. **Constants Module** (src/constants.py) - Application defaults
+3. **Constants Module** (src/canopy_constants.py) - Application defaults
 
 This hierarchy allows flexible deployment while maintaining sensible defaults.
 
@@ -1010,7 +1010,7 @@ The demo mode must accurately simulate the real CasCor backend to enable UI deve
 
 **Implementation:** [src/demo_mode.py](src/demo_mode.py)
 
-**Non-MVP Features (see [DEVELOPMENT_ROADMAP.md](notes/DEVELOPMENT_ROADMAP.md)):**
+**Non-MVP Features (see [DEVELOPMENT_ROADMAP.md](notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md)):**
 
 - HDF5 snapshot playback
 - Export formats (Cytoscape)
@@ -1078,7 +1078,7 @@ Organize files according to their purpose:
 | ------------- | ------------------------------------------- | ----------------------------------- |
 | Source code   | `src/` and logical subdirs                  | `src/demo_mode.py`, `src/frontend/` |
 | Tests         | `src/tests/{unit,integration,performance}/` | `src/tests/unit/test_demo_mode.py`  |
-| Documentation | `notes/`                                    | `notes/DEVELOPMENT_ROADMAP.md`      |
+| Documentation | `notes/`                                    | `notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md`      |
 | Configuration | `conf/`                                     | `conf/app_config.yaml`              |
 | Datasets      | `data/`                                     | `data/spiral_dataset.csv`           |
 | Logs          | `logs/`                                     | `logs/system.log`                   |
@@ -1159,7 +1159,7 @@ Examples:
 
 Development notes and technical details:
 
-- **notes/DEVELOPMENT_ROADMAP.md** - Feature roadmap and status
+- **notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md** - Feature roadmap and status
 - **notes/FINAL_STATUS_*.md** - Major milestone summaries
 - **notes/IMPLEMENTATION_*.md** - Implementation details
 - **notes/FIX_*.md** - Bug fix reports
@@ -1177,7 +1177,7 @@ Update documentation systematically based on the type of change:
 2. **Update [INTEGRATION]_REFERENCE.md** - Add API/configuration details
 3. **Update CHANGELOG.md** - Add entry under "Added" section
 4. **Update README.md** - If feature changes core capabilities
-5. **Update notes/DEVELOPMENT_ROADMAP.md** - Mark feature complete
+5. **Update notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md** - Mark feature complete
 6. **Add to Recent Changes** - Link implementation notes in AGENTS.md
 
 #### On Bug Fix
@@ -1194,7 +1194,7 @@ Update documentation systematically based on the type of change:
 2. **Update QUICK_START.md** - Reflect new setup/usage
 3. **Update all affected manuals** - Update instructions
 4. **Update all affected references** - Update API/config docs
-5. **Update notes/DEVELOPMENT_ROADMAP.md** - Document migration path
+5. **Update notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md** - Document migration path
 6. **Create migration guide** - In docs/ if complex
 
 #### On Test Addition
@@ -1856,7 +1856,7 @@ Clear rules for when to update each documentation type:
 - [ ] **[FEATURE]_MANUAL.md** - Add usage instructions in relevant section
 - [ ] **[FEATURE]_REFERENCE.md** - Add API/configuration documentation
 - [ ] **CHANGELOG.md** - Add entry under `## [Unreleased] ### Added`
-- [ ] **notes/DEVELOPMENT_ROADMAP.md** - Mark feature complete, update status
+- [ ] **notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md** - Mark feature complete, update status
 
 **May Update:**
 
@@ -1893,7 +1893,7 @@ Clear rules for when to update each documentation type:
 - [ ] **All affected QUICK_START.md files** - Update setup instructions
 - [ ] **All affected MANUAL.md files** - Update usage instructions
 - [ ] **All affected REFERENCE.md files** - Update API/config documentation
-- [ ] **notes/DEVELOPMENT_ROADMAP.md** - Document migration path
+- [ ] **notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md** - Document migration path
 
 **Create:**
 
@@ -2153,7 +2153,7 @@ This directory contains historical documentation that has been superseded or con
    - Quick start commands
    - Current features
 
-3. **[notes/DEVELOPMENT_ROADMAP.md](notes/DEVELOPMENT_ROADMAP.md)** - Update status
+3. **[notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md](notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md)** - Update status
    - Mark completed items
    - Update in-progress status
    - Add newly identified work
@@ -2190,7 +2190,7 @@ All new or modified code must meet these requirements before merging:
 
 - [ ] [CHANGELOG.md](CHANGELOG.md) updated with changes and impact
 - [ ] [README.md](README.md) reflects current run/test instructions
-- [ ] [notes/DEVELOPMENT_ROADMAP.md](notes/DEVELOPMENT_ROADMAP.md) status updated
+- [ ] [notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md](notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md) status updated
 - [ ] Code comments only where complexity requires explanation
 - [ ] All public methods have docstrings
 
@@ -2463,7 +2463,7 @@ All three Juniper applications (JuniperCascor, JuniperData, JuniperCanopy) now u
 **See:**
 
 - [MVP_PRE_DEPLOYMENT_IMPLEMENTATION_2025-10-30.md](notes/MVP_PRE_DEPLOYMENT_IMPLEMENTATION_2025-10-30.md) - Complete implementation details
-- [DEVELOPMENT_ROADMAP.md](notes/DEVELOPMENT_ROADMAP.md) - Updated roadmap
+- [DEVELOPMENT_ROADMAP.md](notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md) - Updated roadmap
 
 ### 2025-10-29: Complete MVP Achievement
 

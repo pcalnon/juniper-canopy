@@ -107,7 +107,7 @@ Juniper prioritizes **transparency over convenience** and **understanding over a
 
 ### Get Juniper Canopy running in 5 minutes
 
-**Version:** 0.25.0  
+**Version:** 0.3.0  
 **Status:** ✅ Production Ready
 
 ### Prerequisites
@@ -241,4 +241,4 @@ MIT License - See [LICENSE](LICENSE) for details.
 ---
 
 **Last Updated:** January 29, 2026  
-**Version:** 0.25.0
+**Version:** 0.3.0
