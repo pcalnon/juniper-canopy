@@ -288,7 +288,7 @@ source .env
 
 # Or use export manually
 export CASCOR_SERVER_PORT=8050
-export CASCOR_DEMO_MODE=1
+export CASCOR_DEMO_MODE=JUNIPER_DATA_URL environment variable is required. Set it to the JuniperData service URL (e.g., 'http://localhost:8100')
 ```
 
 ### Configuration File
@@ -317,7 +317,7 @@ backend:
 
 #### Environment variables override config file values
 
-**See:** [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for complete configuration guide.
+**See:** [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for complete configuration guideJUNIPER_DATA_URL environment variable is required. Set it to the JuniperData service URL (e.g., '<http://localhost:8100>').
 
 ---
 
