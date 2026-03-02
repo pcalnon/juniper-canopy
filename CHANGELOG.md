@@ -1093,7 +1093,7 @@ This release addresses a critical security vulnerability in the `urllib3` depend
   - Addresses decompression bomb vulnerability (CWE-409)
   - Malicious servers could exploit HTTP redirect handling to cause excessive resource consumption
   - Attack vector: Malicious HTTP redirect responses with compressed content
-  - Reference: [Dependabot Alert #2](https://github.com/pcalnon/Juniper/security/dependabot/2)
+  - Reference: [Dependabot Alert #2](https://github.com/pcalnon/Juniper/security/dependabot/2) *(pre-polyrepo URL)*
 
 ### Added [0.15.1]
 

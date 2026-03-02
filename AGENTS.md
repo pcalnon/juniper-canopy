@@ -1,5 +1,7 @@
 # Juniper Canopy - Agent Development Guide
 
+**Version**: 0.3.0
+
 ## Project Overview
 
 The juniper_canopy prototype is a real-time monitoring and diagnostic frontend for the Cascade Correlation Neural Network (CasCor) prototype. It provides:

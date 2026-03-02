@@ -23,7 +23,7 @@ In environments where JuniperCanopy runs on a filesystem shared with untrusted u
 
 JuniperCanopy relies on `filelock` for runtime locking behavior, so installations using the vulnerable `filelock` version inherit this risk.
 
-**Reference:** [Dependabot security advisory](https://github.com/pcalnon/Juniper/security/dependabot/1)
+**Reference:** [Dependabot security advisory](https://github.com/pcalnon/Juniper/security/dependabot/1) *(pre-polyrepo URL; Dependabot alerts now reside in individual repo security tabs)*
 
 ---
 
@@ -121,6 +121,6 @@ If you encounter issues during upgrade or have questions about this advisory, pl
 
 ## References
 
-- [Dependabot Security Advisory](https://github.com/pcalnon/Juniper/security/dependabot/1)
+- [Dependabot Security Advisory](https://github.com/pcalnon/Juniper/security/dependabot/1) *(pre-polyrepo URL)*
 - [JuniperCanopy v0.14.0-alpha Release Notes](RELEASE_v0.14.0-alpha.md)
 - [CHANGELOG.md](../CHANGELOG.md)

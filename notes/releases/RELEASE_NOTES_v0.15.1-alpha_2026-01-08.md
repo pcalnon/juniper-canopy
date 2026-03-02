@@ -17,7 +17,7 @@ This is a security patch release addressing a critical vulnerability in the `url
 ### CVE: Decompression-bomb safeguards bypassed when following HTTP redirects (streaming API)
 
 **Severity:** High  
-**Dependabot Alert:** [#2](https://github.com/pcalnon/Juniper/security/dependabot/2)  
+**Dependabot Alert:** [#2](https://github.com/pcalnon/Juniper/security/dependabot/2) *(pre-polyrepo URL)*
 **CWE:** CWE-409 (Improper Handling of Highly Compressed Data)
 
 #### Impact
@@ -79,6 +79,6 @@ pip show urllib3 | grep Version
 
 ## Related Links
 
-- [Dependabot Alert #2](https://github.com/pcalnon/Juniper/security/dependabot/2)
+- [Dependabot Alert #2](https://github.com/pcalnon/Juniper/security/dependabot/2) *(pre-polyrepo URL)*
 - [urllib3 Security Advisory](https://github.com/urllib3/urllib3/security/advisories)
 - [CWE-409: Improper Handling of Highly Compressed Data](https://cwe.mitre.org/data/definitions/409.html)

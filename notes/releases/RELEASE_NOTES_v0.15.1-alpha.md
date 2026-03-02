@@ -30,7 +30,7 @@ A malicious server could exploit this to trigger excessive resource consumption 
 
 JuniperCanopy relies on `urllib3` for HTTP operations, so installations using the vulnerable `urllib3` version inherit this risk.
 
-**Reference:** [Dependabot security advisory](https://github.com/pcalnon/Juniper/security/dependabot/2)
+**Reference:** [Dependabot security advisory](https://github.com/pcalnon/Juniper/security/dependabot/2) *(pre-polyrepo URL; Dependabot alerts now reside in individual repo security tabs)*
 
 ---
 
@@ -123,7 +123,7 @@ If you encounter issues during upgrade or have questions about this advisory, pl
 
 ## References
 
-- [Dependabot Security Advisory](https://github.com/pcalnon/Juniper/security/dependabot/2)
+- [Dependabot Security Advisory](https://github.com/pcalnon/Juniper/security/dependabot/2) *(pre-polyrepo URL)*
 - [CWE-409: Improper Handling of Highly Compressed Data](https://cwe.mitre.org/data/definitions/409.html)
 - [JuniperCanopy v0.15.0-alpha Release Notes](RELEASE_NOTES_v0.15.0-alpha.md)
 - [CHANGELOG.md](../CHANGELOG.md)
