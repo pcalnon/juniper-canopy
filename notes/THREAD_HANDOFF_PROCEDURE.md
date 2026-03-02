@@ -1,6 +1,6 @@
 # Thread Handoff Procedure
 
-**Purpose**: Preserve context fidelity during long-running Amp sessions by proactively handing off to a new thread before context compaction degrades output quality.
+**Purpose**: Preserve context fidelity during long-running Claude Code sessions by proactively handing off to a new thread before context compaction degrades output quality.
 
 **Last Updated**: 2026-02-20
 
