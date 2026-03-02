@@ -51,8 +51,8 @@ JuniperCanopy is the **monitoring dashboard** of the Juniper ecosystem. It depen
 | `CASCOR_SERVICE_URL` | Yes\* | — | JuniperCascor URL — activates service mode |
 | `JUNIPER_DATA_URL` | No | `http://localhost:8100` | JuniperData URL |
 | `CASCOR_DEMO_MODE` | No | — | Set to `1` to run without a backend |
-| `CANOPY_HOST` | No | `0.0.0.0` | Listen address |
-| `CANOPY_PORT` | No | `8050` | Service port |
+| `CASCOR_SERVER_HOST` | No | `127.0.0.1` | Server bind address |
+| `CASCOR_SERVER_PORT` | No | `8050` | Server port |
 
 \* Required for service mode. Omit to fall back to demo mode.
 

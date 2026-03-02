@@ -2079,7 +2079,7 @@ curl -s http://127.0.0.1:8050/api/health | python -m json.tool
 ## Support and Contact
 
 - **Documentation:** [docs/](.)
-- **GitHub:** [Juniper Project](https://github.com/your-org/juniper)
+- **GitHub:** [Juniper Canopy](https://github.com/pcalnon/juniper-canopy)
 - **Issues:** Report bugs via GitHub Issues
 - **Email:** <support@example.com>
 

@@ -136,4 +136,4 @@ If you encounter issues during upgrade or have questions about this advisory, pl
 - [Dependabot Security Advisory](<DEPENDABOT_ALERT_URL>)
 - [<CWE_ID>: <CWE_TITLE>](<CWE_URL>)
 - [JuniperCanopy v[PREVIOUS_VERSION] Release Notes](RELEASE_NOTES_v[PREVIOUS_VERSION].md)
-- [CHANGELOG.md](../CHANGELOG.md)
+- [CHANGELOG.md](../../CHANGELOG.md)

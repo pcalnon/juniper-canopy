@@ -1146,7 +1146,7 @@ Technical deep-dive documentation:
 
 Historical documentation with timestamp-based naming:
 
-- **docs/history/INDEX.md** - Archive index with descriptions
+- **notes/history/INDEX.md** - Archive index with descriptions
 - **docs/history/FILENAME_YYYY-MM-DD.ext** - Archived versions
 - **docs/history/consolidated/** - Superseded consolidated docs
 
@@ -1237,7 +1237,7 @@ Archive documentation when:
    mv FILENAME.md docs/history/FILENAME_YYYY-MM-DD.md
    ```
 
-3. **Update docs/history/INDEX.md:**
+3. **Update notes/history/INDEX.md:**
 
    ```markdown
    ## YYYY-MM-DD: Archive Description
@@ -1275,7 +1275,7 @@ Use relative markdown links with descriptive text:
 
 ✓ See [Testing Quick Start](TESTING_QUICK_START.md) for setup
 ✓ Refer to [API Reference](docs/API_REFERENCE.md) for details
-✓ Check [Archive Index](docs/history/INDEX.md) for older versions
+✓ Check [Archive Index](notes/history/INDEX.md) for older versions
 
 ✗ See docs/API_REFERENCE.md
 ✗ Click here: docs/testing.md
@@ -1407,7 +1407,7 @@ Use relative paths with descriptive link text:
 ✓ [Testing Manual](TESTING_MANUAL.md)
 ✓ [CI/CD Manual](docs/ci_cd/CICD_MANUAL.md)
 ✓ [CI/CD Quick Start](docs/ci_cd/CICD_QUICK_START.md)
-✓ [Archive Index](docs/history/INDEX.md)
+✓ [Archive Index](notes/history/INDEX.md)
 
 ✗ [Example Link](./docs/../TESTING_MANUAL.md)
 ✗ See TESTING_MANUAL.md
@@ -1935,7 +1935,7 @@ Clear rules for when to update each documentation type:
 
 **Must Update:**
 
-- [ ] **docs/history/INDEX.md** - Document archived files
+- [ ] **notes/history/INDEX.md** - Document archived files
 - [ ] **DOCUMENTATION_OVERVIEW.md** - Update navigation
 - [ ] **All internal cross-references** - Point to new locations
 - [ ] **CHANGELOG.md** - Document reorganization under `Changed`
@@ -2051,7 +2051,7 @@ mv "$ORIGINAL" "docs/history/$ARCHIVED"
 
 **3. Update Archive Index:**
 
-Add entry to `docs/history/INDEX.md`:
+Add entry to `notes/history/INDEX.md`:
 
 ## 2025-11-04: Testing Documentation Split
 
@@ -2108,7 +2108,7 @@ grep -r "TESTING_GUIDE_CONSOLIDATED.md" .
 
 **Archive Index Structure:**
 
-`docs/history/INDEX.md` should maintain chronological organization:
+`notes/history/INDEX.md` should maintain chronological organization:
 
 ```markdown
 # Documentation Archive Index
