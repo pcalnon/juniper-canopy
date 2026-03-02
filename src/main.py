@@ -67,6 +67,7 @@ from canopy_constants import ServerConstants
 from communication.websocket_manager import websocket_manager
 from config_manager import get_config
 from frontend.dashboard_manager import DashboardManager
+from health import DependencyStatus, ReadinessResponse, probe_dependency
 from logger.logger import (
     get_system_logger,
     get_training_logger,
@@ -149,24 +150,29 @@ async def lifespan(app: FastAPI):
         system_logger.error("JUNIPER_DATA_URL is not set and could not be resolved from config. " "Set JUNIPER_DATA_URL=http://localhost:8100 or ensure JuniperData service is running.")
         raise RuntimeError("JUNIPER_DATA_URL is required. " "Set JUNIPER_DATA_URL=http://localhost:8100 or start JuniperData service.")
 
-    # CAN-HIGH-001: Probe JuniperData health at startup (non-blocking).
+    # CAN-HIGH-001: Probe upstream services at startup using standardized probe.
     global juniper_data_available
-    health_url = f"{juniper_data_url.rstrip('/')}/health"
-    if not health_url.startswith(("http://", "https://")):
-        system_logger.warning(f"JuniperData health check skipped — unsupported scheme in URL: {health_url}")
+    data_probe = probe_dependency("JuniperData", f"{juniper_data_url.rstrip('/')}/v1/health/live")
+    if data_probe.status == "healthy":
+        juniper_data_available = True
+        system_logger.info(f"JuniperData reachable at {juniper_data_url} ({data_probe.latency_ms:.1f}ms)")
     else:
-        try:
-            import urllib.request
+        system_logger.warning(f"JuniperData unreachable at {juniper_data_url}: {data_probe.message}")
 
-            req = urllib.request.Request(health_url, method="GET")
-            with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310 — URL scheme validated above
-                if resp.status == 200:
-                    juniper_data_available = True
-                    system_logger.info(f"JuniperData health check passed: {health_url}")
-                else:
-                    system_logger.warning(f"JuniperData health check returned status {resp.status} — data operations may fail")
-        except Exception as e:
-            system_logger.warning(f"JuniperData unreachable at {health_url}: {e} — data operations will fail until service is available")
+    # Probe JuniperCascor at startup (service mode only) — fallback to demo on failure.
+    cascor_url = os.getenv("CASCOR_SERVICE_URL")
+    if cascor_url and backend.backend_type == "service":
+        cascor_probe = probe_dependency("JuniperCascor", f"{cascor_url.rstrip('/')}/v1/health/live")
+        if cascor_probe.status == "healthy":
+            system_logger.info(f"JuniperCascor reachable at {cascor_url} ({cascor_probe.latency_ms:.1f}ms)")
+        else:
+            system_logger.warning(f"JuniperCascor unreachable at {cascor_url} — falling back to demo mode")
+            await backend.shutdown()
+            from backend import create_backend
+
+            os.environ["CASCOR_DEMO_MODE"] = "1"
+            backend = create_backend()
+            await backend.initialize()
 
     # Initialize the backend (demo: starts simulation; service: connects to CasCor)
     await backend.initialize()
@@ -385,15 +391,24 @@ async def websocket_control_endpoint(websocket: WebSocket):
         websocket_manager.disconnect(websocket)
 
 
-@app.get("/health")
-@app.get("/api/health")
+@app.get("/health", deprecated=True)
+@app.get("/api/health", deprecated=True)
+async def health_check_deprecated():
+    """Health check endpoint (deprecated — use /v1/health instead)."""
+    return {
+        "status": "healthy",
+        "timestamp": time.time(),
+        "version": config.get("application.version", "1.0.0"),
+        "active_connections": websocket_manager.get_connection_count(),
+        "training_active": backend.is_training_active(),
+        "demo_mode": backend.backend_type == "demo",
+        "juniper_data_available": juniper_data_available,
+    }
+
+
 @app.get("/v1/health")
 async def health_check():
-    """
-    Health check endpoint.
-    Returns:
-        Health status information
-    """
+    """Combined health check endpoint."""
     return {
         "status": "healthy",
         "timestamp": time.time(),
@@ -411,14 +426,49 @@ async def liveness_probe():
     return {"status": "alive"}
 
 
-@app.get("/v1/health/ready")
-async def readiness_probe():
-    """Readiness probe — confirms the service is ready to handle requests."""
-    return {
-        "status": "ready",
-        "version": config.get("application.version", "1.0.0"),
-        "juniper_data_available": juniper_data_available,
-    }
+@app.get("/v1/health/ready", response_model=ReadinessResponse)
+async def readiness_probe() -> ReadinessResponse:
+    """Readiness probe with dependency health status.
+
+    Probes JuniperData and JuniperCascor health endpoints and reports
+    overall readiness with per-dependency status.
+    """
+    app_version = config.get("application.version", "1.0.0")
+
+    # Probe JuniperData
+    data_url = os.getenv("JUNIPER_DATA_URL", "http://localhost:8100")
+    data_dep = probe_dependency("JuniperData Service", f"{data_url.rstrip('/')}/v1/health/live")
+
+    # Probe JuniperCascor
+    cascor_url = os.getenv("CASCOR_SERVICE_URL")
+    if cascor_url:
+        cascor_dep = probe_dependency("JuniperCascor Service", f"{cascor_url.rstrip('/')}/v1/health/live")
+    else:
+        cascor_dep = DependencyStatus(
+            name="JuniperCascor Service",
+            status="not_configured",
+            message="CASCOR_SERVICE_URL not set (demo mode)",
+        )
+
+    dependencies = {"juniper_data": data_dep, "juniper_cascor": cascor_dep}
+
+    overall = "ready"
+    for dep in dependencies.values():
+        if dep.status == "unhealthy":
+            overall = "degraded"
+            break
+
+    return ReadinessResponse(
+        status=overall,
+        version=app_version,
+        service="juniper-canopy",
+        dependencies=dependencies,
+        details={
+            "mode": backend.backend_type,
+            "active_connections": websocket_manager.get_connection_count(),
+            "training_active": backend.is_training_active(),
+        },
+    )
 
 
 @app.get("/api/state")
