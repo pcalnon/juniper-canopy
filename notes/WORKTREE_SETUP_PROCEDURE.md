@@ -110,7 +110,7 @@ After creating the worktree, activate the conda environment and verify the app s
 
 ```bash
 cd "$WORKTREE_DIR"
-conda activate juniper-canopy
+conda activate JuniperCanopy
 cd src
 pytest tests/ -v --tb=short
 ```

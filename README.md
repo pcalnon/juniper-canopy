@@ -14,7 +14,7 @@ Verified compatible versions:
 |---|---|---|---|---|---|
 | 0.4.x | 0.3.x | 0.2.x | >=0.3.1 | >=0.1.0 | >=0.1.0 |
 
-For full-stack Docker deployment and integration tests, see [juniper-deploy](https://github.com/pcalnon/juniper-deploy).
+For full-stack Docker deployment and integration tests, see `juniper-deploy`.
 
 ## Architecture
 
