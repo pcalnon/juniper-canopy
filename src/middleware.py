@@ -24,8 +24,54 @@ EXEMPT_PATHS = {
     "/docs",
     "/openapi.json",
     "/redoc",
-    "/metrics",
 }
+
+# Default Content-Security-Policy for Canopy (Dash requires unsafe-inline for styles).
+_DEFAULT_CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add security headers to all responses.
+
+    Injects standard security headers (X-Content-Type-Options, X-Frame-Options,
+    Referrer-Policy, Permissions-Policy, CSP, and conditional HSTS) into every
+    HTTP response.
+    """
+
+    def __init__(self, app: ASGIApp, content_security_policy: str = _DEFAULT_CSP) -> None:
+        super().__init__(app)
+        self._csp = content_security_policy
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        response = await call_next(request)
+
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        response.headers["Content-Security-Policy"] = self._csp
+
+        if request.headers.get("X-Forwarded-Proto") == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+        return response
+
+
+_MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
+    """Reject requests whose Content-Length exceeds a configurable limit."""
+
+    def __init__(self, app: ASGIApp, max_bytes: int = _MAX_REQUEST_BODY_BYTES) -> None:
+        super().__init__(app)
+        self._max_bytes = max_bytes
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        content_length = request.headers.get("content-length")
+        if content_length is not None and int(content_length) > self._max_bytes:
+            return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+        return await call_next(request)
 
 
 class SecurityMiddleware(BaseHTTPMiddleware):

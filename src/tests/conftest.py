@@ -24,6 +24,8 @@ import pytest
 os.environ["CASCOR_DEMO_MODE"] = "1"
 # CRITICAL: Set JuniperData URL BEFORE any imports (CAN-INT-002: mandatory)
 os.environ["JUNIPER_DATA_URL"] = "http://localhost:8100"
+# Disable rate limiting in tests to prevent 429 responses during rapid test execution
+os.environ["CANOPY_RATE_LIMIT_ENABLED"] = "false"
 
 # Add src directory to Python path IMMEDIATELY (before pytest rewrites imports)
 # This MUST happen at module load time, not in fixtures
