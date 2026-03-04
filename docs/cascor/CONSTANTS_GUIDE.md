@@ -1,7 +1,9 @@
 # Constants Management Guide
 
-**Last Updated:** 2026-01-29  
 **Version:** 0.25.0
+**Status:** Active
+**Last Updated:** March 3, 2026
+**Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ## Overview
 
