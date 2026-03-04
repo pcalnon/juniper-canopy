@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **DOCKER-001: .dockerignore excluded README.md** — Removed `README.md` from `.dockerignore` exclusion list. The Dockerfile `COPY pyproject.toml README.md ./` step requires README.md in the build context, but the .dockerignore was excluding it, causing Docker builds to fail.
+
 ---
 
 ## [0.3.0] - 2026-02-26
