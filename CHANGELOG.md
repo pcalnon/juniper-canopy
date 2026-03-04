@@ -11,6 +11,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.0] - 2026-03-03
+
+**Summary**: Comprehensive security hardening — security headers middleware (Dash-compatible CSP), request body limits, error sanitization, conditional CORS, rate limiting enabled by default, WebSocket authentication with message size limits and idle timeout, /metrics auth, conditional docs, build attestations, and scheduled security scanning.
+
+### Security
+
+- Added `SecurityHeadersMiddleware` with Dash-compatible CSP (`'unsafe-inline'` for Dash/Plotly), X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy, conditional HSTS
+- Added `RequestBodyLimitMiddleware` with configurable max body size (default 10MB)
+- Sanitized error responses — generic messages returned to clients; internal details logged at DEBUG
+- Changed CORS to conditional mode (restricted when origins configured via environment)
+- Changed rate limiting default from disabled to enabled
+- Added WebSocket authentication — API key validation at connection accept
+- Added WebSocket message size limits (64KB for control, 1MB for data)
+- Added WebSocket idle connection timeout (5 minutes default, configurable)
+- Added API key requirement for `/metrics` endpoint
+- Added conditional API docs — disabled when API keys are configured
+- Enabled build attestations in publish workflow
+
+### Added
+
+- `.github/workflows/security-scan.yml` — Weekly scheduled security scanning (Bandit, pip-audit)
+
+### Changed
+
+- Updated `conftest.py` to disable rate limiting during test execution (`CANOPY_RATE_LIMIT_ENABLED=false`)
+- Updated `test_cascor_ws_control.py` assertion for sanitized error messages
+
+### Technical Notes
+
+- **SemVer impact**: MINOR — New middleware, changed security defaults (non-breaking: configurable via env vars)
+- **Test count**: 3,373 passed, 0 failed, 19 skipped
+- **Part of**: Cross-ecosystem security audit (7 repos, 24 findings)
+
+---
+
 ## [0.3.0] - 2026-02-26
 
 **Summary**: First PyPI release. Added packaging infrastructure for distribution via `pip install juniper-canopy`.

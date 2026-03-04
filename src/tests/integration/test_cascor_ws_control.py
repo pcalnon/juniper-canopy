@@ -164,4 +164,4 @@ class TestCascorWsControl:
         response = _send_ws_command(cascor_client, "start")
 
         assert response["ok"] is False
-        assert "Test error" in response.get("error", "")
+        assert "Command execution failed" in response.get("error", "")

@@ -131,8 +131,11 @@ class Settings(BaseSettings):
     # Metrics / observability
     metrics_enabled: bool = False
 
+    # CORS
+    cors_origins: list[str] = []
+
     # Rate limiting
-    rate_limit_enabled: bool = False
+    rate_limit_enabled: bool = True
     rate_limit_requests_per_minute: int = 60
 
     # Smoothing

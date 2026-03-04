@@ -186,26 +186,36 @@ async def lifespan(app: FastAPI):
     system_logger.info("Application shutdown complete")
 
 
+# Disable interactive API docs when authentication is enabled (production).
+_docs_enabled = not os.environ.get("CANOPY_API_KEY")
 # Initialize FastAPI
 app = FastAPI(
     title="Juniper Canopy",
     version="0.3.0",
     description="Real-time monitoring for CasCor networks",
     lifespan=lifespan,
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
 )
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS: only enable when origins are explicitly configured.
+if settings.cors_origins:
+    allow_credentials = bool(settings.cors_origins) and "*" not in settings.cors_origins
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=allow_credentials,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-# Add security middleware (API key auth + rate limiting)
-from middleware import SecurityMiddleware
+# Security headers (outermost — runs on every response)
+from middleware import RequestBodyLimitMiddleware, SecurityHeadersMiddleware, SecurityMiddleware
 from security import get_api_key_auth, get_rate_limiter
+
+app.add_middleware(RequestBodyLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 api_key_auth = get_api_key_auth()
 rate_limiter = get_rate_limiter()
@@ -261,6 +271,25 @@ async def root():
     return RedirectResponse(url="/dashboard/")
 
 
+_WS_MAX_MESSAGE_SIZE = 65536  # 64KB max message size for WebSocket
+
+
+async def _authenticate_websocket(websocket: WebSocket) -> bool:
+    """Authenticate WebSocket connection using X-API-Key header.
+
+    BaseHTTPMiddleware does not intercept WebSocket upgrades, so
+    authentication must be performed explicitly at connection accept.
+
+    Returns True if authenticated (or auth disabled), False otherwise.
+    """
+    if api_key_auth.enabled:
+        key = websocket.headers.get("X-API-Key")
+        if not api_key_auth.validate(key):
+            await websocket.close(code=4001, reason="Authentication required")
+            return False
+    return True
+
+
 @app.websocket("/ws/training")
 async def websocket_training_endpoint(websocket: WebSocket):
     """
@@ -277,6 +306,9 @@ async def websocket_training_endpoint(websocket: WebSocket):
             console.log('Received:', data.type);
         };
     """
+    if not await _authenticate_websocket(websocket):
+        return
+
     client_id = f"training-client-{id(websocket)}"
     await websocket_manager.connect(websocket, client_id=client_id)
     try:
@@ -331,18 +363,35 @@ async def websocket_control_endpoint(websocket: WebSocket):
         {'command': 'resume'}
         {'command': 'reset'}
     """
-    # from datetime import datetime
+    if not await _authenticate_websocket(websocket):
+        return
 
     client_id = f"control-client-{id(websocket)}"
     await websocket_manager.connect(websocket, client_id=client_id)
     # Connection confirmation is sent automatically by websocket_manager.connect()
 
+    _valid_commands = {"start", "stop", "pause", "resume", "reset"}
+
     try:
         while True:
             data = await websocket.receive_text()
-            message = json.loads(data)
 
-            command = message.get("command")
+            if len(data) > _WS_MAX_MESSAGE_SIZE:
+                await websocket_manager.send_personal_message({"ok": False, "error": "Message too large"}, websocket)
+                continue
+
+            try:
+                message = json.loads(data)
+            except json.JSONDecodeError:
+                await websocket_manager.send_personal_message({"ok": False, "error": "Invalid JSON"}, websocket)
+                continue
+
+            command = message.get("command", "")
+
+            if command not in _valid_commands:
+                await websocket_manager.send_personal_message({"ok": False, "error": f"Unknown command: {command}"}, websocket)
+                continue
+
             system_logger.info(f"Control command received: {command} (backend={backend.backend_type})")
 
             try:
@@ -362,13 +411,11 @@ async def websocket_control_endpoint(websocket: WebSocket):
                 elif command == "reset":
                     result = backend.reset_training()
                     response = {"ok": True, "command": command, "state": result}
-                else:
-                    response = {"ok": False, "error": f"Unknown command: {command}"}
 
                 await websocket_manager.send_personal_message(response, websocket)
             except Exception as e:
                 system_logger.error(f"Command execution error: {e}")
-                await websocket_manager.send_personal_message({"ok": False, "error": str(e)}, websocket)
+                await websocket_manager.send_personal_message({"ok": False, "error": "Command execution failed"}, websocket)
 
     except WebSocketDisconnect:
         system_logger.info(f"Control client disconnected: {client_id}")
@@ -985,7 +1032,7 @@ async def create_snapshot(
         system_logger.error(f"Failed to create snapshot: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to create snapshot: {str(e)}",
+            detail="Failed to create snapshot",
         ) from e
 
 
@@ -1173,7 +1220,7 @@ async def restore_snapshot(snapshot_id: str):
         system_logger.error(f"Failed to restore snapshot: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to restore snapshot: {str(e)}",
+            detail="Failed to restore snapshot",
         ) from e
 
 
@@ -1319,7 +1366,8 @@ async def save_metrics_layout(
     try:
         _save_layouts(layouts)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save layout: {e}") from e
+        system_logger.debug(f"Failed to save layout: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save layout") from e
 
     system_logger.info(f"Saved metrics layout: {name}")
 
@@ -1353,7 +1401,8 @@ async def delete_metrics_layout(name: str):
     try:
         _save_layouts(layouts)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete layout: {e}") from e
+        system_logger.debug(f"Failed to delete layout: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete layout") from e
 
     system_logger.info(f"Deleted metrics layout: {name}")
 
@@ -1453,6 +1502,9 @@ async def ws_endpoint(websocket: WebSocket):
     General WebSocket endpoint for compatibility.
     Handles both text and non-text frames gracefully.
     """
+    if not await _authenticate_websocket(websocket):
+        return
+
     await websocket_manager.connect(websocket)
     try:
         while True:
