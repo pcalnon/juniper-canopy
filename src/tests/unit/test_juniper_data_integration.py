@@ -770,6 +770,6 @@ class TestConftestEnvironment:
         assert "8100" in url
 
     @pytest.mark.unit
-    def test_cascor_demo_mode_set_in_test_env(self):
-        """CASCOR_DEMO_MODE is set in the test environment."""
-        assert os.environ.get("CASCOR_DEMO_MODE") == "1"
+    def test_demo_mode_set_in_test_env(self):
+        """JUNIPER_CANOPY_DEMO_MODE is set in the test environment."""
+        assert os.environ.get("JUNIPER_CANOPY_DEMO_MODE") == "1"

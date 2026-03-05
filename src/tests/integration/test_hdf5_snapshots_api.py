@@ -23,7 +23,7 @@ src_dir = Path(__file__).parents[2]
 sys.path.insert(0, str(src_dir))
 
 # Force demo mode for tests
-os.environ["CASCOR_DEMO_MODE"] = "1"
+os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

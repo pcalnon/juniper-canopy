@@ -21,7 +21,7 @@ class TestWebSocketControlIntegration:
         from pathlib import Path
 
         # MUST set environment variable BEFORE importing main
-        os.environ["CASCOR_DEMO_MODE"] = "1"  # Force demo mode
+        os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"  # Force demo mode
 
         # Add src to path
         src_path = Path(__file__).parent.parent.parent
@@ -188,7 +188,7 @@ class TestWebSocketTrainingIntegration:
         from pathlib import Path
 
         # MUST set environment variable BEFORE importing main
-        os.environ["CASCOR_DEMO_MODE"] = "1"
+        os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"
 
         src_path = Path(__file__).parent.parent.parent
         if str(src_path) not in sys.path:
@@ -271,7 +271,7 @@ class TestEndToEndFlow:
         from pathlib import Path
 
         # MUST set environment variable BEFORE importing main
-        os.environ["CASCOR_DEMO_MODE"] = "1"
+        os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"
 
         src_path = Path(__file__).parent.parent.parent
         if str(src_path) not in sys.path:

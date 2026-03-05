@@ -2,7 +2,7 @@
 """End-to-end dashboard smoke tests."""
 import os
 
-os.environ["CASCOR_DEMO_MODE"] = "1"
+os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"
 
 import time  # noqa: E402
 

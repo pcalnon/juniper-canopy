@@ -35,7 +35,7 @@ import os
 import time
 
 # MUST set environment variable BEFORE importing main
-os.environ["CASCOR_DEMO_MODE"] = "1"
+os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"
 
 import pytest  # noqa: F401,E402
 from fastapi.testclient import TestClient  # noqa: E402

@@ -75,6 +75,7 @@ class TestCassandraClientDisabled:
     @pytest.mark.unit
     def test_disabled_by_config_returns_disabled_status(self, mock_config_manager, monkeypatch):
         """Should return DISABLED status when cassandra.enabled is False."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         from backend.cassandra_client import CassandraClient
@@ -91,6 +92,7 @@ class TestCassandraClientDisabled:
     @pytest.mark.unit
     def test_disabled_status_details_contains_config_info(self, mock_config_manager, monkeypatch):
         """Disabled status should include config key/value in details."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         from backend.cassandra_client import CassandraClient
@@ -104,6 +106,7 @@ class TestCassandraClientDisabled:
     @pytest.mark.unit
     def test_disabled_metrics_returns_empty_metrics(self, mock_config_manager, monkeypatch):
         """get_metrics should return empty metrics when disabled."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         from backend.cassandra_client import CassandraClient
@@ -122,6 +125,7 @@ class TestCassandraClientDriverMissing:
     @pytest.mark.unit
     def test_driver_missing_returns_unavailable_status(self, enabled_config_manager, monkeypatch):
         """Should return UNAVAILABLE when driver is not available."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -145,6 +149,7 @@ class TestCassandraClientDriverMissing:
     @pytest.mark.unit
     def test_driver_missing_metrics_returns_unavailable(self, enabled_config_manager, monkeypatch):
         """get_metrics should return UNAVAILABLE when driver is missing."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -170,7 +175,7 @@ class TestCassandraClientDemoMode:
     @pytest.mark.unit
     def test_demo_mode_returns_up_status(self, mock_config_manager, monkeypatch):
         """Should return UP status in demo mode."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         import backend.cassandra_client as cc_module
 
@@ -186,7 +191,7 @@ class TestCassandraClientDemoMode:
     @pytest.mark.unit
     def test_demo_mode_returns_synthetic_cluster_data(self, mock_config_manager, monkeypatch):
         """Demo mode should return synthetic cluster information."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         import backend.cassandra_client as cc_module
 
@@ -206,7 +211,7 @@ class TestCassandraClientDemoMode:
     @pytest.mark.unit
     def test_demo_mode_hosts_have_required_fields(self, mock_config_manager, monkeypatch):
         """Demo mode hosts should have address, rack, and is_up."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         import backend.cassandra_client as cc_module
 
@@ -224,7 +229,7 @@ class TestCassandraClientDemoMode:
     @pytest.mark.unit
     def test_demo_mode_metrics_returns_synthetic_data(self, mock_config_manager, monkeypatch):
         """Demo mode should return synthetic metrics data."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         import backend.cassandra_client as cc_module
 
@@ -241,7 +246,7 @@ class TestCassandraClientDemoMode:
     @pytest.mark.unit
     def test_demo_mode_keyspaces_have_tables(self, mock_config_manager, monkeypatch):
         """Demo mode keyspaces should include table information."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         import backend.cassandra_client as cc_module
 
@@ -259,7 +264,7 @@ class TestCassandraClientDemoMode:
     @pytest.mark.unit
     def test_demo_mode_cluster_stats(self, mock_config_manager, monkeypatch):
         """Demo mode should include cluster statistics."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         import backend.cassandra_client as cc_module
 
@@ -279,6 +284,7 @@ class TestCassandraClientConnectionFailure:
     @pytest.mark.unit
     def test_connection_failure_returns_unavailable(self, enabled_config_manager, monkeypatch):
         """Should return UNAVAILABLE when connection fails."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -299,6 +305,7 @@ class TestCassandraClientConnectionFailure:
     @pytest.mark.unit
     def test_try_connect_returns_false_on_exception(self, enabled_config_manager, monkeypatch):
         """_try_connect should return False when connection raises exception."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -323,7 +330,7 @@ class TestCassandraClientStatusStructure:
     @pytest.mark.unit
     def test_status_has_required_fields(self, mock_config_manager, monkeypatch):
         """Status response should have all required fields."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         import backend.cassandra_client as cc_module
 
@@ -339,7 +346,7 @@ class TestCassandraClientStatusStructure:
     @pytest.mark.unit
     def test_status_cached_within_ttl(self, mock_config_manager, monkeypatch):
         """Status should be cached within TTL."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         import backend.cassandra_client as cc_module
 
@@ -359,7 +366,7 @@ class TestCassandraClientMetricsStructure:
     @pytest.mark.unit
     def test_metrics_has_required_fields(self, mock_config_manager, monkeypatch):
         """Metrics response should have all required fields."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         import backend.cassandra_client as cc_module
 
@@ -379,6 +386,7 @@ class TestCassandraClientClose:
     @pytest.mark.unit
     def test_close_cleans_up_resources(self, mock_config_manager, monkeypatch):
         """close() should clean up cluster and session."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -406,6 +414,7 @@ class TestCassandraClientClose:
     @pytest.mark.unit
     def test_close_handles_shutdown_exception(self, mock_config_manager, monkeypatch):
         """close() should handle exception during shutdown."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -431,7 +440,7 @@ class TestCassandraClientSingleton:
     @pytest.mark.unit
     def test_get_cassandra_client_returns_same_instance(self, mock_config_manager, monkeypatch):
         """get_cassandra_client should return the same instance."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         import backend.cassandra_client as cc_module
 
@@ -445,7 +454,7 @@ class TestCassandraClientSingleton:
     @pytest.mark.unit
     def test_get_cassandra_client_creates_instance_with_config(self, monkeypatch):
         """get_cassandra_client should use provided config_manager."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         import backend.cassandra_client as cc_module
 
@@ -466,6 +475,7 @@ class TestCassandraClientLiveStatus:
     @pytest.mark.unit
     def test_live_status_extracts_host_info(self, enabled_config_manager, monkeypatch):
         """Live status should extract host information from cluster metadata."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -507,6 +517,7 @@ class TestCassandraClientIsConnected:
     @pytest.mark.unit
     def test_is_connected_returns_false_when_no_session(self, mock_config_manager, monkeypatch):
         """_is_connected should return False when session is None."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -521,6 +532,7 @@ class TestCassandraClientIsConnected:
     @pytest.mark.unit
     def test_is_connected_returns_true_when_session_active(self, mock_config_manager, monkeypatch):
         """_is_connected should return True when session is active."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -537,6 +549,7 @@ class TestCassandraClientIsConnected:
     @pytest.mark.unit
     def test_is_connected_returns_false_when_session_shutdown(self, mock_config_manager, monkeypatch):
         """_is_connected should return False when session is shutdown."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -553,6 +566,7 @@ class TestCassandraClientIsConnected:
     @pytest.mark.unit
     def test_is_connected_returns_false_on_exception(self, mock_config_manager, monkeypatch):
         """_is_connected should return False when accessing is_shutdown raises exception."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -573,6 +587,7 @@ class TestCassandraClientTryConnectWithAuth:
     @pytest.mark.unit
     def test_try_connect_with_auth_provider(self, enabled_config_manager, monkeypatch):
         """_try_connect should use PlainTextAuthProvider when username/password configured."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -604,6 +619,7 @@ class TestCassandraClientTryConnectWithAuth:
     @pytest.mark.unit
     def test_try_connect_sets_keyspace(self, enabled_config_manager, monkeypatch):
         """_try_connect should set keyspace after connecting."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -627,6 +643,7 @@ class TestCassandraClientTryConnectWithAuth:
     @pytest.mark.unit
     def test_try_connect_returns_false_when_driver_unavailable(self, enabled_config_manager, monkeypatch):
         """_try_connect should return False when CASSANDRA_AVAILABLE is False."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -650,6 +667,7 @@ class TestCassandraClientGetStatusRetryConnect:
     @pytest.mark.unit
     def test_get_status_retries_connect_when_not_connected(self, enabled_config_manager, monkeypatch):
         """get_status should try to connect when not connected and return live status on success."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -696,6 +714,7 @@ class TestCassandraClientGetLiveStatusException:
     @pytest.mark.unit
     def test_get_live_status_returns_down_on_exception(self, enabled_config_manager, monkeypatch):
         """_get_live_status should return DOWN status when exception occurs."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -722,6 +741,7 @@ class TestCassandraClientGetLiveStatusException:
     @pytest.mark.unit
     def test_get_live_status_includes_error_details(self, enabled_config_manager, monkeypatch):
         """_get_live_status error response should include contact points and port."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -748,6 +768,7 @@ class TestCassandraClientGetLiveMetrics:
     @pytest.mark.unit
     def test_get_live_metrics_extracts_keyspace_info(self, enabled_config_manager, monkeypatch):
         """_get_live_metrics should extract keyspace information from cluster metadata."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -804,6 +825,7 @@ class TestCassandraClientGetLiveMetrics:
     @pytest.mark.unit
     def test_get_live_metrics_counts_live_nodes(self, enabled_config_manager, monkeypatch):
         """_get_live_metrics should count total and live nodes."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -839,6 +861,7 @@ class TestCassandraClientGetLiveMetrics:
     @pytest.mark.unit
     def test_get_live_metrics_returns_down_on_exception(self, enabled_config_manager, monkeypatch):
         """_get_live_metrics should return DOWN status when exception occurs."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -862,6 +885,7 @@ class TestCassandraClientGetLiveMetrics:
     @pytest.mark.unit
     def test_get_live_metrics_skips_system_keyspaces(self, enabled_config_manager, monkeypatch):
         """_get_live_metrics should skip system keyspaces."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -890,6 +914,7 @@ class TestCassandraClientGetLiveMetrics:
     @pytest.mark.unit
     def test_get_live_metrics_handles_no_replication_factor(self, enabled_config_manager, monkeypatch):
         """_get_live_metrics should handle keyspace without replication_factor attribute."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module
@@ -925,6 +950,7 @@ class TestCassandraClientGetMetricsNotConnected:
     @pytest.mark.unit
     def test_get_metrics_returns_unavailable_when_not_connected(self, enabled_config_manager, monkeypatch):
         """get_metrics should return UNAVAILABLE when not connected."""
+        monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
         monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
         import backend.cassandra_client as cc_module

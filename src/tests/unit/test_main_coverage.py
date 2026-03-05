@@ -20,7 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 # Set demo mode before imports
-os.environ["CASCOR_DEMO_MODE"] = "1"
+os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"
 
 # Add src to path
 src_dir = Path(__file__).parents[2]
@@ -340,7 +340,7 @@ class TestDemoModeIntegration:
 
     def test_demo_mode_active_in_env(self):
         """Demo mode should be active via env var."""
-        assert os.environ.get("CASCOR_DEMO_MODE") == "1"
+        assert os.environ.get("JUNIPER_CANOPY_DEMO_MODE") == "1"
 
     def test_demo_mode_provides_data(self, app_client):
         """Demo mode should provide mock data."""

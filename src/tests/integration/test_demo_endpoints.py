@@ -29,7 +29,7 @@ from fastapi.testclient import TestClient
 def test_client():
     """Create test client with demo mode enabled."""
     # Set demo mode environment variable
-    os.environ["CASCOR_DEMO_MODE"] = "1"
+    os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"
 
     # Import after setting env var
     from main import app

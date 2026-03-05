@@ -63,6 +63,7 @@ def reset_redis_singleton():
 @pytest.fixture(autouse=True)
 def ensure_demo_mode_off(monkeypatch):
     """Ensure demo mode is off for most tests."""
+    monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
     monkeypatch.delenv("CASCOR_DEMO_MODE", raising=False)
 
 
@@ -140,7 +141,7 @@ class TestRedisClientDemoMode:
 
     def test_demo_mode_returns_up_status(self, mock_config_manager, monkeypatch):
         """In demo mode, get_status returns UP with DEMO mode."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         from backend.redis_client import RedisClient
 
@@ -154,7 +155,7 @@ class TestRedisClientDemoMode:
 
     def test_demo_mode_returns_synthetic_metrics(self, mock_config_manager, monkeypatch):
         """In demo mode, get_metrics returns synthetic data."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
         from backend.redis_client import RedisClient
 
         client = RedisClient(mock_config_manager)
@@ -177,7 +178,7 @@ class TestRedisClientDemoMode:
 
     def test_demo_mode_is_available_true(self, mock_config_manager, monkeypatch):
         """In demo mode, is_available returns True."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
         from backend.redis_client import RedisClient
 
         client = RedisClient(mock_config_manager)
@@ -186,12 +187,12 @@ class TestRedisClientDemoMode:
     def test_demo_mode_true_values(self, mock_config_manager, monkeypatch):
         """Demo mode recognizes various truthy values."""
         for demo_val in ["1", "true", "yes", "on"]:
-            monkeypatch.setenv("CASCOR_DEMO_MODE", demo_val)
+            monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", demo_val)
             from backend.redis_client import RedisClient
 
             client = RedisClient(mock_config_manager)
 
-            assert client._demo_mode is True, f"Failed for CASCOR_DEMO_MODE={demo_val}"
+            assert client._demo_mode is True, f"Failed for JUNIPER_CANOPY_DEMO_MODE={demo_val}"
 
 
 @pytest.mark.unit
@@ -240,7 +241,7 @@ class TestGetStatus:
 
     def test_status_contains_required_fields(self, mock_config_manager, monkeypatch):
         """get_status returns all required fields."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
         from backend.redis_client import RedisClient
 
         client = RedisClient(mock_config_manager)
@@ -269,7 +270,7 @@ class TestGetStatus:
 
     def test_status_timestamp_iso_format(self, mock_config_manager, monkeypatch):
         """Timestamp is in ISO 8601 format."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
         from backend.redis_client import RedisClient
 
         client = RedisClient(mock_config_manager)
@@ -285,7 +286,7 @@ class TestGetMetrics:
 
     def test_metrics_contains_required_fields(self, mock_config_manager, monkeypatch):
         """get_metrics returns all required fields."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         from backend.redis_client import RedisClient
 
@@ -298,7 +299,7 @@ class TestGetMetrics:
 
     def test_metrics_memory_structure(self, mock_config_manager, monkeypatch):
         """Metrics memory section has correct structure."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         from backend.redis_client import RedisClient
 
@@ -313,7 +314,7 @@ class TestGetMetrics:
 
     def test_metrics_stats_structure(self, mock_config_manager, monkeypatch):
         """Metrics stats section has correct structure."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         from backend.redis_client import RedisClient
 
@@ -330,7 +331,7 @@ class TestGetMetrics:
 
     def test_metrics_clients_structure(self, mock_config_manager, monkeypatch):
         """Metrics clients section has correct structure."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         from backend.redis_client import RedisClient
 
@@ -357,7 +358,7 @@ class TestIsAvailable:
 
     def test_is_available_demo_mode_true(self, mock_config_manager, monkeypatch):
         """is_available returns True in demo mode."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         from backend.redis_client import RedisClient
 
@@ -390,7 +391,7 @@ class TestClose:
 
     def test_close_disconnects_pool(self, mock_config_manager, monkeypatch):
         """close() disconnects the connection pool."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         from backend.redis_client import RedisClient
 
@@ -417,7 +418,7 @@ class TestClose:
 
     def test_close_handles_disconnect_error(self, mock_config_manager, monkeypatch):
         """close() handles disconnect errors gracefully."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         from backend.redis_client import RedisClient
 
@@ -439,7 +440,7 @@ class TestSingletonPattern:
 
     def test_get_redis_client_returns_same_instance(self, mock_config_manager, monkeypatch):
         """get_redis_client returns same instance on repeated calls."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         from backend.redis_client import get_redis_client
 
@@ -450,7 +451,7 @@ class TestSingletonPattern:
 
     def test_get_redis_client_force_new_creates_new(self, mock_config_manager, monkeypatch):
         """get_redis_client(force_new=True) creates new instance."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         from backend.redis_client import get_redis_client
 
@@ -461,7 +462,7 @@ class TestSingletonPattern:
 
     def test_get_redis_client_uses_default_config(self, monkeypatch):
         """get_redis_client uses ConfigManager if none provided."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         from backend.redis_client import get_redis_client
 
@@ -832,7 +833,7 @@ class TestGetRedisClientForceNew:
 
     def test_force_new_creates_fresh_instance(self, mock_config_manager, monkeypatch):
         """force_new=True always creates a new instance."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         from backend.redis_client import get_redis_client
 
@@ -846,7 +847,7 @@ class TestGetRedisClientForceNew:
 
     def test_force_new_replaces_global_instance(self, mock_config_manager, monkeypatch):
         """force_new=True replaces the global singleton."""
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
+        monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", "1")
 
         import backend.redis_client as redis_module
         from backend.redis_client import get_redis_client

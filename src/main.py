@@ -251,6 +251,7 @@ def schedule_broadcast(coroutine):
         except Exception as e:
             system_logger.error(f"Failed to schedule broadcast: {e}")
     else:
+        coroutine.close()
         system_logger.warning("Event loop not available for broadcasting")
 
 

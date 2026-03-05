@@ -189,7 +189,7 @@ fi
 # Export demo mode env var and Start the application
 #####################################################################################################################################################################################################
 log_trace "Export demo mode env var and Start the application"
-export CASCOR_DEMO_MODE="1"
+export JUNIPER_CANOPY_DEMO_MODE="1"
 export JUNIPER_DATA_URL="${JUNIPER_DATA_URL:-http://localhost:8100}"
 echo ""
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"

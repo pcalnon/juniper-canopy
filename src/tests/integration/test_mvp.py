@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 # Set demo mode BEFORE importing
-os.environ["CASCOR_DEMO_MODE"] = "1"
+os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"
 
 # Add src to path
 src_path = Path(__file__).parent.parent.parent
