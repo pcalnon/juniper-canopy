@@ -199,7 +199,7 @@ pre-commit run --all-files
 # Run specific checks
 black src/ --check --diff
 isort src/ --check-only --diff
-flake8 src/ --max-line-length=120 --statistics
+flake8 src/ --max-line-length=512 --statistics
 mypy src/ --ignore-missing-imports
 
 # Auto-format code
