@@ -76,6 +76,7 @@ from observability import (
     configure_logging,
     configure_sentry,
     get_prometheus_app,
+    set_build_info,
 )
 from settings import get_settings
 
@@ -112,6 +113,8 @@ async def lifespan(app: FastAPI):
     # Startup — observability
     configure_logging(settings.log_level, settings.log_format, "juniper-canopy")
     configure_sentry(settings.sentry_dsn, "juniper-canopy", "0.3.0")
+    if settings.metrics_enabled:
+        set_build_info("juniper_canopy", "0.3.0")
 
     system_logger.info("Starting Juniper Canopy application")
     system_logger.info(f"Settings: server={settings.server.host}:{settings.server.port}, demo={settings.demo_mode}")
@@ -216,7 +219,7 @@ app.add_middleware(RequestIdMiddleware)
 if settings.metrics_enabled:
     from observability import PrometheusMiddleware
 
-    app.add_middleware(PrometheusMiddleware, service_name="juniper-canopy")
+    app.add_middleware(PrometheusMiddleware, service_name="juniper-canopy", namespace="juniper_canopy")
     app.mount("/metrics", get_prometheus_app())
 
 # Backend is initialized in lifespan via create_backend() factory

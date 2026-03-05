@@ -13,7 +13,11 @@ from observability import (
     configure_logging,
     configure_sentry,
     get_prometheus_app,
+    inc_websocket_messages,
     request_id_var,
+    set_build_info,
+    set_demo_mode_active,
+    set_websocket_connections,
 )
 
 
@@ -185,7 +189,7 @@ class TestPrometheusMiddleware:
             MockCounter.return_value = mock_counter
             MockHistogram.return_value = mock_histogram
 
-            middleware = PrometheusMiddleware(app=MagicMock(), service_name="test")
+            middleware = PrometheusMiddleware(app=MagicMock(), service_name="test", namespace="juniper_canopy")
 
             response = MagicMock()
             response.status_code = 200
@@ -205,6 +209,41 @@ class TestPrometheusMiddleware:
             mock_histogram.labels().observe.assert_called_once()
             assert result == response
 
+    @pytest.mark.asyncio
+    async def test_namespace_prefix_applied_to_metric_names(self):
+        """Verify that the namespace parameter prefixes metric names."""
+        with patch("prometheus_client.Counter") as MockCounter, patch("prometheus_client.Histogram") as MockHistogram:
+            MockCounter.return_value = MagicMock()
+            MockHistogram.return_value = MagicMock()
+
+            PrometheusMiddleware(app=MagicMock(), service_name="test", namespace="juniper_canopy")
+
+            MockCounter.assert_called_once_with(
+                "juniper_canopy_http_requests_total",
+                "Total HTTP requests",
+                ["method", "endpoint", "status"],
+            )
+            MockHistogram.assert_called_once_with(
+                "juniper_canopy_http_request_duration_seconds",
+                "HTTP request duration in seconds",
+                ["method", "endpoint"],
+            )
+
+    @pytest.mark.asyncio
+    async def test_empty_namespace_produces_unprefixed_names(self):
+        """Verify that an empty namespace does not add a prefix."""
+        with patch("prometheus_client.Counter") as MockCounter, patch("prometheus_client.Histogram") as MockHistogram:
+            MockCounter.return_value = MagicMock()
+            MockHistogram.return_value = MagicMock()
+
+            PrometheusMiddleware(app=MagicMock(), service_name="test", namespace="")
+
+            MockCounter.assert_called_once_with(
+                "http_requests_total",
+                "Total HTTP requests",
+                ["method", "endpoint", "status"],
+            )
+
 
 @pytest.mark.unit
 class TestGetPrometheusApp:
@@ -213,3 +252,69 @@ class TestGetPrometheusApp:
     def test_returns_asgi_app(self):
         app = get_prometheus_app()
         assert callable(app)
+
+
+@pytest.mark.unit
+class TestSetBuildInfo:
+    """Tests for set_build_info function."""
+
+    def test_creates_info_metric(self):
+        with patch("prometheus_client.Info") as MockInfo:
+            mock_info = MagicMock()
+            MockInfo.return_value = mock_info
+            set_build_info("juniper_canopy", "0.3.0")
+            MockInfo.assert_called_once_with("juniper_canopy_build", "Build information for juniper-canopy service")
+            mock_info.info.assert_called_once()
+            call_args = mock_info.info.call_args[0][0]
+            assert call_args["version"] == "0.3.0"
+            assert "python_version" in call_args
+
+
+@pytest.mark.unit
+class TestCanopyMetrics:
+    """Tests for custom canopy metrics helpers."""
+
+    def test_set_websocket_connections(self):
+        import observability as obs
+
+        obs._canopy_metrics = None
+        with patch("prometheus_client.Counter"), patch("prometheus_client.Gauge") as MockGauge:
+            mock_gauge = MagicMock()
+            MockGauge.return_value = mock_gauge
+
+            set_websocket_connections("training", 5)
+            mock_gauge.labels.assert_called_with(channel="training")
+            mock_gauge.labels().set.assert_called_with(5)
+
+        obs._canopy_metrics = None
+
+    def test_inc_websocket_messages(self):
+        import observability as obs
+
+        obs._canopy_metrics = None
+        with patch("prometheus_client.Counter") as MockCounter, patch("prometheus_client.Gauge"):
+            mock_counter = MagicMock()
+            MockCounter.return_value = mock_counter
+
+            inc_websocket_messages("control", "state")
+            mock_counter.labels.assert_called_with(channel="control", type="state")
+            mock_counter.labels().inc.assert_called_once()
+
+        obs._canopy_metrics = None
+
+    def test_set_demo_mode_active(self):
+        import observability as obs
+
+        obs._canopy_metrics = None
+        with patch("prometheus_client.Counter"), patch("prometheus_client.Gauge") as MockGauge:
+            mock_gauge = MagicMock()
+            MockGauge.return_value = mock_gauge
+
+            set_demo_mode_active(True)
+            mock_gauge.set.assert_called_with(1)
+
+            mock_gauge.reset_mock()
+            set_demo_mode_active(False)
+            mock_gauge.set.assert_called_with(0)
+
+        obs._canopy_metrics = None
