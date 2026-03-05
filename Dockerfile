@@ -18,6 +18,9 @@ WORKDIR /build
 
 RUN pip install --no-cache-dir --upgrade pip wheel setuptools
 
+# Install CPU-only PyTorch first (avoids pulling CUDA which is ~4 GB)
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
 # Install pinned dependencies from lockfile (best layer caching)
 COPY requirements.lock ./
 RUN pip install --no-cache-dir -r requirements.lock
