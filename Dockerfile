@@ -23,7 +23,8 @@ COPY requirements.lock ./
 RUN pip install --no-cache-dir -r requirements.lock
 
 # Copy project files and install without deps (already installed above)
-COPY pyproject.toml README.md ./
+# COPY pyproject.toml README.md ./
+COPY pyproject.toml ./
 COPY src/ ./src/
 RUN pip install --no-cache-dir --no-deps .
 
