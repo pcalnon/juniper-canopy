@@ -66,6 +66,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "nest-asyncio>=1.5.0",
     "requests>=2.28.0",
+    "a2wsgi>=1.10.0",
 ]
 
 [project.urls]
@@ -95,7 +96,7 @@ include = ["juniper_canopy*", "backend*", "communication*", "frontend*", "logger
 # ==========================================
 [tool.black]
 line-length = 512
-target-version = ['py311', 'py312', 'py313']
+target-version = ['py312', 'py313', 'py314']
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -140,7 +141,7 @@ skips = ["B101", "B311"]
 # MyPy Type Checker Configuration
 # ==========================================
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.14"
 warn_return_any = false
 warn_unused_configs = true
 ignore_missing_imports = true

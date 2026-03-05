@@ -12,7 +12,7 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Builder — Install dependencies
 # -----------------------------------------------------------------------------
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 
 WORKDIR /build
 
@@ -30,7 +30,7 @@ RUN pip install --no-cache-dir --no-deps .
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime — Minimal production image
 # -----------------------------------------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 LABEL org.opencontainers.image.title="juniper-canopy"
 LABEL org.opencontainers.image.description="Real-time monitoring dashboard for juniper-cascor"
@@ -45,7 +45,7 @@ RUN groupadd --gid 1000 juniper && \
 WORKDIR /app
 
 # Copy installed packages from builder
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy source code and configuration
