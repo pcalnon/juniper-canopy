@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir --upgrade pip wheel setuptools
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
 # Install runtime dependencies missing from lockfile
-RUN pip install --no-cache-dir pydantic-settings colorama networkx psutil
+RUN pip install --no-cache-dir pydantic-settings colorama networkx psutil python-multipart
 
 # Install pinned dependencies from lockfile (best layer caching)
 COPY requirements.lock ./

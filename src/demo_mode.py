@@ -385,7 +385,7 @@ class DemoMode:
         response = client.create_dataset(
             generator="spiral",
             params=params,
-            persist=False,
+            persist=True,
         )
 
         dataset_id = response.get("dataset_id")

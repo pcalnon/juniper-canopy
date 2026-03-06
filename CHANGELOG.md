@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Namespaced Prometheus metrics (`juniper_canopy_` prefix) with WebSocket and demo mode metrics
+- `juniper_canopy_websocket_connections_active` Gauge (by channel)
+- `juniper_canopy_websocket_messages_total` Counter (by channel, type)
+- `juniper_canopy_demo_mode_active` Gauge
+- `juniper_canopy_build_info` Info metric
+
+### Changed
+
+- Renamed HTTP metrics: `http_requests_total` → `juniper_canopy_http_requests_total`, `http_request_duration_seconds` → `juniper_canopy_http_request_duration_seconds`
+
 ### Fixed
 
 - **DOCKER-001: .dockerignore excluded README.md** — Removed `README.md` from `.dockerignore` exclusion list. The Dockerfile `COPY pyproject.toml README.md ./` step requires README.md in the build context, but the .dockerignore was excluding it, causing Docker builds to fail.
