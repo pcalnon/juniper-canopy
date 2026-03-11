@@ -214,11 +214,17 @@ filterwarnings = [
 source = ["src"]
 omit = [
   "*/tests/*",
-  "*/test_*.py",
+  "**/tests/*",
+  "**/test_*.py",
+  "**/__pycache__/*",
   "*/__pycache__/*",
+  "**/site-packages/*",
   "*/site-packages/*",
+  "**/conftest.py",
   "*/conftest.py",
+  "**/venv/*",
   "*/venv/*",
+  "**/.venv/*",
   "*/.venv/*",
 ]
 branch = true
