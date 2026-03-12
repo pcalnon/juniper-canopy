@@ -9,7 +9,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-os.environ["CASCOR_DEMO_MODE"] = "1"
+os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"
 from main import app  # noqa: E402
 
 

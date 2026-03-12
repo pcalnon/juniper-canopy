@@ -10,4 +10,4 @@ if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
 # Set demo mode for all tests
-os.environ["CASCOR_DEMO_MODE"] = "1"
+os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"

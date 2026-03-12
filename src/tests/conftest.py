@@ -21,11 +21,14 @@ from typing import Any, Dict
 import pytest
 
 # CRITICAL: Set demo mode BEFORE any imports of main.py
-os.environ["CASCOR_DEMO_MODE"] = "1"
+os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"
 # CRITICAL: Set JuniperData URL BEFORE any imports (CAN-INT-002: mandatory)
 os.environ["JUNIPER_DATA_URL"] = "http://localhost:8100"
 # Disable rate limiting in tests to prevent 429 responses during rapid test execution
 os.environ["CANOPY_RATE_LIMIT_ENABLED"] = "false"
+# CRITICAL: Set log level via new prefix to prevent DeprecationWarning from
+# legacy CASCOR_LOG_LEVEL that may be present in conda activation environment.
+os.environ.setdefault("JUNIPER_CANOPY_LOG_LEVEL", os.environ.get("CASCOR_LOG_LEVEL", "DEBUG"))
 
 # Add src directory to Python path IMMEDIATELY (before pytest rewrites imports)
 # This MUST happen at module load time, not in fixtures

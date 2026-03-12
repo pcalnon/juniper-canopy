@@ -37,7 +37,7 @@ def temp_layouts_dir(tmp_path):
 @pytest.fixture
 def client(temp_layouts_dir):
     """Create test client with mocked layouts directory."""
-    os.environ["CASCOR_DEMO_MODE"] = "1"
+    os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"
 
     with patch("main._layouts_dir", str(temp_layouts_dir)):
         from main import app

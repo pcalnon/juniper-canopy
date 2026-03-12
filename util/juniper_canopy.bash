@@ -88,14 +88,14 @@ log_info "JuniperData URL: ${JUNIPER_DATA_URL}"
 
 #####################################################################################################################################################################################################
 # Fix 5 (CF-1): Synchronize mode flag between shell and Python
-# Shell uses DEMO_MODE (TRUE="0"/FALSE="1"), Python uses CASCOR_DEMO_MODE ("1"/"0")
+# Shell uses DEMO_MODE (TRUE="0"/FALSE="1"), Python uses JUNIPER_CANOPY_DEMO_MODE ("1"/"0")
 #####################################################################################################################################################################################################
 if [[ "${DEMO_MODE}" == "${TRUE}" ]]; then
-    export CASCOR_DEMO_MODE=1
+    export JUNIPER_CANOPY_DEMO_MODE=1
 else
-    export CASCOR_DEMO_MODE=0
+    export JUNIPER_CANOPY_DEMO_MODE=0
 fi
-log_info "Mode synchronization: DEMO_MODE=${DEMO_MODE}, CASCOR_DEMO_MODE=${CASCOR_DEMO_MODE}"
+log_info "Mode synchronization: DEMO_MODE=${DEMO_MODE}, JUNIPER_CANOPY_DEMO_MODE=${JUNIPER_CANOPY_DEMO_MODE}"
 
 
 #####################################################################################################################################################################################################
@@ -108,12 +108,12 @@ if [[ "${DEMO_MODE}" == "${TRUE}" ]]; then
 else
     log_trace "Launching ${CURRENT_PROJECT} in Main Mode with real CasCor backend (in-process)"
 
-    # Fix 2 (RC-1): Set CASCOR_BACKEND_PATH for in-process integration.
+    # Fix 2 (RC-1): Set JUNIPER_CANOPY_BACKEND_PATH for in-process integration.
     # CasCor runs within Canopy's Python process via module import and method wrapping,
-    # NOT as a separate OS process. Canopy's CascorIntegration uses CASCOR_BACKEND_PATH
+    # NOT as a separate OS process. Canopy's CascorIntegration uses JUNIPER_CANOPY_BACKEND_PATH
     # to locate CasCor modules for import.
-    export CASCOR_BACKEND_PATH="${CASCOR_SCRIPT_APPLICATION_DIR}"
-    log_info "CasCor backend path for in-process integration: ${CASCOR_BACKEND_PATH}"
+    export JUNIPER_CANOPY_BACKEND_PATH="${CASCOR_SCRIPT_APPLICATION_DIR}"
+    log_info "CasCor backend path for in-process integration: ${JUNIPER_CANOPY_BACKEND_PATH}"
 
     # Ensure JuniperData service is available
     JUNIPER_DATA_HEALTH="${JUNIPER_DATA_URL}/v1/health/ready"

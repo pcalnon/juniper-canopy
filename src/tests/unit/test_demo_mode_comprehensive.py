@@ -107,7 +107,8 @@ class TestDemoModeEnvironmentVariables:
         get_settings.cache_clear()
         with patch.dict(os.environ, {"CASCOR_DEMO_UPDATE_INTERVAL": "invalid"}):
             get_settings.cache_clear()
-            demo = DemoMode()
+            with pytest.warns((DeprecationWarning, UserWarning)):
+                demo = DemoMode()
             assert isinstance(demo.update_interval, (int, float))
             demo.stop()
         get_settings.cache_clear()
@@ -115,7 +116,8 @@ class TestDemoModeEnvironmentVariables:
     def test_valid_update_interval_env(self):
         """Test valid CASCOR_DEMO_UPDATE_INTERVAL is used."""
         with patch.dict(os.environ, {"CASCOR_DEMO_UPDATE_INTERVAL": "0.5"}):
-            demo = DemoMode()
+            with pytest.warns(DeprecationWarning, match="CASCOR_DEMO_UPDATE_INTERVAL is deprecated"):
+                demo = DemoMode()
             assert demo.update_interval == 0.5
             demo.stop()
 
@@ -164,7 +166,8 @@ class TestDemoModeEnvironmentVariables:
         get_settings.cache_clear()
         with patch.dict(os.environ, {"CASCOR_DEMO_CASCADE_EVERY": "xyz"}):
             get_settings.cache_clear()
-            demo = DemoMode()
+            with pytest.warns((DeprecationWarning, UserWarning)):
+                demo = DemoMode()
             assert isinstance(demo.cascade_every, int)
             demo.stop()
         get_settings.cache_clear()
@@ -172,7 +175,8 @@ class TestDemoModeEnvironmentVariables:
     def test_valid_cascade_every_env(self):
         """Test valid CASCOR_DEMO_CASCADE_EVERY is used."""
         with patch.dict(os.environ, {"CASCOR_DEMO_CASCADE_EVERY": "50"}):
-            demo = DemoMode()
+            with pytest.warns(DeprecationWarning, match="CASCOR_DEMO_CASCADE_EVERY is deprecated"):
+                demo = DemoMode()
             assert demo.cascade_every == 50
             demo.stop()
 

@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 # Set demo mode before imports
-os.environ["CASCOR_DEMO_MODE"] = "1"
+os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"
 
 # Add src to path
 src_dir = Path(__file__).parents[2]

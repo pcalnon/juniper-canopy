@@ -2,6 +2,7 @@
 
 import json
 import logging
+import sys
 import time
 import uuid
 from contextvars import ContextVar
@@ -13,6 +14,7 @@ from starlette.responses import Response
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 
 _SERVICE_NAME_DEFAULT: str = "juniper-canopy"
+_NAMESPACE_DEFAULT: str = "juniper_canopy"
 
 
 class JuniperJsonFormatter(logging.Formatter):
@@ -55,19 +57,20 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
 
 
 class PrometheusMiddleware(BaseHTTPMiddleware):
-    """Tracks http_requests_total and http_request_duration_seconds."""
+    """Tracks http_requests_total and http_request_duration_seconds with namespace prefix."""
 
-    def __init__(self, app: object, service_name: str = _SERVICE_NAME_DEFAULT) -> None:
+    def __init__(self, app: object, service_name: str = _SERVICE_NAME_DEFAULT, namespace: str = _NAMESPACE_DEFAULT) -> None:
         super().__init__(app)
         from prometheus_client import Counter, Histogram
 
+        prefix = f"{namespace}_" if namespace else ""
         self._request_count = Counter(
-            "http_requests_total",
+            f"{prefix}http_requests_total",
             "Total HTTP requests",
             ["method", "endpoint", "status"],
         )
         self._request_duration = Histogram(
-            "http_request_duration_seconds",
+            f"{prefix}http_request_duration_seconds",
             "HTTP request duration in seconds",
             ["method", "endpoint"],
         )
@@ -149,3 +152,79 @@ def get_prometheus_app():
     from prometheus_client import make_asgi_app
 
     return make_asgi_app()
+
+
+def set_build_info(namespace: str, version: str) -> None:
+    """Set build information as a Prometheus Info metric.
+
+    Args:
+        namespace: Metric namespace prefix (e.g. "juniper_canopy").
+        version: Application version string.
+    """
+    from prometheus_client import Info
+
+    python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    info = Info(f"{namespace}_build", f"Build information for {namespace.replace('_', '-')} service")
+    info.info({"version": version, "python_version": python_version})
+
+
+# ---------------------------------------------------------------------------
+# Custom application metrics — lazily initialized to avoid requiring
+# prometheus_client at import time (it is an optional dependency).
+# ---------------------------------------------------------------------------
+
+_canopy_metrics: dict | None = None
+
+
+def _ensure_canopy_metrics() -> dict:
+    """Create canopy-related Prometheus metrics on first access."""
+    global _canopy_metrics
+    if _canopy_metrics is None:
+        from prometheus_client import Counter, Gauge
+
+        _canopy_metrics = {
+            "websocket_connections_active": Gauge(
+                "juniper_canopy_websocket_connections_active",
+                "Number of active WebSocket connections",
+                ["channel"],
+            ),
+            "websocket_messages_total": Counter(
+                "juniper_canopy_websocket_messages_total",
+                "Total WebSocket messages sent",
+                ["channel", "type"],
+            ),
+            "demo_mode_active": Gauge(
+                "juniper_canopy_demo_mode_active",
+                "Whether demo mode is currently active (0 or 1)",
+            ),
+        }
+    return _canopy_metrics
+
+
+def set_websocket_connections(channel: str, count: int) -> None:
+    """Update the active WebSocket connections gauge.
+
+    Args:
+        channel: WebSocket channel — "training" or "control".
+        count: Current number of active connections.
+    """
+    _ensure_canopy_metrics()["websocket_connections_active"].labels(channel=channel).set(count)
+
+
+def inc_websocket_messages(channel: str, msg_type: str) -> None:
+    """Increment the WebSocket messages counter.
+
+    Args:
+        channel: WebSocket channel — "training" or "control".
+        msg_type: Message type — "metrics", "state", "topology", "event", "control_ack", etc.
+    """
+    _ensure_canopy_metrics()["websocket_messages_total"].labels(channel=channel, type=msg_type).inc()
+
+
+def set_demo_mode_active(active: bool) -> None:
+    """Update the demo mode active gauge.
+
+    Args:
+        active: Whether demo mode is currently active.
+    """
+    _ensure_canopy_metrics()["demo_mode_active"].set(1 if active else 0)

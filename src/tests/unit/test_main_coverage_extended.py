@@ -26,7 +26,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-os.environ["CASCOR_DEMO_MODE"] = "1"
+os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"
 
 src_dir = Path(__file__).parents[2]
 sys.path.insert(0, str(src_dir))
