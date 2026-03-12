@@ -227,7 +227,7 @@ def get_rate_limiter() -> RateLimiter:
     """Get the global rate limiter, creating if needed."""
     global _rate_limiter
     if _rate_limiter is None:
-        enabled = os.environ.get("CANOPY_RATE_LIMIT_ENABLED", "").lower() in ("1", "true", "yes")
+        enabled = os.environ.get("CANOPY_RATE_LIMIT_ENABLED", "true").lower() in ("1", "true", "yes")
         requests_per_minute = int(os.environ.get("CANOPY_RATE_LIMIT_REQUESTS_PER_MINUTE", "60"))
         _rate_limiter = RateLimiter(
             requests_per_minute=requests_per_minute,
