@@ -60,7 +60,7 @@ JuniperCanopy is the **monitoring dashboard** of the Juniper ecosystem. It depen
 
 ```bash
 # Full stack (recommended):
-git clone https://github.com/pcalnon/juniper-deploy.git
+git clone https://github.com/pcalnon/juniper-deploy.git  # (private repository)
 cd juniper-deploy && docker compose up --build
 
 # Standalone (service mode):
@@ -126,7 +126,7 @@ git clone https://github.com/pcalnon/juniper-canopy.git
 cd juniper-canopy
 
 # Activate environment
-conda activate JuniperCanopy
+conda activate JuniperPython
 
 # Launch demo mode
 ./demo

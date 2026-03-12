@@ -1,6 +1,13 @@
 # Demo Mode Environment Setup
 
-Comprehensive guide to configuring the demo mode environment.
+## Comprehensive Guide to Configuring the Demo Mode Environment
+
+**Version:** 0.25.0
+**Status:** Active
+**Last Updated:** March 3, 2026
+**Project:** Juniper - Cascade Correlation Neural Network Monitoring
+
+---
 
 ## Prerequisites
 
@@ -331,10 +338,6 @@ ls -la conf/app_config.yaml
 
 ---
 
-**Last Updated:** January 29, 2026
-**Version:** v0.25.0
-
-**See Also:**
-
-- [AGENTS.md](../../AGENTS.md) - Development guide
-- [README.md](../../README.md) - Project overview
+**Last Updated:** March 3, 2026
+**Version:** 0.25.0
+**Maintainer:** Paul Calnon

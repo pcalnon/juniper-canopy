@@ -1,6 +1,13 @@
 # Demo Mode Technical Reference
 
-Complete technical reference for demo mode implementation.
+## Complete Technical Reference for Demo Mode Implementation
+
+**Version:** 0.25.0
+**Status:** Active
+**Last Updated:** March 3, 2026
+**Project:** Juniper - Cascade Correlation Neural Network Monitoring
+
+---
 
 ## Table of Contents
 
@@ -890,6 +897,6 @@ def _broadcast_metrics(self):
 
 ---
 
-**Last Updated:** January 29, 2026
-**Version:** v0.25.0
-**Status:** Production Ready
+**Last Updated:** March 3, 2026
+**Version:** 0.25.0
+**Maintainer:** Paul Calnon

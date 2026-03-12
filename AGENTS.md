@@ -1824,7 +1824,7 @@ result = function_name(value1, value2)
 
 **Purpose:** Document security patch releases addressing vulnerabilities in dependencies or application code.
 
-**Template:** [notes/TEMPLATE_SECURITY_RELEASE_NOTES.md](notes/TEMPLATE_SECURITY_RELEASE_NOTES.md)
+**Template:** [notes/templates/TEMPLATE_SECURITY_RELEASE_NOTES.md](notes/templates/TEMPLATE_SECURITY_RELEASE_NOTES.md)
 
 **Required Structure:**
 

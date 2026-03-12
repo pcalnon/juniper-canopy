@@ -107,7 +107,7 @@ dashboard_manager.register_component(my_component)
 **CRITICAL**: Before running ANY Python code or test, first activate:
 
 ```bash
-conda activate JuniperCanopy
+conda activate JuniperPython
 ```
 
 This provides torch, yaml, h5py, and all ML dependencies. The project was developed for Ubuntu but should work cross-platform.
@@ -552,7 +552,7 @@ class TestWebSocketPerformance:
 **Run all tests**:
 
 ```bash
-conda activate JuniperCanopy
+conda activate JuniperPython
 cd src/tests
 pytest
 ```
@@ -626,7 +626,7 @@ ptw src/tests -- --testmon  # Only run affected tests
 
 ```bash
 #!/usr/bin/env bash
-conda activate JuniperCanopy
+conda activate JuniperPython
 pytest src/tests/unit -x  # Stop on first failure
 if [ $? -ne 0 ]; then
     echo "Unit tests failed. Commit aborted."

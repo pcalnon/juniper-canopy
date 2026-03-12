@@ -1,6 +1,13 @@
 # Demo Mode Quick Start
 
-Get the Juniper Canopy demo running in 60 seconds.
+## Get the Juniper Canopy Demo Running in 60 Seconds
+
+**Version:** 0.25.0
+**Status:** Active
+**Last Updated:** March 3, 2026
+**Project:** Juniper - Cascade Correlation Neural Network Monitoring
+
+---
 
 ## Launch Demo Mode
 
@@ -92,11 +99,6 @@ export CASCOR_SERVER_PORT=8051
 
 ---
 
-**Last Updated:** January 29, 2026
-**Version:** v0.25.0
-
-**See Also:**
-
-- [Main README](../../README.md) - Project overview
-- [AGENTS.md](../../AGENTS.md) - Development guide
-- [CHANGELOG.md](../../CHANGELOG.md) - Recent changes
+**Last Updated:** March 3, 2026
+**Version:** 0.25.0
+**Status:** Active

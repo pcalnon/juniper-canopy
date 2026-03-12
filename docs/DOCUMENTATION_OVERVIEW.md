@@ -48,6 +48,7 @@
 | **Set up CI/CD environment** | [CICD_ENVIRONMENT_SETUP.md](ci_cd/CICD_ENVIRONMENT_SETUP.md)              | docs/ci_cd/    |
 | **Learn CI/CD workflow**     | [CICD_MANUAL.md](ci_cd/CICD_MANUAL.md)                                    | docs/ci_cd/    |
 | **CI/CD reference**          | [CICD_REFERENCE.md](ci_cd/CICD_REFERENCE.md)                              | docs/ci_cd/    |
+| **Find technical reference** | [REFERENCE.md](REFERENCE.md)                                              | docs/          |
 | **See version history**      | [CHANGELOG.md](../CHANGELOG.md)                                           | Root           |
 | **Contribute code**          | [AGENTS.md](../AGENTS.md)                                                 | Root           |
 
@@ -176,6 +177,7 @@ juniper_canopy/
 │   ├── DOCUMENTATION_OVERVIEW.md  ← You are here
 │   ├── QUICK_START.md             ← Get running fast
 │   ├── ENVIRONMENT_SETUP.md       ← Environment setup
+│   ├── REFERENCE.md               ← Technical reference index
 │   ├── ci_cd/                     ← CI/CD documentation (4 files)
 │   │   ├── CICD_QUICK_START.md
 │   │   ├── CICD_ENVIRONMENT_SETUP.md
@@ -203,6 +205,17 @@ juniper_canopy/
 ├── demo                           ← Demo mode launcher
 └── try                            ← Production launcher
 ```
+
+### Ecosystem Client Libraries
+
+Juniper Canopy uses two client libraries to communicate with backend services:
+
+| Library | PyPI | Purpose |
+|---------|------|---------|
+| [juniper-cascor-client](https://github.com/pcalnon/juniper-cascor-client) | `pip install juniper-cascor-client` | HTTP/WebSocket client for juniper-cascor (port 8200) |
+| [juniper-data-client](https://github.com/pcalnon/juniper-data-client) | `pip install juniper-data-client` | HTTP client for juniper-data (port 8100) |
+
+Both are available via the meta-package: `pip install juniper-ml[all]`
 
 ---
 
@@ -416,6 +429,7 @@ Contains archived documentation that has been superseded or consolidated.
 | **DOCUMENTATION_OVERVIEW.md**            | ~800   | Overview  | All            | ✅ **Active** |
 | **QUICK_START.md**                       | ~400   | Tutorial  | New users      | ✅ **Active** |
 | **ENVIRONMENT_SETUP.md**                 | ~600   | Guide     | Developers     | ✅ **Active** |
+| **REFERENCE.md**                         | ~190   | Reference | All            | ✅ **Active** |
 | **ci_cd/CICD_QUICK_START.md**            | ~400   | Tutorial  | Developers     | ✅ **Active** |
 | **ci_cd/CICD_ENVIRONMENT_SETUP.md**      | ~870   | Guide     | DevOps         | ✅ **Active** |
 | **ci_cd/CICD_MANUAL.md**                 | ~1,688 | Guide     | Developers     | ✅ **Active** |

@@ -175,7 +175,7 @@ debug = os.getenv('CASCOR_DEBUG', '0') == '1'
 **Location:** `conf/conda_environment.yaml`
 
 ```yaml
-name: JuniperCanopy
+name: JuniperPython
 channels:
   - conda-forge
   - pytorch
