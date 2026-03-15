@@ -50,6 +50,7 @@
 | **CI/CD reference**          | [CICD_REFERENCE.md](ci_cd/CICD_REFERENCE.md)                              | docs/ci_cd/    |
 | **Find technical reference** | [REFERENCE.md](REFERENCE.md)                                              | docs/          |
 | **See version history**      | [CHANGELOG.md](../CHANGELOG.md)                                           | Root           |
+| **Quick-reference dev tasks** | [DEVELOPER_CHEATSHEET.md](DEVELOPER_CHEATSHEET.md)              | docs/         |
 | **Contribute code**          | [AGENTS.md](../AGENTS.md)                                                 | Root           |
 
 ---
@@ -439,6 +440,12 @@ Contains archived documentation that has been superseded or consolidated.
 | **testing/TESTING_MANUAL.md**            | ~900   | Guide     | Developers     | ✅ **Active** |
 | **testing/TESTING_REFERENCE.md**         | ~1,200 | Reference | Developers     | ✅ **Active** |
 | **testing/TESTING_REPORTS_COVERAGE.md**  | ~900   | Guide     | Developers     | ✅ **Active** |
+
+### notes/ Directory
+
+| File                                     | Lines  | Type       | Audience       | Status        |
+| ---------------------------------------- | ------ | ---------- | -------------- | ------------- |
+| **DEVELOPER_CHEATSHEET.md**              | ~100   | Cheatsheet | Developers     | ✅ **Active** |
 
 ### docs/history/ Directory, Document Index
 
