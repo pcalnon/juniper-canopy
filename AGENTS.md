@@ -288,7 +288,7 @@ juniper_canopy/
 │   │   ├── mocks/                # Mock implementations
 │   │   └── helpers/              # Test utility functions
 │   ├── config_manager.py         # Configuration management
-│   ├── constants.py              # Central constants (see "Constants Management")
+│   ├── canopy_constants.py       # Central constants (see "Constants Management")
 │   ├── demo_mode.py              # Demo mode simulation
 │   └── main.py                   # FastAPI + Dash application entrypoint
 ├── util/                         # Utility scripts (bash, invoked via ./demo, etc.)

@@ -26,7 +26,7 @@ This guide explains how to use and extend the centralized constants infrastructu
 
 ### Design Principles
 
-1. **Single Source of Truth**: All application constants live in `src/constants.py`
+1. **Single Source of Truth**: All application constants live in `src/canopy_constants.py`
 2. **Type Safety**: Use `typing.Final` to indicate immutability
 3. **Self-Documenting**: Constants have clear, descriptive names with units
 4. **Organized**: Related constants grouped into logical classes
@@ -46,7 +46,7 @@ This guide explains how to use and extend the centralized constants infrastructu
 ### Location
 
 ```bash
-src/constants.py
+src/canopy_constants.py
 ```
 
 ### Current Organization
@@ -164,7 +164,7 @@ UPDATE_INTERVAL: Final[int] = 1000  # Missing units
 
 ### Step 4: Add the Constant
 
-Add to the appropriate class in `src/constants.py`:
+Add to the appropriate class in `src/canopy_constants.py`:
 
 ```python
 class DashboardConstants:
@@ -758,7 +758,7 @@ When migrating hard-coded values to constants:
 
 ### Quick Reference
 
-1. **Add constants** to `src/constants.py`
+1. **Add constants** to `src/canopy_constants.py`
 2. **Use `Final`** type annotation
 3. **Include units** in names (\_MS, \_S, \_PX, \_N)
 4. **UPPER_SNAKE_CASE** naming
