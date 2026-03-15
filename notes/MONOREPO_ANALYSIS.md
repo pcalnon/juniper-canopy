@@ -1,1 +1,1 @@
-/home/pcalnon/Development/python/Juniper/JuniperCascor/juniper_cascor/notes/MONOREPO_ANALYSIS.md
+> Canonical copy: See juniper-cascor/notes/MONOREPO_ANALYSIS.md

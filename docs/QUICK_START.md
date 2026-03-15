@@ -288,7 +288,7 @@ source .env
 
 # Or use export manually
 export CASCOR_SERVER_PORT=8050
-export CASCOR_DEMO_MODE=JUNIPER_DATA_URL environment variable is required. Set it to the JuniperData service URL (e.g., 'http://localhost:8100')
+export CASCOR_DEMO_MODE=1
 ```
 
 ### Configuration File
@@ -317,7 +317,7 @@ backend:
 
 #### Environment variables override config file values
 
-**See:** [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for complete configuration guideJUNIPER_DATA_URL environment variable is required. Set it to the JuniperData service URL (e.g., '<http://localhost:8100>').
+**See:** [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for complete configuration guide.
 
 ---
 
@@ -743,6 +743,4 @@ conda list | grep -E "(fastapi|dash|uvicorn)"
 **Version:** 0.25.0  
 **Status:** ✅ Production Ready
 
-```markdown
-**Happy coding! 🚀**
-```
+**Last Updated:** 2026-03-15

@@ -181,6 +181,30 @@ See [CONSTANTS_GUIDE.md](cascor/CONSTANTS_GUIDE.md) for the complete constants m
 
 ---
 
+## Environment Variables Quick Reference
+
+The most commonly used environment variables for juniper-canopy configuration. For the full list, see [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) and [DEVELOPER_CHEATSHEET.md](DEVELOPER_CHEATSHEET.md).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JUNIPER_CANOPY_DEMO_MODE` | unset | Set `1` to enable demo mode (simulated training) |
+| `CASCOR_SERVER_HOST` | `127.0.0.1` | Server bind address |
+| `CASCOR_SERVER_PORT` | `8050` | Server port |
+| `CASCOR_SERVER_DEBUG` | `0` | Enable debug mode |
+| `CASCOR_BACKEND_PATH` | `../juniper-cascor` | Path to CasCor backend |
+| `CASCOR_TRAINING_EPOCHS` | `500` | Maximum training epochs |
+| `CASCOR_TRAINING_LEARNING_RATE` | `0.01` | Learning rate |
+| `CASCOR_TRAINING_HIDDEN_UNITS` | `40` | Max hidden units |
+| `CASCOR_WEBSOCKET_MAX_CONNECTIONS` | `50` | Max concurrent WebSocket connections |
+| `CASCOR_WEBSOCKET_HEARTBEAT_INTERVAL` | `30` | Heartbeat interval (seconds) |
+| `CASCOR_DEMO_UPDATE_INTERVAL` | `1.0` | Demo simulation step interval (seconds) |
+| `JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS` | `1000` | Dashboard metrics refresh (ms) |
+| `JUNIPER_CANOPY_LOG_FORMAT` | `text` | Set `json` for structured JSON logging |
+| `JUNIPER_CANOPY_SENTRY_DSN` | unset | Sentry error tracking DSN |
+| `JUNIPER_CANOPY_METRICS_ENABLED` | `false` | Enable Prometheus metrics (`juniper_canopy_*`) |
+
+---
+
 **Last Updated:** March 3, 2026
 **Version:** 0.25.0
 **Maintainer:** Paul Calnon
