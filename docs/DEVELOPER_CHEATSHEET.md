@@ -8,25 +8,25 @@
 
 ## Common Commands
 
-| Task | Command |
-|------|---------|
-| Run in demo mode | `./demo` |
-| Run natively (real backend) | `conda activate JuniperPython && cd src && uvicorn main:app --port 8050` |
-| Run via Docker | `docker build -f conf/Dockerfile -t juniper_canopy . && docker run --rm -p 8050:8050 juniper_canopy` |
-| Run via Docker Compose | `docker compose -f conf/docker-compose.yaml up --build` |
-| Health check | `curl -s http://localhost:8050/v1/health \| python -m json.tool` |
-| Liveness / readiness | `curl -s http://localhost:8050/v1/health/live` / `.../v1/health/ready` |
-| Run all tests | `cd src && pytest tests/ -v` |
-| Run unit tests only | `cd src && pytest -m "unit and not slow" -v` |
-| Run integration tests | `cd src && pytest tests/integration/ -v` |
-| Run with coverage | `cd src && pytest tests/ --cov=. --cov-report=html --cov-report=term-missing` |
-| Coverage threshold check | `cd src && pytest tests/ --cov=. --cov-fail-under=80` |
-| Pre-commit (all hooks) | `pre-commit run --all-files` |
-| Format code | `black src/ && isort src/` |
-| Lint | `flake8 src/ --max-line-length=512 --statistics` |
-| Type check | `mypy src/ --ignore-missing-imports` |
-| Security scan | `bandit -r src/` |
-| Install pre-commit hooks | `pip install pre-commit && pre-commit install` |
+| Task                        | Command                                                                                              |
+|-----------------------------|------------------------------------------------------------------------------------------------------|
+| Run in demo mode            | `./demo`                                                                                             |
+| Run natively (real backend) | `conda activate JuniperPython && cd src && uvicorn main:app --port 8050`                             |
+| Run via Docker              | `docker build -f conf/Dockerfile -t juniper_canopy . && docker run --rm -p 8050:8050 juniper_canopy` |
+| Run via Docker Compose      | `docker compose -f conf/docker-compose.yaml up --build`                                              |
+| Health check                | `curl -s http://localhost:8050/v1/health \| python -m json.tool`                                     |
+| Liveness / readiness        | `curl -s http://localhost:8050/v1/health/live` / `.../v1/health/ready`                               |
+| Run all tests               | `cd src && pytest tests/ -v`                                                                         |
+| Run unit tests only         | `cd src && pytest -m "unit and not slow" -v`                                                         |
+| Run integration tests       | `cd src && pytest tests/integration/ -v`                                                             |
+| Run with coverage           | `cd src && pytest tests/ --cov=. --cov-report=html --cov-report=term-missing`                        |
+| Coverage threshold check    | `cd src && pytest tests/ --cov=. --cov-fail-under=80`                                                |
+| Pre-commit (all hooks)      | `pre-commit run --all-files`                                                                         |
+| Format code                 | `black src/ && isort src/`                                                                           |
+| Lint                        | `flake8 src/ --max-line-length=512 --statistics`                                                     |
+| Type check                  | `mypy src/ --ignore-missing-imports`                                                                 |
+| Security scan               | `bandit -r src/`                                                                                     |
+| Install pre-commit hooks    | `pip install pre-commit && pre-commit install`                                                       |
 
 > See: [AGENTS.md](../AGENTS.md) for full command reference
 
@@ -57,10 +57,10 @@ cd src && uvicorn main:app --host 0.0.0.0 --port 8050
 
 WebSocket channels for real-time training updates:
 
-| Channel | Path | Direction | Purpose |
-|---------|------|-----------|---------|
-| Training | `/ws/training` | Server -> Client | Metrics, state, topology updates |
-| Control | `/ws/control` | Bidirectional | Start, stop, pause, resume, reset |
+| Channel  | Path           | Direction        | Purpose                           |
+|----------|----------------|------------------|-----------------------------------|
+| Training | `/ws/training` | Server -> Client | Metrics, state, topology updates  |
+| Control  | `/ws/control`  | Bidirectional    | Start, stop, pause, resume, reset |
 
 > See: [CasCor Backend Reference](cascor/CASCOR_BACKEND_REFERENCE.md) | [API Reference](api/API_REFERENCE.md)
 
