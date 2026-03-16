@@ -162,8 +162,8 @@ class DemoBackend:
         return {
             "nodes": nodes,
             "connections": connections,
-            "input_size": network.input_size,
-            "output_size": network.output_size,
+            "input_units": network.input_size,
+            "output_units": network.output_size,
             "hidden_units": len(network.hidden_units),
         }
 
@@ -221,9 +221,9 @@ class DemoBackend:
             z = predictions.numpy().flatten()
 
         return {
-            "x": xx.tolist(),
-            "y": yy.tolist(),
-            "z": z.reshape(resolution, resolution).tolist(),
+            "xx": grid_x.tolist(),
+            "yy": grid_y.tolist(),
+            "Z": z.reshape(resolution, resolution).tolist(),
             "x_min": x_min,
             "x_max": x_max,
             "y_min": y_min,

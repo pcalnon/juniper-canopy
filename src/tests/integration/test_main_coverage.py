@@ -496,9 +496,9 @@ class TestDecisionBoundaryEndpoint:
         response = client.get("/api/decision_boundary")
         data = response.json()
 
-        assert "x" in data
-        assert "y" in data
-        assert "z" in data
+        assert "xx" in data
+        assert "yy" in data
+        assert "Z" in data
         assert "resolution" in data
 
     @pytest.mark.integration
@@ -891,18 +891,18 @@ class TestTopologyWithHiddenUnits:
     """Test topology endpoint with different network states."""
 
     @pytest.mark.integration
-    def test_topology_has_input_size(self, client):
-        """Topology should report input size."""
+    def test_topology_has_input_units(self, client):
+        """Topology should report input units."""
         response = client.get("/api/topology")
         data = response.json()
-        assert data["input_size"] > 0
+        assert data["input_units"] > 0
 
     @pytest.mark.integration
-    def test_topology_has_output_size(self, client):
-        """Topology should report output size."""
+    def test_topology_has_output_units(self, client):
+        """Topology should report output units."""
         response = client.get("/api/topology")
         data = response.json()
-        assert data["output_size"] > 0
+        assert data["output_units"] > 0
 
     @pytest.mark.integration
     def test_topology_connections_from_to(self, client):

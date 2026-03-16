@@ -122,12 +122,12 @@ class TestAPIContracts:
             assert "current_epoch" in data or "message" in data  # May be empty initially
 
     def test_decision_boundary_returns_grid_and_predictions(self, client):
-        """Contract: /api/decision_boundary returns x, y, z, resolution, bounds"""
+        """Contract: /api/decision_boundary returns xx, yy, Z, resolution, bounds"""
         response = client.get("/api/decision_boundary")
         assert response.status_code == 200
         data = response.json()
-        # API returns x, y, z, resolution, x_min, x_max, y_min, y_max
-        assert "x" in data or "error" in data  # May not be available initially
+        # API returns xx (2D meshgrid), yy (2D meshgrid), Z (uppercase), resolution, bounds
+        assert "xx" in data or "error" in data  # May not be available initially
 
     def test_all_endpoints_return_json(self, client):
         """Contract: All endpoints return valid JSON"""

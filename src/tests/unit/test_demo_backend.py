@@ -161,12 +161,12 @@ class TestNetworkAndData:
         assert isinstance(result, dict)
 
     def test_get_network_topology_has_required_keys(self, demo_backend):
-        """Topology should have nodes, connections, input_size, output_size."""
+        """Topology should have nodes, connections, input_units, output_units."""
         topo = demo_backend.get_network_topology()
         assert "nodes" in topo
         assert "connections" in topo
-        assert "input_size" in topo
-        assert "output_size" in topo
+        assert "input_units" in topo
+        assert "output_units" in topo
         assert "hidden_units" in topo
         assert isinstance(topo["nodes"], list)
         assert isinstance(topo["connections"], list)
@@ -219,11 +219,11 @@ class TestNetworkAndData:
         assert isinstance(result, dict)
 
     def test_get_decision_boundary_has_required_keys(self, demo_backend):
-        """Decision boundary should have x, y, z, resolution, bounds."""
+        """Decision boundary should have xx, yy, Z, resolution, bounds."""
         boundary = demo_backend.get_decision_boundary(resolution=10)
-        assert "x" in boundary
-        assert "y" in boundary
-        assert "z" in boundary
+        assert "xx" in boundary
+        assert "yy" in boundary
+        assert "Z" in boundary
         assert "resolution" in boundary
         assert "x_min" in boundary
         assert "x_max" in boundary
@@ -234,8 +234,8 @@ class TestNetworkAndData:
         """Decision boundary resolution should match the requested value."""
         boundary = demo_backend.get_decision_boundary(resolution=15)
         assert boundary["resolution"] == 15
-        assert len(boundary["x"]) == 15
-        assert len(boundary["y"]) == 15
+        assert len(boundary["xx"]) == 15
+        assert len(boundary["yy"]) == 15
 
 
 class TestParameters:
