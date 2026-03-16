@@ -126,7 +126,7 @@ Items that affect testing coverage, backend integration reliability, or producti
 
 ### CAN-HIGH-001: Startup Health Check with HTTP Probe
 
-**Status**: NOT IMPLEMENTED
+**Status**: COMPLETE
 **Priority**: HIGH
 **Source**: CANOPY_JUNIPER_DATA_INTEGRATION_PLAN.md (CAN-INT-012)
 **Module**: `src/main.py`
@@ -141,6 +141,8 @@ Items that affect testing coverage, backend integration reliability, or producti
 
 **Estimated Scope**: Small (1 file, ~30-50 lines)
 **Files**: `src/main.py` (lifespan function)
+
+> Verified 2026-03-15: Fully implemented via probe_dependency() in main.py lifespan (lines 141-163). Probes both JuniperData and CasCor with graceful degradation to demo mode.
 
 ---
 
@@ -243,7 +245,7 @@ Items that affect testing coverage, backend integration reliability, or producti
 | test_demo_endpoints.py            | requires_server  | Skipped |
 
 **Estimated Scope**: Medium (4 files, ~150-250 lines modified)
-**Files**: Various test files in `src/tests/integration/`
+**Files**: Various test files in `src/tests/regression/`
 
 ---
 
@@ -282,7 +284,7 @@ Items that improve code quality, CI/CD reliability, or developer experience.
 
 ### CAN-MED-002: Re-enable E722 Bare Except in Flake8
 
-**Status**: NOT ADDRESSED
+**Status**: COMPLETE
 **Priority**: MEDIUM
 **Source**: TEST_SUITE_CICD_ENHANCEMENT_DEVELOPMENT_PLAN.md (Epic 4.3)
 **Module**: `.pre-commit-config.yaml`
@@ -292,6 +294,8 @@ Items that improve code quality, CI/CD reliability, or developer experience.
 
 **Estimated Scope**: Small-Medium (find and fix all bare except clauses)
 **Files**: `.pre-commit-config.yaml`, source files with bare excepts
+
+> Verified 2026-03-15: E722 removed from flake8 --extend-ignore list. Zero bare except: clauses in source.
 
 ---
 
@@ -326,7 +330,7 @@ Items that improve code quality, CI/CD reliability, or developer experience.
 
 ### CAN-MED-005: contextlib.suppress Review
 
-**Status**: NOT STARTED
+**Status**: COMPLETE
 **Priority**: MEDIUM
 **Source**: TEST_SUITE_CICD_ENHANCEMENT_DEVELOPMENT_PLAN.md (EXC-04)
 **Module**: Various source files
@@ -335,6 +339,8 @@ Items that improve code quality, CI/CD reliability, or developer experience.
 
 **Estimated Scope**: Small-Medium (multiple files, ~30-50 line changes)
 **Files**: Various source files
+
+> Verified 2026-03-15: Zero bare try/except:pass patterns. 33 contextlib.suppress() usages with specific exception types.
 
 ---
 
@@ -420,6 +426,8 @@ Items that improve code quality, CI/CD reliability, or developer experience.
 **Description**: Clean up legacy code patterns including stale `.pyc` files from deleted `constants.py` module, outdated CLAUDE.md references to `constants.py`, and deprecated code paths.
 
 **Validation Note**: `src/constants.py` has been deleted from the codebase but stale `.pyc` files remain and CLAUDE.md still references `Constants` classes extensively.
+
+> Audit note (2026-03-15): AGENTS.md references now correct (canopy_constants.py). Only stale .pyc files remain in src/__pycache__/.
 
 **Estimated Scope**: Small-Medium (documentation and file cleanup)
 **Files**: `CLAUDE.md`, stale `__pycache__` files
@@ -1042,3 +1050,4 @@ The Juniper ecosystem completed a polyrepo migration (2026-02-22 to 2026-02-25) 
 | 2026-02-17 | AI Agent | Comprehensive rewrite: full notes/ audit, codebase validation, prioritization, and design analysis. Expanded from 28 items to 55 items across 5 phases. |
 | 2026-02-25 | AI Agent | Polyrepo migration impact analysis: updated status of 8 items (CAN-CRIT-001/002, CAN-HIGH-003/004/005/006, CAN-DEF-001/004), added migration notes, updated summary tables, revised design analysis for microservices architecture. |
 | 2026-02-25 | AI Agent | Codebase re-validation: fixed INTEG-004 validation (REST delegation, not ThreadPoolExecutor), corrected CAN-HIGH-007 test file list (WebSocket tests already converted; actual `requires_server` files identified), updated `-p no:warnings` to PARTIALLY COMPLETE (still in .pre-commit-config.yaml), corrected summary table arithmetic. |
+| 2026-03-15 | Documentation Audit | CAN-HIGH-001, CAN-MED-002, CAN-MED-005 marked COMPLETE. CAN-HIGH-007 path corrected. CAN-MED-011 description updated. CasCor integration and Cassandra/Redis status verified. |
