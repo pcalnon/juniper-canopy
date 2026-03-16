@@ -89,25 +89,25 @@ Existing components: `training_metrics`, `metrics_panel`, `network_visualizer`, 
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `JUNIPER_CANOPY_DEMO_MODE` | unset | Set `1` to enable demo mode (simulated training). `CASCOR_DEMO_MODE` is accepted as a deprecated legacy fallback. |
-| `CASCOR_SERVER_HOST` | `127.0.0.1` | Server bind address |
-| `CASCOR_SERVER_PORT` | `8050` | Server port |
-| `CASCOR_SERVER_DEBUG` | `0` | Enable debug mode |
-| `CASCOR_BACKEND_PATH` | `../juniper-cascor` | Path to CasCor backend |
-| `CASCOR_TRAINING_EPOCHS` | `500` | Maximum training epochs |
-| `CASCOR_TRAINING_LEARNING_RATE` | `0.01` | Learning rate |
-| `CASCOR_TRAINING_HIDDEN_UNITS` | `40` | Max hidden units |
-| `CASCOR_WEBSOCKET_MAX_CONNECTIONS` | `50` | Max concurrent WebSocket connections |
-| `CASCOR_WEBSOCKET_HEARTBEAT_INTERVAL` | `30` | Heartbeat interval (seconds) |
-| `CASCOR_DEMO_UPDATE_INTERVAL` | `1.0` | Demo simulation step interval (seconds) |
-| `CASCOR_DEMO_CASCADE_EVERY` | `30` | Demo: add hidden unit every N epochs |
-| `JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS` | `1000` | Dashboard metrics refresh (ms) |
-| `JUNIPER_CANOPY_METRICS_BUFFER_SIZE` | `10000` | Metrics data buffer size |
-| `JUNIPER_CANOPY_LOG_FORMAT` | text | Set `json` for structured JSON logging |
-| `JUNIPER_CANOPY_SENTRY_DSN` | unset | Sentry error tracking DSN |
-| `JUNIPER_CANOPY_METRICS_ENABLED` | `false` | Enable Prometheus metrics (`juniper_canopy_*`) |
+| Variable                                    | Default             | Description                                                                                                       |
+|---------------------------------------------|---------------------|-------------------------------------------------------------------------------------------------------------------|
+| `JUNIPER_CANOPY_DEMO_MODE`                  | unset               | Set `1` to enable demo mode (simulated training). `CASCOR_DEMO_MODE` is accepted as a deprecated legacy fallback. |
+| `CASCOR_SERVER_HOST`                        | `127.0.0.1`         | Server bind address                                                                                               |
+| `CASCOR_SERVER_PORT`                        | `8050`              | Server port                                                                                                       |
+| `CASCOR_SERVER_DEBUG`                       | `0`                 | Enable debug mode                                                                                                 |
+| `CASCOR_BACKEND_PATH`                       | `../juniper-cascor` | Path to CasCor backend                                                                                            |
+| `CASCOR_TRAINING_EPOCHS`                    | `500`               | Maximum training epochs                                                                                           |
+| `CASCOR_TRAINING_LEARNING_RATE`             | `0.01`              | Learning rate                                                                                                     |
+| `CASCOR_TRAINING_HIDDEN_UNITS`              | `40`                | Max hidden units                                                                                                  |
+| `CASCOR_WEBSOCKET_MAX_CONNECTIONS`          | `50`                | Max concurrent WebSocket connections                                                                              |
+| `CASCOR_WEBSOCKET_HEARTBEAT_INTERVAL`       | `30`                | Heartbeat interval (seconds)                                                                                      |
+| `CASCOR_DEMO_UPDATE_INTERVAL`               | `1.0`               | Demo simulation step interval (seconds)                                                                           |
+| `CASCOR_DEMO_CASCADE_EVERY`                 | `30`                | Demo: add hidden unit every N epochs                                                                              |
+| `JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS` | `1000`              | Dashboard metrics refresh (ms)                                                                                    |
+| `JUNIPER_CANOPY_METRICS_BUFFER_SIZE`        | `10000`             | Metrics data buffer size                                                                                          |
+| `JUNIPER_CANOPY_LOG_FORMAT`                 | text                | Set `json` for structured JSON logging                                                                            |
+| `JUNIPER_CANOPY_SENTRY_DSN`                 | unset               | Sentry error tracking DSN                                                                                         |
+| `JUNIPER_CANOPY_METRICS_ENABLED`            | `false`             | Enable Prometheus metrics (`juniper_canopy_*`)                                                                    |
 
 > See: [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) | [REFERENCE.md -- Configuration Reference](REFERENCE.md#configuration-reference)
 
@@ -125,29 +125,29 @@ Extended log levels: `TRACE (5)`, `VERBOSE (7)`, `DEBUG`, `INFO`, `WARNING`, `ER
 
 ### Pytest Markers
 
-| Marker | Meaning |
-|--------|---------|
-| `unit` | Fast, no external deps |
-| `integration` | Backend, DB, filesystem |
-| `regression` | Guards against fixed bugs |
-| `performance` | Benchmarks |
-| `e2e` | Full stack with real services |
-| `slow` | Tests > 1s |
-| `requires_cascor` | Needs real CasCor backend |
-| `requires_server` | Needs running server |
-| `requires_redis` | Needs Redis |
-| `requires_display` | Needs GUI/display |
-| `api` | API endpoint tests |
-| `generators` | Data generator tests |
+| Marker             | Meaning                       |
+|--------------------|-------------------------------|
+| `unit`             | Fast, no external deps        |
+| `integration`      | Backend, DB, filesystem       |
+| `regression`       | Guards against fixed bugs     |
+| `performance`      | Benchmarks                    |
+| `e2e`              | Full stack with real services |
+| `slow`             | Tests > 1s                    |
+| `requires_cascor`  | Needs real CasCor backend     |
+| `requires_server`  | Needs running server          |
+| `requires_redis`   | Needs Redis                   |
+| `requires_display` | Needs GUI/display             |
+| `api`              | API endpoint tests            |
+| `generators`       | Data generator tests          |
 
 ### Test Opt-In Variables
 
-| Variable | Effect |
-|----------|--------|
-| `CASCOR_BACKEND_AVAILABLE=1` | Enable `requires_cascor` tests |
-| `RUN_SERVER_TESTS=1` | Enable `requires_server` tests |
-| `RUN_DISPLAY_TESTS=1` | Enable `requires_display` tests |
-| `ENABLE_SLOW_TESTS=1` | Enable `slow` tests |
+| Variable                     | Effect                          |
+|------------------------------|---------------------------------|
+| `CASCOR_BACKEND_AVAILABLE=1` | Enable `requires_cascor` tests  |
+| `RUN_SERVER_TESTS=1`         | Enable `requires_server` tests  |
+| `RUN_DISPLAY_TESTS=1`        | Enable `requires_display` tests |
+| `ENABLE_SLOW_TESTS=1`        | Enable `slow` tests             |
 
 > Note: `conftest.py` forces `JUNIPER_CANOPY_DEMO_MODE=1` by default so tests do not require a real backend.
 > See: [Testing Reference](testing/TESTING_REFERENCE.md) | [Test Enablement Quick Reference](testing/TEST_ENABLEMENT_QUICK_REFERENCE.md)
@@ -156,25 +156,25 @@ Extended log levels: `TRACE (5)`, `VERBOSE (7)`, `DEBUG`, `INFO`, `WARNING`, `ER
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `ModuleNotFoundError: No module named 'uvicorn'` | Wrong Python env | `conda activate JuniperPython` |
-| Env var not taking effect | Missing `CASCOR_` prefix | Use `CASCOR_TRAINING_EPOCHS=300`, not `TRAINING_EPOCHS=300` |
-| YAML config not loading | Syntax error | `python -c "import yaml; yaml.safe_load(open('conf/app_config.yaml'))"` |
-| Demo mode not starting | `CASCOR_DEMO_MODE` not set | Run via `./demo` or `export CASCOR_DEMO_MODE=1` first |
-| Demo shows stale data | Singleton not reset | Restart app; check `reset_singletons` fixture covers new singletons |
-| WebSocket not connecting | Wrong port or path | Verify `ws://localhost:8050/ws/training`; check `CASCOR_WEBSOCKET_*` vars |
-| Tests fail with backend errors | Demo mode not forced | Ensure `conftest.py` sets `CASCOR_DEMO_MODE=1`; do not set `CASCOR_BACKEND_AVAILABLE` unless backend is running |
-| Prometheus metrics missing | Feature not enabled | Set `JUNIPER_CANOPY_METRICS_ENABLED=true`; verify `/metrics` endpoint returns data |
+| Symptom                                          | Cause                      | Fix                                                                                                             |
+|--------------------------------------------------|----------------------------|-----------------------------------------------------------------------------------------------------------------|
+| `ModuleNotFoundError: No module named 'uvicorn'` | Wrong Python env           | `conda activate JuniperPython`                                                                                  |
+| Env var not taking effect                        | Missing `CASCOR_` prefix   | Use `CASCOR_TRAINING_EPOCHS=300`, not `TRAINING_EPOCHS=300`                                                     |
+| YAML config not loading                          | Syntax error               | `python -c "import yaml; yaml.safe_load(open('conf/app_config.yaml'))"`                                         |
+| Demo mode not starting                           | `CASCOR_DEMO_MODE` not set | Run via `./demo` or `export CASCOR_DEMO_MODE=1` first                                                           |
+| Demo shows stale data                            | Singleton not reset        | Restart app; check `reset_singletons` fixture covers new singletons                                             |
+| WebSocket not connecting                         | Wrong port or path         | Verify `ws://localhost:8050/ws/training`; check `CASCOR_WEBSOCKET_*` vars                                       |
+| Tests fail with backend errors                   | Demo mode not forced       | Ensure `conftest.py` sets `CASCOR_DEMO_MODE=1`; do not set `CASCOR_BACKEND_AVAILABLE` unless backend is running |
+| Prometheus metrics missing                       | Feature not enabled        | Set `JUNIPER_CANOPY_METRICS_ENABLED=true`; verify `/metrics` endpoint returns data                              |
 
 ---
 
 ## Integration Setup (Planned -- NOT YET IMPLEMENTED)
 
-| Integration | Purpose | Config Status | Component Stub |
-|-------------|---------|---------------|----------------|
-| **Cassandra** | Time-series metrics storage | Not in `app_config.yaml` | `src/frontend/components/cassandra_panel.py` |
-| **Redis** | Metrics caching, session mgmt, pub/sub | In `app_config.yaml` (pending) | `src/frontend/components/redis_panel.py` |
+| Integration   | Purpose                                | Config Status                  | Component Stub                               |
+|---------------|----------------------------------------|--------------------------------|----------------------------------------------|
+| **Cassandra** | Time-series metrics storage            | Not in `app_config.yaml`       | `src/frontend/components/cassandra_panel.py` |
+| **Redis**     | Metrics caching, session mgmt, pub/sub | In `app_config.yaml` (pending) | `src/frontend/components/redis_panel.py`     |
 
 > See: [Cassandra Reference](cassandra/CASSANDRA_INTEGRATION_REFERENCE.md) | [Redis Reference](redis/REDIS_INTEGRATION_REFERENCE.md)
 
@@ -182,15 +182,15 @@ Extended log levels: `TRACE (5)`, `VERBOSE (7)`, `DEBUG`, `INFO`, `WARNING`, `ER
 
 ## Cross-References
 
-| Resource | Location |
-|----------|----------|
-| Ecosystem cheatsheet | `../../juniper-ml/docs/DEVELOPER_CHEATSHEET.md` |
-| Parent ecosystem guide | [../../CLAUDE.md](../../CLAUDE.md) |
-| juniper-cascor-client (WebSocket) | `../../juniper-cascor-client/docs/DEVELOPER_CHEATSHEET.md` |
-| juniper-deploy (Docker orchestration) | `../../juniper-deploy/docs/DEVELOPER_CHEATSHEET.md` |
-| API Reference | [api/API_REFERENCE.md](api/API_REFERENCE.md) |
-| Demo Mode Reference | [demo/DEMO_MODE_REFERENCE.md](demo/DEMO_MODE_REFERENCE.md) |
-| CasCor Backend Reference | [cascor/CASCOR_BACKEND_REFERENCE.md](cascor/CASCOR_BACKEND_REFERENCE.md) |
+| Resource                              | Location                                                                 |
+|---------------------------------------|--------------------------------------------------------------------------|
+| Ecosystem cheatsheet                  | `../../juniper-ml/docs/DEVELOPER_CHEATSHEET.md`                          |
+| Parent ecosystem guide                | [../../CLAUDE.md](../../CLAUDE.md)                                       |
+| juniper-cascor-client (WebSocket)     | `../../juniper-cascor-client/docs/DEVELOPER_CHEATSHEET.md`               |
+| juniper-deploy (Docker orchestration) | `../../juniper-deploy/docs/DEVELOPER_CHEATSHEET.md`                      |
+| API Reference                         | [api/API_REFERENCE.md](api/API_REFERENCE.md)                             |
+| Demo Mode Reference                   | [demo/DEMO_MODE_REFERENCE.md](demo/DEMO_MODE_REFERENCE.md)               |
+| CasCor Backend Reference              | [cascor/CASCOR_BACKEND_REFERENCE.md](cascor/CASCOR_BACKEND_REFERENCE.md) |
 
 ---
 

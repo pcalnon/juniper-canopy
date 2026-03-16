@@ -26,8 +26,11 @@ EXEMPT_PATHS = {
     "/redoc",
 }
 
-# Default Content-Security-Policy for Canopy (Dash requires unsafe-inline for styles).
-_DEFAULT_CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+# Default Content-Security-Policy for Canopy.
+# - Dash requires 'unsafe-inline' for styles and scripts.
+# - cdn.jsdelivr.net serves Bootstrap CSS via dash-bootstrap-components.
+# - data: in img-src is needed for Bootstrap's inline SVG data URIs (form controls).
+_DEFAULT_CSP = "default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'"
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
