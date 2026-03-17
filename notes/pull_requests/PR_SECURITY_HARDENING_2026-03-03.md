@@ -71,7 +71,7 @@ A full security audit of the Juniper ecosystem identified 24 findings across 7 r
 
 ### Environments Tested
 
-- JuniperPython conda environment: All tests pass
+- JuniperCanopy conda environment: All tests pass
 - Demo mode: All features functional
 - Python 3.14: Compatible
 

@@ -44,7 +44,7 @@
 
 - [ ] **CasCor backend** installed at `../cascor` (or custom path)
 - [ ] **Juniper Canopy** running successfully in demo mode
-- [ ] **Python 3.11+** with JuniperPython conda environment
+- [ ] **Python 3.12+** with JuniperCanopy conda environment
 - [ ] **CasCor backend tested** independently
 
 **Check CasCor backend:**
@@ -155,7 +155,7 @@ export CASCOR_DEMO_MODE=0
 
 # Or manually
 cd src
-/opt/miniforge3/envs/JuniperPython/bin/python main.py
+/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
 ```
 
 **Expected output:**

@@ -55,7 +55,7 @@ Juniper Canopy is a real-time monitoring and diagnostic frontend for Cascade Cor
 2. **Activate the conda environment:**
 
    ```bash
-   conda activate JuniperPython
+   conda activate JuniperCanopy
    ```
 
 3. **Verify dependencies:**
@@ -91,7 +91,7 @@ export CASCOR_BACKEND_PATH=/path/to/cascor
 
 # Run application
 cd src
-/opt/miniforge3/envs/JuniperPython/bin/python main.py
+/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
 ```
 
 ### Accessing the Dashboard
@@ -600,13 +600,13 @@ ModuleNotFoundError: No module named 'uvicorn'
 ✅ **Use conda environment Python explicitly:**
 
 ```bash
-/opt/miniforge3/envs/JuniperPython/bin/python main.py
+/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
 ```
 
 ✅ **Or activate environment first:**
 
 ```bash
-conda activate JuniperPython
+conda activate JuniperCanopy
 python main.py
 ```
 
@@ -937,7 +937,7 @@ logs/ui.log        # User interactions
 
 **Current Version:** 0.25.0  
 **Release Date:** January 2026  
-**Python:** 3.11+  
+**Python:** 3.12+  
 **License:** MIT
 
 ---
@@ -964,13 +964,13 @@ logs/ui.log        # User interactions
 
 **Minimum:**
 
-- Python 3.11+
+- Python 3.12+
 - 2GB RAM
 - Modern web browser (Chrome, Firefox, Safari, Edge)
 
 **Recommended:**
 
-- Python 3.12+
+- Python 3.13+
 - 4GB RAM
 - 2+ CPU cores
 - Fast network connection (for remote access)

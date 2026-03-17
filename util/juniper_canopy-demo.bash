@@ -72,12 +72,12 @@ echo -e "${GREEN}✓ Conda found${NC}"
 
 
 #####################################################################################################################################################################################################
-# Check if JuniperPython environment exists
+# Check if JuniperCanopy environment exists
 #####################################################################################################################################################################################################
-log_trace "Check if JuniperPython environment exists"
-if ! conda env list | grep -q "JuniperPython"; then
-    echo -e "${YELLOW}⚠ JuniperPython environment not found${NC}"
-    log_warning "\tJuniperPython environment not found"
+log_trace "Check if JuniperCanopy environment exists"
+if ! conda env list | grep -q "JuniperCanopy"; then
+    echo -e "${YELLOW}⚠ JuniperCanopy environment not found${NC}"
+    log_warning "\tJuniperCanopy environment not found"
     echo "  Creating environment from conda_environment.yaml..."
     log_debug "  Creating environment from conda_environment.yaml..."
 
@@ -91,17 +91,17 @@ if ! conda env list | grep -q "JuniperPython"; then
         log_critical "✗ conf/conda_environment.yaml not found$"
     fi
 fi
-echo -e "${GREEN}✓ JuniperPython environment available${NC}"
-log_trace "✓ JuniperPython environment available"
+echo -e "${GREEN}✓ JuniperCanopy environment available${NC}"
+log_trace "✓ JuniperCanopy environment available"
 
 
 #####################################################################################################################################################################################################
 # Activate environment
 #####################################################################################################################################################################################################
-echo -e "${BLUE}→ Activating JuniperPython environment...${NC}"
-log_trace "Activating JuniperPython environment..."
+echo -e "${BLUE}→ Activating JuniperCanopy environment...${NC}"
+log_trace "Activating JuniperCanopy environment..."
 eval "$(conda shell.bash hook)"
-conda activate JuniperPython
+conda activate JuniperCanopy
 
 
 #####################################################################################################################################################################################################

@@ -29,9 +29,9 @@
 #     This file may be used to create the Juniper Project, juniper-canopy Application environment
 #         with conda and miniforge3 using:
 #     create env: conda create --name [env] --file [filename]
-#         e.g., $ conda create --name JuniperPython --file juniper-canopy/conf/conda_environment_ci.yaml
+#         e.g., $ conda create --name JuniperCanopy --file juniper-canopy/conf/conda_environment_ci.yaml
 #     Update env: conda env update --name [env] --file [filename]
-#         e.g., $ conda env update --name JuniperPython --file juniper-canopy/conf/conda_environment_ci.yaml
+#         e.g., $ conda env update --name JuniperCanopy --file juniper-canopy/conf/conda_environment_ci.yaml
 #     Generate deps: conda env export --no-builds (via generate_dep_docs.sh)
 #         e.g., $ bash scripts/generate_dep_docs.sh
 #
@@ -42,7 +42,7 @@
 # COMPLETED:
 #
 #####################################################################################################################################################################################################
-name: JuniperPython
+name: JuniperCanopy
 channels:
   - conda-forge
   - pytorch

@@ -11,7 +11,7 @@
 | Task                        | Command                                                                                              |
 |-----------------------------|------------------------------------------------------------------------------------------------------|
 | Run in demo mode            | `./demo`                                                                                             |
-| Run natively (real backend) | `conda activate JuniperPython && cd src && uvicorn main:app --port 8050`                             |
+| Run natively (real backend) | `conda activate JuniperCanopy && cd src && uvicorn main:app --port 8050`                       |
 | Run via Docker              | `docker build -f conf/Dockerfile -t juniper_canopy . && docker run --rm -p 8050:8050 juniper_canopy` |
 | Run via Docker Compose      | `docker compose -f conf/docker-compose.yaml up --build`                                              |
 | Health check                | `curl -s http://localhost:8050/v1/health \| python -m json.tool`                                     |
@@ -80,7 +80,7 @@ Existing components: `training_metrics`, `metrics_panel`, `network_visualizer`, 
 ### 4. Add a Dependency
 
 1. Add to `conf/requirements.txt` (and `conf/conda_environment.yaml` if conda-installable)
-2. Run `pip install -r conf/requirements.txt` in the `JuniperPython` conda env
+2. Run `pip install -r conf/requirements.txt` in the `JuniperCanopy` conda env
 3. Update `conf/Dockerfile` if needed for Docker builds
 
 > See: [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)
@@ -158,7 +158,7 @@ Extended log levels: `TRACE (5)`, `VERBOSE (7)`, `DEBUG`, `INFO`, `WARNING`, `ER
 
 | Symptom                                          | Cause                      | Fix                                                                                                             |
 |--------------------------------------------------|----------------------------|-----------------------------------------------------------------------------------------------------------------|
-| `ModuleNotFoundError: No module named 'uvicorn'` | Wrong Python env           | `conda activate JuniperPython`                                                                                  |
+| `ModuleNotFoundError: No module named 'uvicorn'` | Wrong Python env           | `conda activate JuniperCanopy`                                                                            |
 | Env var not taking effect                        | Missing `CASCOR_` prefix   | Use `CASCOR_TRAINING_EPOCHS=300`, not `TRAINING_EPOCHS=300`                                                     |
 | YAML config not loading                          | Syntax error               | `python -c "import yaml; yaml.safe_load(open('conf/app_config.yaml'))"`                                         |
 | Demo mode not starting                           | `CASCOR_DEMO_MODE` not set | Run via `./demo` or `export CASCOR_DEMO_MODE=1` first                                                           |

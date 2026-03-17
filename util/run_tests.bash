@@ -63,4 +63,4 @@ export PYTHONPATH="${SRC_DIR}:${PYTHONPATH}"
 
 # Run pytest with all arguments passed through
 cd "${SCRIPT_DIR}" || exit 1
-/opt/miniforge3/envs/JuniperPython/bin/python -m pytest "$@"
+/opt/miniforge3/envs/JuniperCanopy/bin/python -m pytest "$@"

@@ -242,7 +242,7 @@ Following the completion of the Phase 0-3 refactoring (v0.24.0), this branch add
 ### Environments Tested
 
 - Demo mode (local): ✅ All features functional
-- JuniperPython conda environment: ✅ All tests pass
+- JuniperCanopy conda environment: ✅ All tests pass
 - Python 3.14: ✅ Compatible
 
 ---
@@ -448,4 +448,4 @@ Key highlights:
 
 5. **Post-Release Roadmap**: The 55-item roadmap was produced by auditing 45+ notes files with rigorous codebase validation. 14 source documents were archived to `notes/history/`. Cross-project items were added to JuniperCascor and JuniperData roadmaps.
 
-6. **CI/CD Parity**: All three Juniper applications now use identical settings (line length 512, coverage 80%, Python 3.11-3.14 matrix). This enables consistent quality gates across the ecosystem.
+6. **CI/CD Parity**: All three Juniper applications now use identical settings (line length 512, coverage 80%, Python 3.12-3.14 matrix). This enables consistent quality gates across the ecosystem.

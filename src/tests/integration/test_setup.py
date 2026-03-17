@@ -107,7 +107,7 @@ def main():
     if passed == len(tests):
         print("🎉 Setup verification completed successfully!")
         print("\nNext steps:")
-        print("1. Activate environment: conda activate JuniperPython")
+        print("1. Activate environment: conda activate JuniperCanopy")
         print("2. Start development: python -m src.main")
     else:
         print("❌ Some tests failed. Please check the setup.")

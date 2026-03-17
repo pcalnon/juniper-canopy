@@ -30,7 +30,7 @@ This guide covers complete environment setup for Juniper Canopy development and 
 
 **What you'll set up:**
 
-- Conda environment (JuniperPython)
+- Conda environment (JuniperCanopy)
 - Python dependencies
 - Configuration files
 - Environment variables
@@ -57,7 +57,7 @@ This guide covers complete environment setup for Juniper Canopy development and 
 
 | Software        | Minimum Version | Recommended  | Purpose                     |
 | --------------- | --------------- | ------------ | --------------------------- |
-| **Python**      | 3.11            | 3.11 or 3.12 | Runtime                     |
+| **Python**      | 3.12            | 3.13 or 3.14 | Runtime                     |
 | **Conda/Mamba** | 4.12+           | Latest       | Environment management      |
 | **Git**         | 2.20+           | Latest       | Version control             |
 | **Make**        | Any             | Latest       | Build automation (optional) |
@@ -100,7 +100,7 @@ bash Miniforge3-$(uname)-$(uname -m).sh
 
 If you already have Conda/Miniconda/Anaconda installed, you can use it.
 
-### Create JuniperPython Environment
+### Create JuniperCanopy Environment
 
 #### Method 1: From conda_environment.yaml (recommended)
 
@@ -112,17 +112,17 @@ cd /path/to/juniper_canopy
 conda env create -f conf/conda_environment.yaml
 
 # Activate environment
-conda activate JuniperPython
+conda activate JuniperCanopy
 ```
 
 #### Method 2: Manual creation
 
 ```bash
-# Create environment with Python 3.11
-conda create -n JuniperPython python=3.11 -y
+# Create environment with Python 3.12
+conda create -n JuniperCanopy python=3.12 -y
 
 # Activate environment
-conda activate JuniperPython
+conda activate JuniperCanopy
 
 # Install dependencies
 pip install -r conf/requirements.txt
@@ -132,20 +132,20 @@ pip install -r conf/requirements.txt
 
 ```bash
 # Check environment exists
-conda env list | grep JuniperPython
+conda env list | grep JuniperCanopy
 
 # Expected output:
-# JuniperPython         /opt/miniforge3/envs/JuniperPython
+# JuniperCanopy         /opt/miniforge3/envs/JuniperCanopy
 
 # Check Python version
 python --version
 
-# Expected: Python 3.11.x or 3.12.x
+# Expected: Python 3.12.x, 3.13.x, 3.14.x
 
 # Check Python path
 which python
 
-# Expected: /opt/miniforge3/envs/JuniperPython/bin/python
+# Expected: /opt/miniforge3/envs/JuniperCanopy/bin/python
 ```
 
 ### Environment Location
@@ -153,17 +153,17 @@ which python
 #### Default location
 
 ```bash
-/opt/miniforge3/envs/JuniperPython
+/opt/miniforge3/envs/JuniperCanopy
 ```
 
 #### Custom location
 
 ```bash
 # Create in specific location
-conda create -p /custom/path/JuniperPython python=3.11
+conda create -p /custom/path/JuniperCanopy python=3.12
 
 # Activate by path
-conda activate /custom/path/JuniperPython
+conda activate /custom/path/JuniperCanopy
 ```
 
 ---
@@ -221,7 +221,7 @@ conda activate /custom/path/JuniperPython
 
 ```bash
 # Activate environment first
-conda activate JuniperPython
+conda activate JuniperCanopy
 
 # Install all dependencies
 pip install -r conf/requirements.txt
@@ -364,12 +364,12 @@ dash==2.14.2
 **Structure:**
 
 ```yaml
-name: JuniperPython
+name: JuniperCanopy
 channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.11
+  - python=3.12
   - pip
   - pip:
     - -r file:requirements.txt
@@ -549,27 +549,27 @@ conf_dir = (ROOT / "conf").resolve()
 
 ```bash
 # Check environment path
-conda env list | grep JuniperPython
+conda env list | grep JuniperCanopy
 
 # Output:
-# JuniperPython    /opt/miniforge3/envs/JuniperPython
+# JuniperCanopy    /opt/miniforge3/envs/JuniperCanopy
 ```
 
 **Python interpreter path:**
 
 ```bash
 # Full path to Python
-/opt/miniforge3/envs/JuniperPython/bin/python
+/opt/miniforge3/envs/JuniperCanopy/bin/python
 
 # Use in scripts
-#!/opt/miniforge3/envs/JuniperPython/bin/python
+#!/opt/miniforge3/envs/JuniperCanopy/bin/python
 ```
 
 **Or use conda activation:**
 
 ```bash
 #!/bin/bash
-conda activate JuniperPython
+conda activate JuniperCanopy
 python script.py
 ```
 
@@ -598,19 +598,19 @@ backend:
 
 ```bash
 # Activate environment
-conda activate JuniperPython
+conda activate JuniperCanopy
 
 # Check activation
 echo $CONDA_DEFAULT_ENV
-# Expected: JuniperPython
+# Expected: JuniperCanopy
 
 # Check Python version
 python --version
-# Expected: Python 3.11.x or 3.12.x
+# Expected: Python 3.12.x, 3.13.x, or 3.14.x
 
 # Check Python path
 which python
-# Expected: /opt/miniforge3/envs/JuniperPython/bin/python
+# Expected: /opt/miniforge3/envs/JuniperCanopy/bin/python
 ```
 
 ### Step 2: Verify Dependencies
@@ -727,7 +727,7 @@ source ~/.zshrc   # macOS
 **Symptoms:**
 
 ```bash
-Python 3.9.x found, but 3.11+ required
+Python 3.9.x found, but 3.12+ required
 ```
 
 **Solutions:**
@@ -735,9 +735,9 @@ Python 3.9.x found, but 3.11+ required
 ```bash
 # Recreate environment with correct Python
 conda deactivate
-conda remove -n JuniperPython --all -y
-conda create -n JuniperPython python=3.11 -y
-conda activate JuniperPython
+conda remove -n JuniperCanopy --all -y
+conda create -n JuniperCanopy python=3.12 -y
+conda activate JuniperCanopy
 pip install -r conf/requirements.txt
 ```
 
@@ -781,7 +781,7 @@ ModuleNotFoundError: No module named 'fastapi'
 
 ```bash
 # Verify conda environment activated
-conda activate JuniperPython
+conda activate JuniperCanopy
 
 # Verify package installed
 pip list | grep fastapi
@@ -791,7 +791,7 @@ pip install fastapi
 
 # Check Python path
 which python
-# Should be: /opt/miniforge3/envs/JuniperPython/bin/python
+# Should be: /opt/miniforge3/envs/JuniperCanopy/bin/python
 ```
 
 ---
@@ -954,7 +954,7 @@ root:
 **Dockerfile:**
 
 ```dockerfile
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -1013,7 +1013,7 @@ repos:
     rev: 23.10.0
     hooks:
       - id: black
-        language_version: python3.11
+        language_version: python3.12
 
   - repo: https://github.com/pycqa/isort
     rev: 5.12.0
@@ -1052,11 +1052,11 @@ pip install --upgrade -r conf/requirements.txt
 ```bash
 # Remove existing environment
 conda deactivate
-conda remove -n JuniperPython --all -y
+conda remove -n JuniperCanopy --all -y
 
 # Recreate from scratch
 conda env create -f conf/conda_environment.yaml
-conda activate JuniperPython
+conda activate JuniperCanopy
 
 # Verify
 pytest tests/ -v
@@ -1079,8 +1079,8 @@ pip freeze > requirements-frozen.txt
 **Verify these items are complete:**
 
 - [ ] Conda/Mamba installed
-- [ ] JuniperPython environment created
-- [ ] Python 3.11+ installed in environment
+- [ ] JuniperCanopy environment created
+- [ ] Python 3.12+ installed in environment
 - [ ] All dependencies installed (`pip check` passes)
 - [ ] Configuration files present (app_config.yaml, requirements.txt)
 - [ ] Environment variables set (optional but recommended)

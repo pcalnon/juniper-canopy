@@ -167,7 +167,7 @@ start_monitoring_thread(interval=1.0)
 2. **Dependencies installed:**
 
    ```bash
-   conda activate JuniperPython
+   conda activate JuniperCanopy
    pip install torch numpy
    ```
 

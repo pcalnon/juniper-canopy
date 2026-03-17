@@ -250,7 +250,7 @@ flake8 src/
 juniper_canopy/
 ├── conf/                         # Configuration & infrastructure
 │   ├── app_config.yaml           # Main application config (see "Configuration Management")
-│   ├── conda_environment.yaml    # Conda env spec for JuniperPython
+│   ├── conda_environment.yaml    # Conda env spec for JuniperCanopy
 │   ├── requirements.txt          # Pip dependencies
 │   ├── Dockerfile                # Container image for Juniper Canopy
 │   ├── docker-compose.yaml       # Local stack (app + services like Redis)
@@ -752,17 +752,17 @@ def robust_function():
 
 ### Conda Environment
 
-The project uses the JuniperPython conda environment:
+The project uses the JuniperCanopy conda environment:
 
 ```bash
 # Location
-/opt/miniforge3/envs/JuniperPython
+/opt/miniforge3/envs/JuniperCanopy
 
 # Activate manually
-conda activate JuniperPython
+conda activate JuniperCanopy
 
 # Python interpreter path
-/opt/miniforge3/envs/JuniperPython/bin/python
+/opt/miniforge3/envs/JuniperCanopy/bin/python
 ```
 
 ### Configuration
@@ -794,10 +794,10 @@ export CASCOR_DEMO_MODE=1
 python main.py
 
 # Correct (uses conda Python)
-/opt/miniforge3/envs/JuniperPython/bin/python main.py
+/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
 
 # Or activate environment first
-conda activate JuniperPython
+conda activate JuniperCanopy
 python main.py
 ```
 
@@ -922,7 +922,7 @@ logs/
 export CASCOR_DEBUG=1
 
 # Run with verbose output
-/opt/miniforge3/envs/JuniperPython/bin/python -u main.py
+/opt/miniforge3/envs/JuniperCanopy/bin/python -u main.py
 ```
 
 ## Deployment
@@ -941,7 +941,7 @@ export CASCOR_BACKEND_PATH=/path/to/cascor
 
 # Run application
 cd src
-/opt/miniforge3/envs/JuniperPython/bin/python main.py
+/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
 ```
 
 ### Docker (Future)
@@ -1022,14 +1022,14 @@ The demo mode must accurately simulate the real CasCor backend to enable UI deve
 
 ### Conda Environment, Path and Environment
 
-**Always use JuniperPython conda environment:**
+**Always use JuniperCanopy conda environment:**
 
 ```bash
 # Location
-/opt/miniforge3/envs/JuniperPython
+/opt/miniforge3/envs/JuniperCanopy
 
 # Python interpreter path
-/opt/miniforge3/envs/JuniperPython/bin/python
+/opt/miniforge3/envs/JuniperCanopy/bin/python
 ```
 
 **Launch via scripts in `util/`** (they activate conda automatically):
@@ -2346,7 +2346,7 @@ All three Juniper applications (JuniperCascor, JuniperData, JuniperCanopy) now u
 - **yamllint**: Added to pre-commit for all applications
 - **mypy**: Fully enabled in CI for all applications
 - **Artifact Paths**: Standardized to reports/junit/, reports/htmlcov/, reports/coverage.xml
-- **Python Matrix**: 3.11, 3.12, 3.13, 3.14
+- **Python Matrix**: 3.12, 3.13, 3.14
 
 **Files Updated:**
 
@@ -2404,7 +2404,7 @@ All three Juniper applications (JuniperCascor, JuniperData, JuniperCanopy) now u
 
 4. **Complete CI/CD Pipeline (Task 5)**
    - GitHub Actions workflow with 6-stage pipeline
-   - Multi-version Python testing (3.11, 3.12, 3.13)
+   - Multi-version Python testing (3.12, 3.13, 3.14)
    - Pre-commit hooks (Black, isort, Flake8, MyPy, Bandit)
    - Codecov integration
    - Quality gates (60% min coverage, 100% pass rate)
