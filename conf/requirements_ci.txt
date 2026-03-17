@@ -121,8 +121,3 @@ urllib3>=2.0
 uvicorn>=0.30
 websockets>=15.0
 Werkzeug>=3.0
-
-# PyTorch CPU-only (much smaller than GPU version)
-# Use --extra-index-url to add PyTorch CPU index while keeping PyPI as primary
---extra-index-url https://download.pytorch.org/whl/cpu
-torch

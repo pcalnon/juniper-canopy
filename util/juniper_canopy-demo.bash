@@ -111,9 +111,19 @@ log_trace "Install/update dependencies if needed"
 echo -e "${BLUE}→ Checking dependencies...${NC}"
 log_trace "Checking dependencies..."
 if [ -f "conf/requirements.txt" ]; then
-    pip install -q -r conf/requirements.txt
+    if ! pip install -q -r conf/requirements.txt; then
+        echo -e "${RED}✗ Failed to install dependencies${NC}"
+        log_error "pip install failed for conf/requirements.txt"
+        echo "  Please check the errors above and ensure all packages are available."
+        log_critical "Dependency installation failed. Cannot continue."
+        exit 1
+    fi
     echo -e "${GREEN}✓ Dependencies up to date${NC}"
     log_trace "✓ Dependencies up to date"
+else
+    echo -e "${RED}✗ conf/requirements.txt not found${NC}"
+    log_error "conf/requirements.txt not found"
+    exit 1
 fi
 
 

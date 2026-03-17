@@ -118,6 +118,8 @@ starlette==0.52.1
 sympy==1.14.0
 toml==0.10.2
 tomli==2.4.0
+# PyTorch CPU-only — requires the PyTorch CPU index for +cpu builds
+--extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.10.0+cpu
 triton==3.6.0
 typer==0.24.1
