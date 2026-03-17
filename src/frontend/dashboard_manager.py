@@ -485,13 +485,13 @@ class DashboardManager:
                                                     html.Div(id="network-info-panel"),
                                                     html.Hr(),
                                                     html.H6(
-                                                        "Network Information: Details",
+                                                        [
+                                                            html.Span("▶", id="network-info-details-icon", className="collapse-icon"),
+                                                            "Network Information: Details",
+                                                        ],
                                                         id="network-info-details-header",
-                                                        style={
-                                                            "cursor": "pointer",
-                                                            "userSelect": "none",
-                                                            "marginTop": "10px",
-                                                        },
+                                                        className="collapsible-header",
+                                                        style={"marginTop": "10px"},
                                                     ),
                                                     dbc.Collapse(
                                                         html.Div(id="network-info-details-panel", style={"marginTop": "10px"}),
@@ -710,13 +710,18 @@ class DashboardManager:
             return self._toggle_network_info_handler(n=n)
 
         @self.app.callback(
-            Output("network-info-details-collapse", "is_open"),
+            [
+                Output("network-info-details-collapse", "is_open"),
+                Output("network-info-details-icon", "children"),
+            ],
             Input("network-info-details-header", "n_clicks"),
             prevent_initial_call=True,
         )
         def toggle_network_info_details(n):
             """Toggle Network Information: Details section collapse state."""
-            return self._toggle_network_info_details_handler(n=n)
+            is_open = self._toggle_network_info_details_handler(n=n)
+            icon = "▼" if is_open else "▶"
+            return is_open, icon
 
         @self.app.callback(
             Output("network-info-details-panel", "children"),
@@ -732,10 +737,11 @@ class DashboardManager:
         @self.app.callback(
             Output("metrics-panel-metrics-store", "data"),
             Input("fast-update-interval", "n_intervals"),
+            dash.dependencies.State("metrics-panel-display-mode-store", "data"),
         )
-        def update_metrics_store(n):
+        def update_metrics_store(n, display_mode_state):
             """Fetch metrics history from API and update metrics panel store."""
-            return self._update_metrics_store_handler(n=n)
+            return self._update_metrics_store_handler(n=n, display_mode_state=display_mode_state)
 
         @self.app.callback(
             Output("network-visualizer-topology-store", "data"),
@@ -760,8 +766,9 @@ class DashboardManager:
             Output("decision-boundary-boundary-data", "data"),
             Input("slow-update-interval", "n_intervals"),
             Input("visualization-tabs", "active_tab"),
+            Input("decision-boundary-refresh-btn", "n_clicks"),
         )
-        def update_boundary_store(n, active_tab):
+        def update_boundary_store(n, active_tab, refresh_clicks):
             """Fetch decision boundary from API and update decision boundary store."""
             return self._update_boundary_store_handler(n=n, active_tab=active_tab)
 
@@ -1177,10 +1184,16 @@ class DashboardManager:
                 ]
             )
 
-    def _update_metrics_store_handler(self, n=None):
+    def _update_metrics_store_handler(self, n=None, display_mode_state=None):
         """Fetch metrics history from API and update metrics panel store."""
         try:
-            url = self._api_url("/api/metrics/history?limit=100")
+            mode_state = display_mode_state or {"mode": "window", "window_size": 100}
+            mode = mode_state.get("mode", "window")
+            if mode == "full" or mode == "hidden_units":
+                limit = 0  # fetch all
+            else:
+                limit = mode_state.get("window_size", 100)
+            url = self._api_url(f"/api/metrics/history?limit={limit}")
             response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
             payload = response.json()
 
