@@ -26,9 +26,11 @@ os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"
 os.environ["JUNIPER_DATA_URL"] = "http://localhost:8100"
 # Disable rate limiting in tests to prevent 429 responses during rapid test execution
 os.environ["CANOPY_RATE_LIMIT_ENABLED"] = "false"
-# CRITICAL: Set log level via new prefix to prevent DeprecationWarning from
-# legacy CASCOR_LOG_LEVEL that may be present in conda activation environment.
+# CRITICAL: Set new-prefix env vars to prevent DeprecationWarnings from
+# legacy CASCOR_* variables that may be present in conda activation environment.
 os.environ.setdefault("JUNIPER_CANOPY_LOG_LEVEL", os.environ.get("CASCOR_LOG_LEVEL", "DEBUG"))
+os.environ.setdefault("JUNIPER_CANOPY_BACKEND_PATH", os.environ.get("CASCOR_BACKEND_PATH", "../juniper-cascor"))
+os.environ.setdefault("JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL", os.environ.get("CASCOR_DEMO_UPDATE_INTERVAL", "1.0"))
 
 # Add src directory to Python path IMMEDIATELY (before pytest rewrites imports)
 # This MUST happen at module load time, not in fixtures

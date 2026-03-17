@@ -105,21 +105,39 @@ class TestDemoModeEnvironmentVariables:
         from settings import get_settings
 
         get_settings.cache_clear()
-        with patch.dict(os.environ, {"CASCOR_DEMO_UPDATE_INTERVAL": "invalid"}):
+        # Remove new-prefix var so the legacy fallback validator actually runs
+        env_overrides = {"CASCOR_DEMO_UPDATE_INTERVAL": "invalid"}
+        env_removals = {k: v for k, v in os.environ.items() if k == "JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL"}
+        with patch.dict(os.environ, env_overrides):
+            os.environ.pop("JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL", None)
             get_settings.cache_clear()
             with pytest.warns((DeprecationWarning, UserWarning)):
                 demo = DemoMode()
             assert isinstance(demo.update_interval, (int, float))
             demo.stop()
+        # Restore
+        os.environ.update(env_removals)
         get_settings.cache_clear()
 
     def test_valid_update_interval_env(self):
         """Test valid CASCOR_DEMO_UPDATE_INTERVAL is used."""
-        with patch.dict(os.environ, {"CASCOR_DEMO_UPDATE_INTERVAL": "0.5"}):
-            with pytest.warns(DeprecationWarning, match="CASCOR_DEMO_UPDATE_INTERVAL is deprecated"):
-                demo = DemoMode()
-            assert demo.update_interval == 0.5
-            demo.stop()
+        from settings import get_settings
+
+        get_settings.cache_clear()
+        # Remove new-prefix var so the legacy fallback validator actually runs
+        saved = os.environ.pop("JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL", None)
+        try:
+            with patch.dict(os.environ, {"CASCOR_DEMO_UPDATE_INTERVAL": "0.5"}):
+                os.environ.pop("JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL", None)
+                get_settings.cache_clear()
+                with pytest.warns(DeprecationWarning, match="CASCOR_DEMO_UPDATE_INTERVAL is deprecated"):
+                    demo = DemoMode()
+                assert demo.update_interval == 0.5
+                demo.stop()
+        finally:
+            if saved is not None:
+                os.environ["JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL"] = saved
+            get_settings.cache_clear()
 
     def test_invalid_epochs_env(self):
         """Test invalid CASCOR_TRAINING_EPOCHS falls back (lines 212-217)."""

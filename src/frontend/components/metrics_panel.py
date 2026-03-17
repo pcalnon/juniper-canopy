@@ -552,13 +552,13 @@ class MetricsPanel(BaseComponent):
             Input(f"{self.component_id}-candidate-pools-history", "data"),
         )
         def render_candidate_history(history):
-            """Render historical candidate pools as collapsed sections."""
-            if not history or len(history) <= 1:
+            """Render historical candidate pools as expandable sections."""
+            if not history:
                 return []
 
-            # Skip the first (current) pool, show rest as collapsed
+            # Show all historical pools as expandable cards
             history_items = []
-            for pool in history[1:]:
+            for pool in history:
                 epoch = pool.get("epoch", 0)
                 top_id = pool.get("top_candidate_id", "N/A")
                 top_score = pool.get("top_candidate_score", 0.0)
