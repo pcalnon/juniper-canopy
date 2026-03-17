@@ -11,7 +11,7 @@
 | Task                        | Command                                                                                              |
 |-----------------------------|------------------------------------------------------------------------------------------------------|
 | Run in demo mode            | `./demo`                                                                                             |
-| Run natively (real backend) | `conda activate JuniperCanopy && cd src && uvicorn main:app --port 8050`                       |
+| Run natively (real backend) | `conda activate JuniperCanopy && cd src && uvicorn main:app --port 8050`                             |
 | Run via Docker              | `docker build -f conf/Dockerfile -t juniper_canopy . && docker run --rm -p 8050:8050 juniper_canopy` |
 | Run via Docker Compose      | `docker compose -f conf/docker-compose.yaml up --build`                                              |
 | Health check                | `curl -s http://localhost:8050/v1/health \| python -m json.tool`                                     |
