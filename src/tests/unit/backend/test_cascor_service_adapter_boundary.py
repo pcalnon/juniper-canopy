@@ -1,8 +1,9 @@
 """
 Tests for CascorServiceAdapter.get_decision_boundary() — data transformation.
 
-Verifies that the adapter correctly transforms CasCor service response format
-(1D grid arrays + flattened predictions) into the frontend format (2D meshgrids).
+Verifies that the adapter correctly transforms the CasCor service response
+(2D meshgrid arrays ``grid_x``/``grid_y`` and 2D integer prediction grid)
+into the frontend format (``xx``/``yy``/``Z``).
 """
 
 from unittest.mock import MagicMock
@@ -35,16 +36,23 @@ def adapter(mock_client):
 
 
 def _make_cascor_boundary_response(resolution=10):
-    """Create a realistic CasCor service boundary response."""
-    x_grid = np.linspace(-1.5, 1.5, resolution).tolist()
-    y_grid = np.linspace(-1.5, 1.5, resolution).tolist()
-    predictions = np.random.rand(resolution * resolution).tolist()
+    """Create a response matching the real CasCor API format.
+
+    The real ``/v1/decision-boundary`` endpoint returns:
+    - ``grid_x``, ``grid_y``: 2D meshgrid arrays (resolution x resolution)
+    - ``predictions``: 2D array of integer class indices (resolution x resolution)
+    """
+    xx_1d = np.linspace(-1.5, 1.5, resolution)
+    yy_1d = np.linspace(-1.5, 1.5, resolution)
+    grid_x, grid_y = np.meshgrid(xx_1d, yy_1d)
+    # Integer class predictions (0 or 1) — matches argmax output
+    predictions = np.random.randint(0, 2, size=(resolution, resolution))
     return {
-        "status": "ok",
+        "status": "success",
         "data": {
-            "x_grid": x_grid,
-            "y_grid": y_grid,
-            "predictions": predictions,
+            "grid_x": grid_x.tolist(),
+            "grid_y": grid_y.tolist(),
+            "predictions": predictions.tolist(),
             "resolution": resolution,
             "x_range": [-1.5, 1.5],
             "y_range": [-1.5, 1.5],
@@ -56,7 +64,7 @@ class TestGetDecisionBoundary:
     """Test CascorServiceAdapter.get_decision_boundary() transformation."""
 
     def test_transforms_response_to_frontend_format(self, adapter, mock_client):
-        """Verify 1D CasCor format is transformed to 2D frontend format."""
+        """Verify real CasCor API format is transformed to frontend format."""
         mock_client.get_decision_boundary.return_value = _make_cascor_boundary_response(10)
         result = adapter.get_decision_boundary(resolution=10)
 
@@ -98,13 +106,22 @@ class TestGetDecisionBoundary:
         assert Z.ndim == 2
         assert Z.shape == (res, res)
 
+    def test_Z_contains_integer_class_indices(self, adapter, mock_client):
+        """Verify Z contains integer class indices, not continuous values."""
+        mock_client.get_decision_boundary.return_value = _make_cascor_boundary_response(10)
+        result = adapter.get_decision_boundary(resolution=10)
+
+        Z = np.array(result["Z"])
+        unique_vals = np.unique(Z)
+        for val in unique_vals:
+            assert val == int(val), f"Expected integer class index, got {val}"
+
     def test_meshgrid_rows_are_constant_x(self, adapter, mock_client):
         """Each row of xx should be identical (meshgrid property)."""
         mock_client.get_decision_boundary.return_value = _make_cascor_boundary_response(10)
         result = adapter.get_decision_boundary(resolution=10)
 
         xx = np.array(result["xx"])
-        # All rows should be equal
         for row in xx:
             np.testing.assert_array_equal(row, xx[0])
 
@@ -114,7 +131,6 @@ class TestGetDecisionBoundary:
         result = adapter.get_decision_boundary(resolution=10)
 
         yy = np.array(result["yy"])
-        # All columns should be equal
         for col_idx in range(yy.shape[1]):
             np.testing.assert_array_equal(yy[:, col_idx], yy[:, 0])
 
@@ -151,7 +167,7 @@ class TestGetDecisionBoundary:
 
     def test_returns_none_on_empty_data(self, adapter, mock_client):
         """Verify None returned when response data is empty."""
-        mock_client.get_decision_boundary.return_value = {"status": "ok", "data": {}}
+        mock_client.get_decision_boundary.return_value = {"status": "success", "data": {}}
         result = adapter.get_decision_boundary(resolution=50)
 
         assert result is None
@@ -166,8 +182,8 @@ class TestGetDecisionBoundary:
     def test_returns_none_on_malformed_data(self, adapter, mock_client):
         """Verify None returned when data is missing required fields."""
         mock_client.get_decision_boundary.return_value = {
-            "status": "ok",
-            "data": {"x_grid": [1, 2, 3]},  # missing y_grid, predictions
+            "status": "success",
+            "data": {"grid_x": [[1, 2], [1, 2]]},  # missing grid_y, predictions
         }
         result = adapter.get_decision_boundary(resolution=50)
 
@@ -216,3 +232,33 @@ class TestGetDecisionBoundary:
         y_axis = yy[:, 0]
         assert len(y_axis) == 10
         assert y_axis[0] < y_axis[-1]  # increasing
+
+
+class TestRegressionKeyNames:
+    """Regression tests to prevent key name mismatch from recurring.
+
+    The real CasCor API uses grid_x/grid_y (not x_grid/y_grid).
+    These tests ensure the adapter reads the correct keys.
+    """
+
+    def test_adapter_does_not_read_x_grid_key(self, adapter, mock_client):
+        """Verify the adapter does NOT look for the old 'x_grid' key."""
+        mock_client.get_decision_boundary.return_value = {
+            "status": "success",
+            "data": {
+                "x_grid": np.linspace(-1, 1, 5).tolist(),  # old key — should be ignored
+                "y_grid": np.linspace(-1, 1, 5).tolist(),  # old key — should be ignored
+                "predictions": np.zeros(25).tolist(),
+                "resolution": 5,
+            },
+        }
+        # Should return None because grid_x/grid_y are missing
+        result = adapter.get_decision_boundary(resolution=5)
+        assert result is None
+
+    def test_adapter_reads_grid_x_key(self, adapter, mock_client):
+        """Verify the adapter reads the correct 'grid_x' key from the real API."""
+        mock_client.get_decision_boundary.return_value = _make_cascor_boundary_response(5)
+        result = adapter.get_decision_boundary(resolution=5)
+        assert result is not None
+        assert "xx" in result

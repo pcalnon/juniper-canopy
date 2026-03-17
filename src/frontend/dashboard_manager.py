@@ -1260,6 +1260,9 @@ class DashboardManager:
             if resolution is not None:
                 url = f"{url}?resolution={resolution}"
             response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            if not response.ok:
+                self.logger.warning(f"Decision boundary API returned {response.status_code}")
+                return None
             boundary_data = response.json()
             self.logger.debug(f"Fetched decision boundary from {url}")
             return boundary_data
