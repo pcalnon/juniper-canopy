@@ -126,7 +126,7 @@ git clone https://github.com/pcalnon/juniper-canopy.git
 cd juniper-canopy
 
 # Activate environment
-conda activate JuniperPython
+conda activate JuniperCanopy
 
 # Launch demo mode
 ./demo
