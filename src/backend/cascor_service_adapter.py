@@ -261,9 +261,10 @@ class CascorServiceAdapter:
     def get_decision_boundary(self, resolution: int = 50) -> Optional[Dict[str, Any]]:
         """Fetch decision boundary from CasCor service and transform to frontend format.
 
-        The CasCor service returns 1D grid arrays and flattened predictions.
-        This method transforms them into 2D meshgrid arrays matching the
-        format expected by the DecisionBoundary frontend component.
+        The CasCor service returns 2D meshgrid arrays (``grid_x``, ``grid_y``)
+        and a 2D predictions array of integer class indices.  This method
+        renames the keys to ``xx``, ``yy``, ``Z`` as expected by the
+        DecisionBoundary frontend component.
 
         Args:
             resolution: Grid resolution per axis (5-200).
@@ -280,22 +281,20 @@ class CascorServiceAdapter:
             if not data:
                 return None
 
-            x_grid = np.array(data["x_grid"])
-            y_grid = np.array(data["y_grid"])
+            # The real CasCor API returns 2D meshgrid arrays with keys
+            # grid_x / grid_y and a 2D predictions array.
+            grid_x = np.array(data["grid_x"])
+            grid_y = np.array(data["grid_y"])
             predictions = np.array(data["predictions"])
             res = data.get("resolution", resolution)
 
-            # Transform 1D arrays to 2D meshgrids
-            xx, yy = np.meshgrid(x_grid, y_grid)
-            Z = predictions.reshape(res, res)
-
-            x_range = data.get("x_range", [float(x_grid[0]), float(x_grid[-1])])
-            y_range = data.get("y_range", [float(y_grid[0]), float(y_grid[-1])])
+            x_range = data.get("x_range", [float(grid_x[0][0]), float(grid_x[0][-1])])
+            y_range = data.get("y_range", [float(grid_y[0][0]), float(grid_y[-1][0])])
 
             return {
-                "xx": xx.tolist(),
-                "yy": yy.tolist(),
-                "Z": Z.tolist(),
+                "xx": grid_x.tolist(),
+                "yy": grid_y.tolist(),
+                "Z": predictions.tolist(),
                 "x_min": x_range[0],
                 "x_max": x_range[1],
                 "y_min": y_range[0],

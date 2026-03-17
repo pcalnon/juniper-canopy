@@ -111,26 +111,101 @@ class MockCascorNetwork:
         self.train_y = None
 
     def add_hidden_unit(self):
-        """Add a new cascade hidden unit."""
-        hidden_id = len(self.hidden_units)
+        """Add a new cascade hidden unit with trained weights.
 
-        # Create hidden unit with random weights
+        Unlike random initialization, the hidden unit weights are trained via
+        a simplified correlation-maximization procedure (matching the real
+        CasCor candidate training phase).  After installation, output weights
+        are retrained for several steps to adapt to the new feature.
+        """
+        hidden_id = len(self.hidden_units)
+        input_dim = self.input_size + hidden_id
+
+        # Create candidate unit with random initial weights
         unit = {
             "id": hidden_id,
-            "weights": torch.randn(self.input_size + hidden_id) * 0.1,
+            "weights": torch.randn(input_dim) * 0.1,
             "bias": torch.randn(1) * 0.1,
             "activation_fn": torch.sigmoid,
         }
 
+        # Train candidate weights to maximize correlation with residual error
+        if self.train_x is not None and self.train_y is not None:
+            self._train_candidate(unit, steps=80, lr=0.1)
+
         self.hidden_units.append(unit)
 
         # Update output weights to accommodate new hidden unit
-        # Need to expand output_weights matrix by one column for new hidden unit
         old_num_cols = self.output_weights.shape[1]
         new_output_weights = torch.randn(self.output_size, self.input_size + len(self.hidden_units)) * 0.1
-        # Copy all existing weights (inputs + previous hidden units)
         new_output_weights[:, :old_num_cols] = self.output_weights
         self.output_weights = new_output_weights
+
+        # Retrain output weights to incorporate the new feature
+        for _ in range(50):
+            self.train_output_step()
+
+    def _train_candidate(self, unit: dict, steps: int = 80, lr: float = 0.1):
+        """Train a candidate hidden unit to maximize correlation with residual error.
+
+        Implements a simplified version of the CasCor candidate training phase:
+        1. Compute residual error (target - current prediction)
+        2. For each step, adjust unit weights to maximize the absolute value
+           of the correlation between the unit's output and the residual.
+
+        Args:
+            unit: The candidate unit dict with 'weights', 'bias', 'activation_fn'.
+            steps: Number of gradient ascent steps.
+            lr: Learning rate for candidate training.
+        """
+        with torch.no_grad():
+            x = self.train_x
+            y = self.train_y
+
+            # Current network prediction (before this unit is added)
+            current_pred = self.forward(x)
+            residual = y - current_pred  # (N, output_size)
+            residual_mean = residual.mean(dim=0)  # (output_size,)
+
+            # Build the input this candidate unit will receive
+            hidden_outputs = []
+            for existing_unit in self.hidden_units:
+                if hidden_outputs:
+                    ui = torch.cat([x] + hidden_outputs, dim=1)
+                else:
+                    ui = x
+                h = existing_unit["activation_fn"](torch.sum(ui * existing_unit["weights"], dim=1) + existing_unit["bias"])
+                hidden_outputs.append(h.unsqueeze(1))
+            if hidden_outputs:
+                candidate_input = torch.cat([x] + hidden_outputs, dim=1)
+            else:
+                candidate_input = x
+
+            for _ in range(steps):
+                # Forward through candidate unit
+                z = torch.sum(candidate_input * unit["weights"], dim=1) + unit["bias"]
+                v = unit["activation_fn"](z)  # (N,)
+                v_mean = v.mean()
+
+                # Correlation: S_o = sum_p (v_p - v_mean) * (E_po - E_o_mean)
+                v_centered = v - v_mean  # (N,)
+                e_centered = residual - residual_mean  # (N, output_size)
+
+                # Sum correlations across all outputs, take sign
+                correlation = (v_centered.unsqueeze(1) * e_centered).sum(dim=0)  # (output_size,)
+                sign_corr = torch.sign(correlation)  # (output_size,)
+
+                # Gradient: dS/dw = sum_o sign(S_o) * sum_p (E - E_mean) * f'(z) * input
+                f_prime = v * (1.0 - v)  # sigmoid derivative
+                # Weighted error direction: sum across outputs
+                weighted_err = (e_centered * sign_corr.unsqueeze(0)).sum(dim=1)  # (N,)
+                grad_signal = weighted_err * f_prime  # (N,)
+
+                grad_w = (grad_signal.unsqueeze(1) * candidate_input).mean(dim=0)  # (input_dim,)
+                grad_b = grad_signal.mean()
+
+                unit["weights"] += lr * grad_w
+                unit["bias"] += lr * grad_b
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -536,35 +611,36 @@ class DemoMode:
 
     def _simulate_training_step(self) -> Tuple[float, float]:
         """
-        Simulate one training epoch.
+        Perform one training epoch — real gradient step with real metrics.
 
-        Performs a real gradient step on the network's output layer weights
-        using the training data, then derives loss/accuracy metrics from
-        the synthetic decay curve (actual metrics computed on-demand by the
-        boundary endpoint for accuracy).
+        Trains the output layer weights via ``train_output_step()`` and then
+        computes the actual loss and accuracy from the network's predictions
+        on the training data.  This ensures the reported metrics reflect the
+        network's true classification performance.
 
         Returns:
             Tuple of (loss, accuracy)
         """
-        # Increment the pending training steps counter. Actual weight updates are
-        # performed lazily when the decision boundary is requested, avoiding
-        # per-step tensor operations in the training loop that could interfere
-        # with WebSocket message timing.
-        self._pending_train_steps = getattr(self, "_pending_train_steps", 0) + 1
+        # Perform an actual weight update (inline, not deferred)
+        with self._lock:
+            self.network.train_output_step()
 
-        # Use synthetic metrics for the training progress display.
-        # The actual network predictions are reflected in the decision boundary
-        # visualization, which calls network.forward() directly.
-        decay_rate = 0.05
-        noise_level = 0.02
-
-        self.current_loss = self.target_loss + (self.current_loss - self.target_loss) * (1 - decay_rate)
-        self.current_loss += np.random.randn() * noise_level
-        self.current_loss = max(self.target_loss, self.current_loss)
-
-        self.current_accuracy = 1.0 - (self.current_loss / 2.0)
-        self.current_accuracy = min(0.98, max(0.5, self.current_accuracy))
-        self.current_accuracy += np.random.randn() * 0.01
+        # Compute real metrics from network predictions
+        with self._lock, torch.no_grad():
+            if self.network.train_x is not None and self.network.train_y is not None:
+                predictions = self.network.forward(self.network.train_x)
+                # Binary cross-entropy loss
+                eps = 1e-7
+                p = predictions.clamp(eps, 1.0 - eps)
+                bce = -(self.network.train_y * torch.log(p) + (1.0 - self.network.train_y) * torch.log(1.0 - p))
+                self.current_loss = float(bce.mean())
+                # Classification accuracy
+                pred_classes = (predictions > 0.5).float()
+                self.current_accuracy = float((pred_classes == self.network.train_y).float().mean())
+            else:
+                # Fallback if no training data
+                self.current_loss = 1.0
+                self.current_accuracy = 0.5
 
         return self.current_loss, self.current_accuracy
 
