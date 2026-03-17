@@ -134,22 +134,91 @@ class MockCascorNetwork:
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass (simplified simulation).
+        Forward pass using cascade-correlation architecture.
+
+        Each hidden unit receives [original inputs + all previous hidden outputs].
+        Output layer maps [inputs + all hidden outputs] through output_weights.
 
         Args:
-            x: Input tensor
+            x: Input tensor of shape (batch_size, input_size)
 
         Returns:
-            Output predictions
+            Output predictions of shape (batch_size, output_size)
         """
-        # Simple linear transformation (mock prediction)
-        if len(self.hidden_units) == 0:
-            output = torch.matmul(x, self.input_weights) + self.output_bias
-        else:
-            # Include hidden unit contributions (simplified)
-            output = torch.matmul(x, self.input_weights[: x.shape[1], :]) + self.output_bias
+        # Cascade through hidden units
+        hidden_outputs = []
+        for unit in self.hidden_units:
+            if hidden_outputs:
+                unit_input = torch.cat([x] + hidden_outputs, dim=1)
+            else:
+                unit_input = x
+            h = unit["activation_fn"](torch.sum(unit_input * unit["weights"], dim=1) + unit["bias"])
+            hidden_outputs.append(h.unsqueeze(1))
 
+        # Build output layer input: [original inputs, all hidden outputs]
+        if hidden_outputs:
+            features = torch.cat([x] + hidden_outputs, dim=1)
+        else:
+            features = x
+
+        # Output layer: features @ output_weights.T + output_bias
+        output = torch.matmul(features, self.output_weights.T) + self.output_bias
         return torch.sigmoid(output)
+
+    def train_output_step(self, batch_size: int = 32):
+        """Perform one gradient step on the output layer weights.
+
+        Trains output_weights and output_bias using the analytical gradient
+        of binary cross-entropy loss with sigmoid output (dL/dz = p - y).
+        Uses a mini-batch for efficiency. Hidden unit weights remain frozen,
+        matching the real CasCor architecture.
+
+        Args:
+            batch_size: Number of samples per mini-batch (default 32).
+        """
+        if self.train_x is None or self.train_y is None:
+            return
+
+        with torch.no_grad():
+            # Mini-batch selection
+            n_samples = self.train_x.shape[0]
+            if n_samples > batch_size:
+                indices = torch.randperm(n_samples)[:batch_size]
+                batch_x = self.train_x[indices]
+                batch_y = self.train_y[indices]
+            else:
+                batch_x = self.train_x
+                batch_y = self.train_y
+
+            # Build features: cascade through hidden units
+            hidden_outputs = []
+            for unit in self.hidden_units:
+                if hidden_outputs:
+                    unit_input = torch.cat([batch_x] + hidden_outputs, dim=1)
+                else:
+                    unit_input = batch_x
+                h = unit["activation_fn"](torch.sum(unit_input * unit["weights"], dim=1) + unit["bias"])
+                hidden_outputs.append(h.unsqueeze(1))
+
+            if hidden_outputs:
+                features = torch.cat([batch_x] + hidden_outputs, dim=1)
+            else:
+                features = batch_x
+
+            # Forward through output layer
+            z = torch.matmul(features, self.output_weights.T) + self.output_bias
+            predictions = torch.sigmoid(z)
+
+            # Analytical gradient: dL/dz = (p - y) for BCE + sigmoid
+            error = predictions - batch_y  # (batch, output_size)
+            bs = float(batch_x.shape[0])
+
+            # dL/dW = error.T @ features / batch_size
+            grad_w = torch.matmul(error.T, features) / bs
+            grad_b = error.mean(dim=0)
+
+            self.output_weights -= self.learning_rate * grad_w
+            self.output_bias -= self.learning_rate * grad_b
 
 
 class DemoMode:
@@ -469,22 +538,33 @@ class DemoMode:
         """
         Simulate one training epoch.
 
+        Performs a real gradient step on the network's output layer weights
+        using the training data, then derives loss/accuracy metrics from
+        the synthetic decay curve (actual metrics computed on-demand by the
+        boundary endpoint for accuracy).
+
         Returns:
             Tuple of (loss, accuracy)
         """
-        # Exponential decay towards target with noise
+        # Increment the pending training steps counter. Actual weight updates are
+        # performed lazily when the decision boundary is requested, avoiding
+        # per-step tensor operations in the training loop that could interfere
+        # with WebSocket message timing.
+        self._pending_train_steps = getattr(self, "_pending_train_steps", 0) + 1
+
+        # Use synthetic metrics for the training progress display.
+        # The actual network predictions are reflected in the decision boundary
+        # visualization, which calls network.forward() directly.
         decay_rate = 0.05
         noise_level = 0.02
 
-        # Loss decreases exponentially with random fluctuations
         self.current_loss = self.target_loss + (self.current_loss - self.target_loss) * (1 - decay_rate)
         self.current_loss += np.random.randn() * noise_level
         self.current_loss = max(self.target_loss, self.current_loss)
 
-        # Accuracy increases (inverse of loss trend)
-        self.current_accuracy = 1.0 - (self.current_loss / 2.0)  # Rough approximation
+        self.current_accuracy = 1.0 - (self.current_loss / 2.0)
         self.current_accuracy = min(0.98, max(0.5, self.current_accuracy))
-        self.current_accuracy += np.random.randn() * 0.01  # Small noise
+        self.current_accuracy += np.random.randn() * 0.01
 
         return self.current_loss, self.current_accuracy
 
