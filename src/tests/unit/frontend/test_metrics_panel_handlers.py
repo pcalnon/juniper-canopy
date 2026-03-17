@@ -1126,8 +1126,26 @@ class TestRegisteredCallbacks:
 
         if func := callbacks.get("render_candidate_history"):
             result = func([{"epoch": 42}])
-            # Single entry should now be rendered (not skipped)
+            # Single entry should be rendered (all history entries are shown)
             assert result != []
+
+    def test_render_candidate_history_single_entry_contains_epoch(self, registered_callbacks):
+        """Test render_candidate_history single entry shows correct epoch."""
+        panel, callbacks = registered_callbacks
+
+        if func := callbacks.get("render_candidate_history"):
+            result = func([{"epoch": 42}])
+            result_str = str(result)
+            assert "Pool @ Epoch 42" in result_str
+
+    def test_render_candidate_history_single_entry_has_header(self, registered_callbacks):
+        """Test render_candidate_history single entry includes Previous Pools header."""
+        panel, callbacks = registered_callbacks
+
+        if func := callbacks.get("render_candidate_history"):
+            result = func([{"epoch": 42}])
+            result_str = str(result)
+            assert "Previous Pools" in result_str
 
     def test_render_candidate_history_multiple_entries(self, registered_callbacks):
         """Test render_candidate_history with multiple entries."""
@@ -1140,6 +1158,22 @@ class TestRegisteredCallbacks:
             ]
             result = func(history)
             assert result is not None
+
+    def test_render_candidate_history_multiple_entries_shows_all(self, registered_callbacks):
+        """Test render_candidate_history renders all passed entries."""
+        panel, callbacks = registered_callbacks
+
+        if func := callbacks.get("render_candidate_history"):
+            history = [
+                {"epoch": 50, "top_candidate_id": "C001", "top_candidate_score": 0.95, "size": 8},
+                {"epoch": 40, "top_candidate_id": "C002", "top_candidate_score": 0.88, "size": 6},
+                {"epoch": 30, "top_candidate_id": "C003", "top_candidate_score": 0.75, "size": 4},
+            ]
+            result = func(history)
+            result_str = str(result)
+            assert "Pool @ Epoch 50" in result_str
+            assert "Pool @ Epoch 40" in result_str
+            assert "Pool @ Epoch 30" in result_str
 
     def test_capture_view_state_no_trigger(self, registered_callbacks):
         """Test capture_view_state with no trigger."""

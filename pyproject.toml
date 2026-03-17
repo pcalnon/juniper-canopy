@@ -205,6 +205,7 @@ filterwarnings = [
   "ignore::DeprecationWarning:dash.*",
   "ignore::DeprecationWarning:plotly.*",
   "ignore::pytest.PytestUnraisableExceptionWarning",
+  "once:CASCOR_.*is deprecated:DeprecationWarning:settings",
 ]
 
 # ==========================================

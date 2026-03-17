@@ -157,10 +157,31 @@ class TestErrorResponses:
     """Test API error response contracts."""
 
     def test_invalid_limit_returns_422(self, client):
-        """Contract: Invalid limit parameter returns 422 (validation error)"""
+        """Contract: Invalid limit parameter returns 422 (FastAPI type validation error)."""
         response = client.get("/api/metrics/history?limit=invalid")
-        # Endpoint defines limit as int, so invalid value returns 422
+        # Endpoint defines limit: int, so non-integer value triggers 422 validation error
         assert response.status_code == 422
+
+    def test_invalid_limit_422_has_detail(self, client):
+        """Contract: 422 response contains validation error detail."""
+        response = client.get("/api/metrics/history?limit=invalid")
+        assert response.status_code == 422
+        body = response.json()
+        assert "detail" in body
+        assert isinstance(body["detail"], list)
+        assert len(body["detail"]) > 0
+
+    def test_float_limit_returns_422(self, client):
+        """Contract: Float limit value returns 422 (must be int)."""
+        response = client.get("/api/metrics/history?limit=3.14")
+        assert response.status_code == 422
+
+    def test_valid_int_limit_returns_200(self, client):
+        """Contract: Valid integer limit returns 200."""
+        response = client.get("/api/metrics/history?limit=10")
+        assert response.status_code == 200
+        data = response.json()
+        assert "history" in data
 
     def test_negative_limit_handled_gracefully(self, client):
         """Contract: Negative limits handled (422 or clamped to valid range)"""
