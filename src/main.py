@@ -540,13 +540,16 @@ async def get_metrics():
 
 
 @app.get("/api/metrics/history")
-async def get_metrics_history():
+async def get_metrics_history(limit: int = 100):
     """
     Get metrics history.
+    Args:
+        limit: Maximum number of history entries to return (default: 100, 0 = all)
     Returns:
         Dictionary with history list
     """
-    return {"history": backend.get_metrics_history(100)}
+    count = limit if limit > 0 else 10000
+    return {"history": backend.get_metrics_history(count)}
 
 
 @app.get("/api/network/stats")

@@ -240,8 +240,42 @@ table tbody tr:hover {
 /* Muted text light: #6c757d on #ffffff = 4.6:1 ✓ */
 /* Muted text dark: #adb5bd on #1a1a1a = 9.7:1 ✓ */
 
+/* Metrics layout toolbar */
+.metrics-layout-toolbar {
+    background-color: var(--bg-secondary);
+}
+
+.metrics-toolbar-divider {
+    color: var(--text-muted);
+}
+
+.metrics-layout-status {
+    color: var(--text-muted);
+}
+
+/* Collapsible section headers */
+.collapsible-header {
+    cursor: pointer;
+    user-select: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.collapsible-header:hover {
+    background-color: var(--bg-secondary);
+}
+
+.collapsible-header .collapse-icon {
+    display: inline-block;
+    margin-right: 6px;
+    font-size: 0.7em;
+    transition: transform 0.2s ease;
+}
+
 /* Animation for smooth transitions - scoped to avoid breaking Plotly */
 body, .card, .card-header, .card-body, .btn, .form-control,
-.nav-link, .tab-content, table, h1, h2, h3, h4, h5, h6 {
+.nav-link, .tab-content, table, h1, h2, h3, h4, h5, h6,
+.metrics-layout-toolbar {
     transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }

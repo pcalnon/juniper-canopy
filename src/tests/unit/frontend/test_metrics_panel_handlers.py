@@ -1099,7 +1099,7 @@ class TestRegisteredCallbacks:
             assert len(result) == 1
 
     def test_update_candidate_history_max_entries(self, registered_callbacks):
-        """Test update_candidate_history limits to 10 entries."""
+        """Test update_candidate_history limits to 20 entries."""
         panel, callbacks = registered_callbacks
 
         if func := callbacks.get("update_candidate_history"):
@@ -1108,9 +1108,9 @@ class TestRegisteredCallbacks:
                 "current_epoch": 100,
                 "candidate_pool_size": 5,
             }
-            history = [{"epoch": i} for i in range(15)]
+            history = [{"epoch": i} for i in range(25)]
             result = func(state, history)
-            assert len(result) == 10
+            assert len(result) == 20
 
     def test_render_candidate_history_empty(self, registered_callbacks):
         """Test render_candidate_history with empty history."""
@@ -1121,12 +1121,13 @@ class TestRegisteredCallbacks:
             assert result == []
 
     def test_render_candidate_history_single_entry(self, registered_callbacks):
-        """Test render_candidate_history with single entry."""
+        """Test render_candidate_history with single entry renders it."""
         panel, callbacks = registered_callbacks
 
         if func := callbacks.get("render_candidate_history"):
             result = func([{"epoch": 42}])
-            assert result == []
+            # Single entry should now be rendered (not skipped)
+            assert result != []
 
     def test_render_candidate_history_multiple_entries(self, registered_callbacks):
         """Test render_candidate_history with multiple entries."""

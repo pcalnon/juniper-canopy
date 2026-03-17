@@ -36,6 +36,7 @@
 #####################################################################################################################################################################################################
 from typing import Any, Callable, Dict, Optional
 
+import dash_bootstrap_components as dbc
 import numpy as np
 import plotly.graph_objects as go
 from dash import dcc, html
@@ -116,7 +117,7 @@ class DecisionBoundary(BaseComponent):
                     ],
                     style={"marginBottom": "10px"},
                 ),
-                # Status indicator
+                # Status indicator with refresh button
                 html.Div(
                     [
                         html.Div(
@@ -129,9 +130,18 @@ class DecisionBoundary(BaseComponent):
                                 "borderRadius": "3px",
                                 "display": "inline-block",
                             },
-                        )
+                        ),
+                        dbc.Button(
+                            "↻ Refresh",
+                            id=f"{self.component_id}-refresh-btn",
+                            size="sm",
+                            color="secondary",
+                            outline=True,
+                            className="ms-3",
+                            title="Recalculate decision boundary with current network state",
+                        ),
                     ],
-                    style={"marginBottom": "10px"},
+                    style={"marginBottom": "10px", "display": "flex", "alignItems": "center"},
                 ),
                 # Main boundary plot
                 dcc.Graph(

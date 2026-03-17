@@ -172,7 +172,7 @@ class MetricsPanel(BaseComponent):
                                     ],
                                     style={"display": "inline-flex", "alignItems": "center"},
                                 ),
-                                html.Span("|", style={"margin": "0 15px", "color": "#ccc"}),
+                                html.Span("|", className="metrics-toolbar-divider", style={"margin": "0 15px"}),
                                 # Load Layout section
                                 html.Div(
                                     [
@@ -209,17 +209,17 @@ class MetricsPanel(BaseComponent):
                         html.Div(
                             id=f"{self.component_id}-layout-status",
                             children="",
+                            className="metrics-layout-status",
                             style={
                                 "marginTop": "5px",
                                 "fontSize": "12px",
-                                "color": "#6c757d",
                             },
                         ),
                     ],
+                    className="metrics-layout-toolbar",
                     style={
                         "marginBottom": "15px",
                         "padding": "10px",
-                        "backgroundColor": "#f8f9fa",
                         "borderRadius": "5px",
                     },
                 ),
@@ -330,6 +330,52 @@ class MetricsPanel(BaseComponent):
                         "display": "none",
                     },
                 ),
+                # Display mode selector
+                html.Div(
+                    [
+                        html.Label("Display Mode:", className="fw-bold me-3", style={"fontSize": "0.85em"}),
+                        dbc.RadioItems(
+                            id=f"{self.component_id}-display-mode",
+                            options=[
+                                {"label": "Sliding Window", "value": "window"},
+                                {"label": "Full History", "value": "full"},
+                                {"label": "Between Hidden Units", "value": "hidden_units"},
+                            ],
+                            value="window",
+                            inline=True,
+                            className="me-3",
+                            style={"fontSize": "0.85em"},
+                        ),
+                        html.Div(
+                            [
+                                html.Label("Window:", className="me-2", style={"fontSize": "0.85em"}),
+                                dbc.Input(
+                                    id=f"{self.component_id}-window-size",
+                                    type="number",
+                                    value=100,
+                                    min=10,
+                                    max=1000,
+                                    step=10,
+                                    size="sm",
+                                    style={"width": "80px", "display": "inline-block"},
+                                    debounce=True,
+                                ),
+                            ],
+                            id=f"{self.component_id}-window-size-container",
+                            style={"display": "inline-flex", "alignItems": "center"},
+                        ),
+                    ],
+                    className="metrics-layout-toolbar",
+                    style={
+                        "marginBottom": "10px",
+                        "padding": "8px 10px",
+                        "borderRadius": "5px",
+                        "display": "flex",
+                        "alignItems": "center",
+                    },
+                ),
+                # Display mode state store
+                dcc.Store(id=f"{self.component_id}-display-mode-store", data={"mode": "window", "window_size": 100}),
                 # Current metrics display
                 html.Div(
                     [
@@ -542,7 +588,7 @@ class MetricsPanel(BaseComponent):
 
                 if not existing:
                     # Add new pool to history (max 10 entries)
-                    current_history = [pool_snapshot] + current_history[:9]
+                    current_history = [pool_snapshot] + current_history[:19]
                     return current_history
 
             return history or []
@@ -552,13 +598,13 @@ class MetricsPanel(BaseComponent):
             Input(f"{self.component_id}-candidate-pools-history", "data"),
         )
         def render_candidate_history(history):
-            """Render historical candidate pools as collapsed sections."""
-            if not history or len(history) <= 1:
+            """Render historical candidate pools as expandable sections."""
+            if not history:
                 return []
 
-            # Skip the first (current) pool, show rest as collapsed
+            # Show all historical pools as expandable cards
             history_items = []
-            for pool in history[1:]:
+            for pool in history:
                 epoch = pool.get("epoch", 0)
                 top_id = pool.get("top_candidate_id", "N/A")
                 top_score = pool.get("top_candidate_score", 0.0)
@@ -587,6 +633,23 @@ class MetricsPanel(BaseComponent):
                                             html.P([html.Strong("Top Candidate: "), pool.get("top_candidate_id", "N/A")]),
                                             html.P([html.Strong("Score: "), f"{pool.get('top_candidate_score', 0.0):.4f}"]),
                                         ]
+                                        + (
+                                            [
+                                                html.P([html.Strong("2nd Candidate: "), pool.get("second_candidate_id", "N/A")]),
+                                                html.P([html.Strong("2nd Score: "), f"{pool.get('second_candidate_score', 0.0):.4f}"]),
+                                            ]
+                                            if pool.get("second_candidate_id")
+                                            else []
+                                        )
+                                        + (
+                                            [
+                                                html.Hr(style={"margin": "8px 0"}),
+                                                html.P([html.Strong("Avg Loss: "), f"{pm.get('avg_loss', 0):.4f}"]),
+                                                html.P([html.Strong("Avg Accuracy: "), f"{pm.get('avg_accuracy', 0):.4f}"]),
+                                            ]
+                                            if (pm := pool.get("pool_metrics", {}))
+                                            else []
+                                        )
                                     ),
                                     style={"padding": "10px"},
                                 ),
@@ -673,11 +736,12 @@ class MetricsPanel(BaseComponent):
             [
                 Input(f"{self.component_id}-metrics-store", "data"),
                 Input("theme-state", "data"),
+                Input(f"{self.component_id}-display-mode-store", "data"),
             ],
             State(f"{self.component_id}-view-state", "data"),
         )
-        def update_metrics_display(metrics_data: List[Dict[str, Any]], theme: str, view_state: Dict):
-            return self._update_metrics_display_handler(metrics_data=metrics_data, theme=theme, view_state=view_state)
+        def update_metrics_display(metrics_data: List[Dict[str, Any]], theme: str, display_mode_state: Dict, view_state: Dict):
+            return self._update_metrics_display_handler(metrics_data=metrics_data, theme=theme, view_state=view_state, display_mode_state=display_mode_state)
 
         # Replay Controls Callbacks
         @app.callback(
@@ -900,6 +964,23 @@ class MetricsPanel(BaseComponent):
             """Delete selected layout."""
             return self._delete_layout_handler(n_clicks, layout_name)
 
+        # Display mode callbacks
+        @app.callback(
+            [
+                Output(f"{self.component_id}-display-mode-store", "data"),
+                Output(f"{self.component_id}-window-size-container", "style"),
+            ],
+            [
+                Input(f"{self.component_id}-display-mode", "value"),
+                Input(f"{self.component_id}-window-size", "value"),
+            ],
+        )
+        def update_display_mode(mode, window_size):
+            """Update display mode state and show/hide window size input."""
+            window_size = max(10, min(1000, window_size or 100))
+            show_window = {"display": "inline-flex", "alignItems": "center"} if mode == "window" else {"display": "none"}
+            return {"mode": mode, "window_size": window_size}, show_window
+
         self.logger.debug(f"Callbacks registered for {self.component_id}")
 
     def _fetch_network_stats_handler(self, n_intervals=None):
@@ -968,7 +1049,7 @@ class MetricsPanel(BaseComponent):
 
         return self._create_candidate_pool_display(state), {"marginTop": "20px"}
 
-    def _update_metrics_display_handler(self, metrics_data: List[Dict[str, Any]] = None, theme: str = None, view_state: Dict = None):
+    def _update_metrics_display_handler(self, metrics_data: List[Dict[str, Any]] = None, theme: str = None, view_state: Dict = None, display_mode_state: Dict = None):
         """
         Update all metrics visualizations and displays.
 
@@ -976,6 +1057,7 @@ class MetricsPanel(BaseComponent):
             metrics_data: List of metrics dictionaries
             theme: Current theme ("light" or "dark")
             view_state: User's saved view state (zoom ranges)
+            display_mode_state: Display mode configuration (mode, window_size)
 
         Returns:
             Tuple of updated components
@@ -996,9 +1078,30 @@ class MetricsPanel(BaseComponent):
             empty_fig = self._create_empty_plot(theme)
             return (empty_fig, empty_fig, "0", "--", "--", "0", "Status: Idle", self._get_status_style("idle"))
 
+        # Apply display mode filtering
+        mode_state = display_mode_state or {"mode": "window", "window_size": 100}
+        mode = mode_state.get("mode", "window")
+        plot_data = metrics_data
+
+        if mode == "hidden_units" and len(metrics_data) > 1:
+            # Show data between the last two hidden unit additions
+            hidden_unit_epochs = []
+            prev_hu = 0
+            for m in metrics_data:
+                hu = m.get("network_topology", {}).get("hidden_units", 0)
+                if hu > prev_hu:
+                    hidden_unit_epochs.append(m.get("epoch", 0))
+                prev_hu = hu
+            if len(hidden_unit_epochs) >= 2:
+                start_epoch = hidden_unit_epochs[-2]
+                plot_data = [m for m in metrics_data if m.get("epoch", 0) >= start_epoch]
+            elif len(hidden_unit_epochs) == 1:
+                start_epoch = hidden_unit_epochs[-1]
+                plot_data = [m for m in metrics_data if m.get("epoch", 0) >= start_epoch]
+
         # Create plots
-        loss_fig = self._create_loss_plot(metrics_data, theme)
-        accuracy_fig = self._create_accuracy_plot(metrics_data, theme)
+        loss_fig = self._create_loss_plot(plot_data, theme)
+        accuracy_fig = self._create_accuracy_plot(plot_data, theme)
 
         # Apply stored view state to preserve user's zoom/pan
         if view_state:

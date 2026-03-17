@@ -157,12 +157,10 @@ class TestErrorResponses:
     """Test API error response contracts."""
 
     def test_invalid_limit_returns_422(self, client):
-        """Contract: Invalid/unrecognized query params are ignored (endpoint has no limit param)"""
+        """Contract: Invalid limit parameter returns 422 (validation error)"""
         response = client.get("/api/metrics/history?limit=invalid")
-        # Endpoint doesn't define limit parameter, so invalid value is ignored
-        assert response.status_code == 200
-        data = response.json()
-        assert "history" in data  # Should still return valid response
+        # Endpoint defines limit as int, so invalid value returns 422
+        assert response.status_code == 422
 
     def test_negative_limit_handled_gracefully(self, client):
         """Contract: Negative limits handled (422 or clamped to valid range)"""
