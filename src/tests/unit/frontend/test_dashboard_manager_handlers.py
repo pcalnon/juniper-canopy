@@ -495,6 +495,32 @@ class TestDataStoreHandlers:
         assert result is None
 
     @patch("requests.get")
+    def test_update_boundary_store_handler_passes_resolution(self, mock_get, dashboard_manager):
+        """Test boundary store handler appends resolution query param to API URL."""
+        mock_response = Mock()
+        mock_response.json.return_value = {"xx": [], "yy": [], "Z": []}
+        mock_get.return_value = mock_response
+
+        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
+            dashboard_manager._update_boundary_store_handler(n=1, active_tab="boundaries", resolution=75)
+
+        call_url = mock_get.call_args[0][0]
+        assert "resolution=75" in call_url
+
+    @patch("requests.get")
+    def test_update_boundary_store_handler_no_resolution(self, mock_get, dashboard_manager):
+        """Test boundary store handler omits resolution param when None."""
+        mock_response = Mock()
+        mock_response.json.return_value = {"xx": [], "yy": [], "Z": []}
+        mock_get.return_value = mock_response
+
+        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
+            dashboard_manager._update_boundary_store_handler(n=1, active_tab="boundaries")
+
+        call_url = mock_get.call_args[0][0]
+        assert "resolution" not in call_url
+
+    @patch("requests.get")
     def test_update_boundary_dataset_store_handler_active_tab(self, mock_get, dashboard_manager):
         """Test boundary dataset store update when boundaries tab is active."""
         mock_response = Mock()

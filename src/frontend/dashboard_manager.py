@@ -767,10 +767,11 @@ class DashboardManager:
             Input("slow-update-interval", "n_intervals"),
             Input("visualization-tabs", "active_tab"),
             Input("decision-boundary-refresh-btn", "n_clicks"),
+            Input("decision-boundary-resolution-slider", "value"),
         )
-        def update_boundary_store(n, active_tab, refresh_clicks):
+        def update_boundary_store(n, active_tab, refresh_clicks, resolution):
             """Fetch decision boundary from API and update decision boundary store."""
-            return self._update_boundary_store_handler(n=n, active_tab=active_tab)
+            return self._update_boundary_store_handler(n=n, active_tab=active_tab, resolution=resolution)
 
         @self.app.callback(
             Output("decision-boundary-dataset-data", "data"),
@@ -1248,7 +1249,7 @@ class DashboardManager:
             self.logger.warning(f"Failed to fetch dataset from API: {type(e).__name__}: {e}")
             return None
 
-    def _update_boundary_store_handler(self, n=None, active_tab=None):
+    def _update_boundary_store_handler(self, n=None, active_tab=None, resolution=None):
         """Fetch decision boundary from API and update decision boundary store."""
         # Only update if boundaries tab is active
         if active_tab != "boundaries":
@@ -1256,6 +1257,8 @@ class DashboardManager:
 
         try:
             url = self._api_url("/api/decision_boundary")
+            if resolution is not None:
+                url = f"{url}?resolution={resolution}"
             response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
             boundary_data = response.json()
             self.logger.debug(f"Fetched decision boundary from {url}")
