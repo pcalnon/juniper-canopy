@@ -622,13 +622,16 @@ async def get_dataset():
 
 
 @app.get("/api/decision_boundary")
-async def get_decision_boundary():
+async def get_decision_boundary(resolution: int = 100):
     """
     Get decision boundary data for visualization.
+    Args:
+        resolution: Grid resolution per axis (5-200, default 100)
     Returns:
         Decision boundary dictionary with grid and predictions
     """
-    boundary = backend.get_decision_boundary(100)
+    resolution = max(5, min(200, resolution))
+    boundary = backend.get_decision_boundary(resolution)
     if boundary is None:
         return JSONResponse({"error": "No decision boundary data available"}, status_code=503)
     return boundary

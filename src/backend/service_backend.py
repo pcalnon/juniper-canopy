@@ -109,9 +109,7 @@ class ServiceBackend:
         return self._adapter.get_dataset_info()
 
     def get_decision_boundary(self, resolution: int = 50) -> Optional[Dict[str, Any]]:
-        # Decision boundary computation requires in-process network access.
-        # Not available over REST — returns None.
-        return None
+        return self._adapter.get_decision_boundary(resolution)
 
     # --- Parameters ---
 

@@ -149,11 +149,9 @@ class DecisionBoundary(BaseComponent):
                     config={"displayModeBar": True, "displaylogo": False},
                     style={"height": "600px"},
                 ),
-                # Update trigger and data stores
+                # Data stores (updates driven by dashboard_manager slow-update-interval)
                 dcc.Store(id=f"{self.component_id}-boundary-data", data=None),
                 dcc.Store(id=f"{self.component_id}-dataset-data", data=None),
-                # Update interval for real-time refresh
-                dcc.Interval(id=f"{self.component_id}-update-interval", interval=2000, n_intervals=0),  # 2 seconds
             ],
             style={"padding": "20px"},
         )

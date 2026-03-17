@@ -258,6 +258,57 @@ class CascorServiceAdapter:
         except JuniperCascorClientError:
             return None
 
+    def get_decision_boundary(self, resolution: int = 50) -> Optional[Dict[str, Any]]:
+        """Fetch decision boundary from CasCor service and transform to frontend format.
+
+        The CasCor service returns 1D grid arrays and flattened predictions.
+        This method transforms them into 2D meshgrid arrays matching the
+        format expected by the DecisionBoundary frontend component.
+
+        Args:
+            resolution: Grid resolution per axis (5-200).
+
+        Returns:
+            Dict with xx, yy (2D meshgrids), Z (2D predictions), bounds, and resolution,
+            or None if unavailable.
+        """
+        try:
+            import numpy as np
+
+            response = self._client.get_decision_boundary(resolution)
+            data = response.get("data", {}) if isinstance(response, dict) else {}
+            if not data:
+                return None
+
+            x_grid = np.array(data["x_grid"])
+            y_grid = np.array(data["y_grid"])
+            predictions = np.array(data["predictions"])
+            res = data.get("resolution", resolution)
+
+            # Transform 1D arrays to 2D meshgrids
+            xx, yy = np.meshgrid(x_grid, y_grid)
+            Z = predictions.reshape(res, res)
+
+            x_range = data.get("x_range", [float(x_grid[0]), float(x_grid[-1])])
+            y_range = data.get("y_range", [float(y_grid[0]), float(y_grid[-1])])
+
+            return {
+                "xx": xx.tolist(),
+                "yy": yy.tolist(),
+                "Z": Z.tolist(),
+                "x_min": x_range[0],
+                "x_max": x_range[1],
+                "y_min": y_range[0],
+                "y_max": y_range[1],
+                "resolution": res,
+            }
+        except JuniperCascorClientError as e:
+            logger.warning(f"Failed to get decision boundary: {e}")
+            return None
+        except (KeyError, ValueError, IndexError) as e:
+            logger.warning(f"Failed to transform decision boundary data: {e}")
+            return None
+
     def get_prediction_function(self) -> Optional[Callable]:
         """Not available over REST — returns None."""
         return None

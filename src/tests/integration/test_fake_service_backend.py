@@ -137,10 +137,13 @@ def test_get_dataset(backend):
 
 
 @pytest.mark.integration
-def test_get_decision_boundary_returns_none(backend):
-    """Decision boundary is not available over REST."""
-    result = backend.get_decision_boundary()
-    assert result is None
+def test_get_decision_boundary_returns_data(backend):
+    """Decision boundary should return valid data via CasCor client."""
+    result = backend.get_decision_boundary(resolution=10)
+    assert result is not None
+    assert "xx" in result
+    assert "yy" in result
+    assert "Z" in result
 
 
 # --- Lifecycle ---

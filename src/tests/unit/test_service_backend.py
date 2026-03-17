@@ -245,10 +245,22 @@ class TestNetworkAndData:
         result = service_backend.get_dataset()
         assert isinstance(result, (dict, type(None)))
 
-    def test_get_decision_boundary_returns_none(self, service_backend):
-        """get_decision_boundary() returns None for service mode (not available over REST)."""
+    def test_get_decision_boundary_delegates_to_adapter(self, service_backend, mock_adapter):
+        """get_decision_boundary() should delegate to adapter."""
+        mock_adapter.get_decision_boundary.return_value = {
+            "xx": [[1, 2], [1, 2]],
+            "yy": [[1, 1], [2, 2]],
+            "Z": [[0.1, 0.9], [0.8, 0.2]],
+            "x_min": -1.5,
+            "x_max": 1.5,
+            "y_min": -1.5,
+            "y_max": 1.5,
+            "resolution": 2,
+        }
         result = service_backend.get_decision_boundary(resolution=50)
-        assert result is None
+        assert result is not None
+        assert "xx" in result
+        mock_adapter.get_decision_boundary.assert_called_once_with(50)
 
 
 class TestParameters:
