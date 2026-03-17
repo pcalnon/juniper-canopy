@@ -206,6 +206,15 @@ class DemoBackend:
         if dataset is None or "inputs" not in dataset:
             return None
 
+        # Flush pending training steps to update network weights before computing boundary.
+        # Weight training is deferred from the training loop to avoid per-step tensor operations.
+        pending = getattr(self._demo, "_pending_train_steps", 0)
+        if pending > 0:
+            with self._demo._lock:
+                for _ in range(min(pending, 20)):
+                    network.train_output_step()
+                self._demo._pending_train_steps = 0
+
         inputs = dataset["inputs"]
         x_min, x_max = float(inputs[:, 0].min()) - 0.5, float(inputs[:, 0].max()) + 0.5
         y_min, y_max = float(inputs[:, 1].min()) - 0.5, float(inputs[:, 1].max()) + 0.5
@@ -215,7 +224,7 @@ class DemoBackend:
         grid_x, grid_y = np.meshgrid(xx, yy)
         grid_points = np.column_stack([grid_x.ravel(), grid_y.ravel()]).astype(np.float32)
 
-        with torch.no_grad():
+        with self._demo._lock, torch.no_grad():
             grid_tensor = torch.from_numpy(grid_points).float()
             predictions = network.forward(grid_tensor)
             z = predictions.numpy().flatten()
