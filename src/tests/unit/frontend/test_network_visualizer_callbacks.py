@@ -1177,7 +1177,7 @@ class TestCallbackInvocation:
                 with patch("dash.callback_context") as mock_ctx:
                     mock_ctx.triggered = [{"prop_id": f"{visualizer.component_id}-graph.clickData"}]
                     click_data = {"points": [{"text": "Input 0", "curveNumber": 2}]}
-                    result = func.__wrapped__(click_data, None, [])
+                    result = func.__wrapped__(click_data, None, [], "light")
                     nodes, info, style = result
                     assert nodes == ["input_0"]
                 break
@@ -1216,7 +1216,7 @@ class TestCallbackInvocation:
                 with patch("dash.callback_context") as mock_ctx:
                     mock_ctx.triggered = [{"prop_id": f"{visualizer.component_id}-graph.selectedData"}]
                     selected_data = {"points": [{"text": "Input 0"}, {"text": "Hidden 0"}]}
-                    result = func.__wrapped__(None, selected_data, [])
+                    result = func.__wrapped__(None, selected_data, [], "light")
                     nodes, info, style = result
                     assert "input_0" in nodes
                     assert "hidden_0" in nodes
@@ -1257,7 +1257,7 @@ class TestCallbackInvocation:
                     mock_ctx.triggered = [{"prop_id": f"{visualizer.component_id}-graph.clickData"}]
                     click_data = {"points": [{"text": "Input 0", "curveNumber": 2}]}
                     # Node is already selected
-                    result = func.__wrapped__(click_data, None, ["input_0"])
+                    result = func.__wrapped__(click_data, None, ["input_0"], "light")
                     nodes, info, style = result
                     assert nodes == []
                 break

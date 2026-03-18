@@ -439,25 +439,31 @@ class NetworkVisualizer(BaseComponent):
                 Input(f"{self.component_id}-graph", "clickData"),
                 Input(f"{self.component_id}-graph", "selectedData"),
             ],
-            State(f"{self.component_id}-selected-nodes", "data"),
+            [
+                State(f"{self.component_id}-selected-nodes", "data"),
+                State("theme-state", "data"),
+            ],
             prevent_initial_call=True,
         )
-        def handle_node_selection(click_data, selected_data, current_selection):
+        def handle_node_selection(click_data, selected_data, current_selection, theme):
             """Handle node selection via click or box/lasso select."""
             import dash
 
             ctx = dash.callback_context
             trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
 
+            is_dark = theme == "dark" if theme else False
             base_style = {
                 "marginBottom": "10px",
                 "padding": "10px",
-                "backgroundColor": "#e3f2fd",
+                "backgroundColor": "#1a3a5c" if is_dark else "#e3f2fd",
                 "borderRadius": "4px",
-                "border": "1px solid #90caf9",
+                "border": "1px solid #2c5282" if is_dark else "1px solid #90caf9",
             }
             hidden_style = {**base_style, "display": "none"}
             visible_style = {**base_style, "display": "block"}
+            secondary_color = "#adb5bd" if is_dark else "#666"
+            hint_color = "#9ca3af" if is_dark else "#888"
 
             # Handle box/lasso selection
             if "selectedData" in trigger and selected_data:
@@ -477,7 +483,7 @@ class NetworkVisualizer(BaseComponent):
                                 html.Ul([html.Li(n.replace("_", " ").title()) for n in selected_nodes[:5]]),
                                 html.Span(
                                     "(Click elsewhere to deselect)",
-                                    style={"fontSize": "11px", "color": "#666"},
+                                    style={"fontSize": "11px", "color": hint_color},
                                 ),
                             ]
                         )
@@ -505,11 +511,11 @@ class NetworkVisualizer(BaseComponent):
                             [
                                 html.Strong(f"Selected: {text}"),
                                 html.Br(),
-                                html.Span(f"Layer: {layer}", style={"color": "#666"}),
+                                html.Span(f"Layer: {layer}", style={"color": secondary_color}),
                                 html.Br(),
                                 html.Span(
                                     "(Click again or elsewhere to deselect)",
-                                    style={"fontSize": "11px", "color": "#888"},
+                                    style={"fontSize": "11px", "color": hint_color},
                                 ),
                             ]
                         )
@@ -517,6 +523,25 @@ class NetworkVisualizer(BaseComponent):
 
             # No valid selection, clear
             return [], [], hidden_style
+
+        @app.callback(
+            Output(f"{self.component_id}-selection-info", "style", allow_duplicate=True),
+            Input("theme-state", "data"),
+            State(f"{self.component_id}-selection-info", "style"),
+            prevent_initial_call=True,
+        )
+        def update_selection_info_theme(theme, current_style):
+            """Update selection info panel colors when theme changes."""
+            import dash
+
+            if not current_style:
+                return dash.no_update
+            is_dark = theme == "dark" if theme else False
+            return {
+                **current_style,
+                "backgroundColor": "#1a3a5c" if is_dark else "#e3f2fd",
+                "border": "1px solid #2c5282" if is_dark else "1px solid #90caf9",
+            }
 
         self.logger.debug(f"Callbacks registered for {self.component_id}")
 

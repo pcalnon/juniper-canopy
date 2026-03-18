@@ -570,9 +570,17 @@ async def get_network_stats():
         threshold_function = state.get("activation_fn", "sigmoid")
         optimizer_name = state.get("optimizer", "sgd")
 
+        # Collect weights from ALL hidden units (not just the first)
+        if network.hidden_units:
+            import torch
+
+            all_hidden_weights = torch.cat([hu["weights"] for hu in network.hidden_units])
+        else:
+            all_hidden_weights = None
+
         return adapter.get_network_statistics(
             input_weights=network.input_weights,
-            hidden_weights=(network.hidden_units[0]["weights"] if network.hidden_units else None),
+            hidden_weights=all_hidden_weights,
             output_weights=network.output_weights,
             hidden_biases=None,
             output_biases=network.output_bias,
