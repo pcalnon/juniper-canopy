@@ -92,16 +92,10 @@ jobs:
             pre-commit-${{ runner.os }}-${{ matrix.python-version }}-
 
       - name: Run pre-commit hooks
-        env:
-          # Skip local test hook in CI: it uses hardcoded conda path.
-          # Coverage is enforced by the dedicated unit-tests job.
-          SKIP: pytest-coverage
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - Pre-commit Checks                   ║"
           echo "╚════════════════════════════════════════════════════════════╝"
-          echo "Note: pytest-coverage hook skipped in CI"
-          echo "      (handled by dedicated unit-tests job with full environment)"
           pre-commit run --all-files --show-diff-on-failure
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
