@@ -140,6 +140,7 @@ class DatasetPlotter(BaseComponent):
                             style={"display": "inline-block"},
                         ),
                     ],
+                    id=f"{self.component_id}-stats-summary",
                     style={
                         "marginBottom": "15px",
                         "padding": "10px",
@@ -201,6 +202,21 @@ class DatasetPlotter(BaseComponent):
                 Tuple of updated components
             """
             return self._process_dataset_update(dataset, split, theme)
+
+        @app.callback(
+            Output(f"{self.component_id}-stats-summary", "style"),
+            Input("theme-state", "data"),
+        )
+        def update_stats_summary_theme(theme):
+            """Update stats summary background for dark mode."""
+            is_dark = theme == "dark" if theme else False
+            return {
+                "marginBottom": "15px",
+                "padding": "10px",
+                "backgroundColor": "#2d2d2d" if is_dark else "#f8f9fa",
+                "color": "#e9ecef" if is_dark else "#212529",
+                "borderRadius": "3px",
+            }
 
         self.logger.debug(f"Callbacks registered for {self.component_id}")
 
