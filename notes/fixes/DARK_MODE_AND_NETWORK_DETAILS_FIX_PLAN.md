@@ -324,3 +324,208 @@ Audit of all frontend components for remaining hardcoded background colors found
 | `metrics_panel.py` | 3 helper method `#f8f9fa` | Table backgrounds in `_create_candidate_pool_display` and `_create_network_info_table` |
 
 These are cosmetic issues in secondary panels and do not affect the three primary user-reported issues. They are documented here for future remediation.
+
+---
+
+## Discovered & Remaining Issues
+
+This section documents all issues discovered during investigation, implementation, testing, and audit — including pre-existing problems unrelated to the three fixes.
+
+### Category 1: Dark Mode — Remaining Hardcoded Colors
+
+The following components have hardcoded `backgroundColor: "#f8f9fa"` in inline styles that do not respond to theme changes. Each needs a theme callback (or CSS variable migration) to honor dark mode.
+
+#### 1A. About Panel (`src/frontend/components/about_panel.py`)
+
+| Line | Element | Color |
+|------|---------|-------|
+| 122 | CardHeader "License Information" | `#f8f9fa` |
+| 150 | CardHeader "Credits and Acknowledgments" | `#f8f9fa` |
+| 193 | CardHeader "Documentation and Support" | `#f8f9fa` |
+| 252 | CardHeader "Contact" | `#f8f9fa` |
+| 287 | CardHeader "System Information" | `#f8f9fa` |
+
+**Severity**: Low. Static informational panel, not accessed during training workflows.
+
+#### 1B. Cassandra Panel (`src/frontend/components/cassandra_panel.py`)
+
+| Line | Element | Color |
+|------|---------|-------|
+| 229 | CardHeader "Cluster Overview" | `#f8f9fa` |
+| 278 | CardHeader "Schema Overview" | `#f8f9fa` |
+
+**Severity**: Low. Visible only when Cassandra integration is active.
+
+#### 1C. Redis Panel (`src/frontend/components/redis_panel.py`)
+
+| Line | Element | Color |
+|------|---------|-------|
+| 141 | CardHeader "Health" | `#f8f9fa` |
+| 230 | CardHeader "Metrics" | `#f8f9fa` |
+
+**Severity**: Low. Visible only when Redis integration is active.
+
+#### 1D. HDF5 Snapshots Panel (`src/frontend/components/hdf5_snapshots_panel.py`)
+
+| Line | Element | Color |
+|------|---------|-------|
+| 131 | CardHeader "Create New Snapshot" | `#f8f9fa` |
+| 200 | CardHeader (second) | `#f8f9fa` |
+| 250 | CardHeader (third) | `#f8f9fa` |
+| 313 | CardHeader (fourth) | `#f8f9fa` |
+
+**Severity**: Medium. HDF5 Snapshots tab is actively used.
+
+#### 1E. Metrics Panel Helper Methods (`src/frontend/components/metrics_panel.py`)
+
+| Line | Element | Color |
+|------|---------|-------|
+| 328 | Replay controls div (initial) | `#f8f9fa` — **Has callback at line 760, properly handled** |
+| 1759 | `_create_candidate_pool_display()` table | `#f8f9fa` — **No callback** |
+| 1819 | `_create_candidate_pool_display()` pool_metrics table | `#f8f9fa` — **No callback** |
+| 1904 | `_create_network_info_table()` stats table | `#f8f9fa` — **No callback** |
+
+**Severity**: Medium-High. Line 1904 is the table rendered inside the "Network Information: Details" panel — even though the panel now updates with live data (Fix 3), the table content itself has a hardcoded light background. This means the Details section will display a light-background table inside a correctly-themed sidebar in dark mode.
+
+**Recommendation**: `_create_network_info_table()` and `_create_candidate_pool_display()` should accept a `theme` parameter and conditionally set table background/border colors. The callback handler `_update_network_info_details_handler` in `dashboard_manager.py` would need to pass theme state through.
+
+#### 1F. Systemic Pattern
+
+All 16 remaining instances follow the same anti-pattern: `backgroundColor` set as an inline style in a layout method (`get_layout()` or helper), with no corresponding callback to update it when `theme-state` changes. The fix pattern is consistent:
+
+1. Add an `id` to the div (if missing)
+2. Add a callback with `Input("theme-state", "data")` targeting the div's `style`
+3. Return conditional colors: `#2d2d2d` / `#343a40` for dark, `#f8f9fa` for light
+
+Or migrate to CSS variables (`var(--bg-secondary)`) which are already defined in `dark_mode.css` (lines 14-43) and would eliminate the need for per-component callbacks entirely.
+
+---
+
+### Category 2: Worktree Infrastructure Issues
+
+Git worktrees in the juniper-canopy project have infrastructure gaps that cause test failures and collection errors that do not occur in the main working directory.
+
+#### 2A. Broken `logs` Symlink
+
+**Symptom**: `FileExistsError: [Errno 17] File exists: 'logs'` during test collection for files that import `main.py` (which triggers WebSocket manager initialization, which calls the logger factory).
+
+**Root Cause**: `src/logs` is a symlink to `../logs`. In the main repo, `../logs` resolves to a real directory. In a worktree, `../logs` points to a non-existent path because the `logs/` directory at the repo root is gitignored and not created during `git worktree add`.
+
+**Affected Tests** (worktree-only failures):
+- `tests/integration/test_api_contracts.py` — collection error
+- `tests/integration/test_button_layout.py` — collection error
+- `tests/integration/test_cascor_ws_control.py` — collection error
+- `tests/unit/test_juniper_data_url_validation.py` — collection error
+- `tests/unit/test_logger_coverage.py::TestLoggerFactory::test_get_custom_logger` — runtime error
+- `tests/unit/test_logger_coverage.py::TestConvenienceFunctions::test_get_logger_function` — runtime error
+
+**Workaround**: `mkdir -p <worktree>/logs` after creating the worktree.
+
+**Proper Fix Options**:
+1. Add `logs/` creation to `WORKTREE_SETUP_PROCEDURE.md` as a post-setup step
+2. Make the logger factory handle the case where `logs/` is a broken symlink (create target directory if missing)
+3. Replace the symlink with a direct reference in the logger config to an absolute or computed path
+
+#### 2B. Missing `reports/` Directory
+
+**Symptom**: `AssertionError: reports/ missing` in `tests/integration/test_setup.py::test_directories`.
+
+**Root Cause**: `reports/` is gitignored and only exists in the main working directory. Worktrees do not inherit gitignored directories.
+
+**Workaround**: `mkdir -p <worktree>/reports` after creating the worktree.
+
+**Proper Fix Options**:
+1. Add `reports/` creation to `WORKTREE_SETUP_PROCEDURE.md`
+2. Add a `.gitkeep` file inside `reports/` so it's tracked by git
+3. Make `test_directories` create missing directories instead of failing, or skip the check in worktree environments
+
+#### 2C. Recommended Worktree Setup Addition
+
+The `WORKTREE_SETUP_PROCEDURE.md` should include a post-setup step:
+
+```bash
+# After Step 6 (Verify and Begin Work):
+# Create gitignored directories that aren't checked out in worktrees
+mkdir -p logs reports
+```
+
+---
+
+### Category 3: Pre-Existing Test Failures on `main`
+
+These tests fail on the `main` branch (confirmed 2026-03-17) and are not caused by changes in this PR.
+
+#### 3A. `test_api_state_endpoint.py` — All 9 Tests Fail
+
+**File**: `tests/integration/test_api_state_endpoint.py`
+
+**Error**: `AttributeError: 'NoneType' object has no attribute 'backend_type'` at `main.py:516`
+
+**Root Cause**: The `/api/state` endpoint accesses `backend.backend_type` but the `backend` global is `None` at test time. The test creates a `TestClient` from the FastAPI `app` but the backend initialization (which happens during app lifespan/startup) is not triggered.
+
+**Failing Tests**:
+- `TestStateEndpoint::test_state_endpoint_exists`
+- `TestStateEndpoint::test_state_endpoint_returns_json`
+- `TestStateEndpoint::test_state_endpoint_has_required_fields`
+- `TestStateEndpoint::test_state_endpoint_field_types`
+- `TestStateEndpoint::test_state_endpoint_default_values`
+- `TestStateEndpoint::test_state_endpoint_timestamp_is_recent`
+- `TestStateEndpoint::test_state_endpoint_multiple_calls`
+- `TestStateEndpointWithDemoMode::test_state_reflects_demo_mode_when_active`
+- `TestStateEndpointWithDemoMode::test_state_consistency_across_calls`
+
+**Impact**: These 9 failures do NOT block the pre-commit hook on `main` because the hook runs from the main working directory where the `logs/` directory exists. However, they are genuine failures that indicate the `/api/state` endpoint tests were written without proper backend initialization fixtures.
+
+**Recommendation**: Fix the test fixture to initialize the backend (or mock it) before creating the TestClient.
+
+---
+
+### Category 4: Service Mode — Unverified Path
+
+#### 4A. Service Mode Hidden Weights
+
+**File**: `src/main.py` lines 583-593
+
+The service mode path in `/api/network/stats` delegates to `backend._adapter.get_network_data()` which calls `cascor_service_adapter.get_network_data()` → `_client.get_statistics()`. The returned `hidden_weights` key depends on how the juniper-cascor backend serializes its weight data.
+
+**Status**: Not verified. Requires a live juniper-cascor backend to test.
+
+**Risk**: If juniper-cascor returns only partial hidden weights (similar to the demo mode bug), the same incomplete statistics issue would occur in service mode. However, since the cascor backend manages its own weight serialization, it likely returns the complete weight tensor.
+
+**Recommendation**: Add an integration test that verifies `get_network_data()` returns all hidden unit weights when running against a live cascor backend (gated by `@pytest.mark.requires_cascor`).
+
+---
+
+### Category 5: Pre-Commit Hook — Worktree Compatibility
+
+#### 5A. Pre-Commit Runs Full Test Suite Including Broken Tests
+
+The pre-commit hook `pytest-coverage` runs ALL tests (`tests/` with `-m "not slow"`), including integration tests that fail in worktrees due to missing infrastructure (Category 2) and pre-existing failures (Category 3).
+
+**Impact**: Commits from worktrees may be blocked by failures unrelated to the committed changes.
+
+**Workaround Applied**: Created `logs/` and `reports/` directories manually before committing.
+
+**Recommendation**: Either:
+1. Scope the pre-commit hook to unit and regression tests only: `tests/unit/ tests/regression/`
+2. Add worktree infrastructure setup to the pre-commit hook itself
+3. Add a conftest fixture that auto-creates missing gitignored directories
+
+---
+
+### Issue Summary Table
+
+| ID | Category | Severity | Status | Description |
+|----|----------|----------|--------|-------------|
+| 1A | Dark Mode | Low | Open | about_panel.py — 5 hardcoded CardHeader backgrounds |
+| 1B | Dark Mode | Low | Open | cassandra_panel.py — 2 hardcoded CardHeader backgrounds |
+| 1C | Dark Mode | Low | Open | redis_panel.py — 2 hardcoded CardHeader backgrounds |
+| 1D | Dark Mode | Medium | Open | hdf5_snapshots_panel.py — 4 hardcoded CardHeader backgrounds |
+| 1E | Dark Mode | Medium-High | Open | metrics_panel.py — 3 table backgrounds in helper methods (affects Details panel content) |
+| 1F | Dark Mode | — | Open | Systemic: consider CSS variable migration to eliminate per-component callbacks |
+| 2A | Worktree | High | Documented | Broken `src/logs` symlink in worktrees |
+| 2B | Worktree | Medium | Documented | Missing `reports/` directory in worktrees |
+| 2C | Worktree | — | Documented | Setup procedure should include gitignored directory creation |
+| 3A | Test | Medium | Pre-existing | `test_api_state_endpoint.py` — 9 tests fail on `main` (backend=None) |
+| 4A | Service Mode | Low | Unverified | Hidden weights completeness in service mode not verified |
+| 5A | Pre-Commit | Medium | Documented | Pre-commit hook runs all tests, fails in worktrees on infrastructure issues |
