@@ -32,11 +32,10 @@ class TestForwardNoHiddenUnits:
         output = network.forward(sample_input)
         assert output.shape == (3, 1)
 
-    def test_output_is_sigmoid(self, network, sample_input):
-        """Output must be in (0, 1) range (sigmoid activation)."""
+    def test_output_is_real_valued(self, network, sample_input):
+        """Output must be a real-valued tensor (raw linear output, no sigmoid)."""
         output = network.forward(sample_input)
-        assert (output > 0).all()
-        assert (output < 1).all()
+        assert output.dtype == torch.float32
 
     def test_output_uses_output_weights(self, network, sample_input):
         """Modifying output_weights should change the output."""
@@ -111,13 +110,12 @@ class TestForwardWithHiddenUnits:
         network.add_hidden_unit()
         assert network.output_weights.shape == (1, 4)
 
-    def test_output_in_sigmoid_range_with_many_hidden_units(self, network, sample_input):
-        """Output must stay in (0, 1) with many hidden units."""
+    def test_output_is_finite_with_many_hidden_units(self, network, sample_input):
+        """Output must remain finite with many hidden units."""
         for _ in range(10):
             network.add_hidden_unit()
         output = network.forward(sample_input)
-        assert (output > 0).all()
-        assert (output < 1).all()
+        assert torch.isfinite(output).all()
 
 
 class TestForwardDeterminism:

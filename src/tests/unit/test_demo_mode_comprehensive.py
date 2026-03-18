@@ -45,7 +45,6 @@ class TestMockCascorNetwork:
         output = network.forward(x)
 
         assert output.shape == (10, 1)
-        assert torch.all(output >= 0) and torch.all(output <= 1)
 
     def test_forward_with_hidden_units(self):
         """Test forward pass with hidden units (lines 149-150)."""
@@ -85,7 +84,7 @@ class TestMockCascorNetwork:
         assert "bias" in unit
         assert "activation_fn" in unit
         assert unit["id"] == 0
-        assert unit["activation_fn"] == torch.sigmoid
+        assert unit["activation_fn"] == torch.tanh
 
     def test_history_is_bounded_deque(self):
         """Test that history collections are bounded deques."""

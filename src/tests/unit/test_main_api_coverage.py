@@ -867,7 +867,7 @@ class TestNetworkStatsEndpointDirect:
         mock_demo = MagicMock()
         mock_demo.get_network.return_value = mock_network
         mock_demo.get_current_state.return_value = {
-            "activation_fn": "sigmoid",
+            "activation_fn": "tanh",
             "optimizer": "sgd",
         }
 
