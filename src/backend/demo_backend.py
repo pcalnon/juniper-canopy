@@ -150,13 +150,14 @@ class DemoBackend:
         for i in range(network.output_size):
             nodes.append({"id": f"output_{i}", "type": "output", "layer": 2})
             # Connections from inputs to output
+            output_weight = network.output_layer.weight.data
             for j in range(network.input_size):
-                weight = network.output_weights[i, j].item() if j < network.output_weights.shape[1] else 0.0
+                weight = output_weight[i, j].item() if j < output_weight.shape[1] else 0.0
                 connections.append({"from": f"input_{j}", "to": f"output_{i}", "weight": weight})
             # Connections from hidden to output
             for h_idx in range(len(network.hidden_units)):
                 col = network.input_size + h_idx
-                weight = network.output_weights[i, col].item() if col < network.output_weights.shape[1] else 0.0
+                weight = output_weight[i, col].item() if col < output_weight.shape[1] else 0.0
                 connections.append({"from": f"hidden_{h_idx}", "to": f"output_{i}", "weight": weight})
 
         return {
@@ -217,6 +218,7 @@ class DemoBackend:
 
         with self._demo._lock, torch.no_grad():
             grid_tensor = torch.from_numpy(grid_points).float()
+            grid_tensor = network.normalize_inputs(grid_tensor)
             predictions = network.forward(grid_tensor)
             # Apply threshold for binary class labels (matching real CasCor argmax)
             z = (predictions > 0.5).int().numpy().flatten()

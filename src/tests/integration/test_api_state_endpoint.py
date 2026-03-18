@@ -134,7 +134,7 @@ class TestStateEndpointWithDemoMode:
             # Demo mode is active
             assert data["dataset_name"] == "Spiral2D"
             assert data["threshold_function"] == "tanh"
-            assert data["optimizer_name"] == "SGD"
+            assert data["optimizer_name"] == "Adam"
 
     def test_state_consistency_across_calls(self, test_client):
         """Test /api/state returns consistent data across multiple calls."""

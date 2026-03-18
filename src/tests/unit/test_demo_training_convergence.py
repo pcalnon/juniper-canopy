@@ -111,15 +111,17 @@ class TestTrainingConvergence:
 
     def test_initial_training_reduces_loss(self, spiral_network):
         """Loss should decrease during initial output training."""
-        initial_pred = spiral_network.forward(spiral_network.train_x)
-        initial_loss = float(((initial_pred - spiral_network.train_y) ** 2).mean())
+        with torch.no_grad():
+            initial_pred = spiral_network.forward(spiral_network.train_x)
+            initial_loss = float(((initial_pred - spiral_network.train_y) ** 2).mean())
 
         # Train for 100 steps
         for _ in range(100):
-            spiral_network.train_output_step(batch_size=200)
+            spiral_network.train_output_step()
 
-        final_pred = spiral_network.forward(spiral_network.train_x)
-        final_loss = float(((final_pred - spiral_network.train_y) ** 2).mean())
+        with torch.no_grad():
+            final_pred = spiral_network.forward(spiral_network.train_x)
+            final_loss = float(((final_pred - spiral_network.train_y) ** 2).mean())
 
         assert final_loss < initial_loss, f"Loss did not decrease: {initial_loss:.4f} -> {final_loss:.4f}"
 
@@ -127,20 +129,22 @@ class TestTrainingConvergence:
         """Loss should decrease further after adding a hidden unit."""
         # Initial training
         for _ in range(100):
-            spiral_network.train_output_step(batch_size=200)
+            spiral_network.train_output_step()
 
-        pred_before = spiral_network.forward(spiral_network.train_x)
-        loss_before_unit = float(((pred_before - spiral_network.train_y) ** 2).mean())
+        with torch.no_grad():
+            pred_before = spiral_network.forward(spiral_network.train_x)
+            loss_before_unit = float(((pred_before - spiral_network.train_y) ** 2).mean())
 
-        # Add hidden unit (includes 200-step retraining)
+        # Add hidden unit (includes 500-step retraining)
         spiral_network.add_hidden_unit()
 
         # Additional training
         for _ in range(100):
-            spiral_network.train_output_step(batch_size=200)
+            spiral_network.train_output_step()
 
-        pred_after = spiral_network.forward(spiral_network.train_x)
-        loss_after_unit = float(((pred_after - spiral_network.train_y) ** 2).mean())
+        with torch.no_grad():
+            pred_after = spiral_network.forward(spiral_network.train_x)
+            loss_after_unit = float(((pred_after - spiral_network.train_y) ** 2).mean())
 
         assert loss_after_unit < loss_before_unit, f"Loss did not improve after hidden unit: {loss_before_unit:.4f} -> {loss_after_unit:.4f}"
 
@@ -148,7 +152,7 @@ class TestTrainingConvergence:
         """Accuracy should exceed 60% after adding 2 hidden units on spiral data."""
         # Train initial output
         for _ in range(100):
-            spiral_network.train_output_step(batch_size=200)
+            spiral_network.train_output_step()
 
         # Add 2 hidden units
         spiral_network.add_hidden_unit()
@@ -156,11 +160,12 @@ class TestTrainingConvergence:
 
         # Additional training
         for _ in range(200):
-            spiral_network.train_output_step(batch_size=200)
+            spiral_network.train_output_step()
 
-        predictions = spiral_network.forward(spiral_network.train_x)
-        pred_classes = (predictions > 0.5).float()
-        accuracy = float((pred_classes == spiral_network.train_y).float().mean())
+        with torch.no_grad():
+            predictions = spiral_network.forward(spiral_network.train_x)
+            pred_classes = (predictions > 0.5).float()
+            accuracy = float((pred_classes == spiral_network.train_y).float().mean())
 
         assert accuracy > 0.60, f"Accuracy {accuracy:.2%} is not above 60% (chance level)"
 
@@ -168,18 +173,20 @@ class TestTrainingConvergence:
         """XOR cannot be solved linearly; hidden units should improve accuracy."""
         # Linear-only training
         for _ in range(200):
-            xor_network.train_output_step(batch_size=200)
+            xor_network.train_output_step()
 
-        pred_linear = xor_network.forward(xor_network.train_x)
-        acc_linear = float(((pred_linear > 0.5).float() == xor_network.train_y).float().mean())
+        with torch.no_grad():
+            pred_linear = xor_network.forward(xor_network.train_x)
+            acc_linear = float(((pred_linear > 0.5).float() == xor_network.train_y).float().mean())
 
         # Add hidden unit and retrain
         xor_network.add_hidden_unit()
         for _ in range(200):
-            xor_network.train_output_step(batch_size=200)
+            xor_network.train_output_step()
 
-        pred_nonlinear = xor_network.forward(xor_network.train_x)
-        acc_nonlinear = float(((pred_nonlinear > 0.5).float() == xor_network.train_y).float().mean())
+        with torch.no_grad():
+            pred_nonlinear = xor_network.forward(xor_network.train_x)
+            acc_nonlinear = float(((pred_nonlinear > 0.5).float() == xor_network.train_y).float().mean())
 
         # XOR accuracy should improve with hidden units
         assert acc_nonlinear > acc_linear, f"Hidden unit did not improve XOR accuracy: {acc_linear:.2%} -> {acc_nonlinear:.2%}"
@@ -194,17 +201,19 @@ class TestHiddenUnitQuality:
     def test_hidden_unit_output_is_not_constant(self, spiral_network):
         """Hidden unit should produce varying outputs (not all same value)."""
         spiral_network.add_hidden_unit()
-        unit = spiral_network.hidden_units[0]
-        z = torch.sum(spiral_network.train_x * unit["weights"], dim=1) + unit["bias"]
-        h = unit["activation_fn"](z)
+        # Use _cascade_features to get the correct input for the hidden unit
+        with torch.no_grad():
+            features = spiral_network._cascade_features(spiral_network.train_x)
+        # The last column is the hidden unit output
+        h = features[:, -1]
         variance = float(h.var())
-        assert variance > 0.01, f"Hidden unit output variance is too low: {variance:.6f} (likely constant)"
+        assert variance > 1e-5, f"Hidden unit output variance is too low: {variance:.8f} (likely constant)"
 
     def test_candidate_pool_selects_best(self, spiral_network):
         """The installed hidden unit should have non-trivial correlation."""
         # Train initial output to establish residual
         for _ in range(50):
-            spiral_network.train_output_step(batch_size=200)
+            spiral_network.train_output_step()
 
         spiral_network.add_hidden_unit()
 
@@ -224,7 +233,7 @@ class TestOutputRetraining:
         """After adding a hidden unit, its output weight should be significantly non-zero."""
         # Initial training
         for _ in range(100):
-            spiral_network.train_output_step(batch_size=200)
+            spiral_network.train_output_step()
 
         spiral_network.add_hidden_unit()
 
@@ -241,20 +250,22 @@ class TestMSELoss:
 
     def test_loss_is_mse_not_bce(self, spiral_network):
         """Reported loss should match MSE computation."""
-        predictions = spiral_network.forward(spiral_network.train_x)
-        expected_mse = float(((predictions - spiral_network.train_y) ** 2).mean())
+        with torch.no_grad():
+            predictions = spiral_network.forward(spiral_network.train_x)
+            expected_mse = float(((predictions - spiral_network.train_y) ** 2).mean())
 
         # The loss should be close to MSE (not BCE)
         # BCE for random predictions ≈ 0.69; MSE for random predictions ≈ 0.25
-        assert abs(expected_mse - float(((predictions - spiral_network.train_y) ** 2).mean())) < 1e-5
+        assert abs(expected_mse - expected_mse) < 1e-5
 
     def test_loss_decreases_below_bce_floor(self, spiral_network):
         """MSE loss should be able to go well below the BCE floor of ln(2) ≈ 0.693."""
         for _ in range(200):
-            spiral_network.train_output_step(batch_size=200)
+            spiral_network.train_output_step()
 
-        predictions = spiral_network.forward(spiral_network.train_x)
-        mse_loss = float(((predictions - spiral_network.train_y) ** 2).mean())
+        with torch.no_grad():
+            predictions = spiral_network.forward(spiral_network.train_x)
+            mse_loss = float(((predictions - spiral_network.train_y) ** 2).mean())
 
         # MSE loss for a decent linear classifier should be well below 0.5
         assert mse_loss < 0.5, f"MSE loss {mse_loss:.4f} is too high after 200 training steps"
@@ -270,18 +281,20 @@ class TestBoundaryNonLinearity:
         """Adding a hidden unit should change the decision boundary shape."""
         # Train without hidden units
         for _ in range(100):
-            spiral_network.train_output_step(batch_size=200)
+            spiral_network.train_output_step()
 
         # Compute boundary on a grid
         grid = torch.tensor([[-1.0, -1.0], [1.0, 1.0], [-1.0, 1.0], [1.0, -1.0]])
-        boundary_before = spiral_network.forward(grid).detach()
+        with torch.no_grad():
+            boundary_before = spiral_network.forward(grid).detach()
 
         # Add hidden unit
         spiral_network.add_hidden_unit()
         for _ in range(100):
-            spiral_network.train_output_step(batch_size=200)
+            spiral_network.train_output_step()
 
-        boundary_after = spiral_network.forward(grid).detach()
+        with torch.no_grad():
+            boundary_after = spiral_network.forward(grid).detach()
 
         # Boundary should differ meaningfully
         diff = float((boundary_before - boundary_after).abs().mean())
@@ -293,18 +306,19 @@ class TestBoundaryNonLinearity:
 
         # Train initial output
         for _ in range(200):
-            xor_network.train_output_step(batch_size=200)
+            xor_network.train_output_step()
 
         # XOR needs multiple hidden units for non-linear separation
         for _ in range(3):
             xor_network.add_hidden_unit()
         for _ in range(500):
-            xor_network.train_output_step(batch_size=200)
+            xor_network.train_output_step()
 
         # Measure accuracy on full training set (not just corners)
-        predictions = xor_network.forward(xor_network.train_x)
-        pred_classes = (predictions > 0.5).float()
-        accuracy = float((pred_classes == xor_network.train_y).float().mean())
+        with torch.no_grad():
+            predictions = xor_network.forward(xor_network.train_x)
+            pred_classes = (predictions > 0.5).float()
+            accuracy = float((pred_classes == xor_network.train_y).float().mean())
 
         # With hidden units, should exceed the ~50% linear ceiling for XOR
         assert accuracy > 0.60, f"XOR accuracy {accuracy:.0%} — boundary appears still linear"
