@@ -401,6 +401,10 @@ class DemoMode:
         self.max_hidden_units = int(training_defaults.get("hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS))
         self.cascade_every = _settings.demo_cascade_every
 
+        # Convergence-based cascade addition parameters
+        self.convergence_enabled = TrainingConstants.DEFAULT_CONVERGENCE_ENABLED
+        self.convergence_threshold = TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD
+
         # Metrics buffer for realistic curves
         self.metrics_history = deque(maxlen=1000)
 
@@ -746,28 +750,30 @@ class DemoMode:
 
     def _should_add_cascade_unit(self) -> bool:
         """
-        Determine if a cascade unit should be added.
+        Determine if a cascade unit should be added using convergence-based criteria.
 
-        Uses convergence-based detection (loss improvement over 10-epoch
-        sliding window) with the fixed schedule as a fallback maximum interval.
-        Matches the real CasCor algorithm's convergence-based addition.
+        When convergence detection is enabled, adds a hidden unit when the loss
+        improvement over the last 10 epochs falls below ``self.convergence_threshold``.
+        The fixed schedule (``self.cascade_every``) always acts as a fallback.
 
         Returns:
             True if should add unit
         """
-        # Thread-safe check of max_hidden_units
+        # Thread-safe check of max_hidden_units and convergence params
         with self._lock:
             max_units = self.max_hidden_units
             current_units = len(self.network.hidden_units)
+            conv_enabled = self.convergence_enabled
+            conv_threshold = self.convergence_threshold
 
         if current_units >= max_units:
             return False
 
         # Convergence-based: check if loss has stopped improving
-        if len(self.network.history["train_loss"]) >= 10:
+        if conv_enabled and len(self.network.history["train_loss"]) >= 10:
             recent = list(self.network.history["train_loss"])[-10:]
             improvement = recent[0] - recent[-1]
-            if improvement < 0.001:
+            if improvement < conv_threshold:
                 return True
 
         # Fallback: fixed schedule as maximum interval
@@ -989,6 +995,10 @@ class DemoMode:
         torch.nn.init.normal_(self.network.output_layer.bias, std=0.1)
         self.network.output_optimizer = torch.optim.Adam(self.network.output_layer.parameters(), lr=self.network.learning_rate)
 
+        # Restore convergence parameters to defaults
+        self.convergence_enabled = TrainingConstants.DEFAULT_CONVERGENCE_ENABLED
+        self.convergence_threshold = TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD
+
     def stop(self):
         """Stop demo training simulation."""
         # Handle FSM transition
@@ -1203,6 +1213,8 @@ class DemoMode:
                 "metrics_count": len(self.metrics_history),
                 "activation_fn": "tanh",
                 "optimizer": "Adam",
+                "convergence_enabled": self.convergence_enabled,
+                "convergence_threshold": self.convergence_threshold,
             }
 
     def apply_params(
@@ -1210,6 +1222,8 @@ class DemoMode:
         learning_rate: Optional[float] = None,
         max_hidden_units: Optional[int] = None,
         max_epochs: Optional[int] = None,
+        convergence_enabled: Optional[bool] = None,
+        convergence_threshold: Optional[float] = None,
     ):
         """
         Apply parameter changes to demo mode.
@@ -1218,6 +1232,8 @@ class DemoMode:
             learning_rate: New learning rate value
             max_hidden_units: New max hidden units constraint
             max_epochs: New maximum epochs limit
+            convergence_enabled: Enable/disable convergence-based cascade addition
+            convergence_threshold: Loss improvement threshold for convergence detection
         """
         with self._lock:
             if learning_rate is not None:
@@ -1234,6 +1250,17 @@ class DemoMode:
             if max_epochs is not None:
                 self.max_epochs = int(max_epochs)
                 self.logger.info(f"Demo mode: max_epochs set to {max_epochs}")
+
+            if convergence_enabled is not None:
+                self.convergence_enabled = bool(convergence_enabled)
+                self.logger.info(f"Demo mode: convergence_enabled set to {self.convergence_enabled}")
+
+            if convergence_threshold is not None:
+                self.convergence_threshold = max(
+                    TrainingConstants.MIN_CONVERGENCE_THRESHOLD,
+                    min(float(convergence_threshold), TrainingConstants.MAX_CONVERGENCE_THRESHOLD),
+                )
+                self.logger.info(f"Demo mode: convergence_threshold set to {self.convergence_threshold}")
 
         # Update TrainingState with new parameter values
         if self.training_state:

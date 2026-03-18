@@ -1631,6 +1631,8 @@ async def api_set_params(params: dict):
         learning_rate = params.get("learning_rate")
         max_hidden_units = params.get("max_hidden_units")
         max_epochs = params.get("max_epochs")
+        convergence_enabled = params.get("convergence_enabled")
+        convergence_threshold = params.get("convergence_threshold")
 
         # Update TrainingState with all provided parameters
         updates = {}
@@ -1641,11 +1643,19 @@ async def api_set_params(params: dict):
         if max_epochs is not None:
             updates["max_epochs"] = int(max_epochs)
 
-        if not updates:
+        # Convergence params go directly to backend (not TrainingState)
+        backend_updates = dict(updates)
+        if convergence_enabled is not None:
+            backend_updates["convergence_enabled"] = bool(convergence_enabled)
+        if convergence_threshold is not None:
+            backend_updates["convergence_threshold"] = float(convergence_threshold)
+
+        if not backend_updates:
             return JSONResponse({"error": "No parameters provided"}, status_code=400)
 
-        training_state.update_state(**updates)
-        backend.apply_params(**updates)
+        if updates:
+            training_state.update_state(**updates)
+        backend.apply_params(**backend_updates)
         system_logger.info(f"Parameters updated: {updates}")
 
         # Broadcast state change

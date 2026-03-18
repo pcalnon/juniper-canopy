@@ -444,6 +444,25 @@ class DashboardManager:
                                                     debounce=True,
                                                 ),
                                                 html.Hr(),
+                                                html.P("Convergence Detection:", className="mb-1 fw-bold"),
+                                                dcc.Checklist(
+                                                    id="convergence-enabled-checkbox",
+                                                    options=[{"label": " Enable sliding window", "value": "enabled"}],
+                                                    value=["enabled"],
+                                                    className="mb-2",
+                                                ),
+                                                html.P("Convergence Threshold:", className="mb-1 fw-bold"),
+                                                dbc.Input(
+                                                    id="convergence-threshold-input",
+                                                    type="number",
+                                                    value=TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD,
+                                                    step=0.0001,
+                                                    min=TrainingConstants.MIN_CONVERGENCE_THRESHOLD,
+                                                    max=TrainingConstants.MAX_CONVERGENCE_THRESHOLD,
+                                                    className="mb-2",
+                                                    debounce=True,
+                                                ),
+                                                html.Hr(),
                                                 html.Div(
                                                     [
                                                         dbc.Button(
@@ -575,6 +594,8 @@ class DashboardManager:
                         "learning_rate": TrainingConstants.DEFAULT_LEARNING_RATE,
                         "max_hidden_units": TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS,
                         "max_epochs": TrainingConstants.DEFAULT_TRAINING_EPOCHS,
+                        "convergence_enabled": TrainingConstants.DEFAULT_CONVERGENCE_ENABLED,
+                        "convergence_threshold": TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD,
                     },
                 ),
                 # Button state management stores
@@ -864,6 +885,8 @@ class DashboardManager:
                 Output("learning-rate-input", "value"),
                 Output("max-hidden-units-input", "value"),
                 Output("max-epochs-input", "value"),
+                Output("convergence-enabled-checkbox", "value"),
+                Output("convergence-threshold-input", "value"),
             ],
             Input("backend-params-state", "data"),
             prevent_initial_call=True,
@@ -902,12 +925,14 @@ class DashboardManager:
                 Input("learning-rate-input", "value"),
                 Input("max-hidden-units-input", "value"),
                 Input("max-epochs-input", "value"),
+                Input("convergence-enabled-checkbox", "value"),
+                Input("convergence-threshold-input", "value"),
                 Input("applied-params-store", "data"),
             ],
         )
-        def track_param_changes(lr, hu, epochs, applied):
+        def track_param_changes(lr, hu, epochs, conv_enabled, conv_threshold, applied):
             """Enable Apply button when parameters differ from applied values."""
-            return self._track_param_changes_handler(lr, hu, epochs, applied)
+            return self._track_param_changes_handler(lr, hu, epochs, conv_enabled, conv_threshold, applied)
 
         # Handle Apply button click
         @self.app.callback(
@@ -920,12 +945,14 @@ class DashboardManager:
                 dash.dependencies.State("learning-rate-input", "value"),
                 dash.dependencies.State("max-hidden-units-input", "value"),
                 dash.dependencies.State("max-epochs-input", "value"),
+                dash.dependencies.State("convergence-enabled-checkbox", "value"),
+                dash.dependencies.State("convergence-threshold-input", "value"),
             ],
             prevent_initial_call=True,
         )
-        def apply_parameters(n_clicks, lr, hu, epochs):
+        def apply_parameters(n_clicks, lr, hu, epochs, conv_enabled, conv_threshold):
             """Apply parameters to backend and update applied store."""
-            return self._apply_parameters_handler(n_clicks, lr, hu, epochs)
+            return self._apply_parameters_handler(n_clicks, lr, hu, epochs, conv_enabled, conv_threshold)
 
         # Initialize applied-params-store from backend on load
         @self.app.callback(
@@ -1089,12 +1116,15 @@ class DashboardManager:
     def _sync_input_values_from_backend_handler(self, backend_state=None):
         """Sync input values from backend state (only when backend changes)."""
         if backend_state:
+            conv_enabled = backend_state.get("convergence_enabled", True)
             return (
                 backend_state.get("learning_rate", 0.01),
                 backend_state.get("max_hidden_units", 10),
                 backend_state.get("max_epochs", 200),
+                ["enabled"] if conv_enabled else [],
+                backend_state.get("convergence_threshold", 0.001),
             )
-        return dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
     def _update_network_info_handler(self, n=None):
         """Update network information panel from API."""
@@ -1411,6 +1441,8 @@ class DashboardManager:
                     "learning_rate": state.get("learning_rate", 0.01),
                     "max_hidden_units": state.get("max_hidden_units", 10),
                     "max_epochs": state.get("max_epochs", 200),
+                    "convergence_enabled": state.get("convergence_enabled", True),
+                    "convergence_threshold": state.get("convergence_threshold", 0.001),
                 }
         except Exception as e:
             self.logger.warning(f"Failed to sync backend params: {e}")
@@ -1428,16 +1460,18 @@ class DashboardManager:
 
         return dash.no_update
 
-    def _track_param_changes_handler(self, lr, hu, epochs, applied):
+    def _track_param_changes_handler(self, lr, hu, epochs, conv_enabled, conv_threshold, applied):
         """Enable Apply button when parameters differ from applied values.
 
-        Uses float tolerance for learning_rate comparison to handle floating-point
-        precision issues that can occur with step-based input adjustments.
+        Uses float tolerance for learning_rate and convergence_threshold comparison
+        to handle floating-point precision issues from step-based input adjustments.
 
         Args:
             lr: Current learning rate input value
             hu: Current max hidden units input value
             epochs: Current max epochs input value
+            conv_enabled: Current convergence checklist value (list)
+            conv_threshold: Current convergence threshold input value
             applied: Dictionary of currently applied parameter values
 
         Returns:
@@ -1460,12 +1494,18 @@ class DashboardManager:
         hu_changed = hu != applied.get("max_hidden_units")
         epochs_changed = epochs != applied.get("max_epochs")
 
-        has_changes = lr_changed or hu_changed or epochs_changed
+        # Convergence params: checklist returns ["enabled"] or []
+        current_conv_enabled = "enabled" in (conv_enabled or [])
+        applied_conv_enabled = applied.get("convergence_enabled", True)
+        conv_enabled_changed = current_conv_enabled != applied_conv_enabled
+        conv_threshold_changed = not float_equal(conv_threshold, applied.get("convergence_threshold"))
+
+        has_changes = lr_changed or hu_changed or epochs_changed or conv_enabled_changed or conv_threshold_changed
 
         status = "⚠️ Unsaved changes" if has_changes else ""
         return not has_changes, status
 
-    def _apply_parameters_handler(self, n_clicks, lr, hu, epochs):
+    def _apply_parameters_handler(self, n_clicks, lr, hu, epochs, conv_enabled, conv_threshold):
         """Apply parameters to backend and update applied store."""
         if not n_clicks:
             return dash.no_update, dash.no_update
@@ -1474,6 +1514,8 @@ class DashboardManager:
             "learning_rate": float(lr) if lr is not None else 0.01,
             "max_hidden_units": int(hu) if hu is not None else 10,
             "max_epochs": int(epochs) if epochs is not None else 200,
+            "convergence_enabled": "enabled" in (conv_enabled or []),
+            "convergence_threshold": float(conv_threshold) if conv_threshold is not None else 0.001,
         }
 
         try:
@@ -1503,6 +1545,8 @@ class DashboardManager:
                     "learning_rate": state.get("learning_rate", 0.01),
                     "max_hidden_units": state.get("max_hidden_units", 10),
                     "max_epochs": state.get("max_epochs", 200),
+                    "convergence_enabled": state.get("convergence_enabled", True),
+                    "convergence_threshold": state.get("convergence_threshold", 0.001),
                 }
         except Exception as e:
             self.logger.warning(f"Failed to initialize applied params: {e}")
