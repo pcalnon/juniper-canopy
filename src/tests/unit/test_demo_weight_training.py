@@ -91,12 +91,6 @@ class TestTrainOutputStep:
         """Training step must work after hidden units are added."""
         network_with_data.add_hidden_unit()
         network_with_data.add_hidden_unit()
-        # After add_hidden_unit's 500-step retrain with Adam, the optimizer
-        # may have converged. Reset the optimizer to verify training still works.
-        import torch.nn as nn
-
-        nn.init.normal_(network_with_data.output_layer.weight, std=0.1)
-        network_with_data.output_optimizer = torch.optim.Adam(network_with_data.output_layer.parameters(), lr=0.01)
         weights_before = network_with_data.output_weights.clone()
         network_with_data.train_output_step()
         assert not torch.allclose(weights_before, network_with_data.output_weights)

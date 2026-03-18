@@ -146,18 +146,17 @@ class DemoBackend:
                 weight = unit["weights"][j].item() if j < len(unit["weights"]) else 0.0
                 connections.append({"from": f"input_{j}", "to": f"hidden_{i}", "weight": weight})
 
-        # Output nodes — read weights from nn.Linear output layer
-        output_weight_data = network.output_layer.weight.data
+        # Output nodes
         for i in range(network.output_size):
             nodes.append({"id": f"output_{i}", "type": "output", "layer": 2})
             # Connections from inputs to output
             for j in range(network.input_size):
-                weight = output_weight_data[i, j].item() if j < output_weight_data.shape[1] else 0.0
+                weight = network.output_weights[i, j].item() if j < network.output_weights.shape[1] else 0.0
                 connections.append({"from": f"input_{j}", "to": f"output_{i}", "weight": weight})
             # Connections from hidden to output
             for h_idx in range(len(network.hidden_units)):
                 col = network.input_size + h_idx
-                weight = output_weight_data[i, col].item() if col < output_weight_data.shape[1] else 0.0
+                weight = network.output_weights[i, col].item() if col < network.output_weights.shape[1] else 0.0
                 connections.append({"from": f"hidden_{h_idx}", "to": f"output_{i}", "weight": weight})
 
         return {
@@ -216,16 +215,11 @@ class DemoBackend:
         grid_x, grid_y = np.meshgrid(xx, yy)
         grid_points = np.column_stack([grid_x.ravel(), grid_y.ravel()]).astype(np.float32)
 
-        with self._demo._lock:
-            network.output_layer.eval()
-            with torch.no_grad():
-                grid_tensor = torch.from_numpy(grid_points).float()
-                # Normalize grid points using the same parameters as training data
-                grid_normalized = network.normalize_inputs(grid_tensor)
-                predictions = network.forward(grid_normalized)
-                # Apply threshold for binary class labels (matching real CasCor argmax)
-                z = (predictions > 0.5).int().numpy().flatten()
-            network.output_layer.train()
+        with self._demo._lock, torch.no_grad():
+            grid_tensor = torch.from_numpy(grid_points).float()
+            predictions = network.forward(grid_tensor)
+            # Apply threshold for binary class labels (matching real CasCor argmax)
+            z = (predictions > 0.5).int().numpy().flatten()
 
         return {
             "xx": grid_x.tolist(),
