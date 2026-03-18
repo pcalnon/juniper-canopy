@@ -1756,8 +1756,6 @@ class MetricsPanel(BaseComponent):
             style={
                 "width": "100%",
                 "borderCollapse": "collapse",
-                "backgroundColor": "#f8f9fa",
-                "border": "1px solid #dee2e6",
                 "borderRadius": "4px",
                 "marginBottom": "15px",
             },
@@ -1816,8 +1814,6 @@ class MetricsPanel(BaseComponent):
             style={
                 "width": "100%",
                 "borderCollapse": "collapse",
-                "backgroundColor": "#f8f9fa",
-                "border": "1px solid #dee2e6",
                 "borderRadius": "4px",
             },
         )
@@ -1901,8 +1897,6 @@ class MetricsPanel(BaseComponent):
             style={
                 "width": "100%",
                 "borderCollapse": "collapse",
-                "backgroundColor": "#f8f9fa",
-                "border": "1px solid #dee2e6",
                 "borderRadius": "4px",
             },
         )
