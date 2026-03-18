@@ -341,7 +341,12 @@ class TestWebSocketTrainingEndpoint:
             ws.receive_json()  # initial_status
             ws.receive_json()  # state
             ws.send_json({"type": "ping"})
-            response = ws.receive_json()
+            # Drain messages until we find the pong (background training
+            # may broadcast metrics/state messages before our pong arrives)
+            for _ in range(20):
+                response = ws.receive_json()
+                if response["type"] == "pong":
+                    break
             assert response["type"] == "pong"
 
     @pytest.mark.integration
