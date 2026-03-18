@@ -22,10 +22,11 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def test_client():
-    """Create test client for FastAPI app."""
+    """Create test client for FastAPI app with lifespan (initializes backend)."""
     from main import app
 
-    return TestClient(app)
+    with TestClient(app) as client:
+        yield client
 
 
 class TestStateEndpoint:
