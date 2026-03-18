@@ -233,12 +233,13 @@ class CascorLogger:
             self._config_logging_file()
 
     def _config_logging_file(self):
-        # Ensure log directory exists
+        # Ensure log directory exists (resolve symlinks to handle broken symlinks in worktrees)
         log_path = Path(self.log_dir)
-        if log_path.exists() and not log_path.is_dir():
+        resolved_path = log_path.resolve()
+        if resolved_path.exists() and not resolved_path.is_dir():
             # If it exists but isn't a directory, remove it
-            log_path.unlink()
-        log_path.mkdir(parents=True, exist_ok=True)
+            resolved_path.unlink()
+        resolved_path.mkdir(parents=True, exist_ok=True)
 
         # Create rotating file handler
         print(f"Configuring file handler for {self.name}, at log dir: {self.log_dir}")

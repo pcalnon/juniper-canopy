@@ -70,11 +70,21 @@ WORKTREE_DIR="${WORKTREE_BASE}/${REPO_NAME}--${SAFE_BRANCH}--${TIMESTAMP}--${SHO
 git worktree add "$WORKTREE_DIR" "$BRANCH_NAME"
 ```
 
-### Step 6: Verify and Begin Work
+### Step 6: Create Gitignored Directories
+
+Some directories are gitignored and not created during `git worktree add`. The `logs/` directory is required by the logger (the `src/logs` symlink points to `../logs`):
+
+```bash
+cd "$WORKTREE_DIR"
+mkdir -p logs
+```
+
+> **Note**: The `reports/` directory is tracked via `.gitkeep` and is created automatically. The logger also auto-creates the `logs/` target directory when it initializes, but creating it here avoids transient errors during test collection.
+
+### Step 7: Verify and Begin Work
 
 ```bash
 git worktree list
-cd "$WORKTREE_DIR"
 git branch --show-current
 git log --oneline -3
 ```

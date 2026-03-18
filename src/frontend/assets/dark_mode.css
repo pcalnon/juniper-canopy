@@ -216,6 +216,7 @@ hr {
 /* Table styles */
 table {
     background-color: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
     color: var(--text-color) !important;
 }
 
