@@ -138,7 +138,6 @@ class RedisPanel(BaseComponent):
                     [
                         dbc.CardHeader(
                             html.H5("Health", className="mb-0"),
-                            style={"backgroundColor": "#f8f9fa"},
                         ),
                         dbc.CardBody(
                             [
@@ -227,7 +226,6 @@ class RedisPanel(BaseComponent):
                     [
                         dbc.CardHeader(
                             html.H5("Metrics", className="mb-0"),
-                            style={"backgroundColor": "#f8f9fa"},
                         ),
                         dbc.CardBody(
                             [
