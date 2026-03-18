@@ -113,27 +113,41 @@ class MockCascorNetwork:
     def add_hidden_unit(self):
         """Add a new cascade hidden unit with trained weights.
 
-        Unlike random initialization, the hidden unit weights are trained via
-        a simplified correlation-maximization procedure (matching the real
-        CasCor candidate training phase).  After installation, output weights
-        are retrained for several steps to adapt to the new feature.
+        Trains a pool of candidate units via correlation-maximization (matching
+        the real CasCor candidate training phase), selects the best, and installs
+        it.  After installation, output weights are retrained with full-batch
+        gradient descent to adapt to the new feature.
         """
         hidden_id = len(self.hidden_units)
         input_dim = self.input_size + hidden_id
 
-        # Create candidate unit with random initial weights
-        unit = {
-            "id": hidden_id,
-            "weights": torch.randn(input_dim) * 0.1,
-            "bias": torch.randn(1) * 0.1,
-            "activation_fn": torch.sigmoid,
-        }
+        best_unit = None
+        best_correlation = -1.0
 
-        # Train candidate weights to maximize correlation with residual error
-        if self.train_x is not None and self.train_y is not None:
-            self._train_candidate(unit, steps=80, lr=0.1)
+        # Train a pool of candidates and select the best (matching CasCor pool)
+        pool_size = 8
+        for _ in range(pool_size):
+            unit = {
+                "id": hidden_id,
+                "weights": torch.randn(input_dim) * 0.1,
+                "bias": torch.randn(1) * 0.1,
+                "activation_fn": torch.tanh,
+            }
 
-        self.hidden_units.append(unit)
+            # Train candidate weights to maximize correlation with residual error
+            if self.train_x is not None and self.train_y is not None:
+                correlation = self._train_candidate(unit, steps=100, lr=0.05)
+                if correlation > best_correlation:
+                    best_correlation = correlation
+                    best_unit = unit
+            else:
+                best_unit = unit
+                break
+
+        if best_unit is None:
+            return
+
+        self.hidden_units.append(best_unit)
 
         # Update output weights to accommodate new hidden unit
         old_num_cols = self.output_weights.shape[1]
@@ -141,11 +155,12 @@ class MockCascorNetwork:
         new_output_weights[:, :old_num_cols] = self.output_weights
         self.output_weights = new_output_weights
 
-        # Retrain output weights to incorporate the new feature
-        for _ in range(50):
-            self.train_output_step()
+        # Retrain output weights with full-batch to incorporate the new feature
+        n_samples = self.train_x.shape[0] if self.train_x is not None else 32
+        for _ in range(200):
+            self.train_output_step(batch_size=n_samples)
 
-    def _train_candidate(self, unit: dict, steps: int = 80, lr: float = 0.1):
+    def _train_candidate(self, unit: dict, steps: int = 100, lr: float = 0.05):
         """Train a candidate hidden unit to maximize correlation with residual error.
 
         Implements a simplified version of the CasCor candidate training phase:
@@ -153,11 +168,18 @@ class MockCascorNetwork:
         2. For each step, adjust unit weights to maximize the absolute value
            of the correlation between the unit's output and the residual.
 
+        Uses tanh activation with derivative f'(z) = 1 - tanh(z)², matching
+        the real CasCor implementation (Fahlman & Lebiere, 1990).
+
         Args:
             unit: The candidate unit dict with 'weights', 'bias', 'activation_fn'.
             steps: Number of gradient ascent steps.
             lr: Learning rate for candidate training.
+
+        Returns:
+            Final absolute correlation value (float).
         """
+        best_correlation = 0.0
         with torch.no_grad():
             x = self.train_x
             y = self.train_y
@@ -195,8 +217,13 @@ class MockCascorNetwork:
                 correlation = (v_centered.unsqueeze(1) * e_centered).sum(dim=0)  # (output_size,)
                 sign_corr = torch.sign(correlation)  # (output_size,)
 
+                # Track best correlation
+                abs_corr = float(correlation.abs().sum())
+                if abs_corr > best_correlation:
+                    best_correlation = abs_corr
+
                 # Gradient: dS/dw = sum_o sign(S_o) * sum_p (E - E_mean) * f'(z) * input
-                f_prime = v * (1.0 - v)  # sigmoid derivative
+                f_prime = 1.0 - v * v  # tanh derivative: 1 - tanh(z)²
                 # Weighted error direction: sum across outputs
                 weighted_err = (e_centered * sign_corr.unsqueeze(0)).sum(dim=1)  # (N,)
                 grad_signal = weighted_err * f_prime  # (N,)
@@ -206,6 +233,8 @@ class MockCascorNetwork:
 
                 unit["weights"] += lr * grad_w
                 unit["bias"] += lr * grad_b
+
+        return best_correlation
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -236,15 +265,15 @@ class MockCascorNetwork:
         else:
             features = x
 
-        # Output layer: features @ output_weights.T + output_bias
+        # Output layer: features @ output_weights.T + output_bias (raw, no activation)
         output = torch.matmul(features, self.output_weights.T) + self.output_bias
-        return torch.sigmoid(output)
+        return output
 
     def train_output_step(self, batch_size: int = 32):
         """Perform one gradient step on the output layer weights.
 
-        Trains output_weights and output_bias using the analytical gradient
-        of binary cross-entropy loss with sigmoid output (dL/dz = p - y).
+        Trains output_weights and output_bias using MSE loss gradient on
+        raw (unsigmoid) output, matching the real CasCor algorithm.
         Uses a mini-batch for efficiency. Hidden unit weights remain frozen,
         matching the real CasCor architecture.
 
@@ -280,17 +309,16 @@ class MockCascorNetwork:
             else:
                 features = batch_x
 
-            # Forward through output layer
-            z = torch.matmul(features, self.output_weights.T) + self.output_bias
-            predictions = torch.sigmoid(z)
+            # Forward through output layer (raw, no sigmoid — matches CasCor)
+            predictions = torch.matmul(features, self.output_weights.T) + self.output_bias
 
-            # Analytical gradient: dL/dz = (p - y) for BCE + sigmoid
+            # MSE gradient: dL/dW = 2 * (output - y).T @ features / batch_size
             error = predictions - batch_y  # (batch, output_size)
             bs = float(batch_x.shape[0])
 
-            # dL/dW = error.T @ features / batch_size
-            grad_w = torch.matmul(error.T, features) / bs
-            grad_b = error.mean(dim=0)
+            # dL/dW = 2 * error.T @ features / batch_size
+            grad_w = 2.0 * torch.matmul(error.T, features) / bs
+            grad_b = 2.0 * error.mean(dim=0)
 
             self.output_weights -= self.learning_rate * grad_w
             self.output_bias -= self.learning_rate * grad_b
@@ -629,12 +657,10 @@ class DemoMode:
         with self._lock, torch.no_grad():
             if self.network.train_x is not None and self.network.train_y is not None:
                 predictions = self.network.forward(self.network.train_x)
-                # Binary cross-entropy loss
-                eps = 1e-7
-                p = predictions.clamp(eps, 1.0 - eps)
-                bce = -(self.network.train_y * torch.log(p) + (1.0 - self.network.train_y) * torch.log(1.0 - p))
-                self.current_loss = float(bce.mean())
-                # Classification accuracy
+                # MSE loss (matching CasCor algorithm)
+                mse = ((predictions - self.network.train_y) ** 2).mean()
+                self.current_loss = float(mse)
+                # Classification accuracy (threshold at 0.5 for {0,1} targets)
                 pred_classes = (predictions > 0.5).float()
                 self.current_accuracy = float((pred_classes == self.network.train_y).float().mean())
             else:
@@ -906,6 +932,11 @@ class DemoMode:
             self.network.history[key].clear()
         self.network.hidden_units.clear()
         self.network.current_epoch = 0
+
+        # Reset output weights to match network with no hidden units
+        # (prevents dimension mismatch after clearing hidden_units)
+        self.network.output_weights = torch.randn(self.network.output_size, self.network.input_size) * 0.1
+        self.network.output_bias = torch.randn(self.network.output_size) * 0.1
 
     def stop(self):
         """Stop demo training simulation."""

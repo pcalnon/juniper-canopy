@@ -63,14 +63,14 @@ class TestTrainOutputStep:
         """Loss must decrease over multiple training steps."""
         with torch.no_grad():
             pred = network_with_data.forward(network_with_data.train_x)
-            initial_loss = torch.nn.functional.binary_cross_entropy(pred, network_with_data.train_y).item()
+            initial_loss = torch.nn.functional.mse_loss(pred, network_with_data.train_y).item()
 
         for _ in range(50):
             network_with_data.train_output_step()
 
         with torch.no_grad():
             pred = network_with_data.forward(network_with_data.train_x)
-            final_loss = torch.nn.functional.binary_cross_entropy(pred, network_with_data.train_y).item()
+            final_loss = torch.nn.functional.mse_loss(pred, network_with_data.train_y).item()
 
         assert final_loss < initial_loss
 
@@ -106,8 +106,8 @@ class TestBoundaryEvolution:
         backend = DemoBackend(demo)
         boundary_before = backend.get_decision_boundary(resolution=10)
 
-        # Run several training steps
-        for _ in range(20):
+        # Run sufficient training steps for MSE output to cross 0.5 threshold
+        for _ in range(100):
             demo._simulate_training_step()
 
         boundary_after = backend.get_decision_boundary(resolution=10)

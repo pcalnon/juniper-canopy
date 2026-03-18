@@ -65,17 +65,17 @@ class TestCandidateTraining:
         random_unit = {
             "weights": torch.randn(network.input_size) * 0.1,
             "bias": torch.randn(1) * 0.1,
-            "activation_fn": torch.sigmoid,
+            "activation_fn": torch.tanh,
         }
         with torch.no_grad():
-            random_out = torch.sigmoid(torch.sum(network.train_x * random_unit["weights"], dim=1) + random_unit["bias"])
+            random_out = torch.tanh(torch.sum(network.train_x * random_unit["weights"], dim=1) + random_unit["bias"])
             random_corr = abs(float(torch.corrcoef(torch.stack([random_out, residual.squeeze()]))[0, 1]))
 
         # Now add a trained unit
         network.add_hidden_unit()
         trained_unit = network.hidden_units[0]
         with torch.no_grad():
-            trained_out = torch.sigmoid(torch.sum(network.train_x * trained_unit["weights"][: network.input_size], dim=1) + trained_unit["bias"])
+            trained_out = torch.tanh(torch.sum(network.train_x * trained_unit["weights"][: network.input_size], dim=1) + trained_unit["bias"])
             trained_corr = abs(float(torch.corrcoef(torch.stack([trained_out, residual.squeeze()]))[0, 1]))
 
         # Trained correlation should be higher than random (or at least non-trivial)
