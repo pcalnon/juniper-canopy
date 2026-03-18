@@ -72,8 +72,9 @@ class MockCascorNetwork:
     """
     Mock CasCor network that simulates training behavior.
 
-    Provides same interface as real CascadeCorrelationNetwork but with
-    synthetic data generation instead of actual neural network computations.
+    Implements the Cascade Correlation algorithm (Fahlman & Lebiere, 1990)
+    using PyTorch autograd and Adam optimizer, matching the real
+    CascadeCorrelationNetwork in juniper-cascor.
     """
 
     def __init__(self, input_size: int = 2, output_size: int = 1):
@@ -97,10 +98,19 @@ class MockCascorNetwork:
             "val_accuracy": deque(maxlen=1000),
         }
 
-        # Network weights (initialized small random)
+        # Output layer: nn.Linear + Adam optimizer (matching CasCor)
+        self.output_layer = torch.nn.Linear(input_size, output_size)
+        torch.nn.init.normal_(self.output_layer.weight, std=0.1)
+        torch.nn.init.normal_(self.output_layer.bias, std=0.1)
+        self.output_optimizer = torch.optim.Adam(self.output_layer.parameters(), lr=self.learning_rate)
+        self.loss_fn = torch.nn.MSELoss()
+
+        # Legacy attribute for network stats endpoint compatibility
         self.input_weights = torch.randn(input_size, output_size) * 0.1
-        self.output_weights = torch.randn(output_size, input_size) * 0.1
-        self.output_bias = torch.randn(output_size) * 0.1
+
+        # Input normalization parameters (set when dataset is loaded)
+        self._input_min = None
+        self._input_max = None
 
         # Training state
         self.current_epoch = 0
@@ -110,13 +120,74 @@ class MockCascorNetwork:
         self.train_x = None
         self.train_y = None
 
+    @property
+    def output_weights(self):
+        """Backward-compatible access to output layer weights."""
+        return self.output_layer.weight.data
+
+    @output_weights.setter
+    def output_weights(self, value):
+        """Backward-compatible setter — rebuilds output_layer from raw tensor."""
+        out_features, in_features = value.shape
+        self.output_layer = torch.nn.Linear(in_features, out_features)
+        self.output_layer.weight.data = value
+        self.output_optimizer = torch.optim.Adam(self.output_layer.parameters(), lr=self.learning_rate)
+
+    @property
+    def output_bias(self):
+        """Backward-compatible access to output layer bias."""
+        return self.output_layer.bias.data
+
+    @output_bias.setter
+    def output_bias(self, value):
+        """Backward-compatible setter for output layer bias."""
+        self.output_layer.bias.data = value
+
+    def normalize_inputs(self, x: torch.Tensor) -> torch.Tensor:
+        """Normalize inputs to [-1, 1] using stored min/max parameters.
+
+        Args:
+            x: Input tensor of shape (batch_size, input_size)
+
+        Returns:
+            Normalized tensor in [-1, 1] range
+        """
+        if self._input_min is not None and self._input_max is not None:
+            return 2.0 * (x - self._input_min) / (self._input_max - self._input_min + 1e-8) - 1.0
+        return x
+
+    def _cascade_features(self, x: torch.Tensor) -> torch.Tensor:
+        """Build the full feature vector by cascading through hidden units.
+
+        Each hidden unit receives [original inputs + all previous hidden outputs].
+        Returns [original inputs, hidden_0 output, hidden_1 output, ...].
+
+        Args:
+            x: Input tensor of shape (batch_size, input_size)
+
+        Returns:
+            Features tensor of shape (batch_size, input_size + num_hidden)
+        """
+        hidden_outputs = []
+        for unit in self.hidden_units:
+            if hidden_outputs:
+                unit_input = torch.cat([x] + hidden_outputs, dim=1)
+            else:
+                unit_input = x
+            h = unit["activation_fn"](torch.sum(unit_input * unit["weights"], dim=1) + unit["bias"])
+            hidden_outputs.append(h.unsqueeze(1))
+
+        if hidden_outputs:
+            return torch.cat([x] + hidden_outputs, dim=1)
+        return x
+
     def add_hidden_unit(self):
         """Add a new cascade hidden unit with trained weights.
 
-        Trains a pool of candidate units via correlation-maximization (matching
-        the real CasCor candidate training phase), selects the best, and installs
-        it.  After installation, output weights are retrained with full-batch
-        gradient descent to adapt to the new feature.
+        Trains a pool of candidate units via Pearson correlation maximization
+        (matching the real CasCor candidate training phase), selects the best,
+        and installs it. After installation, output layer is expanded and
+        retrained with a fresh Adam optimizer for 500 full-batch steps.
         """
         hidden_id = len(self.hidden_units)
         input_dim = self.input_size + hidden_id
@@ -136,7 +207,7 @@ class MockCascorNetwork:
 
             # Train candidate weights to maximize correlation with residual error
             if self.train_x is not None and self.train_y is not None:
-                correlation = self._train_candidate(unit, steps=100, lr=0.05)
+                correlation = self._train_candidate(unit, steps=200, lr=0.01)
                 if correlation > best_correlation:
                     best_correlation = correlation
                     best_unit = unit
@@ -149,90 +220,82 @@ class MockCascorNetwork:
 
         self.hidden_units.append(best_unit)
 
-        # Update output weights to accommodate new hidden unit
-        old_num_cols = self.output_weights.shape[1]
-        new_output_weights = torch.randn(self.output_size, self.input_size + len(self.hidden_units)) * 0.1
-        new_output_weights[:, :old_num_cols] = self.output_weights
-        self.output_weights = new_output_weights
+        # Expand output layer to accommodate new hidden unit (warm-start)
+        old_layer = self.output_layer
+        new_dim = self.input_size + len(self.hidden_units)
+        self.output_layer = torch.nn.Linear(new_dim, self.output_size)
+        with torch.no_grad():
+            self.output_layer.weight[:, : old_layer.in_features] = old_layer.weight
+            self.output_layer.bias[:] = old_layer.bias
+            # New column initialized by nn.Linear default (small random)
 
-        # Retrain output weights with full-batch to incorporate the new feature
-        n_samples = self.train_x.shape[0] if self.train_x is not None else 32
-        for _ in range(200):
-            self.train_output_step(batch_size=n_samples)
+        # Fresh optimizer for retraining (no stale momentum — matches CasCor)
+        self.output_optimizer = torch.optim.Adam(self.output_layer.parameters(), lr=self.learning_rate)
 
-    def _train_candidate(self, unit: dict, steps: int = 100, lr: float = 0.05):
-        """Train a candidate hidden unit to maximize correlation with residual error.
+        # Retrain output with full-batch for 500 steps
+        for _ in range(500):
+            self.train_output_step()
 
-        Implements a simplified version of the CasCor candidate training phase:
-        1. Compute residual error (target - current prediction)
-        2. For each step, adjust unit weights to maximize the absolute value
-           of the correlation between the unit's output and the residual.
+    def _train_candidate(self, unit: dict, steps: int = 200, lr: float = 0.01):
+        """Train a candidate hidden unit to maximize Pearson correlation with residual.
 
-        Uses tanh activation with derivative f'(z) = 1 - tanh(z)², matching
-        the real CasCor implementation (Fahlman & Lebiere, 1990).
+        Uses PyTorch autograd and Adam optimizer for gradient computation,
+        matching the real CasCor implementation. Correlation is normalized
+        by the product of standard deviations (Pearson correlation coefficient).
 
         Args:
             unit: The candidate unit dict with 'weights', 'bias', 'activation_fn'.
-            steps: Number of gradient ascent steps.
-            lr: Learning rate for candidate training.
+            steps: Number of optimization steps.
+            lr: Learning rate for candidate Adam optimizer.
 
         Returns:
-            Final absolute correlation value (float).
+            Final absolute Pearson correlation value (float).
         """
-        best_correlation = 0.0
+        x = self.train_x
+        y = self.train_y
+
+        # Current network prediction (before this unit is added)
         with torch.no_grad():
-            x = self.train_x
-            y = self.train_y
-
-            # Current network prediction (before this unit is added)
             current_pred = self.forward(x)
-            residual = y - current_pred  # (N, output_size)
-            residual_mean = residual.mean(dim=0)  # (output_size,)
+        residual = (y - current_pred).detach()
 
-            # Build the input this candidate unit will receive
-            hidden_outputs = []
-            for existing_unit in self.hidden_units:
-                if hidden_outputs:
-                    ui = torch.cat([x] + hidden_outputs, dim=1)
-                else:
-                    ui = x
-                h = existing_unit["activation_fn"](torch.sum(ui * existing_unit["weights"], dim=1) + existing_unit["bias"])
-                hidden_outputs.append(h.unsqueeze(1))
-            if hidden_outputs:
-                candidate_input = torch.cat([x] + hidden_outputs, dim=1)
-            else:
-                candidate_input = x
+        # Build the input this candidate unit will receive
+        with torch.no_grad():
+            candidate_input = self._cascade_features(x)
 
-            for _ in range(steps):
-                # Forward through candidate unit
-                z = torch.sum(candidate_input * unit["weights"], dim=1) + unit["bias"]
-                v = unit["activation_fn"](z)  # (N,)
-                v_mean = v.mean()
+        # Wrap candidate weights as Parameters for autograd + Adam
+        weights = torch.nn.Parameter(unit["weights"].clone())
+        bias = torch.nn.Parameter(unit["bias"].clone())
+        optimizer = torch.optim.Adam([weights, bias], lr=lr)
 
-                # Correlation: S_o = sum_p (v_p - v_mean) * (E_po - E_o_mean)
-                v_centered = v - v_mean  # (N,)
-                e_centered = residual - residual_mean  # (N, output_size)
+        best_correlation = 0.0
+        for _ in range(steps):
+            optimizer.zero_grad()
 
-                # Sum correlations across all outputs, take sign
-                correlation = (v_centered.unsqueeze(1) * e_centered).sum(dim=0)  # (output_size,)
-                sign_corr = torch.sign(correlation)  # (output_size,)
+            # Forward through candidate unit
+            z = candidate_input @ weights + bias
+            v = torch.tanh(z)
 
-                # Track best correlation
-                abs_corr = float(correlation.abs().sum())
-                if abs_corr > best_correlation:
-                    best_correlation = abs_corr
+            # Pearson correlation (normalized by std product)
+            v_centered = v - v.mean()
+            e_centered = residual - residual.mean(dim=0)
+            cov = (v_centered.unsqueeze(1) * e_centered).sum(dim=0)
+            std_v = torch.sqrt((v_centered**2).sum() + 1e-8)
+            std_e = torch.sqrt((e_centered**2).sum(dim=0) + 1e-8)
+            correlation = (cov / (std_v * std_e)).abs().sum()
 
-                # Gradient: dS/dw = sum_o sign(S_o) * sum_p (E - E_mean) * f'(z) * input
-                f_prime = 1.0 - v * v  # tanh derivative: 1 - tanh(z)²
-                # Weighted error direction: sum across outputs
-                weighted_err = (e_centered * sign_corr.unsqueeze(0)).sum(dim=1)  # (N,)
-                grad_signal = weighted_err * f_prime  # (N,)
+            # Track best
+            abs_corr = float(correlation.detach())
+            if abs_corr > best_correlation:
+                best_correlation = abs_corr
 
-                grad_w = (grad_signal.unsqueeze(1) * candidate_input).mean(dim=0)  # (input_dim,)
-                grad_b = grad_signal.mean()
+            # Maximize correlation (minimize negative)
+            (-correlation).backward()
+            optimizer.step()
 
-                unit["weights"] += lr * grad_w
-                unit["bias"] += lr * grad_b
+        # Store trained weights back
+        unit["weights"] = weights.detach()
+        unit["bias"] = bias.detach()
 
         return best_correlation
 
@@ -241,7 +304,7 @@ class MockCascorNetwork:
         Forward pass using cascade-correlation architecture.
 
         Each hidden unit receives [original inputs + all previous hidden outputs].
-        Output layer maps [inputs + all hidden outputs] through output_weights.
+        Output layer maps [inputs + all hidden outputs] through nn.Linear.
 
         Args:
             x: Input tensor of shape (batch_size, input_size)
@@ -249,79 +312,42 @@ class MockCascorNetwork:
         Returns:
             Output predictions of shape (batch_size, output_size)
         """
-        # Cascade through hidden units
-        hidden_outputs = []
-        for unit in self.hidden_units:
-            if hidden_outputs:
-                unit_input = torch.cat([x] + hidden_outputs, dim=1)
-            else:
-                unit_input = x
-            h = unit["activation_fn"](torch.sum(unit_input * unit["weights"], dim=1) + unit["bias"])
-            hidden_outputs.append(h.unsqueeze(1))
+        features = self._cascade_features(x)
+        return self.output_layer(features)
 
-        # Build output layer input: [original inputs, all hidden outputs]
-        if hidden_outputs:
-            features = torch.cat([x] + hidden_outputs, dim=1)
-        else:
-            features = x
+    def train_output_step(self, batch_size: Optional[int] = None):
+        """Perform one gradient step on the output layer using Adam optimizer.
 
-        # Output layer: features @ output_weights.T + output_bias (raw, no activation)
-        output = torch.matmul(features, self.output_weights.T) + self.output_bias
-        return output
-
-    def train_output_step(self, batch_size: int = 32):
-        """Perform one gradient step on the output layer weights.
-
-        Trains output_weights and output_bias using MSE loss gradient on
-        raw (unsigmoid) output, matching the real CasCor algorithm.
-        Uses a mini-batch for efficiency. Hidden unit weights remain frozen,
-        matching the real CasCor architecture.
+        Uses nn.Linear + MSELoss + Adam optimizer, matching the real CasCor
+        algorithm. Defaults to full-batch training. Hidden unit weights remain
+        frozen (not wrapped as Parameters).
 
         Args:
-            batch_size: Number of samples per mini-batch (default 32).
+            batch_size: Number of samples per batch. None = full batch (default).
         """
         if self.train_x is None or self.train_y is None:
             return
 
+        # Select batch
+        n_samples = self.train_x.shape[0]
+        if batch_size is not None and n_samples > batch_size:
+            indices = torch.randperm(n_samples)[:batch_size]
+            batch_x = self.train_x[indices]
+            batch_y = self.train_y[indices]
+        else:
+            batch_x = self.train_x
+            batch_y = self.train_y
+
+        # Build features (no grad for frozen hidden units)
         with torch.no_grad():
-            # Mini-batch selection
-            n_samples = self.train_x.shape[0]
-            if n_samples > batch_size:
-                indices = torch.randperm(n_samples)[:batch_size]
-                batch_x = self.train_x[indices]
-                batch_y = self.train_y[indices]
-            else:
-                batch_x = self.train_x
-                batch_y = self.train_y
+            features = self._cascade_features(batch_x)
 
-            # Build features: cascade through hidden units
-            hidden_outputs = []
-            for unit in self.hidden_units:
-                if hidden_outputs:
-                    unit_input = torch.cat([batch_x] + hidden_outputs, dim=1)
-                else:
-                    unit_input = batch_x
-                h = unit["activation_fn"](torch.sum(unit_input * unit["weights"], dim=1) + unit["bias"])
-                hidden_outputs.append(h.unsqueeze(1))
-
-            if hidden_outputs:
-                features = torch.cat([batch_x] + hidden_outputs, dim=1)
-            else:
-                features = batch_x
-
-            # Forward through output layer (raw, no sigmoid — matches CasCor)
-            predictions = torch.matmul(features, self.output_weights.T) + self.output_bias
-
-            # MSE gradient: dL/dW = 2 * (output - y).T @ features / batch_size
-            error = predictions - batch_y  # (batch, output_size)
-            bs = float(batch_x.shape[0])
-
-            # dL/dW = 2 * error.T @ features / batch_size
-            grad_w = 2.0 * torch.matmul(error.T, features) / bs
-            grad_b = 2.0 * error.mean(dim=0)
-
-            self.output_weights -= self.learning_rate * grad_w
-            self.output_bias -= self.learning_rate * grad_b
+        # Forward through output layer with autograd
+        self.output_optimizer.zero_grad()
+        predictions = self.output_layer(features)
+        loss = self.loss_fn(predictions, batch_y)
+        loss.backward()
+        self.output_optimizer.step()
 
 
 class DemoMode:
@@ -412,7 +438,7 @@ class DemoMode:
                 network_name="MockCascorNetwork",
                 dataset_name="Spiral2D",
                 threshold_function="tanh",
-                optimizer_name="SGD",
+                optimizer_name="Adam",
             )
 
     # def _update_training_state(self):
@@ -468,7 +494,7 @@ class DemoMode:
             network_name="MockCascorNetwork",
             dataset_name="Spiral2D",
             threshold_function="tanh",
-            optimizer_name="SGD",
+            optimizer_name="Adam",
             candidate_pool_status=pool_status,
             candidate_pool_phase=pool_phase,
             candidate_pool_size=pool_size,
@@ -573,12 +599,23 @@ class DemoMode:
 
         targets = np.argmax(targets_one_hot, axis=1).astype(np.float32)
 
-        self.logger.info(f"Generated spiral dataset via JuniperData: {len(inputs)} samples")
+        # Normalize inputs to [-1, 1] (prevents activation saturation with large-range data)
+        inputs_tensor = torch.from_numpy(inputs).float()
+        input_min = inputs_tensor.min(dim=0).values
+        input_max = inputs_tensor.max(dim=0).values
+        inputs_tensor = 2.0 * (inputs_tensor - input_min) / (input_max - input_min + 1e-8) - 1.0
+
+        # Store normalization params on network for decision boundary use
+        if hasattr(self, "network") and self.network is not None:
+            self.network._input_min = input_min
+            self.network._input_max = input_max
+
+        self.logger.info(f"Generated spiral dataset via JuniperData: {len(inputs)} samples (normalized to [-1, 1])")
 
         return {
             "inputs": inputs,
             "targets": targets,
-            "inputs_tensor": torch.from_numpy(inputs).float(),
+            "inputs_tensor": inputs_tensor,
             "targets_tensor": torch.from_numpy(targets).float().unsqueeze(1),
             "num_samples": len(inputs),
             "num_features": inputs.shape[1] if len(inputs.shape) > 1 else 2,
@@ -641,22 +678,23 @@ class DemoMode:
         """
         Perform one training epoch — real gradient step with real metrics.
 
-        Trains the output layer weights via ``train_output_step()`` and then
-        computes the actual loss and accuracy from the network's predictions
-        on the training data.  This ensures the reported metrics reflect the
-        network's true classification performance.
+        Trains the output layer weights via ``train_output_step()`` (full-batch)
+        and then computes the actual loss and accuracy from the network's
+        predictions on the training data.
 
         Returns:
             Tuple of (loss, accuracy)
         """
-        # Perform an actual weight update (inline, not deferred)
+        # Perform an actual weight update (full-batch, inline)
         with self._lock:
             self.network.train_output_step()
 
         # Compute real metrics from network predictions
         with self._lock, torch.no_grad():
             if self.network.train_x is not None and self.network.train_y is not None:
+                self.network.output_layer.eval()
                 predictions = self.network.forward(self.network.train_x)
+                self.network.output_layer.train()
                 # MSE loss (matching CasCor algorithm)
                 mse = ((predictions - self.network.train_y) ** 2).mean()
                 self.current_loss = float(mse)
@@ -710,6 +748,10 @@ class DemoMode:
         """
         Determine if a cascade unit should be added.
 
+        Uses convergence-based detection (loss improvement over 10-epoch
+        sliding window) with the fixed schedule as a fallback maximum interval.
+        Matches the real CasCor algorithm's convergence-based addition.
+
         Returns:
             True if should add unit
         """
@@ -721,7 +763,14 @@ class DemoMode:
         if current_units >= max_units:
             return False
 
-        # Add unit every cascade_every epochs
+        # Convergence-based: check if loss has stopped improving
+        if len(self.network.history["train_loss"]) >= 10:
+            recent = list(self.network.history["train_loss"])[-10:]
+            improvement = recent[0] - recent[-1]
+            if improvement < 0.001:
+                return True
+
+        # Fallback: fixed schedule as maximum interval
         return self.current_epoch > 0 and self.current_epoch % self.cascade_every == 0
 
     def _training_loop(self):
@@ -933,10 +982,12 @@ class DemoMode:
         self.network.hidden_units.clear()
         self.network.current_epoch = 0
 
-        # Reset output weights to match network with no hidden units
-        # (prevents dimension mismatch after clearing hidden_units)
-        self.network.output_weights = torch.randn(self.network.output_size, self.network.input_size) * 0.1
-        self.network.output_bias = torch.randn(self.network.output_size) * 0.1
+        # Reinitialize nn.Linear + fresh optimizer (prevents dimension mismatch
+        # after clearing hidden_units and ensures clean optimizer state)
+        self.network.output_layer = torch.nn.Linear(self.network.input_size, self.network.output_size)
+        torch.nn.init.normal_(self.network.output_layer.weight, std=0.1)
+        torch.nn.init.normal_(self.network.output_layer.bias, std=0.1)
+        self.network.output_optimizer = torch.optim.Adam(self.network.output_layer.parameters(), lr=self.network.learning_rate)
 
     def stop(self):
         """Stop demo training simulation."""
@@ -1151,7 +1202,7 @@ class DemoMode:
                 "hidden_units": len(self.network.hidden_units),
                 "metrics_count": len(self.metrics_history),
                 "activation_fn": "tanh",
-                "optimizer": "SGD",
+                "optimizer": "Adam",
             }
 
     def apply_params(
@@ -1171,6 +1222,9 @@ class DemoMode:
         with self._lock:
             if learning_rate is not None:
                 self.network.learning_rate = learning_rate
+                # Update Adam optimizer's learning rate to take effect immediately
+                for param_group in self.network.output_optimizer.param_groups:
+                    param_group["lr"] = learning_rate
                 self.logger.info(f"Demo mode: learning_rate set to {learning_rate}")
 
             if max_hidden_units is not None:

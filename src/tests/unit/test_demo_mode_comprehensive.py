@@ -643,7 +643,7 @@ class TestDemoModeGetMethods:
             assert field in state, f"Missing field: {field}"
 
         assert state["activation_fn"] == "tanh"
-        assert state["optimizer"] == "SGD"
+        assert state["optimizer"] == "Adam"
 
 
 class TestDemoModeUpdateTrainingState:
