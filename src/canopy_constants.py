@@ -53,6 +53,12 @@ class TrainingConstants:
     MIN_HIDDEN_UNITS: Final[int] = 0
     MAX_HIDDEN_UNITS: Final[int] = 20
 
+    # Convergence-based cascade addition defaults
+    DEFAULT_CONVERGENCE_ENABLED: Final[bool] = True
+    DEFAULT_CONVERGENCE_THRESHOLD: Final[float] = 0.001
+    MIN_CONVERGENCE_THRESHOLD: Final[float] = 0.0001
+    MAX_CONVERGENCE_THRESHOLD: Final[float] = 0.1
+
 
 class DashboardConstants:
     """Dashboard UI constants.

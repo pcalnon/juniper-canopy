@@ -523,7 +523,7 @@ class TestSyncBackendParamsHandler:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._sync_backend_params_handler(n=1)
-            assert result == {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200}
+            assert result == {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
 
 
 class TestApplyParametersHandler:
@@ -536,10 +536,12 @@ class TestApplyParametersHandler:
         mocker.patch("requests.post", return_value=mock_response)
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result, msg = dashboard_manager._apply_parameters_handler(1, None, None, None)
+            result, msg = dashboard_manager._apply_parameters_handler(1, None, None, None, ["enabled"], 0.001)
             assert result["learning_rate"] == 0.01
             assert result["max_hidden_units"] == 10
             assert result["max_epochs"] == 200
+            assert result["convergence_enabled"] is True
+            assert result["convergence_threshold"] == 0.001
 
 
 class TestSyncInputValuesHandler:
@@ -556,13 +558,13 @@ class TestSyncInputValuesHandler:
     def test_sync_input_with_none_state(self, dashboard_manager):
         """Test sync input values with None backend state returns no_update."""
         result = dashboard_manager._sync_input_values_from_backend_handler(backend_state=None)
-        assert result == (dash.no_update, dash.no_update, dash.no_update)
+        assert result == (dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update)
 
     def test_sync_input_with_empty_dict_state(self, dashboard_manager):
         """Test sync input values with empty dict backend state uses defaults."""
         backend_state = {}
         result = dashboard_manager._sync_input_values_from_backend_handler(backend_state=backend_state)
-        assert result == (dash.no_update, dash.no_update, dash.no_update)
+        assert result == (dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update)
 
 
 class TestTrackParamChangesEdgeCases:
@@ -570,15 +572,15 @@ class TestTrackParamChangesEdgeCases:
 
     def test_track_param_changes_multiple_changes(self, dashboard_manager):
         """Test track_param_changes with multiple parameter changes."""
-        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200}
-        disabled, status = dashboard_manager._track_param_changes_handler(0.05, 20, 500, applied)
+        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
+        disabled, status = dashboard_manager._track_param_changes_handler(0.05, 20, 500, ["enabled"], 0.001, applied)
         assert disabled is False
         assert "Unsaved" in status
 
     def test_track_param_changes_float_precision_edge(self, dashboard_manager):
         """Test track_param_changes with float precision edge case."""
-        applied = {"learning_rate": 0.0100000001, "max_hidden_units": 10, "max_epochs": 200}
-        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 200, applied)
+        applied = {"learning_rate": 0.0100000001, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
+        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 200, ["enabled"], 0.001, applied)
         assert disabled is True
         assert status == ""
 
@@ -720,25 +722,25 @@ class TestAdditionalHandlerCases:
 
         for lr, hu, epochs in edge_cases:
             with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-                result, msg = dashboard_manager._apply_parameters_handler(1, lr, hu, epochs)
+                result, msg = dashboard_manager._apply_parameters_handler(1, lr, hu, epochs, ["enabled"], 0.001)
                 assert result["learning_rate"] == lr
 
     def test_track_params_with_boundary_values(self, dashboard_manager):
         """Test track param changes with boundary float values."""
-        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200}
+        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
 
         # Test with exactly matching values
-        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 200, applied)
+        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 200, ["enabled"], 0.001, applied)
         assert disabled is True
 
         # Test with very small difference (within tolerance)
-        disabled, status = dashboard_manager._track_param_changes_handler(0.01 + 1e-10, 10, 200, applied)
+        disabled, status = dashboard_manager._track_param_changes_handler(0.01 + 1e-10, 10, 200, ["enabled"], 0.001, applied)
         assert disabled is True
 
         # Test with larger difference (outside 1e-9 tolerance)
-        disabled, status = dashboard_manager._track_param_changes_handler(0.01 + 1e-8, 10, 200, applied)
+        disabled, status = dashboard_manager._track_param_changes_handler(0.01 + 1e-8, 10, 200, ["enabled"], 0.001, applied)
         assert disabled is False  # Outside tolerance, treated as changed
 
         # Test with clearly different value
-        disabled, status = dashboard_manager._track_param_changes_handler(0.02, 10, 200, applied)
+        disabled, status = dashboard_manager._track_param_changes_handler(0.02, 10, 200, ["enabled"], 0.001, applied)
         assert disabled is False

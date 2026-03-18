@@ -137,6 +137,8 @@ class TestConvergenceBasedCascade:
         demo.max_hidden_units = 10
         demo.cascade_every = 30
         demo.current_epoch = 15  # not at fixed interval
+        demo.convergence_enabled = True
+        demo.convergence_threshold = 0.001
         return demo
 
     def test_convergence_stall_triggers_addition(self):

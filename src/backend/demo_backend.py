@@ -241,6 +241,8 @@ class DemoBackend:
             learning_rate=params.get("learning_rate"),
             max_hidden_units=params.get("max_hidden_units"),
             max_epochs=params.get("max_epochs"),
+            convergence_enabled=params.get("convergence_enabled"),
+            convergence_threshold=params.get("convergence_threshold"),
         )
         return params
 

@@ -77,8 +77,12 @@ class TestWebSocketEndpoints:
             # Send ping
             websocket.send_json({"type": "ping"})
 
-            # Should receive pong
-            msg = websocket.receive_json()
+            # Drain messages until we find the pong (background training
+            # may broadcast metrics/state messages before our pong arrives)
+            for _ in range(20):
+                msg = websocket.receive_json()
+                if msg["type"] == "pong":
+                    break
             assert msg["type"] == "pong"
 
     def test_ws_training_receives_broadcasts(self, client):

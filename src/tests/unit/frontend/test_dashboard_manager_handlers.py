@@ -843,6 +843,8 @@ class TestParameterHandlers:
             "learning_rate": 0.02,
             "max_hidden_units": 15,
             "max_epochs": 300,
+            "convergence_enabled": True,
+            "convergence_threshold": 0.001,
         }
         mock_get.return_value = mock_response
 
@@ -852,6 +854,8 @@ class TestParameterHandlers:
         assert result["learning_rate"] == 0.02
         assert result["max_hidden_units"] == 15
         assert result["max_epochs"] == 300
+        assert result["convergence_enabled"] is True
+        assert result["convergence_threshold"] == 0.001
 
     @patch("requests.get")
     def test_sync_backend_params_handler_failure(self, mock_get, dashboard_manager):
@@ -895,24 +899,24 @@ class TestParameterHandlers:
 
     def test_track_param_changes_handler_no_applied(self, dashboard_manager):
         """Test param changes tracking with no applied values."""
-        result = dashboard_manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, applied=None)
+        result = dashboard_manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=None)
 
         assert result == (True, "")
 
     def test_track_param_changes_handler_no_changes(self, dashboard_manager):
         """Test param changes tracking with no changes."""
-        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200}
+        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
 
-        result = dashboard_manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, applied=applied)
+        result = dashboard_manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
 
         assert result[0] is True  # disabled
         assert result[1] == ""
 
     def test_track_param_changes_handler_with_changes(self, dashboard_manager):
         """Test param changes tracking with changes."""
-        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200}
+        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
 
-        result = dashboard_manager._track_param_changes_handler(lr=0.05, hu=10, epochs=200, applied=applied)
+        result = dashboard_manager._track_param_changes_handler(lr=0.05, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
 
         assert result[0] is False  # enabled
         assert "Unsaved" in result[1]
@@ -925,7 +929,7 @@ class TestParameterHandlers:
         mock_post.return_value = mock_response
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300)
+            result = dashboard_manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001)
 
         assert result[0]["learning_rate"] == 0.02
         assert "applied" in result[1].lower()
@@ -939,7 +943,7 @@ class TestParameterHandlers:
         mock_post.return_value = mock_response
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300)
+            result = dashboard_manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001)
 
         assert result[0] == dash.no_update
         assert "Failed" in result[1]
@@ -950,14 +954,14 @@ class TestParameterHandlers:
         mock_post.side_effect = Exception("Connection error")
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300)
+            result = dashboard_manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001)
 
         assert result[0] == dash.no_update
         assert "Error" in result[1]
 
     def test_apply_parameters_handler_no_clicks(self, dashboard_manager):
         """Test apply parameters handler with no clicks."""
-        result = dashboard_manager._apply_parameters_handler(n_clicks=None, lr=0.02, hu=15, epochs=300)
+        result = dashboard_manager._apply_parameters_handler(n_clicks=None, lr=0.02, hu=15, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001)
 
         assert result == (dash.no_update, dash.no_update)
 
@@ -969,11 +973,13 @@ class TestParameterHandlers:
             mock_post.return_value = mock_response
 
             with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-                result = dashboard_manager._apply_parameters_handler(n_clicks=1, lr=None, hu=None, epochs=None)
+                result = dashboard_manager._apply_parameters_handler(n_clicks=1, lr=None, hu=None, epochs=None, conv_enabled=None, conv_threshold=None)
 
             assert result[0]["learning_rate"] == 0.01  # default
             assert result[0]["max_hidden_units"] == 10  # default
             assert result[0]["max_epochs"] == 200  # default
+            assert result[0]["convergence_enabled"] is False  # None -> empty list -> False
+            assert result[0]["convergence_threshold"] == 0.001  # default
 
     @patch("requests.get")
     def test_init_applied_params_handler_success(self, mock_get, dashboard_manager):
@@ -984,6 +990,8 @@ class TestParameterHandlers:
             "learning_rate": 0.01,
             "max_hidden_units": 10,
             "max_epochs": 200,
+            "convergence_enabled": True,
+            "convergence_threshold": 0.001,
         }
         mock_get.return_value = mock_response
 
@@ -991,6 +999,8 @@ class TestParameterHandlers:
             result = dashboard_manager._init_applied_params_handler(n=1, current=None)
 
         assert result["learning_rate"] == 0.01
+        assert result["convergence_enabled"] is True
+        assert result["convergence_threshold"] == 0.001
 
     def test_init_applied_params_handler_already_set(self, dashboard_manager):
         """Test init applied params when already set."""
@@ -1024,24 +1034,26 @@ class TestInputValueSyncHandlers:
             "learning_rate": 0.02,
             "max_hidden_units": 15,
             "max_epochs": 300,
+            "convergence_enabled": True,
+            "convergence_threshold": 0.001,
         }
 
         result = dashboard_manager._sync_input_values_from_backend_handler(backend_state=backend_state)
 
-        assert result == (0.02, 15, 300)
+        assert result == (0.02, 15, 300, ["enabled"], 0.001)
 
     def test_sync_input_values_from_backend_handler_without_state(self, dashboard_manager):
         """Test sync input values without backend state."""
         result = dashboard_manager._sync_input_values_from_backend_handler(backend_state=None)
 
-        assert result == (dash.no_update, dash.no_update, dash.no_update)
+        assert result == (dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update)
 
     def test_sync_input_values_from_backend_handler_empty_state(self, dashboard_manager):
         """Test sync input values with empty dict returns no_update (empty dict is falsy)."""
         result = dashboard_manager._sync_input_values_from_backend_handler(backend_state={})
 
         # Empty dict is falsy, so returns no_update
-        assert result == (dash.no_update, dash.no_update, dash.no_update)
+        assert result == (dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update)
 
     def test_sync_input_values_from_backend_handler_partial_state(self, dashboard_manager):
         """Test sync input values with partial state."""
@@ -1052,3 +1064,5 @@ class TestInputValueSyncHandlers:
         assert result[0] == 0.05  # provided
         assert result[1] == 10  # default
         assert result[2] == 200  # default
+        assert result[3] == ["enabled"]  # default (convergence_enabled=True -> ["enabled"])
+        assert result[4] == 0.001  # default

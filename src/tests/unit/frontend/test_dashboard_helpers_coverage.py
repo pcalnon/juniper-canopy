@@ -939,8 +939,8 @@ class TestParameterTrackingHandler:
 
         manager = DashboardManager({})
 
-        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200}
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, applied=applied)
+        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
+        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
 
         assert disabled is True  # Button disabled when no changes
         assert status == ""
@@ -951,8 +951,8 @@ class TestParameterTrackingHandler:
 
         manager = DashboardManager({})
 
-        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200}
-        disabled, status = manager._track_param_changes_handler(lr=0.02, hu=10, epochs=200, applied=applied)
+        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
+        disabled, status = manager._track_param_changes_handler(lr=0.02, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
 
         assert disabled is False  # Button enabled when changes exist
         assert "Unsaved" in status
@@ -963,7 +963,7 @@ class TestParameterTrackingHandler:
 
         manager = DashboardManager({})
 
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, applied=None)
+        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=None)
 
         assert disabled is True
         assert status == ""
@@ -991,7 +991,7 @@ class TestApplyParametersHandler:
         env = builder.get_environ()
 
         with manager.app.server.request_context(env):
-            params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300)
+            params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001)
 
         assert params["learning_rate"] == 0.02
         assert params["max_hidden_units"] == 15
@@ -1017,7 +1017,7 @@ class TestApplyParametersHandler:
         env = builder.get_environ()
 
         with manager.app.server.request_context(env):
-            params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300)
+            params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001)
 
         assert params == dash.no_update
         assert "❌" in status
@@ -1028,5 +1028,5 @@ class TestApplyParametersHandler:
 
         manager = DashboardManager({})
 
-        result = manager._apply_parameters_handler(n_clicks=None, lr=0.01, hu=10, epochs=200)
+        result = manager._apply_parameters_handler(n_clicks=None, lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001)
         assert result == (dash.no_update, dash.no_update)

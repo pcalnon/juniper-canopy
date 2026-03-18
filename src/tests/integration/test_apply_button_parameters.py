@@ -152,7 +152,7 @@ class TestApplyButtonDashboardIntegration:
             env = builder.get_environ()
 
             with manager.app.server.request_context(env):
-                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.015, hu=25, epochs=600)
+                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.015, hu=25, epochs=600, conv_enabled=["enabled"], conv_threshold=0.001)
 
             assert "max_hidden_units" in params
             assert "max_epochs" in params
@@ -176,17 +176,19 @@ class TestApplyButtonDashboardIntegration:
             "learning_rate": 0.01,
             "max_hidden_units": 10,
             "max_epochs": 200,
+            "convergence_enabled": True,
+            "convergence_threshold": 0.001,
         }
 
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, applied=applied)
+        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
         assert disabled is True
         assert status == ""
 
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=15, epochs=200, applied=applied)
+        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=15, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
         assert disabled is False
         assert "Unsaved" in status
 
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=300, applied=applied)
+        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
         assert disabled is False
         assert "Unsaved" in status
 
@@ -204,12 +206,14 @@ class TestApplyButtonDashboardIntegration:
             "learning_rate": 0.06,
             "max_hidden_units": 10,
             "max_epochs": 200,
+            "convergence_enabled": True,
+            "convergence_threshold": 0.001,
         }
 
         # Float precision error that occurs after multiple step increments
         # e.g., 0.01 + 0.001 * 50 = 0.06000000000000004
         lr_with_precision_error = 0.06000000000000004
-        disabled, status = manager._track_param_changes_handler(lr=lr_with_precision_error, hu=10, epochs=200, applied=applied)
+        disabled, status = manager._track_param_changes_handler(lr=lr_with_precision_error, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
         assert disabled is True, f"Should be disabled but got {disabled} for {lr_with_precision_error}"
         assert status == "", f"Should have no status but got '{status}'"
 
@@ -223,15 +227,17 @@ class TestApplyButtonDashboardIntegration:
             "learning_rate": 0.01,
             "max_hidden_units": 10,
             "max_epochs": 200,
+            "convergence_enabled": True,
+            "convergence_threshold": 0.001,
         }
 
         # Significant change should be detected
-        disabled, status = manager._track_param_changes_handler(lr=0.05, hu=10, epochs=200, applied=applied)
+        disabled, status = manager._track_param_changes_handler(lr=0.05, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
         assert disabled is False
         assert "Unsaved" in status
 
         # Another significant change
-        disabled, status = manager._track_param_changes_handler(lr=0.001, hu=10, epochs=200, applied=applied)
+        disabled, status = manager._track_param_changes_handler(lr=0.001, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
         assert disabled is False
         assert "Unsaved" in status
 
@@ -250,6 +256,8 @@ class TestApplyButtonDashboardIntegration:
                 "learning_rate": 0.02,
                 "max_hidden_units": 18,
                 "max_epochs": 250,
+                "convergence_enabled": True,
+                "convergence_threshold": 0.001,
             }
             mock_get.return_value = mock_response
 
@@ -265,6 +273,8 @@ class TestApplyButtonDashboardIntegration:
 
             assert "max_hidden_units" in result
             assert "max_epochs" in result
+            assert "convergence_enabled" in result
+            assert "convergence_threshold" in result
             assert "hidden_units" not in result
             assert "epochs" not in result
 
@@ -349,7 +359,7 @@ class TestLearningRateApplyButtonP012:
             env = builder.get_environ()
 
             with manager.app.server.request_context(env):
-                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.07, hu=10, epochs=200)
+                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.07, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001)
 
             # Verify the returned params contain correct learning_rate
             assert params["learning_rate"] == 0.07
