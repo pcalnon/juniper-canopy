@@ -3,7 +3,7 @@
 **Date**: 2026-03-17
 **Source**: Discovered & Remaining Issues from `DARK_MODE_AND_NETWORK_DETAILS_FIX_PLAN.md`
 **Predecessor**: PR #28 (fix/canopy-dark-mode-and-network-details)
-**Status**: WU 1 + WU 2 Implemented
+**Status**: Investigation Complete — Ready for Prioritized Execution
 
 ---
 
@@ -11,13 +11,9 @@
 
 The prior fix effort (PR #28) resolved 3 user-reported issues and documented 12 additional findings across 5 categories. This investigation validates those findings against the current codebase and produces a prioritized remediation plan.
 
-**Key discovery 1**: Issues 1A–1D (13 hardcoded `#f8f9fa` backgrounds on `dbc.CardHeader` components) are **NOT visible bugs**. The CSS rule in `dark_mode.css` line 67 — `.card-header { background-color: var(--bg-secondary) !important; }` — already overrides the inline styles. This eliminates 13 of the 16 documented dark mode instances from active remediation.
+**Key discovery**: Issues 1A–1D (13 hardcoded `#f8f9fa` backgrounds on `dbc.CardHeader` components) are **NOT visible bugs**. The CSS rule in `dark_mode.css` line 67 — `.card-header { background-color: var(--bg-secondary) !important; }` — already overrides the inline styles. This eliminates 13 of the 16 documented dark mode instances from active remediation.
 
-**Key discovery 2**: Issue 1E (3 hardcoded `#f8f9fa` backgrounds on `html.Table` elements) is also **NOT a visible bug**. The CSS rule `table { background-color: var(--bg-card) !important; }` (dark_mode.css line 218) already overrides the inline styles. The inline `backgroundColor` and `border` values are redundant and have been removed as code cleanup.
-
-**Key discovery 3**: Issue 5A (pre-commit hook scope) cannot be resolved by scoping to `tests/unit/ tests/regression/` — this drops coverage from 96.46% to 78.67%, below the 80% threshold. Instead, the worktree infrastructure fixes (2A + 2B) resolve the worktree-specific collection errors, making the hook behavior identical between main and worktrees.
-
-**Remaining actionable issues**: 3 (3A, 4A, WU 5 cleanup — all deferred)
+**Remaining actionable issues**: 7 (down from 12)
 
 ---
 
@@ -29,117 +25,172 @@ The prior fix effort (PR #28) resolved 3 user-reported issues and documented 12 
 | 1B | Open (2 CardHeaders) | **Not a Bug** | CSS `!important` already overrides inline style |
 | 1C | Open (2 CardHeaders) | **Not a Bug** | CSS `!important` already overrides inline style |
 | 1D | Open (4 CardHeaders) | **Not a Bug** | CSS `!important` already overrides inline style |
-| 1E | Open (3 tables) | **Not a Bug** (cleaned up) | CSS `table { background-color: var(--bg-card) !important; }` already overrides. Redundant inline styles removed. |
-| 1F | Open (systemic) | **Resolved** | CSS variables already handle all CardHeaders and tables via `!important` |
-| 2A | Documented | **Fixed** | Logger resolves symlinks before mkdir, auto-creates target directory |
-| 2B | Documented | **Fixed** | `reports/.gitkeep` added, directory now tracked in git |
-| 2C | Documented | **Fixed** | `WORKTREE_SETUP_PROCEDURE.md` updated with Step 6 (create gitignored dirs) |
-| 3A | Pre-existing | **Confirmed** | 9 tests still fail in isolation; pass in full suite due to test ordering |
+| 1E | Open (3 tables) | **Confirmed Bug** | `html.Table` has no CSS class with `!important` override |
+| 1F | Open (systemic) | **Downgraded** | CSS variables already handle CardHeaders; only non-card elements need attention |
+| 2A | Documented | **Confirmed** | `src/logs` symlink broken in worktrees |
+| 2B | Documented | **Confirmed** | `reports/` missing in worktrees |
+| 2C | Documented | **Confirmed** | Setup procedure not updated |
+| 3A | Pre-existing | **Confirmed** | 9 tests still fail on main |
 | 4A | Unverified | **Resolved** | Fix verified in PR #28 (torch.cat) |
-| 5A | Documented | **Resolved** | Infrastructure fixes (2A + 2B) eliminate worktree-specific failures; hook scope unchanged (coverage requires integration tests) |
+| 5A | Documented | **Confirmed** | Pre-commit hook runs all tests, fails in worktrees |
 
 ---
 
 ## Prioritized Work Units
 
-### Work Unit 1: Worktree Developer Experience (HIGH) — IMPLEMENTED
+### Work Unit 1: Worktree Developer Experience (HIGH)
 
-**Issues**: 2A, 2B, 2C
-**Status**: Complete
+**Issues**: 2A, 2B, 2C, 5A
+**Effort**: Small (< 1 hour)
+**Impact**: Unblocks all worktree-based development workflows
 
-#### Changes Made
+These four issues are tightly coupled — they all stem from gitignored directories not existing in worktrees, and the pre-commit hook running tests that depend on them.
 
-**2A — Logger symlink resilience** (`src/logger/logger.py`):
-- Modified `_config_logging_file()` to resolve symlinks before checking/creating the log directory
-- `Path.resolve()` follows symlinks to the target path, then `mkdir(parents=True, exist_ok=True)` creates the target if missing
-- Handles broken symlinks in worktrees where `src/logs -> ../logs` points to a non-existent target
+#### Remediation
 
-**2B — Track `reports/` directory** (`reports/.gitkeep`):
-- Added empty `.gitkeep` file so `reports/` is tracked by git
-- `git worktree add` now creates `reports/` automatically
-- No `.gitignore` changes needed (`**/reports` entries were already commented out)
+**2C — Update `WORKTREE_SETUP_PROCEDURE.md`**:
+Add a post-setup step after Step 6 (Verify and Begin Work):
+```bash
+# Create gitignored directories required by the application and tests
+mkdir -p logs reports
+```
 
-**2C — Updated worktree setup procedure** (`notes/WORKTREE_SETUP_PROCEDURE.md`):
-- Added Step 6: Create Gitignored Directories (`mkdir -p logs`)
-- Renumbered original Step 6 to Step 7
-- Noted that `reports/` is now auto-created via `.gitkeep`
+**2A — Fix `src/logs` symlink resilience**:
+Option A (recommended): Make the logger factory create the target directory if the symlink target doesn't exist. This is a one-line fix in the logger initialization code.
+Option B: Replace the symlink with a direct path computation using `pathlib.Path(__file__).parent / "logs"` or similar.
 
-**5A — Pre-commit hook scope** (NOT changed):
-- Scoping to `tests/unit/ tests/regression/` drops coverage to 78.67% (below 80% threshold)
-- Instead, the infrastructure fixes (2A + 2B) resolve the worktree-specific collection errors
-- The hook now behaves identically in main and worktrees
-- 2 pre-existing WebSocket ping-pong test failures remain (also fail on main — not worktree-specific)
+**2B — Add `.gitkeep` to `reports/`**:
+Add `reports/.gitkeep` to version control so the directory is created during `git worktree add`. Remove the `reports/` entry from `.gitignore` (or adjust to `reports/*` with `!reports/.gitkeep`).
 
-#### Verification
-
-- Full suite in worktree: 3544 passed, 2 failed (pre-existing), 19 skipped
-- No worktree-specific collection errors
-- Coverage: 96.46% (above 80% threshold)
+**5A — Scope pre-commit hook to unit + regression tests**:
+Change `.pre-commit-config.yaml` line 268 from:
+```
+tests/ -q
+```
+to:
+```
+tests/unit/ tests/regression/ -q
+```
+Integration tests should run in CI, not as a pre-commit gate.
 
 ---
 
-### Work Unit 2: Metrics Panel Table Cleanup (MEDIUM-HIGH) — IMPLEMENTED
+### Work Unit 2: Metrics Panel Table Dark Mode (MEDIUM-HIGH)
 
 **Issues**: 1E (lines 1759, 1819, 1904)
-**Status**: Complete (reclassified from bug fix to code cleanup)
+**Effort**: Medium (1-2 hours)
+**Impact**: Fixes visible dark mode rendering issue in Network Information: Details panel
 
-#### Investigation Finding
+The three `html.Table` elements in `metrics_panel.py` helper methods have hardcoded `#f8f9fa` backgrounds with no CSS class override. Unlike `dbc.CardHeader`, plain `html.Table` is not targeted by any dark mode CSS rule.
 
-The `dark_mode.css` already contains `table { background-color: var(--bg-card) !important; }` (line 218) which overrides inline `backgroundColor` on all `html.Table` elements. The tables were already correctly themed in dark mode — the inline styles were redundant.
+**Line 1904 is the highest priority** — it's the table inside the "Network Information: Details" panel that was fixed in PR #28 to update with live data. The panel frame is correctly themed but the table content inside it has a light background in dark mode.
 
-#### Changes Made
+#### Remediation
 
-**Metrics panel cleanup** (`src/frontend/components/metrics_panel.py`):
-- Removed redundant `backgroundColor: "#f8f9fa"` from 3 table inline styles (lines 1759, 1819, 1904)
-- Removed redundant `border: "1px solid #dee2e6"` from 3 table inline styles (CSS `border-color` rule handles this)
+**Option A — CSS class approach** (preferred):
+1. Add a CSS class to `dark_mode.css`:
+   ```css
+   .theme-table {
+       background-color: var(--bg-secondary) !important;
+       color: var(--text-color) !important;
+   }
+   .theme-table th, .theme-table td {
+       border-color: var(--border-color) !important;
+       color: var(--text-color) !important;
+   }
+   ```
+2. Add `className="theme-table"` to the three `html.Table` instances
+3. No callback changes needed — CSS handles everything
 
-**CSS table border rule** (`src/frontend/assets/dark_mode.css`):
-- Added `border-color: var(--border-color) !important;` to the `table` CSS rule
-- Ensures table outer borders are themed consistently with the CSS variable system
+**Option B — Pass theme through callbacks**:
+1. Add `theme` parameter to `_create_candidate_pool_display()` and `_create_network_info_table()`
+2. Pass `theme` from the calling callbacks in `dashboard_manager.py`
+3. Use conditional colors in the helper methods
+
+Option A is preferred because it's consistent with the existing CardHeader pattern, requires fewer code changes, and works without modifying the callback chain.
+
+#### Tests
+
+- Add dark mode tests for `_create_network_info_table()` output
+- Add dark mode tests for `_create_candidate_pool_display()` output
+- Verify the CSS class is applied to all three tables
 
 ---
 
-### Work Unit 3: Pre-Existing Test Failures (MEDIUM) — DEFERRED
+### Work Unit 3: Pre-Existing Test Failures (MEDIUM)
 
 **Issues**: 3A (9 failing tests in `test_api_state_endpoint.py`)
-**Status**: Confirmed — tests fail in isolation but pass in full suite due to test ordering
+**Effort**: Small-Medium (30-60 min)
+**Impact**: Eliminates false negatives in test suite
 
-The tests rely on `main.backend` being initialized, which only happens when other test modules import `main.py` and trigger side effects. Fix requires adding a proper backend initialization fixture.
+#### Remediation
 
-**Additional finding**: 2 WebSocket ping-pong tests (`test_main_coverage.py`, `test_main_ws.py`) also fail consistently on both main and worktrees — a separate pre-existing issue.
+Fix the test fixture to properly initialize the backend before creating the `TestClient`. The `/api/state` endpoint accesses `backend.backend_type` but `backend` is `None` because the FastAPI lifespan/startup handler is never triggered.
+
+**Approach**:
+1. Add a fixture that patches `main.backend` with a mock backend object (or use the demo backend initialization)
+2. Ensure the mock has `backend_type`, and the attributes accessed in `get_state()`
+3. Alternative: Use `TestClient` as a context manager which triggers lifespan events
 
 ---
 
-### Work Unit 4: Service Mode Verification (LOW) — DEFERRED
+### Work Unit 4: Service Mode Verification (LOW)
 
 **Issues**: 4A
-**Status**: Resolved in PR #28. Service mode path verified architecturally (delegates to cascor backend).
+**Effort**: Medium (requires live cascor backend)
+**Impact**: Confirms completeness of weight data in production mode
+
+The demo mode fix is verified and complete. Service mode delegates to `CascorServiceAdapter.get_network_data()` → `_client.get_statistics()`, which relies on the juniper-cascor backend's serialization.
+
+#### Remediation
+
+Add an integration test gated by `@pytest.mark.requires_cascor` that:
+1. Starts a demo cascor backend (or uses a running instance)
+2. Trains to produce multiple hidden units
+3. Calls `get_network_data()` and verifies `hidden_weights` contains data from all units
+
+This is low priority because the cascor backend manages its own weight serialization and is tested independently.
 
 ---
 
-### Work Unit 5: Code Cleanup — Remove Redundant Inline Styles (LOW) — DEFERRED
+### Work Unit 5: Code Cleanup — Remove Redundant Inline Styles (LOW)
 
-**Issues**: 1A, 1B, 1C, 1D
-**Status**: Not a visible bug. Optional cleanup.
+**Issues**: 1A, 1B, 1C, 1D, 1F
+**Effort**: Small (< 30 min)
+**Impact**: Code hygiene only — no visible change
+
+The 13 `dbc.CardHeader` inline `backgroundColor: "#f8f9fa"` values are functionally redundant with the CSS rule. They could be removed for cleanliness, but this is optional since the CSS correctly handles dark mode already.
+
+#### Remediation (Optional)
+
+Remove the `backgroundColor` key from the `style` dict on all 13 `dbc.CardHeader` instances. The CSS variable `var(--bg-secondary)` provides `#f8f9fa` in light mode and `#2d2d2d` in dark mode, making the inline style unnecessary.
+
+**Files**:
+- `about_panel.py`: lines 122, 150, 193, 252, 287
+- `cassandra_panel.py`: lines 229, 278
+- `redis_panel.py`: lines 141, 230
+- `hdf5_snapshots_panel.py`: lines 131, 200, 250, 313
 
 ---
 
 ## Implementation Order
 
-| Priority | Work Unit | Issues | Status |
-|----------|-----------|--------|--------|
-| 1 | Worktree Developer Experience | 2A, 2B, 2C, 5A | **Complete** |
-| 2 | Metrics Panel Table Cleanup | 1E, 1F | **Complete** |
-| 3 | Pre-Existing Test Failures | 3A | Deferred |
-| 4 | Service Mode Verification | 4A | Deferred (resolved) |
-| 5 | Code Cleanup | 1A-1D | Deferred (not a bug) |
+| Priority | Work Unit | Issues | Effort | Blocking? |
+|----------|-----------|--------|--------|-----------|
+| 1 | Worktree Developer Experience | 2A, 2B, 2C, 5A | Small | Yes — blocks worktree workflows |
+| 2 | Metrics Panel Table Dark Mode | 1E | Medium | No — cosmetic |
+| 3 | Pre-Existing Test Failures | 3A | Small-Medium | No — pre-existing on main |
+| 4 | Service Mode Verification | 4A | Medium | No — requires live service |
+| 5 | Code Cleanup | 1A-1D, 1F | Small | No — optional hygiene |
+
+**Recommended grouping**: Work Units 1 + 2 in a single PR (worktree infra + remaining dark mode). Work Unit 3 as a separate PR (test fixture fix). Work Units 4-5 deferred.
 
 ---
 
-## Verification Results
+## Verification Baseline
 
-Post-implementation test suite (worktree, 2026-03-17):
-- **Unit + Regression**: 2857 passed, 4 skipped, 0 failures
-- **Full suite (with integration)**: 3544 passed, 2 failed (pre-existing), 19 skipped
-- **Coverage**: 96.46%
-- **Worktree-specific failures**: 0 (previously 6 collection errors)
+Current test suite state (2026-03-17, post PR #28 merge):
+- **1036 unit/regression tests passing**
+- **96.44% coverage**
+- 9 pre-existing failures in `test_api_state_endpoint.py` (not in unit/regression markers)
+- 6 worktree-specific collection errors (infrastructure-dependent)
