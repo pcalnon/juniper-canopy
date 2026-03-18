@@ -16,22 +16,20 @@
 #    Integration tests for /api/network/stats endpoint.
 #
 #####################################################################################################################################################################################################
+from unittest.mock import AsyncMock, MagicMock
+
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
 
 @pytest.fixture
 def client():
-    """Create test client for FastAPI app."""
-    import sys
-    from pathlib import Path
-
-    src_dir = Path(__file__).parent.parent.parent
-    sys.path.insert(0, str(src_dir))
-
+    """Create test client for FastAPI app with lifespan."""
     from main import app
 
-    return TestClient(app)
+    with TestClient(app) as c:
+        yield c
 
 
 class TestNetworkStatsEndpoint:
@@ -265,3 +263,113 @@ class TestStatsUpdateOnTopologyChange:
 
             data2 = response2.json()
             assert "total_nodes" in data2
+
+
+class TestNetworkStatsServiceMode:
+    """Test /api/network/stats service mode path with mocked backend.
+
+    Verifies that the service mode code path correctly passes hidden_weights
+    from get_network_data() through to DataAdapter.get_network_statistics().
+    """
+
+    @pytest.fixture
+    def service_client(self, monkeypatch):
+        """TestClient with backend mocked as service mode returning multi-unit weights."""
+        import main
+        from main import app
+
+        # Simulate 3 hidden units with 4 weights each (12 total hidden weights)
+        hidden_unit_1 = np.array([0.1, -0.2, 0.3, -0.4], dtype=np.float32)
+        hidden_unit_2 = np.array([0.5, -0.6, 0.7, -0.8], dtype=np.float32)
+        hidden_unit_3 = np.array([0.9, -1.0, 1.1, -1.2], dtype=np.float32)
+        all_hidden = np.concatenate([hidden_unit_1, hidden_unit_2, hidden_unit_3])
+
+        mock_adapter = MagicMock()
+        mock_adapter.get_network_data.return_value = {
+            "input_weights": np.array([0.1, 0.2, -0.3, 0.4], dtype=np.float32),
+            "hidden_weights": all_hidden,
+            "output_weights": np.array([0.5, -0.5], dtype=np.float32),
+            "hidden_biases": np.array([0.01, 0.02, 0.03], dtype=np.float32),
+            "output_biases": np.array([0.0], dtype=np.float32),
+            "threshold_function": "tanh",
+            "optimizer": "adam",
+        }
+
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend._adapter = mock_adapter
+        mock_backend.shutdown = AsyncMock()
+
+        with TestClient(app) as c:
+            monkeypatch.setattr(main, "backend", mock_backend)
+            yield c, all_hidden
+
+    @pytest.mark.integration
+    def test_service_mode_returns_200(self, service_client):
+        """Service mode path should return 200 with valid weight data."""
+        client, _ = service_client
+        response = client.get("/api/network/stats")
+        assert response.status_code == 200
+
+    @pytest.mark.integration
+    def test_service_mode_includes_all_hidden_weights(self, service_client):
+        """Weight count should reflect ALL hidden unit weights, not just the first."""
+        client, all_hidden = service_client
+        response = client.get("/api/network/stats")
+        data = response.json()
+
+        weight_stats = data["weight_statistics"]
+        # input(4) + hidden(12) + output(2) = 18 total weights
+        assert weight_stats["total_weights"] == 18
+
+    @pytest.mark.integration
+    def test_service_mode_weight_statistics_correctness(self, service_client):
+        """Weight statistics should be computed from all weights combined."""
+        client, all_hidden = service_client
+        response = client.get("/api/network/stats")
+        data = response.json()
+
+        weight_stats = data["weight_statistics"]
+        # With mixed positive/negative weights, both counts should be > 0
+        assert weight_stats["positive_weights"] > 0
+        assert weight_stats["negative_weights"] > 0
+        assert weight_stats["positive_weights"] + weight_stats["negative_weights"] + weight_stats["zero_weights"] == 18
+
+    @pytest.mark.integration
+    def test_service_mode_metadata(self, service_client):
+        """Service mode should pass through threshold_function and optimizer."""
+        client, _ = service_client
+        response = client.get("/api/network/stats")
+        data = response.json()
+
+        assert data["threshold_function"] == "tanh"
+        assert data["optimizer"] == "adam"
+
+    @pytest.mark.integration
+    def test_service_mode_no_hidden_weights(self, monkeypatch):
+        """Service mode with no hidden weights should still return valid stats."""
+        import main
+        from main import app
+
+        mock_adapter = MagicMock()
+        mock_adapter.get_network_data.return_value = {
+            "input_weights": np.array([0.1, 0.2], dtype=np.float32),
+            "hidden_weights": None,
+            "output_weights": np.array([0.5], dtype=np.float32),
+            "threshold_function": "sigmoid",
+            "optimizer": "sgd",
+        }
+
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+        mock_backend._adapter = mock_adapter
+        mock_backend.shutdown = AsyncMock()
+
+        with TestClient(app) as c:
+            monkeypatch.setattr(main, "backend", mock_backend)
+            response = c.get("/api/network/stats")
+
+        assert response.status_code == 200
+        data = response.json()
+        # Only input(2) + output(1) = 3 weights (no hidden)
+        assert data["weight_statistics"]["total_weights"] == 3

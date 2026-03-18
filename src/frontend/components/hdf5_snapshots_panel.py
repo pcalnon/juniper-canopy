@@ -128,7 +128,6 @@ class HDF5SnapshotsPanel(BaseComponent):
                     [
                         dbc.CardHeader(
                             html.H5("Create New Snapshot", className="mb-0"),
-                            style={"backgroundColor": "#f8f9fa"},
                         ),
                         dbc.CardBody(
                             [
@@ -197,7 +196,6 @@ class HDF5SnapshotsPanel(BaseComponent):
                     [
                         dbc.CardHeader(
                             html.H5("Available Snapshots", className="mb-0"),
-                            style={"backgroundColor": "#f8f9fa"},
                         ),
                         dbc.CardBody(
                             [
@@ -247,7 +245,6 @@ class HDF5SnapshotsPanel(BaseComponent):
                     [
                         dbc.CardHeader(
                             html.H5("Snapshot Details", className="mb-0"),
-                            style={"backgroundColor": "#f8f9fa"},
                         ),
                         dbc.CardBody(
                             id=f"{self.component_id}-detail-panel",
@@ -310,7 +307,6 @@ class HDF5SnapshotsPanel(BaseComponent):
                                 className="p-0 text-decoration-none",
                                 style={"color": "#2c3e50", "fontWeight": "500"},
                             ),
-                            style={"backgroundColor": "#f8f9fa"},
                         ),
                         dbc.Collapse(
                             dbc.CardBody(

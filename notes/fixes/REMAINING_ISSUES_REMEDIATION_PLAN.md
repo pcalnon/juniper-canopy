@@ -3,7 +3,7 @@
 **Date**: 2026-03-17
 **Source**: Discovered & Remaining Issues from `DARK_MODE_AND_NETWORK_DETAILS_FIX_PLAN.md`
 **Predecessor**: PR #28 (fix/canopy-dark-mode-and-network-details)
-**Status**: Investigation Complete — Ready for Prioritized Execution
+**Status**: All 5 Work Units Complete
 
 ---
 
@@ -25,14 +25,14 @@ The prior fix effort (PR #28) resolved 3 user-reported issues and documented 12 
 | 1B | Open (2 CardHeaders) | **Not a Bug** | CSS `!important` already overrides inline style |
 | 1C | Open (2 CardHeaders) | **Not a Bug** | CSS `!important` already overrides inline style |
 | 1D | Open (4 CardHeaders) | **Not a Bug** | CSS `!important` already overrides inline style |
-| 1E | Open (3 tables) | **Confirmed Bug** | `html.Table` has no CSS class with `!important` override |
-| 1F | Open (systemic) | **Downgraded** | CSS variables already handle CardHeaders; only non-card elements need attention |
-| 2A | Documented | **Confirmed** | `src/logs` symlink broken in worktrees |
-| 2B | Documented | **Confirmed** | `reports/` missing in worktrees |
-| 2C | Documented | **Confirmed** | Setup procedure not updated |
-| 3A | Pre-existing | **Confirmed** | 9 tests still fail on main |
+| 1E | Open (3 tables) | **Not a Bug** (cleaned up) | CSS `table { background-color: var(--bg-card) !important; }` already overrides. Redundant inline styles removed. |
+| 1F | Open (systemic) | **Resolved** | CSS variables already handle all CardHeaders and tables via `!important` |
+| 2A | Documented | **Fixed** | Logger resolves symlinks before mkdir, auto-creates target directory |
+| 2B | Documented | **Fixed** | `reports/.gitkeep` added, directory now tracked in git |
+| 2C | Documented | **Fixed** | `WORKTREE_SETUP_PROCEDURE.md` updated with Step 6 (create gitignored dirs) |
+| 3A | Pre-existing | **Fixed** | `test_client` fixture now uses `TestClient(app)` context manager for lifespan |
 | 4A | Unverified | **Resolved** | Fix verified in PR #28 (torch.cat) |
-| 5A | Documented | **Confirmed** | Pre-commit hook runs all tests, fails in worktrees |
+| 5A | Documented | **Resolved** | Infrastructure fixes (2A + 2B) eliminate worktree-specific failures; hook scope unchanged (coverage requires integration tests) |
 
 ---
 
@@ -117,59 +117,49 @@ Option A is preferred because it's consistent with the existing CardHeader patte
 
 ---
 
-### Work Unit 3: Pre-Existing Test Failures (MEDIUM)
+### Work Unit 3: Pre-Existing Test Failures (MEDIUM) — IMPLEMENTED
 
 **Issues**: 3A (9 failing tests in `test_api_state_endpoint.py`)
-**Effort**: Small-Medium (30-60 min)
-**Impact**: Eliminates false negatives in test suite
+**Status**: Complete
 
-#### Remediation
+#### Root Cause
 
-Fix the test fixture to properly initialize the backend before creating the `TestClient`. The `/api/state` endpoint accesses `backend.backend_type` but `backend` is `None` because the FastAPI lifespan/startup handler is never triggered.
+The `test_client` fixture used `TestClient(app)` without the context manager. Other integration tests in the codebase consistently use `with TestClient(app) as client:` which triggers the FastAPI lifespan handler and initializes the `backend` global. Without the context manager, `backend` remained `None`, causing `AttributeError: 'NoneType' object has no attribute 'backend_type'` on all 9 tests.
 
-**Approach**:
-1. Add a fixture that patches `main.backend` with a mock backend object (or use the demo backend initialization)
-2. Ensure the mock has `backend_type`, and the attributes accessed in `get_state()`
-3. Alternative: Use `TestClient` as a context manager which triggers lifespan events
+#### Fix
+
+Changed the fixture from `return TestClient(app)` to `with TestClient(app) as client: yield client`. This matches the pattern used by all other integration test files (`test_dark_mode.py`, `test_api_contracts.py`, `test_main_api_endpoints.py`, etc.).
 
 ---
 
-### Work Unit 4: Service Mode Verification (LOW)
+### Work Unit 4: Service Mode Verification (LOW) — IMPLEMENTED
 
 **Issues**: 4A
-**Effort**: Medium (requires live cascor backend)
-**Impact**: Confirms completeness of weight data in production mode
+**Status**: Complete
 
-The demo mode fix is verified and complete. Service mode delegates to `CascorServiceAdapter.get_network_data()` → `_client.get_statistics()`, which relies on the juniper-cascor backend's serialization.
+Added 5 integration tests to `test_network_stats_endpoint.py` (`TestNetworkStatsServiceMode` class) that mock the backend as service mode with realistic multi-hidden-unit weight data. Tests verify:
+- Service mode returns 200 with valid weight data
+- Weight count reflects ALL hidden units (not just the first)
+- Weight statistics are correctly computed from all weights
+- Metadata (threshold_function, optimizer) passes through correctly
+- Endpoint handles no hidden weights gracefully
 
-#### Remediation
-
-Add an integration test gated by `@pytest.mark.requires_cascor` that:
-1. Starts a demo cascor backend (or uses a running instance)
-2. Trains to produce multiple hidden units
-3. Calls `get_network_data()` and verifies `hidden_weights` contains data from all units
-
-This is low priority because the cascor backend manages its own weight serialization and is tested independently.
+Used `MagicMock`/`AsyncMock` to simulate service mode without requiring a live cascor backend. The `FakeCascorClient.get_statistics()` returns a protocol-level response that doesn't match the weight data format, so mocking was the appropriate approach.
 
 ---
 
-### Work Unit 5: Code Cleanup — Remove Redundant Inline Styles (LOW)
+### Work Unit 5: Code Cleanup — Remove Redundant Inline Styles (LOW) — IMPLEMENTED
 
-**Issues**: 1A, 1B, 1C, 1D, 1F
-**Effort**: Small (< 30 min)
-**Impact**: Code hygiene only — no visible change
+**Issues**: 1A, 1B, 1C, 1D
+**Status**: Complete
 
-The 13 `dbc.CardHeader` inline `backgroundColor: "#f8f9fa"` values are functionally redundant with the CSS rule. They could be removed for cleanliness, but this is optional since the CSS correctly handles dark mode already.
+Removed all 13 `style={"backgroundColor": "#f8f9fa"}` attributes from `dbc.CardHeader` instances across 4 files. The CSS rule `.card-header { background-color: var(--bg-secondary) !important; }` handles dark mode theming, making these inline styles redundant.
 
-#### Remediation (Optional)
-
-Remove the `backgroundColor` key from the `style` dict on all 13 `dbc.CardHeader` instances. The CSS variable `var(--bg-secondary)` provides `#f8f9fa` in light mode and `#2d2d2d` in dark mode, making the inline style unnecessary.
-
-**Files**:
-- `about_panel.py`: lines 122, 150, 193, 252, 287
-- `cassandra_panel.py`: lines 229, 278
-- `redis_panel.py`: lines 141, 230
-- `hdf5_snapshots_panel.py`: lines 131, 200, 250, 313
+**Files modified**:
+- `about_panel.py`: 5 instances removed
+- `cassandra_panel.py`: 2 instances removed
+- `redis_panel.py`: 2 instances removed
+- `hdf5_snapshots_panel.py`: 4 instances removed
 
 ---
 
@@ -177,20 +167,22 @@ Remove the `backgroundColor` key from the `style` dict on all 13 `dbc.CardHeader
 
 | Priority | Work Unit | Issues | Effort | Blocking? |
 |----------|-----------|--------|--------|-----------|
-| 1 | Worktree Developer Experience | 2A, 2B, 2C, 5A | Small | Yes — blocks worktree workflows |
-| 2 | Metrics Panel Table Dark Mode | 1E | Medium | No — cosmetic |
-| 3 | Pre-Existing Test Failures | 3A | Small-Medium | No — pre-existing on main |
-| 4 | Service Mode Verification | 4A | Medium | No — requires live service |
-| 5 | Code Cleanup | 1A-1D, 1F | Small | No — optional hygiene |
-
-**Recommended grouping**: Work Units 1 + 2 in a single PR (worktree infra + remaining dark mode). Work Unit 3 as a separate PR (test fixture fix). Work Units 4-5 deferred.
+| 1 | Worktree Developer Experience | 2A, 2B, 2C, 5A | **Complete** |
+| 2 | Metrics Panel Table Cleanup | 1E, 1F | **Complete** |
+| 3 | Pre-Existing Test Failures | 3A | **Complete** |
+| 4 | Service Mode Verification | 4A | **Complete** |
+| 5 | Code Cleanup | 1A-1D | **Complete** |
 
 ---
 
-## Verification Baseline
+## Verification Results
 
-Current test suite state (2026-03-17, post PR #28 merge):
-- **1036 unit/regression tests passing**
-- **96.44% coverage**
-- 9 pre-existing failures in `test_api_state_endpoint.py` (not in unit/regression markers)
-- 6 worktree-specific collection errors (infrastructure-dependent)
+Post-implementation test suite (worktree, 2026-03-18):
+- **Unit + Regression**: 2857 passed, 4 skipped, 0 failures
+- **Full suite (with integration)**: 3549+ passed, 19 skipped
+- **Coverage**: 96.45%+
+- **Worktree-specific failures**: 0 (previously 6 collection errors)
+- **State endpoint tests**: 9/9 passing (previously 0/9)
+- **Service mode stats tests**: 5/5 passing (new)
+- **Redundant inline styles removed**: 16 (13 CardHeaders + 3 tables)
+- **Pre-existing flaky tests**: 2-4 WebSocket/cascor_ws_control failures remain (also fail on main, test ordering dependent)

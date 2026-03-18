@@ -119,7 +119,6 @@ class AboutPanel(BaseComponent):
                     [
                         dbc.CardHeader(
                             html.H5("License Information", className="mb-0"),
-                            style={"backgroundColor": "#f8f9fa"},
                         ),
                         dbc.CardBody(
                             [
@@ -147,7 +146,6 @@ class AboutPanel(BaseComponent):
                     [
                         dbc.CardHeader(
                             html.H5("Credits and Acknowledgments", className="mb-0"),
-                            style={"backgroundColor": "#f8f9fa"},
                         ),
                         dbc.CardBody(
                             [
@@ -190,7 +188,6 @@ class AboutPanel(BaseComponent):
                     [
                         dbc.CardHeader(
                             html.H5("Documentation and Support", className="mb-0"),
-                            style={"backgroundColor": "#f8f9fa"},
                         ),
                         dbc.CardBody(
                             [
@@ -249,7 +246,6 @@ class AboutPanel(BaseComponent):
                     [
                         dbc.CardHeader(
                             html.H5("Contact", className="mb-0"),
-                            style={"backgroundColor": "#f8f9fa"},
                         ),
                         dbc.CardBody(
                             [
@@ -284,7 +280,6 @@ class AboutPanel(BaseComponent):
                                 color="link",
                                 className="text-decoration-none p-0",
                             ),
-                            style={"backgroundColor": "#f8f9fa"},
                         ),
                         dbc.Collapse(
                             dbc.CardBody(

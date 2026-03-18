@@ -226,7 +226,6 @@ class CassandraPanel(BaseComponent):
                     [
                         dbc.CardHeader(
                             html.H5("Cluster Overview", className="mb-0"),
-                            style={"backgroundColor": "#f8f9fa"},
                         ),
                         dbc.CardBody(
                             [
@@ -275,7 +274,6 @@ class CassandraPanel(BaseComponent):
                     [
                         dbc.CardHeader(
                             html.H5("Schema Overview", className="mb-0"),
-                            style={"backgroundColor": "#f8f9fa"},
                         ),
                         dbc.CardBody(
                             [
