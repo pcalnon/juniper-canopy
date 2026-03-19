@@ -73,26 +73,18 @@ class TestMaxEpochsBackendState:
         """Create dashboard manager instance."""
         return DashboardManager(mock_config)
 
-    def test_max_epochs_in_backend_state_store(self, dashboard):
-        """Test that max_epochs is in backend params state store."""
+    def test_max_epochs_in_applied_params_store(self, dashboard):
+        """Test that applied-params-store exists in layout for tracking parameters."""
         layout_str = str(dashboard.app.layout)
-        assert "backend-params-state" in layout_str
-        # The store should have max_epochs: 200 in its default data
+        assert "applied-params-store" in layout_str
 
-    def test_max_epochs_default_in_store(self, dashboard):
-        """Test that max_epochs default value in store is 200."""
-        # Check that the data attribute of backend-params-state includes max_epochs: 200
-        layout_str = str(dashboard.app.layout)
-        # This is an indirect test; the actual data is set in the Store component
-        assert "backend-params-state" in layout_str
-
-    def test_sync_callback_includes_max_epochs(self, dashboard):
-        """Test that sync callback outputs max_epochs input value."""
+    def test_max_epochs_init_callback_exists(self, dashboard):
+        """Test that init callback outputs max_epochs input value."""
         callbacks = dashboard.app.callback_map
 
         # Look for callback that outputs to max-epochs-input
         found = any("max-epochs-input" in str(cb.get("output", "")) for cb in callbacks.values())
-        assert found, "Sync callback for max_epochs not found"
+        assert found, "Init callback for max_epochs not found"
 
 
 class TestMaxEpochsIntegration:
@@ -115,10 +107,10 @@ class TestMaxEpochsIntegration:
         assert "max-hidden-units-input" in layout_str
         assert "max-epochs-input" in layout_str
 
-    def test_training_controls_section_complete(self, dashboard):
-        """Test that Training Controls section has all three parameters."""
+    def test_training_parameters_section_complete(self, dashboard):
+        """Test that Training Parameters section has all three parameters."""
         layout_str = str(dashboard.app.layout)
-        assert "Training Controls" in layout_str
+        assert "Training Parameters" in layout_str
         assert "learning-rate-input" in layout_str
         assert "max-hidden-units-input" in layout_str
         assert "max-epochs-input" in layout_str

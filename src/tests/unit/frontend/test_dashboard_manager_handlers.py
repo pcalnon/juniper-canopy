@@ -834,51 +834,6 @@ class TestButtonTimeoutHandlers:
 class TestParameterHandlers:
     """Test parameter input and sync handlers."""
 
-    @patch("requests.get")
-    def test_sync_backend_params_handler_success(self, mock_get, dashboard_manager):
-        """Test backend params sync with success."""
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "learning_rate": 0.02,
-            "max_hidden_units": 15,
-            "max_epochs": 300,
-            "convergence_enabled": True,
-            "convergence_threshold": 0.001,
-        }
-        mock_get.return_value = mock_response
-
-        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._sync_backend_params_handler(n=1)
-
-        assert result["learning_rate"] == 0.02
-        assert result["max_hidden_units"] == 15
-        assert result["max_epochs"] == 300
-        assert result["convergence_enabled"] is True
-        assert result["convergence_threshold"] == 0.001
-
-    @patch("requests.get")
-    def test_sync_backend_params_handler_failure(self, mock_get, dashboard_manager):
-        """Test backend params sync with failure."""
-        mock_get.side_effect = Exception("API error")
-
-        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._sync_backend_params_handler(n=1)
-
-        assert result == dash.no_update
-
-    @patch("requests.get")
-    def test_sync_backend_params_handler_bad_status(self, mock_get, dashboard_manager):
-        """Test backend params sync with bad status code."""
-        mock_response = Mock()
-        mock_response.status_code = 500
-        mock_get.return_value = mock_response
-
-        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._sync_backend_params_handler(n=1)
-
-        assert result == dash.no_update
-
     def test_handle_parameter_changes_handler_learning_rate(self, dashboard_manager):
         """Test parameter change handler for learning rate."""
         result = dashboard_manager._handle_parameter_changes_handler(
@@ -982,8 +937,8 @@ class TestParameterHandlers:
             assert result[0]["convergence_threshold"] == 0.001  # default
 
     @patch("requests.get")
-    def test_init_applied_params_handler_success(self, mock_get, dashboard_manager):
-        """Test init applied params with success."""
+    def test_init_params_from_backend_handler_success(self, mock_get, dashboard_manager):
+        """Test init params from backend with success."""
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
@@ -996,73 +951,79 @@ class TestParameterHandlers:
         mock_get.return_value = mock_response
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._init_applied_params_handler(n=1, current=None)
+            result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-        assert result["learning_rate"] == 0.01
-        assert result["convergence_enabled"] is True
-        assert result["convergence_threshold"] == 0.001
+        assert result[0] == 0.01  # learning rate
+        assert result[1] == 10  # max hidden units
+        assert result[2] == 200  # max epochs
+        assert result[3] == ["enabled"]  # convergence checkbox
+        assert result[4] == 0.001  # convergence threshold
+        assert result[5]["learning_rate"] == 0.01
+        assert result[5]["convergence_enabled"] is True
 
-    def test_init_applied_params_handler_already_set(self, dashboard_manager):
-        """Test init applied params when already set."""
-        current = {"learning_rate": 0.02}
+    def test_init_params_from_backend_handler_already_set(self, dashboard_manager):
+        """Test init params from backend when already set."""
+        current_applied = {"learning_rate": 0.02}
 
-        result = dashboard_manager._init_applied_params_handler(n=1, current=current)
+        result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=current_applied)
 
-        assert result == dash.no_update
+        assert result == (dash.no_update,) * 6
 
     @patch("requests.get")
-    def test_init_applied_params_handler_failure(self, mock_get, dashboard_manager):
-        """Test init applied params with failure."""
+    def test_init_params_from_backend_handler_failure(self, mock_get, dashboard_manager):
+        """Test init params from backend with failure."""
         mock_get.side_effect = Exception("API error")
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._init_applied_params_handler(n=1, current=None)
+            result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-        assert result == dash.no_update
+        assert result == (dash.no_update,) * 6
 
 
 # =============================================================================
-# Input Value Sync Handler (Lines 1071-1079)
+# Init Params From Backend Handler (one-time initialization)
 # =============================================================================
 @pytest.mark.unit
-class TestInputValueSyncHandlers:
-    """Test input value synchronization handlers."""
+class TestInitParamsFromBackendHandlers:
+    """Test one-time parameter initialization from backend handler."""
 
-    def test_sync_input_values_from_backend_handler_with_state(self, dashboard_manager):
-        """Test sync input values with backend state."""
-        backend_state = {
+    @patch("requests.get")
+    def test_init_params_from_backend_with_convergence_disabled(self, mock_get, dashboard_manager):
+        """Test init params from backend with convergence disabled."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
             "learning_rate": 0.02,
             "max_hidden_units": 15,
             "max_epochs": 300,
-            "convergence_enabled": True,
-            "convergence_threshold": 0.001,
+            "convergence_enabled": False,
+            "convergence_threshold": 0.01,
         }
+        mock_get.return_value = mock_response
 
-        result = dashboard_manager._sync_input_values_from_backend_handler(backend_state=backend_state)
+        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
+            result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-        assert result == (0.02, 15, 300, ["enabled"], 0.001)
+        assert result[0] == 0.02
+        assert result[1] == 15
+        assert result[2] == 300
+        assert result[3] == []  # convergence disabled -> empty checklist
+        assert result[4] == 0.01
+        assert result[5]["convergence_enabled"] is False
 
-    def test_sync_input_values_from_backend_handler_without_state(self, dashboard_manager):
-        """Test sync input values without backend state."""
-        result = dashboard_manager._sync_input_values_from_backend_handler(backend_state=None)
+    @patch("requests.get")
+    def test_init_params_from_backend_with_partial_state(self, mock_get, dashboard_manager):
+        """Test init params from backend with partial state uses defaults."""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"learning_rate": 0.05}
+        mock_get.return_value = mock_response
 
-        assert result == (dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update)
-
-    def test_sync_input_values_from_backend_handler_empty_state(self, dashboard_manager):
-        """Test sync input values with empty dict returns no_update (empty dict is falsy)."""
-        result = dashboard_manager._sync_input_values_from_backend_handler(backend_state={})
-
-        # Empty dict is falsy, so returns no_update
-        assert result == (dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update)
-
-    def test_sync_input_values_from_backend_handler_partial_state(self, dashboard_manager):
-        """Test sync input values with partial state."""
-        backend_state = {"learning_rate": 0.05}
-
-        result = dashboard_manager._sync_input_values_from_backend_handler(backend_state=backend_state)
+        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
+            result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=None)
 
         assert result[0] == 0.05  # provided
-        assert result[1] == 10  # default
-        assert result[2] == 200  # default
-        assert result[3] == ["enabled"]  # default (convergence_enabled=True -> ["enabled"])
+        assert result[1] == 20  # default (TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)
+        assert result[2] == 300  # default (TrainingConstants.DEFAULT_TRAINING_EPOCHS)
+        assert result[3] == ["enabled"]  # default (convergence_enabled=True)
         assert result[4] == 0.001  # default

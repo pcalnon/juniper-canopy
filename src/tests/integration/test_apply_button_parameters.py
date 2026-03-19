@@ -241,8 +241,8 @@ class TestApplyButtonDashboardIntegration:
         assert disabled is False
         assert "Unsaved" in status
 
-    def test_init_applied_params_uses_correct_keys(self, reset_singletons):
-        """_init_applied_params_handler should use max_hidden_units and max_epochs."""
+    def test_init_params_from_backend_uses_correct_keys(self, reset_singletons):
+        """_init_params_from_backend_handler should use max_hidden_units and max_epochs."""
         from werkzeug.test import EnvironBuilder
 
         from frontend.dashboard_manager import DashboardManager
@@ -269,14 +269,16 @@ class TestApplyButtonDashboardIntegration:
             env = builder.get_environ()
 
             with manager.app.server.request_context(env):
-                result = manager._init_applied_params_handler(n=1, current=None)
+                result = manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-            assert "max_hidden_units" in result
-            assert "max_epochs" in result
-            assert "convergence_enabled" in result
-            assert "convergence_threshold" in result
-            assert "hidden_units" not in result
-            assert "epochs" not in result
+            # Result is a tuple: (lr, hu, epochs, conv_checkbox, conv_threshold, applied_dict)
+            applied = result[5]
+            assert "max_hidden_units" in applied
+            assert "max_epochs" in applied
+            assert "convergence_enabled" in applied
+            assert "convergence_threshold" in applied
+            assert "hidden_units" not in applied
+            assert "epochs" not in applied
 
 
 class TestLearningRateApplyButtonP012:
