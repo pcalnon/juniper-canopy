@@ -935,6 +935,8 @@ class TestParameterTrackingHandler:
 
     def test_track_param_changes_no_changes(self, reset_singletons):
         """Test tracking when params match applied."""
+        import dash
+
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
@@ -943,7 +945,7 @@ class TestParameterTrackingHandler:
         disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
 
         assert disabled is True  # Button disabled when no changes
-        assert status == ""
+        assert status is dash.no_update
 
     def test_track_param_changes_with_changes(self, reset_singletons):
         """Test tracking when params differ from applied."""

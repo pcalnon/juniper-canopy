@@ -789,10 +789,12 @@ class TestParameterHandlers:
 
     def test_track_param_changes_no_changes(self, dashboard_manager):
         """Test track_param_changes returns disabled when no changes."""
+        import dash
+
         applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
         disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 200, ["enabled"], 0.001, applied)
         assert disabled is True
-        assert status == ""
+        assert status is dash.no_update
 
     def test_track_param_changes_lr_changed(self, dashboard_manager):
         """Test track_param_changes detects learning_rate changes."""
@@ -817,10 +819,12 @@ class TestParameterHandlers:
 
     def test_track_param_changes_float_tolerance(self, dashboard_manager):
         """Test track_param_changes uses float tolerance for learning_rate."""
+        import dash
+
         applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
         disabled, status = dashboard_manager._track_param_changes_handler(0.01 + 1e-10, 10, 200, ["enabled"], 0.001, applied)
         assert disabled is True
-        assert status == ""
+        assert status is dash.no_update
 
     def test_apply_parameters_no_clicks(self, dashboard_manager):
         """Test apply_parameters returns no_update when no clicks."""

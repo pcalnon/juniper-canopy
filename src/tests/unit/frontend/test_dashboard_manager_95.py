@@ -571,10 +571,12 @@ class TestTrackParamChangesEdgeCases:
 
     def test_track_param_changes_float_precision_edge(self, dashboard_manager):
         """Test track_param_changes with float precision edge case."""
+        import dash
+
         applied = {"learning_rate": 0.0100000001, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
         disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 200, ["enabled"], 0.001, applied)
         assert disabled is True
-        assert status == ""
+        assert status is dash.no_update
 
 
 class TestAdditionalHandlerCases:

@@ -593,6 +593,8 @@ class DashboardManager:
                 # Update intervals
                 dcc.Interval(id="fast-update-interval", interval=DashboardConstants.FAST_UPDATE_INTERVAL_MS, n_intervals=0),
                 dcc.Interval(id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0),
+                # One-shot interval for parameter initialization (fires once, 1s after load)
+                dcc.Interval(id="params-init-interval", interval=1000, max_intervals=1, n_intervals=0),
                 # Hidden div to store WebSocket data
                 html.Div(id="websocket-data", style={"display": "none"}),
                 dcc.Store(id="training-control-action", data=None),
@@ -926,6 +928,7 @@ class DashboardManager:
             return self._apply_parameters_handler(n_clicks, lr, hu, epochs, conv_enabled, conv_threshold)
 
         # Initialize input fields and applied-params-store from backend on first load
+        # Uses dedicated one-shot interval (max_intervals=1) to guarantee single execution
         @self.app.callback(
             [
                 Output("learning-rate-input", "value"),
@@ -935,7 +938,7 @@ class DashboardManager:
                 Output("convergence-threshold-input", "value"),
                 Output("applied-params-store", "data", allow_duplicate=True),
             ],
-            Input("slow-update-interval", "n_intervals"),
+            Input("params-init-interval", "n_intervals"),
             dash.dependencies.State("applied-params-store", "data"),
             prevent_initial_call=True,
         )
@@ -1450,8 +1453,11 @@ class DashboardManager:
 
         has_changes = lr_changed or hu_changed or epochs_changed or conv_enabled_changed or conv_threshold_changed
 
-        status = "⚠️ Unsaved changes" if has_changes else ""
-        return not has_changes, status
+        if has_changes:
+            return False, "⚠️ Unsaved changes"
+        # No changes: disable button but preserve existing status message
+        # (avoids overwriting "✓ Parameters applied" from apply_parameters callback)
+        return True, dash.no_update
 
     def _apply_parameters_handler(self, n_clicks, lr, hu, epochs, conv_enabled, conv_threshold):
         """Apply parameters to backend and update applied store."""

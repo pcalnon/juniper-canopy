@@ -860,12 +860,14 @@ class TestParameterHandlers:
 
     def test_track_param_changes_handler_no_changes(self, dashboard_manager):
         """Test param changes tracking with no changes."""
+        import dash
+
         applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
 
         result = dashboard_manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
 
         assert result[0] is True  # disabled
-        assert result[1] == ""
+        assert result[1] is dash.no_update
 
     def test_track_param_changes_handler_with_changes(self, dashboard_manager):
         """Test param changes tracking with changes."""
