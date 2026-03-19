@@ -409,7 +409,16 @@ class DashboardManager:
                                                     ],
                                                     className="training-button-group",
                                                 ),
-                                                html.Hr(),
+                                            ]
+                                        ),
+                                    ],
+                                    className="mb-3",
+                                ),
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader(html.H5("Training Parameters")),
+                                        dbc.CardBody(
+                                            [
                                                 html.P("Learning Rate:", className="mb-1 fw-bold"),
                                                 dbc.Input(
                                                     id="learning-rate-input",
@@ -584,20 +593,11 @@ class DashboardManager:
                 # Update intervals
                 dcc.Interval(id="fast-update-interval", interval=DashboardConstants.FAST_UPDATE_INTERVAL_MS, n_intervals=0),
                 dcc.Interval(id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0),
+                # One-shot interval for parameter initialization (fires once, 1s after load)
+                dcc.Interval(id="params-init-interval", interval=1000, max_intervals=1, n_intervals=0),
                 # Hidden div to store WebSocket data
                 html.Div(id="websocket-data", style={"display": "none"}),
                 dcc.Store(id="training-control-action", data=None),
-                # Parameter state store (tracks last known backend state)
-                dcc.Store(
-                    id="backend-params-state",
-                    data={
-                        "learning_rate": TrainingConstants.DEFAULT_LEARNING_RATE,
-                        "max_hidden_units": TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS,
-                        "max_epochs": TrainingConstants.DEFAULT_TRAINING_EPOCHS,
-                        "convergence_enabled": TrainingConstants.DEFAULT_CONVERGENCE_ENABLED,
-                        "convergence_threshold": TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD,
-                    },
-                ),
                 # Button state management stores
                 dcc.Store(
                     id="button-states",
@@ -610,11 +610,7 @@ class DashboardManager:
                     },
                 ),
                 dcc.Store(id="last-button-click", data={"button": None, "timestamp": 0}),
-                # Stores for parameter tracking
-                dcc.Store(
-                    id="pending-params-store",
-                    data={"learning_rate": None, "max_hidden_units": None, "max_epochs": None},
-                ),
+                # Store for tracking applied parameter values
                 dcc.Store(
                     id="applied-params-store",
                     data={},
@@ -881,29 +877,6 @@ class DashboardManager:
     def _setup_backend_callbacks(self):
 
         @self.app.callback(
-            [
-                Output("learning-rate-input", "value"),
-                Output("max-hidden-units-input", "value"),
-                Output("max-epochs-input", "value"),
-                Output("convergence-enabled-checkbox", "value"),
-                Output("convergence-threshold-input", "value"),
-            ],
-            Input("backend-params-state", "data"),
-            prevent_initial_call=True,
-        )
-        def sync_input_values_from_backend(backend_state):
-            """Sync input values from backend state (only when backend changes)."""
-            return self._sync_input_values_from_backend_handler(backend_state=backend_state)
-
-        @self.app.callback(
-            Output("backend-params-state", "data"),
-            Input("slow-update-interval", "n_intervals"),
-        )
-        def sync_backend_params(n):
-            """Sync backend parameter state to store."""
-            return self._sync_backend_params_handler(n=n)
-
-        @self.app.callback(
             Output("training-control-action", "data", allow_duplicate=True),
             [
                 Input("learning-rate-input", "value"),
@@ -954,16 +927,24 @@ class DashboardManager:
             """Apply parameters to backend and update applied store."""
             return self._apply_parameters_handler(n_clicks, lr, hu, epochs, conv_enabled, conv_threshold)
 
-        # Initialize applied-params-store from backend on load
+        # Initialize input fields and applied-params-store from backend on first load
+        # Uses dedicated one-shot interval (max_intervals=1) to guarantee single execution
         @self.app.callback(
-            Output("applied-params-store", "data", allow_duplicate=True),
-            Input("slow-update-interval", "n_intervals"),
+            [
+                Output("learning-rate-input", "value"),
+                Output("max-hidden-units-input", "value"),
+                Output("max-epochs-input", "value"),
+                Output("convergence-enabled-checkbox", "value"),
+                Output("convergence-threshold-input", "value"),
+                Output("applied-params-store", "data", allow_duplicate=True),
+            ],
+            Input("params-init-interval", "n_intervals"),
             dash.dependencies.State("applied-params-store", "data"),
             prevent_initial_call=True,
         )
-        def init_applied_params(n, current):
-            """Initialize applied params from backend if empty."""
-            return self._init_applied_params_handler(n, current)
+        def init_params_from_backend(n, current_applied):
+            """Initialize input values and applied params from backend on first load."""
+            return self._init_params_from_backend_handler(n, current_applied)
 
     # Define event handlers for callbacks
     def _toggle_dark_mode_handler(self, n_clicks=None):
@@ -1112,19 +1093,6 @@ class DashboardManager:
             str(epoch),
             str(hidden_units),
         )
-
-    def _sync_input_values_from_backend_handler(self, backend_state=None):
-        """Sync input values from backend state (only when backend changes)."""
-        if backend_state:
-            conv_enabled = backend_state.get("convergence_enabled", True)
-            return (
-                backend_state.get("learning_rate", 0.01),
-                backend_state.get("max_hidden_units", 10),
-                backend_state.get("max_epochs", 200),
-                ["enabled"] if conv_enabled else [],
-                backend_state.get("convergence_threshold", 0.001),
-            )
-        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
     def _update_network_info_handler(self, n=None):
         """Update network information panel from API."""
@@ -1431,23 +1399,6 @@ class DashboardManager:
 
         return new_states if changed else dash.no_update
 
-    def _sync_backend_params_handler(self, n=None):
-        """Sync backend parameter state to store."""
-        try:
-            state_response = requests.get(self._api_url("/api/state"), timeout=DashboardConstants.API_TIMEOUT_SECONDS)
-            if state_response.status_code == 200:
-                state = state_response.json()
-                return {
-                    "learning_rate": state.get("learning_rate", 0.01),
-                    "max_hidden_units": state.get("max_hidden_units", 10),
-                    "max_epochs": state.get("max_epochs", 200),
-                    "convergence_enabled": state.get("convergence_enabled", True),
-                    "convergence_threshold": state.get("convergence_threshold", 0.001),
-                }
-        except Exception as e:
-            self.logger.warning(f"Failed to sync backend params: {e}")
-        return dash.no_update
-
     def _handle_parameter_changes_handler(self, learning_rate=None, max_hidden_units=None, **kwargs):
         """Handle parameter input changes - now just logs, actual send is via Apply button."""
         ctx = get_callback_context()
@@ -1502,8 +1453,11 @@ class DashboardManager:
 
         has_changes = lr_changed or hu_changed or epochs_changed or conv_enabled_changed or conv_threshold_changed
 
-        status = "⚠️ Unsaved changes" if has_changes else ""
-        return not has_changes, status
+        if has_changes:
+            return False, "⚠️ Unsaved changes"
+        # No changes: disable button but preserve existing status message
+        # (avoids overwriting "✓ Parameters applied" from apply_parameters callback)
+        return True, dash.no_update
 
     def _apply_parameters_handler(self, n_clicks, lr, hu, epochs, conv_enabled, conv_threshold):
         """Apply parameters to backend and update applied store."""
@@ -1533,24 +1487,44 @@ class DashboardManager:
             self.logger.warning(f"Apply failed: {e}")
             return dash.no_update, f"❌ Error: {str(e)[:30]}"
 
-    def _init_applied_params_handler(self, n, current):
-        """Initialize applied params from backend if empty."""
-        if current:
-            return dash.no_update
+    def _init_params_from_backend_handler(self, n, current_applied):
+        """Initialize input values and applied params from backend on first load.
+
+        Only runs once — when applied-params-store is empty (first interval tick).
+        After initialization, returns no_update for all outputs.
+
+        Returns:
+            Tuple of (lr, hu, epochs, conv_checkbox_value, conv_threshold, applied_dict)
+        """
+        if current_applied:
+            return (dash.no_update,) * 6
         try:
-            response = requests.get(self._api_url("/api/state"), timeout=2)
+            response = requests.get(self._api_url("/api/state"), timeout=DashboardConstants.API_TIMEOUT_SECONDS)
             if response.status_code == 200:
                 state = response.json()
-                return {
-                    "learning_rate": state.get("learning_rate", 0.01),
-                    "max_hidden_units": state.get("max_hidden_units", 10),
-                    "max_epochs": state.get("max_epochs", 200),
-                    "convergence_enabled": state.get("convergence_enabled", True),
-                    "convergence_threshold": state.get("convergence_threshold", 0.001),
+                lr = state.get("learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE)
+                hu = state.get("max_hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)
+                epochs = state.get("max_epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS)
+                conv_enabled = state.get("convergence_enabled", TrainingConstants.DEFAULT_CONVERGENCE_ENABLED)
+                conv_threshold = state.get("convergence_threshold", TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD)
+                applied = {
+                    "learning_rate": lr,
+                    "max_hidden_units": hu,
+                    "max_epochs": epochs,
+                    "convergence_enabled": conv_enabled,
+                    "convergence_threshold": conv_threshold,
                 }
+                return (
+                    lr,
+                    hu,
+                    epochs,
+                    ["enabled"] if conv_enabled else [],
+                    conv_threshold,
+                    applied,
+                )
         except Exception as e:
-            self.logger.warning(f"Failed to initialize applied params: {e}")
-        return dash.no_update
+            self.logger.warning(f"Failed to initialize params from backend: {e}")
+        return (dash.no_update,) * 6
 
     def register_component(self, component: BaseComponent):
         """

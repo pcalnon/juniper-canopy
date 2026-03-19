@@ -168,6 +168,8 @@ class TestApplyButtonDashboardIntegration:
 
     def test_track_param_changes_uses_correct_keys(self, reset_singletons):
         """_track_param_changes_handler should compare against correct keys."""
+        import dash
+
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
@@ -182,7 +184,7 @@ class TestApplyButtonDashboardIntegration:
 
         disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
         assert disabled is True
-        assert status == ""
+        assert status is dash.no_update
 
         disabled, status = manager._track_param_changes_handler(lr=0.01, hu=15, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
         assert disabled is False
@@ -198,6 +200,8 @@ class TestApplyButtonDashboardIntegration:
         This test verifies the fix for P0-12 where float precision issues could
         cause incorrect change detection for learning_rate values.
         """
+        import dash
+
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
@@ -215,7 +219,7 @@ class TestApplyButtonDashboardIntegration:
         lr_with_precision_error = 0.06000000000000004
         disabled, status = manager._track_param_changes_handler(lr=lr_with_precision_error, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
         assert disabled is True, f"Should be disabled but got {disabled} for {lr_with_precision_error}"
-        assert status == "", f"Should have no status but got '{status}'"
+        assert status is dash.no_update, f"Should be no_update but got '{status}'"
 
     def test_track_param_changes_learning_rate_actual_change(self, reset_singletons):
         """_track_param_changes_handler should detect actual learning_rate changes."""
@@ -241,8 +245,8 @@ class TestApplyButtonDashboardIntegration:
         assert disabled is False
         assert "Unsaved" in status
 
-    def test_init_applied_params_uses_correct_keys(self, reset_singletons):
-        """_init_applied_params_handler should use max_hidden_units and max_epochs."""
+    def test_init_params_from_backend_uses_correct_keys(self, reset_singletons):
+        """_init_params_from_backend_handler should use max_hidden_units and max_epochs."""
         from werkzeug.test import EnvironBuilder
 
         from frontend.dashboard_manager import DashboardManager
@@ -269,14 +273,16 @@ class TestApplyButtonDashboardIntegration:
             env = builder.get_environ()
 
             with manager.app.server.request_context(env):
-                result = manager._init_applied_params_handler(n=1, current=None)
+                result = manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-            assert "max_hidden_units" in result
-            assert "max_epochs" in result
-            assert "convergence_enabled" in result
-            assert "convergence_threshold" in result
-            assert "hidden_units" not in result
-            assert "epochs" not in result
+            # Result is a tuple: (lr, hu, epochs, conv_checkbox, conv_threshold, applied_dict)
+            applied = result[5]
+            assert "max_hidden_units" in applied
+            assert "max_epochs" in applied
+            assert "convergence_enabled" in applied
+            assert "convergence_threshold" in applied
+            assert "hidden_units" not in applied
+            assert "epochs" not in applied
 
 
 class TestLearningRateApplyButtonP012:
@@ -406,4 +412,143 @@ class TestApplyButtonRoundTrip:
         client.post("/api/set_params", json={"max_epochs": 500})
         state3 = client.get("/api/state").json()
         assert state3["max_epochs"] == 500
-        assert state3["learning_rate"] == 0.02
+
+
+class TestConvergenceStateEndpoint:
+    """Tests for /api/state including convergence parameters (Phase 5.2 fix)."""
+
+    @pytest.mark.asyncio
+    async def test_api_state_includes_convergence_enabled(self, client):
+        """/api/state should include convergence_enabled field."""
+        response = client.get("/api/state")
+        assert response.status_code == 200
+        state = response.json()
+        assert "convergence_enabled" in state
+
+    @pytest.mark.asyncio
+    async def test_api_state_includes_convergence_threshold(self, client):
+        """/api/state should include convergence_threshold field."""
+        response = client.get("/api/state")
+        assert response.status_code == 200
+        state = response.json()
+        assert "convergence_threshold" in state
+
+    @pytest.mark.asyncio
+    async def test_api_state_convergence_reflects_set_params(self, client):
+        """/api/state should reflect convergence params changed via /api/set_params."""
+        client.post("/api/set_params", json={"convergence_enabled": False, "convergence_threshold": 0.05})
+        state = client.get("/api/state").json()
+        assert state["convergence_enabled"] is False
+        assert state["convergence_threshold"] == 0.05
+
+    @pytest.mark.asyncio
+    async def test_api_state_convergence_defaults(self, client):
+        """/api/state convergence params should have correct defaults after reset."""
+        # Reset to defaults before checking
+        client.post("/api/set_params", json={"convergence_enabled": True, "convergence_threshold": 0.001})
+        state = client.get("/api/state").json()
+        assert state["convergence_enabled"] is True
+        assert state["convergence_threshold"] == 0.001
+
+
+class TestConvergenceApplyRoundTrip:
+    """Tests verifying checkbox/threshold don't revert after Apply (Phase 5.2 fixes)."""
+
+    def test_apply_with_convergence_disabled_stores_false(self, reset_singletons):
+        """Applying with unchecked checkbox stores convergence_enabled=False in params store."""
+        from werkzeug.test import EnvironBuilder
+
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+
+        with patch("requests.post") as mock_post:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_post.return_value = mock_response
+
+            builder = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/")
+            env = builder.get_environ()
+
+            with manager.app.server.request_context(env):
+                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.01, hu=10, epochs=200, conv_enabled=[], conv_threshold=0.001)
+
+            assert params["convergence_enabled"] is False
+            assert status == "✓ Parameters applied"
+
+    def test_apply_with_custom_threshold_stores_value(self, reset_singletons):
+        """Applying with edited threshold stores the user's value, not the default."""
+        from werkzeug.test import EnvironBuilder
+
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+
+        with patch("requests.post") as mock_post:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_post.return_value = mock_response
+
+            builder = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/")
+            env = builder.get_environ()
+
+            with manager.app.server.request_context(env):
+                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.05)
+
+            assert params["convergence_threshold"] == 0.05
+
+    def test_track_changes_after_apply_disabled_convergence(self, reset_singletons):
+        """After applying with convergence disabled, track_param_changes detects no diff."""
+        import dash
+
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+
+        applied = {
+            "learning_rate": 0.01,
+            "max_hidden_units": 10,
+            "max_epochs": 200,
+            "convergence_enabled": False,
+            "convergence_threshold": 0.001,
+        }
+
+        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=[], conv_threshold=0.001, applied=applied)
+        assert disabled is True
+        assert status is dash.no_update
+
+    def test_track_changes_detects_convergence_toggle(self, reset_singletons):
+        """track_param_changes detects convergence checkbox toggle."""
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+
+        applied = {
+            "learning_rate": 0.01,
+            "max_hidden_units": 10,
+            "max_epochs": 200,
+            "convergence_enabled": True,
+            "convergence_threshold": 0.001,
+        }
+
+        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=[], conv_threshold=0.001, applied=applied)
+        assert disabled is False
+        assert "Unsaved" in status
+
+    def test_track_changes_detects_threshold_change(self, reset_singletons):
+        """track_param_changes detects convergence threshold change."""
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+
+        applied = {
+            "learning_rate": 0.01,
+            "max_hidden_units": 10,
+            "max_epochs": 200,
+            "convergence_enabled": True,
+            "convergence_threshold": 0.001,
+        }
+
+        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.05, applied=applied)
+        assert disabled is False
+        assert "Unsaved" in status

@@ -7,7 +7,7 @@ Targets missing lines:
 - Lines 720, 731, 740, 749, 757, 768, 778, 787, 796, 805: Callback handler returns
 - Lines 832, 849, 868, 881, 899, 907, 919, 938, 956, 967: More callback handlers
 - Lines 1326->1331: Branch in _handle_training_buttons_handler (debounce branch)
-- Lines 1517->1526: _init_applied_params_handler non-200 branch
+- _init_params_from_backend_handler non-200 branch
 - Lines 1565-1566: start_server method
 """
 
@@ -55,28 +55,28 @@ class TestStartServerMethod:
         mock_run.assert_called_once_with(host="127.0.0.1", port=8050, debug=True)
 
 
-class TestInitAppliedParamsNon200:
-    """Test _init_applied_params_handler non-200 branch - lines 1517->1526."""
+class TestInitParamsFromBackendNon200:
+    """Test _init_params_from_backend_handler non-200 branch."""
 
-    def test_init_applied_params_non_200_status(self, dashboard_manager, mocker):
-        """Test init_applied_params returns no_update on non-200 status."""
+    def test_init_params_from_backend_non_200_status(self, dashboard_manager, mocker):
+        """Test init_params_from_backend returns no_update on non-200 status."""
         mock_response = MagicMock()
         mock_response.status_code = 500
         mocker.patch("requests.get", return_value=mock_response)
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._init_applied_params_handler(1, None)
-            assert result == dash.no_update
+            result = dashboard_manager._init_params_from_backend_handler(1, None)
+            assert result == (dash.no_update,) * 6
 
-    def test_init_applied_params_404_status(self, dashboard_manager, mocker):
-        """Test init_applied_params returns no_update on 404 status."""
+    def test_init_params_from_backend_404_status(self, dashboard_manager, mocker):
+        """Test init_params_from_backend returns no_update on 404 status."""
         mock_response = MagicMock()
         mock_response.status_code = 404
         mocker.patch("requests.get", return_value=mock_response)
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._init_applied_params_handler(1, None)
-            assert result == dash.no_update
+            result = dashboard_manager._init_params_from_backend_handler(1, None)
+            assert result == (dash.no_update,) * 6
 
 
 class TestTrainingButtonsDebounce:
@@ -272,7 +272,6 @@ class TestCallbackWrappersDirectExecution:
             "start-button.disabled",
             "button-states.data",
             "learning-rate-input.value",
-            "backend-params-state.data",
             "apply-params-button.disabled",
             "applied-params-store.data",
         ]
@@ -511,19 +510,25 @@ class TestButtonTimeoutHandler:
         assert result["pause"]["loading"] is False
 
 
-class TestSyncBackendParamsHandler:
-    """Test sync backend params handler variations."""
+class TestInitParamsFromBackendHandler:
+    """Test init params from backend handler variations."""
 
-    def test_sync_backend_params_success_with_defaults(self, dashboard_manager, mocker):
-        """Test sync backend params with missing fields uses defaults."""
+    def test_init_params_from_backend_success_with_defaults(self, dashboard_manager, mocker):
+        """Test init params from backend with missing fields uses defaults."""
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {}
         mocker.patch("requests.get", return_value=mock_response)
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._sync_backend_params_handler(n=1)
-            assert result == {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
+            result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=None)
+            # Returns tuple: (lr, hu, epochs, conv_checkbox, conv_threshold, applied_dict)
+            assert result[0] == 0.01  # default learning rate
+            assert result[1] == 20  # default max hidden units (TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)
+            assert result[2] == 300  # default max epochs (TrainingConstants.DEFAULT_TRAINING_EPOCHS)
+            assert result[3] == ["enabled"]  # default convergence enabled
+            assert result[4] == 0.001  # default convergence threshold
+            assert result[5]["learning_rate"] == 0.01
 
 
 class TestApplyParametersHandler:
@@ -544,27 +549,14 @@ class TestApplyParametersHandler:
             assert result["convergence_threshold"] == 0.001
 
 
-class TestSyncInputValuesHandler:
-    """Test sync input values from backend handler."""
+class TestInitParamsAlreadyInitialized:
+    """Test init params from backend when already initialized."""
 
-    def test_sync_input_with_partial_state(self, dashboard_manager):
-        """Test sync input values with partial backend state."""
-        backend_state = {"learning_rate": 0.05}
-        result = dashboard_manager._sync_input_values_from_backend_handler(backend_state=backend_state)
-        assert result[0] == 0.05
-        assert result[1] == 10
-        assert result[2] == 200
-
-    def test_sync_input_with_none_state(self, dashboard_manager):
-        """Test sync input values with None backend state returns no_update."""
-        result = dashboard_manager._sync_input_values_from_backend_handler(backend_state=None)
-        assert result == (dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update)
-
-    def test_sync_input_with_empty_dict_state(self, dashboard_manager):
-        """Test sync input values with empty dict backend state uses defaults."""
-        backend_state = {}
-        result = dashboard_manager._sync_input_values_from_backend_handler(backend_state=backend_state)
-        assert result == (dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update)
+    def test_init_params_already_applied_returns_no_update(self, dashboard_manager):
+        """Test init params returns no_update when applied-params-store already has data."""
+        current_applied = {"learning_rate": 0.05}
+        result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=current_applied)
+        assert result == (dash.no_update,) * 6
 
 
 class TestTrackParamChangesEdgeCases:
@@ -579,10 +571,12 @@ class TestTrackParamChangesEdgeCases:
 
     def test_track_param_changes_float_precision_edge(self, dashboard_manager):
         """Test track_param_changes with float precision edge case."""
+        import dash
+
         applied = {"learning_rate": 0.0100000001, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
         disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 200, ["enabled"], 0.001, applied)
         assert disabled is True
-        assert status == ""
+        assert status is dash.no_update
 
 
 class TestAdditionalHandlerCases:

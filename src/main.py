@@ -510,11 +510,19 @@ async def get_state():
     """
     Get current training state.
     Returns:
-        TrainingState as JSON
+        TrainingState as JSON (includes convergence params from DemoMode when available)
     """
     # Return demo mode's live training state if available, otherwise global
-    if backend.backend_type == "demo" and hasattr(backend, "_demo") and backend._demo.training_state:
-        return backend._demo.training_state.get_state()
+    if backend.backend_type == "demo" and hasattr(backend, "_demo"):
+        demo = backend._demo
+        if demo.training_state:
+            state = demo.training_state.get_state()
+        else:
+            state = training_state.get_state()
+        # Merge convergence params from DemoMode (not stored in TrainingState)
+        state["convergence_enabled"] = getattr(demo, "convergence_enabled", True)
+        state["convergence_threshold"] = getattr(demo, "convergence_threshold", 0.001)
+        return state
 
     return training_state.get_state()
 

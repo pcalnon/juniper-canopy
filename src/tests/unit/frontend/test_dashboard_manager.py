@@ -339,19 +339,6 @@ class TestDashboardManagerHandlers:
         result = dashboard_manager._toggle_network_info_details_handler(n=None)
         assert result is False
 
-    def test_sync_input_values_from_backend_handler_with_state(self, dashboard_manager):
-        """Test sync_input_values returns backend state values."""
-        backend_state = {"learning_rate": 0.02, "max_hidden_units": 15, "max_epochs": 300, "convergence_enabled": True, "convergence_threshold": 0.001}
-        result = dashboard_manager._sync_input_values_from_backend_handler(backend_state=backend_state)
-        assert result == (0.02, 15, 300, ["enabled"], 0.001)
-
-    def test_sync_input_values_from_backend_handler_none(self, dashboard_manager):
-        """Test sync_input_values returns no_update when state is None."""
-        import dash
-
-        result = dashboard_manager._sync_input_values_from_backend_handler(backend_state=None)
-        assert result == (dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update)
-
     def test_update_topology_store_handler_inactive_tab(self, dashboard_manager):
         """Test topology store handler returns no_update when tab is inactive."""
         import dash
@@ -783,39 +770,6 @@ class TestTrainingButtonHandlers:
         result = dashboard_manager._handle_button_timeout_and_acks_handler(button_states=button_states)
         assert result == dash.no_update
 
-    def test_sync_backend_params_handler_success(self, dashboard_manager, mocker):
-        """Test sync_backend_params fetches and returns params."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"learning_rate": 0.02, "max_hidden_units": 15, "max_epochs": 300, "convergence_enabled": True, "convergence_threshold": 0.001}
-        mocker.patch("requests.get", return_value=mock_response)
-
-        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._sync_backend_params_handler(n=1)
-            assert result == {"learning_rate": 0.02, "max_hidden_units": 15, "max_epochs": 300, "convergence_enabled": True, "convergence_threshold": 0.001}
-
-    def test_sync_backend_params_handler_error(self, dashboard_manager, mocker):
-        """Test sync_backend_params returns no_update on error."""
-        import dash
-
-        mocker.patch("requests.get", side_effect=Exception("Connection error"))
-
-        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._sync_backend_params_handler(n=1)
-            assert result == dash.no_update
-
-    def test_sync_backend_params_handler_non_200(self, dashboard_manager, mocker):
-        """Test sync_backend_params returns no_update on non-200 status."""
-        import dash
-
-        mock_response = MagicMock()
-        mock_response.status_code = 500
-        mocker.patch("requests.get", return_value=mock_response)
-
-        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._sync_backend_params_handler(n=1)
-            assert result == dash.no_update
-
     def test_handle_parameter_changes_handler(self, dashboard_manager):
         """Test parameter changes handler returns no_update (logs only)."""
         import dash
@@ -835,10 +789,12 @@ class TestParameterHandlers:
 
     def test_track_param_changes_no_changes(self, dashboard_manager):
         """Test track_param_changes returns disabled when no changes."""
+        import dash
+
         applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
         disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 200, ["enabled"], 0.001, applied)
         assert disabled is True
-        assert status == ""
+        assert status is dash.no_update
 
     def test_track_param_changes_lr_changed(self, dashboard_manager):
         """Test track_param_changes detects learning_rate changes."""
@@ -863,10 +819,12 @@ class TestParameterHandlers:
 
     def test_track_param_changes_float_tolerance(self, dashboard_manager):
         """Test track_param_changes uses float tolerance for learning_rate."""
+        import dash
+
         applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
         disabled, status = dashboard_manager._track_param_changes_handler(0.01 + 1e-10, 10, 200, ["enabled"], 0.001, applied)
         assert disabled is True
-        assert status == ""
+        assert status is dash.no_update
 
     def test_apply_parameters_no_clicks(self, dashboard_manager):
         """Test apply_parameters returns no_update when no clicks."""
@@ -914,35 +872,39 @@ class TestParameterHandlers:
             assert result == dash.no_update
             assert "Error" in msg
 
-    def test_init_applied_params_with_existing(self, dashboard_manager):
-        """Test init_applied_params returns no_update when current exists."""
+    def test_init_params_from_backend_with_existing(self, dashboard_manager):
+        """Test init_params_from_backend returns no_update when current exists."""
         import dash
 
-        result = dashboard_manager._init_applied_params_handler(1, {"learning_rate": 0.01})
-        assert result == dash.no_update
+        result = dashboard_manager._init_params_from_backend_handler(1, {"learning_rate": 0.01})
+        assert result == (dash.no_update,) * 6
 
-    def test_init_applied_params_success(self, dashboard_manager, mocker):
-        """Test init_applied_params fetches from backend when empty."""
+    def test_init_params_from_backend_success(self, dashboard_manager, mocker):
+        """Test init_params_from_backend fetches from backend when empty."""
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"learning_rate": 0.02, "max_hidden_units": 15, "max_epochs": 300, "convergence_enabled": True, "convergence_threshold": 0.001}
         mocker.patch("requests.get", return_value=mock_response)
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._init_applied_params_handler(1, None)
-            assert result["learning_rate"] == 0.02
-            assert result["convergence_enabled"] is True
-            assert result["convergence_threshold"] == 0.001
+            result = dashboard_manager._init_params_from_backend_handler(1, None)
+            assert result[0] == 0.02  # learning rate
+            assert result[1] == 15  # max hidden units
+            assert result[2] == 300  # max epochs
+            assert result[3] == ["enabled"]  # convergence checkbox
+            assert result[4] == 0.001  # convergence threshold
+            assert result[5]["learning_rate"] == 0.02
+            assert result[5]["convergence_enabled"] is True
 
-    def test_init_applied_params_error(self, dashboard_manager, mocker):
-        """Test init_applied_params returns no_update on error."""
+    def test_init_params_from_backend_error(self, dashboard_manager, mocker):
+        """Test init_params_from_backend returns no_update on error."""
         import dash
 
         mocker.patch("requests.get", side_effect=Exception("Connection error"))
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._init_applied_params_handler(1, None)
-            assert result == dash.no_update
+            result = dashboard_manager._init_params_from_backend_handler(1, None)
+            assert result == (dash.no_update,) * 6
 
     def test_track_param_changes_none_values(self, dashboard_manager):
         """Test track_param_changes handles None values in float comparison."""
