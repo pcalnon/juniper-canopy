@@ -472,6 +472,19 @@ class DashboardManager:
                                                     debounce=True,
                                                 ),
                                                 html.Hr(),
+                                                html.P("Dataset:", className="mb-1 fw-bold"),
+                                                html.P("Spiral Rotations:", className="mb-1"),
+                                                dbc.Input(
+                                                    id="spiral-rotations-input",
+                                                    type="number",
+                                                    value=TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
+                                                    step=0.5,
+                                                    min=TrainingConstants.MIN_SPIRAL_ROTATIONS,
+                                                    max=TrainingConstants.MAX_SPIRAL_ROTATIONS,
+                                                    className="mb-2",
+                                                    debounce=True,
+                                                ),
+                                                html.Hr(),
                                                 html.Div(
                                                     [
                                                         dbc.Button(
@@ -900,12 +913,13 @@ class DashboardManager:
                 Input("max-epochs-input", "value"),
                 Input("convergence-enabled-checkbox", "value"),
                 Input("convergence-threshold-input", "value"),
+                Input("spiral-rotations-input", "value"),
                 Input("applied-params-store", "data"),
             ],
         )
-        def track_param_changes(lr, hu, epochs, conv_enabled, conv_threshold, applied):
+        def track_param_changes(lr, hu, epochs, conv_enabled, conv_threshold, spiral_rot, applied):
             """Enable Apply button when parameters differ from applied values."""
-            return self._track_param_changes_handler(lr, hu, epochs, conv_enabled, conv_threshold, applied)
+            return self._track_param_changes_handler(lr, hu, epochs, conv_enabled, conv_threshold, spiral_rot, applied)
 
         # Handle Apply button click
         @self.app.callback(
@@ -920,12 +934,13 @@ class DashboardManager:
                 dash.dependencies.State("max-epochs-input", "value"),
                 dash.dependencies.State("convergence-enabled-checkbox", "value"),
                 dash.dependencies.State("convergence-threshold-input", "value"),
+                dash.dependencies.State("spiral-rotations-input", "value"),
             ],
             prevent_initial_call=True,
         )
-        def apply_parameters(n_clicks, lr, hu, epochs, conv_enabled, conv_threshold):
+        def apply_parameters(n_clicks, lr, hu, epochs, conv_enabled, conv_threshold, spiral_rot):
             """Apply parameters to backend and update applied store."""
-            return self._apply_parameters_handler(n_clicks, lr, hu, epochs, conv_enabled, conv_threshold)
+            return self._apply_parameters_handler(n_clicks, lr, hu, epochs, conv_enabled, conv_threshold, spiral_rot)
 
         # Initialize input fields and applied-params-store from backend on first load
         # Uses dedicated one-shot interval (max_intervals=1) to guarantee single execution
@@ -936,6 +951,7 @@ class DashboardManager:
                 Output("max-epochs-input", "value"),
                 Output("convergence-enabled-checkbox", "value"),
                 Output("convergence-threshold-input", "value"),
+                Output("spiral-rotations-input", "value"),
                 Output("applied-params-store", "data", allow_duplicate=True),
             ],
             Input("params-init-interval", "n_intervals"),
@@ -1411,11 +1427,11 @@ class DashboardManager:
 
         return dash.no_update
 
-    def _track_param_changes_handler(self, lr, hu, epochs, conv_enabled, conv_threshold, applied):
+    def _track_param_changes_handler(self, lr, hu, epochs, conv_enabled, conv_threshold, spiral_rot, applied):
         """Enable Apply button when parameters differ from applied values.
 
-        Uses float tolerance for learning_rate and convergence_threshold comparison
-        to handle floating-point precision issues from step-based input adjustments.
+        Uses float tolerance for learning_rate, convergence_threshold, and
+        spiral_rotations comparison to handle floating-point precision issues.
 
         Args:
             lr: Current learning rate input value
@@ -1423,6 +1439,7 @@ class DashboardManager:
             epochs: Current max epochs input value
             conv_enabled: Current convergence checklist value (list)
             conv_threshold: Current convergence threshold input value
+            spiral_rot: Current spiral rotations input value
             applied: Dictionary of currently applied parameter values
 
         Returns:
@@ -1451,7 +1468,10 @@ class DashboardManager:
         conv_enabled_changed = current_conv_enabled != applied_conv_enabled
         conv_threshold_changed = not float_equal(conv_threshold, applied.get("convergence_threshold"))
 
-        has_changes = lr_changed or hu_changed or epochs_changed or conv_enabled_changed or conv_threshold_changed
+        # Spiral rotations
+        spiral_rot_changed = not float_equal(spiral_rot, applied.get("spiral_rotations", TrainingConstants.DEFAULT_SPIRAL_ROTATIONS))
+
+        has_changes = lr_changed or hu_changed or epochs_changed or conv_enabled_changed or conv_threshold_changed or spiral_rot_changed
 
         if has_changes:
             return False, "⚠️ Unsaved changes"
@@ -1459,7 +1479,7 @@ class DashboardManager:
         # (avoids overwriting "✓ Parameters applied" from apply_parameters callback)
         return True, dash.no_update
 
-    def _apply_parameters_handler(self, n_clicks, lr, hu, epochs, conv_enabled, conv_threshold):
+    def _apply_parameters_handler(self, n_clicks, lr, hu, epochs, conv_enabled, conv_threshold, spiral_rot):
         """Apply parameters to backend and update applied store."""
         if not n_clicks:
             return dash.no_update, dash.no_update
@@ -1470,6 +1490,7 @@ class DashboardManager:
             "max_epochs": int(epochs) if epochs is not None else 200,
             "convergence_enabled": "enabled" in (conv_enabled or []),
             "convergence_threshold": float(conv_threshold) if conv_threshold is not None else 0.001,
+            "spiral_rotations": float(spiral_rot) if spiral_rot is not None else TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
         }
 
         try:
@@ -1494,10 +1515,10 @@ class DashboardManager:
         After initialization, returns no_update for all outputs.
 
         Returns:
-            Tuple of (lr, hu, epochs, conv_checkbox_value, conv_threshold, applied_dict)
+            Tuple of (lr, hu, epochs, conv_checkbox_value, conv_threshold, spiral_rot, applied_dict)
         """
         if current_applied:
-            return (dash.no_update,) * 6
+            return (dash.no_update,) * 7
         try:
             response = requests.get(self._api_url("/api/state"), timeout=DashboardConstants.API_TIMEOUT_SECONDS)
             if response.status_code == 200:
@@ -1507,12 +1528,14 @@ class DashboardManager:
                 epochs = state.get("max_epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS)
                 conv_enabled = state.get("convergence_enabled", TrainingConstants.DEFAULT_CONVERGENCE_ENABLED)
                 conv_threshold = state.get("convergence_threshold", TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD)
+                spiral_rot = state.get("spiral_rotations", TrainingConstants.DEFAULT_SPIRAL_ROTATIONS)
                 applied = {
                     "learning_rate": lr,
                     "max_hidden_units": hu,
                     "max_epochs": epochs,
                     "convergence_enabled": conv_enabled,
                     "convergence_threshold": conv_threshold,
+                    "spiral_rotations": spiral_rot,
                 }
                 return (
                     lr,
@@ -1520,11 +1543,12 @@ class DashboardManager:
                     epochs,
                     ["enabled"] if conv_enabled else [],
                     conv_threshold,
+                    spiral_rot,
                     applied,
                 )
         except Exception as e:
             self.logger.warning(f"Failed to initialize params from backend: {e}")
-        return (dash.no_update,) * 6
+        return (dash.no_update,) * 7
 
     def register_component(self, component: BaseComponent):
         """

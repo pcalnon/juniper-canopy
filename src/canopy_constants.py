@@ -59,6 +59,20 @@ class TrainingConstants:
     MIN_CONVERGENCE_THRESHOLD: Final[float] = 0.0001
     MAX_CONVERGENCE_THRESHOLD: Final[float] = 0.1
 
+    # Spiral dataset parameters
+    DEFAULT_SPIRAL_ROTATIONS: Final[float] = 3.0
+    MIN_SPIRAL_ROTATIONS: Final[float] = 0.5
+    MAX_SPIRAL_ROTATIONS: Final[float] = 5.0
+
+    # Cascade correlation training constants (Phase 6 — matches CasCor reference)
+    CASCADE_COOLDOWN_EPOCHS: Final[int] = 50
+    CANDIDATE_POOL_SIZE: Final[int] = 32
+    CANDIDATE_TRAINING_STEPS: Final[int] = 600
+    CANDIDATE_PATIENCE: Final[int] = 30
+    OUTPUT_RETRAIN_STEPS: Final[int] = 1000
+    OUTPUT_WEIGHT_INIT_STD: Final[float] = 0.1
+    MIN_CANDIDATE_CORRELATION: Final[float] = 0.01
+
 
 class DashboardConstants:
     """Dashboard UI constants.

@@ -519,9 +519,10 @@ async def get_state():
             state = demo.training_state.get_state()
         else:
             state = training_state.get_state()
-        # Merge convergence params from DemoMode (not stored in TrainingState)
+        # Merge demo-specific params from DemoMode (not stored in TrainingState)
         state["convergence_enabled"] = getattr(demo, "convergence_enabled", True)
         state["convergence_threshold"] = getattr(demo, "convergence_threshold", 0.001)
+        state["spiral_rotations"] = getattr(demo, "spiral_rotations", 3.0)
         return state
 
     return training_state.get_state()
@@ -1641,6 +1642,7 @@ async def api_set_params(params: dict):
         max_epochs = params.get("max_epochs")
         convergence_enabled = params.get("convergence_enabled")
         convergence_threshold = params.get("convergence_threshold")
+        spiral_rotations = params.get("spiral_rotations")
 
         # Update TrainingState with all provided parameters
         updates = {}
@@ -1657,6 +1659,8 @@ async def api_set_params(params: dict):
             backend_updates["convergence_enabled"] = bool(convergence_enabled)
         if convergence_threshold is not None:
             backend_updates["convergence_threshold"] = float(convergence_threshold)
+        if spiral_rotations is not None:
+            backend_updates["spiral_rotations"] = float(spiral_rotations)
 
         if not backend_updates:
             return JSONResponse({"error": "No parameters provided"}, status_code=400)

@@ -52,6 +52,7 @@
 #
 #####################################################################################################################################################################################################
 import logging
+import math
 import threading
 import time
 from collections import deque
@@ -187,7 +188,9 @@ class MockCascorNetwork:
         Trains a pool of candidate units via Pearson correlation maximization
         (matching the real CasCor candidate training phase), selects the best,
         and installs it. After installation, output layer is expanded and
-        retrained with a fresh Adam optimizer for 500 full-batch steps.
+        retrained with a fresh Adam optimizer for OUTPUT_RETRAIN_STEPS
+        full-batch steps. Returns the best correlation, or None if no
+        candidate met the quality threshold.
         """
         hidden_id = len(self.hidden_units)
         input_dim = self.input_size + hidden_id
@@ -196,18 +199,21 @@ class MockCascorNetwork:
         best_correlation = -1.0
 
         # Train a pool of candidates and select the best (matching CasCor pool)
-        pool_size = 8
+        pool_size = TrainingConstants.CANDIDATE_POOL_SIZE
         for _ in range(pool_size):
+            # Xavier-scale init: std = 1/sqrt(input_dim) to keep pre-activation
+            # variance constant as cascade depth grows (prevents tanh saturation)
+            init_std = 1.0 / math.sqrt(input_dim)
             unit = {
                 "id": hidden_id,
-                "weights": torch.randn(input_dim) * 0.1,
-                "bias": torch.randn(1) * 0.1,
+                "weights": torch.randn(input_dim) * init_std,
+                "bias": torch.randn(1) * init_std,
                 "activation_fn": torch.tanh,
             }
 
             # Train candidate weights to maximize correlation with residual error
             if self.train_x is not None and self.train_y is not None:
-                correlation = self._train_candidate(unit, steps=200, lr=0.01)
+                correlation = self._train_candidate(unit, steps=TrainingConstants.CANDIDATE_TRAINING_STEPS, lr=0.01)
                 if correlation > best_correlation:
                     best_correlation = correlation
                     best_unit = unit
@@ -216,7 +222,13 @@ class MockCascorNetwork:
                 break
 
         if best_unit is None:
-            return
+            return None
+
+        # Correlation threshold guard — don't install noise-level candidates
+        # (matches production CasCor's correlation_threshold check).
+        # Only applies when training data is available (candidates were actually trained).
+        if self.train_x is not None and best_correlation < TrainingConstants.MIN_CANDIDATE_CORRELATION:
+            return None
 
         self.hidden_units.append(best_unit)
 
@@ -227,29 +239,38 @@ class MockCascorNetwork:
         with torch.no_grad():
             self.output_layer.weight[:, : old_layer.in_features] = old_layer.weight
             self.output_layer.bias[:] = old_layer.bias
-            # New column initialized by nn.Linear default (small random)
+            # Explicitly init new column to match CasCor reference (randn * 0.1)
+            self.output_layer.weight[:, old_layer.in_features :] = torch.randn(self.output_size, new_dim - old_layer.in_features) * TrainingConstants.OUTPUT_WEIGHT_INIT_STD
 
         # Fresh optimizer for retraining (no stale momentum — matches CasCor)
         self.output_optimizer = torch.optim.Adam(self.output_layer.parameters(), lr=self.learning_rate)
 
-        # Retrain output with full-batch for 500 steps
-        for _ in range(500):
+        # Retrain output with full-batch for OUTPUT_RETRAIN_STEPS steps
+        for _ in range(TrainingConstants.OUTPUT_RETRAIN_STEPS):
             self.train_output_step()
 
-    def _train_candidate(self, unit: dict, steps: int = 200, lr: float = 0.01):
+        # Retain retrain optimizer — its moment estimates encode the converged
+        # loss landscape curvature, which is exactly what the outer loop needs.
+        # Creating a fresh optimizer here would produce a ~1000x overshoot on
+        # the first step due to Adam's bias correction (Phase 6A.1 fix).
+
+        return best_correlation
+
+    def _train_candidate(self, unit: dict, steps: int = 600, lr: float = 0.01):
         """Train a candidate hidden unit to maximize Pearson correlation with residual.
 
         Uses PyTorch autograd and Adam optimizer for gradient computation,
         matching the real CasCor implementation. Correlation is normalized
         by the product of standard deviations (Pearson correlation coefficient).
+        Includes gradient clipping and early stopping with best-weight tracking.
 
         Args:
             unit: The candidate unit dict with 'weights', 'bias', 'activation_fn'.
-            steps: Number of optimization steps.
+            steps: Maximum number of optimization steps.
             lr: Learning rate for candidate Adam optimizer.
 
         Returns:
-            Final absolute Pearson correlation value (float).
+            Best absolute Pearson correlation value (float).
         """
         x = self.train_x
         y = self.train_y
@@ -269,6 +290,10 @@ class MockCascorNetwork:
         optimizer = torch.optim.Adam([weights, bias], lr=lr)
 
         best_correlation = 0.0
+        patience_counter = 0
+        best_weights = unit["weights"].clone()
+        best_bias = unit["bias"].clone()
+
         for _ in range(steps):
             optimizer.zero_grad()
 
@@ -284,18 +309,25 @@ class MockCascorNetwork:
             std_e = torch.sqrt((e_centered**2).sum(dim=0) + 1e-8)
             correlation = (cov / (std_v * std_e)).abs().sum()
 
-            # Track best
-            abs_corr = float(correlation.detach())
-            if abs_corr > best_correlation:
-                best_correlation = abs_corr
-
             # Maximize correlation (minimize negative)
             (-correlation).backward()
             optimizer.step()
 
-        # Store trained weights back
-        unit["weights"] = weights.detach()
-        unit["bias"] = bias.detach()
+            # Early stopping with best-weight tracking
+            abs_corr = float(correlation.detach())
+            if abs_corr > best_correlation:
+                best_correlation = abs_corr
+                patience_counter = 0
+                best_weights = weights.detach().clone()
+                best_bias = bias.detach().clone()
+            else:
+                patience_counter += 1
+                if patience_counter >= TrainingConstants.CANDIDATE_PATIENCE:
+                    break
+
+        # Store best weights (not final — may have overshot)
+        unit["weights"] = best_weights
+        unit["bias"] = best_bias
 
         return best_correlation
 
@@ -388,7 +420,6 @@ class DemoMode:
         self.current_epoch = 0
         self.current_loss = 1.0
         self.current_accuracy = 0.5
-        self.target_loss = 0.1
         self.is_running = False
         self.thread = None
 
@@ -404,6 +435,10 @@ class DemoMode:
         # Convergence-based cascade addition parameters
         self.convergence_enabled = TrainingConstants.DEFAULT_CONVERGENCE_ENABLED
         self.convergence_threshold = TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD
+        self._cascade_cooldown_remaining = 0
+
+        # Spiral dataset parameter
+        self.spiral_rotations = TrainingConstants.DEFAULT_SPIRAL_ROTATIONS
 
         # Metrics buffer for realistic curves
         self.metrics_history = deque(maxlen=1000)
@@ -523,7 +558,7 @@ class DemoMode:
         except Exception as e:
             self.logger.warning(f"State broadcast failed: {type(e).__name__}: {e}")
 
-    def _generate_spiral_dataset(self, n_samples: int = 200, algorithm: Optional[str] = None) -> Dict[str, Any]:
+    def _generate_spiral_dataset(self, n_samples: int = 200, algorithm: Optional[str] = None, n_rotations: Optional[float] = None) -> Dict[str, Any]:
         """
         Generate two-class spiral dataset from JuniperData service.
 
@@ -533,6 +568,7 @@ class DemoMode:
         Args:
             n_samples: Number of total samples (split across classes)
             algorithm: Optional algorithm parameter for backward compatibility
+            n_rotations: Number of spiral rotations (defaults to self.spiral_rotations)
 
         Returns:
             Dataset dictionary with keys: inputs, targets, inputs_tensor, targets_tensor,
@@ -548,14 +584,18 @@ class DemoMode:
         if not juniper_data_url:
             raise JuniperDataConfigurationError("JUNIPER_DATA_URL environment variable is required. " "All datasets must be fetched from the JuniperData service. " "Set JUNIPER_DATA_URL=http://localhost:8100 to connect to a local instance.")
 
-        self.logger.info(f"Fetching dataset from JuniperData at {juniper_data_url}")
-        return self._generate_spiral_dataset_from_juniper_data(n_samples, juniper_data_url, algorithm=algorithm)
+        if n_rotations is None:
+            n_rotations = getattr(self, "spiral_rotations", TrainingConstants.DEFAULT_SPIRAL_ROTATIONS)
+
+        self.logger.info(f"Fetching dataset from JuniperData at {juniper_data_url} (n_rotations={n_rotations})")
+        return self._generate_spiral_dataset_from_juniper_data(n_samples, juniper_data_url, algorithm=algorithm, n_rotations=n_rotations)
 
     def _generate_spiral_dataset_from_juniper_data(
         self,
         n_samples: int,
         juniper_data_url: str,
         algorithm: Optional[str] = None,
+        n_rotations: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Generate spiral dataset using JuniperData service.
@@ -564,6 +604,7 @@ class DemoMode:
             n_samples: Number of total samples (split across classes)
             juniper_data_url: URL of the JuniperData service
             algorithm: Optional algorithm parameter for backward compatibility
+            n_rotations: Number of spiral rotations
 
         Returns:
             Dataset dictionary
@@ -581,6 +622,8 @@ class DemoMode:
             "noise": 0.1,
             "seed": 42,
         }
+        if n_rotations is not None:
+            params["n_rotations"] = float(n_rotations)
         if algorithm is not None:
             params["algorithm"] = algorithm
 
@@ -717,8 +760,8 @@ class DemoMode:
         if not self.candidate_pool:
             return
 
-        # Activate pool
-        pool_size = 8
+        # Activate pool (match actual training pool size)
+        pool_size = TrainingConstants.CANDIDATE_POOL_SIZE
         self.candidate_pool.update_pool(
             status="Active",
             phase="Training",
@@ -765,6 +808,11 @@ class DemoMode:
             current_units = len(self.network.hidden_units)
             conv_enabled = self.convergence_enabled
             conv_threshold = self.convergence_threshold
+
+            # Post-cascade cooldown: block ALL triggers during cooldown
+            if self._cascade_cooldown_remaining > 0:
+                self._cascade_cooldown_remaining -= 1
+                return False
 
         if current_units >= max_units:
             return False
@@ -862,17 +910,29 @@ class DemoMode:
             if self._should_add_cascade_unit():
                 # Add hidden unit and capture state snapshot (minimal lock time)
                 with self._lock:
-                    self.network.add_hidden_unit()
-                    hidden_count = len(self.network.hidden_units)
-                    unit_index = hidden_count - 1
-                    current_epoch_snapshot = self.current_epoch
+                    result = self.network.add_hidden_unit()
+                    if result is not None:
+                        hidden_count = len(self.network.hidden_units)
+                        unit_index = hidden_count - 1
+                        current_epoch_snapshot = self.current_epoch
 
-                    # Reset loss target to simulate retraining
-                    self.current_loss = min(1.0, self.current_loss * 1.5)
-                    self.target_loss *= 0.8
+                        # Record post-retrain loss in history so convergence detector
+                        # sees accurate baseline (retrain steps are otherwise invisible)
+                        with torch.no_grad():
+                            post_retrain_pred = self.network.forward(self.network.train_x)
+                            post_retrain_loss = float(self.network.loss_fn(post_retrain_pred, self.network.train_y))
+                            post_retrain_acc = float(((post_retrain_pred > 0.5).float() == self.network.train_y).float().mean())
+                        self.network.history["train_loss"].append(post_retrain_loss)
+                        self.network.history["train_accuracy"].append(post_retrain_acc)
+                        self.network.history["val_loss"].append(post_retrain_loss * 1.1)
+                        self.network.history["val_accuracy"].append(post_retrain_acc * 0.95)
 
-                # Broadcast outside lock to avoid blocking training thread
-                self._broadcast_cascade_add(unit_index, hidden_count, current_epoch_snapshot)
+                        # Set cooldown to prevent premature convergence detection
+                        self._cascade_cooldown_remaining = TrainingConstants.CASCADE_COOLDOWN_EPOCHS
+
+                # Broadcast outside lock (only if a unit was actually installed)
+                if result is not None:
+                    self._broadcast_cascade_add(unit_index, hidden_count, current_epoch_snapshot)
 
             # Wait with ability to stop promptly
             if self._stop.wait(self.update_interval):
@@ -979,7 +1039,6 @@ class DemoMode:
         self.current_epoch = 0
         self.current_loss = 1.0
         self.current_accuracy = 0.5
-        self.target_loss = 0.1
         self.metrics_history.clear()
 
         # Reset network history
@@ -991,13 +1050,16 @@ class DemoMode:
         # Reinitialize nn.Linear + fresh optimizer (prevents dimension mismatch
         # after clearing hidden_units and ensures clean optimizer state)
         self.network.output_layer = torch.nn.Linear(self.network.input_size, self.network.output_size)
-        torch.nn.init.normal_(self.network.output_layer.weight, std=0.1)
-        torch.nn.init.normal_(self.network.output_layer.bias, std=0.1)
+        torch.nn.init.normal_(self.network.output_layer.weight, std=TrainingConstants.OUTPUT_WEIGHT_INIT_STD)
+        torch.nn.init.normal_(self.network.output_layer.bias, std=TrainingConstants.OUTPUT_WEIGHT_INIT_STD)
         self.network.output_optimizer = torch.optim.Adam(self.network.output_layer.parameters(), lr=self.network.learning_rate)
 
-        # Restore convergence parameters to defaults
+        # Restore convergence parameters, cooldown, and spiral rotations to defaults
         self.convergence_enabled = TrainingConstants.DEFAULT_CONVERGENCE_ENABLED
         self.convergence_threshold = TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD
+        self._cascade_cooldown_remaining = 0
+        # Note: spiral_rotations is NOT reset here — it persists across training resets
+        # so the user's chosen complexity is preserved. Only explicitly changed via apply_params.
 
     def stop(self):
         """Stop demo training simulation."""
@@ -1215,6 +1277,7 @@ class DemoMode:
                 "optimizer": "Adam",
                 "convergence_enabled": self.convergence_enabled,
                 "convergence_threshold": self.convergence_threshold,
+                "spiral_rotations": self.spiral_rotations,
             }
 
     def apply_params(
@@ -1224,6 +1287,7 @@ class DemoMode:
         max_epochs: Optional[int] = None,
         convergence_enabled: Optional[bool] = None,
         convergence_threshold: Optional[float] = None,
+        spiral_rotations: Optional[float] = None,
     ):
         """
         Apply parameter changes to demo mode.
@@ -1234,6 +1298,7 @@ class DemoMode:
             max_epochs: New maximum epochs limit
             convergence_enabled: Enable/disable convergence-based cascade addition
             convergence_threshold: Loss improvement threshold for convergence detection
+            spiral_rotations: Number of spiral rotations for dataset generation
         """
         with self._lock:
             if learning_rate is not None:
@@ -1261,6 +1326,20 @@ class DemoMode:
                     min(float(convergence_threshold), TrainingConstants.MAX_CONVERGENCE_THRESHOLD),
                 )
                 self.logger.info(f"Demo mode: convergence_threshold set to {self.convergence_threshold}")
+
+            if spiral_rotations is not None:
+                new_rotations = max(
+                    TrainingConstants.MIN_SPIRAL_ROTATIONS,
+                    min(float(spiral_rotations), TrainingConstants.MAX_SPIRAL_ROTATIONS),
+                )
+                if new_rotations != self.spiral_rotations:
+                    self.spiral_rotations = new_rotations
+                    self.logger.info(f"Demo mode: spiral_rotations set to {self.spiral_rotations} — regenerating dataset")
+                    # Regenerate dataset with new rotation count and reset training
+                    self.dataset = self._generate_spiral_dataset(n_samples=200, n_rotations=self.spiral_rotations)
+                    self.network.train_x = self.dataset["inputs_tensor"]
+                    self.network.train_y = self.dataset["targets_tensor"]
+                    self._reset_state_and_history()
 
         # Update TrainingState with new parameter values
         if self.training_state:

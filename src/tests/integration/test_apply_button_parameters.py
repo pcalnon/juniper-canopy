@@ -152,7 +152,7 @@ class TestApplyButtonDashboardIntegration:
             env = builder.get_environ()
 
             with manager.app.server.request_context(env):
-                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.015, hu=25, epochs=600, conv_enabled=["enabled"], conv_threshold=0.001)
+                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.015, hu=25, epochs=600, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0)
 
             assert "max_hidden_units" in params
             assert "max_epochs" in params
@@ -182,15 +182,15 @@ class TestApplyButtonDashboardIntegration:
             "convergence_threshold": 0.001,
         }
 
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
+        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
         assert disabled is True
         assert status is dash.no_update
 
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=15, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
+        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=15, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
         assert disabled is False
         assert "Unsaved" in status
 
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
+        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
         assert disabled is False
         assert "Unsaved" in status
 
@@ -217,7 +217,7 @@ class TestApplyButtonDashboardIntegration:
         # Float precision error that occurs after multiple step increments
         # e.g., 0.01 + 0.001 * 50 = 0.06000000000000004
         lr_with_precision_error = 0.06000000000000004
-        disabled, status = manager._track_param_changes_handler(lr=lr_with_precision_error, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
+        disabled, status = manager._track_param_changes_handler(lr=lr_with_precision_error, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
         assert disabled is True, f"Should be disabled but got {disabled} for {lr_with_precision_error}"
         assert status is dash.no_update, f"Should be no_update but got '{status}'"
 
@@ -236,12 +236,12 @@ class TestApplyButtonDashboardIntegration:
         }
 
         # Significant change should be detected
-        disabled, status = manager._track_param_changes_handler(lr=0.05, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
+        disabled, status = manager._track_param_changes_handler(lr=0.05, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
         assert disabled is False
         assert "Unsaved" in status
 
         # Another significant change
-        disabled, status = manager._track_param_changes_handler(lr=0.001, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
+        disabled, status = manager._track_param_changes_handler(lr=0.001, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
         assert disabled is False
         assert "Unsaved" in status
 
@@ -275,8 +275,8 @@ class TestApplyButtonDashboardIntegration:
             with manager.app.server.request_context(env):
                 result = manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-            # Result is a tuple: (lr, hu, epochs, conv_checkbox, conv_threshold, applied_dict)
-            applied = result[5]
+            # Result is a tuple: (lr, hu, epochs, conv_checkbox, conv_threshold, spiral_rot, applied_dict)
+            applied = result[6]
             assert "max_hidden_units" in applied
             assert "max_epochs" in applied
             assert "convergence_enabled" in applied
@@ -365,7 +365,7 @@ class TestLearningRateApplyButtonP012:
             env = builder.get_environ()
 
             with manager.app.server.request_context(env):
-                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.07, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001)
+                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.07, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0)
 
             # Verify the returned params contain correct learning_rate
             assert params["learning_rate"] == 0.07
@@ -471,7 +471,7 @@ class TestConvergenceApplyRoundTrip:
             env = builder.get_environ()
 
             with manager.app.server.request_context(env):
-                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.01, hu=10, epochs=200, conv_enabled=[], conv_threshold=0.001)
+                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.01, hu=10, epochs=200, conv_enabled=[], conv_threshold=0.001, spiral_rot=3.0)
 
             assert params["convergence_enabled"] is False
             assert status == "✓ Parameters applied"
@@ -493,7 +493,7 @@ class TestConvergenceApplyRoundTrip:
             env = builder.get_environ()
 
             with manager.app.server.request_context(env):
-                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.05)
+                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.05, spiral_rot=3.0)
 
             assert params["convergence_threshold"] == 0.05
 
@@ -513,7 +513,7 @@ class TestConvergenceApplyRoundTrip:
             "convergence_threshold": 0.001,
         }
 
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=[], conv_threshold=0.001, applied=applied)
+        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=[], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
         assert disabled is True
         assert status is dash.no_update
 
@@ -531,7 +531,7 @@ class TestConvergenceApplyRoundTrip:
             "convergence_threshold": 0.001,
         }
 
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=[], conv_threshold=0.001, applied=applied)
+        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=[], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
         assert disabled is False
         assert "Unsaved" in status
 
@@ -549,6 +549,6 @@ class TestConvergenceApplyRoundTrip:
             "convergence_threshold": 0.001,
         }
 
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.05, applied=applied)
+        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.05, spiral_rot=3.0, applied=applied)
         assert disabled is False
         assert "Unsaved" in status
