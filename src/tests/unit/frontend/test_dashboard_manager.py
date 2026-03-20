@@ -783,7 +783,7 @@ class TestParameterHandlers:
 
     def test_track_param_changes_no_applied(self, dashboard_manager):
         """Test track_param_changes returns disabled when no applied state."""
-        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 200, ["enabled"], 0.001, None)
+        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 200, ["enabled"], 0.001, 3.0, None)
         assert disabled is True
         assert status == ""
 
@@ -792,28 +792,28 @@ class TestParameterHandlers:
         import dash
 
         applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
-        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 200, ["enabled"], 0.001, applied)
+        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 200, ["enabled"], 0.001, 3.0, applied)
         assert disabled is True
         assert status is dash.no_update
 
     def test_track_param_changes_lr_changed(self, dashboard_manager):
         """Test track_param_changes detects learning_rate changes."""
         applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
-        disabled, status = dashboard_manager._track_param_changes_handler(0.05, 10, 200, ["enabled"], 0.001, applied)
+        disabled, status = dashboard_manager._track_param_changes_handler(0.05, 10, 200, ["enabled"], 0.001, 3.0, applied)
         assert disabled is False
         assert "Unsaved" in status
 
     def test_track_param_changes_hu_changed(self, dashboard_manager):
         """Test track_param_changes detects hidden_units changes."""
         applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
-        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 15, 200, ["enabled"], 0.001, applied)
+        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 15, 200, ["enabled"], 0.001, 3.0, applied)
         assert disabled is False
         assert "Unsaved" in status
 
     def test_track_param_changes_epochs_changed(self, dashboard_manager):
         """Test track_param_changes detects epochs changes."""
         applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
-        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 500, ["enabled"], 0.001, applied)
+        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 500, ["enabled"], 0.001, 3.0, applied)
         assert disabled is False
         assert "Unsaved" in status
 
@@ -822,7 +822,7 @@ class TestParameterHandlers:
         import dash
 
         applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
-        disabled, status = dashboard_manager._track_param_changes_handler(0.01 + 1e-10, 10, 200, ["enabled"], 0.001, applied)
+        disabled, status = dashboard_manager._track_param_changes_handler(0.01 + 1e-10, 10, 200, ["enabled"], 0.001, 3.0, applied)
         assert disabled is True
         assert status is dash.no_update
 
@@ -830,7 +830,7 @@ class TestParameterHandlers:
         """Test apply_parameters returns no_update when no clicks."""
         import dash
 
-        result, msg = dashboard_manager._apply_parameters_handler(None, 0.01, 10, 200, ["enabled"], 0.001)
+        result, msg = dashboard_manager._apply_parameters_handler(None, 0.01, 10, 200, ["enabled"], 0.001, 3.0)
         assert result == dash.no_update
         assert msg == dash.no_update
 
@@ -841,7 +841,7 @@ class TestParameterHandlers:
         mocker.patch("requests.post", return_value=mock_response)
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result, msg = dashboard_manager._apply_parameters_handler(1, 0.05, 15, 300, ["enabled"], 0.001)
+            result, msg = dashboard_manager._apply_parameters_handler(1, 0.05, 15, 300, ["enabled"], 0.001, 3.0)
             assert result["learning_rate"] == 0.05
             assert result["max_hidden_units"] == 15
             assert result["max_epochs"] == 300
@@ -857,7 +857,7 @@ class TestParameterHandlers:
         mocker.patch("requests.post", return_value=mock_response)
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result, msg = dashboard_manager._apply_parameters_handler(1, 0.05, 15, 300, ["enabled"], 0.001)
+            result, msg = dashboard_manager._apply_parameters_handler(1, 0.05, 15, 300, ["enabled"], 0.001, 3.0)
             assert result == dash.no_update
             assert "Failed" in msg
 
@@ -868,7 +868,7 @@ class TestParameterHandlers:
         mocker.patch("requests.post", side_effect=Exception("Network error"))
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result, msg = dashboard_manager._apply_parameters_handler(1, 0.05, 15, 300, ["enabled"], 0.001)
+            result, msg = dashboard_manager._apply_parameters_handler(1, 0.05, 15, 300, ["enabled"], 0.001, 3.0)
             assert result == dash.no_update
             assert "Error" in msg
 
@@ -877,7 +877,7 @@ class TestParameterHandlers:
         import dash
 
         result = dashboard_manager._init_params_from_backend_handler(1, {"learning_rate": 0.01})
-        assert result == (dash.no_update,) * 6
+        assert result == (dash.no_update,) * 7
 
     def test_init_params_from_backend_success(self, dashboard_manager, mocker):
         """Test init_params_from_backend fetches from backend when empty."""
@@ -893,8 +893,9 @@ class TestParameterHandlers:
             assert result[2] == 300  # max epochs
             assert result[3] == ["enabled"]  # convergence checkbox
             assert result[4] == 0.001  # convergence threshold
-            assert result[5]["learning_rate"] == 0.02
-            assert result[5]["convergence_enabled"] is True
+            assert result[5] == 3.0  # spiral_rotations default
+            assert result[6]["learning_rate"] == 0.02
+            assert result[6]["convergence_enabled"] is True
 
     def test_init_params_from_backend_error(self, dashboard_manager, mocker):
         """Test init_params_from_backend returns no_update on error."""
@@ -904,18 +905,18 @@ class TestParameterHandlers:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(1, None)
-            assert result == (dash.no_update,) * 6
+            assert result == (dash.no_update,) * 7
 
     def test_track_param_changes_none_values(self, dashboard_manager):
         """Test track_param_changes handles None values in float comparison."""
         applied = {"learning_rate": None, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
-        disabled, status = dashboard_manager._track_param_changes_handler(None, 10, 200, ["enabled"], 0.001, applied)
+        disabled, status = dashboard_manager._track_param_changes_handler(None, 10, 200, ["enabled"], 0.001, 3.0, applied)
         assert disabled is True
 
     def test_track_param_changes_invalid_float(self, dashboard_manager):
         """Test track_param_changes handles invalid float conversion."""
         applied = {"learning_rate": "invalid", "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
-        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 200, ["enabled"], 0.001, applied)
+        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 200, ["enabled"], 0.001, 3.0, applied)
         assert disabled is False
 
 

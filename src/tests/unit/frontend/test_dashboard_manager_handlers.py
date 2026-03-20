@@ -854,7 +854,7 @@ class TestParameterHandlers:
 
     def test_track_param_changes_handler_no_applied(self, dashboard_manager):
         """Test param changes tracking with no applied values."""
-        result = dashboard_manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=None)
+        result = dashboard_manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=None)
 
         assert result == (True, "")
 
@@ -864,7 +864,7 @@ class TestParameterHandlers:
 
         applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
 
-        result = dashboard_manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
+        result = dashboard_manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
 
         assert result[0] is True  # disabled
         assert result[1] is dash.no_update
@@ -873,7 +873,7 @@ class TestParameterHandlers:
         """Test param changes tracking with changes."""
         applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
 
-        result = dashboard_manager._track_param_changes_handler(lr=0.05, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, applied=applied)
+        result = dashboard_manager._track_param_changes_handler(lr=0.05, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
 
         assert result[0] is False  # enabled
         assert "Unsaved" in result[1]
@@ -886,7 +886,7 @@ class TestParameterHandlers:
         mock_post.return_value = mock_response
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001)
+            result = dashboard_manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0)
 
         assert result[0]["learning_rate"] == 0.02
         assert "applied" in result[1].lower()
@@ -900,7 +900,7 @@ class TestParameterHandlers:
         mock_post.return_value = mock_response
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001)
+            result = dashboard_manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0)
 
         assert result[0] == dash.no_update
         assert "Failed" in result[1]
@@ -911,14 +911,14 @@ class TestParameterHandlers:
         mock_post.side_effect = Exception("Connection error")
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dashboard_manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001)
+            result = dashboard_manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0)
 
         assert result[0] == dash.no_update
         assert "Error" in result[1]
 
     def test_apply_parameters_handler_no_clicks(self, dashboard_manager):
         """Test apply parameters handler with no clicks."""
-        result = dashboard_manager._apply_parameters_handler(n_clicks=None, lr=0.02, hu=15, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001)
+        result = dashboard_manager._apply_parameters_handler(n_clicks=None, lr=0.02, hu=15, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0)
 
         assert result == (dash.no_update, dash.no_update)
 
@@ -930,7 +930,7 @@ class TestParameterHandlers:
             mock_post.return_value = mock_response
 
             with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-                result = dashboard_manager._apply_parameters_handler(n_clicks=1, lr=None, hu=None, epochs=None, conv_enabled=None, conv_threshold=None)
+                result = dashboard_manager._apply_parameters_handler(n_clicks=1, lr=None, hu=None, epochs=None, conv_enabled=None, conv_threshold=None, spiral_rot=None)
 
             assert result[0]["learning_rate"] == 0.01  # default
             assert result[0]["max_hidden_units"] == 10  # default
@@ -960,8 +960,9 @@ class TestParameterHandlers:
         assert result[2] == 200  # max epochs
         assert result[3] == ["enabled"]  # convergence checkbox
         assert result[4] == 0.001  # convergence threshold
-        assert result[5]["learning_rate"] == 0.01
-        assert result[5]["convergence_enabled"] is True
+        assert result[5] == 3.0  # spiral_rotations default
+        assert result[6]["learning_rate"] == 0.01
+        assert result[6]["convergence_enabled"] is True
 
     def test_init_params_from_backend_handler_already_set(self, dashboard_manager):
         """Test init params from backend when already set."""
@@ -969,7 +970,7 @@ class TestParameterHandlers:
 
         result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=current_applied)
 
-        assert result == (dash.no_update,) * 6
+        assert result == (dash.no_update,) * 7
 
     @patch("requests.get")
     def test_init_params_from_backend_handler_failure(self, mock_get, dashboard_manager):
@@ -979,7 +980,7 @@ class TestParameterHandlers:
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-        assert result == (dash.no_update,) * 6
+        assert result == (dash.no_update,) * 7
 
 
 # =============================================================================
@@ -1011,7 +1012,8 @@ class TestInitParamsFromBackendHandlers:
         assert result[2] == 300
         assert result[3] == []  # convergence disabled -> empty checklist
         assert result[4] == 0.01
-        assert result[5]["convergence_enabled"] is False
+        assert result[5] == 3.0  # spiral_rotations default
+        assert result[6]["convergence_enabled"] is False
 
     @patch("requests.get")
     def test_init_params_from_backend_with_partial_state(self, mock_get, dashboard_manager):
