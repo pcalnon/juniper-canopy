@@ -70,6 +70,7 @@ class TrainingConstants:
     CANDIDATE_TRAINING_STEPS: Final[int] = 600
     CANDIDATE_PATIENCE: Final[int] = 30
     OUTPUT_RETRAIN_STEPS: Final[int] = 1000
+    OUTPUT_RETRAIN_EMIT_EVERY: Final[int] = 50
     OUTPUT_WEIGHT_INIT_STD: Final[float] = 0.1
     MIN_CANDIDATE_CORRELATION: Final[float] = 0.01
 
