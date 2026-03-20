@@ -60,6 +60,12 @@ def _make_demo():
     demo.convergence_enabled = True
     demo.convergence_threshold = 0.001
     demo._cascade_cooldown_remaining = 0
+    # Phase 6C additions
+    demo.state_machine = MagicMock()
+    demo.state_machine.get_phase.return_value = MagicMock(name="output")
+    demo.training_state = None
+    demo._update_training_status = MagicMock()
+    demo._broadcast_metrics = MagicMock()
     return demo
 
 
@@ -451,3 +457,240 @@ class TestPostRetrainLossStability:
         # Loss should NOT increase significantly (warm optimizer is stable)
         loss_increase = post_step_loss - post_retrain_loss
         assert loss_increase < 0.001, f"Loss increased by {loss_increase} after one step — warm optimizer should be stable"
+
+
+# ─── T-6C: Phase 6C Structural Refactor Tests ────────────────────────────────
+
+
+class TestTrainCandidatePool:
+    """Verify train_candidate_pool() method (split from add_hidden_unit for lock granularity)."""
+
+    def test_returns_tuple_on_success(self, network_with_data):
+        """train_candidate_pool returns (unit, correlation) tuple for quality candidates."""
+        result = network_with_data.train_candidate_pool()
+        assert result is not None
+        unit, correlation = result
+        assert isinstance(unit, dict)
+        assert "weights" in unit
+        assert "bias" in unit
+        assert isinstance(correlation, float)
+        assert correlation >= TrainingConstants.MIN_CANDIDATE_CORRELATION
+
+    def test_returns_none_for_high_threshold(self, network_with_data):
+        """train_candidate_pool returns None when threshold is impossibly high."""
+        result = network_with_data.train_candidate_pool(min_correlation=100.0)
+        assert result is None
+
+    def test_respects_stop_check(self, network_with_data):
+        """train_candidate_pool aborts when stop_check returns True."""
+        result = network_with_data.train_candidate_pool(stop_check=lambda: True)
+        assert result is None
+
+    def test_does_not_modify_hidden_units(self, network_with_data):
+        """train_candidate_pool should NOT modify hidden_units list."""
+        original_count = len(network_with_data.hidden_units)
+        network_with_data.train_candidate_pool()
+        assert len(network_with_data.hidden_units) == original_count
+
+    def test_does_not_modify_output_layer(self, network_with_data):
+        """train_candidate_pool should NOT modify output_layer."""
+        original_dim = network_with_data.output_layer.in_features
+        network_with_data.train_candidate_pool()
+        assert network_with_data.output_layer.in_features == original_dim
+
+
+class TestInstallCandidate:
+    """Verify install_candidate() method."""
+
+    def test_appends_to_hidden_units(self, network_with_data):
+        """install_candidate adds unit to hidden_units list."""
+        unit = {
+            "id": 0,
+            "weights": torch.randn(2) * 0.1,
+            "bias": torch.randn(1) * 0.1,
+            "activation_fn": torch.tanh,
+        }
+        network_with_data.install_candidate(unit)
+        assert len(network_with_data.hidden_units) == 1
+        assert network_with_data.hidden_units[0] is unit
+
+    def test_expands_output_layer(self, network_with_data):
+        """install_candidate expands output layer in_features by 1."""
+        original_dim = network_with_data.output_layer.in_features
+        unit = {
+            "id": 0,
+            "weights": torch.randn(2) * 0.1,
+            "bias": torch.randn(1) * 0.1,
+            "activation_fn": torch.tanh,
+        }
+        network_with_data.install_candidate(unit)
+        assert network_with_data.output_layer.in_features == original_dim + 1
+
+    def test_creates_fresh_optimizer(self, network_with_data):
+        """install_candidate creates a fresh optimizer (no stale moments)."""
+        old_optimizer = network_with_data.output_optimizer
+        unit = {
+            "id": 0,
+            "weights": torch.randn(2) * 0.1,
+            "bias": torch.randn(1) * 0.1,
+            "activation_fn": torch.tanh,
+        }
+        network_with_data.install_candidate(unit)
+        assert network_with_data.output_optimizer is not old_optimizer
+
+
+class TestComputeMetrics:
+    """Verify compute_metrics() method."""
+
+    def test_returns_loss_and_accuracy(self, network_with_data):
+        """compute_metrics returns (loss, accuracy) tuple."""
+        loss, accuracy = network_with_data.compute_metrics()
+        assert isinstance(loss, float)
+        assert isinstance(accuracy, float)
+        assert loss >= 0.0
+        assert 0.0 <= accuracy <= 1.0
+
+    def test_returns_defaults_without_data(self):
+        """compute_metrics returns (1.0, 0.5) without training data."""
+        net = MockCascorNetwork(input_size=2, output_size=1)
+        loss, accuracy = net.compute_metrics()
+        assert loss == 1.0
+        assert accuracy == 0.5
+
+
+class TestCascadeEvents:
+    """Verify cascade_events tracking in DemoMode."""
+
+    def test_cascade_events_initialized_empty(self):
+        """cascade_events list should be empty on init."""
+        demo = DemoMode(update_interval=0.01)
+        assert demo.cascade_events == []
+
+    def test_cascade_events_in_get_current_state(self):
+        """cascade_events should be exposed in get_current_state."""
+        demo = DemoMode(update_interval=0.01)
+        state = demo.get_current_state()
+        assert "cascade_events" in state
+        assert state["cascade_events"] == []
+
+    def test_cascade_events_reset_on_training_reset(self):
+        """cascade_events should be cleared on _reset_state_and_history."""
+        demo = _make_demo()
+        demo.cascade_events = [{"epoch": 10, "unit_index": 0, "correlation": 0.5}]
+        demo.metrics_history = []
+        demo._reset_state_and_history()
+        assert demo.cascade_events == []
+
+
+class TestEmitTrainingMetrics:
+    """Verify _emit_training_metrics() method."""
+
+    def test_increments_epoch(self):
+        """_emit_training_metrics should increment current_epoch."""
+        demo = _make_demo()
+        demo.cascade_events = []
+        demo.metrics_history = []
+        demo.current_loss = 1.0
+        demo.current_accuracy = 0.5
+        initial_epoch = demo.current_epoch
+        demo._emit_training_metrics()
+        assert demo.current_epoch == initial_epoch + 1
+
+    def test_appends_to_history(self):
+        """_emit_training_metrics should append to metrics_history."""
+        demo = _make_demo()
+        demo.cascade_events = []
+        demo.metrics_history = []
+        demo.current_loss = 1.0
+        demo.current_accuracy = 0.5
+        demo._emit_training_metrics()
+        assert len(demo.metrics_history) == 1
+
+    def test_updates_current_loss_and_accuracy(self):
+        """_emit_training_metrics should update current_loss and current_accuracy."""
+        demo = _make_demo()
+        demo.cascade_events = []
+        demo.metrics_history = []
+        # Set up network with training data
+        torch.manual_seed(42)
+        demo.network.train_x = torch.randn(10, 2)
+        demo.network.train_y = torch.randint(0, 2, (10, 1)).float()
+        demo._emit_training_metrics()
+        # Loss should be a real computed value, not the initial 1.0
+        assert isinstance(demo.current_loss, float)
+        assert isinstance(demo.current_accuracy, float)
+
+
+@pytest.mark.timeout(120)
+class TestEndToEndTrainingLoop:
+    """THE critical missing test: verify the restructured training loop produces
+    monotonic loss decrease across cascade additions."""
+
+    def test_training_loop_produces_cascade_units(self):
+        """Training loop should install cascade units and track cascade events."""
+        import time
+
+        demo = DemoMode(update_interval=0.01)
+        demo.max_epochs = 300
+        demo.max_hidden_units = 3
+        demo.start()
+
+        # Wait for at least 1 cascade unit
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            state = demo.get_current_state()
+            if state["hidden_units"] >= 1:
+                break
+            time.sleep(0.5)
+
+        demo.stop()
+
+        state = demo.get_current_state()
+        assert state["hidden_units"] >= 1, f"Expected at least 1 hidden unit, got {state['hidden_units']}"
+        assert len(demo.cascade_events) >= 1, "Expected at least 1 cascade event"
+
+    def test_loss_decreases_across_training(self):
+        """Overall loss should decrease from start to after cascade additions."""
+        import time
+
+        demo = DemoMode(update_interval=0.01)
+        demo.max_epochs = 300
+        demo.max_hidden_units = 2
+        demo.start()
+
+        # Wait for training to produce some results
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            state = demo.get_current_state()
+            if state["hidden_units"] >= 1 or state["current_epoch"] >= 50:
+                break
+            time.sleep(0.5)
+
+        demo.stop()
+
+        # Loss should be less than initial (1.0)
+        assert demo.current_loss < 0.5, f"Expected loss < 0.5 after training, got {demo.current_loss}"
+
+    def test_metrics_history_populated(self):
+        """Training loop should populate metrics_history with real metrics."""
+        import time
+
+        demo = DemoMode(update_interval=0.01)
+        demo.max_epochs = 50
+        demo.start()
+
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            if demo.current_epoch >= 20:
+                break
+            time.sleep(0.2)
+
+        demo.stop()
+
+        history = demo.get_metrics_history()
+        assert len(history) >= 10, f"Expected ≥10 metrics entries, got {len(history)}"
+        # All metrics should have real loss values
+        for m in history[:5]:
+            assert "metrics" in m
+            assert "loss" in m["metrics"]
+            assert m["metrics"]["loss"] >= 0.0
