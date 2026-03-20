@@ -256,6 +256,105 @@ class MockCascorNetwork:
 
         return best_correlation
 
+    def train_candidate_pool(self, min_correlation: float = None, stop_check=None, progress_callback=None):
+        """Train a pool of candidate units and return the best if it meets quality threshold.
+
+        This method does NOT modify shared network state (hidden_units, output_layer)
+        and is safe to call without holding the DemoMode lock.
+
+        Args:
+            min_correlation: Minimum correlation threshold. If None, uses
+                TrainingConstants.MIN_CANDIDATE_CORRELATION.
+            stop_check: Optional callable returning True if training should abort.
+                Used to propagate stop signals from the training thread.
+            progress_callback: Optional callable(candidate_index, pool_size, best_correlation)
+                called after each candidate finishes training. Used for dashboard updates.
+
+        Returns:
+            Tuple of (unit_dict, best_correlation) if a quality candidate was found,
+            or None if no candidate met the threshold or stop was requested.
+        """
+        if min_correlation is None:
+            min_correlation = TrainingConstants.MIN_CANDIDATE_CORRELATION
+
+        hidden_id = len(self.hidden_units)
+        input_dim = self.input_size + hidden_id
+
+        best_unit = None
+        best_correlation = -1.0
+
+        pool_size = TrainingConstants.CANDIDATE_POOL_SIZE
+        for i in range(pool_size):
+            if stop_check and stop_check():
+                return None
+
+            init_std = 1.0 / math.sqrt(input_dim)
+            unit = {
+                "id": hidden_id,
+                "weights": torch.randn(input_dim) * init_std,
+                "bias": torch.randn(1) * init_std,
+                "activation_fn": torch.tanh,
+            }
+
+            if self.train_x is not None and self.train_y is not None:
+                correlation = self._train_candidate(unit, steps=TrainingConstants.CANDIDATE_TRAINING_STEPS, lr=0.01)
+                if correlation > best_correlation:
+                    best_correlation = correlation
+                    best_unit = unit
+            else:
+                best_unit = unit
+                break
+
+            if progress_callback:
+                progress_callback(i, pool_size, best_correlation)
+
+        if best_unit is None:
+            return None
+
+        if self.train_x is not None and best_correlation < min_correlation:
+            return None
+
+        return (best_unit, best_correlation)
+
+    def install_candidate(self, unit: dict):
+        """Install a trained candidate unit into the network.
+
+        Appends the unit to hidden_units, expands the output layer, and creates
+        a fresh optimizer. This method modifies shared network state and should
+        be called under lock protection.
+
+        Args:
+            unit: Trained candidate unit dict with 'weights', 'bias', 'activation_fn'.
+        """
+        self.hidden_units.append(unit)
+
+        old_layer = self.output_layer
+        new_dim = self.input_size + len(self.hidden_units)
+        self.output_layer = torch.nn.Linear(new_dim, self.output_size)
+        with torch.no_grad():
+            self.output_layer.weight[:, : old_layer.in_features] = old_layer.weight
+            self.output_layer.bias[:] = old_layer.bias
+            self.output_layer.weight[:, old_layer.in_features :] = torch.randn(self.output_size, new_dim - old_layer.in_features) * TrainingConstants.OUTPUT_WEIGHT_INIT_STD
+
+        self.output_optimizer = torch.optim.Adam(self.output_layer.parameters(), lr=self.learning_rate)
+
+    def compute_metrics(self):
+        """Compute current loss and accuracy from real network predictions.
+
+        Returns:
+            Tuple of (loss, accuracy). Returns (1.0, 0.5) if no training data.
+        """
+        if self.train_x is None or self.train_y is None:
+            return 1.0, 0.5
+
+        with torch.no_grad():
+            self.output_layer.eval()
+            predictions = self.forward(self.train_x)
+            self.output_layer.train()
+            mse = float(((predictions - self.train_y) ** 2).mean())
+            accuracy = float(((predictions > 0.5).float() == self.train_y).float().mean())
+        return mse, accuracy
+
     def _train_candidate(self, unit: dict, steps: int = 600, lr: float = 0.01):
         """Train a candidate hidden unit to maximize Pearson correlation with residual.
 
@@ -393,7 +492,7 @@ class DemoMode:
     - Broadcasts updates via WebSocket
     """
 
-    def __init__(self, update_interval: float = 1.0):
+    def __init__(self, update_interval: float = None):
         """
         Initialize demo mode with config-driven simulation parameters.
 
@@ -406,7 +505,7 @@ class DemoMode:
         _settings = get_settings()
         training_defaults = _settings.get_training_defaults()
 
-        self.update_interval = _settings.demo_update_interval
+        self.update_interval = update_interval if update_interval is not None else _settings.demo_update_interval
 
         # Create mock network
         self.network = MockCascorNetwork(input_size=2, output_size=1)
@@ -439,6 +538,9 @@ class DemoMode:
 
         # Spiral dataset parameter
         self.spiral_rotations = TrainingConstants.DEFAULT_SPIRAL_ROTATIONS
+
+        # Cascade event markers for loss chart (epoch, unit_index, correlation)
+        self.cascade_events = []
 
         # Metrics buffer for realistic curves
         self.metrics_history = deque(maxlen=1000)
@@ -828,118 +930,216 @@ class DemoMode:
         return self.current_epoch > 0 and self.current_epoch % self.cascade_every == 0
 
     def _training_loop(self):
-        """Background training simulation loop."""
+        """CasCor two-phase training loop.
+
+        Phase 1: Train output layer on initial network (no hidden units).
+        Phase 2: Cascade growth — repeatedly train candidate pool, install best,
+                 retrain output layer. Each phase emits periodic metrics for
+                 dashboard visualization.
+
+        Lock granularity: candidate training requires NO lock (operates on
+        candidate-local state). Installation is a brief locked operation.
+        Retrain steps run without lock, with periodic locked metric emissions.
+        This ensures get_current_state() returns within ~10ms at any point.
+        """
         self.logger.info("Demo training simulation started")
 
-        while not self._stop.is_set():
-            # Thread-safe check of max_epochs (read each iteration for dynamic updates)
-            with self._lock:
-                should_continue = self.current_epoch < self.max_epochs
-
-            if not should_continue:
-                self.logger.info(f"Training complete: reached max_epochs={self.max_epochs}")
-                self.state_machine.mark_completed()
-                self._update_training_status()
-                break
-
-            # Check if paused
-            while self._pause.is_set() and not self._stop.is_set() and not self._stop.wait(0.1):
-                pass
-
-            # Check if stopped during pause
+        # Phase 1: Initial output training
+        self.state_machine.set_phase(TrainingPhase.OUTPUT)
+        # Initialize last_emit far enough in the past that the first step triggers an emission
+        last_emit = time.monotonic() - self.update_interval
+        for step in range(TrainingConstants.OUTPUT_RETRAIN_STEPS):
             if self._stop.is_set():
                 break
 
-            # Determine training phase
-            is_candidate_phase = self.current_epoch > 0 and self.current_epoch % 5 == 0
-            if is_candidate_phase:
-                self.state_machine.set_phase(TrainingPhase.CANDIDATE)
-                self._simulate_candidate_pool()
-            else:
-                self.state_machine.set_phase(TrainingPhase.OUTPUT)
-                if self.candidate_pool:
-                    self.candidate_pool.update_pool(status="Inactive")
-                    self.candidate_pool.clear()
-
-            # Simulate epoch
-            loss, accuracy = self._simulate_training_step()
-
-            # Generate validation metrics (slightly worse than training)
-            val_loss = loss * 1.1 + np.random.randn() * 0.01
-            val_accuracy = accuracy * 0.95 + np.random.randn() * 0.01
-
-            # Thread-safe update of state
-            with self._lock:
-                self.current_epoch += 1
-                self.network.current_epoch = self.current_epoch
-
-                # Update history with standardized key names
-                self.network.history["train_loss"].append(loss)
-                self.network.history["train_accuracy"].append(accuracy)
-                self.network.history["val_loss"].append(val_loss)
-                self.network.history["val_accuracy"].append(val_accuracy)
-
-                # Store metrics
-                phase_name = self.state_machine.get_phase().name.lower()
-                metrics = {
-                    "epoch": self.current_epoch,
-                    "metrics": {
-                        "loss": float(loss),
-                        "accuracy": float(accuracy),
-                        "val_loss": float(val_loss),
-                        "val_accuracy": float(val_accuracy),
-                    },
-                    "network_topology": {
-                        "input_units": self.network.input_size,
-                        "hidden_units": len(self.network.hidden_units),
-                        "output_units": self.network.output_size,
-                    },
-                    "phase": phase_name,
-                    "timestamp": datetime.now().isoformat(),
-                }
-                self.metrics_history.append(metrics)
-
-            # Broadcast via WebSocket (outside lock to avoid blocking)
-            self._broadcast_metrics(metrics)
-
-            # Update and broadcast TrainingState
-            # self._update_training_state()
-            self._update_training_status()
-
-            # Check if should add cascade unit
-            if self._should_add_cascade_unit():
-                # Add hidden unit and capture state snapshot (minimal lock time)
-                with self._lock:
-                    result = self.network.add_hidden_unit()
-                    if result is not None:
-                        hidden_count = len(self.network.hidden_units)
-                        unit_index = hidden_count - 1
-                        current_epoch_snapshot = self.current_epoch
-
-                        # Record post-retrain loss in history so convergence detector
-                        # sees accurate baseline (retrain steps are otherwise invisible)
-                        with torch.no_grad():
-                            post_retrain_pred = self.network.forward(self.network.train_x)
-                            post_retrain_loss = float(self.network.loss_fn(post_retrain_pred, self.network.train_y))
-                            post_retrain_acc = float(((post_retrain_pred > 0.5).float() == self.network.train_y).float().mean())
-                        self.network.history["train_loss"].append(post_retrain_loss)
-                        self.network.history["train_accuracy"].append(post_retrain_acc)
-                        self.network.history["val_loss"].append(post_retrain_loss * 1.1)
-                        self.network.history["val_accuracy"].append(post_retrain_acc * 0.95)
-
-                        # Set cooldown to prevent premature convergence detection
-                        self._cascade_cooldown_remaining = TrainingConstants.CASCADE_COOLDOWN_EPOCHS
-
-                # Broadcast outside lock (only if a unit was actually installed)
-                if result is not None:
-                    self._broadcast_cascade_add(unit_index, hidden_count, current_epoch_snapshot)
-
-            # Wait with ability to stop promptly
-            if self._stop.wait(self.update_interval):
+            # Check pause
+            while self._pause.is_set() and not self._stop.is_set():
+                self._stop.wait(0.1)
+            if self._stop.is_set():
                 break
 
+            self.network.train_output_step()
+
+            # Time-based metric emission: emit at ~update_interval rate
+            now = time.monotonic()
+            if now - last_emit >= self.update_interval or step == TrainingConstants.OUTPUT_RETRAIN_STEPS - 1:
+                self._emit_training_metrics()
+                last_emit = now
+                with self._lock:
+                    if self.current_epoch >= self.max_epochs:
+                        break
+
+        if self._stop.is_set():
+            self.is_running = False
+            self.logger.info("Demo training stopped during initial output training")
+            return
+
+        # Check if max_epochs was reached during Phase 1
+        with self._lock:
+            if self.current_epoch >= self.max_epochs:
+                self.logger.info(f"Training complete: reached max_epochs={self.max_epochs} during initial training")
+                self.state_machine.mark_completed()
+                self._update_training_status()
+                self.is_running = False
+                return
+
+        # Phase 2: Cascade growth
+        while not self._stop.is_set():
+            # Check stopping criteria
+            with self._lock:
+                if len(self.network.hidden_units) >= self.max_hidden_units:
+                    self.logger.info(f"Max hidden units reached ({self.max_hidden_units})")
+                    break
+                if self.current_epoch >= self.max_epochs:
+                    self.logger.info(f"Max epochs reached ({self.max_epochs})")
+                    break
+
+            # Check pause
+            while self._pause.is_set() and not self._stop.is_set():
+                self._stop.wait(0.1)
+            if self._stop.is_set():
+                break
+
+            # Step 2a: Train candidate pool (NO LOCK — candidate-local state only)
+            self.state_machine.set_phase(TrainingPhase.CANDIDATE)
+            if self.candidate_pool:
+                self.candidate_pool.update_pool(
+                    status="Active",
+                    phase="Training",
+                    size=TrainingConstants.CANDIDATE_POOL_SIZE,
+                    iterations=0,
+                    progress=0.0,
+                    target=0.85,
+                )
+
+            min_corr = self.convergence_threshold if self.convergence_enabled else 0.0
+            last_candidate_emit = [time.monotonic()]  # mutable for closure
+
+            def _candidate_progress(idx, pool_size, best_corr, _emit_tracker=last_candidate_emit):
+                """Emit periodic metrics during candidate training for dashboard updates."""
+                # Respect pause — wait if paused, don't emit
+                while self._pause.is_set() and not self._stop.is_set():
+                    self._stop.wait(0.1)
+                now = time.monotonic()
+                if now - _emit_tracker[0] >= self.update_interval:
+                    self._emit_training_metrics()
+                    _emit_tracker[0] = now
+
+            result = self.network.train_candidate_pool(
+                min_correlation=min_corr,
+                stop_check=self._stop.is_set,
+                progress_callback=_candidate_progress,
+            )
+
+            if self.candidate_pool:
+                self.candidate_pool.update_pool(status="Inactive")
+                self.candidate_pool.clear()
+
+            if result is None:
+                self.logger.info("No candidate met correlation threshold — stopping cascade growth")
+                break
+
+            best_unit, best_correlation = result
+
+            # Step 2b: Install candidate (BRIEF LOCK — modifies shared network state)
+            with self._lock:
+                self.network.install_candidate(best_unit)
+                hidden_count = len(self.network.hidden_units)
+                unit_index = hidden_count - 1
+                epoch_snapshot = self.current_epoch
+
+                # Record cascade event for chart markers
+                self.cascade_events.append(
+                    {
+                        "epoch": epoch_snapshot,
+                        "unit_index": unit_index,
+                        "correlation": best_correlation,
+                    }
+                )
+
+            self.logger.info(f"Installed cascade unit #{unit_index} (correlation={best_correlation:.4f})")
+            self._broadcast_cascade_add(unit_index, hidden_count, epoch_snapshot)
+
+            # Emit metrics at cascade boundary (unconditional — ensures at least 1 per cycle)
+            self._emit_training_metrics()
+
+            # Step 2c: Retrain output layer (NO LOCK per step — only lock for metric emission)
+            self.state_machine.set_phase(TrainingPhase.OUTPUT)
+            last_retrain_emit = time.monotonic()
+            for step in range(TrainingConstants.OUTPUT_RETRAIN_STEPS):
+                if self._stop.is_set():
+                    break
+
+                # Check pause
+                while self._pause.is_set() and not self._stop.is_set():
+                    self._stop.wait(0.1)
+                if self._stop.is_set():
+                    break
+
+                self.network.train_output_step()
+
+                # Time-based metric emission during retrain
+                now = time.monotonic()
+                if now - last_retrain_emit >= self.update_interval or step == TrainingConstants.OUTPUT_RETRAIN_STEPS - 1:
+                    self._emit_training_metrics()
+                    last_retrain_emit = now
+                    with self._lock:
+                        if self.current_epoch >= self.max_epochs:
+                            break
+
+            # Brief yield between cascade cycles for stop/pause responsiveness
+            if self._stop.wait(0.01):
+                break
+
+        # Mark completion
+        self.state_machine.mark_completed()
+        self._update_training_status()
         self.is_running = False
         self.logger.info("Demo training simulation completed")
+
+    def _emit_training_metrics(self):
+        """Compute real metrics from network state and emit to dashboard.
+
+        Increments the epoch counter, updates history, and broadcasts via WebSocket.
+        Acquires the lock briefly for shared state updates only.
+        """
+        loss, accuracy = self.network.compute_metrics()
+
+        val_loss = loss * 1.1 + np.random.randn() * 0.01
+        val_accuracy = accuracy * 0.95 + np.random.randn() * 0.01
+
+        with self._lock:
+            self.current_epoch += 1
+            self.current_loss = loss
+            self.current_accuracy = accuracy
+            self.network.current_epoch = self.current_epoch
+
+            self.network.history["train_loss"].append(loss)
+            self.network.history["train_accuracy"].append(accuracy)
+            self.network.history["val_loss"].append(val_loss)
+            self.network.history["val_accuracy"].append(val_accuracy)
+
+            phase_name = self.state_machine.get_phase().name.lower()
+            metrics = {
+                "epoch": self.current_epoch,
+                "metrics": {
+                    "loss": float(loss),
+                    "accuracy": float(accuracy),
+                    "val_loss": float(val_loss),
+                    "val_accuracy": float(val_accuracy),
+                },
+                "network_topology": {
+                    "input_units": self.network.input_size,
+                    "hidden_units": len(self.network.hidden_units),
+                    "output_units": self.network.output_size,
+                },
+                "phase": phase_name,
+                "timestamp": datetime.now().isoformat(),
+            }
+            self.metrics_history.append(metrics)
+
+        self._broadcast_metrics(metrics)
+        self._update_training_status()
 
     def _broadcast_metrics(self, metrics: Dict[str, Any]):
         """
@@ -1058,6 +1258,7 @@ class DemoMode:
         self.convergence_enabled = TrainingConstants.DEFAULT_CONVERGENCE_ENABLED
         self.convergence_threshold = TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD
         self._cascade_cooldown_remaining = 0
+        self.cascade_events = []
         # Note: spiral_rotations is NOT reset here — it persists across training resets
         # so the user's chosen complexity is preserved. Only explicitly changed via apply_params.
 
@@ -1278,6 +1479,7 @@ class DemoMode:
                 "convergence_enabled": self.convergence_enabled,
                 "convergence_threshold": self.convergence_threshold,
                 "spiral_rotations": self.spiral_rotations,
+                "cascade_events": list(self.cascade_events),
             }
 
     def apply_params(
@@ -1361,7 +1563,7 @@ class DemoMode:
 _demo_instance: Optional[DemoMode] = None
 
 
-def get_demo_mode(update_interval: float = 1.0) -> DemoMode:
+def get_demo_mode(update_interval: float = None) -> DemoMode:
     """
     Get or create global demo mode instance.
 
