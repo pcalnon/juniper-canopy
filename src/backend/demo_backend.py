@@ -243,6 +243,7 @@ class DemoBackend:
             max_epochs=params.get("max_epochs"),
             convergence_enabled=params.get("convergence_enabled"),
             convergence_threshold=params.get("convergence_threshold"),
+            spiral_rotations=params.get("spiral_rotations"),
         )
         return params
 

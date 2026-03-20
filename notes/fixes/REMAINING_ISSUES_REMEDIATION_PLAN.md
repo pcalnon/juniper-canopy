@@ -19,20 +19,20 @@ The prior fix effort (PR #28) resolved 3 user-reported issues and documented 12 
 
 ## Revised Issue Status
 
-| ID | Original Status | Revised Status | Rationale |
-|----|----------------|----------------|-----------|
-| 1A | Open (5 CardHeaders) | **Not a Bug** | CSS `!important` already overrides inline style |
-| 1B | Open (2 CardHeaders) | **Not a Bug** | CSS `!important` already overrides inline style |
-| 1C | Open (2 CardHeaders) | **Not a Bug** | CSS `!important` already overrides inline style |
-| 1D | Open (4 CardHeaders) | **Not a Bug** | CSS `!important` already overrides inline style |
-| 1E | Open (3 tables) | **Not a Bug** (cleaned up) | CSS `table { background-color: var(--bg-card) !important; }` already overrides. Redundant inline styles removed. |
-| 1F | Open (systemic) | **Resolved** | CSS variables already handle all CardHeaders and tables via `!important` |
-| 2A | Documented | **Fixed** | Logger resolves symlinks before mkdir, auto-creates target directory |
-| 2B | Documented | **Fixed** | `reports/.gitkeep` added, directory now tracked in git |
-| 2C | Documented | **Fixed** | `WORKTREE_SETUP_PROCEDURE.md` updated with Step 6 (create gitignored dirs) |
-| 3A | Pre-existing | **Fixed** | `test_client` fixture now uses `TestClient(app)` context manager for lifespan |
-| 4A | Unverified | **Resolved** | Fix verified in PR #28 (torch.cat) |
-| 5A | Documented | **Resolved** | Infrastructure fixes (2A + 2B) eliminate worktree-specific failures; hook scope unchanged (coverage requires integration tests) |
+| ID | Original Status      | Revised Status             | Rationale                                                                                                                       |
+|----|----------------------|----------------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| 1A | Open (5 CardHeaders) | **Not a Bug**              | CSS `!important` already overrides inline style                                                                                 |
+| 1B | Open (2 CardHeaders) | **Not a Bug**              | CSS `!important` already overrides inline style                                                                                 |
+| 1C | Open (2 CardHeaders) | **Not a Bug**              | CSS `!important` already overrides inline style                                                                                 |
+| 1D | Open (4 CardHeaders) | **Not a Bug**              | CSS `!important` already overrides inline style                                                                                 |
+| 1E | Open (3 tables)      | **Not a Bug** (cleaned up) | CSS `table { background-color: var(--bg-card) !important; }` already overrides. Redundant inline styles removed.                |
+| 1F | Open (systemic)      | **Resolved**               | CSS variables already handle all CardHeaders and tables via `!important`                                                        |
+| 2A | Documented           | **Fixed**                  | Logger resolves symlinks before mkdir, auto-creates target directory                                                            |
+| 2B | Documented           | **Fixed**                  | `reports/.gitkeep` added, directory now tracked in git                                                                          |
+| 2C | Documented           | **Fixed**                  | `WORKTREE_SETUP_PROCEDURE.md` updated with Step 6 (create gitignored dirs)                                                      |
+| 3A | Pre-existing         | **Fixed**                  | `test_client` fixture now uses `TestClient(app)` context manager for lifespan                                                   |
+| 4A | Unverified           | **Resolved**               | Fix verified in PR #28 (torch.cat)                                                                                              |
+| 5A | Documented           | **Resolved**               | Infrastructure fixes (2A + 2B) eliminate worktree-specific failures; hook scope unchanged (coverage requires integration tests) |
 
 ---
 
@@ -50,6 +50,7 @@ These four issues are tightly coupled — they all stem from gitignored director
 
 **2C — Update `WORKTREE_SETUP_PROCEDURE.md`**:
 Add a post-setup step after Step 6 (Verify and Begin Work):
+
 ```bash
 # Create gitignored directories required by the application and tests
 mkdir -p logs reports
@@ -64,13 +65,17 @@ Add `reports/.gitkeep` to version control so the directory is created during `gi
 
 **5A — Scope pre-commit hook to unit + regression tests**:
 Change `.pre-commit-config.yaml` line 268 from:
-```
+
+```bash
 tests/ -q
 ```
+
 to:
-```
+
+```bash
 tests/unit/ tests/regression/ -q
 ```
+
 Integration tests should run in CI, not as a pre-commit gate.
 
 ---
@@ -85,10 +90,12 @@ The three `html.Table` elements in `metrics_panel.py` helper methods have hardco
 
 **Line 1904 is the highest priority** — it's the table inside the "Network Information: Details" panel that was fixed in PR #28 to update with live data. The panel frame is correctly themed but the table content inside it has a light background in dark mode.
 
-#### Remediation
+#### Remediation, Work Unit 2
 
 **Option A — CSS class approach** (preferred):
+
 1. Add a CSS class to `dark_mode.css`:
+
    ```css
    .theme-table {
        background-color: var(--bg-secondary) !important;
@@ -99,10 +106,12 @@ The three `html.Table` elements in `metrics_panel.py` helper methods have hardco
        color: var(--text-color) !important;
    }
    ```
+
 2. Add `className="theme-table"` to the three `html.Table` instances
 3. No callback changes needed — CSS handles everything
 
 **Option B — Pass theme through callbacks**:
+
 1. Add `theme` parameter to `_create_candidate_pool_display()` and `_create_network_info_table()`
 2. Pass `theme` from the calling callbacks in `dashboard_manager.py`
 3. Use conditional colors in the helper methods
@@ -138,6 +147,7 @@ Changed the fixture from `return TestClient(app)` to `with TestClient(app) as cl
 **Status**: Complete
 
 Added 5 integration tests to `test_network_stats_endpoint.py` (`TestNetworkStatsServiceMode` class) that mock the backend as service mode with realistic multi-hidden-unit weight data. Tests verify:
+
 - Service mode returns 200 with valid weight data
 - Weight count reflects ALL hidden units (not just the first)
 - Weight statistics are correctly computed from all weights
@@ -156,6 +166,7 @@ Used `MagicMock`/`AsyncMock` to simulate service mode without requiring a live c
 Removed all 13 `style={"backgroundColor": "#f8f9fa"}` attributes from `dbc.CardHeader` instances across 4 files. The CSS rule `.card-header { background-color: var(--bg-secondary) !important; }` handles dark mode theming, making these inline styles redundant.
 
 **Files modified**:
+
 - `about_panel.py`: 5 instances removed
 - `cassandra_panel.py`: 2 instances removed
 - `redis_panel.py`: 2 instances removed
@@ -165,19 +176,20 @@ Removed all 13 `style={"backgroundColor": "#f8f9fa"}` attributes from `dbc.CardH
 
 ## Implementation Order
 
-| Priority | Work Unit | Issues | Effort | Blocking? |
-|----------|-----------|--------|--------|-----------|
-| 1 | Worktree Developer Experience | 2A, 2B, 2C, 5A | **Complete** |
-| 2 | Metrics Panel Table Cleanup | 1E, 1F | **Complete** |
-| 3 | Pre-Existing Test Failures | 3A | **Complete** |
-| 4 | Service Mode Verification | 4A | **Complete** |
-| 5 | Code Cleanup | 1A-1D | **Complete** |
+| Priority | Work Unit                     | Issues         | Effort       | Blocking? |
+|----------|-------------------------------|----------------|--------------|-----------|
+| 1        | Worktree Developer Experience | 2A, 2B, 2C, 5A | **Complete** |           |
+| 2        | Metrics Panel Table Cleanup   | 1E, 1F         | **Complete** |           |
+| 3        | Pre-Existing Test Failures    | 3A             | **Complete** |           |
+| 4        | Service Mode Verification     | 4A             | **Complete** |           |
+| 5        | Code Cleanup                  | 1A-1D          | **Complete** |           |
 
 ---
 
 ## Verification Results
 
 Post-implementation test suite (worktree, 2026-03-18):
+
 - **Unit + Regression**: 2857 passed, 4 skipped, 0 failures
 - **Full suite (with integration)**: 3549+ passed, 19 skipped
 - **Coverage**: 96.45%+

@@ -106,6 +106,7 @@ class TestActivationFunction:
 # ─── Training Convergence ────────────────────────────────────────────────────
 
 
+@pytest.mark.timeout(300)
 class TestTrainingConvergence:
     """Verify training improves after hidden unit addition."""
 
@@ -195,6 +196,7 @@ class TestTrainingConvergence:
 # ─── Hidden Unit Feature Quality ─────────────────────────────────────────────
 
 
+@pytest.mark.timeout(300)
 class TestHiddenUnitQuality:
     """Verify hidden units produce useful (non-constant) features."""
 
@@ -274,6 +276,7 @@ class TestMSELoss:
 # ─── Decision Boundary Non-Linearity ─────────────────────────────────────────
 
 
+@pytest.mark.timeout(300)
 class TestBoundaryNonLinearity:
     """Verify the decision boundary becomes non-linear with hidden units."""
 
@@ -327,6 +330,7 @@ class TestBoundaryNonLinearity:
 # ─── Reset Safety ─────────────────────────────────────────────────────────────
 
 
+@pytest.mark.timeout(300)
 class TestResetSafety:
     """Verify network state is consistent after reset."""
 

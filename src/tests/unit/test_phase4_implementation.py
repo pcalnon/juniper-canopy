@@ -9,6 +9,7 @@ as documented in CASCOR_DEMO_TRAINING_ERROR_PLAN.md.
 import pytest
 import torch
 
+from canopy_constants import TrainingConstants
 from demo_mode import MockCascorNetwork
 
 
@@ -139,6 +140,7 @@ class TestConvergenceBasedCascade:
         demo.current_epoch = 15  # not at fixed interval
         demo.convergence_enabled = True
         demo.convergence_threshold = 0.001
+        demo._cascade_cooldown_remaining = 0
         return demo
 
     def test_convergence_stall_triggers_addition(self):
@@ -309,16 +311,16 @@ class TestCandidateHyperparameters:
         calls = []
         original = network_with_data._train_candidate
 
-        def spy(unit, steps=200, lr=0.01):
+        def spy(unit, steps=TrainingConstants.CANDIDATE_TRAINING_STEPS, lr=0.01):
             calls.append({"steps": steps, "lr": lr})
             return original(unit, steps=steps, lr=lr)
 
         with patch.object(network_with_data, "_train_candidate", side_effect=spy):
             network_with_data.add_hidden_unit()
 
-        assert len(calls) == 8  # pool_size = 8
+        assert len(calls) == TrainingConstants.CANDIDATE_POOL_SIZE
         for call in calls:
-            assert call["steps"] == 200
+            assert call["steps"] == TrainingConstants.CANDIDATE_TRAINING_STEPS
             assert call["lr"] == 0.01
 
 
@@ -326,10 +328,10 @@ class TestCandidateHyperparameters:
 
 
 class TestRetrainSteps:
-    """Verify output retraining uses 500 steps after hidden unit install."""
+    """Verify output retraining uses OUTPUT_RETRAIN_STEPS after hidden unit install."""
 
-    def test_add_hidden_unit_runs_500_retrain_steps(self, network_with_data):
-        """add_hidden_unit should call train_output_step 500 times for retraining."""
+    def test_add_hidden_unit_runs_retrain_steps(self, network_with_data):
+        """add_hidden_unit should call train_output_step OUTPUT_RETRAIN_STEPS times."""
         from unittest.mock import patch
 
         call_count = 0
@@ -345,5 +347,5 @@ class TestRetrainSteps:
         with patch.object(network_with_data, "train_output_step", side_effect=counting_step):
             network_with_data.add_hidden_unit()
 
-        # 500 retrain steps (candidate training uses _train_candidate, not train_output_step)
-        assert call_count == 500, f"Expected 500 retrain steps, got {call_count}"
+        expected = TrainingConstants.OUTPUT_RETRAIN_STEPS
+        assert call_count == expected, f"Expected {expected} retrain steps, got {call_count}"

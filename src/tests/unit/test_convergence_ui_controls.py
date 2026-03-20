@@ -31,6 +31,7 @@ def _make_demo():
     demo.current_epoch = 15  # not at fixed interval
     demo.convergence_enabled = True
     demo.convergence_threshold = 0.001
+    demo._cascade_cooldown_remaining = 0
     return demo
 
 
