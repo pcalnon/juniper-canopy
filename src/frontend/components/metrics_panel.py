@@ -1374,6 +1374,17 @@ class MetricsPanel(BaseComponent):
 
         return fig
 
+    @staticmethod
+    def _phase_band_color(phase: str) -> str:
+        """Return the background band fill color for a training phase, or None."""
+        if phase is None:
+            return None
+        if "candidate" in phase:
+            return "rgba(255, 193, 7, 0.08)"
+        if "output" in phase:
+            return "rgba(0, 123, 255, 0.06)"
+        return None
+
     def _add_phase_bg_bands(self, fig: go.Figure = None, epochs: list = None, phases: list = None) -> go.Figure:
         # Add phase background bands
         current_phase = None
@@ -1393,7 +1404,8 @@ class MetricsPanel(BaseComponent):
         for i, (epoch, phase) in enumerate(zip(epochs, phases, strict=True)):
             if phase != current_phase:
                 # End previous phase band
-                if current_phase is not None and "candidate" in current_phase and phase_start is not None:
+                fillcolor = self._phase_band_color(current_phase)
+                if fillcolor is not None and phase_start is not None:
                     fig.add_shape(
                         type="rect",
                         x0=phase_start,
@@ -1401,7 +1413,7 @@ class MetricsPanel(BaseComponent):
                         y0=0,
                         y1=1,
                         yref="paper",
-                        fillcolor="rgba(255, 193, 7, 0.08)",  # Light yellow for candidate
+                        fillcolor=fillcolor,
                         line_width=0,
                         layer="below",
                     )
@@ -1410,8 +1422,9 @@ class MetricsPanel(BaseComponent):
         return (fig, current_phase, phase_start)
 
     def _candidate_final_band(self, fig: go.Figure = None, epochs: list = None, current_phase: str = None, phase_start: float = None) -> Tuple[go.Figure, str, float]:
-        # Final band if ended in candidate
-        if current_phase is not None and "candidate" in current_phase and phase_start is not None:
+        # Final band if ended in a phase with a background color
+        fillcolor = self._phase_band_color(current_phase)
+        if fillcolor is not None and phase_start is not None:
             fig.add_shape(
                 type="rect",
                 x0=phase_start,
@@ -1419,7 +1432,7 @@ class MetricsPanel(BaseComponent):
                 y0=0,
                 y1=1,
                 yref="paper",
-                fillcolor="rgba(255, 193, 7, 0.08)",
+                fillcolor=fillcolor,
                 line_width=0,
                 layer="below",
             )
@@ -1512,8 +1525,8 @@ class MetricsPanel(BaseComponent):
 
         for i, (epoch, phase) in enumerate(zip(epochs, phases, strict=True)):
             if phase != current_phase:
-                # End previous phase band
-                if current_phase is not None and "candidate" in current_phase and phase_start is not None:
+                fillcolor = self._phase_band_color(current_phase)
+                if fillcolor is not None and phase_start is not None:
                     fig.add_shape(
                         type="rect",
                         x0=phase_start,
@@ -1521,15 +1534,16 @@ class MetricsPanel(BaseComponent):
                         y0=0,
                         y1=1,
                         yref="paper",
-                        fillcolor="rgba(255, 193, 7, 0.08)",  # Light yellow for candidate
+                        fillcolor=fillcolor,
                         line_width=0,
                         layer="below",
                     )
                 current_phase = phase
                 phase_start = epoch
 
-        # Final band if ended in candidate
-        if current_phase is not None and "candidate" in current_phase and phase_start is not None:
+        # Final band if ended in a phase with a background color
+        fillcolor = self._phase_band_color(current_phase)
+        if fillcolor is not None and phase_start is not None:
             fig.add_shape(
                 type="rect",
                 x0=phase_start,
@@ -1537,7 +1551,7 @@ class MetricsPanel(BaseComponent):
                 y0=0,
                 y1=1,
                 yref="paper",
-                fillcolor="rgba(255, 193, 7, 0.08)",
+                fillcolor=fillcolor,
                 line_width=0,
                 layer="below",
             )

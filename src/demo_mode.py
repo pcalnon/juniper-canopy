@@ -185,12 +185,16 @@ class MockCascorNetwork:
     def add_hidden_unit(self):
         """Add a new cascade hidden unit with trained weights.
 
+        .. deprecated::
+            Not called in the production training loop (_training_loop).
+            Retained as a convenience method for unit tests. The production
+            path uses train_candidate_pool() + install_candidate() separately.
+
         Trains a pool of candidate units via Pearson correlation maximization
         (matching the real CasCor candidate training phase), selects the best,
         and installs it. After installation, output layer is expanded and
-        retrained with a fresh Adam optimizer for OUTPUT_RETRAIN_STEPS
-        full-batch steps. Returns the best correlation, or None if no
-        candidate met the quality threshold.
+        retrained for OUTPUT_RETRAIN_STEPS full-batch steps. Returns the best
+        correlation, or None if no candidate met the quality threshold.
         """
         hidden_id = len(self.hidden_units)
         input_dim = self.input_size + hidden_id
@@ -230,29 +234,12 @@ class MockCascorNetwork:
         if self.train_x is not None and best_correlation < TrainingConstants.MIN_CANDIDATE_CORRELATION:
             return None
 
-        self.hidden_units.append(best_unit)
-
-        # Expand output layer to accommodate new hidden unit (warm-start)
-        old_layer = self.output_layer
-        new_dim = self.input_size + len(self.hidden_units)
-        self.output_layer = torch.nn.Linear(new_dim, self.output_size)
-        with torch.no_grad():
-            self.output_layer.weight[:, : old_layer.in_features] = old_layer.weight
-            self.output_layer.bias[:] = old_layer.bias
-            # Explicitly init new column to match CasCor reference (randn * 0.1)
-            self.output_layer.weight[:, old_layer.in_features :] = torch.randn(self.output_size, new_dim - old_layer.in_features) * TrainingConstants.OUTPUT_WEIGHT_INIT_STD
-
-        # Fresh optimizer for retraining (no stale momentum — matches CasCor)
-        self.output_optimizer = torch.optim.Adam(self.output_layer.parameters(), lr=self.learning_rate)
+        # Delegate to install_candidate (preserves optimizer momentum)
+        self.install_candidate(best_unit)
 
         # Retrain output with full-batch for OUTPUT_RETRAIN_STEPS steps
         for _ in range(TrainingConstants.OUTPUT_RETRAIN_STEPS):
             self.train_output_step()
-
-        # Retain retrain optimizer — its moment estimates encode the converged
-        # loss landscape curvature, which is exactly what the outer loop needs.
-        # Creating a fresh optimizer here would produce a ~1000x overshoot on
-        # the first step due to Adam's bias correction (Phase 6A.1 fix).
 
         return best_correlation
 
@@ -320,12 +307,20 @@ class MockCascorNetwork:
         """Install a trained candidate unit into the network.
 
         Appends the unit to hidden_units, expands the output layer, and creates
-        a fresh optimizer. This method modifies shared network state and should
-        be called under lock protection.
+        an optimizer that preserves momentum for existing weights. This method
+        modifies shared network state and should be called under lock protection.
 
         Args:
             unit: Trained candidate unit dict with 'weights', 'bias', 'activation_fn'.
         """
+        # Save old optimizer state before replacing the layer — needed to
+        # transfer momentum into the new optimizer and avoid Adam bias
+        # correction overshoot (~1000x amplification on first step).
+        old_weight = self.output_layer.weight
+        old_bias = self.output_layer.bias
+        old_weight_state = self.output_optimizer.state.get(old_weight, {})
+        old_bias_state = self.output_optimizer.state.get(old_bias, {})
+
         self.hidden_units.append(unit)
 
         old_layer = self.output_layer
@@ -337,6 +332,28 @@ class MockCascorNetwork:
             self.output_layer.weight[:, old_layer.in_features :] = torch.randn(self.output_size, new_dim - old_layer.in_features) * TrainingConstants.OUTPUT_WEIGHT_INIT_STD
 
         self.output_optimizer = torch.optim.Adam(self.output_layer.parameters(), lr=self.learning_rate)
+
+        # Transfer old momentum/variance for preserved weight columns so the
+        # optimizer continues smoothly instead of overshooting.  New column
+        # (for the just-installed hidden unit) starts with zero moments.
+        if old_weight_state:
+            old_dim = old_layer.in_features
+            new_weight = self.output_layer.weight
+            weight_state = {
+                "step": old_weight_state["step"].clone(),
+                "exp_avg": torch.zeros_like(new_weight),
+                "exp_avg_sq": torch.zeros_like(new_weight),
+            }
+            weight_state["exp_avg"][:, :old_dim] = old_weight_state["exp_avg"]
+            weight_state["exp_avg_sq"][:, :old_dim] = old_weight_state["exp_avg_sq"]
+            self.output_optimizer.state[new_weight] = weight_state
+
+        if old_bias_state:
+            self.output_optimizer.state[self.output_layer.bias] = {
+                "step": old_bias_state["step"].clone(),
+                "exp_avg": old_bias_state["exp_avg"].clone(),
+                "exp_avg_sq": old_bias_state["exp_avg_sq"].clone(),
+            }
 
     def compute_metrics(self):
         """Compute current loss and accuracy from real network predictions.
@@ -529,7 +546,7 @@ class DemoMode:
 
         self.max_epochs = int(training_defaults.get("epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS))
         self.max_hidden_units = int(training_defaults.get("hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS))
-        self.cascade_every = _settings.demo_cascade_every
+        self.cascade_every = _settings.demo_cascade_every  # Deprecated: only used by _should_add_cascade_unit
 
         # Convergence-based cascade addition parameters
         self.convergence_enabled = TrainingConstants.DEFAULT_CONVERGENCE_ENABLED
@@ -897,6 +914,12 @@ class DemoMode:
         """
         Determine if a cascade unit should be added using convergence-based criteria.
 
+        .. deprecated::
+            Not called in the production training loop (_training_loop).
+            The two-phase loop (Phase 6C) replaced epoch-based cascade triggers
+            with continuous candidate pool training. cascade_every is also unused.
+            Retained for test coverage compatibility.
+
         When convergence detection is enabled, adds a hidden unit when the loss
         improvement over the last 10 epochs falls below ``self.convergence_threshold``.
         The fixed schedule (``self.cascade_every``) always acts as a fallback.
@@ -960,9 +983,12 @@ class DemoMode:
 
             self.network.train_output_step()
 
-            # Time-based metric emission: emit at ~update_interval rate
+            # Step-based metric emission for retrain visibility (time-based fallback)
             now = time.monotonic()
-            if now - last_emit >= self.update_interval or step == TrainingConstants.OUTPUT_RETRAIN_STEPS - 1:
+            is_step_emit = (step + 1) % TrainingConstants.OUTPUT_RETRAIN_EMIT_EVERY == 0
+            is_final = step == TrainingConstants.OUTPUT_RETRAIN_STEPS - 1
+            is_time_emit = now - last_emit >= self.update_interval
+            if is_step_emit or is_final or is_time_emit:
                 self._emit_training_metrics()
                 last_emit = now
                 with self._lock:
@@ -1078,9 +1104,12 @@ class DemoMode:
 
                 self.network.train_output_step()
 
-                # Time-based metric emission during retrain
+                # Step-based metric emission for retrain visibility (time-based fallback)
                 now = time.monotonic()
-                if now - last_retrain_emit >= self.update_interval or step == TrainingConstants.OUTPUT_RETRAIN_STEPS - 1:
+                is_step_emit = (step + 1) % TrainingConstants.OUTPUT_RETRAIN_EMIT_EVERY == 0
+                is_final = step == TrainingConstants.OUTPUT_RETRAIN_STEPS - 1
+                is_time_emit = now - last_retrain_emit >= self.update_interval
+                if is_step_emit or is_final or is_time_emit:
                     self._emit_training_metrics()
                     last_retrain_emit = now
                     with self._lock:
