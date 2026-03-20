@@ -320,12 +320,20 @@ class MockCascorNetwork:
         """Install a trained candidate unit into the network.
 
         Appends the unit to hidden_units, expands the output layer, and creates
-        a fresh optimizer. This method modifies shared network state and should
-        be called under lock protection.
+        an optimizer that preserves momentum for existing weights. This method
+        modifies shared network state and should be called under lock protection.
 
         Args:
             unit: Trained candidate unit dict with 'weights', 'bias', 'activation_fn'.
         """
+        # Save old optimizer state before replacing the layer — needed to
+        # transfer momentum into the new optimizer and avoid Adam bias
+        # correction overshoot (~1000x amplification on first step).
+        old_weight = self.output_layer.weight
+        old_bias = self.output_layer.bias
+        old_weight_state = self.output_optimizer.state.get(old_weight, {})
+        old_bias_state = self.output_optimizer.state.get(old_bias, {})
+
         self.hidden_units.append(unit)
 
         old_layer = self.output_layer
@@ -337,6 +345,28 @@ class MockCascorNetwork:
             self.output_layer.weight[:, old_layer.in_features :] = torch.randn(self.output_size, new_dim - old_layer.in_features) * TrainingConstants.OUTPUT_WEIGHT_INIT_STD
 
         self.output_optimizer = torch.optim.Adam(self.output_layer.parameters(), lr=self.learning_rate)
+
+        # Transfer old momentum/variance for preserved weight columns so the
+        # optimizer continues smoothly instead of overshooting.  New column
+        # (for the just-installed hidden unit) starts with zero moments.
+        if old_weight_state:
+            old_dim = old_layer.in_features
+            new_weight = self.output_layer.weight
+            weight_state = {
+                "step": old_weight_state["step"].clone(),
+                "exp_avg": torch.zeros_like(new_weight),
+                "exp_avg_sq": torch.zeros_like(new_weight),
+            }
+            weight_state["exp_avg"][:, :old_dim] = old_weight_state["exp_avg"]
+            weight_state["exp_avg_sq"][:, :old_dim] = old_weight_state["exp_avg_sq"]
+            self.output_optimizer.state[new_weight] = weight_state
+
+        if old_bias_state:
+            self.output_optimizer.state[self.output_layer.bias] = {
+                "step": old_bias_state["step"].clone(),
+                "exp_avg": old_bias_state["exp_avg"].clone(),
+                "exp_avg_sq": old_bias_state["exp_avg_sq"].clone(),
+            }
 
     def compute_metrics(self):
         """Compute current loss and accuracy from real network predictions.
