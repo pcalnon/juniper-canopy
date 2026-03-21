@@ -38,35 +38,91 @@ class TrainingConstants:
     parameters including epochs, learning rates, and hidden units.
     """
 
-    # Epoch limits
+    # ── Neural Network: Epoch limits ──
     MIN_TRAINING_EPOCHS: Final[int] = 10
-    MAX_TRAINING_EPOCHS: Final[int] = 1000
-    DEFAULT_TRAINING_EPOCHS: Final[int] = 300
+    MAX_TRAINING_EPOCHS: Final[int] = 10000000
+    DEFAULT_TRAINING_EPOCHS: Final[int] = 1000000
 
-    # Learning rate defaults
+    # ── Neural Network: Maximum iterations (network growth and output training) ──
+    DEFAULT_MAX_ITERATIONS: Final[int] = 1000
+    MIN_MAX_ITERATIONS: Final[int] = 1
+    MAX_MAX_ITERATIONS: Final[int] = 100000
+
+    # ── Neural Network: Learning rate ──
     DEFAULT_LEARNING_RATE: Final[float] = 0.01
     MIN_LEARNING_RATE: Final[float] = 0.0001
     MAX_LEARNING_RATE: Final[float] = 1.0
 
-    # Hidden units defaults
-    DEFAULT_MAX_HIDDEN_UNITS: Final[int] = 20
+    # ── Neural Network: Hidden units ──
+    DEFAULT_MAX_HIDDEN_UNITS: Final[int] = 1000
     MIN_HIDDEN_UNITS: Final[int] = 0
-    MAX_HIDDEN_UNITS: Final[int] = 20
+    MAX_HIDDEN_UNITS: Final[int] = 10000
 
-    # Convergence-based cascade addition defaults
+    # ── Neural Network: Multi-node layers ──
+    DEFAULT_MULTI_NODE_LAYERS: Final[bool] = False
+
+    # ── Neural Network: Growth trigger ──
+    DEFAULT_GROWTH_TRIGGER: Final[str] = "convergence"
+    DEFAULT_PRESET_EPOCHS: Final[int] = 50
+    MIN_PRESET_EPOCHS: Final[int] = 1
+    MAX_PRESET_EPOCHS: Final[int] = 10000
+
+    # ── Neural Network: Convergence detection (used by growth trigger) ──
     DEFAULT_CONVERGENCE_ENABLED: Final[bool] = True
     DEFAULT_CONVERGENCE_THRESHOLD: Final[float] = 0.001
     MIN_CONVERGENCE_THRESHOLD: Final[float] = 0.0001
     MAX_CONVERGENCE_THRESHOLD: Final[float] = 0.1
 
-    # Spiral dataset parameters
-    DEFAULT_SPIRAL_ROTATIONS: Final[float] = 3.0
+    # ── Neural Network: Spiral dataset ──
+    DEFAULT_SPIRAL_ROTATIONS: Final[float] = 1.5
     MIN_SPIRAL_ROTATIONS: Final[float] = 0.5
     MAX_SPIRAL_ROTATIONS: Final[float] = 5.0
+    DEFAULT_SPIRAL_NUMBER: Final[int] = 2
+    MIN_SPIRAL_NUMBER: Final[int] = 1
+    MAX_SPIRAL_NUMBER: Final[int] = 10
+    DEFAULT_DATASET_ELEMENTS: Final[int] = 1000
+    MIN_DATASET_ELEMENTS: Final[int] = 50
+    MAX_DATASET_ELEMENTS: Final[int] = 50000
+    DEFAULT_DATASET_NOISE: Final[float] = 0.25
+    MIN_DATASET_NOISE: Final[float] = 0.0
+    MAX_DATASET_NOISE: Final[float] = 1.0
 
-    # Cascade correlation training constants (Phase 6 — matches CasCor reference)
+    # ── Candidate Nodes: Pool size ──
+    DEFAULT_CANDIDATE_POOL_SIZE: Final[int] = 100
+    MIN_CANDIDATE_POOL_SIZE: Final[int] = 1
+    MAX_CANDIDATE_POOL_SIZE: Final[int] = 500
+
+    # ── Candidate Nodes: Correlation threshold ──
+    DEFAULT_CANDIDATE_CORRELATION_THRESHOLD: Final[float] = 0.001
+    MIN_CANDIDATE_CORRELATION_THRESHOLD: Final[float] = 0.00001
+    MAX_CANDIDATE_CORRELATION_THRESHOLD: Final[float] = 0.1
+
+    # ── Candidate Nodes: Selected candidates ──
+    DEFAULT_SELECTED_CANDIDATES: Final[int] = 1
+    MIN_SELECTED_CANDIDATES: Final[int] = 1
+    MAX_SELECTED_CANDIDATES: Final[int] = 50
+
+    # ── Candidate Nodes: Pool training complete ──
+    DEFAULT_CN_TRAINING_COMPLETE: Final[str] = "preset_epochs"
+    DEFAULT_CANDIDATE_TRAINING_ITERATIONS: Final[int] = 500
+    MIN_CANDIDATE_TRAINING_ITERATIONS: Final[int] = 10
+    MAX_CANDIDATE_TRAINING_ITERATIONS: Final[int] = 5000
+    DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD: Final[float] = 0.0001
+    MIN_CANDIDATE_CONVERGENCE_THRESHOLD: Final[float] = 0.000001
+    MAX_CANDIDATE_CONVERGENCE_THRESHOLD: Final[float] = 0.01
+
+    # ── Candidate Nodes: Multi candidate selection ──
+    DEFAULT_MULTI_CANDIDATE_ENABLED: Final[bool] = False
+    DEFAULT_TOP_CANDIDATES_COUNT: Final[int] = 1
+    MIN_TOP_CANDIDATES_COUNT: Final[int] = 1
+    MAX_TOP_CANDIDATES_COUNT: Final[int] = 20
+    DEFAULT_RANDOM_CANDIDATES_COUNT: Final[int] = 1
+    MIN_RANDOM_CANDIDATES_COUNT: Final[int] = 1
+    MAX_RANDOM_CANDIDATES_COUNT: Final[int] = 20
+
+    # ── Cascade correlation internal constants (Phase 6 — matches CasCor reference) ──
     CASCADE_COOLDOWN_EPOCHS: Final[int] = 50
-    CANDIDATE_POOL_SIZE: Final[int] = 32
+    CANDIDATE_POOL_SIZE: Final[int] = 32  # internal CasCor constant, distinct from UI DEFAULT_CANDIDATE_POOL_SIZE
     CANDIDATE_TRAINING_STEPS: Final[int] = 600
     CANDIDATE_PATIENCE: Final[int] = 30
     OUTPUT_RETRAIN_STEPS: Final[int] = 1000

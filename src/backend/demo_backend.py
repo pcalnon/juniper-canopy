@@ -237,14 +237,7 @@ class DemoBackend:
     # --- Parameters ---
 
     def apply_params(self, **params: Any) -> Dict[str, Any]:
-        self._demo.apply_params(
-            learning_rate=params.get("learning_rate"),
-            max_hidden_units=params.get("max_hidden_units"),
-            max_epochs=params.get("max_epochs"),
-            convergence_enabled=params.get("convergence_enabled"),
-            convergence_threshold=params.get("convergence_threshold"),
-            spiral_rotations=params.get("spiral_rotations"),
-        )
+        self._demo.apply_params(**params)
         return params
 
     # --- Lifecycle ---

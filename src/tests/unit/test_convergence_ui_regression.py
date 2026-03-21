@@ -42,15 +42,31 @@ class TestB51CheckboxDoesNotRevertAfterApply:
             with manager.app.server.request_context(env):
                 params, _ = manager._apply_parameters_handler(
                     n_clicks=1,
-                    lr=0.01,
-                    hu=10,
-                    epochs=200,
-                    conv_enabled=[],
-                    conv_threshold=0.001,
-                    spiral_rot=3.0,
+                    nn_max_iter=1000,
+                    nn_max_epochs=200,
+                    nn_lr=0.01,
+                    nn_max_hu=10,
+                    nn_multi_node=[],
+                    nn_growth_trigger="convergence",
+                    nn_growth_epochs=50,
+                    nn_growth_conv_thresh=0.001,
+                    nn_spiral_rot=1.5,
+                    nn_spiral_num=2,
+                    nn_dataset_elem=1000,
+                    nn_dataset_noise=0.25,
+                    cn_pool_size=100,
+                    cn_corr_thresh=0.001,
+                    cn_selected=1,
+                    cn_training_complete="preset_epochs",
+                    cn_training_iter=500,
+                    cn_training_conv_thresh=0.0001,
+                    cn_multi_cand=[],
+                    cn_cand_selection=None,
+                    cn_top_cands=1,
+                    cn_random_cands=1,
                 )
 
-        assert params["convergence_enabled"] is False
+        assert params["nn_multi_node_layers"] is False
 
     @pytest.mark.regression
     def test_track_changes_after_unchecked_apply_no_diff(self, reset_singletons):
@@ -59,21 +75,53 @@ class TestB51CheckboxDoesNotRevertAfterApply:
 
         manager = DashboardManager({})
         applied = {
-            "learning_rate": 0.01,
-            "max_hidden_units": 10,
-            "max_epochs": 200,
-            "convergence_enabled": False,
-            "convergence_threshold": 0.001,
-            "spiral_rotations": 3.0,
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
         }
 
         disabled, status = manager._track_param_changes_handler(
-            lr=0.01,
-            hu=10,
-            epochs=200,
-            conv_enabled=[],
-            conv_threshold=0.001,
-            spiral_rot=3.0,
+            1000,
+            200,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
             applied=applied,
         )
         assert disabled is True
@@ -113,15 +161,31 @@ class TestB52ThresholdDoesNotRevertAfterApply:
             with manager.app.server.request_context(env):
                 params, _ = manager._apply_parameters_handler(
                     n_clicks=1,
-                    lr=0.01,
-                    hu=10,
-                    epochs=200,
-                    conv_enabled=["enabled"],
-                    conv_threshold=0.05,
-                    spiral_rot=3.0,
+                    nn_max_iter=1000,
+                    nn_max_epochs=200,
+                    nn_lr=0.01,
+                    nn_max_hu=10,
+                    nn_multi_node=[],
+                    nn_growth_trigger="convergence",
+                    nn_growth_epochs=50,
+                    nn_growth_conv_thresh=0.05,
+                    nn_spiral_rot=1.5,
+                    nn_spiral_num=2,
+                    nn_dataset_elem=1000,
+                    nn_dataset_noise=0.25,
+                    cn_pool_size=100,
+                    cn_corr_thresh=0.001,
+                    cn_selected=1,
+                    cn_training_complete="preset_epochs",
+                    cn_training_iter=500,
+                    cn_training_conv_thresh=0.0001,
+                    cn_multi_cand=[],
+                    cn_cand_selection=None,
+                    cn_top_cands=1,
+                    cn_random_cands=1,
                 )
 
-        assert params["convergence_threshold"] == 0.05
+        assert params["nn_growth_convergence_threshold"] == 0.05
 
     @pytest.mark.regression
     def test_track_changes_after_custom_threshold_apply_no_diff(self, reset_singletons):
@@ -130,21 +194,53 @@ class TestB52ThresholdDoesNotRevertAfterApply:
 
         manager = DashboardManager({})
         applied = {
-            "learning_rate": 0.01,
-            "max_hidden_units": 10,
-            "max_epochs": 200,
-            "convergence_enabled": True,
-            "convergence_threshold": 0.05,
-            "spiral_rotations": 3.0,
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.05,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
         }
 
         disabled, status = manager._track_param_changes_handler(
-            lr=0.01,
-            hu=10,
-            epochs=200,
-            conv_enabled=["enabled"],
-            conv_threshold=0.05,
-            spiral_rot=3.0,
+            1000,
+            200,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.05,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
             applied=applied,
         )
         assert disabled is True
@@ -167,15 +263,31 @@ class TestB52ThresholdDoesNotRevertAfterApply:
                 with manager.app.server.request_context(env):
                     params, _ = manager._apply_parameters_handler(
                         n_clicks=1,
-                        lr=0.01,
-                        hu=10,
-                        epochs=200,
-                        conv_enabled=["enabled"],
-                        conv_threshold=threshold,
-                        spiral_rot=3.0,
+                        nn_max_iter=1000,
+                        nn_max_epochs=200,
+                        nn_lr=0.01,
+                        nn_max_hu=10,
+                        nn_multi_node=[],
+                        nn_growth_trigger="convergence",
+                        nn_growth_epochs=50,
+                        nn_growth_conv_thresh=threshold,
+                        nn_spiral_rot=1.5,
+                        nn_spiral_num=2,
+                        nn_dataset_elem=1000,
+                        nn_dataset_noise=0.25,
+                        cn_pool_size=100,
+                        cn_corr_thresh=0.001,
+                        cn_selected=1,
+                        cn_training_complete="preset_epochs",
+                        cn_training_iter=500,
+                        cn_training_conv_thresh=0.0001,
+                        cn_multi_cand=[],
+                        cn_cand_selection=None,
+                        cn_top_cands=1,
+                        cn_random_cands=1,
                     )
 
-            assert params["convergence_threshold"] == threshold, f"Expected {threshold}, got {params['convergence_threshold']}"
+            assert params["nn_growth_convergence_threshold"] == threshold, f"Expected {threshold}, got {params['nn_growth_convergence_threshold']}"
 
 
 # -------------------------------------------------------------------------
@@ -206,7 +318,7 @@ class TestB53NoPeriodicMetaParameterRefresh:
         # Simulate already-initialized state
         current_applied = {"learning_rate": 0.01, "max_hidden_units": 10}
         result = manager._init_params_from_backend_handler(n=1, current_applied=current_applied)
-        assert result == (dash.no_update,) * 7
+        assert result == (dash.no_update,) * 23
 
     @pytest.mark.regression
     def test_no_backend_params_store_in_layout(self, reset_singletons):
@@ -254,13 +366,13 @@ class TestB54SeparateTrainingParametersCard:
         assert "Training Controls" in layout_str
 
     @pytest.mark.regression
-    def test_training_parameters_card_has_header(self, reset_singletons):
-        """'Training Parameters' card must have its own header."""
+    def test_meta_parameters_card_has_header(self, reset_singletons):
+        """'Meta Parameters' card must have its own header."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
         layout_str = str(manager.app.layout)
-        assert "Training Parameters" in layout_str
+        assert "Meta Parameters" in layout_str
 
     @pytest.mark.regression
     def test_buttons_in_controls_card_inputs_in_parameters_card(self, reset_singletons):
@@ -274,9 +386,9 @@ class TestB54SeparateTrainingParametersCard:
         # The controls card should have buttons (start-button, etc.)
         # The parameters card should have inputs (learning-rate-input, etc.)
         start_btn = TestB53NoPeriodicMetaParameterRefresh._find_component_by_id(layout, "start-button")
-        lr_input = TestB53NoPeriodicMetaParameterRefresh._find_component_by_id(layout, "learning-rate-input")
+        lr_input = TestB53NoPeriodicMetaParameterRefresh._find_component_by_id(layout, "nn-learning-rate-input")
         assert start_btn is not None, "start-button not found in layout"
-        assert lr_input is not None, "learning-rate-input not found in layout"
+        assert lr_input is not None, "nn-learning-rate-input not found in layout"
 
 
 # -------------------------------------------------------------------------
@@ -360,21 +472,53 @@ class TestB57StatusMessagePreserved:
 
         manager = DashboardManager({})
         applied = {
-            "learning_rate": 0.01,
-            "max_hidden_units": 10,
-            "max_epochs": 200,
-            "convergence_enabled": True,
-            "convergence_threshold": 0.001,
-            "spiral_rotations": 3.0,
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
         }
 
         disabled, status = manager._track_param_changes_handler(
-            lr=0.01,
-            hu=10,
-            epochs=200,
-            conv_enabled=["enabled"],
-            conv_threshold=0.001,
-            spiral_rot=3.0,
+            1000,
+            200,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
             applied=applied,
         )
         assert disabled is True
@@ -387,21 +531,53 @@ class TestB57StatusMessagePreserved:
 
         manager = DashboardManager({})
         applied = {
-            "learning_rate": 0.01,
-            "max_hidden_units": 10,
-            "max_epochs": 200,
-            "convergence_enabled": True,
-            "convergence_threshold": 0.001,
-            "spiral_rotations": 3.0,
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
         }
 
         disabled, status = manager._track_param_changes_handler(
-            lr=0.05,
-            hu=10,
-            epochs=200,
-            conv_enabled=["enabled"],
-            conv_threshold=0.001,
-            spiral_rot=3.0,
+            1000,
+            200,
+            0.05,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
             applied=applied,
         )
         assert disabled is False
@@ -423,12 +599,28 @@ class TestB57StatusMessagePreserved:
             with manager.app.server.request_context(env):
                 _, status = manager._apply_parameters_handler(
                     n_clicks=1,
-                    lr=0.01,
-                    hu=10,
-                    epochs=200,
-                    conv_enabled=["enabled"],
-                    conv_threshold=0.001,
-                    spiral_rot=3.0,
+                    nn_max_iter=1000,
+                    nn_max_epochs=200,
+                    nn_lr=0.01,
+                    nn_max_hu=10,
+                    nn_multi_node=[],
+                    nn_growth_trigger="convergence",
+                    nn_growth_epochs=50,
+                    nn_growth_conv_thresh=0.001,
+                    nn_spiral_rot=1.5,
+                    nn_spiral_num=2,
+                    nn_dataset_elem=1000,
+                    nn_dataset_noise=0.25,
+                    cn_pool_size=100,
+                    cn_corr_thresh=0.001,
+                    cn_selected=1,
+                    cn_training_complete="preset_epochs",
+                    cn_training_iter=500,
+                    cn_training_conv_thresh=0.0001,
+                    cn_multi_cand=[],
+                    cn_cand_selection=None,
+                    cn_top_cands=1,
+                    cn_random_cands=1,
                 )
 
         assert "Parameters applied" in status

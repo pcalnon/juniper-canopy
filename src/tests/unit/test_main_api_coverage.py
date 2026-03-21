@@ -1095,7 +1095,7 @@ class TestSetParamsEndpoint:
 
             result = await main.api_set_params({"learning_rate": 0.02})
 
-            mock_backend.apply_params.assert_called_once_with(learning_rate=0.02)
+            mock_backend.apply_params.assert_called_once_with(nn_learning_rate=0.02)
             assert result["status"] == "success"
         finally:
             main.backend = original_backend
