@@ -182,7 +182,7 @@ class MockCascorNetwork:
             return torch.cat([x] + hidden_outputs, dim=1)
         return x
 
-    def add_hidden_unit(self):
+    def add_hidden_unit(self, candidate_steps=None, pool_size=None):
         """Add a new cascade hidden unit with trained weights.
 
         .. deprecated::
@@ -195,6 +195,10 @@ class MockCascorNetwork:
         and installs it. After installation, output layer is expanded and
         retrained for OUTPUT_RETRAIN_STEPS full-batch steps. Returns the best
         correlation, or None if no candidate met the quality threshold.
+
+        Args:
+            candidate_steps: Override for per-candidate training steps (default: CANDIDATE_TRAINING_STEPS).
+            pool_size: Override for candidate pool size (default: CANDIDATE_POOL_SIZE).
         """
         hidden_id = len(self.hidden_units)
         input_dim = self.input_size + hidden_id
@@ -202,8 +206,14 @@ class MockCascorNetwork:
         best_unit = None
         best_correlation = -1.0
 
+        # This method is retained only as a convenience for unit tests (not used in
+        # the production training loop). Use modest defaults that finish quickly.
+        if candidate_steps is None:
+            candidate_steps = 50
+        if pool_size is None:
+            pool_size = 8
+
         # Train a pool of candidates and select the best (matching CasCor pool)
-        pool_size = TrainingConstants.CANDIDATE_POOL_SIZE
         for _ in range(pool_size):
             # Xavier-scale init: std = 1/sqrt(input_dim) to keep pre-activation
             # variance constant as cascade depth grows (prevents tanh saturation)
@@ -217,7 +227,7 @@ class MockCascorNetwork:
 
             # Train candidate weights to maximize correlation with residual error
             if self.train_x is not None and self.train_y is not None:
-                correlation = self._train_candidate(unit, steps=TrainingConstants.CANDIDATE_TRAINING_STEPS, lr=0.01)
+                correlation = self._train_candidate(unit, steps=candidate_steps, lr=0.01)
                 if correlation > best_correlation:
                     best_correlation = correlation
                     best_unit = unit

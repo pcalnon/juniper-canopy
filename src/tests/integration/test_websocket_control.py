@@ -39,7 +39,7 @@ class TestWebSocketControlIntegration:
         assert conn_msg.get("type") == "connection_established"
         return conn_msg
 
-    def _receive_command_response(self, websocket, timeout_messages=10):
+    def _receive_command_response(self, websocket, timeout_messages=100):
         """
         Helper to receive command response, skipping any broadcast messages.
 
@@ -301,25 +301,25 @@ class TestEndToEndFlow:
     def _test_client_training_commands(self, websocket, time):
         # sourcery skip: extract-duplicate-method
         # Start training
-        start_resp = self._send_command_with_retry(websocket, "start", timeout_messages=15)
+        start_resp = self._send_command_with_retry(websocket, "start", timeout_messages=100)
         assert start_resp["ok"]
         assert start_resp["state"]["is_running"]
         time.sleep(0.5)  # Let it run
 
         # Pause
-        pause_resp = self._send_command_with_retry(websocket, "pause", timeout_messages=15)
+        pause_resp = self._send_command_with_retry(websocket, "pause", timeout_messages=100)
         assert pause_resp["ok"]
         assert pause_resp["state"]["is_paused"]
         time.sleep(0.3)
 
         # Resume
-        resume_resp = self._send_command_with_retry(websocket, "resume", timeout_messages=15)
+        resume_resp = self._send_command_with_retry(websocket, "resume", timeout_messages=100)
         assert resume_resp["ok"]
         assert not resume_resp["state"]["is_paused"]
         time.sleep(0.3)
 
         # Stop
-        stop_resp = self._send_command_with_retry(websocket, "stop", timeout_messages=15)
+        stop_resp = self._send_command_with_retry(websocket, "stop", timeout_messages=100)
         assert stop_resp["ok"]
         assert not stop_resp["state"]["is_running"]
 

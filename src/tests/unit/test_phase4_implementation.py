@@ -316,7 +316,10 @@ class TestCandidateHyperparameters:
             return original(unit, steps=steps, lr=lr)
 
         with patch.object(network_with_data, "_train_candidate", side_effect=spy):
-            network_with_data.add_hidden_unit()
+            network_with_data.add_hidden_unit(
+                candidate_steps=TrainingConstants.CANDIDATE_TRAINING_STEPS,
+                pool_size=TrainingConstants.CANDIDATE_POOL_SIZE,
+            )
 
         assert len(calls) == TrainingConstants.CANDIDATE_POOL_SIZE
         for call in calls:
