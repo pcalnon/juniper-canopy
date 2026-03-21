@@ -32,22 +32,21 @@ def _find_component_by_id(layout, target_id):
 class TestConvergenceLayoutComponents:
     """Verify convergence UI components exist with correct configuration."""
 
-    def test_convergence_checkbox_exists(self, reset_singletons):
-        """Convergence checkbox exists with correct ID and default value."""
+    def test_growth_trigger_radio_exists(self, reset_singletons):
+        """Growth trigger radio exists with correct ID."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
-        checkbox = _find_component_by_id(manager.app.layout, "convergence-enabled-checkbox")
-        assert checkbox is not None, "convergence-enabled-checkbox not found"
-        assert checkbox.value == ["enabled"], f"Expected default ['enabled'], got {checkbox.value}"
+        radio = _find_component_by_id(manager.app.layout, "nn-growth-trigger-radio")
+        assert radio is not None, "nn-growth-trigger-radio not found"
 
     def test_convergence_threshold_input_exists(self, reset_singletons):
         """Convergence threshold input exists with correct min/max/step/default."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
-        inp = _find_component_by_id(manager.app.layout, "convergence-threshold-input")
-        assert inp is not None, "convergence-threshold-input not found"
+        inp = _find_component_by_id(manager.app.layout, "nn-growth-convergence-threshold-input")
+        assert inp is not None, "nn-growth-convergence-threshold-input not found"
         assert inp.value == TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD
         assert inp.min == TrainingConstants.MIN_CONVERGENCE_THRESHOLD
         assert inp.max == TrainingConstants.MAX_CONVERGENCE_THRESHOLD
@@ -84,8 +83,8 @@ class TestConvergenceLayoutComponents:
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
-        inp = _find_component_by_id(manager.app.layout, "spiral-rotations-input")
-        assert inp is not None, "spiral-rotations-input not found"
+        inp = _find_component_by_id(manager.app.layout, "nn-spiral-rotations-input")
+        assert inp is not None, "nn-spiral-rotations-input not found"
         assert inp.value == TrainingConstants.DEFAULT_SPIRAL_ROTATIONS
         assert inp.min == TrainingConstants.MIN_SPIRAL_ROTATIONS
         assert inp.max == TrainingConstants.MAX_SPIRAL_ROTATIONS
@@ -103,5 +102,5 @@ class TestConvergenceLayoutComponents:
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
-        inp = _find_component_by_id(manager.app.layout, "learning-rate-input")
-        assert inp is not None, "learning-rate-input not found"
+        inp = _find_component_by_id(manager.app.layout, "nn-learning-rate-input")
+        assert inp is not None, "nn-learning-rate-input not found"

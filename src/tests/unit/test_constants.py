@@ -25,8 +25,8 @@ class TestTrainingConstants:
         assert TrainingConstants.MIN_TRAINING_EPOCHS < TrainingConstants.DEFAULT_TRAINING_EPOCHS
         assert TrainingConstants.DEFAULT_TRAINING_EPOCHS < TrainingConstants.MAX_TRAINING_EPOCHS
         assert TrainingConstants.MIN_TRAINING_EPOCHS == 10
-        assert TrainingConstants.MAX_TRAINING_EPOCHS == 1000
-        assert TrainingConstants.DEFAULT_TRAINING_EPOCHS == 300
+        assert TrainingConstants.MAX_TRAINING_EPOCHS == 10000000
+        assert TrainingConstants.DEFAULT_TRAINING_EPOCHS == 1000000
 
     def test_learning_rate_constraints(self):
         """Test learning rate min/max/default relationships."""
@@ -41,8 +41,8 @@ class TestTrainingConstants:
         assert TrainingConstants.MIN_HIDDEN_UNITS <= TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS
         assert TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS <= TrainingConstants.MAX_HIDDEN_UNITS
         assert TrainingConstants.MIN_HIDDEN_UNITS == 0
-        assert TrainingConstants.MAX_HIDDEN_UNITS == 20
-        assert TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS == 20
+        assert TrainingConstants.MAX_HIDDEN_UNITS == 10000
+        assert TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS == 1000
 
     def test_constants_are_integers(self):
         """Test that integer constants are actually integers."""

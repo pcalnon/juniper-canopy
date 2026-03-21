@@ -279,9 +279,9 @@ class TestDashboardManagerTrainingDefaults:
         mock_settings.get_training_defaults.return_value = {}
         dm._settings = mock_settings
         defaults = dm._get_training_defaults_with_env()
-        assert defaults["learning_rate"] == TrainingConstants.DEFAULT_LEARNING_RATE
-        assert defaults["hidden_units"] == TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS
-        assert defaults["epochs"] == TrainingConstants.DEFAULT_TRAINING_EPOCHS
+        assert defaults["learning_rate"] == TrainingConstants.DEFAULT_LEARNING_RATE  # 0.01
+        assert defaults["hidden_units"] == TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS  # 1000
+        assert defaults["epochs"] == TrainingConstants.DEFAULT_TRAINING_EPOCHS  # 1000000
 
 
 class TestDashboardManagerHandlers:
@@ -770,20 +770,37 @@ class TestTrainingButtonHandlers:
         result = dashboard_manager._handle_button_timeout_and_acks_handler(button_states=button_states)
         assert result == dash.no_update
 
-    def test_handle_parameter_changes_handler(self, dashboard_manager):
-        """Test parameter changes handler returns no_update (logs only)."""
-        import dash
-
-        result = dashboard_manager._handle_parameter_changes_handler(learning_rate=0.05, max_hidden_units=20)
-        assert result == dash.no_update
-
 
 class TestParameterHandlers:
     """Test parameter tracking and application handlers."""
 
     def test_track_param_changes_no_applied(self, dashboard_manager):
         """Test track_param_changes returns disabled when no applied state."""
-        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 200, ["enabled"], 0.001, 3.0, None)
+        disabled, status = dashboard_manager._track_param_changes_handler(
+            1000,
+            200,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+            applied=None,
+        )
         assert disabled is True
         assert status == ""
 
@@ -791,29 +808,217 @@ class TestParameterHandlers:
         """Test track_param_changes returns disabled when no changes."""
         import dash
 
-        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
-        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 200, ["enabled"], 0.001, 3.0, applied)
+        applied = {
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
+        }
+        disabled, status = dashboard_manager._track_param_changes_handler(
+            1000,
+            200,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+            applied=applied,
+        )
         assert disabled is True
         assert status is dash.no_update
 
     def test_track_param_changes_lr_changed(self, dashboard_manager):
         """Test track_param_changes detects learning_rate changes."""
-        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
-        disabled, status = dashboard_manager._track_param_changes_handler(0.05, 10, 200, ["enabled"], 0.001, 3.0, applied)
+        applied = {
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
+        }
+        disabled, status = dashboard_manager._track_param_changes_handler(
+            1000,
+            200,
+            0.05,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+            applied=applied,
+        )
         assert disabled is False
         assert "Unsaved" in status
 
     def test_track_param_changes_hu_changed(self, dashboard_manager):
         """Test track_param_changes detects hidden_units changes."""
-        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
-        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 15, 200, ["enabled"], 0.001, 3.0, applied)
+        applied = {
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
+        }
+        disabled, status = dashboard_manager._track_param_changes_handler(
+            1000,
+            200,
+            0.01,
+            15,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+            applied=applied,
+        )
         assert disabled is False
         assert "Unsaved" in status
 
     def test_track_param_changes_epochs_changed(self, dashboard_manager):
         """Test track_param_changes detects epochs changes."""
-        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
-        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 500, ["enabled"], 0.001, 3.0, applied)
+        applied = {
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
+        }
+        disabled, status = dashboard_manager._track_param_changes_handler(
+            1000,
+            500,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+            applied=applied,
+        )
         assert disabled is False
         assert "Unsaved" in status
 
@@ -821,8 +1026,55 @@ class TestParameterHandlers:
         """Test track_param_changes uses float tolerance for learning_rate."""
         import dash
 
-        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
-        disabled, status = dashboard_manager._track_param_changes_handler(0.01 + 1e-10, 10, 200, ["enabled"], 0.001, 3.0, applied)
+        applied = {
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
+        }
+        disabled, status = dashboard_manager._track_param_changes_handler(
+            1000,
+            200,
+            0.01 + 1e-10,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+            applied=applied,
+        )
         assert disabled is True
         assert status is dash.no_update
 
@@ -830,7 +1082,31 @@ class TestParameterHandlers:
         """Test apply_parameters returns no_update when no clicks."""
         import dash
 
-        result, msg = dashboard_manager._apply_parameters_handler(None, 0.01, 10, 200, ["enabled"], 0.001, 3.0)
+        result, msg = dashboard_manager._apply_parameters_handler(
+            None,
+            1000,
+            200,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+        )
         assert result == dash.no_update
         assert msg == dash.no_update
 
@@ -841,10 +1117,34 @@ class TestParameterHandlers:
         mocker.patch("requests.post", return_value=mock_response)
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result, msg = dashboard_manager._apply_parameters_handler(1, 0.05, 15, 300, ["enabled"], 0.001, 3.0)
-            assert result["learning_rate"] == 0.05
-            assert result["max_hidden_units"] == 15
-            assert result["max_epochs"] == 300
+            result, msg = dashboard_manager._apply_parameters_handler(
+                1,
+                1000,
+                300,
+                0.05,
+                15,
+                [],
+                "convergence",
+                50,
+                0.001,
+                1.5,
+                2,
+                1000,
+                0.25,
+                100,
+                0.001,
+                1,
+                "preset_epochs",
+                500,
+                0.0001,
+                [],
+                None,
+                1,
+                1,
+            )
+            assert result["nn_learning_rate"] == 0.05
+            assert result["nn_max_hidden_units"] == 15
+            assert result["nn_max_total_epochs"] == 300
             assert "applied" in msg.lower()
 
     def test_apply_parameters_failure(self, dashboard_manager, mocker):
@@ -857,7 +1157,31 @@ class TestParameterHandlers:
         mocker.patch("requests.post", return_value=mock_response)
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result, msg = dashboard_manager._apply_parameters_handler(1, 0.05, 15, 300, ["enabled"], 0.001, 3.0)
+            result, msg = dashboard_manager._apply_parameters_handler(
+                1,
+                1000,
+                300,
+                0.05,
+                15,
+                [],
+                "convergence",
+                50,
+                0.001,
+                1.5,
+                2,
+                1000,
+                0.25,
+                100,
+                0.001,
+                1,
+                "preset_epochs",
+                500,
+                0.0001,
+                [],
+                None,
+                1,
+                1,
+            )
             assert result == dash.no_update
             assert "Failed" in msg
 
@@ -868,7 +1192,31 @@ class TestParameterHandlers:
         mocker.patch("requests.post", side_effect=Exception("Network error"))
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
-            result, msg = dashboard_manager._apply_parameters_handler(1, 0.05, 15, 300, ["enabled"], 0.001, 3.0)
+            result, msg = dashboard_manager._apply_parameters_handler(
+                1,
+                1000,
+                300,
+                0.05,
+                15,
+                [],
+                "convergence",
+                50,
+                0.001,
+                1.5,
+                2,
+                1000,
+                0.25,
+                100,
+                0.001,
+                1,
+                "preset_epochs",
+                500,
+                0.0001,
+                [],
+                None,
+                1,
+                1,
+            )
             assert result == dash.no_update
             assert "Error" in msg
 
@@ -876,26 +1224,32 @@ class TestParameterHandlers:
         """Test init_params_from_backend returns no_update when current exists."""
         import dash
 
-        result = dashboard_manager._init_params_from_backend_handler(1, {"learning_rate": 0.01})
-        assert result == (dash.no_update,) * 7
+        result = dashboard_manager._init_params_from_backend_handler(1, {"nn_learning_rate": 0.01})
+        assert result == (dash.no_update,) * 23
 
     def test_init_params_from_backend_success(self, dashboard_manager, mocker):
         """Test init_params_from_backend fetches from backend when empty."""
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"learning_rate": 0.02, "max_hidden_units": 15, "max_epochs": 300, "convergence_enabled": True, "convergence_threshold": 0.001}
+        mock_response.json.return_value = {
+            "nn_learning_rate": 0.02,
+            "nn_max_hidden_units": 15,
+            "nn_max_total_epochs": 300,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_convergence_threshold": 0.001,
+        }
         mocker.patch("requests.get", return_value=mock_response)
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(1, None)
-            assert result[0] == 0.02  # learning rate
-            assert result[1] == 15  # max hidden units
-            assert result[2] == 300  # max epochs
-            assert result[3] == ["enabled"]  # convergence checkbox
-            assert result[4] == 0.001  # convergence threshold
-            assert result[5] == 3.0  # spiral_rotations default
-            assert result[6]["learning_rate"] == 0.02
-            assert result[6]["convergence_enabled"] is True
+            # 23-tuple: (nn_max_iter, nn_max_epochs, nn_lr, nn_max_hu, ...)
+            assert result[2] == 0.02  # nn_learning_rate
+            assert result[3] == 15  # nn_max_hidden_units
+            assert result[1] == 300  # nn_max_total_epochs
+            assert result[5] == "convergence"  # nn_growth_trigger
+            assert result[7] == 0.001  # nn_growth_convergence_threshold
+            assert result[22]["nn_learning_rate"] == 0.02
+            assert result[22]["nn_growth_trigger"] == "convergence"
 
     def test_init_params_from_backend_error(self, dashboard_manager, mocker):
         """Test init_params_from_backend returns no_update on error."""
@@ -905,18 +1259,112 @@ class TestParameterHandlers:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(1, None)
-            assert result == (dash.no_update,) * 7
+            assert result == (dash.no_update,) * 23
 
     def test_track_param_changes_none_values(self, dashboard_manager):
         """Test track_param_changes handles None values in float comparison."""
-        applied = {"learning_rate": None, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
-        disabled, status = dashboard_manager._track_param_changes_handler(None, 10, 200, ["enabled"], 0.001, 3.0, applied)
+        applied = {
+            "nn_learning_rate": None,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
+        }
+        disabled, status = dashboard_manager._track_param_changes_handler(
+            1000,
+            200,
+            None,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+            applied=applied,
+        )
         assert disabled is True
 
     def test_track_param_changes_invalid_float(self, dashboard_manager):
         """Test track_param_changes handles invalid float conversion."""
-        applied = {"learning_rate": "invalid", "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
-        disabled, status = dashboard_manager._track_param_changes_handler(0.01, 10, 200, ["enabled"], 0.001, 3.0, applied)
+        applied = {
+            "nn_learning_rate": "invalid",
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
+        }
+        disabled, status = dashboard_manager._track_param_changes_handler(
+            1000,
+            200,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+            applied=applied,
+        )
         assert disabled is False
 
 
@@ -1026,20 +1474,6 @@ class TestDashboardManagerMiscMethods:
         """Test get_app returns the Dash app instance."""
         app = dashboard_manager.get_app()
         assert app is dashboard_manager.app
-
-    def test_handle_parameter_changes_lr_trigger(self, dashboard_manager):
-        """Test parameter changes handler with learning-rate-input trigger."""
-        import dash
-
-        result = dashboard_manager._handle_parameter_changes_handler(learning_rate=0.05, max_hidden_units=10, trigger="learning-rate-input")
-        assert result == dash.no_update
-
-    def test_handle_parameter_changes_hu_trigger(self, dashboard_manager):
-        """Test parameter changes handler with max-hidden-units-input trigger."""
-        import dash
-
-        result = dashboard_manager._handle_parameter_changes_handler(learning_rate=0.01, max_hidden_units=20, trigger="max-hidden-units-input")
-        assert result == dash.no_update
 
     def test_update_metrics_store_non_list_non_dict(self, dashboard_manager, mocker):
         """Test metrics store handler handles unexpected payload type."""

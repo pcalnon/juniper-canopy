@@ -416,75 +416,339 @@ class DashboardManager:
                                 ),
                                 dbc.Card(
                                     [
-                                        dbc.CardHeader(html.H5("Training Parameters")),
+                                        dbc.CardHeader(html.H5("Meta Parameters")),
                                         dbc.CardBody(
                                             [
-                                                html.P("Learning Rate:", className="mb-1 fw-bold"),
-                                                dbc.Input(
-                                                    id="learning-rate-input",
-                                                    type="number",
-                                                    value=self.training_defaults.get("learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE),
-                                                    step=0.001,
-                                                    min=self._settings.get_training_param_config("learning_rate")["min"],
-                                                    max=self._settings.get_training_param_config("learning_rate")["max"],
-                                                    className="mb-2",
-                                                    debounce=True,
+                                                # ── Neural Network Subsection ──
+                                                html.H6(
+                                                    [
+                                                        html.Span("▼", id="nn-subsection-icon", className="collapse-icon"),
+                                                        "Neural Network",
+                                                    ],
+                                                    id="nn-subsection-header",
+                                                    className="collapsible-header",
                                                 ),
-                                                html.P("Max Hidden Units:", className="mb-1 fw-bold"),
-                                                dbc.Input(
-                                                    id="max-hidden-units-input",
-                                                    type="number",
-                                                    value=self.training_defaults.get("hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS),
-                                                    step=1,
-                                                    min=self._settings.get_training_param_config("hidden_units")["min"],
-                                                    max=self._settings.get_training_param_config("hidden_units")["max"],
-                                                    className="mb-2",
-                                                    debounce=True,
-                                                ),
-                                                html.P("Maximum Epochs:", className="mb-1 fw-bold"),
-                                                dbc.Input(
-                                                    id="max-epochs-input",
-                                                    type="number",
-                                                    value=self.training_defaults.get("epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS),
-                                                    step=1,
-                                                    min=self._settings.get_training_param_config("epochs")["min"],
-                                                    max=self._settings.get_training_param_config("epochs")["max"],
-                                                    className="mb-2",
-                                                    debounce=True,
+                                                dbc.Collapse(
+                                                    html.Div(
+                                                        [
+                                                            html.P("Maximum Iterations:", className="mb-1 fw-bold"),
+                                                            dbc.Input(
+                                                                id="nn-max-iterations-input",
+                                                                type="number",
+                                                                value=self.training_defaults.get("max_iterations", TrainingConstants.DEFAULT_MAX_ITERATIONS),
+                                                                step=100,
+                                                                min=TrainingConstants.MIN_MAX_ITERATIONS,
+                                                                max=TrainingConstants.MAX_MAX_ITERATIONS,
+                                                                className="mb-2",
+                                                                debounce=True,
+                                                            ),
+                                                            html.P("Maximum Total Epochs:", className="mb-1 fw-bold"),
+                                                            dbc.Input(
+                                                                id="nn-max-total-epochs-input",
+                                                                type="number",
+                                                                value=self.training_defaults.get("epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS),
+                                                                step=1000,
+                                                                min=self._settings.get_training_param_config("epochs")["min"],
+                                                                max=self._settings.get_training_param_config("epochs")["max"],
+                                                                className="mb-2",
+                                                                debounce=True,
+                                                            ),
+                                                            html.P("Learning Rate:", className="mb-1 fw-bold"),
+                                                            dbc.Input(
+                                                                id="nn-learning-rate-input",
+                                                                type="number",
+                                                                value=self.training_defaults.get("learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE),
+                                                                step=0.001,
+                                                                min=self._settings.get_training_param_config("learning_rate")["min"],
+                                                                max=self._settings.get_training_param_config("learning_rate")["max"],
+                                                                className="mb-2",
+                                                                debounce=True,
+                                                            ),
+                                                            html.P("Maximum Hidden Units:", className="mb-1 fw-bold"),
+                                                            dbc.Input(
+                                                                id="nn-max-hidden-units-input",
+                                                                type="number",
+                                                                value=self.training_defaults.get("hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS),
+                                                                step=1,
+                                                                min=self._settings.get_training_param_config("hidden_units")["min"],
+                                                                max=self._settings.get_training_param_config("hidden_units")["max"],
+                                                                className="mb-2",
+                                                                debounce=True,
+                                                            ),
+                                                            html.P("Multi-Node Layers:", className="mb-1 fw-bold"),
+                                                            dcc.Checklist(
+                                                                id="nn-multi-node-layers-checkbox",
+                                                                options=[{"label": " Enable multi-node layers", "value": "enabled"}],
+                                                                value=[],
+                                                                className="mb-2",
+                                                            ),
+                                                            html.Hr(),
+                                                            # Network Growth Triggers
+                                                            html.P("Network Growth Triggers:", className="mb-1 fw-bold"),
+                                                            dbc.RadioItems(
+                                                                id="nn-growth-trigger-radio",
+                                                                options=[
+                                                                    {"label": "Preset Epochs", "value": "preset_epochs"},
+                                                                    {"label": "Convergence Detection", "value": "convergence"},
+                                                                ],
+                                                                value="convergence",
+                                                                className="mb-2",
+                                                            ),
+                                                            html.Div(
+                                                                [
+                                                                    html.P("Number of Epochs:", className="mb-1 ms-4"),
+                                                                    dbc.Input(
+                                                                        id="nn-growth-preset-epochs-input",
+                                                                        type="number",
+                                                                        value=self.training_defaults.get("preset_epochs", TrainingConstants.DEFAULT_PRESET_EPOCHS),
+                                                                        step=10,
+                                                                        min=TrainingConstants.MIN_PRESET_EPOCHS,
+                                                                        max=TrainingConstants.MAX_PRESET_EPOCHS,
+                                                                        className="mb-2 ms-4",
+                                                                        debounce=True,
+                                                                        disabled=True,
+                                                                        style={"width": "calc(100% - 1.5rem)"},
+                                                                    ),
+                                                                ],
+                                                                id="nn-growth-preset-epochs-container",
+                                                            ),
+                                                            html.Div(
+                                                                [
+                                                                    html.P("Convergence Threshold:", className="mb-1 ms-4"),
+                                                                    dbc.Input(
+                                                                        id="nn-growth-convergence-threshold-input",
+                                                                        type="number",
+                                                                        value=TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD,
+                                                                        step=0.0001,
+                                                                        min=TrainingConstants.MIN_CONVERGENCE_THRESHOLD,
+                                                                        max=TrainingConstants.MAX_CONVERGENCE_THRESHOLD,
+                                                                        className="mb-2 ms-4",
+                                                                        debounce=True,
+                                                                        disabled=False,
+                                                                        style={"width": "calc(100% - 1.5rem)"},
+                                                                    ),
+                                                                ],
+                                                                id="nn-growth-convergence-threshold-container",
+                                                            ),
+                                                            html.Hr(),
+                                                            # Spiral Dataset
+                                                            html.P("Spiral Dataset:", className="mb-1 fw-bold"),
+                                                            html.P("Spiral:", className="mb-1 fw-bold mt-1"),
+                                                            html.P("Rotations:", className="mb-1 ms-3"),
+                                                            dbc.Input(
+                                                                id="nn-spiral-rotations-input",
+                                                                type="number",
+                                                                value=TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
+                                                                step=0.5,
+                                                                min=TrainingConstants.MIN_SPIRAL_ROTATIONS,
+                                                                max=TrainingConstants.MAX_SPIRAL_ROTATIONS,
+                                                                className="mb-2 ms-3",
+                                                                debounce=True,
+                                                                style={"width": "calc(100% - 1rem)"},
+                                                            ),
+                                                            html.P("Number:", className="mb-1 ms-3"),
+                                                            dbc.Input(
+                                                                id="nn-spiral-number-input",
+                                                                type="number",
+                                                                value=TrainingConstants.DEFAULT_SPIRAL_NUMBER,
+                                                                step=1,
+                                                                min=TrainingConstants.MIN_SPIRAL_NUMBER,
+                                                                max=TrainingConstants.MAX_SPIRAL_NUMBER,
+                                                                className="mb-2 ms-3",
+                                                                debounce=True,
+                                                                style={"width": "calc(100% - 1rem)"},
+                                                            ),
+                                                            html.P("Dataset:", className="mb-1 fw-bold mt-2"),
+                                                            html.P("Elements:", className="mb-1 ms-3"),
+                                                            dbc.Input(
+                                                                id="nn-dataset-elements-input",
+                                                                type="number",
+                                                                value=TrainingConstants.DEFAULT_DATASET_ELEMENTS,
+                                                                step=100,
+                                                                min=TrainingConstants.MIN_DATASET_ELEMENTS,
+                                                                max=TrainingConstants.MAX_DATASET_ELEMENTS,
+                                                                className="mb-2 ms-3",
+                                                                debounce=True,
+                                                                style={"width": "calc(100% - 1rem)"},
+                                                            ),
+                                                            html.P("Noise:", className="mb-1 ms-3"),
+                                                            dbc.Input(
+                                                                id="nn-dataset-noise-input",
+                                                                type="number",
+                                                                value=TrainingConstants.DEFAULT_DATASET_NOISE,
+                                                                step=0.05,
+                                                                min=TrainingConstants.MIN_DATASET_NOISE,
+                                                                max=TrainingConstants.MAX_DATASET_NOISE,
+                                                                className="mb-2 ms-3",
+                                                                debounce=True,
+                                                                style={"width": "calc(100% - 1rem)"},
+                                                            ),
+                                                        ]
+                                                    ),
+                                                    id="nn-subsection-collapse",
+                                                    is_open=True,
                                                 ),
                                                 html.Hr(),
-                                                html.P("Convergence Detection:", className="mb-1 fw-bold"),
-                                                dcc.Checklist(
-                                                    id="convergence-enabled-checkbox",
-                                                    options=[{"label": " Enable sliding window", "value": "enabled"}],
-                                                    value=["enabled"],
-                                                    className="mb-2",
+                                                # ── Candidate Nodes Subsection ──
+                                                html.H6(
+                                                    [
+                                                        html.Span("▶", id="cn-subsection-icon", className="collapse-icon"),
+                                                        "Candidate Nodes",
+                                                    ],
+                                                    id="cn-subsection-header",
+                                                    className="collapsible-header",
                                                 ),
-                                                html.P("Convergence Threshold:", className="mb-1 fw-bold"),
-                                                dbc.Input(
-                                                    id="convergence-threshold-input",
-                                                    type="number",
-                                                    value=TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD,
-                                                    step=0.0001,
-                                                    min=TrainingConstants.MIN_CONVERGENCE_THRESHOLD,
-                                                    max=TrainingConstants.MAX_CONVERGENCE_THRESHOLD,
-                                                    className="mb-2",
-                                                    debounce=True,
+                                                dbc.Collapse(
+                                                    html.Div(
+                                                        [
+                                                            html.P("Candidate Pool Size:", className="mb-1 fw-bold"),
+                                                            dbc.Input(
+                                                                id="cn-pool-size-input",
+                                                                type="number",
+                                                                value=TrainingConstants.DEFAULT_CANDIDATE_POOL_SIZE,
+                                                                step=1,
+                                                                min=TrainingConstants.MIN_CANDIDATE_POOL_SIZE,
+                                                                max=TrainingConstants.MAX_CANDIDATE_POOL_SIZE,
+                                                                className="mb-2",
+                                                                debounce=True,
+                                                            ),
+                                                            html.P("Correlation Threshold:", className="mb-1 fw-bold"),
+                                                            dbc.Input(
+                                                                id="cn-correlation-threshold-input",
+                                                                type="number",
+                                                                value=TrainingConstants.DEFAULT_CANDIDATE_CORRELATION_THRESHOLD,
+                                                                step=0.0001,
+                                                                min=TrainingConstants.MIN_CANDIDATE_CORRELATION_THRESHOLD,
+                                                                max=TrainingConstants.MAX_CANDIDATE_CORRELATION_THRESHOLD,
+                                                                className="mb-2",
+                                                                debounce=True,
+                                                            ),
+                                                            html.P("Selected Candidates:", className="mb-1 fw-bold"),
+                                                            dbc.Input(
+                                                                id="cn-selected-candidates-input",
+                                                                type="number",
+                                                                value=TrainingConstants.DEFAULT_SELECTED_CANDIDATES,
+                                                                step=1,
+                                                                min=TrainingConstants.MIN_SELECTED_CANDIDATES,
+                                                                max=TrainingConstants.MAX_SELECTED_CANDIDATES,
+                                                                className="mb-2",
+                                                                debounce=True,
+                                                            ),
+                                                            html.Hr(className="my-2"),
+                                                            # Pool Training Complete
+                                                            html.P("Pool Training Complete:", className="mb-1 fw-bold"),
+                                                            dbc.RadioItems(
+                                                                id="cn-training-complete-radio",
+                                                                options=[
+                                                                    {"label": "Preset Epochs", "value": "preset_epochs"},
+                                                                    {"label": "Convergence Detection", "value": "convergence"},
+                                                                ],
+                                                                value="preset_epochs",
+                                                                className="mb-2",
+                                                            ),
+                                                            html.Div(
+                                                                [
+                                                                    html.P("Training Iterations:", className="mb-1 ms-4"),
+                                                                    dbc.Input(
+                                                                        id="cn-training-iterations-input",
+                                                                        type="number",
+                                                                        value=TrainingConstants.DEFAULT_CANDIDATE_TRAINING_ITERATIONS,
+                                                                        step=10,
+                                                                        min=TrainingConstants.MIN_CANDIDATE_TRAINING_ITERATIONS,
+                                                                        max=TrainingConstants.MAX_CANDIDATE_TRAINING_ITERATIONS,
+                                                                        className="mb-2 ms-4",
+                                                                        debounce=True,
+                                                                        disabled=False,
+                                                                        style={"width": "calc(100% - 1.5rem)"},
+                                                                    ),
+                                                                ],
+                                                                id="cn-training-iterations-container",
+                                                            ),
+                                                            html.Div(
+                                                                [
+                                                                    html.P("Convergence Threshold:", className="mb-1 ms-4"),
+                                                                    dbc.Input(
+                                                                        id="cn-training-convergence-threshold-input",
+                                                                        type="number",
+                                                                        value=TrainingConstants.DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD,
+                                                                        step=0.00001,
+                                                                        min=TrainingConstants.MIN_CANDIDATE_CONVERGENCE_THRESHOLD,
+                                                                        max=TrainingConstants.MAX_CANDIDATE_CONVERGENCE_THRESHOLD,
+                                                                        className="mb-2 ms-4",
+                                                                        debounce=True,
+                                                                        disabled=True,
+                                                                        style={"width": "calc(100% - 1.5rem)"},
+                                                                    ),
+                                                                ],
+                                                                id="cn-training-convergence-threshold-container",
+                                                            ),
+                                                            html.Hr(className="my-2"),
+                                                            # Multi Candidate Selection
+                                                            html.P("Multi Candidate Selection:", className="mb-1 fw-bold"),
+                                                            dcc.Checklist(
+                                                                id="cn-multi-candidate-checkbox",
+                                                                options=[{"label": " Enable multi-candidate selection", "value": "enabled"}],
+                                                                value=[],
+                                                                className="mb-2",
+                                                            ),
+                                                            html.Div(
+                                                                [
+                                                                    dbc.RadioItems(
+                                                                        id="cn-candidate-selection-radio",
+                                                                        options=[
+                                                                            {"label": "Add Top Tier Candidates", "value": "top_tier"},
+                                                                            {"label": "Add Random Candidates", "value": "random"},
+                                                                        ],
+                                                                        value=None,
+                                                                        className="mb-2",
+                                                                        style={"opacity": "0.5"},
+                                                                    ),
+                                                                    html.Div(
+                                                                        [
+                                                                            html.P("Number of Top Candidates:", className="mb-1 ms-4"),
+                                                                            dbc.Input(
+                                                                                id="cn-top-candidates-input",
+                                                                                type="number",
+                                                                                value=TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT,
+                                                                                step=1,
+                                                                                min=TrainingConstants.MIN_TOP_CANDIDATES_COUNT,
+                                                                                max=TrainingConstants.MAX_TOP_CANDIDATES_COUNT,
+                                                                                className="mb-2 ms-4",
+                                                                                debounce=True,
+                                                                                disabled=True,
+                                                                                style={"width": "calc(100% - 1.5rem)"},
+                                                                            ),
+                                                                        ],
+                                                                        id="cn-top-candidates-container",
+                                                                    ),
+                                                                    html.Div(
+                                                                        [
+                                                                            html.P("Number of Random Candidates:", className="mb-1 ms-4"),
+                                                                            dbc.Input(
+                                                                                id="cn-random-candidates-input",
+                                                                                type="number",
+                                                                                value=TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT,
+                                                                                step=1,
+                                                                                min=TrainingConstants.MIN_RANDOM_CANDIDATES_COUNT,
+                                                                                max=TrainingConstants.MAX_RANDOM_CANDIDATES_COUNT,
+                                                                                className="mb-2 ms-4",
+                                                                                debounce=True,
+                                                                                disabled=True,
+                                                                                style={"width": "calc(100% - 1.5rem)"},
+                                                                            ),
+                                                                        ],
+                                                                        id="cn-random-candidates-container",
+                                                                    ),
+                                                                ],
+                                                                id="cn-multi-candidate-content",
+                                                            ),
+                                                        ]
+                                                    ),
+                                                    id="cn-subsection-collapse",
+                                                    is_open=False,
                                                 ),
                                                 html.Hr(),
-                                                html.P("Dataset:", className="mb-1 fw-bold"),
-                                                html.P("Spiral Rotations:", className="mb-1"),
-                                                dbc.Input(
-                                                    id="spiral-rotations-input",
-                                                    type="number",
-                                                    value=TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
-                                                    step=0.5,
-                                                    min=TrainingConstants.MIN_SPIRAL_ROTATIONS,
-                                                    max=TrainingConstants.MAX_SPIRAL_ROTATIONS,
-                                                    className="mb-2",
-                                                    debounce=True,
-                                                ),
-                                                html.Hr(),
+                                                # ── Shared Apply Button ──
                                                 html.Div(
                                                     [
                                                         dbc.Button(
@@ -889,39 +1153,169 @@ class DashboardManager:
     # Define backend callbacks
     def _setup_backend_callbacks(self):
 
+        # ── Collapsible section toggles ──
+
         @self.app.callback(
-            Output("training-control-action", "data", allow_duplicate=True),
+            [Output("nn-subsection-collapse", "is_open"), Output("nn-subsection-icon", "children")],
+            Input("nn-subsection-header", "n_clicks"),
+            dash.dependencies.State("nn-subsection-collapse", "is_open"),
+            prevent_initial_call=True,
+        )
+        def toggle_nn_subsection(n_clicks, is_open):
+            return not is_open, "▼" if not is_open else "▶"
+
+        @self.app.callback(
+            [Output("cn-subsection-collapse", "is_open"), Output("cn-subsection-icon", "children")],
+            Input("cn-subsection-header", "n_clicks"),
+            dash.dependencies.State("cn-subsection-collapse", "is_open"),
+            prevent_initial_call=True,
+        )
+        def toggle_cn_subsection(n_clicks, is_open):
+            return not is_open, "▼" if not is_open else "▶"
+
+        # ── Radio button enable/disable callbacks ──
+
+        @self.app.callback(
+            [Output("nn-growth-preset-epochs-input", "disabled"), Output("nn-growth-convergence-threshold-input", "disabled")],
+            Input("nn-growth-trigger-radio", "value"),
+        )
+        def toggle_nn_growth_inputs(growth_trigger):
+            return self._toggle_nn_growth_inputs_handler(growth_trigger)
+
+        @self.app.callback(
+            [Output("cn-training-iterations-input", "disabled"), Output("cn-training-convergence-threshold-input", "disabled")],
+            Input("cn-training-complete-radio", "value"),
+        )
+        def toggle_cn_training_inputs(training_complete):
+            return self._toggle_cn_training_inputs_handler(training_complete)
+
+        @self.app.callback(
+            [Output("cn-top-candidates-input", "disabled"), Output("cn-random-candidates-input", "disabled")],
+            Input("cn-candidate-selection-radio", "value"),
+        )
+        def toggle_cn_selection_inputs(selection_mode):
+            return self._toggle_cn_selection_inputs_handler(selection_mode)
+
+        # ── Multi candidate sub-group enable/disable ──
+
+        @self.app.callback(
             [
-                Input("learning-rate-input", "value"),
-                Input("max-hidden-units-input", "value"),
+                Output("cn-candidate-selection-radio", "style"),
+                Output("cn-top-candidates-input", "disabled", allow_duplicate=True),
+                Output("cn-random-candidates-input", "disabled", allow_duplicate=True),
+            ],
+            Input("cn-multi-candidate-checkbox", "value"),
+            prevent_initial_call=True,
+        )
+        def toggle_cn_multi_candidate_subgroup(value):
+            return self._toggle_cn_multi_candidate_subgroup_handler(value)
+
+        # ── Cross-section checkbox sync ──
+
+        @self.app.callback(
+            [
+                Output("nn-multi-node-layers-checkbox", "value", allow_duplicate=True),
+                Output("cn-multi-candidate-checkbox", "value", allow_duplicate=True),
+            ],
+            [
+                Input("nn-multi-node-layers-checkbox", "value"),
+                Input("cn-multi-candidate-checkbox", "value"),
             ],
             prevent_initial_call=True,
         )
-        def handle_parameter_changes(learning_rate, max_hidden_units):
-            """Handle parameter input changes - now just logs, actual send is via Apply button."""
-            return self._handle_parameter_changes_handler(learning_rate=learning_rate, max_hidden_units=max_hidden_units)
+        def sync_multi_node_checkboxes(nn_value, cn_value):
+            return self._sync_multi_node_checkboxes_handler(nn_value, cn_value)
 
-        # Track parameter changes to enable/disable Apply button
+        # ── Track parameter changes to enable/disable Apply button ──
+
         @self.app.callback(
             [
                 Output("apply-params-button", "disabled"),
                 Output("params-status", "children"),
             ],
             [
-                Input("learning-rate-input", "value"),
-                Input("max-hidden-units-input", "value"),
-                Input("max-epochs-input", "value"),
-                Input("convergence-enabled-checkbox", "value"),
-                Input("convergence-threshold-input", "value"),
-                Input("spiral-rotations-input", "value"),
+                # Neural Network (12)
+                Input("nn-max-iterations-input", "value"),
+                Input("nn-max-total-epochs-input", "value"),
+                Input("nn-learning-rate-input", "value"),
+                Input("nn-max-hidden-units-input", "value"),
+                Input("nn-multi-node-layers-checkbox", "value"),
+                Input("nn-growth-trigger-radio", "value"),
+                Input("nn-growth-preset-epochs-input", "value"),
+                Input("nn-growth-convergence-threshold-input", "value"),
+                Input("nn-spiral-rotations-input", "value"),
+                Input("nn-spiral-number-input", "value"),
+                Input("nn-dataset-elements-input", "value"),
+                Input("nn-dataset-noise-input", "value"),
+                # Candidate Nodes (10)
+                Input("cn-pool-size-input", "value"),
+                Input("cn-correlation-threshold-input", "value"),
+                Input("cn-selected-candidates-input", "value"),
+                Input("cn-training-complete-radio", "value"),
+                Input("cn-training-iterations-input", "value"),
+                Input("cn-training-convergence-threshold-input", "value"),
+                Input("cn-multi-candidate-checkbox", "value"),
+                Input("cn-candidate-selection-radio", "value"),
+                Input("cn-top-candidates-input", "value"),
+                Input("cn-random-candidates-input", "value"),
+                # Store
                 Input("applied-params-store", "data"),
             ],
         )
-        def track_param_changes(lr, hu, epochs, conv_enabled, conv_threshold, spiral_rot, applied):
+        def track_param_changes(
+            nn_max_iter,
+            nn_max_epochs,
+            nn_lr,
+            nn_max_hu,
+            nn_multi_node,
+            nn_growth_trigger,
+            nn_growth_epochs,
+            nn_growth_conv_thresh,
+            nn_spiral_rot,
+            nn_spiral_num,
+            nn_dataset_elem,
+            nn_dataset_noise,
+            cn_pool_size,
+            cn_corr_thresh,
+            cn_selected,
+            cn_training_complete,
+            cn_training_iter,
+            cn_training_conv_thresh,
+            cn_multi_cand,
+            cn_cand_selection,
+            cn_top_cands,
+            cn_random_cands,
+            applied,
+        ):
             """Enable Apply button when parameters differ from applied values."""
-            return self._track_param_changes_handler(lr, hu, epochs, conv_enabled, conv_threshold, spiral_rot, applied)
+            return self._track_param_changes_handler(
+                nn_max_iter,
+                nn_max_epochs,
+                nn_lr,
+                nn_max_hu,
+                nn_multi_node,
+                nn_growth_trigger,
+                nn_growth_epochs,
+                nn_growth_conv_thresh,
+                nn_spiral_rot,
+                nn_spiral_num,
+                nn_dataset_elem,
+                nn_dataset_noise,
+                cn_pool_size,
+                cn_corr_thresh,
+                cn_selected,
+                cn_training_complete,
+                cn_training_iter,
+                cn_training_conv_thresh,
+                cn_multi_cand,
+                cn_cand_selection,
+                cn_top_cands,
+                cn_random_cands,
+                applied,
+            )
 
-        # Handle Apply button click
+        # ── Handle Apply button click ──
+
         @self.app.callback(
             [
                 Output("applied-params-store", "data"),
@@ -929,29 +1323,114 @@ class DashboardManager:
             ],
             Input("apply-params-button", "n_clicks"),
             [
-                dash.dependencies.State("learning-rate-input", "value"),
-                dash.dependencies.State("max-hidden-units-input", "value"),
-                dash.dependencies.State("max-epochs-input", "value"),
-                dash.dependencies.State("convergence-enabled-checkbox", "value"),
-                dash.dependencies.State("convergence-threshold-input", "value"),
-                dash.dependencies.State("spiral-rotations-input", "value"),
+                # Neural Network (12)
+                dash.dependencies.State("nn-max-iterations-input", "value"),
+                dash.dependencies.State("nn-max-total-epochs-input", "value"),
+                dash.dependencies.State("nn-learning-rate-input", "value"),
+                dash.dependencies.State("nn-max-hidden-units-input", "value"),
+                dash.dependencies.State("nn-multi-node-layers-checkbox", "value"),
+                dash.dependencies.State("nn-growth-trigger-radio", "value"),
+                dash.dependencies.State("nn-growth-preset-epochs-input", "value"),
+                dash.dependencies.State("nn-growth-convergence-threshold-input", "value"),
+                dash.dependencies.State("nn-spiral-rotations-input", "value"),
+                dash.dependencies.State("nn-spiral-number-input", "value"),
+                dash.dependencies.State("nn-dataset-elements-input", "value"),
+                dash.dependencies.State("nn-dataset-noise-input", "value"),
+                # Candidate Nodes (10)
+                dash.dependencies.State("cn-pool-size-input", "value"),
+                dash.dependencies.State("cn-correlation-threshold-input", "value"),
+                dash.dependencies.State("cn-selected-candidates-input", "value"),
+                dash.dependencies.State("cn-training-complete-radio", "value"),
+                dash.dependencies.State("cn-training-iterations-input", "value"),
+                dash.dependencies.State("cn-training-convergence-threshold-input", "value"),
+                dash.dependencies.State("cn-multi-candidate-checkbox", "value"),
+                dash.dependencies.State("cn-candidate-selection-radio", "value"),
+                dash.dependencies.State("cn-top-candidates-input", "value"),
+                dash.dependencies.State("cn-random-candidates-input", "value"),
             ],
             prevent_initial_call=True,
         )
-        def apply_parameters(n_clicks, lr, hu, epochs, conv_enabled, conv_threshold, spiral_rot):
+        def apply_parameters(
+            n_clicks,
+            nn_max_iter,
+            nn_max_epochs,
+            nn_lr,
+            nn_max_hu,
+            nn_multi_node,
+            nn_growth_trigger,
+            nn_growth_epochs,
+            nn_growth_conv_thresh,
+            nn_spiral_rot,
+            nn_spiral_num,
+            nn_dataset_elem,
+            nn_dataset_noise,
+            cn_pool_size,
+            cn_corr_thresh,
+            cn_selected,
+            cn_training_complete,
+            cn_training_iter,
+            cn_training_conv_thresh,
+            cn_multi_cand,
+            cn_cand_selection,
+            cn_top_cands,
+            cn_random_cands,
+        ):
             """Apply parameters to backend and update applied store."""
-            return self._apply_parameters_handler(n_clicks, lr, hu, epochs, conv_enabled, conv_threshold, spiral_rot)
+            return self._apply_parameters_handler(
+                n_clicks,
+                nn_max_iter,
+                nn_max_epochs,
+                nn_lr,
+                nn_max_hu,
+                nn_multi_node,
+                nn_growth_trigger,
+                nn_growth_epochs,
+                nn_growth_conv_thresh,
+                nn_spiral_rot,
+                nn_spiral_num,
+                nn_dataset_elem,
+                nn_dataset_noise,
+                cn_pool_size,
+                cn_corr_thresh,
+                cn_selected,
+                cn_training_complete,
+                cn_training_iter,
+                cn_training_conv_thresh,
+                cn_multi_cand,
+                cn_cand_selection,
+                cn_top_cands,
+                cn_random_cands,
+            )
 
-        # Initialize input fields and applied-params-store from backend on first load
-        # Uses dedicated one-shot interval (max_intervals=1) to guarantee single execution
+        # ── Initialize from backend on first load ──
+
         @self.app.callback(
             [
-                Output("learning-rate-input", "value"),
-                Output("max-hidden-units-input", "value"),
-                Output("max-epochs-input", "value"),
-                Output("convergence-enabled-checkbox", "value"),
-                Output("convergence-threshold-input", "value"),
-                Output("spiral-rotations-input", "value"),
+                # Neural Network (12)
+                Output("nn-max-iterations-input", "value"),
+                Output("nn-max-total-epochs-input", "value"),
+                Output("nn-learning-rate-input", "value"),
+                Output("nn-max-hidden-units-input", "value"),
+                Output("nn-multi-node-layers-checkbox", "value"),
+                Output("nn-growth-trigger-radio", "value"),
+                Output("nn-growth-preset-epochs-input", "value"),
+                Output("nn-growth-convergence-threshold-input", "value"),
+                Output("nn-spiral-rotations-input", "value"),
+                Output("nn-spiral-number-input", "value"),
+                Output("nn-dataset-elements-input", "value"),
+                Output("nn-dataset-noise-input", "value"),
+                # Candidate Nodes (10)
+                Output("cn-pool-size-input", "value"),
+                Output("cn-correlation-threshold-input", "value"),
+                Output("cn-selected-candidates-input", "value"),
+                Output("cn-training-complete-radio", "value"),
+                Output("cn-training-iterations-input", "value"),
+                Output("cn-training-convergence-threshold-input", "value"),
+                Output("cn-multi-candidate-checkbox", "value", allow_duplicate=True),
+                Output("cn-candidate-selection-radio", "value"),
+                Output("cn-top-candidates-input", "value"),
+                Output("cn-random-candidates-input", "value"),
+                # Store
                 Output("applied-params-store", "data", allow_duplicate=True),
             ],
             Input("params-init-interval", "n_intervals"),
@@ -1415,41 +1894,77 @@ class DashboardManager:
 
         return new_states if changed else dash.no_update
 
-    def _handle_parameter_changes_handler(self, learning_rate=None, max_hidden_units=None, **kwargs):
-        """Handle parameter input changes - now just logs, actual send is via Apply button."""
-        ctx = get_callback_context()
-        trigger = kwargs.get("trigger") or ctx.get_triggered_id()
+    def _toggle_nn_growth_inputs_handler(self, growth_trigger):
+        """Enable/disable sub-inputs based on selected growth trigger."""
+        if growth_trigger == "preset_epochs":
+            return False, True
+        return True, False
 
-        if trigger == "learning-rate-input":
-            self.logger.debug(f"Learning rate changed to {learning_rate} (pending)")
-        elif trigger == "max-hidden-units-input":
-            self.logger.debug(f"Max hidden units changed to {max_hidden_units} (pending)")
+    def _toggle_cn_training_inputs_handler(self, training_complete):
+        """Enable/disable sub-inputs based on pool training complete mode."""
+        if training_complete == "preset_epochs":
+            return False, True
+        return True, False
 
-        return dash.no_update
+    def _toggle_cn_selection_inputs_handler(self, selection_mode):
+        """Enable/disable sub-inputs based on candidate selection mode."""
+        if selection_mode == "top_tier":
+            return False, True
+        elif selection_mode == "random":
+            return True, False
+        return True, True
 
-    def _track_param_changes_handler(self, lr, hu, epochs, conv_enabled, conv_threshold, spiral_rot, applied):
-        """Enable Apply button when parameters differ from applied values.
+    def _toggle_cn_multi_candidate_subgroup_handler(self, value):
+        """Enable/disable entire multi-candidate sub-group based on checkbox."""
+        enabled = "enabled" in (value or [])
+        if not enabled:
+            return {"opacity": "0.5"}, True, True
+        return {}, False, False
 
-        Uses float tolerance for learning_rate, convergence_threshold, and
-        spiral_rotations comparison to handle floating-point precision issues.
+    def _sync_multi_node_checkboxes_handler(self, nn_value, cn_value):
+        """Sync multi-node layers checkbox with multi-candidate selection checkbox."""
+        ctx = dash.callback_context
+        trigger = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else None
+        if trigger == "cn-multi-candidate-checkbox":
+            cn_enabled = "enabled" in (cn_value or [])
+            if cn_enabled:
+                return ["enabled"], dash.no_update
+            return dash.no_update, dash.no_update
+        elif trigger == "nn-multi-node-layers-checkbox":
+            return dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update
 
-        Args:
-            lr: Current learning rate input value
-            hu: Current max hidden units input value
-            epochs: Current max epochs input value
-            conv_enabled: Current convergence checklist value (list)
-            conv_threshold: Current convergence threshold input value
-            spiral_rot: Current spiral rotations input value
-            applied: Dictionary of currently applied parameter values
-
-        Returns:
-            Tuple of (disabled, status) where disabled is True if no changes
-        """
+    def _track_param_changes_handler(
+        self,
+        nn_max_iter,
+        nn_max_epochs,
+        nn_lr,
+        nn_max_hu,
+        nn_multi_node,
+        nn_growth_trigger,
+        nn_growth_epochs,
+        nn_growth_conv_thresh,
+        nn_spiral_rot,
+        nn_spiral_num,
+        nn_dataset_elem,
+        nn_dataset_noise,
+        cn_pool_size,
+        cn_corr_thresh,
+        cn_selected,
+        cn_training_complete,
+        cn_training_iter,
+        cn_training_conv_thresh,
+        cn_multi_cand,
+        cn_cand_selection,
+        cn_top_cands,
+        cn_random_cands,
+        applied,
+    ):
+        """Enable Apply button when parameters differ from applied values."""
         if not applied:
             return True, ""
 
         def float_equal(a, b, tol=1e-9):
-            """Compare floats with tolerance to handle precision issues."""
             if a is None or b is None:
                 return a == b
             try:
@@ -1457,48 +1972,118 @@ class DashboardManager:
             except (TypeError, ValueError):
                 return False
 
-        # Use float tolerance for learning_rate comparison
-        lr_changed = not float_equal(lr, applied.get("learning_rate"))
-        hu_changed = hu != applied.get("max_hidden_units")
-        epochs_changed = epochs != applied.get("max_epochs")
+        def checkbox_to_bool(checklist_value):
+            return "enabled" in (checklist_value or [])
 
-        # Convergence params: checklist returns ["enabled"] or []
-        current_conv_enabled = "enabled" in (conv_enabled or [])
-        applied_conv_enabled = applied.get("convergence_enabled", True)
-        conv_enabled_changed = current_conv_enabled != applied_conv_enabled
-        conv_threshold_changed = not float_equal(conv_threshold, applied.get("convergence_threshold"))
+        comparisons = [
+            (nn_max_iter, "nn_max_iterations", "int"),
+            (nn_max_epochs, "nn_max_total_epochs", "int"),
+            (nn_lr, "nn_learning_rate", "float"),
+            (nn_max_hu, "nn_max_hidden_units", "int"),
+            (nn_multi_node, "nn_multi_node_layers", "bool_checkbox"),
+            (nn_growth_trigger, "nn_growth_trigger", "str"),
+            (nn_growth_epochs, "nn_growth_preset_epochs", "int"),
+            (nn_growth_conv_thresh, "nn_growth_convergence_threshold", "float"),
+            (nn_spiral_rot, "nn_spiral_rotations", "float"),
+            (nn_spiral_num, "nn_spiral_number", "int"),
+            (nn_dataset_elem, "nn_dataset_elements", "int"),
+            (nn_dataset_noise, "nn_dataset_noise", "float"),
+            (cn_pool_size, "cn_pool_size", "int"),
+            (cn_corr_thresh, "cn_correlation_threshold", "float"),
+            (cn_selected, "cn_selected_candidates", "int"),
+            (cn_training_complete, "cn_training_complete", "str"),
+            (cn_training_iter, "cn_training_iterations", "int"),
+            (cn_training_conv_thresh, "cn_training_convergence_threshold", "float"),
+            (cn_multi_cand, "cn_multi_candidate", "bool_checkbox"),
+            (cn_cand_selection, "cn_candidate_selection", "str"),
+            (cn_top_cands, "cn_top_candidates", "int"),
+            (cn_random_cands, "cn_random_candidates", "int"),
+        ]
 
-        # Spiral rotations
-        spiral_rot_changed = not float_equal(spiral_rot, applied.get("spiral_rotations", TrainingConstants.DEFAULT_SPIRAL_ROTATIONS))
-
-        has_changes = lr_changed or hu_changed or epochs_changed or conv_enabled_changed or conv_threshold_changed or spiral_rot_changed
+        has_changes = False
+        for current, key, cmp_type in comparisons:
+            stored = applied.get(key)
+            if cmp_type == "float":
+                if not float_equal(current, stored):
+                    has_changes = True
+                    break
+            elif cmp_type == "bool_checkbox":
+                if checkbox_to_bool(current) != stored:
+                    has_changes = True
+                    break
+            elif cmp_type == "int":
+                if current != stored:
+                    has_changes = True
+                    break
+            elif cmp_type == "str":
+                if current != stored:
+                    has_changes = True
+                    break
 
         if has_changes:
             return False, "⚠️ Unsaved changes"
-        # No changes: disable button but preserve existing status message
-        # (avoids overwriting "✓ Parameters applied" from apply_parameters callback)
         return True, dash.no_update
 
-    def _apply_parameters_handler(self, n_clicks, lr, hu, epochs, conv_enabled, conv_threshold, spiral_rot):
+    def _apply_parameters_handler(
+        self,
+        n_clicks,
+        nn_max_iter,
+        nn_max_epochs,
+        nn_lr,
+        nn_max_hu,
+        nn_multi_node,
+        nn_growth_trigger,
+        nn_growth_epochs,
+        nn_growth_conv_thresh,
+        nn_spiral_rot,
+        nn_spiral_num,
+        nn_dataset_elem,
+        nn_dataset_noise,
+        cn_pool_size,
+        cn_corr_thresh,
+        cn_selected,
+        cn_training_complete,
+        cn_training_iter,
+        cn_training_conv_thresh,
+        cn_multi_cand,
+        cn_cand_selection,
+        cn_top_cands,
+        cn_random_cands,
+    ):
         """Apply parameters to backend and update applied store."""
         if not n_clicks:
             return dash.no_update, dash.no_update
 
+        def checkbox_to_bool(v):
+            return "enabled" in (v or [])
+
         params = {
-            "learning_rate": float(lr) if lr is not None else 0.01,
-            "max_hidden_units": int(hu) if hu is not None else 10,
-            "max_epochs": int(epochs) if epochs is not None else 200,
-            "convergence_enabled": "enabled" in (conv_enabled or []),
-            "convergence_threshold": float(conv_threshold) if conv_threshold is not None else 0.001,
-            "spiral_rotations": float(spiral_rot) if spiral_rot is not None else TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
+            "nn_max_iterations": int(nn_max_iter) if nn_max_iter is not None else TrainingConstants.DEFAULT_MAX_ITERATIONS,
+            "nn_max_total_epochs": int(nn_max_epochs) if nn_max_epochs is not None else TrainingConstants.DEFAULT_TRAINING_EPOCHS,
+            "nn_learning_rate": float(nn_lr) if nn_lr is not None else TrainingConstants.DEFAULT_LEARNING_RATE,
+            "nn_max_hidden_units": int(nn_max_hu) if nn_max_hu is not None else TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS,
+            "nn_multi_node_layers": checkbox_to_bool(nn_multi_node),
+            "nn_growth_trigger": nn_growth_trigger or TrainingConstants.DEFAULT_GROWTH_TRIGGER,
+            "nn_growth_preset_epochs": int(nn_growth_epochs) if nn_growth_epochs is not None else TrainingConstants.DEFAULT_PRESET_EPOCHS,
+            "nn_growth_convergence_threshold": float(nn_growth_conv_thresh) if nn_growth_conv_thresh is not None else TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD,
+            "nn_spiral_rotations": float(nn_spiral_rot) if nn_spiral_rot is not None else TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
+            "nn_spiral_number": int(nn_spiral_num) if nn_spiral_num is not None else TrainingConstants.DEFAULT_SPIRAL_NUMBER,
+            "nn_dataset_elements": int(nn_dataset_elem) if nn_dataset_elem is not None else TrainingConstants.DEFAULT_DATASET_ELEMENTS,
+            "nn_dataset_noise": float(nn_dataset_noise) if nn_dataset_noise is not None else TrainingConstants.DEFAULT_DATASET_NOISE,
+            "cn_pool_size": int(cn_pool_size) if cn_pool_size is not None else TrainingConstants.DEFAULT_CANDIDATE_POOL_SIZE,
+            "cn_correlation_threshold": float(cn_corr_thresh) if cn_corr_thresh is not None else TrainingConstants.DEFAULT_CANDIDATE_CORRELATION_THRESHOLD,
+            "cn_selected_candidates": int(cn_selected) if cn_selected is not None else TrainingConstants.DEFAULT_SELECTED_CANDIDATES,
+            "cn_training_complete": cn_training_complete or TrainingConstants.DEFAULT_CN_TRAINING_COMPLETE,
+            "cn_training_iterations": int(cn_training_iter) if cn_training_iter is not None else TrainingConstants.DEFAULT_CANDIDATE_TRAINING_ITERATIONS,
+            "cn_training_convergence_threshold": float(cn_training_conv_thresh) if cn_training_conv_thresh is not None else TrainingConstants.DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD,
+            "cn_multi_candidate": checkbox_to_bool(cn_multi_cand),
+            "cn_candidate_selection": cn_cand_selection,
+            "cn_top_candidates": int(cn_top_cands) if cn_top_cands is not None else TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT,
+            "cn_random_candidates": int(cn_random_cands) if cn_random_cands is not None else TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT,
         }
 
         try:
-            response = requests.post(
-                self._api_url("/api/set_params"),
-                json=params,
-                timeout=2,
-            )
+            response = requests.post(self._api_url("/api/set_params"), json=params, timeout=2)
             if response.status_code == 200:
                 self.logger.info(f"Parameters applied: {params}")
                 return params, "✓ Parameters applied"
@@ -1509,46 +2094,89 @@ class DashboardManager:
             return dash.no_update, f"❌ Error: {str(e)[:30]}"
 
     def _init_params_from_backend_handler(self, n, current_applied):
-        """Initialize input values and applied params from backend on first load.
-
-        Only runs once — when applied-params-store is empty (first interval tick).
-        After initialization, returns no_update for all outputs.
-
-        Returns:
-            Tuple of (lr, hu, epochs, conv_checkbox_value, conv_threshold, spiral_rot, applied_dict)
-        """
+        """Initialize input values and applied params from backend on first load."""
+        NUM_OUTPUTS = 23
         if current_applied:
-            return (dash.no_update,) * 7
+            return (dash.no_update,) * NUM_OUTPUTS
         try:
             response = requests.get(self._api_url("/api/state"), timeout=DashboardConstants.API_TIMEOUT_SECONDS)
             if response.status_code == 200:
                 state = response.json()
-                lr = state.get("learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE)
-                hu = state.get("max_hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)
-                epochs = state.get("max_epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS)
-                conv_enabled = state.get("convergence_enabled", TrainingConstants.DEFAULT_CONVERGENCE_ENABLED)
-                conv_threshold = state.get("convergence_threshold", TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD)
-                spiral_rot = state.get("spiral_rotations", TrainingConstants.DEFAULT_SPIRAL_ROTATIONS)
+                nn_max_iter = state.get("nn_max_iterations", TrainingConstants.DEFAULT_MAX_ITERATIONS)
+                nn_max_epochs = state.get("nn_max_total_epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS)
+                nn_lr = state.get("nn_learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE)
+                nn_max_hu = state.get("nn_max_hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)
+                nn_multi_node = state.get("nn_multi_node_layers", TrainingConstants.DEFAULT_MULTI_NODE_LAYERS)
+                nn_growth_trigger = state.get("nn_growth_trigger", TrainingConstants.DEFAULT_GROWTH_TRIGGER)
+                nn_growth_epochs = state.get("nn_growth_preset_epochs", TrainingConstants.DEFAULT_PRESET_EPOCHS)
+                nn_growth_conv_thresh = state.get("nn_growth_convergence_threshold", TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD)
+                nn_spiral_rot = state.get("nn_spiral_rotations", TrainingConstants.DEFAULT_SPIRAL_ROTATIONS)
+                nn_spiral_num = state.get("nn_spiral_number", TrainingConstants.DEFAULT_SPIRAL_NUMBER)
+                nn_dataset_elem = state.get("nn_dataset_elements", TrainingConstants.DEFAULT_DATASET_ELEMENTS)
+                nn_dataset_noise = state.get("nn_dataset_noise", TrainingConstants.DEFAULT_DATASET_NOISE)
+                cn_pool_size = state.get("cn_pool_size", TrainingConstants.DEFAULT_CANDIDATE_POOL_SIZE)
+                cn_corr_thresh = state.get("cn_correlation_threshold", TrainingConstants.DEFAULT_CANDIDATE_CORRELATION_THRESHOLD)
+                cn_selected = state.get("cn_selected_candidates", TrainingConstants.DEFAULT_SELECTED_CANDIDATES)
+                cn_training_complete = state.get("cn_training_complete", TrainingConstants.DEFAULT_CN_TRAINING_COMPLETE)
+                cn_training_iter = state.get("cn_training_iterations", TrainingConstants.DEFAULT_CANDIDATE_TRAINING_ITERATIONS)
+                cn_training_conv_thresh = state.get("cn_training_convergence_threshold", TrainingConstants.DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD)
+                cn_multi_cand = state.get("cn_multi_candidate", TrainingConstants.DEFAULT_MULTI_CANDIDATE_ENABLED)
+                cn_cand_selection = state.get("cn_candidate_selection", None)
+                cn_top_cands = state.get("cn_top_candidates", TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT)
+                cn_random_cands = state.get("cn_random_candidates", TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT)
+
                 applied = {
-                    "learning_rate": lr,
-                    "max_hidden_units": hu,
-                    "max_epochs": epochs,
-                    "convergence_enabled": conv_enabled,
-                    "convergence_threshold": conv_threshold,
-                    "spiral_rotations": spiral_rot,
+                    "nn_max_iterations": nn_max_iter,
+                    "nn_max_total_epochs": nn_max_epochs,
+                    "nn_learning_rate": nn_lr,
+                    "nn_max_hidden_units": nn_max_hu,
+                    "nn_multi_node_layers": nn_multi_node,
+                    "nn_growth_trigger": nn_growth_trigger,
+                    "nn_growth_preset_epochs": nn_growth_epochs,
+                    "nn_growth_convergence_threshold": nn_growth_conv_thresh,
+                    "nn_spiral_rotations": nn_spiral_rot,
+                    "nn_spiral_number": nn_spiral_num,
+                    "nn_dataset_elements": nn_dataset_elem,
+                    "nn_dataset_noise": nn_dataset_noise,
+                    "cn_pool_size": cn_pool_size,
+                    "cn_correlation_threshold": cn_corr_thresh,
+                    "cn_selected_candidates": cn_selected,
+                    "cn_training_complete": cn_training_complete,
+                    "cn_training_iterations": cn_training_iter,
+                    "cn_training_convergence_threshold": cn_training_conv_thresh,
+                    "cn_multi_candidate": cn_multi_cand,
+                    "cn_candidate_selection": cn_cand_selection,
+                    "cn_top_candidates": cn_top_cands,
+                    "cn_random_candidates": cn_random_cands,
                 }
                 return (
-                    lr,
-                    hu,
-                    epochs,
-                    ["enabled"] if conv_enabled else [],
-                    conv_threshold,
-                    spiral_rot,
+                    nn_max_iter,
+                    nn_max_epochs,
+                    nn_lr,
+                    nn_max_hu,
+                    ["enabled"] if nn_multi_node else [],
+                    nn_growth_trigger,
+                    nn_growth_epochs,
+                    nn_growth_conv_thresh,
+                    nn_spiral_rot,
+                    nn_spiral_num,
+                    nn_dataset_elem,
+                    nn_dataset_noise,
+                    cn_pool_size,
+                    cn_corr_thresh,
+                    cn_selected,
+                    cn_training_complete,
+                    cn_training_iter,
+                    cn_training_conv_thresh,
+                    ["enabled"] if cn_multi_cand else [],
+                    cn_cand_selection,
+                    cn_top_cands,
+                    cn_random_cands,
                     applied,
                 )
         except Exception as e:
             self.logger.warning(f"Failed to initialize params from backend: {e}")
-        return (dash.no_update,) * 7
+        return (dash.no_update,) * NUM_OUTPUTS
 
     def register_component(self, component: BaseComponent):
         """

@@ -146,11 +146,12 @@ class TestDemoModeEnvironmentVariables:
             demo.stop()
 
     def test_valid_epochs_env(self):
-        """Test valid CASCOR_TRAINING_EPOCHS is used."""
-        with patch.dict(os.environ, {"CASCOR_TRAINING_EPOCHS": "500"}):
-            demo = DemoMode()
-            assert demo.max_epochs == 500
-            demo.stop()
+        """Test DemoMode picks up default epochs from Settings."""
+        from canopy_constants import TrainingConstants
+
+        demo = DemoMode()
+        assert demo.max_epochs == TrainingConstants.DEFAULT_TRAINING_EPOCHS
+        demo.stop()
 
     def test_invalid_hidden_units_env(self):
         """Test invalid CASCOR_TRAINING_HIDDEN_UNITS falls back (lines 222-227)."""

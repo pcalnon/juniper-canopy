@@ -941,8 +941,31 @@ class TestParameterTrackingHandler:
 
         manager = DashboardManager({})
 
-        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
+        applied = {
+            "nn_max_iterations": 1000,
+            "nn_max_total_epochs": 1000000,
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
+        }
+        disabled, status = manager._track_param_changes_handler(1000, 1000000, 0.01, 1000, [], "convergence", 50, 0.001, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, [], None, 1, 1, applied)
 
         assert disabled is True  # Button disabled when no changes
         assert status is dash.no_update
@@ -953,8 +976,31 @@ class TestParameterTrackingHandler:
 
         manager = DashboardManager({})
 
-        applied = {"learning_rate": 0.01, "max_hidden_units": 10, "max_epochs": 200, "convergence_enabled": True, "convergence_threshold": 0.001}
-        disabled, status = manager._track_param_changes_handler(lr=0.02, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
+        applied = {
+            "nn_max_iterations": 1000,
+            "nn_max_total_epochs": 1000000,
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
+        }
+        disabled, status = manager._track_param_changes_handler(1000, 1000000, 0.05, 1000, [], "convergence", 50, 0.001, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, [], None, 1, 1, applied)
 
         assert disabled is False  # Button enabled when changes exist
         assert "Unsaved" in status
@@ -965,7 +1011,7 @@ class TestParameterTrackingHandler:
 
         manager = DashboardManager({})
 
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=None)
+        disabled, status = manager._track_param_changes_handler(1000, 1000000, 0.01, 1000, [], "convergence", 50, 0.001, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, [], None, 1, 1, None)
 
         assert disabled is True
         assert status == ""
@@ -993,11 +1039,10 @@ class TestApplyParametersHandler:
         env = builder.get_environ()
 
         with manager.app.server.request_context(env):
-            params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0)
+            params, status = manager._apply_parameters_handler(1, 1000, 1000000, 0.02, 15, [], "convergence", 50, 0.001, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, [], None, 1, 1)
 
-        assert params["learning_rate"] == 0.02
-        assert params["max_hidden_units"] == 15
-        assert params["max_epochs"] == 300
+        assert params["nn_learning_rate"] == 0.02
+        assert params["nn_max_hidden_units"] == 15
         assert "✓" in status
 
     @patch("requests.post")
@@ -1019,7 +1064,7 @@ class TestApplyParametersHandler:
         env = builder.get_environ()
 
         with manager.app.server.request_context(env):
-            params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.02, hu=15, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0)
+            params, status = manager._apply_parameters_handler(1, 1000, 1000000, 0.02, 15, [], "convergence", 50, 0.001, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, [], None, 1, 1)
 
         assert params == dash.no_update
         assert "❌" in status
@@ -1030,5 +1075,5 @@ class TestApplyParametersHandler:
 
         manager = DashboardManager({})
 
-        result = manager._apply_parameters_handler(n_clicks=None, lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0)
+        result = manager._apply_parameters_handler(None, 1000, 1000000, 0.01, 1000, [], "convergence", 50, 0.001, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, [], None, 1, 1)
         assert result == (dash.no_update, dash.no_update)

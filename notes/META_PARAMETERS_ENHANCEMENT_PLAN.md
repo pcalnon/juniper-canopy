@@ -1,4 +1,4 @@
-# Meta Parameters Enhancement Plan
+# Meta Pa./worktrees/juniper-canopy--feature--meta-parameters-left-menu--20260321-0057--2905f3ab/notes/META_PARAMETERS_ENHANCEMENT_[PLAN.md](http://PLAN.md)rameters Enhancement Plan
 
 **Feature**: Rename Training Parameters to Meta Parameters with Neural Network and Candidate Nodes subsections
 **Branch**: `feature/meta-parameters-left-menu`
@@ -19,6 +19,7 @@ Both subsections share a single **Apply Parameters** button. Cross-section check
 ### Current State
 
 The Training Parameters card (`dashboard_manager.py` lines 417-512) contains a flat list of 6 inputs:
+
 - Learning Rate (float, default: 0.01)
 - Max Hidden Units (int, default: 20)
 - Maximum Epochs (int, default: 300)
@@ -37,59 +38,59 @@ Two collapsible subsections with 22 total input components, radio button groups 
 
 ### 2.1 Neural Network Subsection (12 inputs)
 
-| # | Component | ID | Type | Default | New/Changed |
-|---|-----------|-----|------|---------|-------------|
-| 1 | Maximum Iterations | `nn-max-iterations-input` | number (int) | 1000 | NEW |
-| 2 | Maximum Total Epochs | `nn-max-total-epochs-input` | number (int) | 1000000 | NEW (replaces `max-epochs-input`) |
-| 3 | Learning Rate | `nn-learning-rate-input` | number (float) | 0.01 | RENAMED (was `learning-rate-input`) |
-| 4 | Maximum Hidden Units | `nn-max-hidden-units-input` | number (int) | 1000 | RENAMED + default change (was 20) |
-| 5 | Multi-Node Layers | `nn-multi-node-layers-checkbox` | dcc.Checklist | unchecked | NEW |
-| 6 | Growth Trigger Radio | `nn-growth-trigger-radio` | dbc.RadioItems | `"convergence"` | NEW (replaces `convergence-enabled-checkbox`) |
-| 7 | Preset Epochs Count | `nn-growth-preset-epochs-input` | number (int) | 50 | NEW |
-| 8 | Convergence Threshold | `nn-growth-convergence-threshold-input` | number (float) | 0.001 | RENAMED (was `convergence-threshold-input`) |
-| 9 | Spiral Rotations | `nn-spiral-rotations-input` | number (float) | 1.5 | RENAMED + default change (was 3.0) |
-| 10 | Spiral Number | `nn-spiral-number-input` | number (int) | 2 | NEW |
-| 11 | Dataset Elements | `nn-dataset-elements-input` | number (int) | 1000 | NEW |
-| 12 | Dataset Noise | `nn-dataset-noise-input` | number (float) | 0.25 | NEW |
+| #  | Component             | ID                                      | Type           | Default         | New/Changed                                   |
+|----|-----------------------|-----------------------------------------|----------------|-----------------|-----------------------------------------------|
+| 1  | Maximum Iterations    | `nn-max-iterations-input`               | number (int)   | 1000            | NEW                                           |
+| 2  | Maximum Total Epochs  | `nn-max-total-epochs-input`             | number (int)   | 1000000         | NEW (replaces `max-epochs-input`)             |
+| 3  | Learning Rate         | `nn-learning-rate-input`                | number (float) | 0.01            | RENAMED (was `learning-rate-input`)           |
+| 4  | Maximum Hidden Units  | `nn-max-hidden-units-input`             | number (int)   | 1000            | RENAMED + default change (was 20)             |
+| 5  | Multi-Node Layers     | `nn-multi-node-layers-checkbox`         | dcc.Checklist  | unchecked       | NEW                                           |
+| 6  | Growth Trigger Radio  | `nn-growth-trigger-radio`               | dbc.RadioItems | `"convergence"` | NEW (replaces `convergence-enabled-checkbox`) |
+| 7  | Preset Epochs Count   | `nn-growth-preset-epochs-input`         | number (int)   | 50              | NEW                                           |
+| 8  | Convergence Threshold | `nn-growth-convergence-threshold-input` | number (float) | 0.001           | RENAMED (was `convergence-threshold-input`)   |
+| 9  | Spiral Rotations      | `nn-spiral-rotations-input`             | number (float) | 1.5             | RENAMED + default change (was 3.0)            |
+| 10 | Spiral Number         | `nn-spiral-number-input`                | number (int)   | 2               | NEW                                           |
+| 11 | Dataset Elements      | `nn-dataset-elements-input`             | number (int)   | 1000            | NEW                                           |
+| 12 | Dataset Noise         | `nn-dataset-noise-input`                | number (float) | 0.25            | NEW                                           |
 
 ### 2.2 Candidate Nodes Subsection (10 inputs)
 
-| # | Component | ID | Type | Default | New/Changed |
-|---|-----------|-----|------|---------|-------------|
-| 1 | Candidate Pool Size | `cn-pool-size-input` | number (int) | 100 | NEW |
-| 2 | Correlation Threshold | `cn-correlation-threshold-input` | number (float) | 0.001 | NEW |
-| 3 | Selected Candidates | `cn-selected-candidates-input` | number (int) | 1 | NEW |
-| 4 | Pool Training Radio | `cn-training-complete-radio` | dbc.RadioItems | `"preset_epochs"` | NEW |
-| 5 | Training Iterations | `cn-training-iterations-input` | number (int) | 500 | NEW |
-| 6 | CN Convergence Threshold | `cn-training-convergence-threshold-input` | number (float) | 0.0001 | NEW |
-| 7 | Multi Candidate Selection | `cn-multi-candidate-checkbox` | dcc.Checklist | unchecked | NEW |
-| 8 | Candidate Selection Radio | `cn-candidate-selection-radio` | dbc.RadioItems | None (no selection) | NEW |
-| 9 | Top Candidates Count | `cn-top-candidates-input` | number (int) | 1 | NEW |
-| 10 | Random Candidates Count | `cn-random-candidates-input` | number (int) | 1 | NEW |
+| #   | Component                 | ID                                        | Type           | Default             | New/Changed |
+| --- | ------------------------- | ----------------------------------------- | -------------- | ------------------- | ----------- |
+| 1   | Candidate Pool Size       | `cn-pool-size-input`                      | number (int)   | 100                 | NEW         |
+| 2   | Correlation Threshold     | `cn-correlation-threshold-input`          | number (float) | 0.001               | NEW         |
+| 3   | Selected Candidates       | `cn-selected-candidates-input`            | number (int)   | 1                   | NEW         |
+| 4   | Pool Training Radio       | `cn-training-complete-radio`              | dbc.RadioItems | `"preset_epochs"`   | NEW         |
+| 5   | Training Iterations       | `cn-training-iterations-input`            | number (int)   | 500                 | NEW         |
+| 6   | CN Convergence Threshold  | `cn-training-convergence-threshold-input` | number (float) | 0.0001              | NEW         |
+| 7   | Multi Candidate Selection | `cn-multi-candidate-checkbox`             | dcc.Checklist  | unchecked           | NEW         |
+| 8   | Candidate Selection Radio | `cn-candidate-selection-radio`            | dbc.RadioItems | None (no selection) | NEW         |
+| 9   | Top Candidates Count      | `cn-top-candidates-input`                 | number (int)   | 1                   | NEW         |
+| 10  | Random Candidates Count   | `cn-random-candidates-input`              | number (int)   | 1                   | NEW         |
 
 ### 2.3 Structural IDs
 
-| Component | ID | Purpose |
-|-----------|-----|---------|
-| NN section header | `nn-subsection-header` | Collapsible toggle |
-| NN section icon | `nn-subsection-icon` | Expand/collapse indicator |
-| NN section collapse | `nn-subsection-collapse` | dbc.Collapse wrapper |
-| CN section header | `cn-subsection-header` | Collapsible toggle |
-| CN section icon | `cn-subsection-icon` | Expand/collapse indicator |
-| CN section collapse | `cn-subsection-collapse` | dbc.Collapse wrapper |
-| Apply button | `apply-params-button` | Shared (unchanged ID) |
-| Status display | `params-status` | Shared (unchanged ID) |
+| Component           | ID                       | Purpose                   |
+| ------------------- | ------------------------ | ------------------------- |
+| NN section header   | `nn-subsection-header`   | Collapsible toggle        |
+| NN section icon     | `nn-subsection-icon`     | Expand/collapse indicator |
+| NN section collapse | `nn-subsection-collapse` | dbc.Collapse wrapper      |
+| CN section header   | `cn-subsection-header`   | Collapsible toggle        |
+| CN section icon     | `cn-subsection-icon`     | Expand/collapse indicator |
+| CN section collapse | `cn-subsection-collapse` | dbc.Collapse wrapper      |
+| Apply button        | `apply-params-button`    | Shared (unchanged ID)     |
+| Status display      | `params-status`          | Shared (unchanged ID)     |
 
 ### 2.4 Removed Component IDs
 
-| Old ID | Reason |
-|--------|--------|
-| `learning-rate-input` | Renamed to `nn-learning-rate-input` |
-| `max-hidden-units-input` | Renamed to `nn-max-hidden-units-input` |
-| `max-epochs-input` | Replaced by `nn-max-total-epochs-input` |
-| `convergence-enabled-checkbox` | Replaced by `nn-growth-trigger-radio` |
-| `convergence-threshold-input` | Renamed to `nn-growth-convergence-threshold-input` |
-| `spiral-rotations-input` | Renamed to `nn-spiral-rotations-input` |
+| Old ID                         | Reason                                             |
+|--------------------------------|----------------------------------------------------|
+| `learning-rate-input`          | Renamed to `nn-learning-rate-input`                |
+| `max-hidden-units-input`       | Renamed to `nn-max-hidden-units-input`             |
+| `max-epochs-input`             | Replaced by `nn-max-total-epochs-input`            |
+| `convergence-enabled-checkbox` | Replaced by `nn-growth-trigger-radio`              |
+| `convergence-threshold-input`  | Renamed to `nn-growth-convergence-threshold-input` |
+| `spiral-rotations-input`       | Renamed to `nn-spiral-rotations-input`             |
 
 ---
 
@@ -195,24 +196,25 @@ MAX_RANDOM_CANDIDATES_COUNT: Final[int] = 20
 
 ### 4.1 Callback Summary
 
-| # | Callback | Inputs | Outputs | States | prevent_initial_call | allow_duplicate |
-|---|----------|--------|---------|--------|---------------------|-----------------|
-| 1 | `track_param_changes` | 22 components + 1 store = 23 | 2 | 0 | No | None |
-| 2 | `apply_parameters` | 1 (button click) | 2 | 22 | Yes | `params-status.children` |
-| 3 | `init_params_from_backend` | 1 (interval) | 23 (22 components + store) | 1 | Yes | `applied-params-store.data` |
-| 4 | `sync_multi_node_checkboxes` | 2 (both checkboxes) | 2 (both checkboxes) | 0 | Yes | Both outputs |
-| 5 | `toggle_nn_subsection` | 1 (header click) | 2 (collapse + icon) | 1 | Yes | None |
-| 6 | `toggle_cn_subsection` | 1 (header click) | 2 (collapse + icon) | 1 | Yes | None |
-| 7 | `toggle_nn_growth_inputs` | 1 (radio) | 2 (disabled states) | 0 | No | None |
-| 8 | `toggle_cn_training_inputs` | 1 (radio) | 2 (disabled states) | 0 | No | None |
-| 9 | `toggle_cn_selection_inputs` | 1 (radio) | 2 (disabled states) | 0 | No | None |
-| 10 | `toggle_cn_multi_candidate_subgroup` | 1 (checkbox) | 3 (radio + 2 inputs disabled) | 0 | No | None |
+| #  | Callback                             | Inputs                       | Outputs                       | States | prevent_initial_call | allow_duplicate             |
+|----|--------------------------------------|------------------------------|-------------------------------|--------|----------------------|-----------------------------|
+| 1  | `track_param_changes`                | 22 components + 1 store = 23 | 2                             | 0      | No                   | None                        |
+| 2  | `apply_parameters`                   | 1 (button click)             | 2                             | 22     | Yes                  | `params-status.children`    |
+| 3  | `init_params_from_backend`           | 1 (interval)                 | 23 (22 components + store)    | 1      | Yes                  | `applied-params-store.data` |
+| 4  | `sync_multi_node_checkboxes`         | 2 (both checkboxes)          | 2 (both checkboxes)           | 0      | Yes                  | Both outputs                |
+| 5  | `toggle_nn_subsection`               | 1 (header click)             | 2 (collapse + icon)           | 1      | Yes                  | None                        |
+| 6  | `toggle_cn_subsection`               | 1 (header click)             | 2 (collapse + icon)           | 1      | Yes                  | None                        |
+| 7  | `toggle_nn_growth_inputs`            | 1 (radio)                    | 2 (disabled states)           | 0      | No                   | None                        |
+| 8  | `toggle_cn_training_inputs`          | 1 (radio)                    | 2 (disabled states)           | 0      | No                   | None                        |
+| 9  | `toggle_cn_selection_inputs`         | 1 (radio)                    | 2 (disabled states)           | 0      | No                   | None                        |
+| 10 | `toggle_cn_multi_candidate_subgroup` | 1 (checkbox)                 | 3 (radio + 2 inputs disabled) | 0      | No                   | None                        |
 
 **Removed callback**: `handle_parameter_changes` - returns `dash.no_update` unconditionally, only logs. Logging can move to `track_param_changes`.
 
 ### 4.5 Multi Candidate Sub-Group Enable/Disable
 
 When `cn-multi-candidate-checkbox` is unchecked (default), the entire sub-group must be disabled:
+
 - `cn-candidate-selection-radio` disabled
 - `cn-top-candidates-input` disabled
 - `cn-random-candidates-input` disabled
@@ -328,7 +330,7 @@ class TrainingSettings(BaseModel):
 
 ### 6.1 Card Structure
 
-```
+```bash
 dbc.Card (className="mb-3")
   dbc.CardHeader -> html.H5("Meta Parameters")
   dbc.CardBody
@@ -411,16 +413,17 @@ html.Div([
 
 ### 7.1 Breaking Changes
 
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| Removed `convergence-enabled-checkbox` ID | Tests referencing this ID break | Update all tests; map `convergence_enabled` from `nn_growth_trigger == "convergence"` |
-| Renamed component IDs | Callbacks referencing old IDs break | Comprehensive search-and-replace; update all test files |
-| Changed default values | Existing users see different defaults | Document in release notes |
-| `init_params_from_backend` tuple size change (7 -> 23) | Off-by-one errors cause Dash runtime exceptions | Unit test the exact tuple length |
+| Risk                                                   | Impact                                          | Mitigation                                                                            |
+|--------------------------------------------------------|-------------------------------------------------|---------------------------------------------------------------------------------------|
+| Removed `convergence-enabled-checkbox` ID              | Tests referencing this ID break                 | Update all tests; map `convergence_enabled` from `nn_growth_trigger == "convergence"` |
+| Renamed component IDs                                  | Callbacks referencing old IDs break             | Comprehensive search-and-replace; update all test files                               |
+| Changed default values                                 | Existing users see different defaults           | Document in release notes                                                             |
+| `init_params_from_backend` tuple size change (7 -> 23) | Off-by-one errors cause Dash runtime exceptions | Unit test the exact tuple length                                                      |
 
 ### 7.2 Circular Dependency Risk
 
 The `sync_multi_node_checkboxes` callback has components as both Input and Output. This is safe because:
+
 - `allow_duplicate=True` is set on both outputs
 - Handler returns `dash.no_update` for the triggering component
 - Dash de-duplicates no-change updates, preventing infinite loops
@@ -428,22 +431,24 @@ The `sync_multi_node_checkboxes` callback has components as both Input and Outpu
 ### 7.3 Performance
 
 22 inputs on `track_param_changes` is significant but safe because:
+
 - All numeric inputs use `debounce=True` (fires on blur/Enter, not per-keystroke)
 - Radio items and checkboxes fire immediately but handler logic is O(1) comparisons
 - No API calls in the tracking callback
 
 ### 7.4 Backward Compatibility
 
-| Area | Risk | Mitigation |
-|------|------|------------|
-| `/api/set_params` payload | Old clients send old keys | Accept both old and new keys; map old -> new internally |
-| `/api/state` response | Old fields missing | Always provide defaults via `.get()` with `TrainingConstants` fallbacks |
+| Area                          | Risk                             | Mitigation                                                                   |
+|-------------------------------|----------------------------------|------------------------------------------------------------------------------|
+| `/api/set_params` payload     | Old clients send old keys        | Accept both old and new keys; map old -> new internally                      |
+| `/api/state` response         | Old fields missing               | Always provide defaults via `.get()` with `TrainingConstants` fallbacks      |
 | `applied-params-store` format | Incompatible with old store data | Store starts empty; `init_params_from_backend` repopulates on each page load |
-| `DemoMode.apply_params()` | Unknown kwargs | Accept `**kwargs` to absorb unrecognized params gracefully |
+| `DemoMode.apply_params()`     | Unknown kwargs                   | Accept `**kwargs` to absorb unrecognized params gracefully                   |
 
 ### 7.5 UI Overflow
 
 The Meta Parameters card will be 2-3x taller than the current Training Parameters card. Guardrails:
+
 - CN subsection defaults to `is_open=False` (collapsed)
 - Both subsections are independently collapsible
 - Left sidebar has natural scroll from the browser
@@ -454,140 +459,148 @@ The Meta Parameters card will be 2-3x taller than the current Training Parameter
 
 ### 8.1 Unit Tests - Layout Verification
 
-| Test | Validates |
-|------|-----------|
-| All 22 input component IDs exist in layout | Component registration |
-| All structural IDs exist (headers, collapses, icons) | Section structure |
-| Default values match `TrainingConstants` | Constant integration |
-| Radio button options have correct values | Option configuration |
-| Checkboxes default to unchecked | Initial state |
-| Apply button starts disabled | Initial state |
+| Test                                                 | Validates              |
+|------------------------------------------------------|------------------------|
+| All 22 input component IDs exist in layout           | Component registration |
+| All structural IDs exist (headers, collapses, icons) | Section structure      |
+| Default values match `TrainingConstants`             | Constant integration   |
+| Radio button options have correct values             | Option configuration   |
+| Checkboxes default to unchecked                      | Initial state          |
+| Apply button starts disabled                         | Initial state          |
 
 ### 8.2 Unit Tests - Callback Handlers
 
-| Test | Validates |
-|------|-----------|
-| `_track_param_changes_handler` with no changes returns disabled | Dirty tracking |
-| `_track_param_changes_handler` with float change detected | Float tolerance |
-| `_track_param_changes_handler` with radio change detected | String comparison |
-| `_track_param_changes_handler` with checkbox change detected | Bool comparison |
-| `_apply_parameters_handler` builds correct params dict | Param construction |
-| `_apply_parameters_handler` handles None values with defaults | Null safety |
-| `_init_params_from_backend_handler` returns 23-tuple | Tuple length |
-| `_init_params_from_backend_handler` with current_applied returns no_update | Short-circuit |
-| `_sync_multi_node_checkboxes_handler` CN triggers NN | Cross-section link |
-| `_sync_multi_node_checkboxes_handler` NN does not trigger CN | Independence |
-| `_toggle_nn_growth_inputs_handler` preset_epochs mode | Radio disable |
-| `_toggle_nn_growth_inputs_handler` convergence mode | Radio disable |
-| `_toggle_cn_training_inputs_handler` both modes | Radio disable |
-| `_toggle_cn_selection_inputs_handler` both modes | Radio disable |
-| `_toggle_cn_multi_candidate_subgroup_handler` checkbox unchecked disables all | Sub-group disable |
-| `_toggle_cn_multi_candidate_subgroup_handler` checkbox checked enables all | Sub-group enable |
+| Test                                                                          | Validates          |
+|-------------------------------------------------------------------------------|--------------------|
+| `_track_param_changes_handler` with no changes returns disabled               | Dirty tracking     |
+| `_track_param_changes_handler` with float change detected                     | Float tolerance    |
+| `_track_param_changes_handler` with radio change detected                     | String comparison  |
+| `_track_param_changes_handler` with checkbox change detected                  | Bool comparison    |
+| `_apply_parameters_handler` builds correct params dict                        | Param construction |
+| `_apply_parameters_handler` handles None values with defaults                 | Null safety        |
+| `_init_params_from_backend_handler` returns 23-tuple                          | Tuple length       |
+| `_init_params_from_backend_handler` with current_applied returns no_update    | Short-circuit      |
+| `_sync_multi_node_checkboxes_handler` CN triggers NN                          | Cross-section link |
+| `_sync_multi_node_checkboxes_handler` NN does not trigger CN                  | Independence       |
+| `_toggle_nn_growth_inputs_handler` preset_epochs mode                         | Radio disable      |
+| `_toggle_nn_growth_inputs_handler` convergence mode                           | Radio disable      |
+| `_toggle_cn_training_inputs_handler` both modes                               | Radio disable      |
+| `_toggle_cn_selection_inputs_handler` both modes                              | Radio disable      |
+| `_toggle_cn_multi_candidate_subgroup_handler` checkbox unchecked disables all | Sub-group disable  |
+| `_toggle_cn_multi_candidate_subgroup_handler` checkbox checked enables all    | Sub-group enable   |
 
 ### 8.3 Integration Tests
 
-| Test | Validates |
-|------|-----------|
-| POST `/api/set_params` with full new payload | API acceptance |
-| POST `/api/set_params` with partial payload | Backward compat |
-| POST `/api/set_params` with old-style keys | Legacy support |
-| GET `/api/state` includes all 22 fields | State completeness |
-| `DemoMode.apply_params()` accepts all new params | Backend integration |
-| Round-trip: apply -> state -> verify values match | End-to-end |
+| Test                                              | Validates           |
+|---------------------------------------------------|---------------------|
+| POST `/api/set_params` with full new payload      | API acceptance      |
+| POST `/api/set_params` with partial payload       | Backward compat     |
+| POST `/api/set_params` with old-style keys        | Legacy support      |
+| GET `/api/state` includes all 22 fields           | State completeness  |
+| `DemoMode.apply_params()` accepts all new params  | Backend integration |
+| Round-trip: apply -> state -> verify values match | End-to-end          |
 
 ### 8.4 Existing Tests Requiring Updates
 
-| File | Changes Needed |
-|------|---------------|
-| `test_convergence_layout.py` | Update for removed `convergence-enabled-checkbox`, new radio group |
-| `test_convergence_ui_controls.py` | Update handler call signatures |
-| `test_apply_button_parameters.py` | Update API payload keys and handler args |
-| `test_dashboard_manager.py` | Update callback registration counts |
-| `test_config_training_params.py` | Update for changed default values |
-| `test_convergence_ui_regression.py` | Update handler call signatures |
-| `test_dashboard_manager_handlers.py` | Update handler call signatures |
-| `test_dashboard_manager_95.py` | Update for renamed component IDs |
-| `test_max_epochs_parameter.py` | 11+ references to `max-epochs-input` and old IDs; update all |
-| `test_dashboard_enhancements.py` | References `max-epochs-input`, old IDs, and `"Training Parameters"` label |
+| File                                 | Changes Needed                                                            |
+|--------------------------------------|---------------------------------------------------------------------------|
+| `test_convergence_layout.py`         | Update for removed `convergence-enabled-checkbox`, new radio group        |
+| `test_convergence_ui_controls.py`    | Update handler call signatures                                            |
+| `test_apply_button_parameters.py`    | Update API payload keys and handler args                                  |
+| `test_dashboard_manager.py`          | Update callback registration counts                                       |
+| `test_config_training_params.py`     | Update for changed default values                                         |
+| `test_convergence_ui_regression.py`  | Update handler call signatures                                            |
+| `test_dashboard_manager_handlers.py` | Update handler call signatures                                            |
+| `test_dashboard_manager_95.py`       | Update for renamed component IDs                                          |
+| `test_max_epochs_parameter.py`       | 11+ references to `max-epochs-input` and old IDs; update all              |
+| `test_dashboard_enhancements.py`     | References `max-epochs-input`, old IDs, and `"Training Parameters"` label |
 
 ---
 
 ## 9. Implementation Phases
 
 ### Phase 1: Foundation (Constants + Settings)
+
 1. Update `canopy_constants.py` with all new and changed constants
 2. Update `settings.py` `TrainingSettings` model
 3. Run existing tests to identify baseline failures from constant changes
 
 ### Phase 2: Backend API
-4. Update `/api/set_params` endpoint to accept new keys
-5. Update `/api/state` endpoint to return all meta-parameter fields
-6. Update `DemoMode.apply_params()` to accept new parameters
-7. Update `DemoBackend.apply_params()` to forward new params to DemoMode
-8. Update `TrainingState` if needed for new fields
-9. Update `settings.py` `get_training_defaults()` to return new parameter defaults
+
+1. Update `/api/set_params` endpoint to accept new keys
+2. Update `/api/state` endpoint to return all meta-parameter fields
+3. Update `DemoMode.apply_params()` to accept new parameters
+4. Update `DemoBackend.apply_params()` to forward new params to DemoMode
+5. Update `TrainingState` if needed for new fields
+6. Update `settings.py` `get_training_defaults()` to return new parameter defaults
 
 ### Phase 3: Layout
-8. Replace Training Parameters card with Meta Parameters card
-9. Add Neural Network subsection layout with all 12 inputs
-10. Add Candidate Nodes subsection layout with all 10 inputs
-11. Keep shared Apply button and status display
+
+1. Replace Training Parameters card with Meta Parameters card
+2. Add Neural Network subsection layout with all 12 inputs
+3. Add Candidate Nodes subsection layout with all 10 inputs
+4. Keep shared Apply button and status display
 
 ### Phase 4: Callbacks
-12. Add collapsible toggle callbacks (NN + CN sections)
-13. Add radio-to-disable callbacks (3 total)
-14. Add multi-candidate sub-group enable/disable callback
-15. Add cross-section checkbox sync callback
-15. Rewrite `track_param_changes` with 23 inputs
-16. Rewrite `apply_parameters` with 22 State values
-17. Rewrite `init_params_from_backend` with 23 outputs
-18. Remove obsolete `handle_parameter_changes` callback
+
+1. Add collapsible toggle callbacks (NN + CN sections)
+2. Add radio-to-disable callbacks (3 total)
+3. Add multi-candidate sub-group enable/disable callback
+4. Add cross-section checkbox sync callback
+5. Rewrite `track_param_changes` with 23 inputs
+6. Rewrite `apply_parameters` with 22 State values
+7. Rewrite `init_params_from_backend` with 23 outputs
+8. Remove obsolete `handle_parameter_changes` callback
 
 ### Phase 5: Tests
-19. Update all broken existing tests
-20. Add new unit tests for layout verification
-21. Add new unit tests for all handler methods
-22. Add new integration tests for API endpoints
-23. Run full test suite and fix failures
+
+1. Update all broken existing tests
+2. Add new unit tests for layout verification
+3. Add new unit tests for all handler methods
+4. Add new integration tests for API endpoints
+5. Run full test suite and fix failures
 
 ### Phase 6: Finalize
-24. Run linters (black, isort, flake8)
-25. Commit and push
-26. Create pull request
+
+1. Run linters (black, isort, flake8)
+2. Commit and push
+3. Create pull request
 
 ---
 
 ## 10. Files Modified
 
-| File | Type of Change |
-|------|---------------|
-| `src/canopy_constants.py` | New + modified constants |
-| `src/settings.py` | Updated TrainingSettings model |
-| `src/frontend/dashboard_manager.py` | Layout, callbacks, handlers (major rewrite) |
-| `src/main.py` | `/api/set_params` and `/api/state` endpoints |
-| `src/demo_mode.py` | `apply_params()` expansion |
-| `src/backend/demo_backend.py` | `apply_params()` must forward new `nn_*`/`cn_*` params to DemoMode |
-| `src/settings.py` (also) | `get_training_defaults()` method must return new parameter defaults |
-| `src/tests/unit/frontend/test_convergence_layout.py` | Update for new structure |
-| `src/tests/unit/test_convergence_ui_controls.py` | Update handler signatures |
-| `src/tests/integration/test_apply_button_parameters.py` | Update API payload + handler args |
-| `src/tests/unit/frontend/test_dashboard_manager.py` | Update callback counts |
-| `src/tests/unit/test_config_training_params.py` | Update default values |
-| `src/tests/unit/test_max_epochs_parameter.py` | Update all old component ID references |
-| `src/tests/integration/test_dashboard_enhancements.py` | Update old IDs and "Training Parameters" label |
-| New: `src/tests/unit/frontend/test_meta_parameters_layout.py` | Layout verification tests |
-| New: `src/tests/unit/frontend/test_meta_parameters_handlers.py` | Handler unit tests |
-| New: `src/tests/integration/test_meta_parameters_api.py` | API integration tests |
+| File                                                            | Type of Change                                                      |
+|-----------------------------------------------------------------|---------------------------------------------------------------------|
+| `src/canopy_constants.py`                                       | New + modified constants                                            |
+| `src/settings.py`                                               | Updated TrainingSettings model                                      |
+| `src/frontend/dashboard_manager.py`                             | Layout, callbacks, handlers (major rewrite)                         |
+| `src/main.py`                                                   | `/api/set_params` and `/api/state` endpoints                        |
+| `src/demo_mode.py`                                              | `apply_params()` expansion                                          |
+| `src/backend/demo_backend.py`                                   | `apply_params()` must forward new `nn_*`/`cn_*` params to DemoMode  |
+| `src/settings.py` (also)                                        | `get_training_defaults()` method must return new parameter defaults |
+| `src/tests/unit/frontend/test_convergence_layout.py`            | Update for new structure                                            |
+| `src/tests/unit/test_convergence_ui_controls.py`                | Update handler signatures                                           |
+| `src/tests/integration/test_apply_button_parameters.py`         | Update API payload + handler args                                   |
+| `src/tests/unit/frontend/test_dashboard_manager.py`             | Update callback counts                                              |
+| `src/tests/unit/test_config_training_params.py`                 | Update default values                                               |
+| `src/tests/unit/test_max_epochs_parameter.py`                   | Update all old component ID references                              |
+| `src/tests/integration/test_dashboard_enhancements.py`          | Update old IDs and "Training Parameters" label                      |
+| New: `src/tests/unit/frontend/test_meta_parameters_layout.py`   | Layout verification tests                                           |
+| New: `src/tests/unit/frontend/test_meta_parameters_handlers.py` | Handler unit tests                                                  |
+| New: `src/tests/integration/test_meta_parameters_api.py`        | API integration tests                                               |
 
 ---
 
 ## 11. Risk Prioritization
 
-| Priority | Risk | Likelihood | Impact | Mitigation |
-|----------|------|-----------|--------|------------|
-| P0 | `init_params_from_backend` tuple mismatch | High | App crash | Unit test exact tuple length |
-| P0 | Removed component IDs break callbacks | High | App crash | Search all references before removing |
-| P1 | Circular dependency in checkbox sync | Medium | App crash | Test with `dash.testing` or manual verification |
-| P1 | Float comparison false positives | Low | UX bug | Use existing `float_equal` pattern consistently |
-| P2 | UI overflow on small screens | Low | UX issue | CN section collapsed by default |
-| P2 | Backend rejects unknown params | Low | Apply fails | Use `**kwargs` pattern in `apply_params()` |
+| Priority | Risk                                      | Likelihood | Impact      | Mitigation                                      |
+|----------|-------------------------------------------|------------|-------------|-------------------------------------------------|
+| P0       | `init_params_from_backend` tuple mismatch | High       | App crash   | Unit test exact tuple length                    |
+| P0       | Removed component IDs break callbacks     | High       | App crash   | Search all references before removing           |
+| P1       | Circular dependency in checkbox sync      | Medium     | App crash   | Test with `dash.testing` or manual verification |
+| P1       | Float comparison false positives          | Low        | UX bug      | Use existing `float_equal` pattern consistently |
+| P2       | UI overflow on small screens              | Low        | UX issue    | CN section collapsed by default                 |
+| P2       | Backend rejects unknown params            | Low        | Apply fails | Use `**kwargs` pattern in `apply_params()`      |
+
+---

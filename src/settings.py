@@ -65,9 +65,11 @@ class TrainingParamConfig(BaseModel):
 class TrainingSettings(BaseModel):
     """Training parameter configuration (replaces YAML training section)."""
 
-    epochs: TrainingParamConfig = TrainingParamConfig(min=10, max=1000, default=500)
+    epochs: TrainingParamConfig = TrainingParamConfig(min=10, max=10000000, default=1000000)
     learning_rate: TrainingParamConfig = TrainingParamConfig(min=0.0001, max=1.0, default=0.01)
-    hidden_units: TrainingParamConfig = TrainingParamConfig(min=0, max=100, default=40)
+    hidden_units: TrainingParamConfig = TrainingParamConfig(min=0, max=10000, default=1000)
+    max_iterations: TrainingParamConfig = TrainingParamConfig(min=1, max=100000, default=1000)
+    preset_epochs: TrainingParamConfig = TrainingParamConfig(min=1, max=10000, default=50)
 
 
 class ServerSettings(BaseModel):
@@ -282,6 +284,8 @@ class Settings(BaseSettings):
             "epochs": self.training.epochs.default,
             "learning_rate": self.training.learning_rate.default,
             "hidden_units": self.training.hidden_units.default,
+            "max_iterations": self.training.max_iterations.default,
+            "preset_epochs": self.training.preset_epochs.default,
         }
 
     def validate_training_param(self, param: str, value: float) -> bool:

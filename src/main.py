@@ -63,6 +63,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 # from backend.training_monitor import TrainingMonitor  trunk-ignore(ruff/E402)
 # from backend.data_adapter import DataAdapter  trunk-ignore(ruff/E402)
 from backend.training_monitor import TrainingState  # trunk-ignore(ruff/E402)
+from canopy_constants import TrainingConstants  # trunk-ignore(ruff/E402)
 from communication.websocket_manager import websocket_manager
 from frontend.dashboard_manager import DashboardManager
 from health import DependencyStatus, ReadinessResponse, probe_dependency
@@ -523,6 +524,33 @@ async def get_state():
         state["convergence_enabled"] = getattr(demo, "convergence_enabled", True)
         state["convergence_threshold"] = getattr(demo, "convergence_threshold", 0.001)
         state["spiral_rotations"] = getattr(demo, "spiral_rotations", 3.0)
+
+        # ── Neural Network meta-parameters ──
+        state["nn_max_iterations"] = getattr(demo, "nn_max_iterations", TrainingConstants.DEFAULT_MAX_ITERATIONS)
+        state["nn_max_total_epochs"] = getattr(demo, "nn_max_total_epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS)
+        state["nn_learning_rate"] = getattr(demo, "nn_learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE)
+        state["nn_max_hidden_units"] = getattr(demo, "nn_max_hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)
+        state["nn_multi_node_layers"] = getattr(demo, "nn_multi_node_layers", TrainingConstants.DEFAULT_MULTI_NODE_LAYERS)
+        state["nn_growth_trigger"] = getattr(demo, "nn_growth_trigger", TrainingConstants.DEFAULT_GROWTH_TRIGGER)
+        state["nn_growth_preset_epochs"] = getattr(demo, "nn_growth_preset_epochs", TrainingConstants.DEFAULT_PRESET_EPOCHS)
+        state["nn_growth_convergence_threshold"] = getattr(demo, "nn_growth_convergence_threshold", TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD)
+        state["nn_spiral_rotations"] = getattr(demo, "nn_spiral_rotations", TrainingConstants.DEFAULT_SPIRAL_ROTATIONS)
+        state["nn_spiral_number"] = getattr(demo, "nn_spiral_number", TrainingConstants.DEFAULT_SPIRAL_NUMBER)
+        state["nn_dataset_elements"] = getattr(demo, "nn_dataset_elements", TrainingConstants.DEFAULT_DATASET_ELEMENTS)
+        state["nn_dataset_noise"] = getattr(demo, "nn_dataset_noise", TrainingConstants.DEFAULT_DATASET_NOISE)
+
+        # ── Candidate Node meta-parameters ──
+        state["cn_pool_size"] = getattr(demo, "cn_pool_size", TrainingConstants.DEFAULT_CANDIDATE_POOL_SIZE)
+        state["cn_correlation_threshold"] = getattr(demo, "cn_correlation_threshold", TrainingConstants.DEFAULT_CANDIDATE_CORRELATION_THRESHOLD)
+        state["cn_selected_candidates"] = getattr(demo, "cn_selected_candidates", TrainingConstants.DEFAULT_SELECTED_CANDIDATES)
+        state["cn_training_complete"] = getattr(demo, "cn_training_complete", TrainingConstants.DEFAULT_CN_TRAINING_COMPLETE)
+        state["cn_training_iterations"] = getattr(demo, "cn_training_iterations", TrainingConstants.DEFAULT_CANDIDATE_TRAINING_ITERATIONS)
+        state["cn_training_convergence_threshold"] = getattr(demo, "cn_training_convergence_threshold", TrainingConstants.DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD)
+        state["cn_multi_candidate"] = getattr(demo, "cn_multi_candidate", TrainingConstants.DEFAULT_MULTI_CANDIDATE_ENABLED)
+        state["cn_candidate_selection"] = getattr(demo, "cn_candidate_selection", "top")
+        state["cn_top_candidates"] = getattr(demo, "cn_top_candidates", TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT)
+        state["cn_random_candidates"] = getattr(demo, "cn_random_candidates", TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT)
+
         return state
 
     return training_state.get_state()
@@ -1630,45 +1658,83 @@ async def api_train_status():
 @app.post("/api/set_params")
 async def api_set_params(params: dict):
     """
-    Set training parameters (learning rate, max hidden units).
+    Set training parameters with nn_* and cn_* prefixed keys.
+    Also accepts old-style keys for backward compatibility.
     Args:
         params: Dictionary containing parameters to update
     Returns:
         Updated training state
     """
     try:
-        learning_rate = params.get("learning_rate")
-        max_hidden_units = params.get("max_hidden_units")
-        max_epochs = params.get("max_epochs")
-        convergence_enabled = params.get("convergence_enabled")
-        convergence_threshold = params.get("convergence_threshold")
-        spiral_rotations = params.get("spiral_rotations")
+        # Backward-compatible mapping: old-style keys -> new prefixed keys
+        compat_map = {
+            "learning_rate": "nn_learning_rate",
+            "max_hidden_units": "nn_max_hidden_units",
+            "max_epochs": "nn_max_total_epochs",
+            "convergence_enabled": "convergence_enabled",
+            "convergence_threshold": "nn_growth_convergence_threshold",
+            "spiral_rotations": "nn_spiral_rotations",
+        }
+        # Normalize old-style keys into prefixed keys (prefixed keys take precedence)
+        for old_key, new_key in compat_map.items():
+            if old_key in params and new_key not in params:
+                params[new_key] = params.pop(old_key)
 
-        # Update TrainingState with all provided parameters
-        updates = {}
-        if learning_rate is not None:
-            updates["learning_rate"] = float(learning_rate)
-        if max_hidden_units is not None:
-            updates["max_hidden_units"] = int(max_hidden_units)
-        if max_epochs is not None:
-            updates["max_epochs"] = int(max_epochs)
+        # All recognized nn_* and cn_* parameter keys
+        nn_keys = [
+            "nn_max_iterations",
+            "nn_max_total_epochs",
+            "nn_learning_rate",
+            "nn_max_hidden_units",
+            "nn_multi_node_layers",
+            "nn_growth_trigger",
+            "nn_growth_preset_epochs",
+            "nn_growth_convergence_threshold",
+            "nn_spiral_rotations",
+            "nn_spiral_number",
+            "nn_dataset_elements",
+            "nn_dataset_noise",
+        ]
+        cn_keys = [
+            "cn_pool_size",
+            "cn_correlation_threshold",
+            "cn_selected_candidates",
+            "cn_training_complete",
+            "cn_training_iterations",
+            "cn_training_convergence_threshold",
+            "cn_multi_candidate",
+            "cn_candidate_selection",
+            "cn_top_candidates",
+            "cn_random_candidates",
+        ]
 
-        # Convergence params go directly to backend (not TrainingState)
-        backend_updates = dict(updates)
-        if convergence_enabled is not None:
-            backend_updates["convergence_enabled"] = bool(convergence_enabled)
-        if convergence_threshold is not None:
-            backend_updates["convergence_threshold"] = float(convergence_threshold)
-        if spiral_rotations is not None:
-            backend_updates["spiral_rotations"] = float(spiral_rotations)
+        # Collect all recognized params
+        backend_updates = {}
+        for key in nn_keys + cn_keys:
+            if key in params and params[key] is not None:
+                backend_updates[key] = params[key]
+
+        # Also pass through convergence_enabled if present (backward compat, no prefix)
+        if "convergence_enabled" in params and params["convergence_enabled"] is not None:
+            backend_updates["convergence_enabled"] = bool(params["convergence_enabled"])
 
         if not backend_updates:
             return JSONResponse({"error": "No parameters provided"}, status_code=400)
 
-        if updates:
-            training_state.update_state(**updates)
+        # Update TrainingState with backward-compatible keys it understands
+        ts_updates = {}
+        if "nn_learning_rate" in backend_updates:
+            ts_updates["learning_rate"] = float(backend_updates["nn_learning_rate"])
+        if "nn_max_hidden_units" in backend_updates:
+            ts_updates["max_hidden_units"] = int(backend_updates["nn_max_hidden_units"])
+        if "nn_max_total_epochs" in backend_updates:
+            ts_updates["max_epochs"] = int(backend_updates["nn_max_total_epochs"])
+        if ts_updates:
+            training_state.update_state(**ts_updates)
+
+        # Forward all params to backend
         backend.apply_params(**backend_updates)
-        system_logger.info(f"Parameters updated: {updates}")
+        system_logger.info(f"Parameters updated: {backend_updates}")
 
         # Broadcast state change
         await websocket_manager.broadcast({"type": "state_change", "data": training_state.get_state()})

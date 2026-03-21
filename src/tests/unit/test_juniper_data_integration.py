@@ -364,7 +364,7 @@ class TestDemoModeMandatoryUrl:
         with patch.dict(os.environ, {"JUNIPER_DATA_URL": "http://localhost:8100"}):
             with patch.object(demo, "_generate_spiral_dataset_from_juniper_data", return_value=mock_result) as mock_gen:
                 result = demo._generate_spiral_dataset(n_samples=100)
-                mock_gen.assert_called_once_with(100, "http://localhost:8100", algorithm=None, n_rotations=3.0)
+                mock_gen.assert_called_once_with(100, "http://localhost:8100", algorithm=None, n_rotations=1.5)
                 assert result == mock_result
 
     @pytest.mark.unit
@@ -379,7 +379,7 @@ class TestDemoModeMandatoryUrl:
         with patch.dict(os.environ, {"JUNIPER_DATA_URL": "http://localhost:8100"}):
             with patch.object(demo, "_generate_spiral_dataset_from_juniper_data", return_value=mock_result) as mock_gen:
                 demo._generate_spiral_dataset(n_samples=200, algorithm="fermat")
-                mock_gen.assert_called_once_with(200, "http://localhost:8100", algorithm="fermat", n_rotations=3.0)
+                mock_gen.assert_called_once_with(200, "http://localhost:8100", algorithm="fermat", n_rotations=1.5)
 
 
 # ---------------------------------------------------------------------------

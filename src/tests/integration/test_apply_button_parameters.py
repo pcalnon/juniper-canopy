@@ -152,17 +152,41 @@ class TestApplyButtonDashboardIntegration:
             env = builder.get_environ()
 
             with manager.app.server.request_context(env):
-                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.015, hu=25, epochs=600, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0)
+                params, status = manager._apply_parameters_handler(
+                    n_clicks=1,
+                    nn_max_iter=1000,
+                    nn_max_epochs=600,
+                    nn_lr=0.015,
+                    nn_max_hu=25,
+                    nn_multi_node=[],
+                    nn_growth_trigger="convergence",
+                    nn_growth_epochs=50,
+                    nn_growth_conv_thresh=0.001,
+                    nn_spiral_rot=1.5,
+                    nn_spiral_num=2,
+                    nn_dataset_elem=1000,
+                    nn_dataset_noise=0.25,
+                    cn_pool_size=100,
+                    cn_corr_thresh=0.001,
+                    cn_selected=1,
+                    cn_training_complete="preset_epochs",
+                    cn_training_iter=500,
+                    cn_training_conv_thresh=0.0001,
+                    cn_multi_cand=[],
+                    cn_cand_selection=None,
+                    cn_top_cands=1,
+                    cn_random_cands=1,
+                )
 
-            assert "max_hidden_units" in params
-            assert "max_epochs" in params
-            assert params["max_hidden_units"] == 25
-            assert params["max_epochs"] == 600
+            assert "nn_max_hidden_units" in params
+            assert "nn_max_total_epochs" in params
+            assert params["nn_max_hidden_units"] == 25
+            assert params["nn_max_total_epochs"] == 600
 
             call_args = mock_post.call_args
             json_payload = call_args.kwargs.get("json") or call_args[1].get("json")
-            assert "max_hidden_units" in json_payload
-            assert "max_epochs" in json_payload
+            assert "nn_max_hidden_units" in json_payload
+            assert "nn_max_total_epochs" in json_payload
             assert "hidden_units" not in json_payload
             assert "epochs" not in json_payload
 
@@ -175,22 +199,111 @@ class TestApplyButtonDashboardIntegration:
         manager = DashboardManager({})
 
         applied = {
-            "learning_rate": 0.01,
-            "max_hidden_units": 10,
-            "max_epochs": 200,
-            "convergence_enabled": True,
-            "convergence_threshold": 0.001,
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
         }
 
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
+        disabled, status = manager._track_param_changes_handler(
+            1000,
+            200,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+            applied=applied,
+        )
         assert disabled is True
         assert status is dash.no_update
 
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=15, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
+        disabled, status = manager._track_param_changes_handler(
+            1000,
+            200,
+            0.01,
+            15,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+            applied=applied,
+        )
         assert disabled is False
         assert "Unsaved" in status
 
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=300, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
+        disabled, status = manager._track_param_changes_handler(
+            1000,
+            300,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+            applied=applied,
+        )
         assert disabled is False
         assert "Unsaved" in status
 
@@ -207,17 +320,58 @@ class TestApplyButtonDashboardIntegration:
         manager = DashboardManager({})
 
         applied = {
-            "learning_rate": 0.06,
-            "max_hidden_units": 10,
-            "max_epochs": 200,
-            "convergence_enabled": True,
-            "convergence_threshold": 0.001,
+            "nn_learning_rate": 0.06,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
         }
 
         # Float precision error that occurs after multiple step increments
         # e.g., 0.01 + 0.001 * 50 = 0.06000000000000004
         lr_with_precision_error = 0.06000000000000004
-        disabled, status = manager._track_param_changes_handler(lr=lr_with_precision_error, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
+        disabled, status = manager._track_param_changes_handler(
+            1000,
+            200,
+            lr_with_precision_error,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+            applied=applied,
+        )
         assert disabled is True, f"Should be disabled but got {disabled} for {lr_with_precision_error}"
         assert status is dash.no_update, f"Should be no_update but got '{status}'"
 
@@ -228,20 +382,85 @@ class TestApplyButtonDashboardIntegration:
         manager = DashboardManager({})
 
         applied = {
-            "learning_rate": 0.01,
-            "max_hidden_units": 10,
-            "max_epochs": 200,
-            "convergence_enabled": True,
-            "convergence_threshold": 0.001,
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
         }
 
         # Significant change should be detected
-        disabled, status = manager._track_param_changes_handler(lr=0.05, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
+        disabled, status = manager._track_param_changes_handler(
+            1000,
+            200,
+            0.05,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+            applied=applied,
+        )
         assert disabled is False
         assert "Unsaved" in status
 
         # Another significant change
-        disabled, status = manager._track_param_changes_handler(lr=0.001, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
+        disabled, status = manager._track_param_changes_handler(
+            1000,
+            200,
+            0.001,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+            applied=applied,
+        )
         assert disabled is False
         assert "Unsaved" in status
 
@@ -257,11 +476,11 @@ class TestApplyButtonDashboardIntegration:
             mock_response = Mock()
             mock_response.status_code = 200
             mock_response.json.return_value = {
-                "learning_rate": 0.02,
-                "max_hidden_units": 18,
-                "max_epochs": 250,
-                "convergence_enabled": True,
-                "convergence_threshold": 0.001,
+                "nn_learning_rate": 0.02,
+                "nn_max_hidden_units": 18,
+                "nn_max_total_epochs": 250,
+                "nn_growth_trigger": "convergence",
+                "nn_growth_convergence_threshold": 0.001,
             }
             mock_get.return_value = mock_response
 
@@ -275,12 +494,12 @@ class TestApplyButtonDashboardIntegration:
             with manager.app.server.request_context(env):
                 result = manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-            # Result is a tuple: (lr, hu, epochs, conv_checkbox, conv_threshold, spiral_rot, applied_dict)
-            applied = result[6]
-            assert "max_hidden_units" in applied
-            assert "max_epochs" in applied
-            assert "convergence_enabled" in applied
-            assert "convergence_threshold" in applied
+            # Result is a 23-tuple: (...22 values..., applied_dict)
+            applied = result[22]
+            assert "nn_max_hidden_units" in applied
+            assert "nn_max_total_epochs" in applied
+            assert "nn_growth_trigger" in applied
+            assert "nn_growth_convergence_threshold" in applied
             assert "hidden_units" not in applied
             assert "epochs" not in applied
 
@@ -365,15 +584,39 @@ class TestLearningRateApplyButtonP012:
             env = builder.get_environ()
 
             with manager.app.server.request_context(env):
-                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.07, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.001, spiral_rot=3.0)
+                params, status = manager._apply_parameters_handler(
+                    n_clicks=1,
+                    nn_max_iter=1000,
+                    nn_max_epochs=200,
+                    nn_lr=0.07,
+                    nn_max_hu=10,
+                    nn_multi_node=[],
+                    nn_growth_trigger="convergence",
+                    nn_growth_epochs=50,
+                    nn_growth_conv_thresh=0.001,
+                    nn_spiral_rot=1.5,
+                    nn_spiral_num=2,
+                    nn_dataset_elem=1000,
+                    nn_dataset_noise=0.25,
+                    cn_pool_size=100,
+                    cn_corr_thresh=0.001,
+                    cn_selected=1,
+                    cn_training_complete="preset_epochs",
+                    cn_training_iter=500,
+                    cn_training_conv_thresh=0.0001,
+                    cn_multi_cand=[],
+                    cn_cand_selection=None,
+                    cn_top_cands=1,
+                    cn_random_cands=1,
+                )
 
             # Verify the returned params contain correct learning_rate
-            assert params["learning_rate"] == 0.07
+            assert params["nn_learning_rate"] == 0.07
 
             # Verify the payload sent to backend contains correct learning_rate
             call_args = mock_post.call_args
             json_payload = call_args.kwargs.get("json") or call_args[1].get("json")
-            assert json_payload["learning_rate"] == 0.07
+            assert json_payload["nn_learning_rate"] == 0.07
 
 
 class TestApplyButtonRoundTrip:
@@ -471,9 +714,33 @@ class TestConvergenceApplyRoundTrip:
             env = builder.get_environ()
 
             with manager.app.server.request_context(env):
-                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.01, hu=10, epochs=200, conv_enabled=[], conv_threshold=0.001, spiral_rot=3.0)
+                params, status = manager._apply_parameters_handler(
+                    n_clicks=1,
+                    nn_max_iter=1000,
+                    nn_max_epochs=200,
+                    nn_lr=0.01,
+                    nn_max_hu=10,
+                    nn_multi_node=[],
+                    nn_growth_trigger="convergence",
+                    nn_growth_epochs=50,
+                    nn_growth_conv_thresh=0.001,
+                    nn_spiral_rot=1.5,
+                    nn_spiral_num=2,
+                    nn_dataset_elem=1000,
+                    nn_dataset_noise=0.25,
+                    cn_pool_size=100,
+                    cn_corr_thresh=0.001,
+                    cn_selected=1,
+                    cn_training_complete="preset_epochs",
+                    cn_training_iter=500,
+                    cn_training_conv_thresh=0.0001,
+                    cn_multi_cand=[],
+                    cn_cand_selection=None,
+                    cn_top_cands=1,
+                    cn_random_cands=1,
+                )
 
-            assert params["convergence_enabled"] is False
+            assert params["nn_multi_node_layers"] is False
             assert status == "✓ Parameters applied"
 
     def test_apply_with_custom_threshold_stores_value(self, reset_singletons):
@@ -493,12 +760,36 @@ class TestConvergenceApplyRoundTrip:
             env = builder.get_environ()
 
             with manager.app.server.request_context(env):
-                params, status = manager._apply_parameters_handler(n_clicks=1, lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.05, spiral_rot=3.0)
+                params, status = manager._apply_parameters_handler(
+                    n_clicks=1,
+                    nn_max_iter=1000,
+                    nn_max_epochs=200,
+                    nn_lr=0.01,
+                    nn_max_hu=10,
+                    nn_multi_node=[],
+                    nn_growth_trigger="convergence",
+                    nn_growth_epochs=50,
+                    nn_growth_conv_thresh=0.05,
+                    nn_spiral_rot=1.5,
+                    nn_spiral_num=2,
+                    nn_dataset_elem=1000,
+                    nn_dataset_noise=0.25,
+                    cn_pool_size=100,
+                    cn_corr_thresh=0.001,
+                    cn_selected=1,
+                    cn_training_complete="preset_epochs",
+                    cn_training_iter=500,
+                    cn_training_conv_thresh=0.0001,
+                    cn_multi_cand=[],
+                    cn_cand_selection=None,
+                    cn_top_cands=1,
+                    cn_random_cands=1,
+                )
 
-            assert params["convergence_threshold"] == 0.05
+            assert params["nn_growth_convergence_threshold"] == 0.05
 
     def test_track_changes_after_apply_disabled_convergence(self, reset_singletons):
-        """After applying with convergence disabled, track_param_changes detects no diff."""
+        """After applying with multi-node disabled, track_param_changes detects no diff."""
         import dash
 
         from frontend.dashboard_manager import DashboardManager
@@ -506,32 +797,114 @@ class TestConvergenceApplyRoundTrip:
         manager = DashboardManager({})
 
         applied = {
-            "learning_rate": 0.01,
-            "max_hidden_units": 10,
-            "max_epochs": 200,
-            "convergence_enabled": False,
-            "convergence_threshold": 0.001,
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
         }
 
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=[], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
+        disabled, status = manager._track_param_changes_handler(
+            1000,
+            200,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+            applied=applied,
+        )
         assert disabled is True
         assert status is dash.no_update
 
-    def test_track_changes_detects_convergence_toggle(self, reset_singletons):
-        """track_param_changes detects convergence checkbox toggle."""
+    def test_track_changes_detects_growth_trigger_change(self, reset_singletons):
+        """track_param_changes detects growth trigger change."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
 
         applied = {
-            "learning_rate": 0.01,
-            "max_hidden_units": 10,
-            "max_epochs": 200,
-            "convergence_enabled": True,
-            "convergence_threshold": 0.001,
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
         }
 
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=[], conv_threshold=0.001, spiral_rot=3.0, applied=applied)
+        disabled, status = manager._track_param_changes_handler(
+            1000,
+            200,
+            0.01,
+            10,
+            [],
+            "preset_epochs",
+            50,
+            0.001,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+            applied=applied,
+        )
         assert disabled is False
         assert "Unsaved" in status
 
@@ -542,13 +915,54 @@ class TestConvergenceApplyRoundTrip:
         manager = DashboardManager({})
 
         applied = {
-            "learning_rate": 0.01,
-            "max_hidden_units": 10,
-            "max_epochs": 200,
-            "convergence_enabled": True,
-            "convergence_threshold": 0.001,
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
         }
 
-        disabled, status = manager._track_param_changes_handler(lr=0.01, hu=10, epochs=200, conv_enabled=["enabled"], conv_threshold=0.05, spiral_rot=3.0, applied=applied)
+        disabled, status = manager._track_param_changes_handler(
+            1000,
+            200,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.05,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            [],
+            None,
+            1,
+            1,
+            applied=applied,
+        )
         assert disabled is False
         assert "Unsaved" in status

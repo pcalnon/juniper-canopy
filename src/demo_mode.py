@@ -1529,18 +1529,32 @@ class DemoMode:
         convergence_enabled: Optional[bool] = None,
         convergence_threshold: Optional[float] = None,
         spiral_rotations: Optional[float] = None,
+        **kwargs,
     ):
         """
         Apply parameter changes to demo mode.
 
         Args:
-            learning_rate: New learning rate value
-            max_hidden_units: New max hidden units constraint
-            max_epochs: New maximum epochs limit
-            convergence_enabled: Enable/disable convergence-based cascade addition
-            convergence_threshold: Loss improvement threshold for convergence detection
-            spiral_rotations: Number of spiral rotations for dataset generation
+            learning_rate: New learning rate value (backward compat)
+            max_hidden_units: New max hidden units constraint (backward compat)
+            max_epochs: New maximum epochs limit (backward compat)
+            convergence_enabled: Enable/disable convergence-based cascade addition (backward compat)
+            convergence_threshold: Loss improvement threshold for convergence detection (backward compat)
+            spiral_rotations: Number of spiral rotations for dataset generation (backward compat)
+            **kwargs: Additional nn_* and cn_* prefixed parameters
         """
+        # Map prefixed keys to legacy positional args for backward compat
+        if learning_rate is None and "nn_learning_rate" in kwargs:
+            learning_rate = kwargs.pop("nn_learning_rate")
+        if max_hidden_units is None and "nn_max_hidden_units" in kwargs:
+            max_hidden_units = kwargs.pop("nn_max_hidden_units")
+        if max_epochs is None and "nn_max_total_epochs" in kwargs:
+            max_epochs = kwargs.pop("nn_max_total_epochs")
+        if convergence_threshold is None and "nn_growth_convergence_threshold" in kwargs:
+            convergence_threshold = kwargs.pop("nn_growth_convergence_threshold")
+        if spiral_rotations is None and "nn_spiral_rotations" in kwargs:
+            spiral_rotations = kwargs.pop("nn_spiral_rotations")
+
         with self._lock:
             if learning_rate is not None:
                 self.network.learning_rate = learning_rate
@@ -1581,6 +1595,42 @@ class DemoMode:
                     self.network.train_x = self.dataset["inputs_tensor"]
                     self.network.train_y = self.dataset["targets_tensor"]
                     self._reset_state_and_history()
+
+            # ── Store nn_* prefixed parameters ──
+            nn_param_map = {
+                "nn_max_iterations": int,
+                "nn_max_total_epochs": int,
+                "nn_learning_rate": float,
+                "nn_max_hidden_units": int,
+                "nn_multi_node_layers": bool,
+                "nn_growth_trigger": str,
+                "nn_growth_preset_epochs": int,
+                "nn_growth_convergence_threshold": float,
+                "nn_spiral_rotations": float,
+                "nn_spiral_number": int,
+                "nn_dataset_elements": int,
+                "nn_dataset_noise": float,
+            }
+
+            # ── Store cn_* prefixed parameters ──
+            cn_param_map = {
+                "cn_pool_size": int,
+                "cn_correlation_threshold": float,
+                "cn_selected_candidates": int,
+                "cn_training_complete": str,
+                "cn_training_iterations": int,
+                "cn_training_convergence_threshold": float,
+                "cn_multi_candidate": bool,
+                "cn_candidate_selection": str,
+                "cn_top_candidates": int,
+                "cn_random_candidates": int,
+            }
+
+            for param_name, cast_fn in {**nn_param_map, **cn_param_map}.items():
+                if param_name in kwargs and kwargs[param_name] is not None:
+                    value = cast_fn(kwargs[param_name])
+                    setattr(self, param_name, value)
+                    self.logger.info(f"Demo mode: {param_name} set to {value}")
 
         # Update TrainingState with new parameter values
         if self.training_state:

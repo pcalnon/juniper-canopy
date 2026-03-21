@@ -54,9 +54,9 @@ class TestDashboardEnhancementsIntegration:
         assert "network-info-collapse" in layout_str
         assert "network-info-details-collapse" in layout_str
 
-        # Enhancement 4: Maximum Epochs
-        assert "Maximum Epochs" in layout_str
-        assert "max-epochs-input" in layout_str
+        # Enhancement 4: Maximum Total Epochs
+        assert "Maximum Total Epochs" in layout_str
+        assert "nn-max-total-epochs-input" in layout_str
 
     def test_sidebar_structure(self, dashboard):
         """Test that sidebar has correct structure with enhancements."""
@@ -83,9 +83,9 @@ class TestDashboardEnhancementsIntegration:
         assert "Reset Training" in layout_str or "reset-button" in layout_str
 
         # All parameter inputs
-        assert "learning-rate-input" in layout_str
-        assert "max-hidden-units-input" in layout_str
-        assert "max-epochs-input" in layout_str
+        assert "nn-learning-rate-input" in layout_str
+        assert "nn-max-hidden-units-input" in layout_str
+        assert "nn-max-total-epochs-input" in layout_str
 
 
 class TestCallbacksIntegration:
@@ -118,7 +118,7 @@ class TestCallbacksIntegration:
         callbacks = dashboard.app.callback_map
 
         # Should have callback that outputs to all three input fields
-        sync_cb = any("max-epochs-input" in str(cb.get("output", "")) for cb in callbacks.values())
+        sync_cb = any("nn-max-total-epochs-input" in str(cb.get("output", "")) for cb in callbacks.values())
         assert sync_cb, "Parameter sync callback not found"
 
 
