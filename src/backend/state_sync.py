@@ -72,10 +72,7 @@ class CascorStateSync:
             state.params = params_response.get("data", {}).get("params", {})
             if not state.params and isinstance(params_response.get("data"), dict):
                 # Some responses embed params at top level of data
-                state.params = {
-                    k: v for k, v in params_response.get("data", {}).items()
-                    if k not in ("epochs", "dataset")
-                }
+                state.params = {k: v for k, v in params_response.get("data", {}).items() if k not in ("epochs", "dataset")}
         except Exception as e:
             logger.warning(f"Failed to fetch training params during sync: {e}")
 
@@ -97,10 +94,7 @@ class CascorStateSync:
         except Exception as e:
             logger.debug(f"Failed to fetch metrics history during sync: {e}")
 
-        logger.info(
-            f"State sync complete: status={state.status}, epoch={state.current_epoch}, "
-            f"metrics={len(state.metrics_history)} entries"
-        )
+        logger.info(f"State sync complete: status={state.status}, epoch={state.current_epoch}, " f"metrics={len(state.metrics_history)} entries")
         return state
 
     @staticmethod

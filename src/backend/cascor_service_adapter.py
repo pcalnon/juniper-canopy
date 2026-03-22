@@ -157,6 +157,7 @@ class CascorServiceAdapter:
 
         async def _relay_loop():
             from communication.websocket_manager import websocket_manager
+
             backoff = [1, 2, 5, 10, 30]
             attempt = 0
             relay_enabled = True
@@ -297,11 +298,7 @@ class CascorServiceAdapter:
         Keys not in the mapping are silently skipped (canopy-only parameters
         such as nn_spiral_rotations have no cascor service equivalent).
         """
-        mapped = {
-            self._CANOPY_TO_CASCOR_PARAM_MAP[k]: v
-            for k, v in params.items()
-            if k in self._CANOPY_TO_CASCOR_PARAM_MAP
-        }
+        mapped = {self._CANOPY_TO_CASCOR_PARAM_MAP[k]: v for k, v in params.items() if k in self._CANOPY_TO_CASCOR_PARAM_MAP}
         if not mapped:
             return {"ok": True, "data": {}, "message": "No cascor-mappable params provided"}
         try:
