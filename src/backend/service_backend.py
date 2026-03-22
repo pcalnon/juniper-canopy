@@ -24,8 +24,8 @@
 #####################################################################################################################################################################################################
 # Notes:
 #     Phase 5 of the Microservices Architecture Development Roadmap.
-#     Operations not yet supported by the CasCor service (pause, resume, reset,
-#     apply_params) return {"ok": False, "error": "..."} rather than raising.
+#     Training control operations (pause, resume, reset) and apply_params
+#     delegate to CascorServiceAdapter, which forwards to the CasCor service.
 #
 #####################################################################################################################################################################################################
 # References:
