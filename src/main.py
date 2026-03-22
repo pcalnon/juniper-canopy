@@ -131,6 +131,20 @@ async def lifespan(app: FastAPI):
     global backend, training_state
 
     from backend import create_backend
+    from discovery import discover_cascor
+
+    # Auto-discover a running cascor instance if no URL is explicitly configured
+    # and demo mode is not forced.
+    if not settings.demo_mode and not settings.cascor_service_url:
+        if settings.cascor_discovery.enabled:
+            discovered_url = await discover_cascor(
+                host=settings.cascor_discovery.host,
+                ports=settings.cascor_discovery.ports,
+                timeout=settings.cascor_discovery.timeout_seconds,
+            )
+            if discovered_url:
+                system_logger.info(f"Auto-discovered cascor at {discovered_url} — activating service mode")
+                os.environ["CASCOR_SERVICE_URL"] = discovered_url
 
     backend = create_backend()
 

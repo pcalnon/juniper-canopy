@@ -109,6 +109,7 @@ class CascorServiceAdapter:
         self.training_monitor = _ServiceTrainingMonitor(self._client)
         self._training_stream: Optional[CascorTrainingStream] = None
         self._relay_task: Optional[asyncio.Task] = None
+        self._attached_to_existing: bool = False
 
         # Derive WebSocket URL from HTTP URL
         ws_url = service_url.replace("http://", "ws://").replace("https://", "wss://")
@@ -126,28 +127,59 @@ class CascorServiceAdapter:
             logger.error(f"Failed to connect to CasCor service at {self._service_url}")
             return False
 
+    def attach_to_existing(self) -> bool:
+        """
+        Attempt to attach to an already-running cascor session non-destructively.
+
+        Calls get_network() to confirm a network exists. Does NOT create a new
+        network or modify any cascor state. The network property queries the
+        client on each access, so there is no local state to cache.
+
+        Returns:
+            True if an existing network was found; False otherwise.
+        """
+        try:
+            result = self._client.get_network()
+            if result and not result.get("error"):
+                self._attached_to_existing = True
+                logger.info("Attached to existing cascor network (non-destructive)")
+                return True
+        except Exception as e:
+            logger.debug(f"No existing cascor network found: {e}")
+        self._attached_to_existing = False
+        return False
+
     async def start_metrics_relay(self) -> None:
         """
         Open a WebSocket training stream and relay messages to Canopy's
         websocket_manager for broadcast to dashboard clients.
         """
-        from communication.websocket_manager import websocket_manager
-
-        self._training_stream = CascorTrainingStream(base_url=self._ws_url, api_key=self._api_key)
 
         async def _relay_loop():
-            try:
-                await self._training_stream.connect()
-                async for message in self._training_stream.stream():
-                    msg_type = message.get("type", "")
-                    data = message.get("data", message)
-                    await websocket_manager.broadcast({"type": msg_type, "data": data})
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                logger.error(f"Metrics relay error: {e}")
-            finally:
-                await self._training_stream.disconnect()
+            from communication.websocket_manager import websocket_manager
+            backoff = [1, 2, 5, 10, 30]
+            attempt = 0
+            relay_enabled = True
+            while relay_enabled:
+                try:
+                    stream = CascorTrainingStream(base_url=self._ws_url, api_key=self._api_key)
+                    await stream.connect()
+                    attempt = 0
+                    async for message in stream.stream():
+                        msg_type = message.get("type", "")
+                        data = message.get("data", message)
+                        await websocket_manager.broadcast({"type": msg_type, "data": data})
+                    await stream.disconnect()
+                except asyncio.CancelledError:
+                    relay_enabled = False
+                except Exception as e:
+                    delay = backoff[min(attempt, len(backoff) - 1)]
+                    logger.warning(f"Cascor metrics stream disconnected ({e}). Reconnecting in {delay}s")
+                    attempt += 1
+                    try:
+                        await asyncio.sleep(delay)
+                    except asyncio.CancelledError:
+                        relay_enabled = False
 
         self._relay_task = asyncio.create_task(_relay_loop())
         logger.info("Metrics relay started")
@@ -224,6 +256,60 @@ class CascorServiceAdapter:
         except JuniperCascorClientError as e:
             logger.error(f"Failed to stop training: {e}")
             return False
+
+    def pause_training(self) -> Dict[str, Any]:
+        try:
+            result = self._client.pause_training()
+            return {"ok": True, "data": result}
+        except JuniperCascorClientError as e:
+            logger.error(f"Failed to pause training: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def resume_training(self) -> Dict[str, Any]:
+        try:
+            result = self._client.resume_training()
+            return {"ok": True, "data": result}
+        except JuniperCascorClientError as e:
+            logger.error(f"Failed to resume training: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def reset_training(self) -> Dict[str, Any]:
+        try:
+            result = self._client.reset_training()
+            self._attached_to_existing = False
+            return {"ok": True, "data": result}
+        except JuniperCascorClientError as e:
+            logger.error(f"Failed to reset training: {e}")
+            return {"ok": False, "error": str(e)}
+
+    # Parameter mapping: canopy nn_*/cn_* names -> cascor API parameter names
+    _CANOPY_TO_CASCOR_PARAM_MAP = {
+        "nn_learning_rate": "learning_rate",
+        "nn_max_hidden_units": "max_hidden_units",
+        "cn_pool_size": "candidate_pool_size",
+        "cn_correlation_threshold": "correlation_threshold",
+    }
+
+    def apply_params(self, **params: Any) -> Dict[str, Any]:
+        """Forward parameter updates to the running cascor instance.
+
+        Maps canopy's nn_*/cn_* parameter namespace to cascor API parameter names.
+        Keys not in the mapping are silently skipped (canopy-only parameters
+        such as nn_spiral_rotations have no cascor service equivalent).
+        """
+        mapped = {
+            self._CANOPY_TO_CASCOR_PARAM_MAP[k]: v
+            for k, v in params.items()
+            if k in self._CANOPY_TO_CASCOR_PARAM_MAP
+        }
+        if not mapped:
+            return {"ok": True, "data": {}, "message": "No cascor-mappable params provided"}
+        try:
+            result = self._client.update_params(mapped)
+            return {"ok": True, "data": result}
+        except JuniperCascorClientError as e:
+            logger.error(f"Failed to update cascor params: {e}")
+            return {"ok": False, "error": str(e)}
 
     # ------------------------------------------------------------------
     # Status & metrics
@@ -355,6 +441,8 @@ class CascorServiceAdapter:
     # ------------------------------------------------------------------
 
     def shutdown(self) -> None:
+        """Close the HTTP session. Does NOT stop training on the cascor service."""
+        logger.info("CascorServiceAdapter shutting down — cascor continues running")
         try:
             self._client.close()
         except Exception as e:

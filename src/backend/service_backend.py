@@ -72,13 +72,13 @@ class ServiceBackend:
         return {"ok": success}
 
     def pause_training(self) -> Dict[str, Any]:
-        return {"ok": False, "error": "Pause not yet supported in service mode"}
+        return self._adapter.pause_training()
 
     def resume_training(self) -> Dict[str, Any]:
-        return {"ok": False, "error": "Resume not yet supported in service mode"}
+        return self._adapter.resume_training()
 
     def reset_training(self) -> Dict[str, Any]:
-        return {"ok": False, "error": "Reset not yet supported in service mode"}
+        return self._adapter.reset_training()
 
     def is_training_active(self) -> bool:
         return self._adapter.is_training_in_progress()
@@ -114,13 +114,20 @@ class ServiceBackend:
     # --- Parameters ---
 
     def apply_params(self, **params: Any) -> Dict[str, Any]:
-        return {"ok": False, "error": "Parameter changes not yet supported in service mode"}
+        return self._adapter.apply_params(**params)
 
     # --- Lifecycle ---
 
     async def initialize(self) -> bool:
+        """Connect to cascor service, attach non-destructively, and start metrics relay."""
         connected = await self._adapter.connect()
         if connected:
+            # Non-destructive attach: check for existing network without creating/resetting
+            has_network = self._adapter.attach_to_existing()
+            if has_network:
+                logger.info("ServiceBackend: attached to existing cascor network")
+            else:
+                logger.info("ServiceBackend: no existing cascor network found (will create on start)")
             await self._adapter.start_metrics_relay()
             logger.info(f"ServiceBackend connected to {self._adapter._service_url}")
         else:
@@ -128,6 +135,7 @@ class ServiceBackend:
         return connected
 
     async def shutdown(self) -> None:
+        """Disconnect from cascor gracefully. Does NOT stop training on cascor."""
         await self._adapter.stop_metrics_relay()
         self._adapter.shutdown()
-        logger.info("ServiceBackend shut down")
+        logger.info("ServiceBackend disconnected — cascor continues running independently")

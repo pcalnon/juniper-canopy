@@ -89,6 +89,15 @@ class WebSocketSettings(BaseModel):
     reconnect_delay: int = 2
 
 
+class CascorDiscoverySettings(BaseModel):
+    """Settings for auto-discovery of running cascor instances."""
+
+    enabled: bool = True
+    host: str = "localhost"
+    ports: list[int] = [8200]
+    timeout_seconds: float = 2.0
+
+
 class Settings(BaseSettings):
     """JuniperCanopy application settings.
 
@@ -120,6 +129,7 @@ class Settings(BaseSettings):
     backend_path: str = "../juniper-cascor"
     juniper_data_url: str = "http://localhost:8100"
     cascor_service_url: Optional[str] = None
+    cascor_discovery: CascorDiscoverySettings = CascorDiscoverySettings()
 
     # Demo
     demo_update_interval: float = 1.0
