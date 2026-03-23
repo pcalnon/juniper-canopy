@@ -75,7 +75,7 @@ nvidia-nvjitlink-cu12==12.9.86
 nvidia-nvshmem-cu12==3.5.21
 nvidia-nvtx-cu12==12.9.79
 objprint==0.3.0
-packaging==25.0
+packaging==26.0
 pathspec==1.0.4
 pillow==12.1.1
 pip==26.0.1
