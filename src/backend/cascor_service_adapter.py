@@ -120,10 +120,10 @@ class CascorServiceAdapter:
     # ------------------------------------------------------------------
 
     async def connect(self) -> bool:
-        """Connect to the CasCor service and verify it is ready."""
+        """Connect to the CasCor service and verify it is reachable."""
         try:
-            return self._client.is_ready()
-        except JuniperCascorClientError:
+            return self._client.is_alive()
+        except Exception:
             logger.error(f"Failed to connect to CasCor service at {self._service_url}")
             return False
 
