@@ -40,9 +40,10 @@
 #####################################################################################################################################################################################################
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from backend.cascor_service_adapter import CascorServiceAdapter
+from backend.state_sync import CascorStateSync, SyncedState
 
 logger = logging.getLogger("juniper_canopy.backend.service_backend")
 
@@ -52,6 +53,17 @@ class ServiceBackend:
 
     def __init__(self, adapter: CascorServiceAdapter):
         self._adapter = adapter
+        self._synced_state: Optional[SyncedState] = None
+        self._state_update_callback: Optional[Callable] = None
+
+    def set_state_update_callback(self, callback: Callable) -> None:
+        """Register a callback invoked when cascor broadcasts state changes.
+
+        The callback receives keyword arguments (status, phase, etc.) and is
+        expected to update the application-level TrainingState.
+        """
+        self._state_update_callback = callback
+        self._adapter.set_state_update_callback(callback)
 
     @property
     def backend_type(self) -> str:
@@ -119,13 +131,16 @@ class ServiceBackend:
     # --- Lifecycle ---
 
     async def initialize(self) -> bool:
-        """Connect to cascor service, attach non-destructively, and start metrics relay."""
+        """Connect to cascor service, attach non-destructively, sync state, and start metrics relay."""
         connected = await self._adapter.connect()
         if connected:
             # Non-destructive attach: check for existing network without creating/resetting
             has_network = self._adapter.attach_to_existing()
             if has_network:
                 logger.info("ServiceBackend: attached to existing cascor network")
+                # Sync current cascor state into canopy
+                self._synced_state = CascorStateSync(self._adapter._client).sync()
+                logger.info(f"ServiceBackend: state synced — status={self._synced_state.status}, epoch={self._synced_state.current_epoch}, params={len(self._synced_state.params)} keys")
             else:
                 logger.info("ServiceBackend: no existing cascor network found (will create on start)")
             await self._adapter.start_metrics_relay()
@@ -133,6 +148,10 @@ class ServiceBackend:
         else:
             logger.error(f"ServiceBackend failed to connect to {self._adapter._service_url}")
         return connected
+
+    def get_synced_state(self) -> Optional[SyncedState]:
+        """Return the state snapshot from the most recent sync, or None."""
+        return self._synced_state
 
     async def shutdown(self) -> None:
         """Disconnect from cascor gracefully. Does NOT stop training on cascor."""

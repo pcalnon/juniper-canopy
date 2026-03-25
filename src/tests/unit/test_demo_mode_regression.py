@@ -18,12 +18,37 @@ from backend.demo_backend import DemoBackend
 
 
 def _make_backend(monkeypatch, env_vars: dict):
-    """Set env vars and call create_backend() from a fresh import."""
+    """Set env vars and call create_backend() from a fresh import.
+
+    Also manages JUNIPER_CANOPY_* prefix env vars to keep the Pydantic settings
+    layer consistent with the legacy env vars being tested.
+    """
     for key, value in env_vars.items():
         if value is None:
             monkeypatch.delenv(key, raising=False)
         else:
             monkeypatch.setenv(key, value)
+
+    # Mirror legacy env vars into settings-prefix env vars so the Pydantic
+    # settings layer sees the same values as the legacy fallback path.
+    if "CASCOR_DEMO_MODE" in env_vars:
+        val = env_vars["CASCOR_DEMO_MODE"]
+        if val is None:
+            monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
+        else:
+            monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", val)
+    if "CASCOR_SERVICE_URL" in env_vars:
+        val = env_vars["CASCOR_SERVICE_URL"]
+        if val is None:
+            monkeypatch.delenv("JUNIPER_CANOPY_CASCOR_SERVICE_URL", raising=False)
+        else:
+            monkeypatch.setenv("JUNIPER_CANOPY_CASCOR_SERVICE_URL", val)
+
+    # Clear cached settings so env var changes take effect
+    from settings import get_settings
+
+    get_settings.cache_clear()
+
     from backend import create_backend
 
     return create_backend()
@@ -149,9 +174,11 @@ class TestFallbackBehaviour:
 
     def test_discovery_env_var_absent_means_demo_backend(self, monkeypatch):
         """R3 — CASCOR_SERVICE_URL absent means discovery never ran; factory falls back."""
-        monkeypatch.delenv("CASCOR_SERVICE_URL", raising=False)
-        monkeypatch.setenv("CASCOR_DEMO_MODE", "0")
-        from backend import create_backend
-
-        backend = create_backend()
+        backend = _make_backend(
+            monkeypatch,
+            {
+                "CASCOR_DEMO_MODE": "0",
+                "CASCOR_SERVICE_URL": None,
+            },
+        )
         assert isinstance(backend, DemoBackend)
