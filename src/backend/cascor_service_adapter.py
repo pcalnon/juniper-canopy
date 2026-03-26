@@ -44,6 +44,18 @@ from juniper_cascor_client.exceptions import JuniperCascorClientError
 logger = logging.getLogger("juniper_canopy.backend.cascor_service_adapter")
 
 
+def _first_defined(*values, default=None):
+    """Return the first value that is not None, or default.
+
+    Unlike ``or`` chains, this correctly preserves falsy-but-valid values
+    like 0, 0.0, False, and empty strings.
+    """
+    for v in values:
+        if v is not None:
+            return v
+    return default
+
+
 class _ServiceTrainingMonitor:
     """
     Lightweight training monitor that delegates to the CasCor service via REST.
@@ -61,20 +73,37 @@ class _ServiceTrainingMonitor:
     def is_training(self) -> bool:
         try:
             status = self._client.get_training_status()
-            return status.get("is_training", False)
+            is_training_top = status.get("is_training")
+            if is_training_top is not None:
+                return is_training_top
+            data = status.get("data", {})
+            if isinstance(data, dict):
+                return data.get("training_active", False)
+            return False
         except JuniperCascorClientError:
             return False
 
     def get_current_metrics(self) -> Dict[str, Any]:
         try:
-            return self._client.get_metrics()
+            result = self._client.get_metrics()
+            if isinstance(result, dict) and "data" in result:
+                data = result["data"]
+                return CascorServiceAdapter._normalize_metric(data) if isinstance(data, dict) else result
+            return result if isinstance(result, dict) else {}
         except JuniperCascorClientError:
             return {}
 
     def get_recent_metrics(self, count: int = 100) -> list:
         try:
             result = self._client.get_metrics_history(count=count)
-            return result.get("history", []) if isinstance(result, dict) else result
+            if isinstance(result, dict):
+                data = result.get("data", result)
+                if isinstance(data, list):
+                    return [CascorServiceAdapter._normalize_metric(m) for m in data]
+                if isinstance(data, dict):
+                    history = data.get("history", [])
+                    return [CascorServiceAdapter._normalize_metric(m) for m in history]
+            return result if isinstance(result, list) else []
         except JuniperCascorClientError:
             return []
 
@@ -281,7 +310,13 @@ class CascorServiceAdapter:
     def is_training_in_progress(self) -> bool:
         try:
             status = self._client.get_training_status()
-            return status.get("is_training", False)
+            is_training_top = status.get("is_training")
+            if is_training_top is not None:
+                return is_training_top
+            data = status.get("data", {})
+            if isinstance(data, dict):
+                return data.get("training_active", False)
+            return False
         except JuniperCascorClientError:
             return False
 
@@ -329,15 +364,7 @@ class CascorServiceAdapter:
         "cn_training_iterations": "candidate_epochs",
     }
 
-    _CASCOR_TO_CANOPY_PARAM_MAP = {
-        "learning_rate": "nn_learning_rate",
-        "max_hidden_units": "nn_max_hidden_units",
-        "epochs_max": "nn_max_total_epochs",
-        "candidate_pool_size": "cn_pool_size",
-        "correlation_threshold": "cn_correlation_threshold",
-        "patience": "cn_training_convergence_threshold",
-        "candidate_epochs": "cn_training_iterations",
-    }
+    _CASCOR_TO_CANOPY_PARAM_MAP = {v: k for k, v in _CANOPY_TO_CASCOR_PARAM_MAP.items()}
 
     def apply_params(self, **params: Any) -> Dict[str, Any]:
         """Forward parameter updates to the running cascor instance.
@@ -363,7 +390,7 @@ class CascorServiceAdapter:
             # Unwrap the response
             params = result.get("data", {}).get("params", {})
             if not params and isinstance(result.get("data"), dict):
-                params = result.get("data", {})
+                params = {k: v for k, v in result.get("data", {}).items() if k not in ("epochs", "dataset", "status", "meta", "timestamp")}
             # Map to canopy namespace
             canopy_params = {}
             for cascor_key, canopy_key in self._CASCOR_TO_CANOPY_PARAM_MAP.items():
@@ -389,6 +416,48 @@ class CascorServiceAdapter:
         if isinstance(response, dict) and "data" in response:
             return response["data"]
         return response
+
+    @staticmethod
+    def _is_cascor_nested(data: dict) -> bool:
+        """Detect whether data uses cascor's nested structure.
+
+        Uses positive detection of nested structure (state_machine/monitor/
+        training_state) rather than checking for flat keys, which could
+        misfire if cascor ever adds a flat field.
+        """
+        return isinstance(data, dict) and ("state_machine" in data or "training_active" in data)
+
+    @staticmethod
+    def _normalize_metric(entry: dict) -> dict:
+        """Normalize a single metric entry to canopy's canonical field names.
+
+        Handles both real cascor names (loss, accuracy, validation_loss,
+        validation_accuracy) and canopy names (train_loss, train_accuracy,
+        val_loss, val_accuracy).  Uses ``"key" in entry`` checks instead of
+        ``or`` chains so that valid 0.0 values are preserved.
+        """
+        return {
+            "epoch": entry.get("epoch", 0),
+            "train_loss": _first_defined(
+                entry.get("train_loss") if "train_loss" in entry else None,
+                entry.get("loss") if "loss" in entry else None,
+            ),
+            "train_accuracy": _first_defined(
+                entry.get("train_accuracy") if "train_accuracy" in entry else None,
+                entry.get("accuracy") if "accuracy" in entry else None,
+            ),
+            "val_loss": _first_defined(
+                entry.get("val_loss") if "val_loss" in entry else None,
+                entry.get("validation_loss") if "validation_loss" in entry else None,
+            ),
+            "val_accuracy": _first_defined(
+                entry.get("val_accuracy") if "val_accuracy" in entry else None,
+                entry.get("validation_accuracy") if "validation_accuracy" in entry else None,
+            ),
+            "hidden_units": entry.get("hidden_units", 0),
+            "phase": entry.get("phase"),
+            "timestamp": entry.get("timestamp"),
+        }
 
     # ------------------------------------------------------------------
     # Status & metrics
