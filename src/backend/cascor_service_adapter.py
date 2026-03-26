@@ -195,6 +195,16 @@ class CascorServiceAdapter:
                             except Exception as se:  # nosec B110
                                 logger.debug(f"State update callback error: {se}")
 
+                        # Handle event messages (e.g. training_complete) to keep training_state aligned
+                        if msg_type == "event" and self._state_update_callback and isinstance(data, dict):
+                            event_name = data.get("event", "")
+                            if event_name == "training_complete":
+                                try:
+                                    self._state_update_callback(status="Completed", phase="Idle")
+                                    logger.info("Training complete event received from cascor")
+                                except Exception as ee:  # nosec B110
+                                    logger.debug(f"Event callback error: {ee}")
+
                     await stream.disconnect()
                 except asyncio.CancelledError:
                     relay_enabled = False
