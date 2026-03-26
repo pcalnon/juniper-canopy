@@ -1,7 +1,7 @@
 # API Response Schemas
 
-**Last Updated:** January 29, 2026  
-**Version:** 1.1.0  
+**Last Updated:** March 26, 2026  
+**Version:** 1.2.0  
 **Status:** Current
 
 ## Table of Contents
@@ -91,11 +91,17 @@ Health check endpoint for monitoring application status.
 
 Get detailed training status and network information.
 
-**Response (Demo Mode):**
+**Response (Demo Backend):**
 
 ```json
 {
   "is_training": true,
+  "is_running": true,
+  "is_paused": false,
+  "completed": false,
+  "failed": false,
+  "fsm_status": "STARTED",
+  "phase": "output",
   "current_epoch": 42,
   "current_loss": 0.234,
   "current_accuracy": 0.876,
@@ -103,58 +109,61 @@ Get detailed training status and network information.
   "monitoring_active": true,
   "input_size": 2,
   "output_size": 1,
-  "hidden_units": 3,
-  "current_phase": "demo_mode"
+  "hidden_units": 3
 }
 ```
 
-**Response (CasCor Backend):**
+**Response (Service Backend, normalized):**
 
 ```json
 {
   "is_training": true,
-  "current_epoch": 100,
-  "current_phase": "output_training",
+  "is_running": true,
+  "is_paused": false,
+  "completed": false,
+  "failed": false,
+  "fsm_status": "STARTED",
+  "phase": "output",
+  "current_epoch": 42,
+  "hidden_units": 3,
   "network_connected": true,
   "monitoring_active": true,
-  "hidden_units": 5
-}
-```
-
-**Response (No Backend):**
-
-```json
-{
-  "is_training": false,
-  "network_connected": false,
-  "monitoring_active": false
+  "input_size": 2,
+  "output_size": 3,
+  "learning_rate": 0.01,
+  "max_hidden_units": 10,
+  "max_epochs": 500
 }
 ```
 
 **Response Fields:**
 
 - `is_training` (boolean): Whether training is active
+- `is_running` (boolean): Whether training is running
+- `is_paused` (boolean): Whether training is paused
+- `completed` (boolean): Whether training reached completion
+- `failed` (boolean): Whether training failed
+- `fsm_status` (string): Backend FSM status
+- `phase` (string): Current phase (`idle`, `output`, `candidate`, ...)
 - `current_epoch` (integer): Current training epoch
-- `current_loss` (float): Most recent loss value
-- `current_accuracy` (float): Most recent accuracy value
-- `network_connected` (boolean): Whether backend is connected
+- `hidden_units` (integer): Number of hidden units
+- `network_connected` (boolean): Whether backend/network is connected
 - `monitoring_active` (boolean): Whether monitoring is active
 - `input_size` (integer): Number of input features
 - `output_size` (integer): Number of output units
-- `hidden_units` (integer): Number of hidden units
-- `current_phase` (string): Training phase identifier
+- `learning_rate` (number, service mode): Active learning rate
+- `max_hidden_units` (integer, service mode): Max hidden units parameter
+- `max_epochs` (integer, service mode): Max epochs parameter
 
 **Status Codes:**
 
 - `200`: Success
 
----
-
 ### GET /api/metrics
 
 Get current training metrics snapshot.
 
-**Response:**
+**Response (Demo Backend):**
 
 ```json
 {
@@ -163,33 +172,29 @@ Get current training metrics snapshot.
   "current_epoch": 10,
   "current_loss": 0.45,
   "current_accuracy": 0.85,
-  "val_loss": 0.48,
-  "val_accuracy": 0.83,
   "hidden_units": 2,
-  "metrics_count": 100,
-  "phase": "output_training"
+  "metrics_count": 100
 }
 ```
 
-**Response Fields:**
+**Response (Service Backend, normalized):**
 
-- `is_running` (boolean): Whether training is running
-- `is_paused` (boolean): Whether training is paused
-- `current_epoch` (integer): Current epoch number
-- `current_loss` (float): Current training loss
-- `current_accuracy` (float): Current training accuracy
-- `val_loss` (float): Current validation loss
-- `val_accuracy` (float): Current validation accuracy
-- `hidden_units` (integer): Number of hidden units
-- `metrics_count` (integer): Total metrics collected
-- `phase` (string): Current training phase
+```json
+{
+  "epoch": 10,
+  "train_loss": 0.45,
+  "train_accuracy": 0.85,
+  "val_loss": 0.48,
+  "val_accuracy": 0.83,
+  "hidden_units": 2,
+  "phase": "output",
+  "timestamp": 1711459200.123
+}
+```
 
 **Status Codes:**
 
 - `200`: Success
-- `503`: No backend available (returns empty object `{}`)
-
----
 
 ### GET /api/metrics/history
 
@@ -197,7 +202,7 @@ Get historical training metrics.
 
 **Query Parameters:**
 
-- `limit` (integer, optional): Maximum number of metrics to return (default: all)
+- `limit` (integer, optional): Maximum number of metrics to return (`0` means all available)
 
 **Response:**
 
@@ -207,69 +212,42 @@ Get historical training metrics.
     {
       "epoch": 1,
       "metrics": {
-        "loss": 0.9,
-        "accuracy": 0.5,
-        "val_loss": 0.95,
-        "val_accuracy": 0.45
+        "loss": 0.95,
+        "accuracy": 0.38,
+        "val_loss": 0.99,
+        "val_accuracy": 0.35
       },
       "network_topology": {
         "input_units": 2,
         "hidden_units": 0,
-        "output_units": 1
+        "output_units": 3
       },
-      "phase": "output_training",
-      "timestamp": "2025-11-12T10:30:00"
+      "phase": "output",
+      "timestamp": "2026-03-26T18:30:00"
     },
     {
       "epoch": 2,
-      "metrics": {
-        "loss": 0.8,
-        "accuracy": 0.6,
-        "val_loss": 0.85,
-        "val_accuracy": 0.55
-      },
-      "network_topology": {
-        "input_units": 2,
-        "hidden_units": 0,
-        "output_units": 1
-      },
-      "phase": "output_training",
-      "timestamp": "2025-11-12T10:30:01"
+      "train_loss": 0.82,
+      "train_accuracy": 0.51,
+      "val_loss": 0.84,
+      "val_accuracy": 0.49,
+      "hidden_units": 0,
+      "phase": "output",
+      "timestamp": 1711459201.123
     }
   ]
 }
 ```
 
-**Response Fields:**
+**Notes:**
 
-- `history` (array): List of historical metric snapshots
-  - `epoch` (integer): Epoch number
-  - `metrics` (object): Training metrics
-    - `loss` (float): Training loss
-    - `accuracy` (float): Training accuracy
-    - `val_loss` (float): Validation loss
-    - `val_accuracy` (float): Validation accuracy
-  - `network_topology` (object): Network structure
-    - `input_units` (integer): Number of inputs
-    - `hidden_units` (integer): Number of hidden units
-    - `output_units` (integer): Number of outputs
-  - `phase` (string): Training phase
-  - `timestamp` (string): ISO 8601 timestamp
+- Demo history entries use nested `metrics` and `network_topology` objects.
+- Service history entries are normalized flat metric objects.
 
 **Status Codes:**
 
 - `200`: Success
-- `503`: No backend available
-
-**Error Response:**
-
-```json
-{
-  "error": "No backend available"
-}
-```
-
----
+- `422`: Invalid query parameter type
 
 ### GET /api/topology
 
@@ -284,59 +262,26 @@ Get current network topology with nodes and connections.
   "output_units": 1,
   "nodes": [
     {"id": "input_0", "type": "input", "layer": 0},
-    {"id": "input_1", "type": "input", "layer": 0},
-    {"id": "hidden_0", "type": "hidden", "layer": 1},
-    {"id": "hidden_1", "type": "hidden", "layer": 1},
-    {"id": "hidden_2", "type": "hidden", "layer": 1},
+    {"id": "hidden_0", "type": "hidden", "label": "H0"},
     {"id": "output_0", "type": "output", "layer": 2}
   ],
   "connections": [
-    {"from": "input_0", "to": "output_0", "weight": 0.45},
-    {"from": "input_1", "to": "output_0", "weight": -0.32},
-    {"from": "input_0", "to": "hidden_0", "weight": 0.67},
-    {"from": "input_1", "to": "hidden_0", "weight": 0.23},
-    {"from": "hidden_0", "to": "output_0", "weight": 0.89},
-    {"from": "hidden_0", "to": "hidden_1", "weight": 0.12},
-    {"from": "hidden_1", "to": "output_0", "weight": -0.54}
-  ],
-  "total_connections": 7
+    {"from": "input_0", "to": "hidden_0", "weight": 0.45},
+    {"from": "hidden_0", "to": "output_0", "weight": 0.89}
+  ]
 }
 ```
-
-**Response Fields:**
-
-- `input_units` (integer): Number of input nodes
-- `hidden_units` (integer): Number of hidden nodes
-- `output_units` (integer): Number of output nodes
-- `nodes` (array): List of network nodes
-  - `id` (string): Unique node identifier (e.g., "input_0", "hidden_1", "output_0")
-  - `type` (string): Node type ("input", "hidden", "output")
-  - `layer` (integer): Layer index (0=input, 1=hidden, 2=output)
-- `connections` (array): List of weighted connections
-  - `from` (string): Source node ID
-  - `to` (string): Target node ID
-  - `weight` (float): Connection weight
-- `total_connections` (integer): Total number of connections
 
 **Status Codes:**
 
 - `200`: Success
-
-**Error Response:**
-
-```json
-{
-  "error": "No topology available"
-}
-```
-
----
+- `503`: No topology available
 
 ### GET /api/dataset
 
-Get dataset information and samples.
+Get dataset information.
 
-**Response:**
+**Response (Demo Backend):**
 
 ```json
 {
@@ -348,31 +293,31 @@ Get dataset information and samples.
 }
 ```
 
-**Response Fields:**
+**Response (Service Backend, normalized):**
 
-- `inputs` (array): 2D array of input samples [num_samples × num_features]
-- `targets` (array): 2D array of target labels [num_samples × num_outputs]
-- `num_samples` (integer): Total number of samples
-- `num_features` (integer): Number of input features
-- `num_classes` (integer): Number of output classes
+```json
+{
+  "num_samples": 1000,
+  "num_features": 2,
+  "num_classes": 3,
+  "loaded": true,
+  "train_samples": 800,
+  "test_samples": 200
+}
+```
 
 **Status Codes:**
 
 - `200`: Success
-
-**Error Response:**
-
-```json
-{
-  "error": "No dataset available"
-}
-```
-
----
+- `503`: No dataset available
 
 ### GET /api/decision_boundary
 
 Get decision boundary data for visualization.
+
+**Query Parameters:**
+
+- `resolution` (integer, optional): Grid resolution per axis (`5..200`, clamped)
 
 **Response:**
 
@@ -380,40 +325,19 @@ Get decision boundary data for visualization.
 {
   "xx": [[0.0, 0.1, 0.2], [0.0, 0.1, 0.2]],
   "yy": [[0.0, 0.0, 0.0], [0.1, 0.1, 0.1]],
-  "Z": [[0.2, 0.3, 0.5], [0.4, 0.6, 0.7]],
-  "bounds": {
-    "x_min": -1.5,
-    "x_max": 1.5,
-    "y_min": -1.5,
-    "y_max": 1.5
-  }
+  "Z": [[0, 0, 1], [0, 1, 1]],
+  "x_min": -1.5,
+  "x_max": 1.5,
+  "y_min": -1.5,
+  "y_max": 1.5,
+  "resolution": 100
 }
 ```
-
-**Response Fields:**
-
-- `xx` (array): 2D meshgrid x-coordinates [100 × 100]
-- `yy` (array): 2D meshgrid y-coordinates [100 × 100]
-- `Z` (array): 2D prediction values [100 × 100]
-- `bounds` (object): Data bounds
-  - `x_min` (float): Minimum x value
-  - `x_max` (float): Maximum x value
-  - `y_min` (float): Minimum y value
-  - `y_max` (float): Maximum y value
 
 **Status Codes:**
 
 - `200`: Success
-
-**Error Response:**
-
-```json
-{
-  "error": "No decision boundary data available"
-}
-```
-
----
+- `503`: No decision boundary data available
 
 ### GET /api/statistics
 
@@ -424,18 +348,23 @@ Get WebSocket connection statistics.
 ```json
 {
   "active_connections": 3,
-  "total_messages_sent": 1523,
-  "total_messages_received": 87,
-  "uptime_seconds": 3456.78
+  "total_messages_broadcast": 1523,
+  "connections_info": [
+    {
+      "client_id": "training-client-12345",
+      "connected_at": "2026-03-26T18:30:00",
+      "messages_sent": 756,
+      "last_message_at": "2026-03-26T18:45:00"
+    }
+  ]
 }
 ```
 
 **Response Fields:**
 
 - `active_connections` (integer): Number of active WebSocket connections
-- `total_messages_sent` (integer): Total messages broadcast
-- `total_messages_received` (integer): Total messages received from clients
-- `uptime_seconds` (float): WebSocket manager uptime in seconds
+- `total_messages_broadcast` (integer): Total messages broadcast
+- `connections_info` (array): Per-connection metadata (`client_id`, `connected_at`, `messages_sent`, `last_message_at`)
 
 **Status Codes:**
 
@@ -453,13 +382,7 @@ Start training simulation.
 
 - `reset` (boolean, optional): Whether to reset network before starting (default: false)
 
-**Request Example:**
-
-```http
-POST /api/train/start?reset=true
-```
-
-**Response:**
+**Response (Demo Backend):**
 
 ```json
 {
@@ -467,28 +390,26 @@ POST /api/train/start?reset=true
   "is_running": true,
   "is_paused": false,
   "current_epoch": 0,
-  "current_loss": 0.0,
-  "current_accuracy": 0.0,
-  "hidden_units": 0
+  "current_loss": 1.0,
+  "current_accuracy": 0.5,
+  "hidden_units": 0,
+  "metrics_count": 0
 }
 ```
 
-**Response Fields:**
+**Response (Service Backend):**
 
-- `status` (string): Operation status ("started")
-- `is_running` (boolean): Training is now running
-- `is_paused` (boolean): Training pause state
-- `current_epoch` (integer): Current epoch (0 if reset)
-- `current_loss` (float): Current loss
-- `current_accuracy` (float): Current accuracy
-- `hidden_units` (integer): Number of hidden units
+```json
+{
+  "status": "started",
+  "ok": true,
+  "is_training": true
+}
+```
 
 **Status Codes:**
 
 - `200`: Success
-- `503`: No backend available
-
----
 
 ### POST /api/train/pause
 
@@ -505,9 +426,10 @@ Pause training without losing state.
 **Status Codes:**
 
 - `200`: Success
-- `503`: No backend available
 
----
+**Notes:**
+
+- Response is an acknowledgement; check `GET /api/status` for authoritative backend state.
 
 ### POST /api/train/resume
 
@@ -524,9 +446,10 @@ Resume paused training.
 **Status Codes:**
 
 - `200`: Success
-- `503`: No backend available
 
----
+**Notes:**
+
+- Response is an acknowledgement; check `GET /api/status` for authoritative backend state.
 
 ### POST /api/train/stop
 
@@ -543,15 +466,12 @@ Stop training completely.
 **Status Codes:**
 
 - `200`: Success
-- `503`: No backend available
-
----
 
 ### POST /api/train/reset
 
 Reset training to initial state.
 
-**Response:**
+**Response (Demo Backend):**
 
 ```json
 {
@@ -559,18 +479,28 @@ Reset training to initial state.
   "is_running": false,
   "is_paused": false,
   "current_epoch": 0,
-  "current_loss": 0.0,
-  "current_accuracy": 0.0,
-  "hidden_units": 0
+  "current_loss": 1.0,
+  "current_accuracy": 0.5,
+  "hidden_units": 0,
+  "metrics_count": 0
+}
+```
+
+**Response (Service Backend):**
+
+```json
+{
+  "status": "reset",
+  "ok": true,
+  "data": {
+    "message": "reset requested"
+  }
 }
 ```
 
 **Status Codes:**
 
 - `200`: Success
-- `503`: No backend available
-
----
 
 ### GET /api/train/status
 
@@ -580,22 +510,27 @@ Get current training status flags.
 
 ```json
 {
-  "is_training_in_progress": true,
-  "stop_requested": false
+  "backend": "service",
+  "is_training": true,
+  "is_running": true,
+  "is_paused": false,
+  "completed": false,
+  "failed": false,
+  "fsm_status": "STARTED",
+  "phase": "output",
+  "current_epoch": 42,
+  "hidden_units": 3
 }
 ```
 
 **Response Fields:**
 
-- `is_training_in_progress` (boolean): Whether training is currently running
-- `stop_requested` (boolean): Whether a stop has been requested but not yet completed
+- `backend` (string): Active backend (`demo` or `service`)
+- Remaining fields mirror `GET /api/status`
 
 **Status Codes:**
 
 - `200`: Success
-- `503`: No backend available
-
----
 
 ## Remote Worker Endpoints
 
@@ -763,74 +698,87 @@ Real-time training metrics WebSocket endpoint.
 const ws = new WebSocket('ws://localhost:8050/ws/training');
 ```
 
-**Initial Message (Server → Client):**
+**Initial Messages (Server -> Client):**
 
 ```json
 {
   "type": "initial_status",
   "data": {
+    "is_training": true,
     "is_running": true,
-    "current_epoch": 42,
-    "current_loss": 0.234,
-    "current_accuracy": 0.876
+    "phase": "output",
+    "current_epoch": 42
   }
 }
 ```
 
-**Training Metrics Update (Server → Client):**
+```json
+{
+  "type": "state",
+  "timestamp": 1711459200.123,
+  "data": {
+    "status": "Started",
+    "phase": "Output",
+    "current_epoch": 42
+  }
+}
+```
+
+**Metrics Update (Server -> Client):**
 
 ```json
 {
-  "type": "training_metrics",
+  "type": "metrics",
+  "timestamp": 1711459201.123,
   "data": {
     "epoch": 43,
-    "loss": 0.221,
-    "accuracy": 0.885,
-    "val_loss": 0.245,
-    "val_accuracy": 0.870
+    "metrics": {
+      "loss": 0.221,
+      "accuracy": 0.885,
+      "val_loss": 0.245,
+      "val_accuracy": 0.87
+    }
   }
 }
 ```
 
-**Topology Update (Server → Client):**
+**Topology Update (Server -> Client):**
 
 ```json
 {
-  "type": "topology_update",
+  "type": "topology",
+  "timestamp": 1711459201.456,
   "data": {
     "input_units": 2,
     "hidden_units": 3,
     "output_units": 1,
-    "nodes": [...],
-    "connections": [...]
+    "nodes": [],
+    "connections": []
   }
 }
 ```
 
-**Cascade Add Event (Server → Client):**
+**Event Update (Server -> Client):**
 
 ```json
 {
-  "type": "cascade_add",
+  "type": "event",
+  "timestamp": 1711459202.123,
   "data": {
-    "hidden_unit_index": 3,
-    "epoch": 50,
-    "correlation": 0.678
+    "event": "training_complete"
   }
 }
 ```
 
-**Ping/Pong (Client → Server → Client):**
+**Ping/Pong (Client <-> Server):**
 
 ```json
-// Client sends
 {"type": "ping"}
-
-// Server responds
-{"type": "pong"}
 ```
 
----
+```json
+{"type": "pong"}
+```
 
 ### WS /ws/control
 
@@ -842,9 +790,7 @@ Training control WebSocket endpoint.
 const ws = new WebSocket('ws://localhost:8050/ws/control');
 ```
 
-**Connection Confirmation (Server → Client):**
-
-Sent automatically upon connection.
+**Connection Confirmation (Server -> Client):**
 
 ```json
 {
@@ -853,7 +799,7 @@ Sent automatically upon connection.
 }
 ```
 
-**Start Command (Client → Server):**
+**Command (Client -> Server):**
 
 ```json
 {
@@ -862,7 +808,7 @@ Sent automatically upon connection.
 }
 ```
 
-**Start Response (Server → Client):**
+**Response (Server -> Client):**
 
 ```json
 {
@@ -870,100 +816,12 @@ Sent automatically upon connection.
   "command": "start",
   "state": {
     "is_running": true,
-    "current_epoch": 0,
-    "current_loss": 0.0
-  }
-}
-```
-
-**Pause Command (Client → Server):**
-
-```json
-{
-  "command": "pause"
-}
-```
-
-**Pause Response (Server → Client):**
-
-```json
-{
-  "ok": true,
-  "command": "pause",
-  "state": {
-    "is_running": false,
-    "is_paused": true,
-    "current_epoch": 25
-  }
-}
-```
-
-**Resume Command (Client → Server):**
-
-```json
-{
-  "command": "resume"
-}
-```
-
-**Resume Response (Server → Client):**
-
-```json
-{
-  "ok": true,
-  "command": "resume",
-  "state": {
-    "is_running": true,
-    "is_paused": false,
-    "current_epoch": 25
-  }
-}
-```
-
-**Stop Command (Client → Server):**
-
-```json
-{
-  "command": "stop"
-}
-```
-
-**Stop Response (Server → Client):**
-
-```json
-{
-  "ok": true,
-  "command": "stop",
-  "state": {
-    "is_running": false,
-    "current_epoch": 42
-  }
-}
-```
-
-**Reset Command (Client → Server):**
-
-```json
-{
-  "command": "reset"
-}
-```
-
-**Reset Response (Server → Client):**
-
-```json
-{
-  "ok": true,
-  "command": "reset",
-  "state": {
-    "is_running": false,
-    "is_paused": false,
     "current_epoch": 0
   }
 }
 ```
 
-**Error Response (Server → Client):**
+**Error Response (Server -> Client):**
 
 ```json
 {
@@ -971,8 +829,6 @@ Sent automatically upon connection.
   "error": "Unknown command: invalid_cmd"
 }
 ```
-
----
 
 ## Error Responses
 
@@ -998,12 +854,12 @@ Common HTTP status codes:
 
 ### Metric Naming Convention
 
-All metrics follow snake_case naming:
+History payloads support two valid metric shapes:
 
-- Training metrics: `loss`, `accuracy`
-- Validation metrics: `val_loss`, `val_accuracy`
-- Learning rate: `learning_rate`
-- Epoch counter: `epoch`
+- Demo history shape: `metrics.loss`, `metrics.accuracy`, `metrics.val_loss`, `metrics.val_accuracy`
+- Service history shape: `train_loss`, `train_accuracy`, `val_loss`, `val_accuracy`
+
+Canopy normalizes service-side external CasCor fields (`loss`, `accuracy`, `validation_loss`, `validation_accuracy`) before returning service history/current metric snapshots.
 
 ### Timestamp Format
 
