@@ -44,6 +44,18 @@ from juniper_cascor_client.exceptions import JuniperCascorClientError
 logger = logging.getLogger("juniper_canopy.backend.cascor_service_adapter")
 
 
+def _first_defined(*values, default=None):
+    """Return the first value that is not None, or default.
+
+    Unlike ``or`` chains, this correctly preserves falsy-but-valid values
+    like 0, 0.0, False, and empty strings.
+    """
+    for v in values:
+        if v is not None:
+            return v
+    return default
+
+
 class _ServiceTrainingMonitor:
     """
     Lightweight training monitor that delegates to the CasCor service via REST.
@@ -61,20 +73,37 @@ class _ServiceTrainingMonitor:
     def is_training(self) -> bool:
         try:
             status = self._client.get_training_status()
-            return status.get("is_training", False)
+            is_training_top = status.get("is_training")
+            if is_training_top is not None:
+                return is_training_top
+            data = status.get("data", {})
+            if isinstance(data, dict):
+                return data.get("training_active", False)
+            return False
         except JuniperCascorClientError:
             return False
 
     def get_current_metrics(self) -> Dict[str, Any]:
         try:
-            return self._client.get_metrics()
+            result = self._client.get_metrics()
+            if isinstance(result, dict) and "data" in result:
+                data = result["data"]
+                return CascorServiceAdapter._normalize_metric(data) if isinstance(data, dict) else result
+            return result if isinstance(result, dict) else {}
         except JuniperCascorClientError:
             return {}
 
     def get_recent_metrics(self, count: int = 100) -> list:
         try:
             result = self._client.get_metrics_history(count=count)
-            return result.get("history", []) if isinstance(result, dict) else result
+            if isinstance(result, dict):
+                data = result.get("data", result)
+                if isinstance(data, list):
+                    return [CascorServiceAdapter._normalize_metric(m) for m in data]
+                if isinstance(data, dict):
+                    history = data.get("history", [])
+                    return [CascorServiceAdapter._normalize_metric(m) for m in history]
+            return result if isinstance(result, list) else []
         except JuniperCascorClientError:
             return []
 
@@ -110,20 +139,25 @@ class CascorServiceAdapter:
         self._training_stream: Optional[CascorTrainingStream] = None
         self._relay_task: Optional[asyncio.Task] = None
         self._attached_to_existing: bool = False
+        self._state_update_callback: Optional[Callable] = None
 
         # Derive WebSocket URL from HTTP URL
         ws_url = service_url.replace("http://", "ws://").replace("https://", "wss://")
         self._ws_url = ws_url
+
+    def set_state_update_callback(self, callback: Callable) -> None:
+        """Register a callback invoked when cascor broadcasts state changes."""
+        self._state_update_callback = callback
 
     # ------------------------------------------------------------------
     # Connection lifecycle (async)
     # ------------------------------------------------------------------
 
     async def connect(self) -> bool:
-        """Connect to the CasCor service and verify it is ready."""
+        """Connect to the CasCor service and verify it is reachable."""
         try:
-            return self._client.is_ready()
-        except JuniperCascorClientError:
+            return self._client.is_alive()
+        except Exception:
             logger.error(f"Failed to connect to CasCor service at {self._service_url}")
             return False
 
@@ -157,6 +191,7 @@ class CascorServiceAdapter:
 
         async def _relay_loop():
             from communication.websocket_manager import websocket_manager
+
             backoff = [1, 2, 5, 10, 30]
             attempt = 0
             relay_enabled = True
@@ -169,6 +204,36 @@ class CascorServiceAdapter:
                         msg_type = message.get("type", "")
                         data = message.get("data", message)
                         await websocket_manager.broadcast({"type": msg_type, "data": data})
+
+                        # On cascade_add, fetch fresh topology and broadcast
+                        if msg_type == "cascade_add":
+                            try:
+                                topology = self.extract_network_topology()
+                                if topology:
+                                    await websocket_manager.broadcast({"type": "topology", "data": topology})
+                            except Exception as te:
+                                logger.debug(f"Failed to fetch topology after cascade_add: {te}")
+
+                        # Update local training_state from cascor state messages
+                        if msg_type == "state" and self._state_update_callback and isinstance(data, dict):
+                            try:
+                                from backend.state_sync import CascorStateSync
+
+                                status = CascorStateSync._normalize_status(data.get("status", data.get("state", "")))
+                                self._state_update_callback(status=status, phase=data.get("phase", ""))
+                            except Exception as se:  # nosec B110
+                                logger.debug(f"State update callback error: {se}")
+
+                        # Handle event messages (e.g. training_complete) to keep training_state aligned
+                        if msg_type == "event" and self._state_update_callback and isinstance(data, dict):
+                            event_name = data.get("event", "")
+                            if event_name == "training_complete":
+                                try:
+                                    self._state_update_callback(status="Completed", phase="Idle")
+                                    logger.info("Training complete event received from cascor")
+                                except Exception as ee:  # nosec B110
+                                    logger.debug(f"Event callback error: {ee}")
+
                     await stream.disconnect()
                 except asyncio.CancelledError:
                     relay_enabled = False
@@ -245,7 +310,13 @@ class CascorServiceAdapter:
     def is_training_in_progress(self) -> bool:
         try:
             status = self._client.get_training_status()
-            return status.get("is_training", False)
+            is_training_top = status.get("is_training")
+            if is_training_top is not None:
+                return is_training_top
+            data = status.get("data", {})
+            if isinstance(data, dict):
+                return data.get("training_active", False)
+            return False
         except JuniperCascorClientError:
             return False
 
@@ -286,9 +357,14 @@ class CascorServiceAdapter:
     _CANOPY_TO_CASCOR_PARAM_MAP = {
         "nn_learning_rate": "learning_rate",
         "nn_max_hidden_units": "max_hidden_units",
+        "nn_max_total_epochs": "epochs_max",
+        "nn_growth_convergence_threshold": "patience",
         "cn_pool_size": "candidate_pool_size",
         "cn_correlation_threshold": "correlation_threshold",
+        "cn_training_iterations": "candidate_epochs",
     }
+
+    _CASCOR_TO_CANOPY_PARAM_MAP = {v: k for k, v in _CANOPY_TO_CASCOR_PARAM_MAP.items()}
 
     def apply_params(self, **params: Any) -> Dict[str, Any]:
         """Forward parameter updates to the running cascor instance.
@@ -297,11 +373,7 @@ class CascorServiceAdapter:
         Keys not in the mapping are silently skipped (canopy-only parameters
         such as nn_spiral_rotations have no cascor service equivalent).
         """
-        mapped = {
-            self._CANOPY_TO_CASCOR_PARAM_MAP[k]: v
-            for k, v in params.items()
-            if k in self._CANOPY_TO_CASCOR_PARAM_MAP
-        }
+        mapped = {self._CANOPY_TO_CASCOR_PARAM_MAP[k]: v for k, v in params.items() if k in self._CANOPY_TO_CASCOR_PARAM_MAP}
         if not mapped:
             return {"ok": True, "data": {}, "message": "No cascor-mappable params provided"}
         try:
@@ -311,27 +383,103 @@ class CascorServiceAdapter:
             logger.error(f"Failed to update cascor params: {e}")
             return {"ok": False, "error": str(e)}
 
+    def get_canopy_params(self) -> Dict[str, Any]:
+        """Fetch training params from cascor and map to canopy nn_*/cn_* namespace."""
+        try:
+            result = self._client.get_training_params()
+            # Unwrap the response
+            params = result.get("data", {}).get("params", {})
+            if not params and isinstance(result.get("data"), dict):
+                params = {k: v for k, v in result.get("data", {}).items() if k not in ("epochs", "dataset", "status", "meta", "timestamp")}
+            # Map to canopy namespace
+            canopy_params = {}
+            for cascor_key, canopy_key in self._CASCOR_TO_CANOPY_PARAM_MAP.items():
+                if cascor_key in params:
+                    canopy_params[canopy_key] = params[cascor_key]
+            return canopy_params
+        except JuniperCascorClientError as e:
+            logger.warning(f"Failed to fetch canopy params: {e}")
+            return {}
+
+    # ------------------------------------------------------------------
+    # Response normalization
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _unwrap_response(response: Any) -> Any:
+        """Unwrap cascor API success_response envelope.
+
+        The cascor API wraps successful responses in ``{"data": ...}``.
+        This helper extracts the inner payload so that adapter methods
+        return consistent shapes regardless of envelope presence.
+        """
+        if isinstance(response, dict) and "data" in response:
+            return response["data"]
+        return response
+
+    @staticmethod
+    def _is_cascor_nested(data: dict) -> bool:
+        """Detect whether data uses cascor's nested structure.
+
+        Uses positive detection of nested structure (state_machine/monitor/
+        training_state) rather than checking for flat keys, which could
+        misfire if cascor ever adds a flat field.
+        """
+        return isinstance(data, dict) and ("state_machine" in data or "training_active" in data)
+
+    @staticmethod
+    def _normalize_metric(entry: dict) -> dict:
+        """Normalize a single metric entry to canopy's canonical field names.
+
+        Handles both real cascor names (loss, accuracy, validation_loss,
+        validation_accuracy) and canopy names (train_loss, train_accuracy,
+        val_loss, val_accuracy).  Uses ``"key" in entry`` checks instead of
+        ``or`` chains so that valid 0.0 values are preserved.
+        """
+        return {
+            "epoch": entry.get("epoch", 0),
+            "train_loss": _first_defined(
+                entry.get("train_loss") if "train_loss" in entry else None,
+                entry.get("loss") if "loss" in entry else None,
+            ),
+            "train_accuracy": _first_defined(
+                entry.get("train_accuracy") if "train_accuracy" in entry else None,
+                entry.get("accuracy") if "accuracy" in entry else None,
+            ),
+            "val_loss": _first_defined(
+                entry.get("val_loss") if "val_loss" in entry else None,
+                entry.get("validation_loss") if "validation_loss" in entry else None,
+            ),
+            "val_accuracy": _first_defined(
+                entry.get("val_accuracy") if "val_accuracy" in entry else None,
+                entry.get("validation_accuracy") if "validation_accuracy" in entry else None,
+            ),
+            "hidden_units": entry.get("hidden_units", 0),
+            "phase": entry.get("phase"),
+            "timestamp": entry.get("timestamp"),
+        }
+
     # ------------------------------------------------------------------
     # Status & metrics
     # ------------------------------------------------------------------
 
     def get_training_status(self) -> Dict[str, Any]:
         try:
-            return self._client.get_training_status()
+            return self._unwrap_response(self._client.get_training_status())
         except JuniperCascorClientError as e:
             logger.error(f"Failed to get training status: {e}")
             return {"is_training": False, "error": str(e)}
 
     def get_network_data(self) -> Dict[str, Any]:
         try:
-            return self._client.get_statistics()
+            return self._unwrap_response(self._client.get_statistics())
         except JuniperCascorClientError as e:
             logger.error(f"Failed to get network data: {e}")
             return {}
 
     def extract_network_topology(self) -> Optional[Dict[str, Any]]:
         try:
-            return self._client.get_topology()
+            return self._unwrap_response(self._client.get_topology())
         except JuniperCascorClientError:
             return None
 
@@ -340,7 +488,7 @@ class CascorServiceAdapter:
 
     def get_dataset_info(self, x=None, y=None) -> Optional[Dict[str, Any]]:
         try:
-            return self._client.get_dataset()
+            return self._unwrap_response(self._client.get_dataset())
         except JuniperCascorClientError:
             return None
 

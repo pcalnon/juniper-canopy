@@ -21,7 +21,7 @@ def _probe_url_sync(url: str, timeout: float) -> bool:
     """Synchronous probe of a cascor URL. Validates response body."""
     try:
         req = urllib.request.Request(f"{url}/v1/health/live")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
             if resp.status != 200:
                 return False
             body = json.loads(resp.read())
@@ -32,7 +32,7 @@ def _probe_url_sync(url: str, timeout: float) -> bool:
 
 async def probe_cascor_url(url: str, timeout: float = _DEFAULT_TIMEOUT) -> bool:
     """Async probe of a cascor URL. Runs synchronous I/O in executor."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _probe_url_sync, url, timeout)
 
 

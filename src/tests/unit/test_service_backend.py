@@ -143,23 +143,26 @@ class TestTrainingControl:
         assert result["ok"] is True
         mock_adapter.request_training_stop.assert_called_once()
 
-    def test_pause_training_not_supported(self, service_backend):
-        """pause_training() should return error (not yet supported)."""
+    def test_pause_training_delegates_to_adapter(self, service_backend, mock_adapter):
+        """pause_training() should delegate to adapter."""
+        mock_adapter.pause_training.return_value = {"ok": True, "data": {}}
         result = service_backend.pause_training()
-        assert result["ok"] is False
-        assert "not yet supported" in result["error"]
+        assert result["ok"] is True
+        mock_adapter.pause_training.assert_called_once()
 
-    def test_resume_training_not_supported(self, service_backend):
-        """resume_training() should return error (not yet supported)."""
+    def test_resume_training_delegates_to_adapter(self, service_backend, mock_adapter):
+        """resume_training() should delegate to adapter."""
+        mock_adapter.resume_training.return_value = {"ok": True, "data": {}}
         result = service_backend.resume_training()
-        assert result["ok"] is False
-        assert "not yet supported" in result["error"]
+        assert result["ok"] is True
+        mock_adapter.resume_training.assert_called_once()
 
-    def test_reset_training_not_supported(self, service_backend):
-        """reset_training() should return error (not yet supported)."""
+    def test_reset_training_delegates_to_adapter(self, service_backend, mock_adapter):
+        """reset_training() should delegate to adapter."""
+        mock_adapter.reset_training.return_value = {"ok": True, "data": {}}
         result = service_backend.reset_training()
-        assert result["ok"] is False
-        assert "not yet supported" in result["error"]
+        assert result["ok"] is True
+        mock_adapter.reset_training.assert_called_once()
 
     def test_is_training_active_returns_bool(self, service_backend):
         """is_training_active() should return a bool."""
@@ -266,11 +269,12 @@ class TestNetworkAndData:
 class TestParameters:
     """Test parameter methods."""
 
-    def test_apply_params_not_supported(self, service_backend):
-        """apply_params() should return error (not yet supported in service mode)."""
+    def test_apply_params_delegates_to_adapter(self, service_backend, mock_adapter):
+        """apply_params() should delegate to adapter."""
+        mock_adapter.apply_params.return_value = {"ok": True, "data": {"learning_rate": 0.05}}
         result = service_backend.apply_params(learning_rate=0.05)
-        assert result["ok"] is False
-        assert "not yet supported" in result["error"]
+        assert result["ok"] is True
+        mock_adapter.apply_params.assert_called_once_with(learning_rate=0.05)
 
 
 class TestLifecycle:

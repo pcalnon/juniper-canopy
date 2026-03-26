@@ -218,11 +218,20 @@ def test_converged_scenario_has_network():
     fake.close()
 
 
-# --- Apply params (not supported in service mode) ---
+# --- Apply params (service mode delegates to cascor adapter) ---
 
 
 @pytest.mark.integration
-def test_apply_params_not_supported(backend):
-    """apply_params should report not supported."""
+def test_apply_params_unmapped_keys_succeeds_gracefully(backend):
+    """Passing keys that don't map to cascor API names should succeed with a message."""
     result = backend.apply_params(learning_rate=0.001)
-    assert result.get("ok") is False
+    assert result.get("ok") is True
+    assert result.get("message") == "No cascor-mappable params provided"
+    assert result.get("data") == {}
+
+
+@pytest.mark.integration
+def test_apply_params_mapped_keys_forwarded(backend):
+    """Passing nn_learning_rate should map to cascor's learning_rate and forward."""
+    result = backend.apply_params(nn_learning_rate=0.005)
+    assert result.get("ok") is True

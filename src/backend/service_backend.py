@@ -24,8 +24,8 @@
 #####################################################################################################################################################################################################
 # Notes:
 #     Phase 5 of the Microservices Architecture Development Roadmap.
-#     Operations not yet supported by the CasCor service (pause, resume, reset,
-#     apply_params) return {"ok": False, "error": "..."} rather than raising.
+#     Training control operations (pause, resume, reset) and apply_params
+#     delegate to CascorServiceAdapter, which forwards to the CasCor service.
 #
 #####################################################################################################################################################################################################
 # References:
@@ -40,9 +40,10 @@
 #####################################################################################################################################################################################################
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
-from backend.cascor_service_adapter import CascorServiceAdapter
+from backend.cascor_service_adapter import CascorServiceAdapter, _first_defined
+from backend.state_sync import CascorStateSync, SyncedState
 
 logger = logging.getLogger("juniper_canopy.backend.service_backend")
 
@@ -52,6 +53,17 @@ class ServiceBackend:
 
     def __init__(self, adapter: CascorServiceAdapter):
         self._adapter = adapter
+        self._synced_state: Optional[SyncedState] = None
+        self._state_update_callback: Optional[Callable] = None
+
+    def set_state_update_callback(self, callback: Callable) -> None:
+        """Register a callback invoked when cascor broadcasts state changes.
+
+        The callback receives keyword arguments (status, phase, etc.) and is
+        expected to update the application-level TrainingState.
+        """
+        self._state_update_callback = callback
+        self._adapter.set_state_update_callback(callback)
 
     @property
     def backend_type(self) -> str:
@@ -86,7 +98,42 @@ class ServiceBackend:
     # --- Status and metrics ---
 
     def get_status(self) -> Dict[str, Any]:
-        return self._adapter.get_training_status()
+        raw = self._adapter.get_training_status()
+        if not isinstance(raw, dict) or not CascorServiceAdapter._is_cascor_nested(raw):
+            return raw
+        sm = raw.get("state_machine", {}) if isinstance(raw.get("state_machine"), dict) else {}
+        monitor = raw.get("monitor", {}) if isinstance(raw.get("monitor"), dict) else {}
+        ts = raw.get("training_state", {}) if isinstance(raw.get("training_state"), dict) else {}
+        fsm_status = sm.get("status", sm.get("current_state", "Stopped"))
+        status_upper = fsm_status.upper() if isinstance(fsm_status, str) else "STOPPED"
+        phase_raw = sm.get("phase") or ts.get("phase", "idle")
+        return {
+            "is_training": raw.get("training_active", False),
+            "is_running": status_upper in ("STARTED", "RUNNING", "TRAINING"),
+            "is_paused": status_upper == "PAUSED",
+            "completed": status_upper in ("COMPLETED", "CONVERGED"),
+            "failed": status_upper == "FAILED",
+            "fsm_status": fsm_status,
+            "phase": phase_raw.lower() if isinstance(phase_raw, str) else "idle",
+            "current_epoch": _first_defined(
+                monitor.get("current_epoch"),
+                monitor.get("epoch"),
+                ts.get("current_epoch"),
+                default=0,
+            ),
+            "hidden_units": _first_defined(
+                monitor.get("current_hidden_units"),
+                monitor.get("hidden_units"),
+                default=0,
+            ),
+            "network_connected": raw.get("network_loaded", False),
+            "monitoring_active": status_upper in ("STARTED", "RUNNING", "TRAINING"),
+            "input_size": ts.get("input_size", 0),
+            "output_size": ts.get("output_size", 0),
+            "learning_rate": ts.get("learning_rate", 0.0),
+            "max_hidden_units": ts.get("max_hidden_units", 0),
+            "max_epochs": ts.get("max_epochs", 0),
+        }
 
     def get_metrics(self) -> Dict[str, Any]:
         return self._adapter.training_monitor.get_current_metrics()
@@ -106,7 +153,19 @@ class ServiceBackend:
         return self._adapter.get_network_data()
 
     def get_dataset(self) -> Optional[Dict[str, Any]]:
-        return self._adapter.get_dataset_info()
+        raw = self._adapter.get_dataset_info()
+        if not raw:
+            return None
+        if "train_samples" in raw or "input_features" in raw:
+            return {
+                "num_samples": raw.get("train_samples", 0) + raw.get("test_samples", 0),
+                "num_features": raw.get("input_features", 0),
+                "num_classes": raw.get("output_features", 0),
+                "loaded": raw.get("loaded", True),
+                "train_samples": raw.get("train_samples", 0),
+                "test_samples": raw.get("test_samples", 0),
+            }
+        return raw
 
     def get_decision_boundary(self, resolution: int = 50) -> Optional[Dict[str, Any]]:
         return self._adapter.get_decision_boundary(resolution)
@@ -119,13 +178,16 @@ class ServiceBackend:
     # --- Lifecycle ---
 
     async def initialize(self) -> bool:
-        """Connect to cascor service, attach non-destructively, and start metrics relay."""
+        """Connect to cascor service, attach non-destructively, sync state, and start metrics relay."""
         connected = await self._adapter.connect()
         if connected:
             # Non-destructive attach: check for existing network without creating/resetting
             has_network = self._adapter.attach_to_existing()
             if has_network:
                 logger.info("ServiceBackend: attached to existing cascor network")
+                # Sync current cascor state into canopy
+                self._synced_state = CascorStateSync(self._adapter._client).sync()
+                logger.info(f"ServiceBackend: state synced — status={self._synced_state.status}, epoch={self._synced_state.current_epoch}, params={len(self._synced_state.params)} keys")
             else:
                 logger.info("ServiceBackend: no existing cascor network found (will create on start)")
             await self._adapter.start_metrics_relay()
@@ -133,6 +195,10 @@ class ServiceBackend:
         else:
             logger.error(f"ServiceBackend failed to connect to {self._adapter._service_url}")
         return connected
+
+    def get_synced_state(self) -> Optional[SyncedState]:
+        """Return the state snapshot from the most recent sync, or None."""
+        return self._synced_state
 
     async def shutdown(self) -> None:
         """Disconnect from cascor gracefully. Does NOT stop training on cascor."""

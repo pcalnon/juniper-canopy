@@ -8,6 +8,7 @@ class TestServiceModeControls:
     def test_pause_training_delegates_to_cascor(self):
         from backend.cascor_service_adapter import CascorServiceAdapter
         from backend.service_backend import ServiceBackend
+
         fake = FakeCascorClient(scenario="two_spiral_training")
         adapter = CascorServiceAdapter(client=fake)
         backend = ServiceBackend(adapter)
@@ -18,6 +19,7 @@ class TestServiceModeControls:
     def test_resume_training_delegates_to_cascor(self):
         from backend.cascor_service_adapter import CascorServiceAdapter
         from backend.service_backend import ServiceBackend
+
         fake = FakeCascorClient(scenario="two_spiral_training")
         fake.set_state("paused")
         adapter = CascorServiceAdapter(client=fake)
@@ -29,6 +31,7 @@ class TestServiceModeControls:
     def test_reset_training_delegates_to_cascor(self):
         from backend.cascor_service_adapter import CascorServiceAdapter
         from backend.service_backend import ServiceBackend
+
         fake = FakeCascorClient(scenario="two_spiral_training")
         adapter = CascorServiceAdapter(client=fake)
         backend = ServiceBackend(adapter)
@@ -39,6 +42,7 @@ class TestServiceModeControls:
     def test_pause_returns_error_when_not_training(self):
         from backend.cascor_service_adapter import CascorServiceAdapter
         from backend.service_backend import ServiceBackend
+
         fake = FakeCascorClient(scenario="idle")
         fake.create_network(input_size=2, output_size=2, learning_rate=0.01)
         adapter = CascorServiceAdapter(client=fake)
@@ -49,6 +53,7 @@ class TestServiceModeControls:
     def test_apply_params_maps_nn_keys(self):
         from backend.cascor_service_adapter import CascorServiceAdapter
         from backend.service_backend import ServiceBackend
+
         fake = FakeCascorClient(scenario="two_spiral_training")
         adapter = CascorServiceAdapter(client=fake)
         backend = ServiceBackend(adapter)
@@ -60,6 +65,7 @@ class TestServiceModeControls:
     def test_apply_params_skips_unknown_keys(self):
         from backend.cascor_service_adapter import CascorServiceAdapter
         from backend.service_backend import ServiceBackend
+
         fake = FakeCascorClient(scenario="two_spiral_training")
         adapter = CascorServiceAdapter(client=fake)
         backend = ServiceBackend(adapter)

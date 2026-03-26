@@ -32,12 +32,37 @@ except ImportError:
 
 
 def _create_backend_with_env(monkeypatch, env_vars: dict):
-    """Call create_backend() with specific environment variables."""
+    """Call create_backend() with specific environment variables.
+
+    Also manages JUNIPER_CANOPY_DEMO_MODE and JUNIPER_CANOPY_CASCOR_SERVICE_URL
+    to keep the Pydantic settings layer consistent with the legacy env vars
+    being tested.
+    """
     for key, value in env_vars.items():
         if value is None:
             monkeypatch.delenv(key, raising=False)
         else:
             monkeypatch.setenv(key, value)
+
+    # Mirror legacy env vars into settings-prefix env vars so the Pydantic
+    # settings layer sees the same values as the legacy fallback path.
+    if "CASCOR_DEMO_MODE" in env_vars:
+        val = env_vars["CASCOR_DEMO_MODE"]
+        if val is None:
+            monkeypatch.delenv("JUNIPER_CANOPY_DEMO_MODE", raising=False)
+        else:
+            monkeypatch.setenv("JUNIPER_CANOPY_DEMO_MODE", val)
+    if "CASCOR_SERVICE_URL" in env_vars:
+        val = env_vars["CASCOR_SERVICE_URL"]
+        if val is None:
+            monkeypatch.delenv("JUNIPER_CANOPY_CASCOR_SERVICE_URL", raising=False)
+        else:
+            monkeypatch.setenv("JUNIPER_CANOPY_CASCOR_SERVICE_URL", val)
+
+    # Clear cached settings so env var changes take effect
+    from settings import get_settings
+
+    get_settings.cache_clear()
 
     from backend import create_backend
 

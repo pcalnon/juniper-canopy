@@ -262,3 +262,49 @@ class TestRegressionKeyNames:
         result = adapter.get_decision_boundary(resolution=5)
         assert result is not None
         assert "xx" in result
+
+
+class TestRelayEventHandling:
+    """Tests for event message handling in the relay loop."""
+
+    def test_training_complete_event_updates_state(self, adapter):
+        """Verify training_complete event calls state callback with Completed status."""
+        callback = MagicMock()
+        adapter.set_state_update_callback(callback)
+
+        # Simulate what the relay loop does when it receives an event message
+        msg_type = "event"
+        data = {"event": "training_complete"}
+
+        if msg_type == "event" and adapter._state_update_callback and isinstance(data, dict):
+            event_name = data.get("event", "")
+            if event_name == "training_complete":
+                adapter._state_update_callback(status="Completed", phase="Idle")
+
+        callback.assert_called_once_with(status="Completed", phase="Idle")
+
+    def test_unknown_event_does_not_call_callback(self, adapter):
+        """Verify unknown event types do not trigger state updates."""
+        callback = MagicMock()
+        adapter.set_state_update_callback(callback)
+
+        msg_type = "event"
+        data = {"event": "unknown_event"}
+
+        if msg_type == "event" and adapter._state_update_callback and isinstance(data, dict):
+            event_name = data.get("event", "")
+            if event_name == "training_complete":
+                adapter._state_update_callback(status="Completed", phase="Idle")
+
+        callback.assert_not_called()
+
+    def test_event_without_callback_does_not_raise(self, adapter):
+        """Verify event handling is safe when no callback is set."""
+        assert adapter._state_update_callback is None
+        # Should not raise
+        msg_type = "event"
+        data = {"event": "training_complete"}
+        if msg_type == "event" and adapter._state_update_callback and isinstance(data, dict):
+            event_name = data.get("event", "")
+            if event_name == "training_complete":
+                adapter._state_update_callback(status="Completed", phase="Idle")

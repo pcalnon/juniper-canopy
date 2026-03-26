@@ -28,6 +28,7 @@ def mock_client():
     """Create a mock JuniperCascorClient."""
     client = MagicMock()
     client.is_ready.return_value = True
+    client.is_alive.return_value = True
     client.get_training_status.return_value = {"is_training": False, "status": "idle"}
     client.get_metrics.return_value = {"loss": 0.5, "accuracy": 0.8}
     client.get_metrics_history.return_value = {"history": [{"epoch": 1, "loss": 0.5}]}
@@ -360,19 +361,17 @@ class TestAsyncConnect:
     async def test_connect_success(self, adapter, mock_client):
         result = await adapter.connect()
         assert result is True
-        mock_client.is_ready.assert_called_once()
+        mock_client.is_alive.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_connect_not_ready(self, adapter, mock_client):
-        mock_client.is_ready.return_value = False
+    async def test_connect_not_alive(self, adapter, mock_client):
+        mock_client.is_alive.return_value = False
         result = await adapter.connect()
         assert result is False
 
     @pytest.mark.asyncio
     async def test_connect_on_error(self, adapter, mock_client):
-        from juniper_cascor_client.exceptions import JuniperCascorConnectionError
-
-        mock_client.is_ready.side_effect = JuniperCascorConnectionError("fail")
+        mock_client.is_alive.side_effect = ConnectionError("refused")
         result = await adapter.connect()
         assert result is False
 

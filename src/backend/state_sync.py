@@ -9,6 +9,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from backend.cascor_service_adapter import _first_defined
+
 logger = logging.getLogger("juniper_canopy.backend.state_sync")
 
 
@@ -56,26 +58,49 @@ class CascorStateSync:
         # --- Training status ---
         try:
             status_response = self._client.get_training_status()
-            state.is_training = status_response.get("is_training", False)
-            # The response includes a nested "data" dict with "state", "epoch", etc.
             data = status_response.get("data", {})
-            raw_state = data.get("state", "idle")
-            state.status = self._normalize_status(raw_state)
-            state.current_epoch = data.get("epoch", 0)
-            state.max_epochs = data.get("max_epochs", 0)
+            if isinstance(data, dict):
+                is_training_top = status_response.get("is_training")
+                if is_training_top is not None:
+                    state.is_training = is_training_top
+                else:
+                    state.is_training = data.get("training_active", False)
+                sm = data.get("state_machine", {})
+                ts = data.get("training_state", {})
+                raw_state = data.get("state") or (sm.get("status", "").lower() if isinstance(sm, dict) else None) or (sm.get("current_state", "").lower() if isinstance(sm, dict) else None) or "idle"
+                state.status = self._normalize_status(raw_state)
+                raw_phase = (sm.get("phase") if isinstance(sm, dict) else None) or (ts.get("phase") if isinstance(ts, dict) else None) or "Idle"
+                state.phase = raw_phase.lower() if isinstance(raw_phase, str) else "idle"
+                monitor = data.get("monitor", {})
+                state.current_epoch = _first_defined(
+                    data.get("epoch"),
+                    monitor.get("current_epoch") if isinstance(monitor, dict) else None,
+                    ts.get("current_epoch") if isinstance(ts, dict) else None,
+                    default=0,
+                )
+                state.max_epochs = _first_defined(
+                    data.get("max_epochs"),
+                    ts.get("max_epochs") if isinstance(ts, dict) else None,
+                    ts.get("epochs_max") if isinstance(ts, dict) else None,
+                    default=0,
+                )
+            else:
+                state.is_training = status_response.get("is_training", False)
+                state.status = "Stopped"
+                state.phase = "idle"
+                state.current_epoch = 0
+                state.max_epochs = 0
         except Exception as e:
             logger.warning(f"Failed to fetch training status during sync: {e}")
 
         # --- Training parameters ---
         try:
             params_response = self._client.get_training_params()
-            state.params = params_response.get("data", {}).get("params", {})
-            if not state.params and isinstance(params_response.get("data"), dict):
-                # Some responses embed params at top level of data
-                state.params = {
-                    k: v for k, v in params_response.get("data", {}).items()
-                    if k not in ("epochs", "dataset")
-                }
+            data = params_response.get("data", {})
+            if isinstance(data, dict):
+                state.params = data.get("params", {})
+                if not state.params:
+                    state.params = {k: v for k, v in data.items() if k not in ("epochs", "dataset", "status", "meta", "timestamp")}
         except Exception as e:
             logger.warning(f"Failed to fetch training params during sync: {e}")
 
@@ -91,16 +116,19 @@ class CascorStateSync:
         try:
             history_response = self._client.get_metrics_history(count=metrics_limit)
             if isinstance(history_response, dict):
-                state.metrics_history = history_response.get("data", {}).get("history", [])
+                data = history_response.get("data", history_response)
+                if isinstance(data, list):
+                    state.metrics_history = data
+                elif isinstance(data, dict):
+                    state.metrics_history = data.get("history", [])
+                else:
+                    state.metrics_history = []
             elif isinstance(history_response, list):
                 state.metrics_history = history_response
         except Exception as e:
             logger.debug(f"Failed to fetch metrics history during sync: {e}")
 
-        logger.info(
-            f"State sync complete: status={state.status}, epoch={state.current_epoch}, "
-            f"metrics={len(state.metrics_history)} entries"
-        )
+        logger.info(f"State sync complete: status={state.status}, epoch={state.current_epoch}, " f"metrics={len(state.metrics_history)} entries")
         return state
 
     @staticmethod
@@ -109,9 +137,13 @@ class CascorStateSync:
         mapping = {
             "idle": "Stopped",
             "training": "Started",
+            "started": "Started",
             "paused": "Paused",
             "complete": "Completed",
+            "completed": "Completed",
             "failed": "Failed",
+            "stopped": "Stopped",
+            "running": "Started",
             # Handle already-normalized values
             "Stopped": "Stopped",
             "Started": "Started",

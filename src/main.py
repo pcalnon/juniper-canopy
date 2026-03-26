@@ -135,6 +135,7 @@ async def lifespan(app: FastAPI):
 
     # Auto-discover a running cascor instance if no URL is explicitly configured
     # and demo mode is not forced.
+    discovered_url = None
     if not settings.demo_mode and not settings.cascor_service_url:
         if settings.cascor_discovery.enabled:
             discovered_url = await discover_cascor(
@@ -144,9 +145,8 @@ async def lifespan(app: FastAPI):
             )
             if discovered_url:
                 system_logger.info(f"Auto-discovered cascor at {discovered_url} — activating service mode")
-                os.environ["CASCOR_SERVICE_URL"] = discovered_url
 
-    backend = create_backend()
+    backend = create_backend(service_url=discovered_url)
 
     # Validate JuniperData URL — mandatory for both demo and real backend (CAN-INT-002).
     juniper_data_url = settings.juniper_data_url
@@ -173,20 +173,33 @@ async def lifespan(app: FastAPI):
             await backend.shutdown()
             from backend import create_backend
 
-            os.environ["CASCOR_DEMO_MODE"] = "1"
-            backend = create_backend()
+            backend = create_backend(demo_mode=True)
             await backend.initialize()
 
     # Initialize the backend (demo: starts simulation; service: connects to CasCor)
     await backend.initialize()
 
-    # Sync global training_state with demo defaults if applicable
+    # Sync global training_state from backend
     if backend.backend_type == "demo" and hasattr(backend, "_demo"):
         demo = backend._demo
         if demo.training_state:
             demo_state = demo.training_state.get_state()
             training_state.update_state(**demo_state)
             system_logger.info(f"Global training_state synced with demo defaults: LR={demo_state.get('learning_rate')}, " f"MaxHidden={demo_state.get('max_hidden_units')}, Epochs={demo_state.get('max_epochs')}")
+    elif backend.backend_type == "service":
+        synced = backend.get_synced_state()
+        if synced:
+            training_state.update_state(
+                status=synced.status,
+                phase=synced.phase,
+                current_epoch=synced.current_epoch,
+                max_epochs=synced.max_epochs,
+                learning_rate=synced.params.get("learning_rate", training_state.get_state().get("learning_rate")),
+                max_hidden_units=synced.params.get("max_hidden_units", training_state.get_state().get("max_hidden_units")),
+            )
+            system_logger.info(f"Global training_state synced with cascor: status={synced.status}, epoch={synced.current_epoch}, params={len(synced.params)} keys")
+        # Register callback so relay-driven state updates keep training_state current
+        backend.set_state_update_callback(training_state.update_state)
 
     system_logger.info(f"Backend initialized: {backend.backend_type}")
     system_logger.info("Application startup complete")
@@ -565,6 +578,40 @@ async def get_state():
         state["cn_top_candidates"] = getattr(demo, "cn_top_candidates", TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT)
         state["cn_random_candidates"] = getattr(demo, "cn_random_candidates", TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT)
 
+        return state
+
+    # Service mode: provide all nn_*/cn_* keys the dashboard expects.
+    # Keys that cascor exposes are fetched live; the rest get defaults.
+    if backend.backend_type == "service" and hasattr(backend, "_adapter"):
+        state = training_state.get_state()
+
+        # Populate all nn_*/cn_* keys with defaults first (dashboard reads all 22)
+        state.setdefault("nn_max_iterations", TrainingConstants.DEFAULT_MAX_ITERATIONS)
+        state.setdefault("nn_max_total_epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS)
+        state.setdefault("nn_learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE)
+        state.setdefault("nn_max_hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)
+        state.setdefault("nn_multi_node_layers", TrainingConstants.DEFAULT_MULTI_NODE_LAYERS)
+        state.setdefault("nn_growth_trigger", TrainingConstants.DEFAULT_GROWTH_TRIGGER)
+        state.setdefault("nn_growth_preset_epochs", TrainingConstants.DEFAULT_PRESET_EPOCHS)
+        state.setdefault("nn_growth_convergence_threshold", TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD)
+        state.setdefault("nn_spiral_rotations", TrainingConstants.DEFAULT_SPIRAL_ROTATIONS)
+        state.setdefault("nn_spiral_number", TrainingConstants.DEFAULT_SPIRAL_NUMBER)
+        state.setdefault("nn_dataset_elements", TrainingConstants.DEFAULT_DATASET_ELEMENTS)
+        state.setdefault("nn_dataset_noise", TrainingConstants.DEFAULT_DATASET_NOISE)
+        state.setdefault("cn_pool_size", TrainingConstants.DEFAULT_CANDIDATE_POOL_SIZE)
+        state.setdefault("cn_correlation_threshold", TrainingConstants.DEFAULT_CANDIDATE_CORRELATION_THRESHOLD)
+        state.setdefault("cn_selected_candidates", TrainingConstants.DEFAULT_SELECTED_CANDIDATES)
+        state.setdefault("cn_training_complete", TrainingConstants.DEFAULT_CN_TRAINING_COMPLETE)
+        state.setdefault("cn_training_iterations", TrainingConstants.DEFAULT_CANDIDATE_TRAINING_ITERATIONS)
+        state.setdefault("cn_training_convergence_threshold", TrainingConstants.DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD)
+        state.setdefault("cn_multi_candidate", TrainingConstants.DEFAULT_MULTI_CANDIDATE_ENABLED)
+        state.setdefault("cn_candidate_selection", "top")
+        state.setdefault("cn_top_candidates", TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT)
+        state.setdefault("cn_random_candidates", TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT)
+
+        # Override with live values from cascor (keys it actually exposes)
+        canopy_params = backend._adapter.get_canopy_params()
+        state.update(canopy_params)
         return state
 
     return training_state.get_state()
