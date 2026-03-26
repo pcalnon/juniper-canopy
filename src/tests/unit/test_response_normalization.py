@@ -13,12 +13,14 @@ from tests.fixtures.cascor_response_fixtures import (
     fake_metrics_history,
     fake_training_status_active,
     fake_training_status_idle,
+    real_dataset,
     real_metrics_current,
     real_metrics_history,
     real_training_params,
     real_training_status_active,
     real_training_status_epoch_zero,
     real_training_status_idle,
+    real_topology,
 )
 
 # ---------------------------------------------------------------------------
@@ -314,3 +316,86 @@ class TestMetricFieldNormalization:
         entry = result[0]
         assert entry["train_loss"] == 0.95
         assert entry["train_accuracy"] == 0.35
+
+
+# ===========================================================================
+# FIX-9: extract_network_topology() cascor -> canopy conversion
+# ===========================================================================
+
+
+class TestExtractNetworkTopology:
+    """Covers topology conversion paths with high dashboard blast radius."""
+
+    def test_real_topology_converted_to_canopy_shape(self):
+        """Real cascor topology should be converted into canopy node/edge schema."""
+        from backend.cascor_service_adapter import CascorServiceAdapter
+
+        client = _make_mock_client(get_topology=real_topology())
+        adapter = CascorServiceAdapter(client=client)
+        result = adapter.extract_network_topology()
+
+        assert result is not None
+        assert result["input_units"] == 2
+        assert result["output_units"] == 3
+        assert result["hidden_units"] == 2
+        assert len(result["nodes"]) == 7  # 2 input + 2 hidden + 3 output
+        assert any(c["from"] == "input_0" and c["to"] == "hidden_0" for c in result["connections"])
+        assert any(c["from"] == "hidden_1" and c["to"] == "output_2" for c in result["connections"])
+
+    def test_canopy_topology_passthrough_unchanged(self):
+        """Topology already in canopy format should not be transformed."""
+        from backend.cascor_service_adapter import CascorServiceAdapter
+
+        canopy_topology = {
+            "input_units": 2,
+            "hidden_units": 1,
+            "output_units": 2,
+            "nodes": [{"id": "input_0"}, {"id": "hidden_0"}, {"id": "output_0"}, {"id": "output_1"}],
+            "connections": [{"from": "input_0", "to": "hidden_0"}],
+        }
+        client = _make_mock_client(get_topology={"status": "success", "data": canopy_topology})
+        adapter = CascorServiceAdapter(client=client)
+
+        result = adapter.extract_network_topology()
+        assert result == canopy_topology
+
+
+# ===========================================================================
+# FIX-10: ServiceBackend.get_dataset() real cascor shape normalization
+# ===========================================================================
+
+
+class TestDatasetNormalization:
+    """Ensure dataset metadata is normalized to frontend contract."""
+
+    def test_real_dataset_fields_mapped_for_dashboard(self):
+        """input_features/output_features shape should map to num_* fields."""
+        from backend.cascor_service_adapter import CascorServiceAdapter
+        from backend.service_backend import ServiceBackend
+
+        adapter = MagicMock(spec=CascorServiceAdapter)
+        adapter.get_dataset_info.return_value = real_dataset()["data"]
+        backend = ServiceBackend(adapter)
+
+        dataset = backend.get_dataset()
+        assert dataset is not None
+        assert dataset["num_samples"] == 1000
+        assert dataset["num_features"] == 2
+        assert dataset["num_classes"] == 3
+        assert dataset["train_samples"] == 800
+        assert dataset["test_samples"] == 200
+
+    def test_missing_counts_default_to_zero(self):
+        """Missing train/test counts should not raise and should default safely."""
+        from backend.cascor_service_adapter import CascorServiceAdapter
+        from backend.service_backend import ServiceBackend
+
+        adapter = MagicMock(spec=CascorServiceAdapter)
+        adapter.get_dataset_info.return_value = {"input_features": 4, "output_features": 2, "loaded": True}
+        backend = ServiceBackend(adapter)
+
+        dataset = backend.get_dataset()
+        assert dataset is not None
+        assert dataset["num_samples"] == 0
+        assert dataset["train_samples"] == 0
+        assert dataset["test_samples"] == 0
