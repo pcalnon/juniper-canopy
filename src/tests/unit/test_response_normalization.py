@@ -155,6 +155,17 @@ class TestGetCurrentMetrics:
         assert "status" not in result
         assert "meta" not in result
 
+    def test_real_envelope_emits_legacy_metrics_shape(self):
+        """Current metrics include legacy nested metrics keys used by dashboard."""
+        from backend.cascor_service_adapter import _ServiceTrainingMonitor
+
+        client = _make_mock_client(get_metrics=real_metrics_current())
+        monitor = _ServiceTrainingMonitor(client)
+        result = monitor.get_current_metrics()
+
+        assert result["metrics"]["loss"] == 0.45
+        assert result["metrics"]["accuracy"] == 0.72
+
 
 # ===========================================================================
 # FIX-4: ServiceBackend.get_status()
@@ -304,6 +315,10 @@ class TestMetricFieldNormalization:
         # Raw names should not be present
         assert "loss" not in entry
         assert "accuracy" not in entry
+        # Legacy nested shape expected by metrics panel callbacks
+        assert entry["metrics"]["loss"] == 0.95
+        assert entry["metrics"]["accuracy"] == 0.35
+        assert entry["network_topology"]["hidden_units"] == 0
 
     def test_fake_field_names_preserved(self):
         """FakeCascorClient already uses canopy names."""
