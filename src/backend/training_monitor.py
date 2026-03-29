@@ -249,6 +249,13 @@ class TrainingState:
         "second_candidate_id",
         "second_candidate_score",
         "pool_metrics",
+        "phase_detail",
+        "grow_iteration",
+        "grow_max",
+        "best_correlation",
+        "candidates_trained",
+        "candidates_total",
+        "phase_started_at",
     }
 
     def __init__(self):
@@ -275,6 +282,14 @@ class TrainingState:
         self.__second_candidate_id: str = ""
         self.__second_candidate_score: float = 0.0
         self.__pool_metrics: Dict[str, Any] = {}
+
+        self.__phase_detail: str = ""
+        self.__grow_iteration: int = 0
+        self.__grow_max: int = 0
+        self.__best_correlation: float = 0.0
+        self.__candidates_trained: int = 0
+        self.__candidates_total: int = 0
+        self.__phase_started_at: str = ""
 
     def get_state(self) -> Dict[str, Any]:
         """
@@ -305,6 +320,13 @@ class TrainingState:
                 "second_candidate_id": self.__second_candidate_id,
                 "second_candidate_score": self.__second_candidate_score,
                 "pool_metrics": self.__pool_metrics,
+                "phase_detail": self.__phase_detail,
+                "grow_iteration": self.__grow_iteration,
+                "grow_max": self.__grow_max,
+                "best_correlation": self.__best_correlation,
+                "candidates_trained": self.__candidates_trained,
+                "candidates_total": self.__candidates_total,
+                "phase_started_at": self.__phase_started_at,
             }
 
     def update_state(self, **kwargs) -> None:

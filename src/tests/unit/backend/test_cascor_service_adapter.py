@@ -163,6 +163,61 @@ class TestRESTDelegation:
 
 
 # =========================================================================
+# Parameter normalization for canopy namespace
+# =========================================================================
+
+
+class TestCanopyParamsMapping:
+    """Verify get_canopy_params() handles both nested and flat payloads."""
+
+    def test_get_canopy_params_prefers_nested_params(self, adapter, mock_client):
+        mock_client.get_training_params.return_value = {
+            "data": {
+                "params": {
+                    "learning_rate": 0.02,
+                    "max_hidden_units": 11,
+                    "epochs_max": 250,
+                },
+                "learning_rate": 0.99,  # Should be ignored because nested params exist
+            }
+        }
+
+        result = adapter.get_canopy_params()
+
+        assert result["nn_learning_rate"] == 0.02
+        assert result["nn_max_hidden_units"] == 11
+        assert result["nn_max_total_epochs"] == 250
+
+    def test_get_canopy_params_supports_flat_data_payload(self, adapter, mock_client):
+        mock_client.get_training_params.return_value = {
+            "data": {
+                "learning_rate": 0.03,
+                "max_hidden_units": 7,
+                "epochs_max": 100,
+                "status": "started",
+                "meta": {"source": "test"},
+                "timestamp": "2026-03-29T00:00:00Z",
+                "dataset": "two_spiral",
+            }
+        }
+
+        result = adapter.get_canopy_params()
+
+        assert result == {
+            "nn_learning_rate": 0.03,
+            "nn_max_hidden_units": 7,
+            "nn_max_total_epochs": 100,
+        }
+
+    def test_get_canopy_params_returns_empty_dict_on_client_error(self, adapter, mock_client):
+        from juniper_cascor_client.exceptions import JuniperCascorConnectionError
+
+        mock_client.get_training_params.side_effect = JuniperCascorConnectionError("connection down")
+
+        assert adapter.get_canopy_params() == {}
+
+
+# =========================================================================
 # Network property
 # =========================================================================
 

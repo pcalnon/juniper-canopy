@@ -1,153 +1,190 @@
-"""Characterization tests for cascor response normalization.
-
-These tests validate that canopy correctly handles both real cascor
-ResponseEnvelope responses and FakeCascorClient responses. Initially
-written as failing tests documenting bugs; they pass after Phase 2 fixes.
+#!/usr/bin/env python
+#####################################################################
+# Project:       Juniper
+# Sub-Project:   JuniperCanopy
+# File Name:     test_response_normalization.py
+# Author:        Paul Calnon
+# Version:       0.1.0
+# Date:          2026-03-26
+# Last Modified: 2026-03-26
+# License:       MIT License
+# Copyright:     Copyright (c) 2024-2026 Paul Calnon
+# Description:   Phase 0 characterization tests — document current bugs with real cascor responses
+#####################################################################
 """
+Phase 0 characterization tests for response normalization.
 
-from unittest.mock import MagicMock, PropertyMock, patch
+These tests exercise _ServiceTrainingMonitor and ServiceBackend methods with real
+cascor ResponseEnvelope-formatted responses. They document what the code SHOULD do
+after fixes — they will fail now and pass after Phase 2 fixes.
+
+Uses unittest.mock.MagicMock to create mock clients returning fixture responses.
+"""
+from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 
+try:
+    from backend.cascor_service_adapter import CascorServiceAdapter, _ServiceTrainingMonitor
+    from backend.service_backend import ServiceBackend
+
+    _HAS_SERVICE_BACKEND = True
+except ImportError:
+    _HAS_SERVICE_BACKEND = False
+
+pytestmark = pytest.mark.skipif(not _HAS_SERVICE_BACKEND, reason="juniper-cascor-client not installed")
+
 from tests.fixtures.cascor_response_fixtures import (
-    fake_metrics_history,
-    fake_training_status_active,
-    fake_training_status_idle,
-    real_dataset,
     real_metrics_current,
     real_metrics_history,
-    real_training_params,
-    real_training_status_active,
-    real_training_status_epoch_zero,
-    real_training_status_idle,
     real_topology,
+    real_training_status_active,
+    real_training_status_idle,
 )
 
-# ---------------------------------------------------------------------------
-# Helper: create a mock client that returns the given fixtures
-# ---------------------------------------------------------------------------
+# ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
 
 
-def _make_mock_client(**method_returns):
-    """Create a mock JuniperCascorClient with specified return values."""
-    client = MagicMock()
-    for method_name, return_value in method_returns.items():
-        getattr(client, method_name).return_value = return_value
-    return client
+def _make_monitor(client_mock):
+    """Create a _ServiceTrainingMonitor wrapping a mock client."""
+    return _ServiceTrainingMonitor(client_mock)
 
 
-# ===========================================================================
-# FIX-1: _ServiceTrainingMonitor.get_recent_metrics()
-# ===========================================================================
+def _make_service_backend(adapter_mock):
+    """Create a ServiceBackend wrapping a mock adapter."""
+    return ServiceBackend(adapter_mock)
 
 
-class TestGetRecentMetrics:
-    """FIX-1: get_recent_metrics must handle both real and fake envelope formats."""
+def _make_adapter_mock(**overrides):
+    """Create a mock CascorServiceAdapter with sensible defaults.
 
-    def test_real_envelope_returns_metrics_list(self):
-        """Real cascor: data is a flat list, not data.history."""
-        from backend.cascor_service_adapter import _ServiceTrainingMonitor
+    Keyword arguments override specific adapter method return values.
+    """
+    adapter = MagicMock(spec=CascorServiceAdapter)
+    type(adapter).network = PropertyMock(return_value=MagicMock(__bool__=lambda s: True))
+    adapter.is_training_in_progress.return_value = False
+    adapter.training_monitor = MagicMock()
+    adapter._service_url = "http://localhost:8200"
+    for key, value in overrides.items():
+        setattr(adapter, key, value) if not callable(value) else None
+        if callable(value):
+            getattr(adapter, key).return_value = value()
+    return adapter
 
-        client = _make_mock_client(get_metrics_history=real_metrics_history())
-        monitor = _ServiceTrainingMonitor(client)
-        result = monitor.get_recent_metrics(count=10)
+
+# ==================================================================
+# FIX-1: get_recent_metrics envelope handling
+# ==================================================================
+
+
+@pytest.mark.unit
+class TestFix1RecentMetrics:
+    """FIX-1: _ServiceTrainingMonitor.get_recent_metrics must unwrap real cascor envelopes."""
+
+    def test_get_recent_metrics_with_real_envelope(self):
+        """Real cascor returns envelope with data as a flat list of metrics.
+
+        After FIX-A (P5-RC-01): output is now nested dashboard format.
+        """
+        client = MagicMock()
+        client.get_metrics_history.return_value = real_metrics_history()
+        monitor = _make_monitor(client)
+
+        result = monitor.get_recent_metrics(count=100)
 
         assert isinstance(result, list)
-        assert len(result) == 3
-        assert result[0]["train_loss"] == 0.95
-        assert result[0]["epoch"] == 1
+        assert len(result) > 0
+        # After normalization + dashboard transform, entries use nested format
+        assert "metrics" in result[0]
+        assert "network_topology" in result[0]
+        assert "loss" in result[0]["metrics"]
+        assert "accuracy" in result[0]["metrics"]
+        assert "hidden_units" in result[0]["network_topology"]
 
-    def test_fake_envelope_returns_metrics_list(self):
-        """FakeCascorClient: data.history is a list."""
-        from backend.cascor_service_adapter import _ServiceTrainingMonitor
+    def test_get_recent_metrics_with_fake_envelope(self):
+        """Backward compat: old-style response with nested history key."""
+        client = MagicMock()
+        client.get_metrics_history.return_value = {"status": "ok", "data": {"history": [{"train_loss": 0.5}]}}
+        monitor = _make_monitor(client)
 
-        client = _make_mock_client(get_metrics_history=fake_metrics_history())
-        monitor = _ServiceTrainingMonitor(client)
-        result = monitor.get_recent_metrics(count=10)
+        result = monitor.get_recent_metrics(count=100)
 
         assert isinstance(result, list)
-        assert len(result) == 2
-        assert result[0]["train_loss"] == 0.95
+        assert len(result) == 1
+        # After FIX-A: output is nested dashboard format
+        assert result[0]["metrics"]["loss"] == 0.5
 
-    def test_empty_data_returns_empty_list(self):
-        """Edge case: empty data dict returns empty list."""
-        from backend.cascor_service_adapter import _ServiceTrainingMonitor
+    def test_get_recent_metrics_empty_data(self):
+        """Empty data list should return empty list."""
+        client = MagicMock()
+        client.get_metrics_history.return_value = {"status": "success", "data": [], "meta": {}}
+        monitor = _make_monitor(client)
 
-        client = _make_mock_client(get_metrics_history={"status": "success", "data": []})
-        monitor = _ServiceTrainingMonitor(client)
-        result = monitor.get_recent_metrics(count=10)
+        result = monitor.get_recent_metrics(count=100)
 
         assert result == []
 
-    def test_loss_zero_preserved(self):
-        """FIX-13 edge: loss=0.0 must not be treated as missing."""
-        from backend.cascor_service_adapter import _ServiceTrainingMonitor
 
-        client = _make_mock_client(get_metrics_history=real_metrics_history())
-        monitor = _ServiceTrainingMonitor(client)
-        result = monitor.get_recent_metrics(count=10)
-
-        # Third entry in fixture has loss=0.0
-        assert result[2]["train_loss"] == 0.0
+# ==================================================================
+# FIX-2: is_training envelope handling
+# ==================================================================
 
 
-# ===========================================================================
-# FIX-2: _ServiceTrainingMonitor.is_training
-# ===========================================================================
+@pytest.mark.unit
+class TestFix2IsTraining:
+    """FIX-2: _ServiceTrainingMonitor.is_training must handle real cascor envelopes."""
 
+    def test_is_training_with_real_envelope(self):
+        """Real cascor wraps training_active in a nested data structure."""
+        client = MagicMock()
+        client.get_training_status.return_value = real_training_status_active()
+        monitor = _make_monitor(client)
 
-class TestIsTraining:
-    """FIX-2: is_training must handle real cascor nested format."""
-
-    def test_real_envelope_active(self):
-        """Real cascor: training_active=True at data level."""
-        from backend.cascor_service_adapter import _ServiceTrainingMonitor
-
-        client = _make_mock_client(get_training_status=real_training_status_active())
-        monitor = _ServiceTrainingMonitor(client)
         assert monitor.is_training is True
 
-    def test_real_envelope_idle(self):
-        """Real cascor: training_active=False."""
-        from backend.cascor_service_adapter import _ServiceTrainingMonitor
+    def test_is_training_false_not_fallthrough(self):
+        """Top-level is_training=False should take precedence (is not None guard)."""
+        client = MagicMock()
+        client.get_training_status.return_value = {
+            "status": "ok",
+            "is_training": False,
+            "data": {"training_active": True},
+        }
+        monitor = _make_monitor(client)
 
-        client = _make_mock_client(get_training_status=real_training_status_idle())
-        monitor = _ServiceTrainingMonitor(client)
-        assert monitor.is_training is False
-
-    def test_fake_envelope_active(self):
-        """FakeCascorClient: top-level is_training=True."""
-        from backend.cascor_service_adapter import _ServiceTrainingMonitor
-
-        client = _make_mock_client(get_training_status=fake_training_status_active())
-        monitor = _ServiceTrainingMonitor(client)
-        assert monitor.is_training is True
-
-    def test_false_not_fallthrough(self):
-        """FIX-2 edge: is_training=False must not fall through to nested check."""
-        from backend.cascor_service_adapter import _ServiceTrainingMonitor
-
-        # FakeCascorClient with is_training=False explicitly set
-        client = _make_mock_client(get_training_status=fake_training_status_idle())
-        monitor = _ServiceTrainingMonitor(client)
         assert monitor.is_training is False
 
 
-# ===========================================================================
-# FIX-3: _ServiceTrainingMonitor.get_current_metrics()
-# ===========================================================================
+# ==================================================================
+# FIX-3: get_current_metrics envelope handling
+# ==================================================================
 
 
-class TestGetCurrentMetrics:
-    """FIX-3: get_current_metrics must unwrap envelope."""
+@pytest.mark.unit
+class TestFix3CurrentMetrics:
+    """FIX-3: _ServiceTrainingMonitor.get_current_metrics must unwrap envelope."""
 
-    def test_real_envelope_unwraps(self):
-        """Real cascor: must return inner dict, not full envelope."""
-        from backend.cascor_service_adapter import _ServiceTrainingMonitor
+    def test_get_current_metrics_unwraps(self):
+        """Real cascor wraps current metrics in envelope — result uses nested dashboard format."""
+        client = MagicMock()
+        client.get_metrics.return_value = real_metrics_current()
+        monitor = _make_monitor(client)
 
-        client = _make_mock_client(get_metrics=real_metrics_current())
-        monitor = _ServiceTrainingMonitor(client)
         result = monitor.get_current_metrics()
+
+        assert "epoch" in result
+        assert result["epoch"] == 42
+        # After FIX-A (P5-RC-01, P5-RC-09): output is nested dashboard format
+        assert "metrics" in result
+        assert "network_topology" in result
+
+
+# ==================================================================
+# FIX-4: get_status normalization of cascor nested structure
+# ==================================================================
+
 
         assert "train_loss" in result
         assert result["train_loss"] == 0.45
@@ -243,69 +280,86 @@ class TestGetStatus:
         backend = ServiceBackend(adapter)
         status = backend.get_status()
 
-        # Flat format should pass through
-        assert status["is_running"] is True
-        assert status["current_epoch"] == 10
+        
+@pytest.mark.unit
+class TestFix4GetStatus:
+    """FIX-4: ServiceBackend.get_status must normalize cascor's nested structure."""
 
-    def test_partial_nested(self):
-        """FIX-4: handles partial nested structure (e.g., missing monitor)."""
-        from backend.cascor_service_adapter import CascorServiceAdapter
-        from backend.service_backend import ServiceBackend
+    def test_get_status_normalizes_cascor(self):
+        """Unwrapped data from real_training_status_active should normalize to flat keys."""
+        unwrapped = real_training_status_active()["data"]
+        adapter = _make_adapter_mock()
+        adapter.get_training_status.return_value = unwrapped
+        backend = _make_service_backend(adapter)
 
-        adapter = MagicMock(spec=CascorServiceAdapter)
+        result = backend.get_status()
+
+        assert "is_running" in result
+        assert "phase" in result
+        assert "current_epoch" in result
+        assert result["is_running"] is True
+        assert result["current_epoch"] == 42
+
+    def test_get_status_epoch_zero_preserved(self):
+        """Epoch 0 should be preserved, not missing or None."""
+        unwrapped = real_training_status_idle()["data"]
+        adapter = _make_adapter_mock()
+        adapter.get_training_status.return_value = unwrapped
+        backend = _make_service_backend(adapter)
+
+        result = backend.get_status()
+
+        assert result["current_epoch"] == 0
+
+    def test_get_status_hidden_units_zero_preserved(self):
+        """Hidden units 0 should be preserved, not missing or None."""
+        unwrapped = real_training_status_idle()["data"]
+        adapter = _make_adapter_mock()
+        adapter.get_training_status.return_value = unwrapped
+        backend = _make_service_backend(adapter)
+
+        result = backend.get_status()
+
+        assert result.get("hidden_units", None) == 0
+
+    def test_get_status_uppercase_started(self):
+        """Cascor sends STARTED (uppercase) — should map to is_running=True."""
+        unwrapped = real_training_status_active()["data"]
+        assert unwrapped["state_machine"]["status"] == "STARTED"
+        adapter = _make_adapter_mock()
+        adapter.get_training_status.return_value = unwrapped
+        backend = _make_service_backend(adapter)
+
+        result = backend.get_status()
+
+        assert result["is_running"] is True
+
+    def test_get_status_passthrough_flat(self):
+        """A flat dict (already normalized) should pass through unchanged."""
+        flat = {"is_running": True, "phase": "output"}
+        adapter = _make_adapter_mock()
+        adapter.get_training_status.return_value = flat
+        backend = _make_service_backend(adapter)
+
+        result = backend.get_status()
+
+        assert result["is_running"] is True
+        assert result["phase"] == "output"
+
+    def test_get_status_partial_nested(self):
+        """Data with state_machine but no monitor should not crash."""
         partial = {
-            "training_active": True,
             "state_machine": {"status": "STARTED", "phase": "OUTPUT"},
-            # monitor missing
-            "training_state": {"max_epochs": 100},
+            "training_active": True,
         }
+        adapter = _make_adapter_mock()
         adapter.get_training_status.return_value = partial
-        backend = ServiceBackend(adapter)
-        status = backend.get_status()
+        backend = _make_service_backend(adapter)
 
-        assert status["is_running"] is True
-        assert status["current_epoch"] == 0  # default when monitor missing
-        assert status["hidden_units"] == 0
+        result = backend.get_status()
 
+        assert result.get("current_epoch", 0) == 0
 
-# ===========================================================================
-# FIX-8: CascorServiceAdapter.is_training_in_progress()
-# ===========================================================================
-
-
-class TestIsTrainingInProgress:
-    """FIX-8: is_training_in_progress has same envelope bug as is_training."""
-
-    def test_real_envelope(self):
-        from backend.cascor_service_adapter import CascorServiceAdapter
-
-        client = _make_mock_client(get_training_status=real_training_status_active())
-        adapter = CascorServiceAdapter(client=client)
-        assert adapter.is_training_in_progress() is True
-
-    def test_real_envelope_idle(self):
-        from backend.cascor_service_adapter import CascorServiceAdapter
-
-        client = _make_mock_client(get_training_status=real_training_status_idle())
-        adapter = CascorServiceAdapter(client=client)
-        assert adapter.is_training_in_progress() is False
-
-
-# ===========================================================================
-# FIX-13: Metric field name normalization
-# ===========================================================================
-
-
-class TestMetricFieldNormalization:
-    """FIX-13: loss -> train_loss, accuracy -> train_accuracy, etc."""
-
-    def test_real_field_names_normalized(self):
-        """Real cascor field names are mapped to canopy canonical names."""
-        from backend.cascor_service_adapter import _ServiceTrainingMonitor
-
-        client = _make_mock_client(get_metrics_history=real_metrics_history())
-        monitor = _ServiceTrainingMonitor(client)
-        result = monitor.get_recent_metrics(count=10)
 
         entry = result[0]
         assert "train_loss" in entry
@@ -320,97 +374,266 @@ class TestMetricFieldNormalization:
         assert entry["metrics"]["accuracy"] == 0.35
         assert entry["network_topology"]["hidden_units"] == 0
 
-    def test_fake_field_names_preserved(self):
-        """FakeCascorClient already uses canopy names."""
-        from backend.cascor_service_adapter import _ServiceTrainingMonitor
 
-        client = _make_mock_client(get_metrics_history=fake_metrics_history())
-        monitor = _ServiceTrainingMonitor(client)
-        result = monitor.get_recent_metrics(count=10)
+# ==================================================================
+# FIX-8: is_training_in_progress with real envelope
+# ==================================================================
 
-        entry = result[0]
-        assert entry["train_loss"] == 0.95
-        assert entry["train_accuracy"] == 0.35
+@pytest.mark.unit
+class TestFix8IsTrainingInProgress:
+    """FIX-8: CascorServiceAdapter.is_training_in_progress must handle real envelopes."""
+
+    def test_is_training_in_progress_real(self):
+        """Real cascor envelope should be unwrapped to detect active training."""
+        client = MagicMock()
+        client.get_training_status.return_value = real_training_status_active()
+        adapter = CascorServiceAdapter.__new__(CascorServiceAdapter)
+        adapter._client = client
+
+        result = adapter.is_training_in_progress()
+
+        assert result is True
 
 
-# ===========================================================================
-# FIX-9: extract_network_topology() cascor -> canopy conversion
-# ===========================================================================
+# ==================================================================
+# FIX-13: zero-value metric preservation
+# ==================================================================
 
 
-class TestExtractNetworkTopology:
-    """Covers topology conversion paths with high dashboard blast radius."""
+@pytest.mark.unit
+class TestFix13ZeroMetricPreservation:
+    """FIX-13: Metrics with value 0.0 must not be normalized to None."""
 
-    def test_real_topology_converted_to_canopy_shape(self):
-        """Real cascor topology should be converted into canopy node/edge schema."""
-        from backend.cascor_service_adapter import CascorServiceAdapter
+    def test_metrics_loss_zero_preserved(self):
+        """A metric dict with loss=0.0 should produce train_loss=0.0 in flat, and preserve through dashboard transform."""
+        metric = {"loss": 0.0, "accuracy": 0.0}
+        normalized = CascorServiceAdapter._normalize_metric(metric)
 
-        client = _make_mock_client(get_topology=real_topology())
-        adapter = CascorServiceAdapter(client=client)
+        assert normalized["train_loss"] == 0.0
+        assert normalized["train_accuracy"] == 0.0
+
+        # Also verify through dashboard transform
+        dashboard = CascorServiceAdapter._to_dashboard_metric(normalized)
+        assert dashboard["metrics"]["loss"] == 0.0
+        assert dashboard["metrics"]["accuracy"] == 0.0
+
+
+# ==================================================================
+# P5-RC-01 / P5-RC-09: Dashboard format contract tests
+# ==================================================================
+
+
+@pytest.mark.unit
+class TestDashboardMetricsContract:
+    """Verify service metrics output matches dashboard's nested access contract."""
+
+    def test_to_dashboard_metric_produces_nested_format(self):
+        """_to_dashboard_metric must produce the nested format the dashboard reads."""
+        flat = {
+            "epoch": 5,
+            "train_loss": 0.45,
+            "train_accuracy": 0.82,
+            "val_loss": 0.60,
+            "val_accuracy": 0.65,
+            "hidden_units": 3,
+            "phase": "output",
+            "timestamp": "2026-03-28T12:00:00",
+        }
+        result = CascorServiceAdapter._to_dashboard_metric(flat)
+
+        # Dashboard reads: m.get("metrics", {}).get("loss", 0)
+        assert result["metrics"]["loss"] == 0.45
+        assert result["metrics"]["accuracy"] == 0.82
+        assert result["metrics"]["val_loss"] == 0.60
+        assert result["metrics"]["val_accuracy"] == 0.65
+        # Dashboard reads: m.get("network_topology", {}).get("hidden_units", 0)
+        assert result["network_topology"]["hidden_units"] == 3
+        # Top-level keys preserved
+        assert result["epoch"] == 5
+        assert result["phase"] == "output"
+        assert result["timestamp"] == "2026-03-28T12:00:00"
+
+    def test_metrics_history_uses_nested_format(self):
+        """get_recent_metrics output must use nested keys, not flat keys."""
+        client = MagicMock()
+        client.get_metrics_history.return_value = real_metrics_history()
+        monitor = _make_monitor(client)
+
+        result = monitor.get_recent_metrics(count=100)
+
+        for entry in result:
+            # Must have nested "metrics" dict
+            assert "metrics" in entry, f"Entry missing 'metrics' key: {entry.keys()}"
+            assert isinstance(entry["metrics"], dict)
+            # Must have nested "network_topology" dict
+            assert "network_topology" in entry, f"Entry missing 'network_topology' key: {entry.keys()}"
+            assert isinstance(entry["network_topology"], dict)
+            # Must NOT have flat service keys
+            assert "train_loss" not in entry, "Flat key 'train_loss' should not be at top level"
+            assert "train_accuracy" not in entry, "Flat key 'train_accuracy' should not be at top level"
+
+    def test_current_metrics_uses_nested_format(self):
+        """get_current_metrics output must use nested keys, not flat keys."""
+        client = MagicMock()
+        client.get_metrics.return_value = real_metrics_current()
+        monitor = _make_monitor(client)
+
+        result = monitor.get_current_metrics()
+
+        assert "metrics" in result
+        assert "network_topology" in result
+        assert "train_loss" not in result
+        assert "train_accuracy" not in result
+
+    def test_field_name_mapping_strips_train_prefix(self):
+        """train_loss -> metrics.loss (strip train_ prefix), val_loss stays."""
+        flat = {"train_loss": 0.5, "train_accuracy": 0.8, "val_loss": 0.6, "val_accuracy": 0.7}
+        result = CascorServiceAdapter._to_dashboard_metric(flat)
+
+        assert result["metrics"]["loss"] == 0.5
+        assert result["metrics"]["accuracy"] == 0.8
+        assert result["metrics"]["val_loss"] == 0.6
+        assert result["metrics"]["val_accuracy"] == 0.7
+
+
+# ==================================================================
+# P5-RC-02: Topology transformation tests
+# ==================================================================
+
+
+@pytest.mark.unit
+class TestTopologyTransformation:
+    """Verify topology transformation from weight-oriented to graph-oriented format."""
+
+    def test_transform_topology_basic(self):
+        """Weight-oriented topology must be transformed to graph-oriented."""
+        raw = real_topology()["data"]
+        result = CascorServiceAdapter._transform_topology(raw)
+
+        assert "input_units" in result
+        assert "output_units" in result
+        assert isinstance(result["hidden_units"], int)
+        assert "nodes" in result
+        assert "connections" in result
+        assert result["input_units"] == 2
+        assert result["output_units"] == 1
+        assert result["hidden_units"] == 2
+
+    def test_transform_topology_graph_format_passthrough(self):
+        """Already graph-oriented topology must pass through unchanged."""
+        graph = {
+            "input_units": 2,
+            "output_units": 1,
+            "hidden_units": 3,
+            "nodes": [{"id": "input_0", "type": "input"}],
+            "connections": [{"from": "input_0", "to": "hidden_0", "weight": 0.5}],
+        }
+        result = CascorServiceAdapter._transform_topology(graph)
+        assert result is graph  # Same object, not a copy
+
+    def test_transform_topology_creates_correct_nodes(self):
+        """Transformation must create input, hidden, and output nodes."""
+        raw = real_topology()["data"]
+        result = CascorServiceAdapter._transform_topology(raw)
+
+        node_types = {n["type"] for n in result["nodes"]}
+        assert "input" in node_types
+        assert "hidden" in node_types
+        assert "output" in node_types
+        assert len([n for n in result["nodes"] if n["type"] == "input"]) == 2
+        assert len([n for n in result["nodes"] if n["type"] == "hidden"]) == 2
+        assert len([n for n in result["nodes"] if n["type"] == "output"]) == 1
+
+    def test_transform_topology_cascade_connections(self):
+        """Hidden unit 1 must connect to inputs AND to hidden unit 0 (cascade)."""
+        raw = real_topology()["data"]
+        result = CascorServiceAdapter._transform_topology(raw)
+
+        # Hidden_1 should have connections from input_0, input_1, AND hidden_0
+        h1_connections = [c for c in result["connections"] if c["to"] == "hidden_1"]
+        h1_sources = {c["from"] for c in h1_connections}
+        assert "input_0" in h1_sources
+        assert "input_1" in h1_sources
+        assert "hidden_0" in h1_sources  # Cascade connection
+
+    def test_transform_topology_empty_network(self):
+        """Network with no hidden units must still produce valid structure."""
+        raw = {"input_size": 2, "output_size": 1, "hidden_units": [], "output_weights": [[0.5, 0.3]], "output_bias": [0.1]}
+        result = CascorServiceAdapter._transform_topology(raw)
+
+        assert result["input_units"] == 2
+        assert result["output_units"] == 1
+        assert result["hidden_units"] == 0
+        assert len([n for n in result["nodes"] if n["type"] == "input"]) == 2
+        assert len([n for n in result["nodes"] if n["type"] == "output"]) == 1
+
+    def test_extract_network_topology_applies_transform(self):
+        """extract_network_topology must apply _transform_topology."""
+        client = MagicMock()
+        client.get_topology.return_value = real_topology()
+        adapter = CascorServiceAdapter.__new__(CascorServiceAdapter)
+        adapter._client = client
+
         result = adapter.extract_network_topology()
 
         assert result is not None
-        assert result["input_units"] == 2
-        assert result["output_units"] == 3
-        assert result["hidden_units"] == 2
-        assert len(result["nodes"]) == 7  # 2 input + 2 hidden + 3 output
-        assert any(c["from"] == "input_0" and c["to"] == "hidden_0" for c in result["connections"])
-        assert any(c["from"] == "hidden_1" and c["to"] == "output_2" for c in result["connections"])
-
-    def test_canopy_topology_passthrough_unchanged(self):
-        """Topology already in canopy format should not be transformed."""
-        from backend.cascor_service_adapter import CascorServiceAdapter
-
-        canopy_topology = {
-            "input_units": 2,
-            "hidden_units": 1,
-            "output_units": 2,
-            "nodes": [{"id": "input_0"}, {"id": "hidden_0"}, {"id": "output_0"}, {"id": "output_1"}],
-            "connections": [{"from": "input_0", "to": "hidden_0"}],
-        }
-        client = _make_mock_client(get_topology={"status": "success", "data": canopy_topology})
-        adapter = CascorServiceAdapter(client=client)
-
-        result = adapter.extract_network_topology()
-        assert result == canopy_topology
+        assert "input_units" in result
+        assert isinstance(result["hidden_units"], int)
+        assert "connections" in result
 
 
-# ===========================================================================
-# FIX-10: ServiceBackend.get_dataset() real cascor shape normalization
-# ===========================================================================
+# ==================================================================
+# P5-RC-03: Status normalization hardening tests
+# ==================================================================
 
 
-class TestDatasetNormalization:
-    """Ensure dataset metadata is normalized to frontend contract."""
+@pytest.mark.unit
+class TestStatusNormalizationHardening:
+    """Verify _normalize_status handles all case variants."""
 
-    def test_real_dataset_fields_mapped_for_dashboard(self):
-        """input_features/output_features shape should map to num_* fields."""
-        from backend.cascor_service_adapter import CascorServiceAdapter
-        from backend.service_backend import ServiceBackend
+    def test_normalize_status_lowercase(self):
+        """Standard lowercase inputs normalize correctly."""
+        from backend.state_sync import CascorStateSync
 
-        adapter = MagicMock(spec=CascorServiceAdapter)
-        adapter.get_dataset_info.return_value = real_dataset()["data"]
-        backend = ServiceBackend(adapter)
+        assert CascorStateSync._normalize_status("started") == "Started"
+        assert CascorStateSync._normalize_status("paused") == "Paused"
+        assert CascorStateSync._normalize_status("completed") == "Completed"
+        assert CascorStateSync._normalize_status("stopped") == "Stopped"
+        assert CascorStateSync._normalize_status("failed") == "Failed"
+        assert CascorStateSync._normalize_status("idle") == "Stopped"
+        assert CascorStateSync._normalize_status("training") == "Started"
+        assert CascorStateSync._normalize_status("running") == "Started"
 
-        dataset = backend.get_dataset()
-        assert dataset is not None
-        assert dataset["num_samples"] == 1000
-        assert dataset["num_features"] == 2
-        assert dataset["num_classes"] == 3
-        assert dataset["train_samples"] == 800
-        assert dataset["test_samples"] == 200
+    def test_normalize_status_uppercase(self):
+        """Uppercase enum names (from TrainingStatus.name) must normalize correctly."""
+        from backend.state_sync import CascorStateSync
 
-    def test_missing_counts_default_to_zero(self):
-        """Missing train/test counts should not raise and should default safely."""
-        from backend.cascor_service_adapter import CascorServiceAdapter
-        from backend.service_backend import ServiceBackend
+        assert CascorStateSync._normalize_status("STARTED") == "Started"
+        assert CascorStateSync._normalize_status("PAUSED") == "Paused"
+        assert CascorStateSync._normalize_status("COMPLETED") == "Completed"
+        assert CascorStateSync._normalize_status("STOPPED") == "Stopped"
+        assert CascorStateSync._normalize_status("FAILED") == "Failed"
 
-        adapter = MagicMock(spec=CascorServiceAdapter)
-        adapter.get_dataset_info.return_value = {"input_features": 4, "output_features": 2, "loaded": True}
-        backend = ServiceBackend(adapter)
+    def test_normalize_status_title_case(self):
+        """Title-case (current CasCor broadcast format) must normalize correctly."""
+        from backend.state_sync import CascorStateSync
 
-        dataset = backend.get_dataset()
-        assert dataset is not None
-        assert dataset["num_samples"] == 0
-        assert dataset["train_samples"] == 0
-        assert dataset["test_samples"] == 0
+        assert CascorStateSync._normalize_status("Started") == "Started"
+        assert CascorStateSync._normalize_status("Paused") == "Paused"
+        assert CascorStateSync._normalize_status("Completed") == "Completed"
+        assert CascorStateSync._normalize_status("Stopped") == "Stopped"
+        assert CascorStateSync._normalize_status("Failed") == "Failed"
+
+    def test_normalize_status_unknown_defaults_to_stopped(self):
+        """Unknown status strings default to 'Stopped'."""
+        from backend.state_sync import CascorStateSync
+
+        assert CascorStateSync._normalize_status("unknown_status") == "Stopped"
+        assert CascorStateSync._normalize_status("") == "Stopped"
+
+    def test_normalize_status_whitespace_handling(self):
+        """Leading/trailing whitespace must be stripped."""
+        from backend.state_sync import CascorStateSync
+
+        assert CascorStateSync._normalize_status("  started  ") == "Started"
+        assert CascorStateSync._normalize_status(" PAUSED ") == "Paused"

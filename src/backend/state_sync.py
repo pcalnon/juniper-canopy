@@ -9,7 +9,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from backend.cascor_service_adapter import _first_defined
+from backend.cascor_service_adapter import CascorServiceAdapter, _first_defined
 
 logger = logging.getLogger("juniper_canopy.backend.state_sync")
 
@@ -59,35 +59,27 @@ class CascorStateSync:
         try:
             status_response = self._client.get_training_status()
             data = status_response.get("data", {})
-
             if isinstance(data, dict):
-                # is_training: explicit None check prevents False falling through
-                is_training_top = status_response.get("is_training")  # FakeCascorClient
+                is_training_top = status_response.get("is_training")
                 if is_training_top is not None:
                     state.is_training = is_training_top
                 else:
-                    state.is_training = data.get("training_active", False)  # Real server
-
-                # State string from nested structure
-                sm = data.get("state_machine", {}) if isinstance(data.get("state_machine"), dict) else {}
-                ts = data.get("training_state", {}) if isinstance(data.get("training_state"), dict) else {}
-                raw_state = data.get("state") or (sm.get("status", "").lower() if isinstance(sm, dict) and sm else None) or (sm.get("current_state", "").lower() if isinstance(sm, dict) and sm else None) or "idle"  # FakeCascorClient: data.state
+                    state.is_training = data.get("training_active", False)
+                sm = data.get("state_machine", {})
+                ts = data.get("training_state", {})
+                raw_state = data.get("state") or (sm.get("status", "").lower() if isinstance(sm, dict) else None) or (sm.get("current_state", "").lower() if isinstance(sm, dict) else None) or "idle"
                 state.status = self._normalize_status(raw_state)
-
-                # Phase (not previously extracted)
                 raw_phase = (sm.get("phase") if isinstance(sm, dict) else None) or (ts.get("phase") if isinstance(ts, dict) else None) or "Idle"
                 state.phase = raw_phase.lower() if isinstance(raw_phase, str) else "idle"
-
-                # Epoch and max_epochs: _first_defined preserves 0
-                monitor = data.get("monitor", {}) if isinstance(data.get("monitor"), dict) else {}
+                monitor = data.get("monitor", {})
                 state.current_epoch = _first_defined(
-                    data.get("epoch"),  # FakeCascorClient
+                    data.get("epoch"),
                     monitor.get("current_epoch") if isinstance(monitor, dict) else None,
                     ts.get("current_epoch") if isinstance(ts, dict) else None,
                     default=0,
                 )
                 state.max_epochs = _first_defined(
-                    data.get("max_epochs"),  # FakeCascorClient
+                    data.get("max_epochs"),
                     ts.get("max_epochs") if isinstance(ts, dict) else None,
                     ts.get("epochs_max") if isinstance(ts, dict) else None,
                     default=0,
@@ -106,10 +98,13 @@ class CascorStateSync:
             params_response = self._client.get_training_params()
             data = params_response.get("data", {})
             if isinstance(data, dict):
-                state.params = data.get("params", {})  # FakeCascorClient: data.params
-                if not state.params:
-                    # Real server: params are flat fields in data
-                    state.params = {k: v for k, v in data.items() if k not in ("epochs", "dataset", "status", "meta", "timestamp")}
+                raw_params = data.get("params", {})
+                if not raw_params:
+                    raw_params = {k: v for k, v in data.items() if k not in ("epochs", "dataset", "status", "meta", "timestamp")}
+                # Map CasCor param names to Canopy nn_*/cn_* namespace
+                reverse_map = CascorServiceAdapter._CASCOR_TO_CANOPY_PARAM_MAP
+                mapped = {reverse_map.get(k, k): v for k, v in raw_params.items()}
+                state.params = mapped
         except Exception as e:
             logger.warning(f"Failed to fetch training params during sync: {e}")
 
@@ -117,23 +112,28 @@ class CascorStateSync:
         try:
             topology_response = self._client.get_topology()
             if isinstance(topology_response, dict):
-                state.topology = topology_response.get("data", topology_response)
+                raw_topo = topology_response.get("data", topology_response)
+                if isinstance(raw_topo, dict):
+                    state.topology = CascorServiceAdapter._transform_topology(raw_topo)
+                else:
+                    state.topology = raw_topo
         except Exception as e:
             logger.debug(f"Failed to fetch topology during sync (may not exist): {e}")
 
         # --- Metrics history (FIX-6) ---
         try:
             history_response = self._client.get_metrics_history(count=metrics_limit)
+            raw_history = []
             if isinstance(history_response, dict):
                 data = history_response.get("data", history_response)
                 if isinstance(data, list):
-                    state.metrics_history = data  # Real server: data is the list
+                    raw_history = data
                 elif isinstance(data, dict):
-                    state.metrics_history = data.get("history", [])  # FakeCascorClient
-                else:
-                    state.metrics_history = []
+                    raw_history = data.get("history", [])
             elif isinstance(history_response, list):
-                state.metrics_history = history_response
+                raw_history = history_response
+            # Normalize raw CasCor metrics to dashboard's nested format
+            state.metrics_history = [CascorServiceAdapter._to_dashboard_metric(CascorServiceAdapter._normalize_metric(m)) for m in raw_history]
         except Exception as e:
             logger.debug(f"Failed to fetch metrics history during sync: {e}")
 
@@ -142,23 +142,22 @@ class CascorStateSync:
 
     @staticmethod
     def _normalize_status(raw: str) -> str:
-        """Map cascor state strings to canopy display strings."""
+        """Normalize status string to canonical title-case representation.
+
+        Case-insensitive: handles lowercase, title-case, and uppercase inputs.
+        This protects all callers including the relay callback path and future
+        backends that may send uppercase enum names.
+        """
+        key = raw.strip().lower() if isinstance(raw, str) else ""
         mapping = {
             "idle": "Stopped",
             "training": "Started",
+            "started": "Started",
             "paused": "Paused",
             "complete": "Completed",
-            "failed": "Failed",
-            # Real server state_machine.status values (lowercased)
-            "started": "Started",
             "completed": "Completed",
+            "failed": "Failed",
             "stopped": "Stopped",
             "running": "Started",
-            # Handle already-normalized values
-            "Stopped": "Stopped",
-            "Started": "Started",
-            "Paused": "Paused",
-            "Completed": "Completed",
-            "Failed": "Failed",
         }
-        return mapping.get(raw, "Stopped")
+        return mapping.get(key, "Stopped")
