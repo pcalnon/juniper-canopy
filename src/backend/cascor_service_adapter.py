@@ -73,12 +73,9 @@ class _ServiceTrainingMonitor:
     def is_training(self) -> bool:
         try:
             status = self._client.get_training_status()
-            # Check top-level first (FakeCascorClient), with explicit None guard
-            # so that is_training=False doesn't fall through
             is_training_top = status.get("is_training")
             if is_training_top is not None:
                 return is_training_top
-            # Unwrap envelope and check nested (real server)
             data = status.get("data", {})
             if isinstance(data, dict):
                 return data.get("training_active", False)
@@ -91,7 +88,10 @@ class _ServiceTrainingMonitor:
             result = self._client.get_metrics()
             if isinstance(result, dict) and "data" in result:
                 data = result["data"]
-                return CascorServiceAdapter._normalize_metric(data) if isinstance(data, dict) else result
+                if isinstance(data, dict):
+                    flat = CascorServiceAdapter._normalize_metric(data)
+                    return CascorServiceAdapter._to_dashboard_metric(flat)
+                return result
             return result if isinstance(result, dict) else {}
         except JuniperCascorClientError:
             return {}
@@ -102,10 +102,10 @@ class _ServiceTrainingMonitor:
             if isinstance(result, dict):
                 data = result.get("data", result)
                 if isinstance(data, list):
-                    return [CascorServiceAdapter._normalize_metric(m) for m in data]
+                    return [CascorServiceAdapter._to_dashboard_metric(CascorServiceAdapter._normalize_metric(m)) for m in data]
                 if isinstance(data, dict):
                     history = data.get("history", [])
-                    return [CascorServiceAdapter._normalize_metric(m) for m in history]
+                    return [CascorServiceAdapter._to_dashboard_metric(CascorServiceAdapter._normalize_metric(m)) for m in history]
             return result if isinstance(result, list) else []
         except JuniperCascorClientError:
             return []
@@ -223,7 +223,15 @@ class CascorServiceAdapter:
                                 from backend.state_sync import CascorStateSync
 
                                 status = CascorStateSync._normalize_status(data.get("status", data.get("state", "")))
-                                self._state_update_callback(status=status, phase=data.get("phase", ""))
+                                self._state_update_callback(
+                                    status=status,
+                                    phase=data.get("phase", ""),
+                                    current_epoch=data.get("current_epoch"),
+                                    current_step=data.get("current_step"),
+                                    learning_rate=data.get("learning_rate"),
+                                    max_hidden_units=data.get("max_hidden_units"),
+                                    max_epochs=data.get("max_epochs"),
+                                )
                             except Exception as se:  # nosec B110
                                 logger.debug(f"State update callback error: {se}")
 
@@ -364,7 +372,7 @@ class CascorServiceAdapter:
         "nn_growth_convergence_threshold": "patience",
         "cn_pool_size": "candidate_pool_size",
         "cn_correlation_threshold": "correlation_threshold",
-        "cn_training_iterations": "candidate_epochs",
+        "cn_candidate_learning_rate": "candidate_learning_rate",
     }
 
     _CASCOR_TO_CANOPY_PARAM_MAP = {v: k for k, v in _CANOPY_TO_CASCOR_PARAM_MAP.items()}
@@ -393,7 +401,6 @@ class CascorServiceAdapter:
             # Unwrap the response: try FakeCascorClient nested format first
             params = result.get("data", {}).get("params", {})
             if not params and isinstance(result.get("data"), dict):
-                # Real server: params are flat fields in data, filter non-param keys
                 params = {k: v for k, v in result.get("data", {}).items() if k not in ("epochs", "dataset", "status", "meta", "timestamp")}
             # Map to canopy namespace
             canopy_params = {}
@@ -423,13 +430,13 @@ class CascorServiceAdapter:
 
     @staticmethod
     def _is_cascor_nested(data: dict) -> bool:
-        """Detect whether the data dict uses cascor's nested structure
-        (state_machine/monitor/training_state) vs the flat demo format.
+        """Detect whether data uses cascor's nested structure.
 
-        Uses positive detection of nested structure rather than checking
-        for flat keys, which could misfire if cascor ever adds a flat field.
+        Uses positive detection of nested structure (state_machine/monitor/
+        training_state) rather than checking for flat keys, which could
+        misfire if cascor ever adds a flat field.
         """
-        return "state_machine" in data or "training_active" in data
+        return isinstance(data, dict) and ("state_machine" in data or "training_active" in data)
 
     @staticmethod
     def _normalize_metric(entry: dict) -> dict:
@@ -437,7 +444,8 @@ class CascorServiceAdapter:
 
         Handles both real cascor names (loss, accuracy, validation_loss,
         validation_accuracy) and canopy names (train_loss, train_accuracy,
-        val_loss, val_accuracy). Uses _first_defined to preserve 0.0 values.
+        val_loss, val_accuracy).  Uses ``"key" in entry`` checks instead of
+        ``or`` chains so that valid 0.0 values are preserved.
         """
         return {
             "epoch": entry.get("epoch", 0),
@@ -462,6 +470,30 @@ class CascorServiceAdapter:
             "timestamp": entry.get("timestamp"),
         }
 
+    @staticmethod
+    def _to_dashboard_metric(flat: dict) -> dict:
+        """Transform flat normalized metric to dashboard's nested format.
+
+        Matches the format produced by DemoMode._emit_training_metrics().
+        The dashboard (metrics_panel.py) reads metrics using nested access:
+          m.get("metrics", {}).get("loss", 0)
+          m.get("network_topology", {}).get("hidden_units", 0)
+        """
+        return {
+            "epoch": flat.get("epoch", 0),
+            "metrics": {
+                "loss": flat.get("train_loss"),
+                "accuracy": flat.get("train_accuracy"),
+                "val_loss": flat.get("val_loss"),
+                "val_accuracy": flat.get("val_accuracy"),
+            },
+            "network_topology": {
+                "hidden_units": flat.get("hidden_units", 0),
+            },
+            "phase": flat.get("phase"),
+            "timestamp": flat.get("timestamp"),
+        }
+
     # ------------------------------------------------------------------
     # Status & metrics
     # ------------------------------------------------------------------
@@ -480,48 +512,77 @@ class CascorServiceAdapter:
             logger.error(f"Failed to get network data: {e}")
             return {}
 
+    @staticmethod
+    def _transform_topology(raw: dict) -> dict:
+        """Transform CasCor weight-oriented topology to graph-oriented format.
+
+        CasCor returns: {input_size, output_size, hidden_units: [{weights, bias, activation}], output_weights, output_bias}
+        Dashboard expects: {input_units, output_units, hidden_units: int, nodes: [...], connections: [...]}
+
+        Cascade correlation architecture: each hidden unit connects to all inputs
+        AND all prior hidden units (cascaded connections).
+        """
+        if "input_units" in raw:
+            return raw  # Already in graph format
+
+        input_size = raw.get("input_size", 0)
+        output_size = raw.get("output_size", 0)
+        hidden_units_data = raw.get("hidden_units", [])
+        num_hidden = len(hidden_units_data) if isinstance(hidden_units_data, list) else 0
+
+        nodes = []
+        connections = []
+
+        # Input nodes
+        for i in range(input_size):
+            nodes.append({"id": f"input_{i}", "type": "input", "layer": 0})
+
+        # Hidden nodes with cascade connections
+        for h, unit in enumerate(hidden_units_data if isinstance(hidden_units_data, list) else []):
+            nodes.append({"id": f"hidden_{h}", "type": "hidden", "layer": h + 1})
+            weights = unit.get("weights", [])
+            w_idx = 0
+            # Connections from inputs
+            for i in range(input_size):
+                if w_idx < len(weights):
+                    connections.append({"from": f"input_{i}", "to": f"hidden_{h}", "weight": float(weights[w_idx])})
+                    w_idx += 1
+            # Cascade connections from prior hidden units
+            for prior_h in range(h):
+                if w_idx < len(weights):
+                    connections.append({"from": f"hidden_{prior_h}", "to": f"hidden_{h}", "weight": float(weights[w_idx])})
+                    w_idx += 1
+
+        # Output nodes and connections
+        output_weights = raw.get("output_weights", [])
+        for o in range(output_size):
+            nodes.append({"id": f"output_{o}", "type": "output", "layer": num_hidden + 1})
+            if o < len(output_weights):
+                row = output_weights[o] if isinstance(output_weights[o], list) else output_weights
+                w_idx = 0
+                for i in range(input_size):
+                    if w_idx < len(row):
+                        connections.append({"from": f"input_{i}", "to": f"output_{o}", "weight": float(row[w_idx])})
+                        w_idx += 1
+                for h in range(num_hidden):
+                    if w_idx < len(row):
+                        connections.append({"from": f"hidden_{h}", "to": f"output_{o}", "weight": float(row[w_idx])})
+                        w_idx += 1
+
+        return {
+            "input_units": input_size,
+            "output_units": output_size,
+            "hidden_units": num_hidden,
+            "nodes": nodes,
+            "connections": connections,
+        }
+
     def extract_network_topology(self) -> Optional[Dict[str, Any]]:
         try:
-            data = self._unwrap_response(self._client.get_topology())
-            if not isinstance(data, dict):
-                return data
-            # Already in canopy format (has input_units key)
-            if "input_units" in data:
-                return data
-            # Cascor format: input_size/output_size, hidden_units as list of dicts
-            if "input_size" in data:
-                n_input = data.get("input_size", 0)
-                n_output = data.get("output_size", 0)
-                hidden_list = data.get("hidden_units", [])
-                n_hidden = len(hidden_list) if isinstance(hidden_list, list) else 0
-                # Build nodes and connections from cascor weight-oriented format
-                nodes = []
-                connections = []
-                for i in range(n_input):
-                    nodes.append({"id": f"input_{i}", "type": "input", "label": f"I{i}"})
-                for h_idx, hu in enumerate(hidden_list if isinstance(hidden_list, list) else []):
-                    nodes.append({"id": f"hidden_{h_idx}", "type": "hidden", "label": f"H{h_idx}"})
-                    # Connections from inputs and prior hidden units to this hidden unit
-                    conn_indices = hu.get("connections", []) if isinstance(hu, dict) else []
-                    for src_idx in conn_indices:
-                        src_id = f"input_{src_idx}" if src_idx < n_input else f"hidden_{src_idx - n_input}"
-                        connections.append({"from": src_id, "to": f"hidden_{h_idx}", "weight": 0.0})
-                for i in range(n_output):
-                    nodes.append({"id": f"output_{i}", "type": "output", "label": f"O{i}"})
-                    # Output weights from all inputs + hidden to this output
-                    output_weights = data.get("output_weights", [])
-                    if isinstance(output_weights, list):
-                        for h_idx in range(n_hidden):
-                            w = output_weights[h_idx][i] if h_idx < len(output_weights) and i < len(output_weights[h_idx]) else 0.0
-                            connections.append({"from": f"hidden_{h_idx}", "to": f"output_{i}", "weight": w})
-                return {
-                    "nodes": nodes,
-                    "connections": connections,
-                    "input_units": n_input,
-                    "output_units": n_output,
-                    "hidden_units": n_hidden,
-                }
-            return data
+            raw = self._unwrap_response(self._client.get_topology())
+            if isinstance(raw, dict):
+                return self._transform_topology(raw)
+            return raw
         except JuniperCascorClientError:
             return None
 

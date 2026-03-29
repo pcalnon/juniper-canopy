@@ -100,15 +100,13 @@ class ServiceBackend:
     def get_status(self) -> Dict[str, Any]:
         raw = self._adapter.get_training_status()
         if not isinstance(raw, dict) or not CascorServiceAdapter._is_cascor_nested(raw):
-            return raw  # Already flat (demo-compatible format)
-
+            return raw
         sm = raw.get("state_machine", {}) if isinstance(raw.get("state_machine"), dict) else {}
         monitor = raw.get("monitor", {}) if isinstance(raw.get("monitor"), dict) else {}
         ts = raw.get("training_state", {}) if isinstance(raw.get("training_state"), dict) else {}
-
         fsm_status = sm.get("status", sm.get("current_state", "Stopped"))
         status_upper = fsm_status.upper() if isinstance(fsm_status, str) else "STOPPED"
-
+        phase_raw = sm.get("phase") or ts.get("phase", "idle")
         return {
             "is_training": raw.get("training_active", False),
             "is_running": status_upper in ("STARTED", "RUNNING", "TRAINING"),
@@ -116,7 +114,7 @@ class ServiceBackend:
             "completed": status_upper in ("COMPLETED", "CONVERGED"),
             "failed": status_upper == "FAILED",
             "fsm_status": fsm_status,
-            "phase": (sm.get("phase") or ts.get("phase", "idle")).lower() if isinstance(sm.get("phase") or ts.get("phase", "idle"), str) else "idle",
+            "phase": phase_raw.lower() if isinstance(phase_raw, str) else "idle",
             "current_epoch": _first_defined(
                 monitor.get("current_epoch"),
                 monitor.get("epoch"),
@@ -158,8 +156,7 @@ class ServiceBackend:
         raw = self._adapter.get_dataset_info()
         if not raw:
             return None
-        # Normalize cascor dataset keys to canopy contract
-        if "input_features" in raw or "train_samples" in raw:
+        if "train_samples" in raw or "input_features" in raw:
             return {
                 "num_samples": raw.get("train_samples", 0) + raw.get("test_samples", 0),
                 "num_features": raw.get("input_features", 0),
