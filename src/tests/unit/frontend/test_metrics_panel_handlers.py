@@ -830,6 +830,50 @@ class TestUpdateCandidatePoolHandler:
 
 
 @pytest.mark.unit
+class TestUpdateProgressDetailHandler:
+    """Tests for _update_progress_detail_handler method."""
+
+    def test_returns_empty_for_none_state(self, metrics_panel):
+        """Should return empty string when state is missing."""
+        assert metrics_panel._update_progress_detail_handler(state=None) == ""
+
+    def test_returns_empty_for_stopped_state(self, metrics_panel):
+        """Should hide progress details for stopped/idle statuses."""
+        assert metrics_panel._update_progress_detail_handler(state={"status": "STOPPED"}) == ""
+        assert metrics_panel._update_progress_detail_handler(state={"status": "idle"}) == ""
+
+    def test_formats_all_progress_segments(self, metrics_panel):
+        """Should include all progress segments when fields are present."""
+        state = {
+            "status": "RUNNING",
+            "phase_detail": "candidate_training",
+            "grow_iteration": 2,
+            "grow_max": 10,
+            "best_correlation": 0.91234,
+            "candidates_trained": 3,
+            "candidates_total": 8,
+        }
+
+        result = metrics_panel._update_progress_detail_handler(state=state)
+        assert result == "Candidate Training | Iteration 2/10 | Best Corr: 0.9123 | Candidates: 3/8"
+
+    def test_omits_segments_for_falsy_values(self, metrics_panel):
+        """Should omit optional segments when values are zero/falsy."""
+        state = {
+            "status": "RUNNING",
+            "phase_detail": "output_training",
+            "grow_iteration": 0,
+            "grow_max": 0,
+            "best_correlation": 0.0,
+            "candidates_trained": 0,
+            "candidates_total": 0,
+        }
+
+        result = metrics_panel._update_progress_detail_handler(state=state)
+        assert result == "Output Training"
+
+
+@pytest.mark.unit
 class TestUpdateMetricsDisplayHandler:
     """Tests for _update_metrics_display_handler method."""
 
@@ -1111,6 +1155,21 @@ class TestRegisteredCallbacks:
             history = [{"epoch": i} for i in range(25)]
             result = func(state, history)
             assert len(result) == 20
+
+    def test_update_progress_detail_callback_registered(self, registered_callbacks):
+        """Test update_progress_detail callback uses the progress handler."""
+        panel, callbacks = registered_callbacks
+
+        if func := callbacks.get("update_progress_detail"):
+            state = {
+                "status": "RUNNING",
+                "phase_detail": "candidate_training",
+                "grow_iteration": 1,
+                "grow_max": 5,
+            }
+            result = func(state)
+            assert "Candidate Training" in result
+            assert "Iteration 1/5" in result
 
     def test_render_candidate_history_empty(self, registered_callbacks):
         """Test render_candidate_history with empty history."""
