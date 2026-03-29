@@ -186,6 +186,101 @@ class TestFix3CurrentMetrics:
 # ==================================================================
 
 
+        assert "train_loss" in result
+        assert result["train_loss"] == 0.45
+        # Must NOT contain envelope keys
+        assert "status" not in result
+        assert "meta" not in result
+
+    def test_real_envelope_emits_legacy_metrics_shape(self):
+        """Current metrics include legacy nested metrics keys used by dashboard."""
+        from backend.cascor_service_adapter import _ServiceTrainingMonitor
+
+        client = _make_mock_client(get_metrics=real_metrics_current())
+        monitor = _ServiceTrainingMonitor(client)
+        result = monitor.get_current_metrics()
+
+        assert result["metrics"]["loss"] == 0.45
+        assert result["metrics"]["accuracy"] == 0.72
+
+
+# ===========================================================================
+# FIX-4: ServiceBackend.get_status()
+# ===========================================================================
+
+
+class TestGetStatus:
+    """FIX-4: get_status must normalize cascor nested structure to flat dict."""
+
+    def _make_service_backend(self, training_status_fixture):
+        """Create a ServiceBackend with a mocked adapter returning the given status."""
+        from backend.cascor_service_adapter import CascorServiceAdapter
+        from backend.service_backend import ServiceBackend
+
+        adapter = MagicMock(spec=CascorServiceAdapter)
+        # get_training_status on the adapter returns unwrapped data
+        # (since _unwrap_response is called inside the adapter method)
+        data = training_status_fixture.get("data", training_status_fixture)
+        adapter.get_training_status.return_value = data
+        backend = ServiceBackend(adapter)
+        return backend
+
+    def test_normalizes_cascor_nested(self):
+        """Real cascor nested structure -> flat dashboard dict."""
+        backend = self._make_service_backend(real_training_status_active())
+        status = backend.get_status()
+
+        assert status["is_running"] is True
+        assert status["is_training"] is True
+        assert status["phase"] == "output"
+        assert status["current_epoch"] == 42
+        assert status["hidden_units"] == 3
+
+    def test_epoch_zero_preserved(self):
+        """FIX-4 edge: epoch=0 must not be treated as missing."""
+        backend = self._make_service_backend(real_training_status_epoch_zero())
+        status = backend.get_status()
+
+        assert status["current_epoch"] == 0
+        assert status["is_training"] is True
+
+    def test_hidden_units_zero_preserved(self):
+        """FIX-4 edge: hidden_units=0 must not be treated as missing."""
+        backend = self._make_service_backend(real_training_status_epoch_zero())
+        status = backend.get_status()
+
+        assert status["hidden_units"] == 0
+
+    def test_uppercase_started(self):
+        """FIX-4 case: STARTED -> is_running=True."""
+        backend = self._make_service_backend(real_training_status_active())
+        status = backend.get_status()
+
+        assert status["is_running"] is True
+        assert status["is_paused"] is False
+        assert status["completed"] is False
+
+    def test_passthrough_flat(self):
+        """Demo-compatible flat dict passes through unchanged."""
+        from backend.cascor_service_adapter import CascorServiceAdapter
+        from backend.service_backend import ServiceBackend
+
+        adapter = MagicMock(spec=CascorServiceAdapter)
+        flat_status = {
+            "is_training": True,
+            "is_running": True,
+            "is_paused": False,
+            "completed": False,
+            "failed": False,
+            "phase": "output",
+            "current_epoch": 10,
+            "hidden_units": 2,
+        }
+        adapter.get_training_status.return_value = flat_status
+        backend = ServiceBackend(adapter)
+        status = backend.get_status()
+
+        
 @pytest.mark.unit
 class TestFix4GetStatus:
     """FIX-4: ServiceBackend.get_status must normalize cascor's nested structure."""
@@ -266,10 +361,23 @@ class TestFix4GetStatus:
         assert result.get("current_epoch", 0) == 0
 
 
+        entry = result[0]
+        assert "train_loss" in entry
+        assert "train_accuracy" in entry
+        assert "val_loss" in entry
+        assert "val_accuracy" in entry
+        # Raw names should not be present
+        assert "loss" not in entry
+        assert "accuracy" not in entry
+        # Legacy nested shape expected by metrics panel callbacks
+        assert entry["metrics"]["loss"] == 0.95
+        assert entry["metrics"]["accuracy"] == 0.35
+        assert entry["network_topology"]["hidden_units"] == 0
+
+
 # ==================================================================
 # FIX-8: is_training_in_progress with real envelope
 # ==================================================================
-
 
 @pytest.mark.unit
 class TestFix8IsTrainingInProgress:

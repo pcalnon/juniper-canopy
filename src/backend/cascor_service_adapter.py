@@ -454,25 +454,41 @@ class CascorServiceAdapter:
         val_loss, val_accuracy).  Uses ``"key" in entry`` checks instead of
         ``or`` chains so that valid 0.0 values are preserved.
         """
+        train_loss = _first_defined(
+            entry.get("train_loss") if "train_loss" in entry else None,
+            entry.get("loss") if "loss" in entry else None,
+        )
+        train_accuracy = _first_defined(
+            entry.get("train_accuracy") if "train_accuracy" in entry else None,
+            entry.get("accuracy") if "accuracy" in entry else None,
+        )
+        val_loss = _first_defined(
+            entry.get("val_loss") if "val_loss" in entry else None,
+            entry.get("validation_loss") if "validation_loss" in entry else None,
+        )
+        val_accuracy = _first_defined(
+            entry.get("val_accuracy") if "val_accuracy" in entry else None,
+            entry.get("validation_accuracy") if "validation_accuracy" in entry else None,
+        )
+        hidden_units = entry.get("hidden_units", 0)
+        epoch = entry.get("epoch", 0)
+
         return {
-            "epoch": entry.get("epoch", 0),
-            "train_loss": _first_defined(
-                entry.get("train_loss") if "train_loss" in entry else None,
-                entry.get("loss") if "loss" in entry else None,
-            ),
-            "train_accuracy": _first_defined(
-                entry.get("train_accuracy") if "train_accuracy" in entry else None,
-                entry.get("accuracy") if "accuracy" in entry else None,
-            ),
-            "val_loss": _first_defined(
-                entry.get("val_loss") if "val_loss" in entry else None,
-                entry.get("validation_loss") if "validation_loss" in entry else None,
-            ),
-            "val_accuracy": _first_defined(
-                entry.get("val_accuracy") if "val_accuracy" in entry else None,
-                entry.get("validation_accuracy") if "validation_accuracy" in entry else None,
-            ),
-            "hidden_units": entry.get("hidden_units", 0),
+            # Legacy dashboard shape used by metrics panel rendering.
+            "epoch": epoch,
+            "metrics": {
+                "loss": train_loss,
+                "accuracy": train_accuracy,
+                "val_loss": val_loss,
+                "val_accuracy": val_accuracy,
+            },
+            "network_topology": {"hidden_units": hidden_units},
+            # Canonical normalized names retained for API/client compatibility.
+            "train_loss": train_loss,
+            "train_accuracy": train_accuracy,
+            "val_loss": val_loss,
+            "val_accuracy": val_accuracy,
+            "hidden_units": hidden_units,
             "phase": entry.get("phase"),
             "timestamp": entry.get("timestamp"),
         }
