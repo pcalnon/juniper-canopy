@@ -206,6 +206,11 @@ class CascorServiceAdapter:
                     async for message in stream.stream():
                         msg_type = message.get("type", "")
                         data = message.get("data", message)
+
+                        # Normalize metrics payloads to dashboard format (P5-RC-14)
+                        if msg_type == "metrics" and isinstance(data, dict):
+                            data = CascorServiceAdapter._to_dashboard_metric(CascorServiceAdapter._normalize_metric(data))
+
                         await websocket_manager.broadcast({"type": msg_type, "data": data})
 
                         # On cascade_add, fetch fresh topology and broadcast

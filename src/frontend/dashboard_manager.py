@@ -872,6 +872,8 @@ class DashboardManager:
                 dcc.Interval(id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0),
                 # One-shot interval for parameter initialization (fires once, 1s after load)
                 dcc.Interval(id="params-init-interval", interval=1000, max_intervals=1, n_intervals=0),
+                # WebSocket real-time metrics buffer (P5-RC-05)
+                dcc.Store(id="ws-metrics-buffer", data=[]),
                 # Hidden div to store WebSocket data
                 html.Div(id="websocket-data", style={"display": "none"}),
                 dcc.Store(id="training-control-action", data=None),
@@ -1028,13 +1030,51 @@ class DashboardManager:
     # Component data store updaters
     def _setup_datastore_callbacks(self):
 
+        # P5-RC-05: WebSocket clientside callback for real-time metrics push.
+        # Connects to /ws/training and accumulates metrics in ws-metrics-buffer.
+        self.app.clientside_callback(
+            """
+            function(n) {
+                // Only initialize once
+                if (window._juniper_ws) return window.dash_clientside.no_update;
+                var proto = (location.protocol === 'https:') ? 'wss:' : 'ws:';
+                var url = proto + '//' + location.host + '/ws/training';
+                try {
+                    var ws = new WebSocket(url);
+                    window._juniper_ws = ws;
+                    window._juniper_ws_buffer = window._juniper_ws_buffer || [];
+                    ws.onmessage = function(evt) {
+                        try {
+                            var msg = JSON.parse(evt.data);
+                            if (msg.type === 'metrics' && msg.data) {
+                                window._juniper_ws_buffer.push(msg.data);
+                                if (window._juniper_ws_buffer.length > 10000) {
+                                    window._juniper_ws_buffer = window._juniper_ws_buffer.slice(-5000);
+                                }
+                            }
+                        } catch(e) {}
+                    };
+                    ws.onclose = function() { window._juniper_ws = null; };
+                } catch(e) {}
+                return window.dash_clientside.no_update;
+            }
+            """,
+            Output("ws-metrics-buffer", "data"),
+            Input("fast-update-interval", "n_intervals"),
+            prevent_initial_call=False,
+        )
+
         @self.app.callback(
             Output("metrics-panel-metrics-store", "data"),
             Input("fast-update-interval", "n_intervals"),
             dash.dependencies.State("metrics-panel-display-mode-store", "data"),
         )
         def update_metrics_store(n, display_mode_state):
-            """Fetch metrics history from API and update metrics panel store."""
+            """Fetch metrics history from API and update metrics panel store.
+
+            When WebSocket data is available in the JS buffer, it is consumed
+            as a supplement to REST-polled data.
+            """
             return self._update_metrics_store_handler(n=n, display_mode_state=display_mode_state)
 
         @self.app.callback(

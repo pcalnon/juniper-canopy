@@ -318,7 +318,7 @@ async def _authenticate_websocket(websocket: WebSocket) -> bool:
     Returns True if authenticated (or auth disabled), False otherwise.
     """
     if api_key_auth.enabled:
-        key = websocket.headers.get("X-API-Key")
+        key = websocket.headers.get("X-API-Key") or websocket.query_params.get("api_key")
         if not api_key_auth.validate(key):
             await websocket.close(code=4001, reason="Authentication required")
             return False
