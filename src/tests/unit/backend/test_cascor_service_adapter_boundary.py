@@ -6,7 +6,8 @@ Verifies that the adapter correctly transforms the CasCor service response
 into the frontend format (``xx``/``yy``/``Z``).
 """
 
-from unittest.mock import MagicMock
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
 import pytest
@@ -308,3 +309,77 @@ class TestRelayEventHandling:
             event_name = data.get("event", "")
             if event_name == "training_complete":
                 adapter._state_update_callback(status="Completed", phase="Idle")
+
+
+class _SingleStateMessageStream:
+    """Fake training stream that emits one state message then exits."""
+
+    def __init__(self, *args, **kwargs):
+        self.message = kwargs.pop("message")
+
+    async def connect(self):
+        return None
+
+    async def disconnect(self):
+        return None
+
+    async def stream(self):
+        yield self.message
+        raise asyncio.CancelledError()
+
+
+class TestRelayStateHandling:
+    """Tests for state message handling in the relay loop."""
+
+    @pytest.mark.asyncio
+    async def test_state_message_forwards_progress_fields(self, adapter, monkeypatch):
+        """Relay should forward new progress fields to state callback."""
+        callback = MagicMock()
+        adapter.set_state_update_callback(callback)
+
+        message = {
+            "type": "state",
+            "data": {
+                "status": "started",
+                "phase": "candidate_training",
+                "current_epoch": 7,
+                "current_step": 42,
+                "learning_rate": 0.03,
+                "max_hidden_units": 9,
+                "max_epochs": 200,
+                "phase_detail": "candidate_training",
+                "grow_iteration": 2,
+                "grow_max": 11,
+                "best_correlation": 0.9753,
+                "candidates_trained": 5,
+                "candidates_total": 10,
+                "phase_started_at": "2026-03-29T13:00:00Z",
+            },
+        }
+
+        class StreamFactory(_SingleStateMessageStream):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, message=message, **kwargs)
+
+        fake_websocket_manager = MagicMock()
+        fake_websocket_manager.broadcast = AsyncMock()
+        monkeypatch.setattr("communication.websocket_manager.websocket_manager", fake_websocket_manager)
+        monkeypatch.setattr("backend.cascor_service_adapter.CascorTrainingStream", StreamFactory)
+
+        await adapter.start_metrics_relay()
+        await asyncio.wait_for(adapter._relay_task, timeout=1.0)
+
+        callback.assert_called_once()
+        kwargs = callback.call_args.kwargs
+        assert kwargs["status"] == "Started"
+        assert kwargs["phase"] == "candidate_training"
+        assert kwargs["phase_detail"] == "candidate_training"
+        assert kwargs["grow_iteration"] == 2
+        assert kwargs["grow_max"] == 11
+        assert kwargs["best_correlation"] == 0.9753
+        assert kwargs["candidates_trained"] == 5
+        assert kwargs["candidates_total"] == 10
+        assert kwargs["phase_started_at"] == "2026-03-29T13:00:00Z"
+        fake_websocket_manager.broadcast.assert_awaited()
+
+        await adapter.stop_metrics_relay()

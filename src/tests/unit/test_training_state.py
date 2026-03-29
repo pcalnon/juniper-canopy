@@ -105,6 +105,28 @@ class TestTrainingStateUpdate:
         assert data["learning_rate"] == 0.001
         assert data["current_epoch"] == 42
 
+    def test_update_state_progress_fields(self):
+        """Test updating newly added progress fields."""
+        state = TrainingState()
+        state.update_state(
+            phase_detail="candidate_training",
+            grow_iteration=3,
+            grow_max=12,
+            best_correlation=0.9876,
+            candidates_trained=4,
+            candidates_total=20,
+            phase_started_at="2026-03-29T12:00:00Z",
+        )
+
+        data = state.get_state()
+        assert data["phase_detail"] == "candidate_training"
+        assert data["grow_iteration"] == 3
+        assert data["grow_max"] == 12
+        assert data["best_correlation"] == 0.9876
+        assert data["candidates_trained"] == 4
+        assert data["candidates_total"] == 20
+        assert data["phase_started_at"] == "2026-03-29T12:00:00Z"
+
     def test_update_state_all_fields(self):
         """Test updating all fields."""
         state = TrainingState()
