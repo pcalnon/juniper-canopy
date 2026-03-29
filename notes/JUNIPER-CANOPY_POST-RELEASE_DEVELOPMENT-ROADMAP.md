@@ -2,7 +2,7 @@
 
 **Project**: JuniperCanopy - Web-based Monitoring Frontend
 **Created**: 2026-02-17
-**Last Updated**: 2026-02-25
+**Last Updated**: 2026-03-26
 **Author**: Paul Calnon
 **Status**: Active - Post-Release Assessment with Polyrepo Migration Updates
 **Source**: Full codebase audit of all notes/ files with validation against source code (2026-02-17); polyrepo migration impact analysis (2026-02-25)
@@ -1051,3 +1051,4 @@ The Juniper ecosystem completed a polyrepo migration (2026-02-22 to 2026-02-25) 
 | 2026-02-25 | AI Agent | Polyrepo migration impact analysis: updated status of 8 items (CAN-CRIT-001/002, CAN-HIGH-003/004/005/006, CAN-DEF-001/004), added migration notes, updated summary tables, revised design analysis for microservices architecture. |
 | 2026-02-25 | AI Agent | Codebase re-validation: fixed INTEG-004 validation (REST delegation, not ThreadPoolExecutor), corrected CAN-HIGH-007 test file list (WebSocket tests already converted; actual `requires_server` files identified), updated `-p no:warnings` to PARTIALLY COMPLETE (still in .pre-commit-config.yaml), corrected summary table arithmetic. |
 | 2026-03-15 | Documentation Audit | CAN-HIGH-001, CAN-MED-002, CAN-MED-005 marked COMPLETE. CAN-HIGH-007 path corrected. CAN-MED-011 description updated. CasCor integration and Cassandra/Redis status verified. |
+| 2026-03-26 | Documentation Automation | Updated API contracts documentation for external CasCor normalization and backend parity. Refreshed endpoint/websocket schemas in `docs/api/API_REFERENCE.md` and `docs/api/API_SCHEMAS.md` to match current source behavior (`ServiceBackend`/`CascorServiceAdapter`). |

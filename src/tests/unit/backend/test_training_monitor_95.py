@@ -628,6 +628,13 @@ class TestTrainingStateAdditionalCoverage:
             "second_candidate_id",
             "second_candidate_score",
             "pool_metrics",
+            "phase_detail",
+            "grow_iteration",
+            "grow_max",
+            "best_correlation",
+            "candidates_trained",
+            "candidates_total",
+            "phase_started_at",
         }
 
         assert set(result.keys()) == expected_fields
