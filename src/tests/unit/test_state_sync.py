@@ -3,14 +3,19 @@
 from unittest.mock import MagicMock
 
 import pytest
-from juniper_cascor_client.testing import FakeCascorClient
+
+
+def _make_fake_client(scenario: str):
+    """Import FakeCascorClient lazily so non-fake tests can still run."""
+    testing = pytest.importorskip("juniper_cascor_client.testing", reason="juniper-cascor-client testing helpers not installed")
+    return testing.FakeCascorClient(scenario=scenario)
 
 
 class TestCascorStateSync:
     def test_sync_idle_state(self):
         from backend.state_sync import CascorStateSync
 
-        fake = FakeCascorClient(scenario="idle")
+        fake = _make_fake_client(scenario="idle")
         fake.create_network(input_size=2, output_size=2, learning_rate=0.01)
         synced = CascorStateSync(fake).sync()
         assert synced.is_training is False
@@ -19,7 +24,7 @@ class TestCascorStateSync:
     def test_sync_training_state(self):
         from backend.state_sync import CascorStateSync
 
-        fake = FakeCascorClient(scenario="two_spiral_training")
+        fake = _make_fake_client(scenario="two_spiral_training")
         synced = CascorStateSync(fake).sync()
         assert synced.is_training is True
         assert synced.status == "Started"
@@ -28,7 +33,7 @@ class TestCascorStateSync:
     def test_sync_paused_state(self):
         from backend.state_sync import CascorStateSync
 
-        fake = FakeCascorClient(scenario="two_spiral_training")
+        fake = _make_fake_client(scenario="two_spiral_training")
         fake.set_state("paused")
         synced = CascorStateSync(fake).sync()
         assert synced.status == "Paused"
@@ -36,7 +41,7 @@ class TestCascorStateSync:
     def test_sync_includes_metrics_history(self):
         from backend.state_sync import CascorStateSync
 
-        fake = FakeCascorClient(scenario="two_spiral_training")
+        fake = _make_fake_client(scenario="two_spiral_training")
         fake.advance_epoch(10)
         synced = CascorStateSync(fake).sync(metrics_limit=100)
         assert len(synced.metrics_history) > 0
@@ -46,7 +51,7 @@ class TestCascorStateSync:
 
         from backend.state_sync import CascorStateSync
 
-        fake = FakeCascorClient(scenario="idle")
+        fake = _make_fake_client(scenario="idle")
         fake.create_network(input_size=2, output_size=2, learning_rate=0.01)
         with patch.object(fake, "get_topology", side_effect=Exception("network error")):
             synced = CascorStateSync(fake).sync()
@@ -55,7 +60,7 @@ class TestCascorStateSync:
     def test_sync_respects_metrics_limit(self):
         from backend.state_sync import CascorStateSync
 
-        fake = FakeCascorClient(scenario="two_spiral_training")
+        fake = _make_fake_client(scenario="two_spiral_training")
         fake.advance_epoch(200)
         synced = CascorStateSync(fake).sync(metrics_limit=50)
         assert len(synced.metrics_history) <= 50
