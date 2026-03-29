@@ -40,7 +40,6 @@ from tests.fixtures.cascor_response_fixtures import (
     real_topology,
     real_training_status_active,
     real_training_status_idle,
-    real_topology,
 )
 
 # ------------------------------------------------------------------
