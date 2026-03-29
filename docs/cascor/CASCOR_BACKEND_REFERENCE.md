@@ -2,9 +2,9 @@
 
 ## Technical reference for CasCor backend integration in Juniper Canopy
 
-**Version:** 0.25.0  
+**Version:** 0.26.0  
 **Status:** ✅ PARTIALLY IMPLEMENTED  
-**Last Updated:** January 29, 2026
+**Last Updated:** March 29, 2026
 
 ---
 
@@ -12,7 +12,181 @@
 
 **Location:** `src/backend/cascor_integration.py`
 
-**Purpose:** Integration layer between Juniper Canopy frontend and CasCor neural network backend.
+**Purpose:** In-process integration layer between Juniper Canopy frontend and CasCor neural network backend.
+
+---
+
+## Module: cascor_service_adapter.py
+
+**Location:** `src/backend/cascor_service_adapter.py`
+
+**Purpose:** Service-mode adapter around `juniper-cascor-client` for REST/WebSocket communication with a running CasCor service.
+
+### Class: CascorServiceAdapter
+
+#### Constructor
+
+```python
+CascorServiceAdapter(
+    service_url: str = "http://localhost:8200",
+    api_key: Optional[str] = None,
+    client: Optional[JuniperCascorClient] = None
+)
+```
+
+**Description:** Create a service adapter that exposes a `CascorIntegration`-compatible surface for `main.py` and `ServiceBackend`.
+
+**Parameters:**
+
+- `service_url` (str): Base CasCor service URL.
+- `api_key` (str, optional): API key for authenticated service endpoints.
+- `client` (JuniperCascorClient, optional): Injected client instance (used by tests and advanced integrations).
+
+#### Key Methods
+
+```python
+connect() -> bool
+```
+
+- Verifies service reachability (`is_alive()`).
+
+```python
+attach_to_existing() -> bool
+```
+
+- Non-destructive probe for an existing remote network. Does not create/reset state.
+
+```python
+start_metrics_relay() -> None
+stop_metrics_relay() -> None
+```
+
+- Starts/stops asynchronous relay from CasCor training stream to Canopy websocket broadcasts.
+
+```python
+get_training_status() -> Dict[str, Any]
+```
+
+- Returns normalized status payload, unwrapping response envelopes where needed.
+
+```python
+get_canopy_params() -> Dict[str, Any]
+```
+
+- Fetches service training params and maps CasCor keys to Canopy `nn_*` / `cn_*` namespace.
+
+#### Response Normalization Helpers
+
+```python
+_unwrap_response(response: Any) -> Any
+```
+
+- Unwraps `{ "data": ... }` envelopes.
+
+```python
+_normalize_metric(entry: dict) -> dict
+```
+
+- Accepts either CasCor keys (`loss`, `accuracy`, `validation_loss`, `validation_accuracy`) or Canopy keys (`train_loss`, `train_accuracy`, `val_loss`, `val_accuracy`) and emits canonical flat metric fields.
+
+```python
+_to_dashboard_metric(flat: dict) -> dict
+```
+
+- Converts normalized flat metric payload into dashboard contract:
+  - `metrics.loss`
+  - `metrics.accuracy`
+  - `metrics.val_loss`
+  - `metrics.val_accuracy`
+  - `network_topology.hidden_units`
+
+```python
+_transform_topology(raw: dict) -> dict
+```
+
+- Converts CasCor weight-oriented topology payloads into dashboard graph-oriented topology.
+
+---
+
+## Module: state_sync.py
+
+**Location:** `src/backend/state_sync.py`
+
+**Purpose:** One-time connect-time synchronization of service backend state into Canopy.
+
+### Dataclass: SyncedState
+
+```python
+SyncedState(
+    is_training: bool = False,
+    status: str = "Stopped",
+    phase: str = "Idle",
+    current_epoch: int = 0,
+    max_epochs: int = 0,
+    params: Dict[str, Any] = {},
+    topology: Optional[Dict[str, Any]] = None,
+    metrics_history: List[Dict[str, Any]] = []
+)
+```
+
+**Description:** Snapshot used to hydrate global training state and initial dashboard payloads after service attach.
+
+### Class: CascorStateSync
+
+#### Constructor
+
+```python
+CascorStateSync(client)
+```
+
+- `client`: `JuniperCascorClient` or compatible fake test client.
+
+#### Key Methods
+
+```python
+sync(metrics_limit: int = 500) -> SyncedState
+```
+
+- Fetches training status, parameters, topology, and metrics history.
+- Tolerates partial failures per call and returns best-effort state.
+- Applies status normalization and metric/topology transforms for dashboard compatibility.
+
+```python
+_normalize_status(raw: str) -> str
+```
+
+- Case-insensitive canonical mapping:
+  - `idle`, `stopped` -> `Stopped`
+  - `training`, `started`, `running` -> `Started`
+  - `paused` -> `Paused`
+  - `complete`, `completed` -> `Completed`
+  - `failed` -> `Failed`
+  - unknown -> `Stopped`
+
+---
+
+## Module: service_backend.py
+
+**Location:** `src/backend/service_backend.py`
+
+**Purpose:** `BackendProtocol` implementation used by service mode; delegates to `CascorServiceAdapter` and coordinates startup sync.
+
+### Class: ServiceBackend
+
+```python
+ServiceBackend(adapter: CascorServiceAdapter)
+```
+
+#### Key Lifecycle Method
+
+```python
+initialize() -> bool
+```
+
+- Connects adapter to CasCor service.
+- Performs non-destructive attach.
+- Runs `CascorStateSync.sync()` if network exists.
+- Starts metrics relay for real-time updates.
 
 ---
 
@@ -829,8 +1003,8 @@ with self.topology_lock:
 
 ---
 
-**Last Updated:** January 29, 2026  
-**Version:** 0.25.0  
+**Last Updated:** March 29, 2026  
+**Version:** 0.26.0  
 **Status:** ✅ PARTIALLY IMPLEMENTED
 
 **Complete technical reference for CasCor backend integration!**

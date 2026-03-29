@@ -2,21 +2,29 @@
 
 ## Complete guide for CasCor backend integration in Juniper Canopy
 
-**Version:** 0.25.0  
+**Version:** 0.26.0  
 **Status:** ✅ PARTIALLY IMPLEMENTED  
-**Last Updated:** January 29, 2026
+**Last Updated:** March 29, 2026
 
 ---
 
 ## Overview
 
-The CasCor backend integration (`src/backend/cascor_integration.py`) provides a seamless connection between the Juniper Canopy frontend and the CasCor (Cascade Correlation) neural network prototype.
+Juniper Canopy supports two real-backend integration paths:
+
+- **Service mode** via `CASCOR_SERVICE_URL`, using `src/backend/cascor_service_adapter.py` and `src/backend/service_backend.py`
+- **In-process mode** via `src/backend/cascor_integration.py` (legacy/direct import path)
+
+This manual focuses on behavior and operations that affect dashboard users in both paths, with extra detail for service-mode response normalization and startup state synchronization.
 
 ### Features
 
 **Implemented:**
 
 - ✅ Dynamic import of CasCor backend modules
+- ✅ Service mode backend factory (`CASCOR_SERVICE_URL` → `CascorServiceAdapter`)
+- ✅ Non-destructive attach to existing CasCor service sessions
+- ✅ Connect-time state sync (`CascorStateSync`) for immediate dashboard state hydration
 - ✅ Network instantiation with configuration mapping
 - ✅ Method wrapping for monitoring hooks
 - ✅ Real-time metrics extraction and broadcasting
@@ -40,6 +48,8 @@ The CasCor backend integration (`src/backend/cascor_integration.py`) provides a 
 ## Table of Contents
 
 - [Architecture](#architecture)
+- [Service Mode Workflow](#service-mode-workflow)
+- [Response and State Contracts](#response-and-state-contracts)
 - [Installation](#installation)
 - [Basic Usage](#basic-usage)
 - [Advanced Features](#advanced-features)
@@ -150,6 +160,97 @@ start_monitoring_thread(interval=1.0)
            └→ _broadcast_message(metrics)
            └→ sleep(interval)
 ```
+
+---
+
+## Service Mode Workflow
+
+Service mode is activated when `CASCOR_SERVICE_URL` is set and demo mode is not forced. The backend factory selects `ServiceBackend`, which wraps `CascorServiceAdapter`.
+
+### Startup Sequence
+
+```bash
+FastAPI lifespan startup
+  └→ backend.create_backend()
+      └→ ServiceBackend(CascorServiceAdapter)
+          └→ initialize()
+              └→ adapter.connect()
+              └→ adapter.attach_to_existing()        # non-destructive check
+              └→ CascorStateSync.sync()              # one-time hydration
+              └→ adapter.start_metrics_relay()       # WS relay to dashboard clients
+```
+
+### Why the Initial Sync Matters
+
+`CascorStateSync` pulls current state at connect time so the dashboard does not start with blank/default values when attaching to an already-running CasCor session. It syncs:
+
+- training status + phase
+- current and max epoch values
+- training parameters (mapped to Canopy namespace)
+- topology snapshot
+- metrics history (bounded by `metrics_limit`, default 500)
+
+### Non-Destructive Attach Behavior
+
+`attach_to_existing()` checks for an existing network using service APIs. It does **not** create or reset training state. If no network exists, Canopy waits for explicit start/create operations.
+
+---
+
+## Response and State Contracts
+
+Service mode normalizes CasCor REST/WS payloads to match dashboard expectations.
+
+### Metrics Normalization
+
+The adapter accepts both CasCor and Canopy naming styles and converts to one dashboard shape:
+
+- accepted training loss keys: `loss` or `train_loss`
+- accepted training accuracy keys: `accuracy` or `train_accuracy`
+- accepted validation loss keys: `validation_loss` or `val_loss`
+- accepted validation accuracy keys: `validation_accuracy` or `val_accuracy`
+
+Final dashboard metric structure:
+
+```json
+{
+  "epoch": 42,
+  "metrics": {
+    "loss": 0.12,
+    "accuracy": 0.98,
+    "val_loss": 0.18,
+    "val_accuracy": 0.95
+  },
+  "network_topology": {
+    "hidden_units": 4
+  },
+  "phase": "output",
+  "timestamp": "2026-03-29T12:34:56Z"
+}
+```
+
+### Envelope Handling
+
+Service responses are unwrapped from CasCor envelopes when needed:
+
+- if response is `{ "data": ... }`, the adapter uses inner `data`
+- if response is already flat, it is used directly
+- nested `history` and flat-list history formats are both supported
+
+### Zero-Value Preservation
+
+Normalization uses first-defined semantics (`None`-aware) rather than `or` chaining, so valid `0` / `0.0` values are preserved for metrics and epoch fields.
+
+### Status Normalization
+
+`CascorStateSync._normalize_status()` maps case-insensitive backend states to canonical Canopy values:
+
+- `idle`, `stopped` -> `Stopped`
+- `training`, `started`, `running` -> `Started`
+- `paused` -> `Paused`
+- `complete`, `completed` -> `Completed`
+- `failed` -> `Failed`
+
+Unknown values default to `Stopped`.
 
 ---
 
@@ -614,6 +715,9 @@ See [CASCOR_BACKEND_REFERENCE.md](CASCOR_BACKEND_REFERENCE.md) for complete API 
 - `disconnect_remote_workers()` - Disconnect from workers
 - `get_remote_worker_status()` - Get worker status
 - `shutdown()` - Cleanup resources
+- `CascorServiceAdapter(service_url, api_key=None)` - Service-mode adapter constructor
+- `ServiceBackend.initialize()` - Connect, attach, sync state, and start relay
+- `CascorStateSync.sync(metrics_limit=500)` - One-time startup state hydration
 
 ---
 
@@ -624,6 +728,9 @@ See [CASCOR_BACKEND_REFERENCE.md](CASCOR_BACKEND_REFERENCE.md) for complete API 
 ```bash
 cd src
 pytest tests/unit/test_cascor_integration.py -v
+pytest tests/unit/backend/test_cascor_service_adapter.py -v
+pytest tests/unit/test_state_sync.py -v
+pytest tests/unit/test_response_normalization.py -v
 ```
 
 ### Integration Tests
@@ -631,6 +738,8 @@ pytest tests/unit/test_cascor_integration.py -v
 ```bash
 cd src
 pytest tests/integration/test_cascor_backend.py -v
+pytest tests/integration/test_external_cascor_attach.py -v
+pytest tests/integration/test_training_controls_service_mode.py -v
 ```
 
 ### Manual Testing
@@ -653,6 +762,46 @@ python test_training.py
 
 See [CASCOR_BACKEND_QUICK_START.md](CASCOR_BACKEND_QUICK_START.md#common-issues) for common issues.
 
+### Service Mode Shows Blank Dashboard After Restart
+
+**Symptom:** Canopy connects to CasCor service, but dashboard starts at defaults (`epoch=0`, no history) despite active backend session.
+
+**Cause:** Initial state sync did not run or did not return expected payloads.
+
+**Checks:**
+
+```bash
+# Look for startup sync logs
+rg "state synced|attached to existing cascor network|State sync complete" logs/system.log
+
+# Confirm service URL is configured and demo mode is not forced
+echo "$CASCOR_SERVICE_URL"
+echo "${CASCOR_DEMO_MODE:-unset}"
+```
+
+### Metrics Present in API but Missing in Dashboard Panels
+
+**Symptom:** `/api/metrics` returns data, but plotted metrics remain empty or incomplete.
+
+**Cause:** Metric payload shape mismatch (flat keys vs nested dashboard format).
+
+**Checks:**
+
+```bash
+# Verify nested dashboard metric keys
+curl -s http://localhost:8050/api/metrics | rg "\"metrics\"|\"network_topology\"|\"loss\"|\"accuracy\"|\"val_loss\"|\"val_accuracy\""
+```
+
+The dashboard expects nested keys under `metrics` and `network_topology`.
+
+### Status Shows Unexpected Values
+
+**Symptom:** UI badges/controls show wrong run state after service reconnect.
+
+**Cause:** Backend status values are not in canonical Canopy form.
+
+**Expected normalized states:** `Started`, `Paused`, `Completed`, `Failed`, `Stopped`.
+
 ### Debug Logging
 
 ```python
@@ -661,6 +810,14 @@ logging.basicConfig(level=logging.DEBUG)
 
 integration = CascorIntegration()
 # Will see detailed logs
+```
+
+For service mode startup/relay logs:
+
+```python
+from backend.cascor_service_adapter import CascorServiceAdapter
+
+adapter = CascorServiceAdapter(service_url="http://localhost:8200")
 ```
 
 ### Thread Safety Issues
@@ -698,8 +855,8 @@ with CascorIntegration() as integration:
 
 ---
 
-**Last Updated:** January 29, 2026  
-**Version:** 0.25.0  
+**Last Updated:** March 29, 2026  
+**Version:** 0.26.0  
 **Status:** ✅ PARTIALLY IMPLEMENTED
 
 **Explore advanced features and integrate with your workflow!**
