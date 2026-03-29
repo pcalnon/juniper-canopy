@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Renamed HTTP metrics: `http_requests_total` → `juniper_canopy_http_requests_total`, `http_request_duration_seconds` → `juniper_canopy_http_request_duration_seconds`
+- Updated CasCor backend documentation to cover service-mode behavior (`CascorServiceAdapter`, `ServiceBackend`, `CascorStateSync`), including startup attach/sync workflow, response normalization contracts, and service-mode troubleshooting:
+  - `docs/cascor/CASCOR_BACKEND_MANUAL.md`
+  - `docs/cascor/CASCOR_BACKEND_REFERENCE.md`
+  - `docs/cascor/CASCOR_BACKEND_QUICK_START.md`
 
 ### Fixed
 

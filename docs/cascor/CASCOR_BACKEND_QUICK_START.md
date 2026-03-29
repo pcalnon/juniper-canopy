@@ -2,9 +2,9 @@
 
 ## Connect to real CasCor backend in 5 minutes
 
-**Version:** 0.25.0  
+**Version:** 0.26.0  
 **Status:** ✅ ASYNC TRAINING READY  
-**Last Updated:** January 29, 2026
+**Last Updated:** March 29, 2026
 
 ---
 
@@ -13,6 +13,9 @@
 **CasCor backend integration provides:**
 
 - ✅ Dynamic import of CasCor backend modules
+- ✅ Service mode via `CASCOR_SERVICE_URL` (`CascorServiceAdapter` + `ServiceBackend`)
+- ✅ Non-destructive attach to existing CasCor sessions
+- ✅ Connect-time state sync (`CascorStateSync`) for immediate dashboard hydration
 - ✅ Network instantiation and configuration
 - ✅ Method wrapping for monitoring hooks
 - ✅ Real-time metrics extraction
@@ -23,7 +26,7 @@
 - ✅ Training status and stop request support
 - ✅ Remote worker integration for distributed training
 
-**Current Status:** Async training ready in `src/backend/cascor_integration.py`
+**Current Status:** Service mode and async training are ready in `src/backend/`.
 
 ---
 
@@ -64,6 +67,9 @@ python -c "from cascade_correlation.cascade_correlation import CascadeCorrelatio
 ---
 
 ## Quick Setup
+
+> **Mode note:** This quick start describes the in-process backend path (`CascorIntegration`) that uses `CASCOR_BACKEND_PATH`.
+> For service mode (remote CasCor), set `CASCOR_SERVICE_URL` as shown in `README.md` and keep `CASCOR_DEMO_MODE` disabled.
 
 ### Step 1: Verify CasCor Backend Location
 
@@ -729,8 +735,8 @@ integration.create_monitoring_callback('epoch_end', on_epoch_end)
 
 ---
 
-**Last Updated:** January 29, 2026  
-**Version:** 0.25.0  
+**Last Updated:** March 29, 2026  
+**Version:** 0.26.0  
 **Status:** ✅ ASYNC TRAINING READY
 
 **Ready to use! See [CASCOR_BACKEND_MANUAL.md](CASCOR_BACKEND_MANUAL.md) for advanced features!**
