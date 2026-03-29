@@ -1094,6 +1094,12 @@ class MetricsPanel(BaseComponent):
         if cand_trained is not None and cand_total:
             parts.append(f"Candidates: {cand_trained}/{cand_total}")
 
+        cand_epoch = state.get("candidate_epoch")
+        cand_total_epochs = state.get("candidate_total_epochs")
+        if cand_epoch and cand_total_epochs:
+            pct = int(100 * cand_epoch / cand_total_epochs)
+            parts.append(f"Candidate Epoch: {cand_epoch}/{cand_total_epochs} ({pct}%)")
+
         return " | ".join(parts) if parts else ""
 
     def _update_metrics_display_handler(self, metrics_data: List[Dict[str, Any]] = None, theme: str = None, view_state: Dict = None, display_mode_state: Dict = None):
