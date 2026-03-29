@@ -231,6 +231,13 @@ class CascorServiceAdapter:
                                     learning_rate=data.get("learning_rate"),
                                     max_hidden_units=data.get("max_hidden_units"),
                                     max_epochs=data.get("max_epochs"),
+                                    phase_detail=data.get("phase_detail"),
+                                    grow_iteration=data.get("grow_iteration"),
+                                    grow_max=data.get("grow_max"),
+                                    best_correlation=data.get("best_correlation"),
+                                    candidates_trained=data.get("candidates_trained"),
+                                    candidates_total=data.get("candidates_total"),
+                                    phase_started_at=data.get("phase_started_at"),
                                 )
                             except Exception as se:  # nosec B110
                                 logger.debug(f"State update callback error: {se}")

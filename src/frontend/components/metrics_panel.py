@@ -143,6 +143,16 @@ class MetricsPanel(BaseComponent):
                                 "fontSize": "14px",
                             },
                         ),
+                        html.Div(
+                            id=f"{self.component_id}-progress-detail",
+                            children="",
+                            style={
+                                "display": "inline-block",
+                                "marginLeft": "15px",
+                                "fontSize": "13px",
+                                "color": "#adb5bd",
+                            },
+                        ),
                     ],
                     style={"marginBottom": "10px"},
                 ),
@@ -536,6 +546,13 @@ class MetricsPanel(BaseComponent):
         )
         def update_candidate_pool(state):
             return self._update_candidate_pool_handler(state=state)
+
+        @app.callback(
+            Output(f"{self.component_id}-progress-detail", "children"),
+            [Input(f"{self.component_id}-training-state-store", "data")],
+        )
+        def update_progress_detail(state):
+            return self._update_progress_detail_handler(state=state)
 
         @app.callback(
             [
@@ -1049,6 +1066,35 @@ class MetricsPanel(BaseComponent):
             ), {"marginTop": "20px"}
 
         return self._create_candidate_pool_display(state), {"marginTop": "20px"}
+
+    def _update_progress_detail_handler(self, state=None):
+        """Build inline progress text from training state progress fields."""
+        if not state:
+            return ""
+        status = (state.get("status") or "").upper()
+        if status in ("STOPPED", "IDLE", ""):
+            return ""
+
+        parts = []
+        phase_detail = state.get("phase_detail", "")
+        if phase_detail:
+            parts.append(phase_detail.replace("_", " ").title())
+
+        grow_iter = state.get("grow_iteration")
+        grow_max = state.get("grow_max")
+        if grow_iter is not None and grow_max:
+            parts.append(f"Iteration {grow_iter}/{grow_max}")
+
+        best_corr = state.get("best_correlation")
+        if best_corr:
+            parts.append(f"Best Corr: {best_corr:.4f}")
+
+        cand_trained = state.get("candidates_trained")
+        cand_total = state.get("candidates_total")
+        if cand_trained is not None and cand_total:
+            parts.append(f"Candidates: {cand_trained}/{cand_total}")
+
+        return " | ".join(parts) if parts else ""
 
     def _update_metrics_display_handler(self, metrics_data: List[Dict[str, Any]] = None, theme: str = None, view_state: Dict = None, display_mode_state: Dict = None):
         """
