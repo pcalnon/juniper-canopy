@@ -1,5 +1,7 @@
 """Tests for CascorStateSync."""
 
+from unittest.mock import MagicMock
+
 import pytest
 from juniper_cascor_client.testing import FakeCascorClient
 
@@ -66,3 +68,78 @@ class TestCascorStateSync:
         assert CascorStateSync._normalize_status("paused") == "Paused"
         assert CascorStateSync._normalize_status("complete") == "Completed"
         assert CascorStateSync._normalize_status("unknown") == "Stopped"
+
+
+class TestCascorStateSyncNormalizationBranches:
+    def _make_client(self):
+        client = MagicMock()
+        client.get_training_status.return_value = {"is_training": False, "data": {"training_active": False}}
+        client.get_training_params.return_value = {"data": {"params": {}}}
+        client.get_topology.return_value = {"data": {"input_size": 2, "output_size": 1, "hidden_units": []}}
+        client.get_metrics_history.return_value = {"data": []}
+        return client
+
+    def test_sync_prefers_top_level_is_training_flag(self):
+        from backend.state_sync import CascorStateSync
+
+        client = self._make_client()
+        client.get_training_status.return_value = {
+            "is_training": False,
+            "data": {
+                "training_active": True,
+                "state_machine": {"status": "TRAINING", "phase": "OUTPUT"},
+                "monitor": {"current_epoch": 12},
+                "training_state": {"max_epochs": 300},
+            },
+        }
+
+        synced = CascorStateSync(client).sync()
+
+        assert synced.is_training is False
+        assert synced.status == "Started"
+        assert synced.current_epoch == 12
+        assert synced.max_epochs == 300
+
+    def test_sync_maps_flat_param_payload_when_nested_params_missing(self):
+        from backend.state_sync import CascorStateSync
+
+        client = self._make_client()
+        client.get_training_params.return_value = {
+            "data": {
+                "learning_rate": 0.04,
+                "max_hidden_units": 8,
+                "epochs_max": 222,
+                "status": "started",
+                "meta": {"source": "test"},
+                "timestamp": "2026-03-29T00:00:00Z",
+                "dataset": "two_spiral",
+            }
+        }
+
+        synced = CascorStateSync(client).sync()
+
+        assert synced.params["nn_learning_rate"] == 0.04
+        assert synced.params["nn_max_hidden_units"] == 8
+        assert synced.params["nn_max_total_epochs"] == 222
+        assert "status" not in synced.params
+        assert "meta" not in synced.params
+        assert "timestamp" not in synced.params
+        assert "dataset" not in synced.params
+
+    def test_sync_normalizes_top_level_metrics_history_list(self):
+        from backend.state_sync import CascorStateSync
+
+        client = self._make_client()
+        client.get_metrics_history.return_value = [
+            {"epoch": 1, "loss": 0.0, "accuracy": 0.0, "hidden_units": 0},
+            {"epoch": 2, "validation_loss": 0.55, "validation_accuracy": 0.88, "hidden_units": 1},
+        ]
+
+        synced = CascorStateSync(client).sync()
+
+        assert len(synced.metrics_history) == 2
+        assert synced.metrics_history[0]["metrics"]["loss"] == 0.0
+        assert synced.metrics_history[0]["metrics"]["accuracy"] == 0.0
+        assert synced.metrics_history[0]["network_topology"]["hidden_units"] == 0
+        assert synced.metrics_history[1]["metrics"]["val_loss"] == 0.55
+        assert synced.metrics_history[1]["metrics"]["val_accuracy"] == 0.88
