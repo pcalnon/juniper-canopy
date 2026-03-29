@@ -398,7 +398,7 @@ class CascorServiceAdapter:
         """Fetch training params from cascor and map to canopy nn_*/cn_* namespace."""
         try:
             result = self._client.get_training_params()
-            # Unwrap the response
+            # Unwrap the response: try FakeCascorClient nested format first
             params = result.get("data", {}).get("params", {})
             if not params and isinstance(result.get("data"), dict):
                 params = {k: v for k, v in result.get("data", {}).items() if k not in ("epochs", "dataset", "status", "meta", "timestamp")}

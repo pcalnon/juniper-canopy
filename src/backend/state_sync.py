@@ -55,7 +55,7 @@ class CascorStateSync:
         """
         state = SyncedState()
 
-        # --- Training status ---
+        # --- Training status (FIX-5, FIX-12) ---
         try:
             status_response = self._client.get_training_status()
             data = status_response.get("data", {})
@@ -93,7 +93,7 @@ class CascorStateSync:
         except Exception as e:
             logger.warning(f"Failed to fetch training status during sync: {e}")
 
-        # --- Training parameters ---
+        # --- Training parameters (FIX-7) ---
         try:
             params_response = self._client.get_training_params()
             data = params_response.get("data", {})
@@ -120,7 +120,7 @@ class CascorStateSync:
         except Exception as e:
             logger.debug(f"Failed to fetch topology during sync (may not exist): {e}")
 
-        # --- Metrics history ---
+        # --- Metrics history (FIX-6) ---
         try:
             history_response = self._client.get_metrics_history(count=metrics_limit)
             raw_history = []
