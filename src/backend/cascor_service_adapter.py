@@ -242,6 +242,18 @@ class CascorServiceAdapter:
                             except Exception as se:  # nosec B110
                                 logger.debug(f"State update callback error: {se}")
 
+                        # Update local training_state from candidate progress messages
+                        if msg_type == "candidate_progress" and self._state_update_callback and isinstance(data, dict):
+                            try:
+                                self._state_update_callback(
+                                    phase_detail="training_candidates",
+                                    candidate_epoch=data.get("epoch"),
+                                    candidate_total_epochs=data.get("total_epochs"),
+                                    best_correlation=data.get("correlation"),
+                                )
+                            except Exception as cpe:  # nosec B110
+                                logger.debug(f"Candidate progress callback error: {cpe}")
+
                         # Handle event messages (e.g. training_complete) to keep training_state aligned
                         if msg_type == "event" and self._state_update_callback and isinstance(data, dict):
                             event_name = data.get("event", "")
