@@ -99,7 +99,7 @@ class TestFetchNetworkStatsHandler:
             result = metrics_panel._fetch_network_stats_handler()
 
             assert result == {"nodes": 5, "connections": 12}
-            mock_get.assert_called_once_with("http://localhost:8050/api/network/stats", timeout=2)
+            mock_get.assert_called_once_with("http://127.0.0.1:8050/api/network/stats", timeout=2)
 
     def test_fetch_network_stats_non_200_status(self, metrics_panel):
         """Should return empty dict on non-200 status code."""
@@ -158,7 +158,7 @@ class TestFetchTrainingStateHandler:
             result = metrics_panel._fetch_training_state_handler()
 
             assert result == {"status": "RUNNING", "epoch": 25}
-            mock_get.assert_called_once_with("http://localhost:8050/api/state", timeout=2)
+            mock_get.assert_called_once_with("http://127.0.0.1:8050/api/state", timeout=2)
 
     def test_fetch_training_state_non_200_status(self, metrics_panel):
         """Should return empty dict on non-200 status code."""

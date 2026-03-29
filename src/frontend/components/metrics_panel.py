@@ -80,6 +80,7 @@ class MetricsPanel(BaseComponent):
 
         # Initialize settings for component configuration
         _settings = get_settings()
+        self._api_base_url = f"http://127.0.0.1:{_settings.server.port}"
 
         # Update interval (milliseconds)
         # Priority: 1. Passed config, 2. Environment variable, 3. Default (1000ms)
@@ -997,7 +998,7 @@ class MetricsPanel(BaseComponent):
         import requests
 
         try:
-            response = requests.get("http://localhost:8050/api/network/stats", timeout=2)
+            response = requests.get(f"{self._api_base_url}/api/network/stats", timeout=2)
             if response.status_code == 200:
                 return response.json()
         except Exception as e:
@@ -1018,7 +1019,7 @@ class MetricsPanel(BaseComponent):
         import requests
 
         try:
-            response = requests.get("http://localhost:8050/api/state", timeout=2)
+            response = requests.get(f"{self._api_base_url}/api/state", timeout=2)
             if response.status_code == 200:
                 return response.json()
         except Exception as e:
@@ -1152,7 +1153,7 @@ class MetricsPanel(BaseComponent):
         import requests
 
         try:
-            response = requests.get("http://localhost:8050/api/v1/metrics/layouts", timeout=2)
+            response = requests.get(f"{self._api_base_url}/api/v1/metrics/layouts", timeout=2)
             if response.status_code == 200:
                 data = response.json()
                 layouts = data.get("layouts", [])
@@ -1184,7 +1185,7 @@ class MetricsPanel(BaseComponent):
 
         try:
             response = requests.post(
-                "http://localhost:8050/api/v1/metrics/layouts",
+                f"{self._api_base_url}/api/v1/metrics/layouts",
                 params={
                     "name": name.strip(),
                     "smoothing_window": self.smoothing_window,
@@ -1228,7 +1229,7 @@ class MetricsPanel(BaseComponent):
 
         try:
             response = requests.get(
-                f"http://localhost:8050/api/v1/metrics/layouts/{layout_name}",
+                f"{self._api_base_url}/api/v1/metrics/layouts/{layout_name}",
                 timeout=2,
             )
 
@@ -1271,7 +1272,7 @@ class MetricsPanel(BaseComponent):
 
         try:
             response = requests.delete(
-                f"http://localhost:8050/api/v1/metrics/layouts/{layout_name}",
+                f"{self._api_base_url}/api/v1/metrics/layouts/{layout_name}",
                 timeout=5,
             )
 

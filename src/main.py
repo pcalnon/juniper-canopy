@@ -163,6 +163,7 @@ async def lifespan(app: FastAPI):
         system_logger.warning(f"JuniperData unreachable at {juniper_data_url}: {data_probe.message}")
 
     # Probe JuniperCascor at startup (service mode only) — fallback to demo on failure.
+    backend_initialized = False
     cascor_url = settings.cascor_service_url
     if cascor_url and backend.backend_type == "service":
         cascor_probe = probe_dependency("JuniperCascor", f"{cascor_url.rstrip('/')}/v1/health/live")
@@ -175,9 +176,11 @@ async def lifespan(app: FastAPI):
 
             backend = create_backend(demo_mode=True)
             await backend.initialize()
+            backend_initialized = True
 
     # Initialize the backend (demo: starts simulation; service: connects to CasCor)
-    await backend.initialize()
+    if not backend_initialized:
+        await backend.initialize()
 
     # Sync global training_state from backend
     if backend.backend_type == "demo" and hasattr(backend, "_demo"):

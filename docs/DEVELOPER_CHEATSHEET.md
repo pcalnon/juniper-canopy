@@ -8,6 +8,14 @@
 
 ## Common Commands
 
+**The following commands launch a full set of Juniper Project services, start services in the order listed below:**
+
+- juniper-data: cd /home/pcalnon/Development/python/Juniper/juniper-data && conda activate JuniperData && pip install -e ".[all]" && PYTHON_GIL=0 uvicorn juniper_data.api.app:app --host 0.0.0.0 --port 8100
+- juniper-cascor: cd /home/pcalnon/Development/python/Juniper/juniper-cascor/src && conda activate JuniperCascor && JUNIPER_CASCOR_PORT=8201 python server.py
+- juniper-canopy: cd /home/pcalnon/Development/python/Juniper/juniper-canopy/src && conda activate JuniperCanopy && CASCOR_SERVICE_URL="<http://localhost:8201>" uvicorn main:app --host 0.0.0.0 --port 8050
+
+**General list of useful Commands:**
+
 | Task                        | Command                                                                                              |
 |-----------------------------|------------------------------------------------------------------------------------------------------|
 | Run in demo mode            | `./demo`                                                                                             |

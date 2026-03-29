@@ -1,15 +1,11 @@
 # Unified Development Plan: External CasCor Dashboard Integration
 
-**Version**: 1.0.0
-**Date**: 2026-03-26
-**Author**: Amp (AI Agent)
-**Status**: Ready for Implementation
-**Supersedes**: `CANOPY_EXTERNAL_CASCOR_PLAN.md` (v1.0.0),
-`EXTERNAL_CASCOR_INTEGRATION_DEV_PLAN.md` (v2.0.0),
-`DEVELOPMENT_PLAN_EXTERNAL_CASCOR_FIX.md` (v1.0.0)
-**Source Analysis**: Synthesized from three analysis documents and two prior
-development plans, cross-validated by five independent review agents against
-the current codebase.
+- **Version**: 1.0.0
+- **Date**: 2026-03-26
+- **Author**: Amp (AI Agent)
+- **Status**: Ready for Implementation
+- **Supersedes**: `CANOPY_EXTERNAL_CASCOR_PLAN.md` (v1.0.0), `EXTERNAL_CASCOR_INTEGRATION_DEV_PLAN.md` (v2.0.0), `DEVELOPMENT_PLAN_EXTERNAL_CASCOR_FIX.md` (v1.0.0)
+- **Source Analysis**: Synthesized from three analysis documents and two prior development plans, cross-validated by five independent review agents against the current codebase.
 
 ---
 
@@ -415,7 +411,7 @@ pytest tests/unit/test_response_normalization.py -v
 Add the shared helper methods that all subsequent fixes use. No behavior
 changes yet — just adding the infrastructure.
 
-#### Changes
+#### Changes, Phase 1
 
 1. **`src/backend/cascor_service_adapter.py`** — Add `_first_defined()`:
 
@@ -493,7 +489,7 @@ changes yet — just adding the infrastructure.
    `_unwrap_envelope()`. The existing method at line 381-391 already handles
    envelope stripping correctly.
 
-#### Verification
+#### Verification, Phase 1
 
 ```bash
 cd /home/pcalnon/Development/python/Juniper/juniper-canopy/src
@@ -648,38 +644,38 @@ def get_status(self) -> Dict[str, Any]:
 
 #### Dashboard Key Mapping Reference
 
-| Dashboard Key | Cascor Source Path | DemoBackend Equivalent |
-|---|---|---|
-| `is_running` | `state_machine.status == "STARTED"` | `self._fsm.status == "STARTED"` |
-| `is_paused` | `state_machine.status == "PAUSED"` | `self._fsm.status == "PAUSED"` |
-| `completed` | `state_machine.status == "COMPLETED"` | `self._fsm.status == "COMPLETED"` |
-| `failed` | `state_machine.status == "FAILED"` | `self._fsm.status == "FAILED"` |
-| `phase` | `state_machine.phase` (lowercased) | `self._training_phase` |
-| `current_epoch` | `monitor.current_epoch` | `self._current_epoch` |
-| `hidden_units` | `monitor.current_hidden_units` | `self._hidden_units` |
-| `is_training` | `training_active` | `self._is_training` |
-| `network_connected` | `network_loaded` | `self._network is not None` |
+| Dashboard Key       | Cascor Source Path                    | DemoBackend Equivalent            |
+|---------------------|---------------------------------------|-----------------------------------|
+| `is_running`        | `state_machine.status == "STARTED"`   | `self._fsm.status == "STARTED"`   |
+| `is_paused`         | `state_machine.status == "PAUSED"`    | `self._fsm.status == "PAUSED"`    |
+| `completed`         | `state_machine.status == "COMPLETED"` | `self._fsm.status == "COMPLETED"` |
+| `failed`            | `state_machine.status == "FAILED"`    | `self._fsm.status == "FAILED"`    |
+| `phase`             | `state_machine.phase` (lowercased)    | `self._training_phase`            |
+| `current_epoch`     | `monitor.current_epoch`               | `self._current_epoch`             |
+| `hidden_units`      | `monitor.current_hidden_units`        | `self._hidden_units`              |
+| `is_training`       | `training_active`                     | `self._is_training`               |
+| `network_connected` | `network_loaded`                      | `self._network is not None`       |
 
 #### Tests for Phase 2
 
-| Test | File | Validates |
-|---|---|---|
-| `test_get_recent_metrics_real_envelope` | `test_response_normalization.py` | FIX-1 |
-| `test_get_recent_metrics_fake_envelope` | `test_response_normalization.py` | FIX-1 compat |
-| `test_get_recent_metrics_empty_data` | `test_response_normalization.py` | FIX-1 edge |
-| `test_is_training_real_envelope` | `test_response_normalization.py` | FIX-2 |
-| `test_is_training_false_not_fallthrough` | `test_response_normalization.py` | FIX-2 edge |
-| `test_get_current_metrics_unwraps` | `test_response_normalization.py` | FIX-3 |
-| `test_get_status_normalizes_cascor` | `test_response_normalization.py` | FIX-4 |
-| `test_get_status_epoch_zero_preserved` | `test_response_normalization.py` | FIX-4 edge |
-| `test_get_status_uppercase_started` | `test_response_normalization.py` | FIX-4 case |
-| `test_get_status_passthrough_flat` | `test_response_normalization.py` | FIX-4 demo compat |
-| `test_is_training_in_progress_real` | `test_cascor_service_adapter.py` | FIX-8 |
-| `test_is_training_active_service` | `test_service_backend.py` | FIX-8: protocol path through `ServiceBackend.is_training_active()` |
-| `test_get_status_partial_nested` | `test_response_normalization.py` | FIX-4: handles partial nested structure (e.g., missing `monitor`) |
-| `test_metrics_loss_zero_preserved` | `test_response_normalization.py` | FIX-13 edge |
+| Test                                     | File                             | Validates                                                          |
+|------------------------------------------|----------------------------------|--------------------------------------------------------------------|
+| `test_get_recent_metrics_real_envelope`  | `test_response_normalization.py` | FIX-1                                                              |
+| `test_get_recent_metrics_fake_envelope`  | `test_response_normalization.py` | FIX-1 compat                                                       |
+| `test_get_recent_metrics_empty_data`     | `test_response_normalization.py` | FIX-1 edge                                                         |
+| `test_is_training_real_envelope`         | `test_response_normalization.py` | FIX-2                                                              |
+| `test_is_training_false_not_fallthrough` | `test_response_normalization.py` | FIX-2 edge                                                         |
+| `test_get_current_metrics_unwraps`       | `test_response_normalization.py` | FIX-3                                                              |
+| `test_get_status_normalizes_cascor`      | `test_response_normalization.py` | FIX-4                                                              |
+| `test_get_status_epoch_zero_preserved`   | `test_response_normalization.py` | FIX-4 edge                                                         |
+| `test_get_status_uppercase_started`      | `test_response_normalization.py` | FIX-4 case                                                         |
+| `test_get_status_passthrough_flat`       | `test_response_normalization.py` | FIX-4 demo compat                                                  |
+| `test_is_training_in_progress_real`      | `test_cascor_service_adapter.py` | FIX-8                                                              |
+| `test_is_training_active_service`        | `test_service_backend.py`        | FIX-8: protocol path through `ServiceBackend.is_training_active()` |
+| `test_get_status_partial_nested`         | `test_response_normalization.py` | FIX-4: handles partial nested structure (e.g., missing `monitor`)  |
+| `test_metrics_loss_zero_preserved`       | `test_response_normalization.py` | FIX-13 edge                                                        |
 
-#### Verification
+#### Verification, Phase 2
 
 ```bash
 cd /home/pcalnon/Development/python/Juniper/juniper-canopy/src
@@ -812,20 +808,20 @@ if isinstance(data, dict):
 
 #### Tests for Phase 3
 
-| Test | File | Validates |
-|---|---|---|
-| `test_sync_real_training_status` | `test_state_sync.py` | FIX-5: nested status |
-| `test_sync_fake_training_status` | `test_state_sync.py` | FIX-5: fake compat |
-| `test_sync_is_training_false_preserved` | `test_state_sync.py` | FIX-5: False edge |
-| `test_sync_epoch_zero_preserved` | `test_state_sync.py` | FIX-5: 0 edge |
-| `test_sync_metrics_history_list` | `test_state_sync.py` | FIX-6: bare list |
-| `test_sync_metrics_history_dict` | `test_state_sync.py` | FIX-6: dict compat |
-| `test_sync_params_flat` | `test_state_sync.py` | FIX-7: flat params |
-| `test_sync_params_nested` | `test_state_sync.py` | FIX-7: nested compat |
-| `test_normalize_status_uppercase` | `test_state_sync.py` | FIX-12: STARTED → Started |
-| `test_sync_phase_extracted` | `test_state_sync.py` | FIX-5: phase population |
+| Test                                    | File                 | Validates                 |
+|-----------------------------------------|----------------------|---------------------------|
+| `test_sync_real_training_status`        | `test_state_sync.py` | FIX-5: nested status      |
+| `test_sync_fake_training_status`        | `test_state_sync.py` | FIX-5: fake compat        |
+| `test_sync_is_training_false_preserved` | `test_state_sync.py` | FIX-5: False edge         |
+| `test_sync_epoch_zero_preserved`        | `test_state_sync.py` | FIX-5: 0 edge             |
+| `test_sync_metrics_history_list`        | `test_state_sync.py` | FIX-6: bare list          |
+| `test_sync_metrics_history_dict`        | `test_state_sync.py` | FIX-6: dict compat        |
+| `test_sync_params_flat`                 | `test_state_sync.py` | FIX-7: flat params        |
+| `test_sync_params_nested`               | `test_state_sync.py` | FIX-7: nested compat      |
+| `test_normalize_status_uppercase`       | `test_state_sync.py` | FIX-12: STARTED → Started |
+| `test_sync_phase_extracted`             | `test_state_sync.py` | FIX-5: phase population   |
 
-#### Verification
+#### Verification, Phase 3
 
 ```bash
 cd /home/pcalnon/Development/python/Juniper/juniper-canopy/src
@@ -865,6 +861,7 @@ This guarantees mathematical consistency and prevents future drift.
 **File**: `canopy/src/backend/cascor_service_adapter.py` (lines 359-375)
 
 Verify and fix the dual-path logic. The current code does:
+
 ```python
 result = self._client.get_training_params()
 params = result.get("data", {}).get("params", {})
@@ -927,16 +924,16 @@ Compare cascor's `/v1/network/topology` response shape (after
 
 #### Tests for Phase 4
 
-| Test | File | Validates |
-|---|---|---|
-| `test_param_map_roundtrip_all` | `test_cascor_service_adapter.py` | FIX-9: all 7 params |
-| `test_param_map_reverse_is_inverse` | `test_cascor_service_adapter.py` | FIX-9: mathematical |
-| `test_get_canopy_params_real_envelope` | `test_cascor_service_adapter.py` | FIX-10 |
-| `test_get_canopy_params_fake_envelope` | `test_cascor_service_adapter.py` | FIX-10 compat |
-| `test_dataset_key_normalization` | `test_service_backend.py` | FIX-11 |
-| `test_topology_format_compat` | `test_service_backend.py` | FIX-14 |
+| Test                                   | File                             | Validates           |
+|----------------------------------------|----------------------------------|---------------------|
+| `test_param_map_roundtrip_all`         | `test_cascor_service_adapter.py` | FIX-9: all 7 params |
+| `test_param_map_reverse_is_inverse`    | `test_cascor_service_adapter.py` | FIX-9: mathematical |
+| `test_get_canopy_params_real_envelope` | `test_cascor_service_adapter.py` | FIX-10              |
+| `test_get_canopy_params_fake_envelope` | `test_cascor_service_adapter.py` | FIX-10 compat       |
+| `test_dataset_key_normalization`       | `test_service_backend.py`        | FIX-11              |
+| `test_topology_format_compat`          | `test_service_backend.py`        | FIX-14              |
 
-#### Verification
+#### Verification, Phase 4
 
 ```bash
 cd /home/pcalnon/Development/python/Juniper/juniper-canopy/src
@@ -958,14 +955,14 @@ pytest tests/ -v -k "dataset or topology or param"
 
 **File**: `juniper-cascor-client/juniper_cascor_client/testing/fake_client.py`
 
-| Method | Before | After |
-|---|---|---|
-| All methods | `"status": "ok"` | `"status": "success"` |
-| All methods | No `meta` field | `"meta": {"timestamp": ..., "version": "0.4.0"}` |
+| Method                  | Before                                     | After                                                                                      |
+|-------------------------|--------------------------------------------|--------------------------------------------------------------------------------------------|
+| All methods             | `"status": "ok"`                           | `"status": "success"`                                                                      |
+| All methods             | No `meta` field                            | `"meta": {"timestamp": ..., "version": "0.4.0"}`                                           |
 | `get_training_status()` | Top-level `is_training`, flat `data.state` | `data.training_active`, nested `data.state_machine`, `data.monitor`, `data.training_state` |
-| `get_metrics_history()` | `data: {"history": [...]}` | `data: [... list ...]` |
-| `get_metrics()` | Extra `correlation`, `phase` | Add `timestamp`; keep `train_loss` names |
-| `get_training_params()` | `data: {"params": {...}}` | `data: {flat param dict}` |
+| `get_metrics_history()` | `data: {"history": [...]}`                 | `data: [... list ...]`                                                                     |
+| `get_metrics()`         | Extra `correlation`, `phase`               | Add `timestamp`; keep `train_loss` names                                                   |
+| `get_training_params()` | `data: {"params": {...}}`                  | `data: {flat param dict}`                                                                  |
 
 #### 5.2 Add Response Envelope Helper
 
@@ -990,16 +987,16 @@ This change will break existing tests. Strategy:
 
 Expected breakage in juniper-canopy:
 
-| Test File | Expected Impact |
-|---|---|
-| `test_cascor_service_adapter.py` | Mock response format assertions |
-| `test_state_sync.py` | Status response data paths |
-| `test_fake_service_backend.py` | Full-chain assertions |
-| `test_service_controls.py` | Control response message format |
-| `test_external_cascor_attach.py` | Attach response assertions |
-| `test_training_controls_service_mode.py` | Control response shapes |
+| Test File                                | Expected Impact                 |
+|------------------------------------------|---------------------------------|
+| `test_cascor_service_adapter.py`         | Mock response format assertions |
+| `test_state_sync.py`                     | Status response data paths      |
+| `test_fake_service_backend.py`           | Full-chain assertions           |
+| `test_service_controls.py`               | Control response message format |
+| `test_external_cascor_attach.py`         | Attach response assertions      |
+| `test_training_controls_service_mode.py` | Control response shapes         |
 
-#### Verification
+#### Verification, Phase 5
 
 ```bash
 # Cascor-client tests:
@@ -1022,12 +1019,12 @@ pytest tests/ -v
 
 #### 6.1 Required Integration Tests
 
-| Test | File | Type | Validates |
-|---|---|---|---|
-| `test_service_mode_dashboard_data` | `tests/integration/test_dashboard_data.py` | **Mock** | Each `/api/*` endpoint returns dashboard-compatible shapes in service mode using mocked cascor responses |
-| `test_external_cascor_attach` | `tests/integration/test_external_cascor_attach.py` | **Live** | Non-destructive attach to running cascor; no `create_network` or `reset` calls; params/epoch/status populate correctly |
-| `test_canopy_restart_during_training` | `tests/integration/test_canopy_restart.py` | **Live** | Start canopy → verify cascor continues → stop canopy → verify cascor keeps running → restart canopy → verify reattach and state restore |
-| `test_param_apply_roundtrip` | `tests/integration/test_param_roundtrip.py` | **Live** | Apply each mappable param from canopy → verify cascor received update → verify canopy reflects new values |
+| Test                                  | File                                               | Type     | Validates                                                                                                                               |
+|---------------------------------------|----------------------------------------------------|----------|-----------------------------------------------------------------------------------------------------------------------------------------|
+| `test_service_mode_dashboard_data`    | `tests/integration/test_dashboard_data.py`         | **Mock** | Each `/api/*` endpoint returns dashboard-compatible shapes in service mode using mocked cascor responses                                |
+| `test_external_cascor_attach`         | `tests/integration/test_external_cascor_attach.py` | **Live** | Non-destructive attach to running cascor; no `create_network` or `reset` calls; params/epoch/status populate correctly                  |
+| `test_canopy_restart_during_training` | `tests/integration/test_canopy_restart.py`         | **Live** | Start canopy → verify cascor continues → stop canopy → verify cascor keeps running → restart canopy → verify reattach and state restore |
+| `test_param_apply_roundtrip`          | `tests/integration/test_param_roundtrip.py`        | **Live** | Apply each mappable param from canopy → verify cascor received update → verify canopy reflects new values                               |
 
 > **CI gating**: Tests marked **(Live)** require a running cascor instance
 > and must be gated behind the `CASCOR_BACKEND_AVAILABLE=1` environment
@@ -1121,7 +1118,7 @@ curl -s http://localhost:8050/api/topology | python -m json.tool
 
 ## 10. Dependency Graph
 
-```
+```bash
 Phase 0 (characterization tests)
     └──→ Phase 1 (shared helpers: _first_defined, _normalize_metric, etc.)
               │
@@ -1156,7 +1153,7 @@ Phase 0 (characterization tests)
 All changes are isolated to the normalization/translation layer. No persistent
 data migrations, no schema changes, no new external dependencies.
 
-### If a regression is detected after deployment:
+### If a regression is detected after deployment
 
 1. **Identify scope**: Is the regression in service mode only or does it affect
    demo mode?
@@ -1169,7 +1166,7 @@ data migrations, no schema changes, no new external dependencies.
 5. **Diagnose**: Use the failing characterization test to identify which
    specific normalization path regressed.
 
-### Risk minimization:
+### Risk minimization
 
 - All dual-path logic is designed for backward compatibility — FakeCascorClient
   paths are checked first, so demo mode is never affected by normalization
@@ -1184,18 +1181,18 @@ data migrations, no schema changes, no new external dependencies.
 
 ## 12. Risk Mitigation
 
-| Risk | Impact | Probability | Mitigation |
-|---|---|---|---|
-| Falsy values (epoch=0, loss=0.0) treated as missing | Charts show gaps; epoch counter blank | Medium | `_first_defined()` + `"key" in dict` checks; dedicated edge-case tests |
-| Real server status case (`STARTED` vs `Started`) mismatch | Status bar shows wrong state | Medium | `.upper()` normalization in `_normalize_status_response`; uppercase entries in `_normalize_status()` mapping |
-| FakeCascorClient changes break many tests (Phase 5) | Test suite fails | **High** | Atomic pass: update fake + fix all tests in one commit. Run full suite before merge |
-| Dual-path detection misfires | Silent data corruption | Low | Positive detection via `_is_cascor_nested()`; test both paths |
-| Parameter mapping has untested edge cases | Params silently fail to apply | Medium | Auto-generated reverse map; round-trip tests for all 7 params |
-| Dashboard callbacks have undocumented key dependencies | Some UI elements still blank | Medium | Phase 6 visual verification; explicit dashboard data contract (§6) |
-| `_unwrap_response()` strips `meta` field needed by some code | Loss of timestamp/version | Low | No current canopy code reads `meta` — verified |
-| Demo mode regresses from shared code changes | Demo mode breaks | Low | Dual-path logic checks FakeCascorClient format first |
-| Dataset visualization broken (no data arrays) | Dataset tab empty scatter plot | **Expected** | Document as known limitation (§12.2); defer to future enhancement |
-| Normalization logic drifts from cascor API | Future cascor changes break canopy | Low | Phase 5 aligns fake client; tests catch divergence early |
+| Risk                                                         | Impact                                | Probability  | Mitigation                                                                                                   |
+|--------------------------------------------------------------|---------------------------------------|--------------|--------------------------------------------------------------------------------------------------------------|
+| Falsy values (epoch=0, loss=0.0) treated as missing          | Charts show gaps; epoch counter blank | Medium       | `_first_defined()` + `"key" in dict` checks; dedicated edge-case tests                                       |
+| Real server status case (`STARTED` vs `Started`) mismatch    | Status bar shows wrong state          | Medium       | `.upper()` normalization in `_normalize_status_response`; uppercase entries in `_normalize_status()` mapping |
+| FakeCascorClient changes break many tests (Phase 5)          | Test suite fails                      | **High**     | Atomic pass: update fake + fix all tests in one commit. Run full suite before merge                          |
+| Dual-path detection misfires                                 | Silent data corruption                | Low          | Positive detection via `_is_cascor_nested()`; test both paths                                                |
+| Parameter mapping has untested edge cases                    | Params silently fail to apply         | Medium       | Auto-generated reverse map; round-trip tests for all 7 params                                                |
+| Dashboard callbacks have undocumented key dependencies       | Some UI elements still blank          | Medium       | Phase 6 visual verification; explicit dashboard data contract (§6)                                           |
+| `_unwrap_response()` strips `meta` field needed by some code | Loss of timestamp/version             | Low          | No current canopy code reads `meta` — verified                                                               |
+| Demo mode regresses from shared code changes                 | Demo mode breaks                      | Low          | Dual-path logic checks FakeCascorClient format first                                                         |
+| Dataset visualization broken (no data arrays)                | Dataset tab empty scatter plot        | **Expected** | Document as known limitation (§12.2); defer to future enhancement                                            |
+| Normalization logic drifts from cascor API                   | Future cascor changes break canopy    | Low          | Phase 5 aligns fake client; tests catch divergence early                                                     |
 
 ---
 
@@ -1241,43 +1238,43 @@ data migrations, no schema changes, no new external dependencies.
 
 ### juniper-canopy
 
-| File | Phase | Changes |
-|---|---|---|
-| `src/backend/cascor_service_adapter.py` | 1, 2, 4 | Add `_first_defined`, `_is_cascor_nested`, `_normalize_metric` helpers; fix monitor methods (FIX-1,2,3); fix `is_training_in_progress` (FIX-8); fix reverse param map (FIX-9); harmonize `get_canopy_params` (FIX-10) |
-| `src/backend/service_backend.py` | 2, 4 | Add `get_status()` flat-dict builder (FIX-4); fix `get_dataset()` key mapping (FIX-11) |
-| `src/backend/state_sync.py` | 3 | Fix `sync()` field navigation (FIX-5,6,7); expand `_normalize_status()` (FIX-12); add phase extraction |
-| `src/main.py` | — | No changes needed |
-| `src/tests/fixtures/cascor_response_fixtures.py` | 0 | **NEW** — Real cascor response fixtures |
-| `src/tests/unit/test_response_normalization.py` | 0 | **NEW** — Characterization tests |
-| `src/tests/unit/test_state_sync.py` | 3 | Updated with real envelope format tests |
-| `src/tests/unit/test_service_backend.py` | 2, 4 | Status normalization + dataset + topology tests |
-| `src/tests/unit/test_cascor_service_adapter.py` | 2, 4 | FIX-8 + param roundtrip tests |
-| `src/tests/integration/test_dashboard_data.py` | 6 | **NEW** — Mock: service mode dashboard data shape contract tests |
-| `src/tests/integration/test_canopy_restart.py` | 6 | **NEW** — Live: canopy restart during training verification |
-| `src/tests/integration/test_param_roundtrip.py` | 6 | **NEW** — Live: param apply round-trip verification |
+| File                                             | Phase   | Changes                                                                                                                                                                                                               |
+|--------------------------------------------------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `src/backend/cascor_service_adapter.py`          | 1, 2, 4 | Add `_first_defined`, `_is_cascor_nested`, `_normalize_metric` helpers; fix monitor methods (FIX-1,2,3); fix `is_training_in_progress` (FIX-8); fix reverse param map (FIX-9); harmonize `get_canopy_params` (FIX-10) |
+| `src/backend/service_backend.py`                 | 2, 4    | Add `get_status()` flat-dict builder (FIX-4); fix `get_dataset()` key mapping (FIX-11)                                                                                                                                |
+| `src/backend/state_sync.py`                      | 3       | Fix `sync()` field navigation (FIX-5,6,7); expand `_normalize_status()` (FIX-12); add phase extraction                                                                                                                |
+| `src/main.py`                                    | —       | No changes needed                                                                                                                                                                                                     |
+| `src/tests/fixtures/cascor_response_fixtures.py` | 0       | **NEW** — Real cascor response fixtures                                                                                                                                                                               |
+| `src/tests/unit/test_response_normalization.py`  | 0       | **NEW** — Characterization tests                                                                                                                                                                                      |
+| `src/tests/unit/test_state_sync.py`              | 3       | Updated with real envelope format tests                                                                                                                                                                               |
+| `src/tests/unit/test_service_backend.py`         | 2, 4    | Status normalization + dataset + topology tests                                                                                                                                                                       |
+| `src/tests/unit/test_cascor_service_adapter.py`  | 2, 4    | FIX-8 + param roundtrip tests                                                                                                                                                                                         |
+| `src/tests/integration/test_dashboard_data.py`   | 6       | **NEW** — Mock: service mode dashboard data shape contract tests                                                                                                                                                      |
+| `src/tests/integration/test_canopy_restart.py`   | 6       | **NEW** — Live: canopy restart during training verification                                                                                                                                                           |
+| `src/tests/integration/test_param_roundtrip.py`  | 6       | **NEW** — Live: param apply round-trip verification                                                                                                                                                                   |
 
 ### juniper-cascor-client (Phase 5 only)
 
-| File | Phase | Changes |
-|---|---|---|
-| `juniper_cascor_client/testing/fake_client.py` | 5 | Align response format with real ResponseEnvelope (FIX-SYS) |
+| File                                           | Phase | Changes                                                    |
+|------------------------------------------------|-------|------------------------------------------------------------|
+| `juniper_cascor_client/testing/fake_client.py` | 5     | Align response format with real ResponseEnvelope (FIX-SYS) |
 
 ### juniper-canopy test updates (Phase 5)
 
-| File | Phase | Changes |
-|---|---|---|
-| `src/tests/unit/test_cascor_service_adapter.py` | 5 | Update mock response formats |
-| `src/tests/unit/test_state_sync.py` | 5 | Update expected data paths |
-| `src/tests/unit/test_service_backend.py` | 5 | Update status response assertions |
-| `src/tests/integration/test_fake_service_backend.py` | 5 | Update full-chain assertions |
-| `src/tests/integration/test_external_cascor_attach.py` | 5 | Update attach response assertions |
-| `src/tests/integration/test_training_controls_service_mode.py` | 5 | Update control response assertions |
+| File                                                           | Phase | Changes                            |
+|----------------------------------------------------------------|-------|------------------------------------|
+| `src/tests/unit/test_cascor_service_adapter.py`                | 5     | Update mock response formats       |
+| `src/tests/unit/test_state_sync.py`                            | 5     | Update expected data paths         |
+| `src/tests/unit/test_service_backend.py`                       | 5     | Update status response assertions  |
+| `src/tests/integration/test_fake_service_backend.py`           | 5     | Update full-chain assertions       |
+| `src/tests/integration/test_external_cascor_attach.py`         | 5     | Update attach response assertions  |
+| `src/tests/integration/test_training_controls_service_mode.py` | 5     | Update control response assertions |
 
 ### No Changes Required
 
-| Repo | Reason |
-|---|---|
-| juniper-cascor | Server API already exposes all necessary endpoints correctly |
+| Repo                              | Reason                                                                    |
+|-----------------------------------|---------------------------------------------------------------------------|
+| juniper-cascor                    | Server API already exposes all necessary endpoints correctly              |
 | juniper-cascor-client (client.py) | Client correctly returns raw responses; normalization is canopy's concern |
 
 ---
@@ -1380,3 +1377,20 @@ curl -s http://localhost:8050/api/status | python -m json.tool
 curl -s http://localhost:8050/api/metrics/history?limit=10 | python -m json.tool
 curl -s http://localhost:8050/api/state | python -m json.tool
 ```
+
+### Full E2E Test
+
+**The following commands launch a full set of Juniper Project services: start services in the order listed below:**
+
+```bash
+# juniper-data:
+cd /home/pcalnon/Development/python/Juniper/juniper-data && conda activate JuniperData && pip install -e ".[all]" && PYTHON_GIL=0 uvicorn juniper_data.api.app:app --host 0.0.0.0 --port 8100
+
+# juniper-cascor:
+cd /home/pcalnon/Development/python/Juniper/juniper-cascor/src && conda activate JuniperCascor && JUNIPER_CASCOR_PORT=8201 python server.py
+
+# juniper-canopy:
+cd /home/pcalnon/Development/python/Juniper/juniper-canopy/src && conda activate JuniperCanopy && CASCOR_SERVICE_URL="<http://localhost:8201>" uvicorn main:app --host 0.0.0.0 --port 8050
+```
+
+---
