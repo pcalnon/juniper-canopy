@@ -1,5 +1,7 @@
 """Tests for CascorStateSync."""
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from tests.fixtures.cascor_response_fixtures import (
