@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Refreshed API documentation to match current runtime contracts for service-mode CasCor normalization and backend parity. Updated `docs/api/API_REFERENCE.md` and `docs/api/API_SCHEMAS.md` for `/api/status`, `/api/metrics`, `/api/metrics/history`, `/api/topology`, `/api/dataset`, `/api/decision_boundary`, training-control endpoints, and WebSocket message types.
+- Updated CI/CD documentation and dependency inventory to match workflow-pinned GitHub Action revisions for caching:
+  - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
+  - `docs/ci_cd/CICD_MANUAL.md`
+  - `notes/juniper-canopy_OTHER_DEPENDENCIES.md`
 
 - Renamed HTTP metrics: `http_requests_total` → `juniper_canopy_http_requests_total`, `http_request_duration_seconds` → `juniper_canopy_http_request_duration_seconds`
 - Updated CasCor backend documentation to cover service-mode behavior (`CascorServiceAdapter`, `ServiceBackend`, `CascorStateSync`), including startup attach/sync workflow, response normalization contracts, and service-mode troubleshooting:

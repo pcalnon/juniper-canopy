@@ -2,7 +2,7 @@
 
 **Project**: Juniper
 **Application**: juniper-canopy
-**Last Updated**: 2026-02-25
+**Last Updated**: 2026-03-30
 
 ---
 
@@ -37,7 +37,7 @@ For conda/mamba-managed dependencies, see `conf/conda_environment_ci.yaml`.
 | actions/checkout | v4 | github-action | Repository checkout |
 | actions/setup-python | v5 | github-action | Python environment setup |
 | actions/upload-artifact | v4 | github-action | CI artifact storage |
-| actions/cache | v4 | github-action | Dependency caching |
+| actions/cache | v5 | github-action | Dependency caching |
 | conda-incubator/setup-miniconda | v3 | github-action | Conda/Miniforge setup in CI |
 | gitleaks/gitleaks-action | v2 | github-action | Secrets detection |
 | github/codeql-action/upload-sarif | v3 | github-action | SARIF security upload |
