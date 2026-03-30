@@ -1,7 +1,7 @@
 # Testing Reference - Technical Documentation
 
-**Last Updated:** January 29, 2026  
-**Version:** v0.25.0
+**Last Updated:** March 30, 2026  
+**Version:** v0.26.0
 
 Complete technical reference for the Juniper Canopy testing infrastructure.
 
@@ -871,6 +871,25 @@ def test_api_post():
     """Test POST endpoint."""
     response = client.post("/api/control", json={"command": "start"})
     assert response.status_code == 200
+```
+
+### Service Normalization Regression Matrix
+
+Use this matrix when backend/service integration changes affect dashboard-facing payload contracts.
+
+| Test File | Contract Focus | Key Behavior |
+| ------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------ |
+| `tests/unit/test_response_normalization.py` | CasCor envelope + field normalization | envelope unwrapping, nested metrics contract, status normalization, topology transform, target conversion |
+| `tests/unit/test_service_backend.py` | Service backend adapter normalization | nested `get_status()` flattening, zero-value preservation, metadata-only dataset hydration |
+| `tests/unit/frontend/test_metrics_panel_handlers.py` | Metrics panel callback handler behavior | replay control transitions, validation overlay rendering, progress/detail formatting, hidden units formatting |
+
+Recommended command subset:
+
+```bash
+cd src
+pytest tests/unit/test_response_normalization.py -k "Fix1 or Fix2 or Fix3 or Fix4 or Fix13 or DashboardMetricsContract or TopologyTransformation or DatasetTargetConversion" -v
+pytest tests/unit/test_service_backend.py -k "get_status or get_dataset" -v
+pytest tests/unit/frontend/test_metrics_panel_handlers.py -k "validation_overlay or replay or progress_detail or training_progress or hidden_units" -v
 ```
 
 ### Testing WebSocket Endpoints

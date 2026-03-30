@@ -2,8 +2,8 @@
 
 ## Technical reference for CasCor backend integration in Juniper Canopy
 
-**Version:** 0.27.0
-**Status:** ✅ PARTIALLY IMPLEMENTED
+**Version:** 0.27.0  
+**Status:** ✅ PARTIALLY IMPLEMENTED  
 **Last Updated:** March 30, 2026
 
 ---
@@ -98,6 +98,10 @@ _normalize_metric(entry: dict) -> dict
 ```
 
 - Accepts either CasCor keys (`loss`, `accuracy`, `validation_loss`, `validation_accuracy`) or Canopy keys (`train_loss`, `train_accuracy`, `val_loss`, `val_accuracy`) and emits canonical flat metric fields.
+- Uses first-defined extraction (`None`-aware) to preserve valid falsy values (`0`, `0.0`) for epoch/metric fields.
+- Emits both:
+  - nested dashboard fields (`metrics`, `network_topology`) for UI consumers
+  - flat canonical fields (`train_loss`, `train_accuracy`, `val_loss`, `val_accuracy`, `hidden_units`) for compatibility paths
 
 ```python
 _to_dashboard_metric(flat: dict) -> dict
@@ -109,14 +113,18 @@ _to_dashboard_metric(flat: dict) -> dict
   - `metrics.val_loss`
   - `metrics.val_accuracy`
   - `network_topology.hidden_units`
+- Keeps top-level metadata (`epoch`, `phase`, `timestamp`) unchanged.
 
 ```python
 _transform_topology(raw: dict) -> dict
 ```
 
 - Converts CasCor weight-oriented topology payloads into dashboard graph-oriented topology.
-- Enforces dashboard 3-layer contract: input layer `0`, hidden layer `1`, output layer `2`.
-- Transposes CasCor `output_weights` from `(input+hidden, output)` to output-oriented rows before creating output connections.
+- Handles:
+  - passthrough for already graph-oriented payloads (`input_units` present)
+  - cascade hidden-unit wiring (each hidden unit receives prior hidden outputs)
+  - multi-output transposed `output_weights`
+  - partial/mismatched rows safely (emits only available connections)
 
 ---
 
@@ -174,6 +182,7 @@ _normalize_status(raw: str) -> str
   - `complete`, `completed` -> `Completed`
   - `failed` -> `Failed`
   - unknown -> `Stopped`
+- Leading/trailing whitespace is stripped before mapping.
 
 ---
 
@@ -200,19 +209,25 @@ initialize() -> bool
 - Runs `CascorStateSync.sync()` if network exists.
 - Starts metrics relay for real-time updates.
 
-#### Dataset Normalization Behavior
+#### Status and Dataset Normalization Behavior
+
+```python
+get_status() -> Dict[str, Any]
+```
+
+- If adapter status payload is nested CasCor format (`state_machine`/`training_state`), returns normalized flat Canopy status shape.
+- `current_epoch` and `hidden_units` use first-defined (`None`-aware) extraction to preserve explicit zero values.
+- Running/paused/completed flags are derived from normalized uppercase FSM status values.
 
 ```python
 get_dataset() -> Optional[Dict[str, Any]]
 ```
 
-- Normalizes service metadata keys to dashboard keys:
-  - `train_samples` + `test_samples` -> `num_samples`
-  - `input_features` -> `num_features`
-  - `output_features` -> `num_classes`
-- Preserves `inputs`/`targets` if already present in adapter response.
-- If metadata is present but arrays are missing, performs a secondary call to `adapter.get_dataset_data()` and merges arrays when available.
-- Returns metadata-only payload when arrays are unavailable, enabling frontend fallback rendering without exceptions.
+- Accepts metadata-only payloads from service and derives:
+  - `num_samples = train_samples + test_samples`
+  - `num_features = input_features`
+  - `num_classes = output_features`
+- If metadata response omits arrays, attempts `adapter.get_dataset_data()` and injects `inputs`/`targets` when available.
 
 ---
 
@@ -1029,8 +1044,8 @@ with self.topology_lock:
 
 ---
 
-**Last Updated:** March 30, 2026
-**Version:** 0.27.0
+**Last Updated:** March 30, 2026  
+**Version:** 0.27.0  
 **Status:** ✅ PARTIALLY IMPLEMENTED
 
 **Complete technical reference for CasCor backend integration!**

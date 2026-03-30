@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Expanded service-mode backend and testing documentation to cover regression-tested normalization contracts and dashboard handler edge cases:
+  - `docs/cascor/CASCOR_BACKEND_MANUAL.md`
+  - `docs/cascor/CASCOR_BACKEND_REFERENCE.md`
+  - `docs/testing/TESTING_MANUAL.md`
+  - `docs/testing/TESTING_REFERENCE.md`
+  - Added explicit coverage for envelope unwrapping precedence, zero-value preservation (`0`/`0.0`), topology transformation constraints, dataset target conversion, and metrics panel replay/progress/validation-overlay behaviors.
+
 - Refreshed API documentation to match current runtime contracts for service-mode CasCor normalization and backend parity. Updated `docs/api/API_REFERENCE.md` and `docs/api/API_SCHEMAS.md` for `/api/status`, `/api/metrics`, `/api/metrics/history`, `/api/topology`, `/api/dataset`, `/api/decision_boundary`, training-control endpoints, and WebSocket message types.
 - Updated dashboard and backend integration documentation for dashboard augmentation Phase 1-2:
   - `docs/USER_MANUAL.md`

@@ -2,9 +2,9 @@
 
 ## Complete guide for CasCor backend integration in Juniper Canopy
 
-**Version:** 0.26.0  
+**Version:** 0.27.0  
 **Status:** ✅ PARTIALLY IMPLEMENTED  
-**Last Updated:** March 29, 2026
+**Last Updated:** March 30, 2026
 
 ---
 
@@ -236,9 +236,24 @@ Service responses are unwrapped from CasCor envelopes when needed:
 - if response is already flat, it is used directly
 - nested `history` and flat-list history formats are both supported
 
+### Training Status Normalization and Precedence
+
+Service-mode status handling intentionally prefers explicit top-level values and preserves valid zeros:
+
+- `_ServiceTrainingMonitor.is_training` and `CascorServiceAdapter.is_training_in_progress()` use top-level `is_training` when present, even if nested `data.training_active` differs
+- `ServiceBackend.get_status()` normalizes nested CasCor status structures into a flat dashboard-facing dict
+- `ServiceBackend.get_status()` uses first-defined (`None`-aware) extraction for `current_epoch` and `hidden_units`, so `0` is preserved and not treated as missing
+- uppercase state machine status values (for example `STARTED`) are accepted and mapped to running state flags
+
 ### Zero-Value Preservation
 
 Normalization uses first-defined semantics (`None`-aware) rather than `or` chaining, so valid `0` / `0.0` values are preserved for metrics and epoch fields.
+
+Example:
+
+- `loss=0.0` remains `metrics.loss=0.0`
+- `accuracy=0.0` remains `metrics.accuracy=0.0`
+- `current_epoch=0` remains epoch zero (not fallback/default)
 
 ### Status Normalization
 
@@ -251,6 +266,29 @@ Normalization uses first-defined semantics (`None`-aware) rather than `or` chain
 - `failed` -> `Failed`
 
 Unknown values default to `Stopped`.
+
+### Topology and Dataset Compatibility Rules
+
+Service-mode transform behavior used by dashboard components:
+
+- topology is transformed from weight-oriented CasCor payloads to graph-oriented payloads with `nodes` and `connections`
+- hidden-unit cascade links are preserved (`hidden_n` receives links from all prior hidden units)
+- output layer wiring supports multiple outputs and tolerates mismatched weight rows by emitting only available connections
+- binary dataset targets (`train_y` with one value per row) are converted with threshold `>= 0.5`
+- multiclass dataset targets (`train_y` with multiple values per row) are converted with `argmax`
+
+### Metrics Panel Handler Contract (Service Mode)
+
+`MetricsPanel` callback handlers assume:
+
+- `/api/metrics` and `/api/metrics/history` provide entries with nested `metrics` and `network_topology`
+- validation overlays read `metrics.val_loss` and `metrics.val_accuracy`; `None` values are ignored, numeric values are plotted
+- replay controls are visible when state is missing or not actively running (`STOPPED`, `PAUSED`, `COMPLETED`, `FAILED`)
+- replay state transitions are deterministic:
+  - play toggles `playing`/`paused`
+  - step actions force `paused`
+  - replay tick advances only in `playing` mode and stops at `end_index`
+  - slider position maps to index by percentage of current history length
 
 ---
 
@@ -731,6 +769,19 @@ pytest tests/unit/test_cascor_integration.py -v
 pytest tests/unit/backend/test_cascor_service_adapter.py -v
 pytest tests/unit/test_state_sync.py -v
 pytest tests/unit/test_response_normalization.py -v
+pytest tests/unit/test_service_backend.py -v
+pytest tests/unit/frontend/test_metrics_panel_handlers.py -v
+```
+
+### High-Signal Regression Commands
+
+Use this subset when validating service normalization and dashboard compatibility quickly:
+
+```bash
+cd src
+pytest tests/unit/test_response_normalization.py -k "Fix1 or Fix2 or Fix3 or Fix4 or Fix13 or DashboardMetricsContract or TopologyTransformation or DatasetTargetConversion" -v
+pytest tests/unit/test_service_backend.py -k "get_status or get_dataset" -v
+pytest tests/unit/frontend/test_metrics_panel_handlers.py -k "validation_overlay or replay or progress_detail or training_progress or hidden_units" -v
 ```
 
 ### Integration Tests
@@ -802,6 +853,20 @@ The dashboard expects nested keys under `metrics` and `network_topology`.
 
 **Expected normalized states:** `Started`, `Paused`, `Completed`, `Failed`, `Stopped`.
 
+### Epoch or Hidden Units Reset to Defaults Unexpectedly
+
+**Symptom:** Status payload shows fallback values even though backend reports `0`.
+
+**Cause:** Consumer code is using `or`-based fallbacks and treating `0` as missing.
+
+**Checks:**
+
+```bash
+curl -s http://localhost:8050/api/status | rg "\"current_epoch\"|\"hidden_units\"|\"fsm_status\""
+```
+
+Use `None`-aware extraction (`_first_defined`) for status normalization paths.
+
 ### Debug Logging
 
 ```python
@@ -855,8 +920,8 @@ with CascorIntegration() as integration:
 
 ---
 
-**Last Updated:** March 29, 2026  
-**Version:** 0.26.0  
+**Last Updated:** March 30, 2026  
+**Version:** 0.27.0  
 **Status:** ✅ PARTIALLY IMPLEMENTED
 
 **Explore advanced features and integrate with your workflow!**
