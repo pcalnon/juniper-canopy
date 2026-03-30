@@ -1,8 +1,8 @@
 # Juniper Canopy User Manual
 
-**Version:** 0.25.0  
-**Status:** ✅ Production Ready  
-**Last Updated:** January 29, 2026  
+**Version:** 0.25.0
+**Status:** ✅ Production Ready
+**Last Updated:** March 30, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -34,10 +34,10 @@ Juniper Canopy is a real-time monitoring and diagnostic frontend for Cascade Cor
 
 ### Key Features
 
-✅ **Zero Configuration** - Works out of the box with sensible defaults  
-✅ **Demo Mode** - Test and explore without a CasCor backend  
-✅ **Real-time Updates** - WebSocket-based push updates (<100ms latency)  
-✅ **Responsive UI** - Modern Bootstrap-based interface  
+✅ **Zero Configuration** - Works out of the box with sensible defaults
+✅ **Demo Mode** - Test and explore without a CasCor backend
+✅ **Real-time Updates** - WebSocket-based push updates (<100ms latency)
+✅ **Responsive UI** - Modern Bootstrap-based interface
 ✅ **Production Ready** - Comprehensive testing and CI/CD pipeline
 
 ---
@@ -223,8 +223,8 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 - **Range:** 1 - 100
 - **Effect:** Limits maximum cascade units added during training
 
-> **Note:** In current version (MVP), these parameters are UI-only placeholders.  
-> Full integration with training control is in development roadmap (Phase 3).
+> **Note:** These controls are active in both demo and service modes.
+> In service mode, current values are also exposed through `GET /api/status` and `GET /api/state`.
 
 ---
 
@@ -242,10 +242,17 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 **Features:**
 
 - **Auto-scaling Y-axis** - Adjusts to data range
-- **Real-time Updates** - Every 1 second via WebSocket
+- **Real-time Updates** - Store updated every second (REST + WebSocket-assisted buffering)
 - **Smoothing** - 10-point rolling average (configurable)
 - **Hover Information** - Epoch, exact metric values
 - **Legend Toggle** - Click legend items to show/hide series
+- **Validation Overlays** - Dashed `val_loss` and `val_accuracy` traces are shown when available
+- **Learning Rate Card** - Displays current `learning_rate` from training state (`--` if unavailable)
+- **Hidden Units Ratio** - Displays `hidden_units / max_hidden_units` when max is known
+- **Phase Duration** - Shows elapsed time from `phase_started_at` during active phases
+- **Progress Bars** - Shows grow iteration and candidate epoch progress when state includes:
+  - `grow_iteration`, `grow_max`
+  - `candidate_epoch`, `candidate_total_epochs`
 
 **Interpreting the Plots:**
 
@@ -264,8 +271,9 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 
 **Data Source:**
 
-- API: `GET /api/metrics?limit=100`
-- WebSocket: `/ws/training` (type: `training_metrics`)
+- Metrics history: `GET /api/metrics/history?limit=...`
+- Training state: `GET /api/state`
+- WebSocket stream: `/ws/training` (`metrics`, `state`, `topology`, `event`)
 
 ---
 
@@ -308,7 +316,7 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 **Data Source:**
 
 - API: `GET /api/topology`
-- WebSocket: `/ws/training` (type: `topology_update`)
+- WebSocket: `/ws/training` (type: `topology`)
 
 **Example Topology Response:**
 
@@ -437,6 +445,12 @@ frontend:
 **Data Source:**
 
 - API: `GET /api/dataset`
+
+**Service Mode Behavior:**
+
+- Service-mode responses may include metadata only (`num_samples`, `num_features`, `num_classes`) when arrays are not available yet.
+- In that case, the dataset tab renders empty plots with summary stats and class distribution shown as `N/A`.
+- When arrays are available, `inputs` and `targets` are rendered normally.
 
 **Example Response:**
 
@@ -935,9 +949,9 @@ logs/ui.log        # User interactions
 
 ### Version Information
 
-**Current Version:** 0.25.0  
-**Release Date:** January 2026  
-**Python:** 3.12+  
+**Current Version:** 0.25.0
+**Release Date:** January 2026
+**Python:** 3.12+
 **License:** MIT
 
 ---

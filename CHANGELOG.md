@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added explicit coverage for envelope unwrapping precedence, zero-value preservation (`0`/`0.0`), topology transformation constraints, dataset target conversion, and metrics panel replay/progress/validation-overlay behaviors.
 
 - Refreshed API documentation to match current runtime contracts for service-mode CasCor normalization and backend parity. Updated `docs/api/API_REFERENCE.md` and `docs/api/API_SCHEMAS.md` for `/api/status`, `/api/metrics`, `/api/metrics/history`, `/api/topology`, `/api/dataset`, `/api/decision_boundary`, training-control endpoints, and WebSocket message types.
+- Updated dashboard and backend integration documentation for dashboard augmentation Phase 1-2:
+  - `docs/USER_MANUAL.md`
+  - `docs/api/API_REFERENCE.md`
+  - `docs/cascor/CASCOR_BACKEND_REFERENCE.md`
+  - Coverage includes:
+    - Metrics panel state-driven UI (`learning_rate`, phase duration, grow/candidate progress bars, validation overlays)
+    - Service-mode topology normalization details (3-layer mapping and output-weight transposition)
+    - Service-mode dataset behavior for metadata-only responses and secondary dataset array fetch fallback
 - Updated CI/CD documentation and dependency inventory to match workflow-pinned GitHub Action revisions for caching:
   - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
   - `docs/ci_cd/CICD_MANUAL.md`

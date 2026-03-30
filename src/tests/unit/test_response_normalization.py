@@ -26,7 +26,11 @@ import plotly.graph_objects as go
 import pytest
 
 try:
-    from backend.cascor_service_adapter import CascorServiceAdapter, _ServiceTrainingMonitor
+    from backend.cascor_service_adapter import (
+        CascorServiceAdapter,
+        _first_defined,
+        _ServiceTrainingMonitor,
+    )
     from backend.service_backend import ServiceBackend
 
     _HAS_SERVICE_BACKEND = True
@@ -398,6 +402,33 @@ class TestFix13ZeroMetricPreservation:
 
 
 # ==================================================================
+# Helper-function hardening tests
+# ==================================================================
+
+
+@pytest.mark.unit
+class TestHelperFunctionHardening:
+    """Direct tests for shared response-normalization helpers."""
+
+    def test_first_defined_preserves_zero(self):
+        """Falsy-but-valid zero should not be skipped."""
+        assert _first_defined(None, 0, 5, default=9) == 0
+
+    def test_first_defined_preserves_empty_string(self):
+        """Falsy-but-valid empty string should be returned."""
+        assert _first_defined(None, "", "fallback", default="x") == ""
+
+    def test_first_defined_returns_default_when_all_none(self):
+        """Default should be returned only when all values are None."""
+        assert _first_defined(None, None, default="missing") == "missing"
+
+    def test_unwrap_response_preserves_falsy_data_payload(self):
+        """_unwrap_response must return falsy payload values unchanged."""
+        assert CascorServiceAdapter._unwrap_response({"data": 0}) == 0
+        assert CascorServiceAdapter._unwrap_response({"data": False}) is False
+
+
+# ==================================================================
 # P5-RC-01 / P5-RC-09: Dashboard format contract tests
 # ==================================================================
 
@@ -754,6 +785,22 @@ class TestDatasetTargetConversion:
         client.get_dataset_data.side_effect = JuniperCascorClientError("Not found")
         result = adapter.get_dataset_data()
         assert result is None
+
+    def test_dataset_target_conversion_binary_scalar_labels(self):
+        """Scalar binary labels should not crash and must preserve classes."""
+        adapter = CascorServiceAdapter.__new__(CascorServiceAdapter)
+        client = MagicMock()
+        adapter._client = client
+        client.get_dataset_data.return_value = {
+            "status": "success",
+            "data": {
+                "train_x": [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]],
+                "train_y": [0, 1, 0],
+            },
+            "meta": {"timestamp": 0, "version": "0.4.0"},
+        }
+        result = adapter.get_dataset_data()
+        assert result["targets"] == [0, 1, 0]
 
 
 @pytest.mark.unit

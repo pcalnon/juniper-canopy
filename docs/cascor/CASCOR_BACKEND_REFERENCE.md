@@ -70,6 +70,16 @@ get_training_status() -> Dict[str, Any]
 - Returns normalized status payload, unwrapping response envelopes where needed.
 
 ```python
+get_dataset_data() -> Optional[Dict[str, Any]]
+```
+
+- Fetches dataset arrays from service-mode CasCor data endpoint (`train_x`, `train_y`) for dashboard scatter visualization.
+- Converts targets to integer classes:
+  - binary (`len(train_y[row]) == 1`) uses threshold `>= 0.5`
+  - multiclass uses `argmax`
+- Returns `None` on service/client error so callers can fall back to metadata-only handling.
+
+```python
 get_canopy_params() -> Dict[str, Any]
 ```
 
@@ -964,13 +974,13 @@ with self.topology_lock:
 
 ### Topology Extraction
 
-**Cost:** ~1-5ms per call  
-**Frequency:** Only when requested  
+**Cost:** ~1-5ms per call
+**Frequency:** Only when requested
 **Optimization:** Cached in frontend
 
 ### WebSocket Broadcasting
 
-**Latency:** <100ms  
+**Latency:** <100ms
 **Throttling:** None (uses monitoring interval)
 
 ---
