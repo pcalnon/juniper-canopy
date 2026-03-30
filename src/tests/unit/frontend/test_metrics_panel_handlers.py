@@ -1586,6 +1586,11 @@ class TestLearningRateHandler:
         result = metrics_panel._update_learning_rate_handler(state={"status": "RUNNING"})
         assert result == "--"
 
+    def test_learning_rate_zero_value_is_preserved(self, metrics_panel):
+        """Returns formatted zero instead of treating 0.0 as missing."""
+        result = metrics_panel._update_learning_rate_handler(state={"learning_rate": 0.0})
+        assert result == "0.000000"
+
 
 @pytest.mark.unit
 class TestPhaseDurationHandler:
@@ -1621,6 +1626,33 @@ class TestPhaseDurationHandler:
         """Returns empty string when phase_started_at is missing."""
         result = metrics_panel._update_phase_duration_handler(state={"status": "STARTED"})
         assert result == ""
+
+    def test_phase_duration_invalid_timestamp(self, metrics_panel):
+        """Returns empty string when phase_started_at is malformed."""
+        result = metrics_panel._update_phase_duration_handler(
+            state={"status": "STARTED", "phase_started_at": "not-a-timestamp"}
+        )
+        assert result == ""
+
+    def test_phase_duration_future_timestamp(self, metrics_panel):
+        """Returns empty string when phase_started_at is in the future."""
+        from datetime import datetime, timedelta, timezone
+
+        future = (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()
+        result = metrics_panel._update_phase_duration_handler(
+            state={"status": "STARTED", "phase_started_at": future}
+        )
+        assert result == ""
+
+    def test_phase_duration_naive_timestamp_is_supported(self, metrics_panel):
+        """Naive timestamps are treated as UTC and rendered."""
+        from datetime import datetime, timedelta
+
+        started = (datetime.now() - timedelta(seconds=90)).isoformat()
+        result = metrics_panel._update_phase_duration_handler(
+            state={"status": "STARTED", "phase_started_at": started}
+        )
+        assert result.startswith("Phase Duration:")
 
 
 @pytest.mark.unit
