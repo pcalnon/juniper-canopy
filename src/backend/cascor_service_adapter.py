@@ -38,8 +38,14 @@ import asyncio
 import logging
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
-from juniper_cascor_client import CascorTrainingStream, JuniperCascorClient
-from juniper_cascor_client.exceptions import JuniperCascorClientError
+from juniper_cascor_client import CascorTrainingStream, JuniperCascorClient, JuniperCascorClientError
+
+# from juniper_cascor_client.juniper_cascor_client.client import CascorTrainingStream, JuniperCascorClient
+# from juniper_cascor_client.client import CascorTrainingStream, JuniperCascorClient
+
+
+# from juniper_cascor_client.juniper_cascor_client.exceptions import JuniperCascorClientError
+# from juniper_cascor_client.exceptions import JuniperCascorClientError
 
 logger = logging.getLogger("juniper_canopy.backend.cascor_service_adapter")
 
