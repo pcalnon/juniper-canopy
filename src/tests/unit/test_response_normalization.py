@@ -705,6 +705,22 @@ class TestDatasetTargetConversion:
         result = adapter.get_dataset_data()
         assert result is None
 
+    def test_dataset_target_conversion_binary_scalar_labels(self):
+        """Scalar binary labels should not crash and must preserve classes."""
+        adapter = CascorServiceAdapter.__new__(CascorServiceAdapter)
+        client = MagicMock()
+        adapter._client = client
+        client.get_dataset_data.return_value = {
+            "status": "success",
+            "data": {
+                "train_x": [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]],
+                "train_y": [0, 1, 0],
+            },
+            "meta": {"timestamp": 0, "version": "0.4.0"},
+        }
+        result = adapter.get_dataset_data()
+        assert result["targets"] == [0, 1, 0]
+
 
 @pytest.mark.unit
 class TestValidationOverlay:
