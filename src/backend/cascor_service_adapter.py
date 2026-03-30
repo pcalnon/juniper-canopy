@@ -644,6 +644,20 @@ class CascorServiceAdapter:
         except JuniperCascorClientError:
             return None
 
+    @staticmethod
+    def _coerce_scalar_target(value: Any) -> int:
+        """Convert scalar target/probability value to integer class label."""
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return 0
+
+        if numeric.is_integer():
+            return int(numeric)
+        if 0.0 <= numeric <= 1.0:
+            return int(numeric >= 0.5)
+        return int(round(numeric))
+
     def get_dataset_data(self) -> Optional[Dict[str, Any]]:
         """Fetch dataset arrays from CasCor for scatter plot visualization."""
         try:
@@ -652,14 +666,22 @@ class CascorServiceAdapter:
                 return None
             inputs = result.get("train_x", [])
             targets_raw = result.get("train_y", [])
-            # Binary (output_size=1): threshold at 0.5 — NOT argmax
-            # Argmax of single-element list [1.0] returns 0, not 1
-            if targets_raw and len(targets_raw[0]) == 1:
-                targets = [int(row[0] >= 0.5) for row in targets_raw]
-            elif targets_raw:
-                targets = [max(range(len(row)), key=lambda i: row[i]) for row in targets_raw]
-            else:
-                targets = []
+            targets = []
+            if targets_raw:
+                first = targets_raw[0]
+                # Binary (output_size=1): threshold scalar values at 0.5 — NOT argmax.
+                if isinstance(first, list):
+                    if len(first) == 1:
+                        targets = [self._coerce_scalar_target(row[0] if isinstance(row, list) and row else 0) for row in targets_raw]
+                    else:
+                        for row in targets_raw:
+                            if isinstance(row, list) and row:
+                                targets.append(max(range(len(row)), key=lambda i: row[i]))
+                            else:
+                                targets.append(0)
+                else:
+                    # Some services emit scalar labels directly (e.g., [0, 1, 0]).
+                    targets = [self._coerce_scalar_target(value) for value in targets_raw]
             return {"inputs": inputs, "targets": targets}
         except JuniperCascorClientError:
             return None
