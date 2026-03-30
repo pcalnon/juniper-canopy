@@ -35,6 +35,7 @@
 #####################################################################################################################################################################################################
 
 import asyncio
+import contextlib
 import logging
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
@@ -86,7 +87,7 @@ class _ServiceTrainingMonitor:
             if isinstance(data, dict):
                 return data.get("training_active", False)
             return False
-        except JuniperCascorClientError:
+        except Exception:
             return False
 
     def get_current_metrics(self) -> Dict[str, Any]:
@@ -99,7 +100,7 @@ class _ServiceTrainingMonitor:
                     return CascorServiceAdapter._to_dashboard_metric(flat)
                 return result
             return result if isinstance(result, dict) else {}
-        except JuniperCascorClientError:
+        except Exception:
             return {}
 
     def get_recent_metrics(self, count: int = 100) -> list:
@@ -113,7 +114,7 @@ class _ServiceTrainingMonitor:
                     history = data.get("history", [])
                     return [CascorServiceAdapter._to_dashboard_metric(CascorServiceAdapter._normalize_metric(m)) for m in history]
             return result if isinstance(result, list) else []
-        except JuniperCascorClientError:
+        except Exception:
             return []
 
 
@@ -294,10 +295,8 @@ class CascorServiceAdapter:
         """Cancel the WebSocket relay task."""
         if self._relay_task and not self._relay_task.done():
             self._relay_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._relay_task
-            except asyncio.CancelledError:
-                pass
         self._relay_task = None
         logger.info("Metrics relay stopped")
 
@@ -312,8 +311,8 @@ class CascorServiceAdapter:
             result = self._client.get_network()
             if result and not result.get("error"):
                 return _NetworkSentinel()
-        except JuniperCascorClientError:
-            pass
+        except Exception as e:
+            logger.debug("Failed to query network: %s", e)
         return None
 
     # ------------------------------------------------------------------
@@ -638,7 +637,7 @@ class CascorServiceAdapter:
             if isinstance(raw, dict):
                 return self._transform_topology(raw)
             return raw
-        except JuniperCascorClientError:
+        except Exception:
             return None
 
     def get_network_topology(self) -> Optional[Dict[str, Any]]:
@@ -647,7 +646,7 @@ class CascorServiceAdapter:
     def get_dataset_info(self, x=None, y=None) -> Optional[Dict[str, Any]]:
         try:
             return self._unwrap_response(self._client.get_dataset())
-        except JuniperCascorClientError:
+        except Exception:
             return None
 
     @staticmethod
@@ -666,6 +665,9 @@ class CascorServiceAdapter:
 
     def get_dataset_data(self) -> Optional[Dict[str, Any]]:
         """Fetch dataset arrays from CasCor for scatter plot visualization."""
+        if not hasattr(self._client, "get_dataset_data"):
+            logger.warning("Client does not support get_dataset_data (version mismatch?)")
+            return None
         try:
             result = self._unwrap_response(self._client.get_dataset_data())
             if not result:
@@ -689,7 +691,8 @@ class CascorServiceAdapter:
                     # Some services emit scalar labels directly (e.g., [0, 1, 0]).
                     targets = [self._coerce_scalar_target(value) for value in targets_raw]
             return {"inputs": inputs, "targets": targets}
-        except JuniperCascorClientError:
+        except Exception as e:
+            logger.warning("Failed to fetch dataset data: %s: %s", type(e).__name__, e)
             return None
 
     def get_decision_boundary(self, resolution: int = 50) -> Optional[Dict[str, Any]]:
