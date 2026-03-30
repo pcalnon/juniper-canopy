@@ -1,7 +1,7 @@
 # CI/CD Environment Setup Guide
 
-**Last Updated:** 2026-01-29  
-**Version:** 0.25.0
+**Last Updated:** 2026-03-30  
+**Version:** 0.25.1
 
 Complete guide to configuring the GitHub Actions CI/CD environment.
 
@@ -271,7 +271,7 @@ Test Suite (Python 3.13)  ─┘
 ### With Caching
 
 ```yaml
-- uses: actions/cache@v3
+- uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7  # v5.0.4
   with:
     path: ~/.cache/pip
     key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
@@ -288,7 +288,7 @@ Test Suite (Python 3.13)  ─┘
 ### Cache Conda
 
 ```yaml
-- uses: actions/cache@v3
+- uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7  # v5.0.4
   with:
     path: |
       /usr/share/miniconda/envs/JuniperPython-CI

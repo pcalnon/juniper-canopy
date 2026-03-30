@@ -1318,7 +1318,7 @@ Total:        33 min sequential
 
 ```yaml
 - name: Cache pip packages
-  uses: actions/cache@v3
+  uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7  # v5.0.4
   with:
     path: ~/.cache/pip
     key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
@@ -1334,7 +1334,7 @@ Total:        33 min sequential
 
 ```yaml
 - name: Cache pytest
-  uses: actions/cache@v3
+  uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7  # v5.0.4
   with:
     path: src/.pytest_cache
     key: ${{ runner.os }}-pytest-${{ hashFiles('**/tests/**') }}
@@ -1684,6 +1684,6 @@ Fix by: 2025-11-12
 
 ---
 
-**Last Updated:** 2026-01-29  
-**Version:** 0.25.0  
+**Last Updated:** 2026-03-30  
+**Version:** 0.25.1  
 **Status:** ✅ Complete
