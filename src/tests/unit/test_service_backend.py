@@ -281,6 +281,29 @@ class TestNetworkAndData:
         assert "targets" not in result
         assert result["num_samples"] == 1000
 
+    def test_get_dataset_fetches_inputs_targets_from_dataset_data(self, service_backend, mock_adapter):
+        """get_dataset() fetches arrays from get_dataset_data() when metadata-only response is returned."""
+        mock_adapter.get_dataset_info.return_value = {
+            "loaded": True,
+            "train_samples": 80,
+            "test_samples": 20,
+            "input_features": 2,
+            "output_features": 2,
+        }
+        mock_adapter.get_dataset_data.return_value = {
+            "inputs": [[0.1, 0.2], [0.3, 0.4]],
+            "targets": [1, 0],
+        }
+
+        result = service_backend.get_dataset()
+
+        assert result["num_samples"] == 100
+        assert result["num_features"] == 2
+        assert result["num_classes"] == 2
+        assert result["inputs"] == [[0.1, 0.2], [0.3, 0.4]]
+        assert result["targets"] == [1, 0]
+        mock_adapter.get_dataset_data.assert_called_once()
+
     def test_get_decision_boundary_delegates_to_adapter(self, service_backend, mock_adapter):
         """get_decision_boundary() should delegate to adapter."""
         mock_adapter.get_decision_boundary.return_value = {
