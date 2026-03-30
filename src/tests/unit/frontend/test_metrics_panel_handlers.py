@@ -1657,3 +1657,89 @@ class TestHiddenUnitsRatioFormat:
         result = metrics_panel._update_metrics_display_handler(metrics_data=metrics_data, theme="light", view_state=None, training_state=None)
 
         assert result[5] == "3"
+
+
+@pytest.mark.unit
+class TestTrainingProgressHandler:
+    """Tests for _update_training_progress_handler (dbc.Progress bars)."""
+
+    def test_none_state_hides_bars(self, metrics_panel):
+        """Progress bars hidden when state is None."""
+        style, grow_val, grow_lbl, cand_val, cand_lbl = metrics_panel._update_training_progress_handler(state=None)
+
+        assert style["display"] == "none"
+        assert grow_val == 0
+        assert grow_lbl == ""
+        assert cand_val == 0
+        assert cand_lbl == ""
+
+    def test_idle_hides_bars(self, metrics_panel):
+        """Progress bars hidden when status is IDLE."""
+        result = metrics_panel._update_training_progress_handler(state={"status": "IDLE"})
+        assert result[0]["display"] == "none"
+
+    def test_stopped_hides_bars(self, metrics_panel):
+        """Progress bars hidden when status is STOPPED."""
+        result = metrics_panel._update_training_progress_handler(state={"status": "STOPPED"})
+        assert result[0]["display"] == "none"
+
+    def test_running_no_progress_data_hides_bars(self, metrics_panel):
+        """Progress bars hidden when running but no grow/candidate data."""
+        result = metrics_panel._update_training_progress_handler(state={"status": "RUNNING"})
+        assert result[0]["display"] == "none"
+
+    def test_grow_iteration_progress(self, metrics_panel):
+        """Grow iteration bar shows correct percentage and label."""
+        state = {"status": "RUNNING", "grow_iteration": 3, "grow_max": 10}
+        style, grow_val, grow_lbl, cand_val, cand_lbl = metrics_panel._update_training_progress_handler(state=state)
+
+        assert style["display"] == "block"
+        assert grow_val == 30
+        assert grow_lbl == "3/10"
+        assert cand_val == 0
+        assert cand_lbl == ""
+
+    def test_candidate_epoch_progress(self, metrics_panel):
+        """Candidate epoch bar shows correct percentage and label."""
+        state = {"status": "RUNNING", "candidate_epoch": 25, "candidate_total_epochs": 100}
+        style, grow_val, grow_lbl, cand_val, cand_lbl = metrics_panel._update_training_progress_handler(state=state)
+
+        assert style["display"] == "block"
+        assert grow_val == 0
+        assert grow_lbl == ""
+        assert cand_val == 25
+        assert cand_lbl == "25/100"
+
+    def test_both_bars_active(self, metrics_panel):
+        """Both bars display when grow and candidate data present."""
+        state = {
+            "status": "RUNNING",
+            "grow_iteration": 5,
+            "grow_max": 10,
+            "candidate_epoch": 40,
+            "candidate_total_epochs": 50,
+        }
+        style, grow_val, grow_lbl, cand_val, cand_lbl = metrics_panel._update_training_progress_handler(state=state)
+
+        assert style["display"] == "block"
+        assert grow_val == 50
+        assert grow_lbl == "5/10"
+        assert cand_val == 80
+        assert cand_lbl == "40/50"
+
+    def test_grow_iteration_zero(self, metrics_panel):
+        """Grow iteration 0 is a valid value (not hidden)."""
+        state = {"status": "RUNNING", "grow_iteration": 0, "grow_max": 10}
+        style, grow_val, grow_lbl, _, _ = metrics_panel._update_training_progress_handler(state=state)
+
+        assert style["display"] == "block"
+        assert grow_val == 0
+        assert grow_lbl == "0/10"
+
+    def test_complete_progress(self, metrics_panel):
+        """Progress at 100% displays correctly."""
+        state = {"status": "RUNNING", "grow_iteration": 10, "grow_max": 10}
+        _, grow_val, grow_lbl, _, _ = metrics_panel._update_training_progress_handler(state=state)
+
+        assert grow_val == 100
+        assert grow_lbl == "10/10"
