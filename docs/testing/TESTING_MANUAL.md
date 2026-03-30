@@ -1,7 +1,7 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** January 29, 2026  
-**Version:** v0.25.0
+**Last Updated:** March 30, 2026  
+**Version:** v0.26.0
 
 Complete guide to testing the Juniper Canopy application.
 
@@ -116,6 +116,20 @@ pytest --cov=src --cov-report=html
 
 # Multiple report formats
 pytest --cov=src --cov-report=html --cov-report=term-missing --cov-report=xml
+```
+
+### High-Signal Regression Commands
+
+```bash
+# Service normalization contract tests
+cd src
+pytest tests/unit/test_response_normalization.py -k "Fix1 or Fix2 or Fix3 or Fix4 or Fix13 or DashboardMetricsContract or TopologyTransformation or DatasetTargetConversion" -v
+
+# ServiceBackend status/dataset normalization tests
+pytest tests/unit/test_service_backend.py -k "get_status or get_dataset" -v
+
+# Metrics panel handler edge-case tests (replay/progress/validation overlays)
+pytest tests/unit/frontend/test_metrics_panel_handlers.py -k "validation_overlay or replay or progress_detail or training_progress or hidden_units" -v
 ```
 
 ### Advanced Options
@@ -897,6 +911,32 @@ pip install pytest-asyncio
 # Solution: Ensure source path is correct
 pytest --cov=src --cov-report=term-missing
 ```
+
+#### 6. Service Metrics Shape Mismatch in Dashboard Tests
+
+```bash
+# Symptom: metrics panel tests fail with missing nested keys
+# Check: metrics payload must include nested metrics/network_topology
+pytest tests/unit/frontend/test_metrics_panel_handlers.py -k "metrics_display" -v
+```
+
+Expected per-entry shape:
+
+- `entry["metrics"]["loss"]` / `entry["metrics"]["accuracy"]`
+- `entry["metrics"]["val_loss"]` / `entry["metrics"]["val_accuracy"]`
+- `entry["network_topology"]["hidden_units"]`
+
+If only flat keys (`train_loss`, `train_accuracy`) are present at top-level, normalize through service adapter helpers before UI consumption.
+
+#### 7. Zero Values Dropped During Status/Metrics Assertions
+
+```bash
+# Symptom: epoch=0 or hidden_units=0 treated as missing
+# Check dedicated normalization coverage
+pytest tests/unit/test_response_normalization.py -k "epoch_zero_preserved or hidden_units_zero_preserved or ZeroMetricPreservation" -v
+```
+
+Avoid `or` fallbacks when zero is valid. Prefer explicit `None` checks or first-defined helper logic.
 
 ### Debug Tests
 
