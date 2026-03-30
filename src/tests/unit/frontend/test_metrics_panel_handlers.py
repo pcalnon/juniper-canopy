@@ -1501,3 +1501,159 @@ class TestRegisteredCallbacks:
         if func := callbacks.get("update_play_button"):
             result = func({"mode": "paused"})
             assert result == "▶"
+
+
+@pytest.mark.unit
+class TestValidationOverlay:
+    """Tests for _add_validation_overlay static method."""
+
+    def test_add_validation_overlay_with_data(self, metrics_panel):
+        """Validation overlay adds dashed trace when val_loss data exists."""
+        import plotly.graph_objects as go
+
+        fig = go.Figure()
+        metrics_data = [
+            {"epoch": 1, "metrics": {"val_loss": 0.9}},
+            {"epoch": 2, "metrics": {"val_loss": 0.7}},
+            {"epoch": 3, "metrics": {"val_loss": 0.5}},
+        ]
+
+        MetricsPanel._add_validation_overlay(fig, metrics_data, "val_loss", "Validation Loss", "#ff6b6b")
+
+        assert len(fig.data) == 1
+        assert fig.data[0].name == "Validation Loss"
+        assert fig.data[0].line.dash == "dash"
+        assert list(fig.data[0].x) == [1, 2, 3]
+
+    def test_add_validation_overlay_no_data(self, metrics_panel):
+        """No trace added when all validation values are None."""
+        import plotly.graph_objects as go
+
+        fig = go.Figure()
+        metrics_data = [
+            {"epoch": 1, "metrics": {"val_loss": None}},
+            {"epoch": 2, "metrics": {}},
+        ]
+
+        MetricsPanel._add_validation_overlay(fig, metrics_data, "val_loss", "Validation Loss", "#ff6b6b")
+
+        assert len(fig.data) == 0
+
+    def test_add_validation_overlay_partial_data(self, metrics_panel):
+        """Overlay only includes epochs with non-None values."""
+        import plotly.graph_objects as go
+
+        fig = go.Figure()
+        metrics_data = [
+            {"epoch": 1, "metrics": {"val_accuracy": 0.5}},
+            {"epoch": 2, "metrics": {"val_accuracy": None}},
+            {"epoch": 3, "metrics": {"val_accuracy": 0.8}},
+        ]
+
+        MetricsPanel._add_validation_overlay(fig, metrics_data, "val_accuracy", "Val Acc", "#82e0aa")
+
+        assert len(fig.data) == 1
+        assert list(fig.data[0].x) == [1, 3]
+        assert list(fig.data[0].y) == [0.5, 0.8]
+
+
+@pytest.mark.unit
+class TestLearningRateHandler:
+    """Tests for _update_learning_rate_handler method."""
+
+    def test_learning_rate_with_value(self, metrics_panel):
+        """Returns formatted LR when state has learning_rate."""
+        result = metrics_panel._update_learning_rate_handler(state={"learning_rate": 0.01})
+        assert result == "0.010000"
+
+    def test_learning_rate_small_value(self, metrics_panel):
+        """Returns formatted LR for small values."""
+        result = metrics_panel._update_learning_rate_handler(state={"learning_rate": 0.000123})
+        assert result == "0.000123"
+
+    def test_learning_rate_none_state(self, metrics_panel):
+        """Returns '--' when state is None."""
+        result = metrics_panel._update_learning_rate_handler(state=None)
+        assert result == "--"
+
+    def test_learning_rate_empty_state(self, metrics_panel):
+        """Returns '--' when state is empty dict."""
+        result = metrics_panel._update_learning_rate_handler(state={})
+        assert result == "--"
+
+    def test_learning_rate_missing_key(self, metrics_panel):
+        """Returns '--' when learning_rate key absent."""
+        result = metrics_panel._update_learning_rate_handler(state={"status": "RUNNING"})
+        assert result == "--"
+
+
+@pytest.mark.unit
+class TestPhaseDurationHandler:
+    """Tests for _update_phase_duration_handler method."""
+
+    def test_phase_duration_active(self, metrics_panel):
+        """Returns duration string when phase is active with started_at."""
+        from datetime import datetime, timedelta, timezone
+
+        started = (datetime.now(timezone.utc) - timedelta(minutes=2, seconds=30)).isoformat()
+        state = {"status": "STARTED", "phase_started_at": started}
+
+        result = metrics_panel._update_phase_duration_handler(state=state)
+
+        assert result.startswith("Phase Duration: 2m")
+
+    def test_phase_duration_idle(self, metrics_panel):
+        """Returns empty string when status is IDLE."""
+        result = metrics_panel._update_phase_duration_handler(state={"status": "IDLE"})
+        assert result == ""
+
+    def test_phase_duration_stopped(self, metrics_panel):
+        """Returns empty string when status is STOPPED."""
+        result = metrics_panel._update_phase_duration_handler(state={"status": "STOPPED"})
+        assert result == ""
+
+    def test_phase_duration_none_state(self, metrics_panel):
+        """Returns empty string when state is None."""
+        result = metrics_panel._update_phase_duration_handler(state=None)
+        assert result == ""
+
+    def test_phase_duration_no_started_at(self, metrics_panel):
+        """Returns empty string when phase_started_at is missing."""
+        result = metrics_panel._update_phase_duration_handler(state={"status": "STARTED"})
+        assert result == ""
+
+
+@pytest.mark.unit
+class TestHiddenUnitsRatioFormat:
+    """Tests for hidden units 'N / max' format in _update_metrics_display_handler."""
+
+    def test_hidden_units_with_max(self, metrics_panel):
+        """Hidden units card shows 'N / max' when training_state has max_hidden_units."""
+        metrics_data = [
+            {
+                "epoch": 1,
+                "phase": "output_training",
+                "metrics": {"loss": 0.5, "accuracy": 0.6},
+                "network_topology": {"hidden_units": 3},
+            },
+        ]
+        training_state = {"max_hidden_units": 10}
+
+        result = metrics_panel._update_metrics_display_handler(metrics_data=metrics_data, theme="light", view_state=None, training_state=training_state)
+
+        assert result[5] == "3 / 10"
+
+    def test_hidden_units_without_max(self, metrics_panel):
+        """Hidden units card shows plain count when max_hidden_units absent."""
+        metrics_data = [
+            {
+                "epoch": 1,
+                "phase": "output_training",
+                "metrics": {"loss": 0.5, "accuracy": 0.6},
+                "network_topology": {"hidden_units": 3},
+            },
+        ]
+
+        result = metrics_panel._update_metrics_display_handler(metrics_data=metrics_data, theme="light", view_state=None, training_state=None)
+
+        assert result[5] == "3"

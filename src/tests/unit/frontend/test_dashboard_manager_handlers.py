@@ -343,6 +343,37 @@ class TestStatusBarHandlers:
 
         assert result[5] == "Inference"
 
+    def test_build_unified_status_bar_hidden_units_ratio(self, dashboard_manager):
+        """Status bar shows 'N / max' for hidden units when max_hidden_units present."""
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "is_running": True,
+            "is_paused": False,
+            "phase": "candidate",
+            "current_epoch": 50,
+            "hidden_units": 3,
+            "max_hidden_units": 10,
+        }
+
+        result = dashboard_manager._build_unified_status_bar_content(mock_response, latency_ms=50)
+
+        assert result[8] == "3 / 10"
+
+    def test_build_unified_status_bar_hidden_units_no_max(self, dashboard_manager):
+        """Status bar shows plain count when max_hidden_units absent."""
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "is_running": True,
+            "is_paused": False,
+            "phase": "output",
+            "current_epoch": 10,
+            "hidden_units": 2,
+        }
+
+        result = dashboard_manager._build_unified_status_bar_content(mock_response, latency_ms=50)
+
+        assert result[8] == "2"
+
 
 # =============================================================================
 # Data Store Handlers (Lines 1170-1256)
