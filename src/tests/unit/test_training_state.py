@@ -116,6 +116,8 @@ class TestTrainingStateUpdate:
             candidates_trained=4,
             candidates_total=20,
             phase_started_at="2026-03-29T12:00:00Z",
+            candidate_epoch=150,
+            candidate_total_epochs=500,
         )
 
         data = state.get_state()
@@ -126,6 +128,8 @@ class TestTrainingStateUpdate:
         assert data["candidates_trained"] == 4
         assert data["candidates_total"] == 20
         assert data["phase_started_at"] == "2026-03-29T12:00:00Z"
+        assert data["candidate_epoch"] == 150
+        assert data["candidate_total_epochs"] == 500
 
     def test_update_state_all_fields(self):
         """Test updating all fields."""

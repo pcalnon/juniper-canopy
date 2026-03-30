@@ -857,6 +857,18 @@ class TestUpdateProgressDetailHandler:
         result = metrics_panel._update_progress_detail_handler(state=state)
         assert result == "Candidate Training | Iteration 2/10 | Best Corr: 0.9123 | Candidates: 3/8"
 
+    def test_formats_candidate_epoch_progress_segment(self, metrics_panel):
+        """Should include candidate epoch progress text and percent."""
+        state = {
+            "status": "RUNNING",
+            "phase_detail": "candidate_training",
+            "candidate_epoch": 150,
+            "candidate_total_epochs": 500,
+        }
+
+        result = metrics_panel._update_progress_detail_handler(state=state)
+        assert result == "Candidate Training | Candidate Epoch: 150/500 (30%)"
+
     def test_omits_segments_for_falsy_values(self, metrics_panel):
         """Should omit optional segments when values are zero/falsy."""
         state = {
