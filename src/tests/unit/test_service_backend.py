@@ -248,6 +248,39 @@ class TestNetworkAndData:
         result = service_backend.get_dataset()
         assert isinstance(result, (dict, type(None)))
 
+    def test_get_dataset_passes_through_inputs_targets(self, service_backend, mock_adapter):
+        """get_dataset() includes inputs/targets when present in raw response."""
+        mock_adapter.get_dataset_info.return_value = {
+            "loaded": True,
+            "train_samples": 100,
+            "test_samples": 25,
+            "input_features": 2,
+            "output_features": 1,
+            "inputs": [[0.1, 0.2], [0.3, 0.4]],
+            "targets": [0, 1],
+        }
+        result = service_backend.get_dataset()
+        assert "inputs" in result
+        assert "targets" in result
+        assert result["inputs"] == [[0.1, 0.2], [0.3, 0.4]]
+        assert result["targets"] == [0, 1]
+        assert result["num_samples"] == 125
+
+    def test_get_dataset_metadata_only_no_inputs_key(self, service_backend, mock_adapter):
+        """get_dataset() omits inputs/targets when not in raw response and data endpoint unavailable."""
+        mock_adapter.get_dataset_info.return_value = {
+            "loaded": True,
+            "train_samples": 800,
+            "test_samples": 200,
+            "input_features": 2,
+            "output_features": 1,
+        }
+        mock_adapter.get_dataset_data.return_value = None
+        result = service_backend.get_dataset()
+        assert "inputs" not in result
+        assert "targets" not in result
+        assert result["num_samples"] == 1000
+
     def test_get_decision_boundary_delegates_to_adapter(self, service_backend, mock_adapter):
         """get_decision_boundary() should delegate to adapter."""
         mock_adapter.get_decision_boundary.return_value = {

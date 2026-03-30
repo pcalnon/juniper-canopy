@@ -242,13 +242,27 @@ class DatasetPlotter(BaseComponent):
         # Filter data by split
         filtered_data = self._filter_by_split(dataset, split)
 
+        # Check for metadata-only dataset (service mode without data arrays)
+        inputs = filtered_data.get("inputs", [])
+        if not inputs and (dataset.get("num_samples") or dataset.get("num_features")):
+            scatter_fig = self._create_empty_plot("Dataset loaded (metadata only)", theme)
+            dist_fig = self._create_empty_plot("Distribution unavailable", theme)
+            return (
+                scatter_fig,
+                dist_fig,
+                str(dataset.get("num_samples", 0)),
+                str(dataset.get("num_features", 0)),
+                str(dataset.get("num_classes", 0)),
+                "N/A",
+            )
+
         # Create plots
         scatter_fig = self._create_scatter_plot(filtered_data, theme)
         dist_fig = self._create_distribution_plot(filtered_data, theme)
 
         # Calculate statistics
-        n_samples = len(filtered_data.get("inputs", []))
-        n_features = len(filtered_data["inputs"][0]) if filtered_data.get("inputs") else 0
+        n_samples = len(inputs)
+        n_features = len(inputs[0]) if inputs else 0
         targets = filtered_data.get("targets", [])
         unique_classes = len(set(targets)) if targets else 0
 

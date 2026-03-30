@@ -1115,3 +1115,48 @@ class TestCallbackDirectInvocation:
         unique_classes = len(set(targets)) if targets else 0
 
         assert unique_classes == 5
+
+    def test_process_dataset_update_metadata_only(self):
+        """Metadata-only dataset (service mode) shows stats without crash."""
+        from frontend.components.dataset_plotter import DatasetPlotter
+
+        config = {}
+        component = DatasetPlotter(config)
+
+        dataset = {
+            "num_samples": 1000,
+            "num_features": 2,
+            "num_classes": 3,
+            "loaded": True,
+            "train_samples": 800,
+            "test_samples": 200,
+        }
+
+        result = component._process_dataset_update(dataset, "all", "light")
+
+        assert isinstance(result[0], go.Figure)
+        assert isinstance(result[1], go.Figure)
+        assert result[2] == "1000"
+        assert result[3] == "2"
+        assert result[4] == "3"
+        assert result[5] == "N/A"
+
+    def test_process_dataset_update_metadata_only_dark_theme(self):
+        """Metadata-only dataset renders in dark theme without crash."""
+        from frontend.components.dataset_plotter import DatasetPlotter
+
+        config = {}
+        component = DatasetPlotter(config)
+
+        dataset = {
+            "num_samples": 500,
+            "num_features": 4,
+            "num_classes": 2,
+            "loaded": True,
+        }
+
+        result = component._process_dataset_update(dataset, "all", "dark")
+
+        assert isinstance(result[0], go.Figure)
+        assert result[2] == "500"
+        assert result[3] == "4"
