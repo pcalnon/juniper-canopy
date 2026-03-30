@@ -581,6 +581,56 @@ class TestTopologyTransformation:
             elif node["type"] == "output":
                 assert node["layer"] == 2
 
+    def test_transform_topology_multi_output_transpose(self):
+        """Multi-output output_weights are transposed and wired per output neuron."""
+        raw = {
+            "input_size": 2,
+            "output_size": 2,
+            "hidden_units": [
+                {"weights": [0.1, 0.2], "bias": 0.0, "activation": "sigmoid"},
+            ],
+            # Shape: (input_size + hidden_units, output_size) == (3, 2)
+            # Row-major by source node: [input_0, input_1, hidden_0]
+            "output_weights": [
+                [0.11, 0.12],  # input_0 -> output_0, output_1
+                [0.21, 0.22],  # input_1 -> output_0, output_1
+                [0.31, 0.32],  # hidden_0 -> output_0, output_1
+            ],
+            "output_bias": [0.0, 0.0],
+        }
+        result = CascorServiceAdapter._transform_topology(raw)
+
+        out0 = {(c["from"], c["to"]): c["weight"] for c in result["connections"] if c["to"] == "output_0"}
+        out1 = {(c["from"], c["to"]): c["weight"] for c in result["connections"] if c["to"] == "output_1"}
+
+        assert out0[("input_0", "output_0")] == 0.11
+        assert out0[("input_1", "output_0")] == 0.21
+        assert out0[("hidden_0", "output_0")] == 0.31
+        assert out1[("input_0", "output_1")] == 0.12
+        assert out1[("input_1", "output_1")] == 0.22
+        assert out1[("hidden_0", "output_1")] == 0.32
+
+    def test_transform_topology_output_weights_mismatched_rows(self):
+        """Mismatched output-weight rows should only emit available connections safely."""
+        raw = {
+            "input_size": 2,
+            "output_size": 2,
+            "hidden_units": [],
+            # One row only (should not crash; only input_0 weights are available)
+            "output_weights": [[0.5, 0.6]],
+            "output_bias": [0.0, 0.0],
+        }
+        result = CascorServiceAdapter._transform_topology(raw)
+
+        out0 = [c for c in result["connections"] if c["to"] == "output_0"]
+        out1 = [c for c in result["connections"] if c["to"] == "output_1"]
+        assert len(out0) == 1
+        assert len(out1) == 1
+        assert out0[0]["from"] == "input_0"
+        assert out0[0]["weight"] == 0.5
+        assert out1[0]["from"] == "input_0"
+        assert out1[0]["weight"] == 0.6
+
     def test_extract_network_topology_applies_transform(self):
         """extract_network_topology must apply _transform_topology."""
         client = MagicMock()
