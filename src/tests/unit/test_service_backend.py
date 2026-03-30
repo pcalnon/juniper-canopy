@@ -265,6 +265,21 @@ class TestNetworkAndData:
         assert result["inputs"] == [[0.1, 0.2], [0.3, 0.4]]
         assert result["targets"] == [0, 1]
         assert result["num_samples"] == 125
+        mock_adapter.get_dataset_data.assert_not_called()
+
+    def test_get_dataset_passthrough_for_non_metadata_shape(self, service_backend, mock_adapter):
+        """Raw dataset payload without metadata keys is returned unchanged."""
+        raw = {
+            "inputs": [[0.1, 0.2], [0.3, 0.4]],
+            "targets": [0, 1],
+            "split_indices": {"train": [0], "test": [1]},
+        }
+        mock_adapter.get_dataset_info.return_value = raw
+
+        result = service_backend.get_dataset()
+
+        assert result == raw
+        mock_adapter.get_dataset_data.assert_not_called()
 
     def test_get_dataset_metadata_only_no_inputs_key(self, service_backend, mock_adapter):
         """get_dataset() omits inputs/targets when not in raw response and data endpoint unavailable."""
@@ -280,6 +295,15 @@ class TestNetworkAndData:
         assert "inputs" not in result
         assert "targets" not in result
         assert result["num_samples"] == 1000
+
+    def test_get_dataset_returns_none_when_info_missing(self, service_backend, mock_adapter):
+        """get_dataset() returns None when adapter has no dataset info."""
+        mock_adapter.get_dataset_info.return_value = None
+
+        result = service_backend.get_dataset()
+
+        assert result is None
+        mock_adapter.get_dataset_data.assert_not_called()
 
     def test_get_dataset_fetches_inputs_targets_from_dataset_data(self, service_backend, mock_adapter):
         """get_dataset() fetches arrays from get_dataset_data() when metadata-only response is returned."""

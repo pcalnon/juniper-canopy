@@ -26,7 +26,11 @@ import plotly.graph_objects as go
 import pytest
 
 try:
-    from backend.cascor_service_adapter import CascorServiceAdapter, _ServiceTrainingMonitor
+    from backend.cascor_service_adapter import (
+        CascorServiceAdapter,
+        _first_defined,
+        _ServiceTrainingMonitor,
+    )
     from backend.service_backend import ServiceBackend
 
     _HAS_SERVICE_BACKEND = True
@@ -395,6 +399,33 @@ class TestFix13ZeroMetricPreservation:
         dashboard = CascorServiceAdapter._to_dashboard_metric(normalized)
         assert dashboard["metrics"]["loss"] == 0.0
         assert dashboard["metrics"]["accuracy"] == 0.0
+
+
+# ==================================================================
+# Helper-function hardening tests
+# ==================================================================
+
+
+@pytest.mark.unit
+class TestHelperFunctionHardening:
+    """Direct tests for shared response-normalization helpers."""
+
+    def test_first_defined_preserves_zero(self):
+        """Falsy-but-valid zero should not be skipped."""
+        assert _first_defined(None, 0, 5, default=9) == 0
+
+    def test_first_defined_preserves_empty_string(self):
+        """Falsy-but-valid empty string should be returned."""
+        assert _first_defined(None, "", "fallback", default="x") == ""
+
+    def test_first_defined_returns_default_when_all_none(self):
+        """Default should be returned only when all values are None."""
+        assert _first_defined(None, None, default="missing") == "missing"
+
+    def test_unwrap_response_preserves_falsy_data_payload(self):
+        """_unwrap_response must return falsy payload values unchanged."""
+        assert CascorServiceAdapter._unwrap_response({"data": 0}) == 0
+        assert CascorServiceAdapter._unwrap_response({"data": False}) is False
 
 
 # ==================================================================
