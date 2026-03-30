@@ -157,7 +157,7 @@ class ServiceBackend:
         if not raw:
             return None
         if "train_samples" in raw or "input_features" in raw:
-            return {
+            result = {
                 "num_samples": raw.get("train_samples", 0) + raw.get("test_samples", 0),
                 "num_features": raw.get("input_features", 0),
                 "num_classes": raw.get("output_features", 0),
@@ -165,6 +165,17 @@ class ServiceBackend:
                 "train_samples": raw.get("train_samples", 0),
                 "test_samples": raw.get("test_samples", 0),
             }
+            if "inputs" in raw:
+                result["inputs"] = raw["inputs"]
+            if "targets" in raw:
+                result["targets"] = raw["targets"]
+            # Fetch actual arrays if metadata-only
+            if "inputs" not in result:
+                data = self._adapter.get_dataset_data()
+                if data:
+                    result["inputs"] = data["inputs"]
+                    result["targets"] = data["targets"]
+            return result
         return raw
 
     def get_decision_boundary(self, resolution: int = 50) -> Optional[Dict[str, Any]]:

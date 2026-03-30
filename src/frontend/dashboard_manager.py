@@ -1570,6 +1570,7 @@ class DashboardManager:
         raw_phase = status_data.get("phase", "idle")
         epoch = status_data.get("current_epoch", 0)
         hidden_units = status_data.get("hidden_units", 0)
+        max_hidden_units = status_data.get("max_hidden_units")
 
         # Determine display status (terminal states take priority)
         if is_failed:
@@ -1626,7 +1627,7 @@ class DashboardManager:
             phase,
             phase_style,
             str(epoch),
-            str(hidden_units),
+            f"{hidden_units} / {max_hidden_units}" if max_hidden_units else str(hidden_units),
         )
 
     def _update_network_info_handler(self, n=None):

@@ -579,7 +579,7 @@ class CascorServiceAdapter:
 
         # Hidden nodes with cascade connections
         for h, unit in enumerate(hidden_units_data if isinstance(hidden_units_data, list) else []):
-            nodes.append({"id": f"hidden_{h}", "type": "hidden", "layer": h + 1})
+            nodes.append({"id": f"hidden_{h}", "type": "hidden", "layer": 1})
             weights = unit.get("weights", [])
             w_idx = 0
             # Connections from inputs
@@ -594,11 +594,20 @@ class CascorServiceAdapter:
                     w_idx += 1
 
         # Output nodes and connections
-        output_weights = raw.get("output_weights", [])
+        # CasCor output_weights is shape (input_size + num_hidden, output_size),
+        # stored row-per-input-feature. Transpose to row-per-output-neuron.
+        raw_output_weights = raw.get("output_weights", [])
+        if raw_output_weights and isinstance(raw_output_weights[0], list):
+            n_cols = len(raw_output_weights[0])
+            output_weights_t = [[raw_output_weights[r][c] for r in range(len(raw_output_weights))] for c in range(n_cols)]
+        else:
+            # 1D fallback (single output, already flat)
+            output_weights_t = [raw_output_weights] if raw_output_weights else []
+
         for o in range(output_size):
-            nodes.append({"id": f"output_{o}", "type": "output", "layer": num_hidden + 1})
-            if o < len(output_weights):
-                row = output_weights[o] if isinstance(output_weights[o], list) else output_weights
+            nodes.append({"id": f"output_{o}", "type": "output", "layer": 2})
+            if o < len(output_weights_t):
+                row = output_weights_t[o]
                 w_idx = 0
                 for i in range(input_size):
                     if w_idx < len(row):
@@ -632,6 +641,26 @@ class CascorServiceAdapter:
     def get_dataset_info(self, x=None, y=None) -> Optional[Dict[str, Any]]:
         try:
             return self._unwrap_response(self._client.get_dataset())
+        except JuniperCascorClientError:
+            return None
+
+    def get_dataset_data(self) -> Optional[Dict[str, Any]]:
+        """Fetch dataset arrays from CasCor for scatter plot visualization."""
+        try:
+            result = self._unwrap_response(self._client.get_dataset_data())
+            if not result:
+                return None
+            inputs = result.get("train_x", [])
+            targets_raw = result.get("train_y", [])
+            # Binary (output_size=1): threshold at 0.5 — NOT argmax
+            # Argmax of single-element list [1.0] returns 0, not 1
+            if targets_raw and len(targets_raw[0]) == 1:
+                targets = [int(row[0] >= 0.5) for row in targets_raw]
+            elif targets_raw:
+                targets = [max(range(len(row)), key=lambda i: row[i]) for row in targets_raw]
+            else:
+                targets = []
+            return {"inputs": inputs, "targets": targets}
         except JuniperCascorClientError:
             return None
 

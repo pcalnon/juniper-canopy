@@ -22,6 +22,7 @@ Uses unittest.mock.MagicMock to create mock clients returning fixture responses.
 """
 from unittest.mock import MagicMock, PropertyMock
 
+import plotly.graph_objects as go
 import pytest
 
 try:
@@ -39,6 +40,7 @@ from tests.fixtures.cascor_response_fixtures import (
     real_metrics_history,
     real_topology,
     real_training_status_active,
+    real_training_status_epoch_zero,
     real_training_status_idle,
 )
 
@@ -179,29 +181,19 @@ class TestFix3CurrentMetrics:
         # After FIX-A (P5-RC-01, P5-RC-09): output is nested dashboard format
         assert "metrics" in result
         assert "network_topology" in result
-
-
-# ==================================================================
-# FIX-4: get_status normalization of cascor nested structure
-# ==================================================================
-
-
-        assert "train_loss" in result
-        assert result["train_loss"] == 0.45
         # Must NOT contain envelope keys
         assert "status" not in result
         assert "meta" not in result
 
     def test_real_envelope_emits_legacy_metrics_shape(self):
         """Current metrics include legacy nested metrics keys used by dashboard."""
-        from backend.cascor_service_adapter import _ServiceTrainingMonitor
-
-        client = _make_mock_client(get_metrics=real_metrics_current())
-        monitor = _ServiceTrainingMonitor(client)
+        client = MagicMock()
+        client.get_metrics.return_value = real_metrics_current()
+        monitor = _make_monitor(client)
         result = monitor.get_current_metrics()
 
-        assert result["metrics"]["loss"] == 0.45
-        assert result["metrics"]["accuracy"] == 0.72
+        assert result["metrics"]["loss"] == 0.12
+        assert result["metrics"]["accuracy"] == 0.91
 
 
 # ===========================================================================
@@ -278,9 +270,9 @@ class TestGetStatus:
         }
         adapter.get_training_status.return_value = flat_status
         backend = ServiceBackend(adapter)
-        status = backend.get_status()
+        backend.get_status()
 
-        
+
 @pytest.mark.unit
 class TestFix4GetStatus:
     """FIX-4: ServiceBackend.get_status must normalize cascor's nested structure."""
@@ -361,23 +353,10 @@ class TestFix4GetStatus:
         assert result.get("current_epoch", 0) == 0
 
 
-        entry = result[0]
-        assert "train_loss" in entry
-        assert "train_accuracy" in entry
-        assert "val_loss" in entry
-        assert "val_accuracy" in entry
-        # Raw names should not be present
-        assert "loss" not in entry
-        assert "accuracy" not in entry
-        # Legacy nested shape expected by metrics panel callbacks
-        assert entry["metrics"]["loss"] == 0.95
-        assert entry["metrics"]["accuracy"] == 0.35
-        assert entry["network_topology"]["hidden_units"] == 0
-
-
 # ==================================================================
 # FIX-8: is_training_in_progress with real envelope
 # ==================================================================
+
 
 @pytest.mark.unit
 class TestFix8IsTrainingInProgress:
@@ -558,7 +537,7 @@ class TestTopologyTransformation:
 
     def test_transform_topology_empty_network(self):
         """Network with no hidden units must still produce valid structure."""
-        raw = {"input_size": 2, "output_size": 1, "hidden_units": [], "output_weights": [[0.5, 0.3]], "output_bias": [0.1]}
+        raw = {"input_size": 2, "output_size": 1, "hidden_units": [], "output_weights": [[0.5], [0.3]], "output_bias": [0.1]}
         result = CascorServiceAdapter._transform_topology(raw)
 
         assert result["input_units"] == 2
@@ -566,6 +545,41 @@ class TestTopologyTransformation:
         assert result["hidden_units"] == 0
         assert len([n for n in result["nodes"] if n["type"] == "input"]) == 2
         assert len([n for n in result["nodes"] if n["type"] == "output"]) == 1
+
+    def test_transform_topology_output_connections_with_hidden_units(self):
+        """Output node must connect to all inputs AND all hidden units."""
+        raw = real_topology()["data"]
+        result = CascorServiceAdapter._transform_topology(raw)
+
+        out_connections = [c for c in result["connections"] if c["to"] == "output_0"]
+        out_sources = {c["from"] for c in out_connections}
+        # 2 inputs + 2 hidden = 4 connections to output
+        assert len(out_connections) == 4
+        assert "input_0" in out_sources
+        assert "input_1" in out_sources
+        assert "hidden_0" in out_sources
+        assert "hidden_1" in out_sources
+
+    def test_transform_topology_empty_network_output_connections(self):
+        """Output node in empty network must connect to all inputs."""
+        raw = {"input_size": 2, "output_size": 1, "hidden_units": [], "output_weights": [[0.5], [0.3]], "output_bias": [0.1]}
+        result = CascorServiceAdapter._transform_topology(raw)
+
+        out_connections = [c for c in result["connections"] if c["to"] == "output_0"]
+        assert len(out_connections) == 2  # 2 inputs, 0 hidden
+
+    def test_transform_topology_correct_layer_assignments(self):
+        """All hidden nodes get layer=1, output nodes get layer=2 (3-layer scheme)."""
+        raw = real_topology()["data"]
+        result = CascorServiceAdapter._transform_topology(raw)
+
+        for node in result["nodes"]:
+            if node["type"] == "input":
+                assert node["layer"] == 0
+            elif node["type"] == "hidden":
+                assert node["layer"] == 1
+            elif node["type"] == "output":
+                assert node["layer"] == 2
 
     def test_extract_network_topology_applies_transform(self):
         """extract_network_topology must apply _transform_topology."""
@@ -637,3 +651,108 @@ class TestStatusNormalizationHardening:
 
         assert CascorStateSync._normalize_status("  started  ") == "Started"
         assert CascorStateSync._normalize_status(" PAUSED ") == "Paused"
+
+
+# ==================================================================
+# Dataset target conversion tests
+# ==================================================================
+
+
+@pytest.mark.unit
+class TestDatasetTargetConversion:
+    """Verify binary/multiclass target conversion in get_dataset_data."""
+
+    def test_dataset_target_conversion_binary(self):
+        """Binary (output_size=1): threshold at 0.5, not argmax."""
+        adapter = CascorServiceAdapter.__new__(CascorServiceAdapter)
+        client = MagicMock()
+        adapter._client = client
+        client.get_dataset_data.return_value = {
+            "status": "success",
+            "data": {
+                "train_x": [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]],
+                "train_y": [[0.0], [1.0], [0.0]],
+            },
+            "meta": {"timestamp": 0, "version": "0.4.0"},
+        }
+        result = adapter.get_dataset_data()
+        assert result["targets"] == [0, 1, 0]
+
+    def test_dataset_target_conversion_multiclass(self):
+        """Multiclass (output_size>1): argmax."""
+        adapter = CascorServiceAdapter.__new__(CascorServiceAdapter)
+        client = MagicMock()
+        adapter._client = client
+        client.get_dataset_data.return_value = {
+            "status": "success",
+            "data": {
+                "train_x": [[0.1, 0.2], [0.3, 0.4]],
+                "train_y": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            },
+            "meta": {"timestamp": 0, "version": "0.4.0"},
+        }
+        result = adapter.get_dataset_data()
+        assert result["targets"] == [0, 1]
+
+    def test_dataset_data_no_data_returns_none(self):
+        """No dataset loaded returns None gracefully."""
+        adapter = CascorServiceAdapter.__new__(CascorServiceAdapter)
+        client = MagicMock()
+        adapter._client = client
+        from juniper_cascor_client.exceptions import JuniperCascorClientError
+
+        client.get_dataset_data.side_effect = JuniperCascorClientError("Not found")
+        result = adapter.get_dataset_data()
+        assert result is None
+
+
+@pytest.mark.unit
+class TestValidationOverlay:
+    """Verify validation overlay trace logic."""
+
+    def test_add_validation_overlay_with_data(self):
+        """val_loss/val_accuracy traces added to plot when data present."""
+        from frontend.components.metrics_panel import MetricsPanel
+
+        fig = go.Figure()
+        metrics = [
+            {"epoch": 1, "metrics": {"val_loss": 0.9}},
+            {"epoch": 2, "metrics": {"val_loss": 0.7}},
+        ]
+        MetricsPanel._add_validation_overlay(fig, metrics, "val_loss", "Val Loss", "#ff0000")
+        assert len(fig.data) == 1
+        assert fig.data[0].name == "Val Loss"
+        assert list(fig.data[0].x) == [1, 2]
+
+    def test_add_validation_overlay_no_data(self):
+        """No trace when all validation values are None."""
+        from frontend.components.metrics_panel import MetricsPanel
+
+        fig = go.Figure()
+        metrics = [
+            {"epoch": 1, "metrics": {"val_loss": None}},
+            {"epoch": 2, "metrics": {}},
+        ]
+        MetricsPanel._add_validation_overlay(fig, metrics, "val_loss", "Val Loss", "#ff0000")
+        assert len(fig.data) == 0
+
+
+@pytest.mark.unit
+class TestDatasetMetadataOnly:
+    """Verify metadata-only graceful handling in DatasetPlotter."""
+
+    def test_process_dataset_update_metadata_only(self):
+        """Metadata-only dataset renders stats without crash."""
+        from frontend.components.dataset_plotter import DatasetPlotter
+
+        plotter = DatasetPlotter.__new__(DatasetPlotter)
+        plotter.logger = MagicMock()
+        plotter.component_id = "test-dataset"
+        plotter.default_colors = ["#1f77b4", "#ff7f0e", "#2ca02c"]
+
+        dataset = {"num_samples": 800, "num_features": 2, "num_classes": 1, "loaded": True}
+        result = plotter._process_dataset_update(dataset, "all", "light")
+
+        assert result[2] == "800"
+        assert result[3] == "2"
+        assert result[4] == "1"

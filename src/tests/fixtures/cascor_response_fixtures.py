@@ -82,6 +82,31 @@ def real_training_status_idle():
     )
 
 
+def real_training_status_epoch_zero():
+    """Envelope with epoch=0 / hidden_units=0 edge case (training just started)."""
+    return _envelope(
+        {
+            "state_machine": {"status": "STARTED", "phase": "OUTPUT"},
+            "monitor": {
+                "is_training": True,
+                "current_epoch": 0,
+                "current_hidden_units": 0,
+                "total_metrics": 0,
+            },
+            "training_state": {
+                "status": "Started",
+                "phase": "Output",
+                "learning_rate": 0.01,
+                "max_hidden_units": 10,
+                "max_epochs": 1000,
+                "current_epoch": 0,
+            },
+            "network_loaded": True,
+            "training_active": True,
+        }
+    )
+
+
 def real_metrics_history():
     """Envelope with a flat list of metric dicts using real cascor field names."""
     return _envelope(
@@ -179,7 +204,7 @@ def real_topology():
                     "activation": "sigmoid",
                 },
             ],
-            "output_weights": [0.7, -0.2, 0.4],
-            "output_bias": 0.05,
+            "output_weights": [[0.7], [-0.2], [0.4], [0.1]],
+            "output_bias": [0.05],
         }
     )

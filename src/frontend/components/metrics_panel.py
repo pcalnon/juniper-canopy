@@ -153,6 +153,16 @@ class MetricsPanel(BaseComponent):
                                 "color": "#adb5bd",
                             },
                         ),
+                        html.Span(
+                            id=f"{self.component_id}-phase-duration",
+                            children="",
+                            style={
+                                "display": "inline-block",
+                                "marginLeft": "15px",
+                                "fontSize": "13px",
+                                "color": "#adb5bd",
+                            },
+                        ),
                     ],
                     style={"marginBottom": "10px"},
                 ),
@@ -426,8 +436,53 @@ class MetricsPanel(BaseComponent):
                             className="metric-card",
                             style={"flex": "1", "textAlign": "center", "padding": "15px"},
                         ),
+                        html.Div(
+                            [
+                                html.H5("Learning Rate"),
+                                html.H2(id=f"{self.component_id}-current-lr", children="--", style={"color": "#6f42c1"}),
+                            ],
+                            className="metric-card",
+                            style={"flex": "1", "textAlign": "center", "padding": "15px"},
+                        ),
                     ],
                     style={"display": "flex", "justifyContent": "space-around", "marginBottom": "20px", "gap": "10px"},
+                ),
+                # Training progress bars
+                html.Div(
+                    id=f"{self.component_id}-progress-bars",
+                    children=[
+                        html.Div(
+                            [
+                                html.Small("Grow Iteration", style={"marginRight": "10px", "minWidth": "110px"}),
+                                dbc.Progress(
+                                    id=f"{self.component_id}-grow-progress",
+                                    value=0,
+                                    label="",
+                                    color="info",
+                                    striped=True,
+                                    animated=True,
+                                    style={"flex": "1", "height": "20px"},
+                                ),
+                            ],
+                            style={"display": "flex", "alignItems": "center", "marginBottom": "5px"},
+                        ),
+                        html.Div(
+                            [
+                                html.Small("Candidate Epoch", style={"marginRight": "10px", "minWidth": "110px"}),
+                                dbc.Progress(
+                                    id=f"{self.component_id}-candidate-epoch-progress",
+                                    value=0,
+                                    label="",
+                                    color="warning",
+                                    striped=True,
+                                    animated=True,
+                                    style={"flex": "1", "height": "20px"},
+                                ),
+                            ],
+                            style={"display": "flex", "alignItems": "center"},
+                        ),
+                    ],
+                    style={"display": "none", "marginBottom": "15px", "padding": "0 10px"},
                 ),
                 # Plots
                 dcc.Graph(
@@ -553,6 +608,33 @@ class MetricsPanel(BaseComponent):
         )
         def update_progress_detail(state):
             return self._update_progress_detail_handler(state=state)
+
+        @app.callback(
+            Output(f"{self.component_id}-current-lr", "children"),
+            [Input(f"{self.component_id}-training-state-store", "data")],
+        )
+        def update_learning_rate(state):
+            return self._update_learning_rate_handler(state=state)
+
+        @app.callback(
+            Output(f"{self.component_id}-phase-duration", "children"),
+            [Input(f"{self.component_id}-training-state-store", "data")],
+        )
+        def update_phase_duration(state):
+            return self._update_phase_duration_handler(state=state)
+
+        @app.callback(
+            [
+                Output(f"{self.component_id}-progress-bars", "style"),
+                Output(f"{self.component_id}-grow-progress", "value"),
+                Output(f"{self.component_id}-grow-progress", "label"),
+                Output(f"{self.component_id}-candidate-epoch-progress", "value"),
+                Output(f"{self.component_id}-candidate-epoch-progress", "label"),
+            ],
+            [Input(f"{self.component_id}-training-state-store", "data")],
+        )
+        def update_training_progress(state):
+            return self._update_training_progress_handler(state=state)
 
         @app.callback(
             [
@@ -756,10 +838,13 @@ class MetricsPanel(BaseComponent):
                 Input("theme-state", "data"),
                 Input(f"{self.component_id}-display-mode-store", "data"),
             ],
-            State(f"{self.component_id}-view-state", "data"),
+            [
+                State(f"{self.component_id}-view-state", "data"),
+                State(f"{self.component_id}-training-state-store", "data"),
+            ],
         )
-        def update_metrics_display(metrics_data: List[Dict[str, Any]], theme: str, display_mode_state: Dict, view_state: Dict):
-            return self._update_metrics_display_handler(metrics_data=metrics_data, theme=theme, view_state=view_state, display_mode_state=display_mode_state)
+        def update_metrics_display(metrics_data: List[Dict[str, Any]], theme: str, display_mode_state: Dict, view_state: Dict, training_state: Dict):
+            return self._update_metrics_display_handler(metrics_data=metrics_data, theme=theme, view_state=view_state, display_mode_state=display_mode_state, training_state=training_state)
 
         # Replay Controls Callbacks
         @app.callback(
@@ -1102,7 +1187,71 @@ class MetricsPanel(BaseComponent):
 
         return " | ".join(parts) if parts else ""
 
-    def _update_metrics_display_handler(self, metrics_data: List[Dict[str, Any]] = None, theme: str = None, view_state: Dict = None, display_mode_state: Dict = None):
+    def _update_learning_rate_handler(self, state=None):
+        """Update learning rate card from training state."""
+        if not state:
+            return "--"
+        lr = state.get("learning_rate")
+        if lr is not None:
+            return f"{lr:.6f}"
+        return "--"
+
+    def _update_training_progress_handler(self, state=None):
+        """Update grow iteration and candidate epoch progress bars."""
+        hidden_style = {"display": "none", "marginBottom": "15px", "padding": "0 10px"}
+        visible_style = {"display": "block", "marginBottom": "15px", "padding": "0 10px"}
+
+        if not state:
+            return hidden_style, 0, "", 0, ""
+
+        status = (state.get("status") or "").upper()
+        if status in ("STOPPED", "IDLE", ""):
+            return hidden_style, 0, "", 0, ""
+
+        grow_iter = state.get("grow_iteration")
+        grow_max = state.get("grow_max")
+        cand_epoch = state.get("candidate_epoch")
+        cand_total = state.get("candidate_total_epochs")
+
+        has_grow = grow_iter is not None and grow_max
+        has_cand = cand_epoch is not None and cand_total
+
+        if not has_grow and not has_cand:
+            return hidden_style, 0, "", 0, ""
+
+        grow_pct = int(100 * grow_iter / grow_max) if has_grow else 0
+        grow_label = f"{grow_iter}/{grow_max}" if has_grow else ""
+        cand_pct = int(100 * cand_epoch / cand_total) if has_cand else 0
+        cand_label = f"{cand_epoch}/{cand_total}" if has_cand else ""
+
+        return visible_style, grow_pct, grow_label, cand_pct, cand_label
+
+    def _update_phase_duration_handler(self, state=None):
+        """Compute and display elapsed time since phase_started_at."""
+        if not state:
+            return ""
+        status = (state.get("status") or "").upper()
+        if status in ("STOPPED", "IDLE", ""):
+            return ""
+        phase_started = state.get("phase_started_at")
+        if not phase_started:
+            return ""
+        from datetime import datetime, timezone
+
+        try:
+            started = datetime.fromisoformat(phase_started)
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            elapsed = datetime.now(timezone.utc) - started
+            total_seconds = int(elapsed.total_seconds())
+            if total_seconds < 0:
+                return ""
+            minutes, seconds = divmod(total_seconds, 60)
+            return f"Phase Duration: {minutes}m {seconds}s"
+        except (ValueError, TypeError):
+            return ""
+
+    def _update_metrics_display_handler(self, metrics_data: List[Dict[str, Any]] = None, theme: str = None, view_state: Dict = None, display_mode_state: Dict = None, training_state: Dict = None):
         """
         Update all metrics visualizations and displays.
 
@@ -1111,6 +1260,7 @@ class MetricsPanel(BaseComponent):
             theme: Current theme ("light" or "dark")
             view_state: User's saved view state (zoom ranges)
             display_mode_state: Display mode configuration (mode, window_size)
+            training_state: Training state dictionary (for max_hidden_units)
 
         Returns:
             Tuple of updated components
@@ -1179,6 +1329,10 @@ class MetricsPanel(BaseComponent):
         loss_str = f"{current_loss:.4f}" if isinstance(current_loss, (int, float)) else "--"
         accuracy_str = f"{current_accuracy:.2%}" if isinstance(current_accuracy, (int, float)) else "--"
 
+        # Format hidden units as "N / max" when max is available
+        max_hu = (training_state or {}).get("max_hidden_units") or (training_state or {}).get("nn_max_hidden_units")
+        hu_str = f"{hidden_units} / {max_hu}" if max_hu else str(hidden_units)
+
         # Status text and style
         status_text = f'Status: {phase.replace("_", " ").title()}'
         status_style = self._get_status_style(phase)
@@ -1189,7 +1343,7 @@ class MetricsPanel(BaseComponent):
             str(current_epoch),
             loss_str,
             accuracy_str,
-            str(hidden_units),
+            hu_str,
             status_text,
             status_style,
         )
@@ -1358,6 +1512,7 @@ class MetricsPanel(BaseComponent):
 
         # Create figure with phase-colored scatter
         fig = self._create_phase_colored_scatter(fig=go.Figure(), epochs=epochs, losses=losses, phases=phases)
+        self._add_validation_overlay(fig, metrics_data, "val_loss", "Validation Loss", "#ff6b6b")
         fig = self._add_phase_bg_bands(fig=fig, epochs=epochs, phases=phases)
         (fig, epoch) = self._add_hidden_unit_markers(metrics_data=metrics_data, fig=fig, theme=theme, epochs=epochs)
 
@@ -1425,6 +1580,36 @@ class MetricsPanel(BaseComponent):
                 )
             )
 
+        return fig
+
+    @staticmethod
+    def _add_validation_overlay(fig: go.Figure, metrics_data: List[Dict[str, Any]], field_name: str, trace_name: str, color: str) -> go.Figure:
+        """Add a dashed validation overlay trace to an existing plot.
+
+        Args:
+            fig: Existing plotly figure to add trace to.
+            metrics_data: List of metrics dictionaries.
+            field_name: Key inside metrics dict (e.g. "val_loss").
+            trace_name: Legend label for the trace.
+            color: CSS color string.
+        """
+        epochs = []
+        values = []
+        for m in metrics_data:
+            val = m.get("metrics", {}).get(field_name)
+            if val is not None:
+                epochs.append(m.get("epoch", 0))
+                values.append(val)
+        if epochs:
+            fig.add_trace(
+                go.Scatter(
+                    x=epochs,
+                    y=values,
+                    mode="lines",
+                    name=trace_name,
+                    line={"color": color, "width": 2, "dash": "dash"},
+                )
+            )
         return fig
 
     @staticmethod
@@ -1571,6 +1756,8 @@ class MetricsPanel(BaseComponent):
                 fillcolor="rgba(40, 167, 69, 0.1)",
             )
         )
+
+        self._add_validation_overlay(fig, metrics_data, "val_accuracy", "Validation Accuracy", "#82e0aa")
 
         # Add phase background bands
         current_phase = None
