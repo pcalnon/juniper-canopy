@@ -383,3 +383,44 @@ class TestRelayStateHandling:
         fake_websocket_manager.broadcast.assert_awaited()
 
         await adapter.stop_metrics_relay()
+
+
+class TestRelayCandidateProgressHandling:
+    """Tests for candidate progress message handling in the relay loop."""
+
+    @pytest.mark.asyncio
+    async def test_candidate_progress_message_forwards_candidate_epoch_fields(self, adapter, monkeypatch):
+        """Relay should map candidate_progress payload to training-state callback fields."""
+        callback = MagicMock()
+        adapter.set_state_update_callback(callback)
+
+        message = {
+            "type": "candidate_progress",
+            "data": {
+                "epoch": 150,
+                "total_epochs": 500,
+                "correlation": 0.9021,
+            },
+        }
+
+        class StreamFactory(_SingleStateMessageStream):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, message=message, **kwargs)
+
+        fake_websocket_manager = MagicMock()
+        fake_websocket_manager.broadcast = AsyncMock()
+        monkeypatch.setattr("communication.websocket_manager.websocket_manager", fake_websocket_manager)
+        monkeypatch.setattr("backend.cascor_service_adapter.CascorTrainingStream", StreamFactory)
+
+        await adapter.start_metrics_relay()
+        await asyncio.wait_for(adapter._relay_task, timeout=1.0)
+
+        callback.assert_called_once_with(
+            phase_detail="training_candidates",
+            candidate_epoch=150,
+            candidate_total_epochs=500,
+            best_correlation=0.9021,
+        )
+        fake_websocket_manager.broadcast.assert_awaited()
+
+        await adapter.stop_metrics_relay()
