@@ -1,7 +1,7 @@
 # Juniper Canopy API Reference
 
-**Version:** 1.2.0  
-**Last Updated:** March 26, 2026  
+**Version:** 1.3.0
+**Last Updated:** March 30, 2026
 **Base URL:** `http://127.0.0.1:8050`
 
 ---
@@ -244,6 +244,46 @@ curl http://127.0.0.1:8050/api/health
 - Use `phase` (not `current_phase`) as the canonical phase key.
 - In service mode, this endpoint returns normalized fields from nested CasCor status payloads.
 
+### GET /api/state
+
+**Description:** Get the full training state used by dashboard UI handlers.
+
+**Parameters:** None
+
+**Response Schema (abridged):**
+
+```json
+{
+  "status": "Started",
+  "phase": "Output",
+  "learning_rate": 0.01,
+  "max_hidden_units": 10,
+  "current_epoch": 42,
+  "grow_iteration": 3,
+  "grow_max": 10,
+  "phase_started_at": "2026-03-30T12:00:00+00:00",
+  "candidate_epoch": 120,
+  "candidate_total_epochs": 500
+}
+```
+
+**Field Groups:**
+
+- Core runtime: `status`, `phase`, `current_epoch`, `current_step`, `timestamp`
+- Hyperparameters: `learning_rate`, `max_hidden_units`, `max_epochs`
+- Candidate pool state: `candidate_pool_*`, `pool_metrics`, `top_candidate_*`
+- Progress detail: `phase_detail`, `grow_iteration`, `grow_max`, `best_correlation`, `candidates_*`, `phase_started_at`, `candidate_epoch`, `candidate_total_epochs`
+- Service/dashboard compatibility keys: `nn_*`, `cn_*` fields may also be present depending on backend mode
+
+**Status Codes:**
+
+- `200 OK` - State retrieved successfully
+
+**Notes:**
+
+- This endpoint is the source for metrics-panel state cards and progress bars.
+- `phase_started_at` is ISO-8601 and used to compute elapsed phase duration in the dashboard.
+
 ### GET /api/metrics
 
 **Description:** Get current training metrics snapshot
@@ -391,6 +431,11 @@ curl "http://127.0.0.1:8050/api/metrics/history?limit=100"
 
 - Node attributes may vary by backend (`layer` in demo mode, `label` in service mode).
 - Consumers should rely on `id` + `type` + `connections` as primary contract.
+- Service-mode topology normalization emits a strict 3-layer scheme:
+  - `input` nodes use `layer: 0`
+  - all `hidden_*` nodes use `layer: 1`
+  - all `output_*` nodes use `layer: 2`
+- In service mode, output connection rows are derived by transposing CasCor `output_weights` from `(input+hidden, output)` to output-oriented rows.
 
 ### GET /api/dataset
 
@@ -419,7 +464,9 @@ curl "http://127.0.0.1:8050/api/metrics/history?limit=100"
   "num_classes": 3,
   "loaded": true,
   "train_samples": 800,
-  "test_samples": 200
+  "test_samples": 200,
+  "inputs": [[0.1, 0.2], [0.3, 0.4]],
+  "targets": [0, 1]
 }
 ```
 
@@ -431,7 +478,9 @@ curl "http://127.0.0.1:8050/api/metrics/history?limit=100"
 **Notes:**
 
 - Demo mode returns full sample arrays.
-- Service mode returns metadata-oriented dataset shape normalized from external CasCor keys.
+- Service mode always returns normalized metadata (`num_samples`, `num_features`, `num_classes`), and may additionally include `inputs`/`targets` when available.
+- If service metadata is returned without arrays, Canopy attempts a secondary dataset fetch through the service data endpoint before returning.
+- When arrays are still unavailable, frontend dataset visualizations should treat the payload as metadata-only and avoid assuming `inputs`/`targets` exist.
 
 ### GET /api/decision_boundary
 
@@ -919,6 +968,7 @@ Most WebSocket messages use this shape:
 
 - `/ws/training` sends an initial `initial_status` message before steady-state messages.
 - Some control-channel messages may omit `timestamp`.
+- Runtime dashboard updates consume `metrics`, `state`, `topology`, and `event` message types.
 
 
 ### WS /ws/training

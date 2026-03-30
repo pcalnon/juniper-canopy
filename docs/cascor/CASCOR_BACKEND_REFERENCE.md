@@ -2,9 +2,9 @@
 
 ## Technical reference for CasCor backend integration in Juniper Canopy
 
-**Version:** 0.26.0  
-**Status:** ✅ PARTIALLY IMPLEMENTED  
-**Last Updated:** March 29, 2026
+**Version:** 0.27.0
+**Status:** ✅ PARTIALLY IMPLEMENTED
+**Last Updated:** March 30, 2026
 
 ---
 
@@ -70,6 +70,16 @@ get_training_status() -> Dict[str, Any]
 - Returns normalized status payload, unwrapping response envelopes where needed.
 
 ```python
+get_dataset_data() -> Optional[Dict[str, Any]]
+```
+
+- Fetches dataset arrays from service-mode CasCor data endpoint (`train_x`, `train_y`) for dashboard scatter visualization.
+- Converts targets to integer classes:
+  - binary (`len(train_y[row]) == 1`) uses threshold `>= 0.5`
+  - multiclass uses `argmax`
+- Returns `None` on service/client error so callers can fall back to metadata-only handling.
+
+```python
 get_canopy_params() -> Dict[str, Any]
 ```
 
@@ -105,6 +115,8 @@ _transform_topology(raw: dict) -> dict
 ```
 
 - Converts CasCor weight-oriented topology payloads into dashboard graph-oriented topology.
+- Enforces dashboard 3-layer contract: input layer `0`, hidden layer `1`, output layer `2`.
+- Transposes CasCor `output_weights` from `(input+hidden, output)` to output-oriented rows before creating output connections.
 
 ---
 
@@ -187,6 +199,20 @@ initialize() -> bool
 - Performs non-destructive attach.
 - Runs `CascorStateSync.sync()` if network exists.
 - Starts metrics relay for real-time updates.
+
+#### Dataset Normalization Behavior
+
+```python
+get_dataset() -> Optional[Dict[str, Any]]
+```
+
+- Normalizes service metadata keys to dashboard keys:
+  - `train_samples` + `test_samples` -> `num_samples`
+  - `input_features` -> `num_features`
+  - `output_features` -> `num_classes`
+- Preserves `inputs`/`targets` if already present in adapter response.
+- If metadata is present but arrays are missing, performs a secondary call to `adapter.get_dataset_data()` and merges arrays when available.
+- Returns metadata-only payload when arrays are unavailable, enabling frontend fallback rendering without exceptions.
 
 ---
 
@@ -933,13 +959,13 @@ with self.topology_lock:
 
 ### Topology Extraction
 
-**Cost:** ~1-5ms per call  
-**Frequency:** Only when requested  
+**Cost:** ~1-5ms per call
+**Frequency:** Only when requested
 **Optimization:** Cached in frontend
 
 ### WebSocket Broadcasting
 
-**Latency:** <100ms  
+**Latency:** <100ms
 **Throttling:** None (uses monitoring interval)
 
 ---
@@ -1003,8 +1029,8 @@ with self.topology_lock:
 
 ---
 
-**Last Updated:** March 29, 2026  
-**Version:** 0.26.0  
+**Last Updated:** March 30, 2026
+**Version:** 0.27.0
 **Status:** ✅ PARTIALLY IMPLEMENTED
 
 **Complete technical reference for CasCor backend integration!**

@@ -1635,6 +1635,9 @@ class DashboardManager:
         try:
             url = self._api_url("/api/status")
             response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            if not response.ok:
+                self.logger.warning(f"Status API returned {response.status_code}")
+                return html.Div("Unable to fetch network info", style={"color": "orange"})
             status = response.json()
 
             return html.Div(
@@ -1706,6 +1709,9 @@ class DashboardManager:
         try:
             url = self._api_url("/api/network/stats")
             response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            if not response.ok:
+                self.logger.warning(f"Network stats API returned {response.status_code}")
+                return html.Div("Unable to fetch network stats", style={"color": "orange"})
             stats = response.json()
 
             # Use the metrics_panel helper to create the detailed table
@@ -1730,6 +1736,9 @@ class DashboardManager:
                 limit = mode_state.get("window_size", 100)
             url = self._api_url(f"/api/metrics/history?limit={limit}")
             response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            if not response.ok:
+                self.logger.warning(f"Metrics history API returned {response.status_code}")
+                return []
             payload = response.json()
 
             # Normalize to a list for the Store (handle different API envelopes)
@@ -1760,6 +1769,9 @@ class DashboardManager:
         try:
             url = self._api_url("/api/topology")
             response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            if not response.ok:
+                self.logger.warning(f"Topology API returned {response.status_code}")
+                return {}
             topology = response.json()
             self.logger.debug(f"Fetched topology from {url}: {topology.get('total_connections', 0)} connections")
             return topology
@@ -1776,6 +1788,9 @@ class DashboardManager:
         try:
             url = self._api_url("/api/dataset")
             response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            if not response.ok:
+                self.logger.warning(f"Dataset API returned {response.status_code}")
+                return None
             dataset = response.json()
             self.logger.debug(f"Fetched dataset from {url}: {dataset.get('num_samples', 0)} samples")
             return dataset
@@ -1813,6 +1828,9 @@ class DashboardManager:
         try:
             url = self._api_url("/api/dataset")
             response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            if not response.ok:
+                self.logger.warning(f"Boundary dataset API returned {response.status_code}")
+                return None
             return response.json()
         except Exception as e:
             self.logger.warning(f"Failed to fetch dataset for boundary from API: {type(e).__name__}: {e}")
@@ -2052,14 +2070,9 @@ class DashboardManager:
                 if checkbox_to_bool(current) != stored:
                     has_changes = True
                     break
-            elif cmp_type == "int":
-                if current != stored:
-                    has_changes = True
-                    break
-            elif cmp_type == "str":
-                if current != stored:
-                    has_changes = True
-                    break
+            elif cmp_type in ("int", "str") and current != stored:
+                has_changes = True
+                break
 
         if has_changes:
             return False, "⚠️ Unsaved changes"
@@ -2162,7 +2175,7 @@ class DashboardManager:
                 cn_training_iter = state.get("cn_training_iterations", TrainingConstants.DEFAULT_CANDIDATE_TRAINING_ITERATIONS)
                 cn_training_conv_thresh = state.get("cn_training_convergence_threshold", TrainingConstants.DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD)
                 cn_multi_cand = state.get("cn_multi_candidate", TrainingConstants.DEFAULT_MULTI_CANDIDATE_ENABLED)
-                cn_cand_selection = state.get("cn_candidate_selection", None)
+                cn_cand_selection = state.get("cn_candidate_selection")
                 cn_top_cands = state.get("cn_top_candidates", TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT)
                 cn_random_cands = state.get("cn_random_candidates", TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT)
 
