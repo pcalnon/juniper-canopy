@@ -37,7 +37,6 @@
 #####################################################################################################################################################################################################
 import json
 import logging
-import queue
 import threading
 import time
 from datetime import datetime
@@ -414,9 +413,6 @@ class TrainingMonitor:
             "topology_change": [],
         }
 
-        # Thread-safe queue for metrics
-        self.metrics_queue = queue.Queue()
-
         # Lock for thread safety
         self.lock = threading.Lock()
 
@@ -526,9 +522,6 @@ class TrainingMonitor:
             if len(self.metrics_buffer) > self.max_buffer_size:
                 self.metrics_buffer.pop(0)
 
-        # Add to queue for async processing
-        self.metrics_queue.put(metrics)
-
         self.logger.debug(f"Epoch {epoch} ended: loss={loss:.4f}, accuracy={accuracy:.4f}")
         self._trigger_callbacks("epoch_end", metrics=metrics, epoch=epoch, loss=loss, accuracy=accuracy)
 
@@ -608,21 +601,6 @@ class TrainingMonitor:
         with self.lock:
             self.metrics_buffer.clear()
         self.logger.info("Metrics buffer cleared")
-
-    def poll_metrics_queue(self, timeout: float = 0.1) -> Optional[TrainingMetrics]:
-        """
-        Poll metrics queue for new metrics (non-blocking).
-
-        Args:
-            timeout: Timeout in seconds
-
-        Returns:
-            TrainingMetrics object or None if queue empty
-        """
-        try:
-            return self.metrics_queue.get(timeout=timeout)
-        except queue.Empty:
-            return None
 
     def apply_params(self, learning_rate: Optional[float] = None, max_hidden_units: Optional[int] = None) -> Dict[str, Any]:
         """

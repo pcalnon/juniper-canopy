@@ -4,7 +4,6 @@ Unit Tests for TrainingMonitor
 Tests callback registration, event triggers, metrics buffering, and thread safety.
 """
 
-import queue
 import threading
 from datetime import datetime
 from unittest.mock import MagicMock
@@ -58,7 +57,6 @@ class TestTrainingMonitor:
         assert monitor.current_epoch == 0
         assert monitor.current_hidden_units == 0
         assert monitor.current_phase == "output"
-        assert isinstance(monitor.metrics_queue, queue.Queue)
         assert isinstance(monitor.lock, type(threading.Lock()))
 
     def test_register_callback_valid_event(self):
@@ -179,17 +177,18 @@ class TestTrainingMonitor:
         assert monitor.metrics_buffer[0].accuracy == 0.8
         callback.assert_called_once()
 
-    def test_on_epoch_end_adds_to_queue(self):
-        """Test on_epoch_end adds metrics to queue."""
+    def test_on_epoch_end_adds_to_buffer(self):
+        """Test on_epoch_end adds metrics to buffer."""
         adapter = FakeDataAdapter()
         monitor = TrainingMonitor(adapter)
 
         monitor.on_epoch_end(epoch=1, loss=0.5, accuracy=0.8, learning_rate=0.01)
 
-        # Should be able to get from queue
-        metrics = monitor.metrics_queue.get(timeout=1.0)
-        assert metrics.epoch == 1
-        assert metrics.loss == 0.5
+        # Verify metrics stored in buffer
+        recent = monitor.get_recent_metrics(1)
+        assert len(recent) == 1
+        assert recent[0].epoch == 1
+        assert recent[0].loss == 0.5
 
     def test_on_epoch_end_respects_max_buffer_size(self):
         """Test on_epoch_end respects max_buffer_size limit."""
@@ -326,28 +325,6 @@ class TestTrainingMonitor:
         monitor.clear_metrics()
 
         assert len(monitor.metrics_buffer) == 0
-
-    def test_poll_metrics_queue_success(self):
-        """Test poll_metrics_queue returns metrics from queue."""
-        adapter = FakeDataAdapter()
-        monitor = TrainingMonitor(adapter)
-
-        # Add metric to trigger queue update
-        monitor.on_epoch_end(epoch=1, loss=0.5, accuracy=0.8, learning_rate=0.01)
-
-        metrics = monitor.poll_metrics_queue(timeout=1.0)
-
-        assert metrics is not None
-        assert metrics.epoch == 1
-
-    def test_poll_metrics_queue_empty_returns_none(self):
-        """Test poll_metrics_queue returns None when queue empty."""
-        adapter = FakeDataAdapter()
-        monitor = TrainingMonitor(adapter)
-
-        metrics = monitor.poll_metrics_queue(timeout=0.1)
-
-        assert metrics is None
 
     def test_thread_safety_concurrent_epoch_end(self):
         """Test on_epoch_end is thread-safe with concurrent access."""
