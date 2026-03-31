@@ -152,6 +152,7 @@ class DashboardConstants:
 
     DEFAULT_METRICS_HISTORY: Final[int] = 50
     DEFAULT_DATA_POINTS: Final[int] = 1000
+    DEFAULT_SLIDING_WINDOW_SIZE: Final[int] = 500
 
     # Display Constants
     DEFAULT_SCALE: Final[float] = 10.0

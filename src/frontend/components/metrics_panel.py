@@ -50,11 +50,10 @@ import plotly.graph_objects as go
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
+from canopy_constants import DashboardConstants
 from settings import get_settings
 
 from ..base_component import BaseComponent
-
-# from canopy_constants import DashboardConstants
 
 
 class MetricsPanel(BaseComponent):
@@ -375,7 +374,7 @@ class MetricsPanel(BaseComponent):
                                 dbc.Input(
                                     id=f"{self.component_id}-window-size",
                                     type="number",
-                                    value=100,
+                                    value=DashboardConstants.DEFAULT_SLIDING_WINDOW_SIZE,
                                     min=10,
                                     max=1000,
                                     step=10,
@@ -398,7 +397,7 @@ class MetricsPanel(BaseComponent):
                     },
                 ),
                 # Display mode state store
-                dcc.Store(id=f"{self.component_id}-display-mode-store", data={"mode": "window", "window_size": 100}),
+                dcc.Store(id=f"{self.component_id}-display-mode-store", data={"mode": "window", "window_size": DashboardConstants.DEFAULT_SLIDING_WINDOW_SIZE}),
                 # Current metrics display
                 html.Div(
                     [

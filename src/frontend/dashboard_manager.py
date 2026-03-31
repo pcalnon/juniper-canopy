@@ -59,6 +59,7 @@ from .components.hdf5_snapshots_panel import HDF5SnapshotsPanel
 from .components.metrics_panel import MetricsPanel
 from .components.network_visualizer import NetworkVisualizer
 from .components.redis_panel import RedisPanel
+from .tooltips import CONTROL_TOOLTIPS
 
 
 class DashboardManager:
@@ -874,6 +875,8 @@ class DashboardManager:
                 dcc.Interval(id="params-init-interval", interval=1000, max_intervals=1, n_intervals=0),
                 # WebSocket real-time metrics buffer (P5-RC-05)
                 dcc.Store(id="ws-metrics-buffer", data=[]),
+                # Tooltips for parameter controls
+                *[dbc.Tooltip(text, target=target_id, placement="top") for target_id, text in CONTROL_TOOLTIPS.items()],
                 # Hidden div to store WebSocket data
                 html.Div(id="websocket-data", style={"display": "none"}),
                 dcc.Store(id="training-control-action", data=None),
@@ -961,6 +964,37 @@ class DashboardManager:
             """,
             Output("dark-mode-store", "data", allow_duplicate=True),
             Input("dark-mode-store", "data"),
+            prevent_initial_call=True,
+        )
+
+        # ── Layout persistence: save active tab to localStorage ──
+        self.app.clientside_callback(
+            """
+            function(active_tab) {
+                if (active_tab) {
+                    localStorage.setItem('juniper_canopy_active_tab', active_tab);
+                }
+                return window.dash_clientside.no_update;
+            }
+            """,
+            Output("visualization-tabs", "active_tab", allow_duplicate=True),
+            Input("visualization-tabs", "active_tab"),
+            prevent_initial_call=True,
+        )
+
+        # ── Layout persistence: restore active tab from localStorage on load ──
+        self.app.clientside_callback(
+            """
+            function(n) {
+                var saved = localStorage.getItem('juniper_canopy_active_tab');
+                if (saved) {
+                    return saved;
+                }
+                return window.dash_clientside.no_update;
+            }
+            """,
+            Output("visualization-tabs", "active_tab", allow_duplicate=True),
+            Input("params-init-interval", "n_intervals"),
             prevent_initial_call=True,
         )
 
@@ -1098,7 +1132,7 @@ class DashboardManager:
 
         @self.app.callback(
             Output("decision-boundary-boundary-data", "data"),
-            Input("slow-update-interval", "n_intervals"),
+            Input("fast-update-interval", "n_intervals"),
             Input("visualization-tabs", "active_tab"),
             Input("decision-boundary-refresh-btn", "n_clicks"),
             Input("decision-boundary-resolution-slider", "value"),
@@ -1109,7 +1143,7 @@ class DashboardManager:
 
         @self.app.callback(
             Output("decision-boundary-dataset-data", "data"),
-            Input("slow-update-interval", "n_intervals"),
+            Input("fast-update-interval", "n_intervals"),
             Input("visualization-tabs", "active_tab"),
         )
         def update_boundary_dataset_store(n, active_tab):
