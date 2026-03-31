@@ -25,13 +25,13 @@
 
 **Cause**: The `SecurityHeadersMiddleware` (added in `c692a07`) injects a CSP header on **all** responses:
 
-```
+```text
 default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'none'
 ```
 
 The dashboard loads Bootstrap CSS via `dbc.themes.BOOTSTRAP`, which resolves to:
 
-```
+```text
 https://cdn.jsdelivr.net/npm/bootstrap@5.3.6/dist/css/bootstrap.min.css
 ```
 

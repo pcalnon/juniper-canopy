@@ -26,7 +26,8 @@
 
 When the Juniper Canopy startup script (`util/juniper_canopy.bash`) is run with `DEMO_MODE=false`, it launches the JuniperCascor `main.py` as a background process and then starts the Canopy FastAPI server. The dashboard correctly shows training state as **"Not Running"** and receives **no data** from the CasCor process.
 
-The investigation identified **1 primary architectural root cause** and **5 secondary root causes** that collectively prevent Canopy from communicating with the CasCor backend in non-demo mode. The core issue is a **fundamental architecture mismatch**: the startup script launches CasCor as a separate, isolated process, while Canopy's `CascorIntegration` module expects to control CasCor **within the same Python process** via in-process module imports and method wrapping. There is no inter-process communication (IPC) channel between the two.
+The investigation identified **1 primary architectural root cause** and **5 secondary root causes** that collectively prevent Canopy from communicating with the CasCor backend in non-demo mode. The core issue is a **fundamental architecture mismatch**: the startup script launches CasCor as a separate, isolated process, while Canopy's `CascorIntegration` module expects to control CasCor **within the same Python process** via in-process module imports and method wrapping.
+There is no inter-process communication (IPC) channel between the two.
 
 ---
 

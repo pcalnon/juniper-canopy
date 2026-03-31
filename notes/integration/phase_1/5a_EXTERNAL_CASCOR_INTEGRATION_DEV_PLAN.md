@@ -63,7 +63,7 @@ but every data path from cascor to the dashboard is broken:
 
 All failures trace to a single systemic issue:
 
-```
+```text
 RC-SYS: FakeCascorClient response format diverges from real cascor ResponseEnvelope
   │
   ├── RC-1 (CRITICAL): _ServiceTrainingMonitor.get_recent_metrics() → always []
@@ -887,7 +887,7 @@ Visual verification checklist:
 
 ## 9. Dependency Graph
 
-```
+```text
 Phase 1 (Monitor + Status + FIX-14)     Phase 2 (State Sync)
     │                                        │
     ├────────────────────────────────────────┤

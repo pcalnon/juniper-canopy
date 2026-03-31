@@ -151,7 +151,7 @@ Two architectural approaches were evaluated:
 
 ### Data Flow After Fix
 
-```
+```text
 juniper-cascor (REST API)
   │ ResponseEnvelope: {"status":"success","data":...,"meta":...}
   ▼
@@ -867,7 +867,7 @@ curl -s http://localhost:8050/api/dataset | python -m json.tool
 
 ## 7. Dependency Graph
 
-```
+```text
 Phase 0 (characterization tests — write failing tests)
     │
     ▼

@@ -43,7 +43,7 @@ discarded.
 
 ### Two Primary Data Paths
 
-```
+```text
 PATH A — HTTP Polling (Primary Display Mechanism)
 ══════════════════════════════════════════════════
 Dashboard (dcc.Interval, 1s)

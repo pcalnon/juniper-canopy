@@ -278,7 +278,7 @@ def extract_network_topology(self) -> Optional[Dict[str, Any]]:
 
 **Regression test confirms** (test_topology_boundary_data_contract.py:23-26):
 
-```
+```python
 # Network topology regression: DemoBackend returned "input_size"/"output_size"
 # but NetworkVisualizer expected "input_units"/"output_units"
 ```
@@ -924,7 +924,7 @@ The `@asynccontextmanager` lifespan runs sequentially. After fallback replaces `
 
 ## 6. Dependency Graph
 
-```
+```text
 P4-RC-16 (Systemic: No canonical contract)
   │
   ├── P4-RC-01 (CRITICAL: Metrics format mismatch)

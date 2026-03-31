@@ -1,3 +1,4 @@
+<!-- markdownlint-disable MD024 -->
 #####################################################################################################################################################################################################
 # Project:       Juniper
 # Application:   juniper-canopy
@@ -9,10 +10,10 @@
 # File Path:     Juniper/juniper-canopy/conf/
 #
 # Date:          2025-12-06
-# Last Modified: <YYYY-MM-dd for Current date>
+# Last Modified: `<YYYY-MM-dd for Current date>`
 #
 # License:       MIT License
-# Copyright:     Copyright (c) 2024-<YYYY for Current Year> Paul Calnon
+# Copyright:     Copyright (c) 2024-`<YYYY for Current Year>` Paul Calnon
 #
 # Description
 # This file lists python requirements that can be installed via pip
@@ -20,9 +21,9 @@
 #####################################################################################################################################################################################################
 # Notes
 #
-# created-by: pip <Pip Version>
+# created-by: pip `<Pip Version>`
 # platform: linux-64
-# python: <Python Version>
+# python: `<Python Version>`
 #
 # This file may be used to create the Juniper Project, juniper-canopy Application environment with pip using
 # create:  $ pip list --format=freeze >requirements_ci.txt

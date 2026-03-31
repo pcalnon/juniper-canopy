@@ -194,7 +194,7 @@ This means:
 
 ### Data Flow (After Fix)
 
-```
+```text
 slow-update-interval (5s) → callback → _update_network_info_details_handler()
 → GET /api/network/stats → DataAdapter.get_network_statistics(all_weights)
 → _create_network_info_table(stats) → UI update

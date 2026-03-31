@@ -101,7 +101,7 @@ bug exists in both paths but was never caught because **no test exercises
 
 #### Data Flow (Broken)
 
-```
+```text
 Dashboard polls GET /api/metrics/history?limit=100
   → main.py:649: return {"history": backend.get_metrics_history(count)}
     → service_backend.py:107: return self._adapter.training_monitor.get_recent_metrics(count)
@@ -403,7 +403,7 @@ one place.
 
 ### Path A: HTTP Polling (BROKEN — RC-1)
 
-```
+```text
 Dashboard (1s interval)
   → GET /api/metrics/history
     → main.py:649 → backend.get_metrics_history(count)
@@ -423,7 +423,7 @@ Dashboard (1s interval)
 
 ### Path B: WebSocket Relay (FUNCTIONAL but not wired to display)
 
-```
+```text
 cascor /ws/training broadcasts {"type":"metrics","data":{...}}
   → CascorTrainingStream reads message
     → _relay_loop() in cascor_service_adapter.py
@@ -440,7 +440,7 @@ is populated exclusively via HTTP polling (Path A).
 
 ### Path C: State Hydration on Connect (DEGRADED — RC-4)
 
-```
+```text
 ServiceBackend.initialize()
   → CascorStateSync(client).sync()
     → client.get_training_status()
@@ -456,7 +456,7 @@ ServiceBackend.initialize()
 
 ## Dependency Chain
 
-```
+```text
 RC-5 (FakeCascorClient divergence)
   ├── causes → RC-1 (metrics history empty)     ← BLOCKS ALL DISPLAY
   ├── causes → RC-2 (is_training always False)

@@ -152,7 +152,7 @@ Demo mode (`demo_mode.py:1162-1177`) produces the **nested** format the dashboar
 
 ### 4.2 Complete Data Flow Trace (Service Mode)
 
-```
+```text
 Step 1: CasCor TrainingMonitor.on_epoch_end()
         → {epoch, loss, accuracy, validation_loss, validation_accuracy, hidden_units, phase, timestamp}
 Step 2: Wrapped in ResponseEnvelope: {"status": "success", "data": [...], "meta": {...}}
@@ -809,7 +809,7 @@ curl -s http://localhost:8050/api/status | python3 -m json.tool
 
 ## 23. Root Cause Dependency Graph
 
-```
+```text
 RC-15 (SYSTEMIC: No canonical backend contract)
   │
   ├── RC-1 (CRITICAL: Metrics flat vs nested mismatch)

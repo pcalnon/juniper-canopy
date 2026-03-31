@@ -45,7 +45,7 @@ This Phase 4 analysis synthesizes findings from seven independent Phase 3 propos
 
 ### Root Cause Hierarchy
 
-```
+```text
 SYSTEMIC: No Canonical Backend Contract (ISS-17)
   |
   +-- CRITICAL: Metrics Format Mismatch (ISS-01)
@@ -431,7 +431,8 @@ When CasCor broadcasts `"status": "STARTED"` via WebSocket, the relay's `_normal
 
 #### Validation Nuance
 
-**Post-validation correction**: Current WebSocket state messages from CasCor's `TrainingLifecycleManager` send **title-case** status strings (e.g., `"Started"`, `"Paused"`, `"Completed"`) via `TrainingState.update_state()`, which are set with explicit title-case in `manager.py` (lines 218, 228, 231, 236, etc.). These title-case strings ARE in the `_normalize_status()` mapping. The **uppercase** enum `.name` values (`"STARTED"`, `"PAUSED"`) flow through the REST/sync path (where `.lower()` protects), not currently through the WebSocket relay path.
+**Post-validation correction**: Current WebSocket state messages from CasCor's `TrainingLifecycleManager` send **title-case** status strings (e.g., `"Started"`, `"Paused"`, `"Completed"`) via `TrainingState.update_state()`, which are set with explicit title-case in `manager.py` (lines 218, 228, 231, 236, etc.). These title-case strings ARE in the `_normalize_status()` mapping.
+The **uppercase** enum `.name` values (`"STARTED"`, `"PAUSED"`) flow through the REST/sync path (where `.lower()` protects), not currently through the WebSocket relay path.
 
 **However**, `FakeCascorClient` (at `fake_client.py:462-467`) DOES emit uppercase status values (`"STARTED"`, `"PAUSED"`, `"COMPLETED"`, `"IDLE"`), so tests using the fake client against the relay path would trigger this bug. The vulnerability is **latent/architectural** -- it represents a fragile coupling between the title-case convention in `manager.py` and the absence of case normalization in the relay callback.
 
@@ -1043,7 +1044,7 @@ FIX-C, FIX-D, and FIX-F can run in parallel. FIX-E depends on FIX-A. FIX-K depen
 
 ### Recommended Implementation Order
 
-```
+```text
 FIX-A (ISS-01, ISS-07) ──┐
                           ├── FIX-E (ISS-05, ISS-12, ISS-13) ── FIX-K (ISS-17, ISS-19)
 FIX-B (ISS-04) ──────────┘

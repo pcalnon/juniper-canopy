@@ -103,7 +103,7 @@ This mismatch exists because Phase 1 defined a "Canonical Internal Contract" (Se
 
 #### Complete Data Flow (Service Mode — Broken)
 
-```
+```text
 cascor TrainingMonitor.on_epoch_end()
   → {epoch, loss, accuracy, validation_loss, validation_accuracy, hidden_units, phase}
   → wrapped in ResponseEnvelope
@@ -869,7 +869,7 @@ curl -s http://localhost:8050/api/status | python3 -m json.tool
 
 ## Appendix B: Document Lineage
 
-```
+```text
 Phase 0 (Original Analysis):
   CANOPY_EXTERNAL_CASCOR_PLAN.md
   CANOPY_CASCOR_DASHBOARD_DATA_FLOW_ANALYSIS.md

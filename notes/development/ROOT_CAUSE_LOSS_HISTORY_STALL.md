@@ -85,21 +85,21 @@ After the 500-step retraining, the network has already extracted most of the ava
 
 Suppose before unit addition, the 10-epoch history is:
 
-```
+```text
 [0.18, 0.17, 0.165, 0.162, 0.160, 0.158, 0.157, 0.156, 0.155, 0.154]
 improvement = 0.18 - 0.154 = 0.026  (> 0.001, so no trigger)
 ```
 
 The 500-step retraining converges the output layer to approximately its new floor, say 0.082. Post-cascade epochs then look like:
 
-```
+```text
 [0.082, 0.081, 0.0808, 0.0805, 0.0803, 0.0801, 0.0800, 0.0799, 0.0798, 0.0797]
 improvement = 0.082 - 0.0797 = 0.0023  (barely > 0.001)
 ```
 
 By epoch 12-15 post-cascade:
 
-```
+```text
 improvement = 0.0801 - 0.0795 = 0.0006  (< 0.001, TRIGGERS another cascade)
 ```
 
@@ -193,7 +193,7 @@ This is the true network performance metric. The history does NOT record the inf
 
 **However**, there is still a disconnect: the `loss` appended to history is the loss **before** the cascade's 500-step retraining. The network has already substantially changed by the time the next epoch runs, but the recorded loss does not reflect the post-retraining state. This means the history shows:
 
-```
+```text
 [..., loss_before_cascade, loss_after_500_steps_of_next_architecture, ...]
 ```
 

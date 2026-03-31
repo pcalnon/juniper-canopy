@@ -1,3 +1,4 @@
+<!-- markdownlint-disable MD024 -->
 #####################################################################################################################################################################################################
 # Project:       Juniper
 # Application:   juniper-canopy
@@ -9,10 +10,10 @@
 # Config Path:   Juniper/juniper-canopy/conf/
 #
 # Date:          2025-12-06
-# Last Modified: <YYYY-MM-dd for current date>
+# Last Modified: `<YYYY-MM-dd for current date>`
 #
 # License:       MIT License
-# Copyright:     Copyright (c) 2024-<YYYY for current year> Paul Calnon
+# Copyright:     Copyright (c) 2024-`<YYYY for current year>` Paul Calnon
 #
 # Description
 # This config file contains an automatically generated list of environment dependencies managed by conda / mamba for the juniper-canopy application
@@ -21,7 +22,7 @@
 # Notes
 # created-by: conda <YYYY.MM.dd for current date>
 # platform: linux-64
-# python: <Python Version>
+# python: `<Python Version>`
 #
 #####################################################################################################################################################################################################
 # References

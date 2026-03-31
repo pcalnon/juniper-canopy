@@ -103,5 +103,9 @@ MD013:
 MD046:
   style: consistent
 
+# MD024/no-duplicate-heading: allow duplicate headings under different parents
+MD024:
+  siblings_only: true
+
 # MD036/no-emphasis-as-heading: allow emphasis used instead of a heading
 MD036: false

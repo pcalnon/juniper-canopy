@@ -159,7 +159,7 @@ For detailed implementation plans, see:
 
 | Dependent Item           | Depends On                      | Type       | Risk Level | Notes              |
 | ------------------------ | ------------------------------- | ---------- | ---------- | ------------------ |
-| [FEATURE_OR_MILESTONE]   | [OTHER_COMPONENT_OR_TEAM]       | [TECH|ORG] | [L/M/H]    | [DETAILS]          |
+| [FEATURE_OR_MILESTONE]   | [OTHER_COMPONENT_OR_TEAM]       | [TECH\|ORG] | [L/M/H]    | [DETAILS]          |
 
 ### Critical Dependencies
 

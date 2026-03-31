@@ -1650,78 +1650,6 @@ class TestPhaseDurationHandler:
 
 
 @pytest.mark.unit
-class TestTrainingProgressHandler:
-    """Tests for _update_training_progress_handler method."""
-
-    def test_training_progress_hidden_for_missing_state(self, metrics_panel):
-        """Missing state keeps progress bars hidden."""
-        style, grow_pct, grow_label, cand_pct, cand_label = metrics_panel._update_training_progress_handler(state=None)
-        assert style["display"] == "none"
-        assert grow_pct == 0
-        assert grow_label == ""
-        assert cand_pct == 0
-        assert cand_label == ""
-
-    def test_training_progress_hidden_for_stopped_status(self, metrics_panel):
-        """STOPPED/IDLE status should hide progress bars."""
-        style, grow_pct, grow_label, cand_pct, cand_label = metrics_panel._update_training_progress_handler(state={"status": "STOPPED"})
-        assert style["display"] == "none"
-        assert grow_pct == 0
-        assert grow_label == ""
-        assert cand_pct == 0
-        assert cand_label == ""
-
-    def test_training_progress_visible_with_grow_and_candidate(self, metrics_panel):
-        """Active state with grow/candidate values shows both bars and labels."""
-        state = {
-            "status": "RUNNING",
-            "grow_iteration": 2,
-            "grow_max": 8,
-            "candidate_epoch": 5,
-            "candidate_total_epochs": 20,
-        }
-        style, grow_pct, grow_label, cand_pct, cand_label = metrics_panel._update_training_progress_handler(state=state)
-
-        assert style["display"] == "block"
-        assert grow_pct == 25
-        assert grow_label == "2/8"
-        assert cand_pct == 25
-        assert cand_label == "5/20"
-
-    def test_training_progress_visible_with_only_grow_data(self, metrics_panel):
-        """Grow-only state keeps container visible and leaves candidate label empty."""
-        state = {
-            "status": "RUNNING",
-            "grow_iteration": 1,
-            "grow_max": 4,
-        }
-        style, grow_pct, grow_label, cand_pct, cand_label = metrics_panel._update_training_progress_handler(state=state)
-
-        assert style["display"] == "block"
-        assert grow_pct == 25
-        assert grow_label == "1/4"
-        assert cand_pct == 0
-        assert cand_label == ""
-
-    def test_training_progress_hides_when_max_values_missing(self, metrics_panel):
-        """Zero/absent max values should not attempt progress computation."""
-        state = {
-            "status": "RUNNING",
-            "grow_iteration": 3,
-            "grow_max": 0,
-            "candidate_epoch": 7,
-            "candidate_total_epochs": 0,
-        }
-        style, grow_pct, grow_label, cand_pct, cand_label = metrics_panel._update_training_progress_handler(state=state)
-
-        assert style["display"] == "none"
-        assert grow_pct == 0
-        assert grow_label == ""
-        assert cand_pct == 0
-        assert cand_label == ""
-
-
-@pytest.mark.unit
 class TestHiddenUnitsRatioFormat:
     """Tests for hidden units 'N / max' format in _update_metrics_display_handler."""
 
@@ -1841,3 +1769,20 @@ class TestTrainingProgressHandler:
 
         assert grow_val == 100
         assert grow_lbl == "10/10"
+
+    def test_training_progress_hides_when_max_values_zero(self, metrics_panel):
+        """Zero max values should not attempt progress computation."""
+        state = {
+            "status": "RUNNING",
+            "grow_iteration": 3,
+            "grow_max": 0,
+            "candidate_epoch": 7,
+            "candidate_total_epochs": 0,
+        }
+        style, grow_val, grow_lbl, cand_val, cand_lbl = metrics_panel._update_training_progress_handler(state=state)
+
+        assert style["display"] == "none"
+        assert grow_val == 0
+        assert grow_lbl == ""
+        assert cand_val == 0
+        assert cand_lbl == ""

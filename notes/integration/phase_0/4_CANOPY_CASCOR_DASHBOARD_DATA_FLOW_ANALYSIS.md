@@ -24,7 +24,7 @@ Three critical mismatches were identified:
 
 The full pipeline was traced from cascor → canopy backend → REST API → dashboard frontend:
 
-```
+```text
 juniper-cascor (port 8201)
   └── /v1/training/status, /v1/metrics/*, /v1/network/*, /v1/dataset
         │
@@ -305,7 +305,7 @@ The dashboard uses **two parallel update mechanisms**:
 
 ### 1. dcc.Interval Polling (Primary — drives all data display)
 
-```
+```text
 fast-update-interval (DashboardConstants.FAST_UPDATE_INTERVAL_MS)
   ├── update_unified_status_bar  → GET /api/status
   └── update_metrics_store       → GET /api/metrics/history
@@ -321,7 +321,7 @@ This is the mechanism that drives all visible dashboard content. **All data disp
 
 ### 2. WebSocket Push (Secondary — real-time overlay)
 
-```
+```text
 websocket_client.js → CascorWebSocket → ws://host:8050/ws/training
   └── Buffers messages in messageBuffer[]
   └── Dispatches to registered type handlers

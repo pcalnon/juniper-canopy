@@ -30,7 +30,7 @@ Demo training stalls after the first hidden unit because the candidate training 
 
 CasCor trains **50 candidates** in parallel and selects the best. The demo trains **8 sequentially**. The candidate pool serves as a random-restart mechanism: each candidate starts from a different random initialization and may converge to a different local optimum on the correlation surface. The probability that at least one candidate finds a high-correlation feature is:
 
-```
+```text
 P(at_least_one_good) = 1 - (1 - p)^N
 ```
 
@@ -76,7 +76,7 @@ At 200 steps, the candidate may still be on a rising trajectory when training te
 
 **Mathematical estimate of convergence speed**: For Adam with lr=0.01 on a Pearson objective through a `tanh` nonlinearity, the effective gradient magnitude scales as:
 
-```
+```text
 ||grad_corr|| ~ (1/N) * ||d_tanh/dz|| * ||x|| * ||e_centered|| / (std_v * std_e)
 ```
 
@@ -102,7 +102,7 @@ The Pearson correlation coefficient is theoretically **scale-invariant**: multip
 
 The full gradient chain is:
 
-```
+```text
 d(corr)/d(weights) = d(corr)/d(v) * d(v)/d(z) * d(z)/d(weights)
 ```
 
@@ -113,7 +113,7 @@ where:
 
 Expanding `d(corr)/d(v)` for the Pearson formula:
 
-```
+```text
 d(corr)/d(v_i) = (1/denom) * [e_centered_i - corr * v_centered_i * (sum(e_centered^2) / sum(v_centered^2))]
                   * sign(corr)
 ```
@@ -152,11 +152,12 @@ correlation = np.abs(correlation_raw)
 
 **Key difference**: The CasCor reference computes the denominator as `sqrt(sum_out^2 * sum_err^2 + eps)`, applying epsilon *inside* the product before the square root. The demo computes it as `sqrt(sum_out^2 + eps) * sqrt(sum_err^2 + eps)`, applying epsilon to each factor separately. These are mathematically different:
 
-```
+```text
 sqrt(A * B + eps)  !=  sqrt(A + eps) * sqrt(B + eps)
 ```
 
-When `A` and `B` are both large (first hidden unit, large residual), the difference is negligible. When `B` (`sum_err^2`) is small (later hidden units, small residual), the demo's formulation `sqrt(B + eps)` floors at `sqrt(eps) = 1e-4`, while the CasCor reference's `sqrt(A * B + eps)` can produce a larger denominator (since `A * B` may still be above `eps`). This means the demo's correlation values for later units are **slightly inflated** compared to the reference, and more critically, the **gradient through the separate-sqrt formulation differs**.
+When `A` and `B` are both large (first hidden unit, large residual), the difference is negligible. When `B` (`sum_err^2`) is small (later hidden units, small residual), the demo's formulation `sqrt(B + eps)` floors at `sqrt(eps) = 1e-4`, while the CasCor reference's `sqrt(A * B + eps)` can produce a larger denominator (since `A * B` may still be above `eps`).
+This means the demo's correlation values for later units are **slightly inflated** compared to the reference, and more critically, the **gradient through the separate-sqrt formulation differs**.
 
 Additionally, the CasCor reference detaches the correlation to a Python float (`numerator_val / denominator_val` using `.item()`) and uses `np.abs()` -- the correlation value itself does *not* carry autograd history. The gradient computation happens in a separate `_update_weights_and_bias` method that recomputes the correlation from scratch with `requires_grad=True` parameters (lines 1123-1184). This **recomputation pattern** ensures clean gradient graphs each epoch.
 
@@ -179,7 +180,7 @@ Gradient norms for candidate weight updates will be **5-10x smaller** for the se
 
 Both implementations use `randn * 0.1`. For the first hidden unit, `input_dim = 2`, so the pre-activation is:
 
-```
+```text
 z = x @ w + b,  where w ~ N(0, 0.01),  x in [-1, 1]
 ```
 

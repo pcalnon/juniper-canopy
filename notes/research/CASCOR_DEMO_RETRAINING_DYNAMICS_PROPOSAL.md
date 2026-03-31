@@ -71,7 +71,8 @@ The new column must learn a weight that correctly scales the new hidden unit's c
 
 - **Convergence timeline**: For a 200-sample full-batch problem with MSE loss on a linear output layer (convex), Adam typically converges to within 1% of optimal in ~200-400 steps (empirical observation for similar dimensionality). At 500 steps, the output layer is likely near-converged for the current feature set.
 
-- **However**: 500 steps may be *just barely sufficient* rather than *fully converged*. The final 500 steps of a 1000-step run produce residual improvements of ~0.0001-0.001 per step. These small improvements matter because they set the baseline for convergence detection. If retrain stops at 500 steps while the loss is still dropping at 0.001/step, the next 10 outer epochs of single-step training will show continued improvement and delay the false convergence trigger. If retrain stops only when the loss is truly flat, the post-retrain window immediately looks converged.
+- **However**: 500 steps may be *just barely sufficient* rather than *fully converged*. The final 500 steps of a 1000-step run produce residual improvements of ~0.0001-0.001 per step. These small improvements matter because they set the baseline for convergence detection.
+If retrain stops at 500 steps while the loss is still dropping at 0.001/step, the next 10 outer epochs of single-step training will show continued improvement and delay the false convergence trigger. If retrain stops only when the loss is truly flat, the post-retrain window immediately looks converged.
 
 **Verdict**: 500 steps is likely sufficient for the output layer to learn to *use* the new hidden unit feature in a basic sense (the new weight reaches approximately the right magnitude). The problem is not that 500 steps is too few for initial learning, but that it is close enough to convergence that the subsequent 1-step-per-epoch training has almost nothing left to improve.
 
@@ -135,7 +136,8 @@ The critical issue: `improvement = recent[0] - recent[-1]` compares the **first 
 
 **This means the network gets only 10-11 outer epochs between additions**, not the 30 that the fixed schedule would provide. The convergence detector short-circuits the fixed schedule fallback.
 
-**Important nuance**: The convergence detector checks `improvement = recent[0] - recent[-1]`. This is the **total improvement over the window**, not the per-epoch rate. With loss near 0.24 (post-retrain for a spiral problem), an improvement of 0.001 over 10 epochs corresponds to a 0.4% relative improvement. This is actually a reasonable convergence criterion for the *current architecture* -- the problem is that the architecture just changed (new hidden unit added) and the output layer hasn't had enough inter-cascade steps to exploit the change.
+**Important nuance**: The convergence detector checks `improvement = recent[0] - recent[-1]`. This is the **total improvement over the window**, not the per-epoch rate. With loss near 0.24 (post-retrain for a spiral problem), an improvement of 0.001 over 10 epochs corresponds to a 0.4% relative improvement.
+This is actually a reasonable convergence criterion for the *current architecture* -- the problem is that the architecture just changed (new hidden unit added) and the output layer hasn't had enough inter-cascade steps to exploit the change.
 
 ### 5. Cumulative Effect: The Rapid-Addition Cascade
 
@@ -165,7 +167,7 @@ The feedback loop creates an accelerating cycle of diminishing returns:
 
 **Predicted loss trajectory**:
 
-```
+```text
 Epoch:  0    10   20   30   31   41   42   52   53   ...
 Loss:   0.50 0.35 0.27 0.24 0.22 0.219 0.217 0.216 0.215 ...
                        ^Unit1     ^Unit2      ^Unit3
@@ -354,4 +356,5 @@ Using **relative improvement** (rather than absolute) prevents the threshold fro
 | Convergence detection | 10-epoch window, abs threshold 0.001 | Correlation threshold on candidates | 25-epoch window, relative threshold 0.005 |
 | Cascade trigger | Convergence OR fixed schedule (30) | Correlation threshold met | Convergence OR fixed schedule (30) |
 
-**Key architectural difference**: In production CasCor, the outer loop is `grow_network()` which alternates between candidate training and output retraining. There is no "inter-cascade output training" -- the output is retrained for the full `output_epochs` count after each unit, and the next iteration immediately begins candidate training. The demo's outer loop adds a third phase (inter-cascade single-step training) that does not exist in the algorithm specification. The proposed fix does not eliminate this third phase but makes it productive enough to avoid false convergence triggers.
+**Key architectural difference**: In production CasCor, the outer loop is `grow_network()` which alternates between candidate training and output retraining. There is no "inter-cascade output training" -- the output is retrained for the full `output_epochs` count after each unit, and the next iteration immediately begins candidate training.
+The demo's outer loop adds a third phase (inter-cascade single-step training) that does not exist in the algorithm specification. The proposed fix does not eliminate this third phase but makes it productive enough to avoid false convergence triggers.

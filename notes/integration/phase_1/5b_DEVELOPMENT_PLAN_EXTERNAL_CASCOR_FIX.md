@@ -70,7 +70,7 @@ All normalization is done in `CascorServiceAdapter`, which becomes the
 single source of truth for translating cascor's native API responses into
 canopy's internal format. This avoids breaking changes to the client library.
 
-```
+```text
 juniper-cascor (REST API)
   │ ResponseEnvelope: {"status":"success","data":...,"meta":...}
   ▼
@@ -745,7 +745,7 @@ curl -s http://localhost:8050/api/dataset | python -m json.tool
 
 ## Dependency Graph
 
-```
+```text
 Phase 0 (characterization tests)
     └──→ Phase 1 (adapter normalization — RC-1, RC-2, RC-3, ISS-3)
               ├──→ Phase 2 (status normalization — ISS-1)

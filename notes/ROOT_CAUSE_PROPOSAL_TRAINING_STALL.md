@@ -293,7 +293,7 @@ However, there is a subtle issue: `self.current_loss` is read by `get_current_st
 
 The five mismatches interact as follows to produce the observed stall:
 
-```
+```text
 Initial state: Output layer training at 1 step/epoch (Mismatch 1)
                           |
                           v

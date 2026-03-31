@@ -32,7 +32,7 @@ The juniper-data service is not running on `localhost:8100`. juniper-cascor has 
 
 ### Call Chain (Failure Path)
 
-```
+```text
 try (bash) → init.conf → juniper_cascor.conf (sets JUNIPER_DATA_URL)
   → python main.py
     → main() [line 142]
