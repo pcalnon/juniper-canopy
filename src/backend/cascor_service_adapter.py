@@ -238,6 +238,13 @@ class CascorServiceAdapter:
                                 from backend.state_sync import CascorStateSync
 
                                 status = CascorStateSync._normalize_status(data.get("status", data.get("state", "")))
+                                phase_detail = data.get("phase_detail", "")
+                                if phase_detail in ("training_candidates", "candidate_training"):
+                                    candidate_pool_status = "Training"
+                                elif phase_detail == "adding_candidate":
+                                    candidate_pool_status = "Selecting Best"
+                                else:
+                                    candidate_pool_status = "Inactive"
                                 self._state_update_callback(
                                     status=status,
                                     phase=data.get("phase", ""),
@@ -246,13 +253,17 @@ class CascorServiceAdapter:
                                     learning_rate=data.get("learning_rate"),
                                     max_hidden_units=data.get("max_hidden_units"),
                                     max_epochs=data.get("max_epochs"),
-                                    phase_detail=data.get("phase_detail"),
+                                    phase_detail=phase_detail,
                                     grow_iteration=data.get("grow_iteration"),
                                     grow_max=data.get("grow_max"),
                                     best_correlation=data.get("best_correlation"),
                                     candidates_trained=data.get("candidates_trained"),
                                     candidates_total=data.get("candidates_total"),
                                     phase_started_at=data.get("phase_started_at"),
+                                    candidate_epoch=data.get("candidate_epoch"),
+                                    candidate_total_epochs=data.get("candidate_total_epochs"),
+                                    candidate_pool_status=candidate_pool_status,
+                                    candidate_pool_size=data.get("candidates_total"),
                                 )
                             except Exception as se:  # nosec B110
                                 logger.debug(f"State update callback error: {se}")
@@ -265,6 +276,7 @@ class CascorServiceAdapter:
                                     candidate_epoch=data.get("epoch"),
                                     candidate_total_epochs=data.get("total_epochs"),
                                     best_correlation=data.get("correlation"),
+                                    candidate_pool_status="Training",
                                 )
                             except Exception as cpe:  # nosec B110
                                 logger.debug(f"Candidate progress callback error: {cpe}")
@@ -772,6 +784,40 @@ class CascorServiceAdapter:
     def get_prediction_function(self) -> Optional[Callable]:
         """Not available over REST — returns None."""
         return None
+
+    # ------------------------------------------------------------------
+    # Snapshot REST delegation
+    # ------------------------------------------------------------------
+
+    def save_snapshot(self, path: str, description: str = "") -> None:
+        """Save current network state via CasCor /v1/snapshots endpoint.
+
+        Args:
+            path: Local path hint (ignored — CasCor manages storage server-side).
+            description: Optional description for the snapshot.
+        """
+        try:
+            self._client.save_snapshot(description=description)
+            logger.info("Snapshot saved via CasCor service (description=%r)", description)
+        except JuniperCascorClientError as e:
+            logger.error("Failed to save snapshot: %s", e)
+            raise
+
+    def load_snapshot(self, path: str) -> None:
+        """Restore network state via CasCor /v1/snapshots/{id}/restore endpoint.
+
+        Args:
+            path: Snapshot path or ID. The file stem is used as the snapshot ID.
+        """
+        from pathlib import Path as _Path
+
+        snapshot_id = _Path(path).stem
+        try:
+            self._client.load_snapshot(snapshot_id)
+            logger.info("Snapshot restored via CasCor service (id=%s)", snapshot_id)
+        except JuniperCascorClientError as e:
+            logger.error("Failed to load snapshot %s: %s", snapshot_id, e)
+            raise
 
     # ------------------------------------------------------------------
     # Monitoring no-ops (hooks are in-process CascorIntegration only)

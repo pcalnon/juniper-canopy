@@ -39,7 +39,7 @@
 #####################################################################################################################################################################################################
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 import numpy as np
 import torch
@@ -111,16 +111,16 @@ class DemoBackend:
             for k in ("learning_rate", "max_hidden_units", "max_epochs", "status", "phase"):
                 if k in ts and k not in state:
                     state[k] = ts[k]
-        return state
+        return cast(StatusResult, state)
 
     def get_metrics(self) -> MetricsResult:
-        return self._demo.get_current_state()
+        return cast(MetricsResult, self._demo.get_current_state())
 
     def get_metrics_history(self, count: int = 100) -> List[MetricsResult]:
         history = self._demo.get_metrics_history()
         if count and len(history) > count:
-            return history[-count:]
-        return history
+            return cast(List[MetricsResult], history[-count:])
+        return cast(List[MetricsResult], history)
 
     # --- Network and data ---
 
@@ -197,7 +197,7 @@ class DemoBackend:
             result["inputs"] = inputs.tolist() if isinstance(inputs, np.ndarray) else inputs
             if targets is not None:
                 result["targets"] = targets.tolist() if isinstance(targets, np.ndarray) else targets
-        return result
+        return cast(DatasetResult, result)
 
     def get_decision_boundary(self, resolution: int = 50) -> Optional[Dict[str, Any]]:
         network = self._demo.get_network()

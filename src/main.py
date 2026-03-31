@@ -200,6 +200,7 @@ async def lifespan(app: FastAPI):
                 max_epochs=synced.max_epochs,
                 learning_rate=synced.params.get("learning_rate", training_state.get_state().get("learning_rate")),
                 max_hidden_units=synced.params.get("max_hidden_units", training_state.get_state().get("max_hidden_units")),
+                **synced.progress_fields,
             )
             system_logger.info(f"Global training_state synced with cascor: status={synced.status}, epoch={synced.current_epoch}, params={len(synced.params)} keys")
         # Register callback so relay-driven state updates keep training_state current

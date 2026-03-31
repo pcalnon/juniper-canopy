@@ -26,6 +26,7 @@ class SyncedState:
     params: Dict[str, Any] = field(default_factory=dict)
     topology: Optional[Dict[str, Any]] = None
     metrics_history: List[Dict[str, Any]] = field(default_factory=list)
+    progress_fields: Dict[str, Any] = field(default_factory=dict)
 
 
 class CascorStateSync:
@@ -84,6 +85,19 @@ class CascorStateSync:
                     ts.get("epochs_max") if isinstance(ts, dict) else None,
                     default=0,
                 )
+                # Extract progress fields for mid-training reconnect
+                if isinstance(ts, dict):
+                    state.progress_fields = {
+                        "grow_iteration": ts.get("grow_iteration", 0),
+                        "grow_max": ts.get("grow_max", 0),
+                        "candidates_trained": ts.get("candidates_trained", 0),
+                        "candidates_total": ts.get("candidates_total", 0),
+                        "phase_detail": ts.get("phase_detail", ""),
+                        "phase_started_at": ts.get("phase_started_at", ""),
+                        "candidate_epoch": ts.get("candidate_epoch", 0),
+                        "candidate_total_epochs": ts.get("candidate_total_epochs", 0),
+                        "best_correlation": ts.get("best_correlation", 0.0),
+                    }
             else:
                 state.is_training = status_response.get("is_training", False)
                 state.status = "Stopped"

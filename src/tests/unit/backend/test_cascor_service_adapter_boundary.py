@@ -380,6 +380,7 @@ class TestRelayStateHandling:
         assert kwargs["candidates_trained"] == 5
         assert kwargs["candidates_total"] == 10
         assert kwargs["phase_started_at"] == "2026-03-29T13:00:00Z"
+        assert kwargs["candidate_pool_status"] == "Training"
         fake_websocket_manager.broadcast.assert_awaited()
 
         await adapter.stop_metrics_relay()
@@ -420,6 +421,7 @@ class TestRelayCandidateProgressHandling:
             candidate_epoch=150,
             candidate_total_epochs=500,
             best_correlation=0.9021,
+            candidate_pool_status="Training",
         )
         fake_websocket_manager.broadcast.assert_awaited()
 

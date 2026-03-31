@@ -40,7 +40,7 @@
 #####################################################################################################################################################################################################
 
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, cast
 
 from backend.cascor_service_adapter import CascorServiceAdapter, _first_defined
 from backend.protocol import DatasetResult, MetricsResult, StatusResult, TopologyResult
@@ -101,43 +101,46 @@ class ServiceBackend:
     def get_status(self) -> StatusResult:
         raw = self._adapter.get_training_status()
         if not isinstance(raw, dict) or not CascorServiceAdapter._is_cascor_nested(raw):
-            return raw
+            return cast(StatusResult, raw)
         sm = raw.get("state_machine", {}) if isinstance(raw.get("state_machine"), dict) else {}
         monitor = raw.get("monitor", {}) if isinstance(raw.get("monitor"), dict) else {}
         ts = raw.get("training_state", {}) if isinstance(raw.get("training_state"), dict) else {}
         fsm_status = sm.get("status", sm.get("current_state", "Stopped"))
         status_upper = fsm_status.upper() if isinstance(fsm_status, str) else "STOPPED"
         phase_raw = sm.get("phase") or ts.get("phase", "idle")
-        return {
-            "is_training": raw.get("training_active", False),
-            "is_running": status_upper in ("STARTED", "RUNNING", "TRAINING"),
-            "is_paused": status_upper == "PAUSED",
-            "completed": status_upper in ("COMPLETED", "CONVERGED"),
-            "failed": status_upper == "FAILED",
-            "fsm_status": fsm_status,
-            "phase": phase_raw.lower() if isinstance(phase_raw, str) else "idle",
-            "current_epoch": _first_defined(
-                monitor.get("current_epoch"),
-                monitor.get("epoch"),
-                ts.get("current_epoch"),
-                default=0,
-            ),
-            "hidden_units": _first_defined(
-                monitor.get("current_hidden_units"),
-                monitor.get("hidden_units"),
-                default=0,
-            ),
-            "network_connected": raw.get("network_loaded", False),
-            "monitoring_active": status_upper in ("STARTED", "RUNNING", "TRAINING"),
-            "input_size": ts.get("input_size", 0),
-            "output_size": ts.get("output_size", 0),
-            "learning_rate": ts.get("learning_rate", 0.0),
-            "max_hidden_units": ts.get("max_hidden_units", 0),
-            "max_epochs": ts.get("max_epochs", 0),
-        }
+        return cast(
+            StatusResult,
+            {
+                "is_training": raw.get("training_active", False),
+                "is_running": status_upper in ("STARTED", "RUNNING", "TRAINING"),
+                "is_paused": status_upper == "PAUSED",
+                "completed": status_upper in ("COMPLETED", "CONVERGED"),
+                "failed": status_upper == "FAILED",
+                "fsm_status": fsm_status,
+                "phase": phase_raw.lower() if isinstance(phase_raw, str) else "idle",
+                "current_epoch": _first_defined(
+                    monitor.get("current_epoch"),
+                    monitor.get("epoch"),
+                    ts.get("current_epoch"),
+                    default=0,
+                ),
+                "hidden_units": _first_defined(
+                    monitor.get("current_hidden_units"),
+                    monitor.get("hidden_units"),
+                    default=0,
+                ),
+                "network_connected": raw.get("network_loaded", False),
+                "monitoring_active": status_upper in ("STARTED", "RUNNING", "TRAINING"),
+                "input_size": ts.get("input_size", 0),
+                "output_size": ts.get("output_size", 0),
+                "learning_rate": ts.get("learning_rate", 0.0),
+                "max_hidden_units": ts.get("max_hidden_units", 0),
+                "max_epochs": ts.get("max_epochs", 0),
+            },
+        )
 
     def get_metrics(self) -> MetricsResult:
-        return self._adapter.training_monitor.get_current_metrics()
+        return cast(MetricsResult, self._adapter.training_monitor.get_current_metrics())
 
     def get_metrics_history(self, count: int = 100) -> List[MetricsResult]:
         return self._adapter.training_monitor.get_recent_metrics(count)
@@ -148,7 +151,7 @@ class ServiceBackend:
         return self._adapter.network is not None
 
     def get_network_topology(self) -> Optional[TopologyResult]:
-        return self._adapter.extract_network_topology()
+        return cast(Optional[TopologyResult], self._adapter.extract_network_topology())
 
     def get_network_stats(self) -> Dict[str, Any]:
         return self._adapter.get_network_data()
@@ -176,8 +179,8 @@ class ServiceBackend:
                 if data:
                     result["inputs"] = data["inputs"]
                     result["targets"] = data["targets"]
-            return result
-        return raw
+            return cast(DatasetResult, result)
+        return cast(DatasetResult, raw)
 
     def get_decision_boundary(self, resolution: int = 50) -> Optional[Dict[str, Any]]:
         return self._adapter.get_decision_boundary(resolution)
