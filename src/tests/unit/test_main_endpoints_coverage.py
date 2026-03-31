@@ -367,3 +367,181 @@ class TestReadinessProbe:
         cascor_dep = data["dependencies"]["juniper_cascor"]
         assert cascor_dep["status"] == "not_configured"
         assert "demo mode" in cascor_dep["message"].lower()
+
+
+class TestMetricsLayouts:
+    """Tests for metrics layouts CRUD endpoints (lines 1365-1542)."""
+
+    @pytest.fixture(autouse=True)
+    def _layouts_tmp(self, tmp_path):
+        """Redirect _layouts_dir to a temp directory for isolation."""
+        import main
+
+        self._orig = main._layouts_dir
+        main._layouts_dir = str(tmp_path / "layouts")
+        yield
+        main._layouts_dir = self._orig
+
+    @pytest.mark.unit
+    def test_list_empty(self, app_client):
+        """Empty layouts dir returns empty list."""
+        response = app_client.get("/api/v1/metrics/layouts")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["layouts"] == []
+        assert data["total"] == 0
+
+    @pytest.mark.unit
+    def test_list_populated(self, app_client):
+        """Saved layouts appear in list."""
+        app_client.post("/api/v1/metrics/layouts?name=alpha&description=First")
+        app_client.post("/api/v1/metrics/layouts?name=beta&description=Second")
+
+        response = app_client.get("/api/v1/metrics/layouts")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 2
+        names = {layout["name"] for layout in data["layouts"]}
+        assert names == {"alpha", "beta"}
+
+    @pytest.mark.unit
+    def test_get_found(self, app_client):
+        """Get an existing layout by name."""
+        app_client.post("/api/v1/metrics/layouts?name=mylay")
+        response = app_client.get("/api/v1/metrics/layouts/mylay")
+        assert response.status_code == 200
+        assert response.json()["name"] == "mylay"
+
+    @pytest.mark.unit
+    def test_get_not_found(self, app_client):
+        """Get a non-existent layout returns 404."""
+        response = app_client.get("/api/v1/metrics/layouts/nonexistent")
+        assert response.status_code == 404
+
+    @pytest.mark.unit
+    def test_save_valid(self, app_client):
+        """Save a layout with a valid name returns 201."""
+        response = app_client.post("/api/v1/metrics/layouts?name=new_layout&description=desc")
+        assert response.status_code == 201
+        data = response.json()
+        assert data["name"] == "new_layout"
+        assert data["message"] == "Layout saved successfully"
+
+    @pytest.mark.unit
+    def test_save_empty_name(self, app_client):
+        """Save with empty name returns 400."""
+        response = app_client.post("/api/v1/metrics/layouts?name=%20")
+        assert response.status_code == 400
+
+    @pytest.mark.unit
+    def test_delete_found(self, app_client):
+        """Delete an existing layout returns success."""
+        app_client.post("/api/v1/metrics/layouts?name=to_delete")
+        response = app_client.delete("/api/v1/metrics/layouts/to_delete")
+        assert response.status_code == 200
+        assert response.json()["message"] == "Layout deleted successfully"
+
+        # Verify it's gone
+        response = app_client.get("/api/v1/metrics/layouts/to_delete")
+        assert response.status_code == 404
+
+    @pytest.mark.unit
+    def test_delete_not_found(self, app_client):
+        """Delete a non-existent layout returns 404."""
+        response = app_client.delete("/api/v1/metrics/layouts/no_such")
+        assert response.status_code == 404
+
+
+class TestRedisAndCassandraEndpoints:
+    """Tests for Redis and Cassandra status/metrics endpoints (lines 1550-1626)."""
+
+    @pytest.mark.unit
+    def test_redis_status(self, app_client):
+        """GET /api/v1/redis/status returns 200 with status field."""
+        response = app_client.get("/api/v1/redis/status")
+        assert response.status_code == 200
+        assert "status" in response.json()
+
+    @pytest.mark.unit
+    def test_redis_metrics(self, app_client):
+        """GET /api/v1/redis/metrics returns 200 with status field."""
+        response = app_client.get("/api/v1/redis/metrics")
+        assert response.status_code == 200
+        assert "status" in response.json()
+
+    @pytest.mark.unit
+    def test_cassandra_status(self, app_client):
+        """GET /api/v1/cassandra/status returns 200 with status field."""
+        response = app_client.get("/api/v1/cassandra/status")
+        assert response.status_code == 200
+        assert "status" in response.json()
+
+    @pytest.mark.unit
+    def test_cassandra_metrics(self, app_client):
+        """GET /api/v1/cassandra/metrics returns 200 with status field."""
+        response = app_client.get("/api/v1/cassandra/metrics")
+        assert response.status_code == 200
+        assert "status" in response.json()
+
+
+class TestRemoteWorkerEndpoints:
+    """Tests for remote worker management endpoints in demo mode (lines 1828-1912)."""
+
+    @pytest.mark.unit
+    def test_remote_status(self, app_client):
+        """GET /api/remote/status returns 200 with available=False in demo mode."""
+        response = app_client.get("/api/remote/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["available"] is False
+        assert "demo" in data.get("error", "").lower()
+
+    @pytest.mark.unit
+    def test_remote_connect(self, app_client):
+        """POST /api/remote/connect returns 503 in demo mode."""
+        response = app_client.post("/api/remote/connect?host=localhost&port=5000&authkey=secret")
+        assert response.status_code == 503
+        assert "demo" in response.json()["error"].lower()
+
+    @pytest.mark.unit
+    def test_remote_start_workers(self, app_client):
+        """POST /api/remote/start_workers returns 503 in demo mode."""
+        response = app_client.post("/api/remote/start_workers?num_workers=2")
+        assert response.status_code == 503
+        assert "demo" in response.json()["error"].lower()
+
+    @pytest.mark.unit
+    def test_remote_stop_workers(self, app_client):
+        """POST /api/remote/stop_workers returns 503 in demo mode."""
+        response = app_client.post("/api/remote/stop_workers?timeout=5")
+        assert response.status_code == 503
+        assert "demo" in response.json()["error"].lower()
+
+    @pytest.mark.unit
+    def test_remote_disconnect(self, app_client):
+        """POST /api/remote/disconnect returns 503 in demo mode."""
+        response = app_client.post("/api/remote/disconnect")
+        assert response.status_code == 503
+        assert "demo" in response.json()["error"].lower()
+
+
+class TestSnapshotListEndpoint:
+    """Tests for GET /api/v1/snapshots endpoint (lines 836-869)."""
+
+    @pytest.mark.unit
+    def test_snapshots_list_demo_mode(self, app_client):
+        """GET /api/v1/snapshots in demo mode returns mock snapshots."""
+        response = app_client.get("/api/v1/snapshots")
+        assert response.status_code == 200
+        data = response.json()
+        assert "snapshots" in data
+        assert len(data["snapshots"]) > 0
+        assert "demo" in data.get("message", "").lower()
+
+    @pytest.mark.unit
+    def test_snapshots_list_has_ids(self, app_client):
+        """Each snapshot in the list has an id field."""
+        response = app_client.get("/api/v1/snapshots")
+        assert response.status_code == 200
+        for snap in response.json()["snapshots"]:
+            assert "id" in snap
