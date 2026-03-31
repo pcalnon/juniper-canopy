@@ -1575,6 +1575,32 @@ class DemoMode:
         """
         return self.network
 
+    def regenerate_dataset(self, n_samples: int = 200, n_spirals: int = 2, noise: float = 0.1, n_rotations: Optional[float] = None) -> Dict[str, Any]:
+        """Regenerate the dataset with new parameters and reset the network.
+
+        Args:
+            n_samples: Total number of samples.
+            n_spirals: Number of spiral arms (passed as context but JuniperData uses n_points_per_spiral).
+            noise: Gaussian noise standard deviation.
+            n_rotations: Number of spiral rotations.
+
+        Returns:
+            New dataset dictionary.
+        """
+        if self.is_running:
+            self.stop()
+
+        self.dataset = self._generate_spiral_dataset(n_samples=n_samples, n_rotations=n_rotations)
+        self.network.train_x = self.dataset["inputs_tensor"]
+        self.network.train_y = self.dataset["targets_tensor"]
+        self.current_epoch = 0
+        self.current_loss = 1.0
+        self.current_accuracy = 0.5
+        with self._lock:
+            self.metrics_history.clear()
+        self.logger.info(f"Dataset regenerated: n_samples={n_samples}, n_rotations={n_rotations}")
+        return self.dataset
+
     def get_dataset(self) -> Dict[str, Any]:
         """
         Get demo dataset.

@@ -199,6 +199,11 @@ class DemoBackend:
                 result["targets"] = targets.tolist() if isinstance(targets, np.ndarray) else targets
         return cast(DatasetResult, result)
 
+    def regenerate_dataset(self, n_samples: int = 200, n_spirals: int = 2, noise: float = 0.1, n_rotations: float = 1.5) -> Optional[DatasetResult]:
+        """Regenerate the dataset with new parameters."""
+        self._demo.regenerate_dataset(n_samples=n_samples, n_spirals=n_spirals, noise=noise, n_rotations=n_rotations)
+        return self.get_dataset()
+
     def get_decision_boundary(self, resolution: int = 50) -> Optional[Dict[str, Any]]:
         network = self._demo.get_network()
         if network is None:

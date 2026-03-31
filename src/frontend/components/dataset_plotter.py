@@ -36,6 +36,7 @@
 #####################################################################################################################################################################################################
 from typing import Any, Dict, List, Optional
 
+import dash_bootstrap_components as dbc
 import numpy as np
 import plotly.graph_objects as go
 from dash import dcc, html
@@ -90,6 +91,13 @@ class DatasetPlotter(BaseComponent):
                         html.H3("Dataset Visualization", style={"display": "inline-block"}),
                         html.Div(
                             [
+                                dbc.Button(
+                                    "⟳ Generate Dataset",
+                                    id=f"{self.component_id}-generate-btn",
+                                    color="primary",
+                                    size="sm",
+                                    style={"marginRight": "15px"},
+                                ),
                                 html.Label("Dataset:", style={"marginRight": "10px"}),
                                 dcc.Dropdown(
                                     id=f"{self.component_id}-dataset-selector",
@@ -110,10 +118,68 @@ class DatasetPlotter(BaseComponent):
                                     style={"width": "150px", "display": "inline-block"},
                                 ),
                             ],
-                            style={"display": "inline-block", "float": "right"},
+                            style={"display": "inline-flex", "alignItems": "center", "float": "right"},
                         ),
                     ],
                     style={"marginBottom": "10px"},
+                ),
+                # Generate Dataset modal
+                dbc.Modal(
+                    [
+                        dbc.ModalHeader(dbc.ModalTitle("Generate New Dataset")),
+                        dbc.ModalBody(
+                            [
+                                dbc.Row(
+                                    [
+                                        dbc.Col(
+                                            [
+                                                dbc.Label("Samples"),
+                                                dbc.Input(id=f"{self.component_id}-gen-samples", type="number", value=200, min=20, max=2000, step=10),
+                                            ],
+                                            width=6,
+                                        ),
+                                        dbc.Col(
+                                            [
+                                                dbc.Label("Spirals"),
+                                                dbc.Input(id=f"{self.component_id}-gen-spirals", type="number", value=2, min=2, max=6, step=1),
+                                            ],
+                                            width=6,
+                                        ),
+                                    ],
+                                    className="mb-3",
+                                ),
+                                dbc.Row(
+                                    [
+                                        dbc.Col(
+                                            [
+                                                dbc.Label("Rotations"),
+                                                dbc.Input(id=f"{self.component_id}-gen-rotations", type="number", value=1.5, min=0.1, max=10.0, step=0.1),
+                                            ],
+                                            width=6,
+                                        ),
+                                        dbc.Col(
+                                            [
+                                                dbc.Label("Noise"),
+                                                dbc.Input(id=f"{self.component_id}-gen-noise", type="number", value=0.1, min=0.0, max=1.0, step=0.01),
+                                            ],
+                                            width=6,
+                                        ),
+                                    ],
+                                    className="mb-3",
+                                ),
+                                html.Div(id=f"{self.component_id}-gen-status", style={"color": "#6c757d", "fontSize": "0.85em"}),
+                            ]
+                        ),
+                        dbc.ModalFooter(
+                            [
+                                dbc.Button("Generate", id=f"{self.component_id}-gen-confirm", color="primary"),
+                                dbc.Button("Cancel", id=f"{self.component_id}-gen-cancel", color="secondary", className="ms-2"),
+                            ]
+                        ),
+                    ],
+                    id=f"{self.component_id}-generate-modal",
+                    is_open=False,
+                    centered=True,
                 ),
                 # Dataset statistics
                 html.Div(

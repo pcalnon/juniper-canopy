@@ -1150,6 +1150,60 @@ class DashboardManager:
             """Sync dataset data to decision boundary component."""
             return self._update_boundary_dataset_store_handler(n=n, active_tab=active_tab)
 
+        # ── Dataset generation modal callbacks ──
+
+        @self.app.callback(
+            Output("dataset-plotter-generate-modal", "is_open"),
+            [
+                Input("dataset-plotter-generate-btn", "n_clicks"),
+                Input("dataset-plotter-gen-cancel", "n_clicks"),
+                Input("dataset-plotter-gen-confirm", "n_clicks"),
+            ],
+            dash.dependencies.State("dataset-plotter-generate-modal", "is_open"),
+            prevent_initial_call=True,
+        )
+        def toggle_generate_modal(open_clicks, cancel_clicks, confirm_clicks, is_open):
+            ctx = get_callback_context()
+            trigger = ctx.triggered_id
+            if trigger == "dataset-plotter-generate-btn":
+                return True
+            return False
+
+        @self.app.callback(
+            [
+                Output("dataset-plotter-gen-status", "children"),
+                Output("dataset-plotter-dataset-store", "data", allow_duplicate=True),
+            ],
+            Input("dataset-plotter-gen-confirm", "n_clicks"),
+            [
+                dash.dependencies.State("dataset-plotter-gen-samples", "value"),
+                dash.dependencies.State("dataset-plotter-gen-spirals", "value"),
+                dash.dependencies.State("dataset-plotter-gen-rotations", "value"),
+                dash.dependencies.State("dataset-plotter-gen-noise", "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def generate_dataset(n_clicks, n_samples, n_spirals, n_rotations, noise):
+            return self._generate_dataset_handler(n_samples, n_spirals, n_rotations, noise)
+
+    def _generate_dataset_handler(self, n_samples, n_spirals, n_rotations, noise):
+        """Handle dataset generation request."""
+        try:
+            url = self._api_url("/api/dataset/generate")
+            payload = {
+                "n_samples": int(n_samples or 200),
+                "n_spirals": int(n_spirals or 2),
+                "n_rotations": float(n_rotations or 1.5),
+                "noise": float(noise or 0.1),
+            }
+            response = requests.post(url, json=payload, timeout=DashboardConstants.API_TIMEOUT_SECONDS + 5)
+            if response.ok:
+                return "✅ Dataset generated", response.json()
+            return f"❌ {response.json().get('error', 'Failed')}", dash.no_update
+        except Exception as e:
+            self.logger.warning(f"Dataset generation failed: {e}")
+            return f"❌ Error: {e}", dash.no_update
+
     # Define button action callbacks
     def _setup_button_action_callbacks(self):
 

@@ -743,6 +743,37 @@ async def get_dataset():
     return dataset
 
 
+@app.post("/api/dataset/generate")
+async def generate_dataset(request: Request):
+    """Generate a new dataset with custom parameters (demo mode only)."""
+    if backend.backend_type != "demo":
+        return JSONResponse({"error": "Dataset generation only available in demo mode"}, status_code=400)
+
+    if not hasattr(backend, "regenerate_dataset"):
+        return JSONResponse({"error": "Backend does not support dataset regeneration"}, status_code=501)
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    n_samples = int(body.get("n_samples", 200))
+    n_spirals = int(body.get("n_spirals", 2))
+    noise = float(body.get("noise", 0.1))
+    n_rotations = float(body.get("n_rotations", 1.5))
+
+    n_samples = max(20, min(2000, n_samples))
+    n_rotations = max(0.1, min(10.0, n_rotations))
+    noise = max(0.0, min(1.0, noise))
+
+    try:
+        dataset = backend.regenerate_dataset(n_samples=n_samples, n_spirals=n_spirals, noise=noise, n_rotations=n_rotations)
+        return dataset or {"status": "generated"}
+    except Exception as e:
+        system_logger.error(f"Dataset generation failed: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.get("/api/decision_boundary")
 async def get_decision_boundary(resolution: int = 100):
     """
