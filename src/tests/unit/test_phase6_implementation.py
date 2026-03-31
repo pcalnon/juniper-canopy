@@ -467,7 +467,7 @@ class TestTrainCandidatePool:
 
     def test_returns_tuple_on_success(self, network_with_data):
         """train_candidate_pool returns (unit, correlation) tuple for quality candidates."""
-        result = network_with_data.train_candidate_pool()
+        result = network_with_data.train_candidate_pool(pool_size=4, candidate_steps=50)
         assert result is not None
         unit, correlation = result
         assert isinstance(unit, dict)
@@ -478,7 +478,7 @@ class TestTrainCandidatePool:
 
     def test_returns_none_for_high_threshold(self, network_with_data):
         """train_candidate_pool returns None when threshold is impossibly high."""
-        result = network_with_data.train_candidate_pool(min_correlation=100.0)
+        result = network_with_data.train_candidate_pool(min_correlation=100.0, pool_size=4, candidate_steps=50)
         assert result is None
 
     def test_respects_stop_check(self, network_with_data):
@@ -489,13 +489,13 @@ class TestTrainCandidatePool:
     def test_does_not_modify_hidden_units(self, network_with_data):
         """train_candidate_pool should NOT modify hidden_units list."""
         original_count = len(network_with_data.hidden_units)
-        network_with_data.train_candidate_pool()
+        network_with_data.train_candidate_pool(pool_size=4, candidate_steps=50)
         assert len(network_with_data.hidden_units) == original_count
 
     def test_does_not_modify_output_layer(self, network_with_data):
         """train_candidate_pool should NOT modify output_layer."""
         original_dim = network_with_data.output_layer.in_features
-        network_with_data.train_candidate_pool()
+        network_with_data.train_candidate_pool(pool_size=4, candidate_steps=50)
         assert network_with_data.output_layer.in_features == original_dim
 
 

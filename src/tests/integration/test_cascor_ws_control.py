@@ -84,12 +84,23 @@ def cascor_client(mock_service_backend):
 
 
 def _send_ws_command(client, command, **extra):
-    """Send a command over /ws/control and return the response dict."""
+    """Send a command over /ws/control and return the response dict.
+
+    Drains any broadcast messages (metrics/state) that may arrive between
+    the connection acknowledgment and the command response.
+    """
     with client.websocket_connect("/ws/control") as ws:
-        ws.receive_json()
+        ws.receive_json()  # consume connection_established ack
         payload = {"command": command, **extra}
         ws.send_text(json.dumps(payload))
-        return ws.receive_json()
+        # The demo backend training thread may broadcast metrics/state messages
+        # between connect and the command response. Drain until we find the
+        # command response (which contains an "ok" key).
+        for _ in range(10):
+            msg = ws.receive_json()
+            if "ok" in msg:
+                return msg
+        raise AssertionError("No command response received after 10 messages")
 
 
 class TestCascorWsControl:

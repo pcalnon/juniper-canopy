@@ -253,7 +253,7 @@ class MockCascorNetwork:
 
         return best_correlation
 
-    def train_candidate_pool(self, min_correlation: float = None, stop_check=None, progress_callback=None):
+    def train_candidate_pool(self, min_correlation: float = None, stop_check=None, progress_callback=None, pool_size: int = None, candidate_steps: int = None):
         """Train a pool of candidate units and return the best if it meets quality threshold.
 
         This method does NOT modify shared network state (hidden_units, output_layer)
@@ -266,6 +266,8 @@ class MockCascorNetwork:
                 Used to propagate stop signals from the training thread.
             progress_callback: Optional callable(candidate_index, pool_size, best_correlation)
                 called after each candidate finishes training. Used for dashboard updates.
+            pool_size: Override for candidate pool size (default: CANDIDATE_POOL_SIZE).
+            candidate_steps: Override for per-candidate training steps (default: CANDIDATE_TRAINING_STEPS).
 
         Returns:
             Tuple of (unit_dict, best_correlation) if a quality candidate was found,
@@ -280,7 +282,10 @@ class MockCascorNetwork:
         best_unit = None
         best_correlation = -1.0
 
-        pool_size = TrainingConstants.CANDIDATE_POOL_SIZE
+        if pool_size is None:
+            pool_size = TrainingConstants.CANDIDATE_POOL_SIZE
+        if candidate_steps is None:
+            candidate_steps = TrainingConstants.CANDIDATE_TRAINING_STEPS
         for i in range(pool_size):
             if stop_check and stop_check():
                 return None
@@ -294,7 +299,7 @@ class MockCascorNetwork:
             }
 
             if self.train_x is not None and self.train_y is not None:
-                correlation = self._train_candidate(unit, steps=TrainingConstants.CANDIDATE_TRAINING_STEPS, lr=0.01)
+                correlation = self._train_candidate(unit, steps=candidate_steps, lr=0.01)
                 if correlation > best_correlation:
                     best_correlation = correlation
                     best_unit = unit

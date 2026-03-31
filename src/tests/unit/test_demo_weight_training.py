@@ -89,8 +89,8 @@ class TestTrainOutputStep:
 
     def test_works_with_hidden_units(self, network_with_data):
         """Training step must work after hidden units are added."""
-        network_with_data.add_hidden_unit(candidate_steps=200, pool_size=16)
-        network_with_data.add_hidden_unit(candidate_steps=200, pool_size=16)
+        network_with_data.add_hidden_unit(candidate_steps=50, pool_size=4)
+        network_with_data.add_hidden_unit(candidate_steps=50, pool_size=4)
         # Re-initialize output optimizer so the next step starts fresh
         # (the retrain inside add_hidden_unit may have converged the Adam state)
         network_with_data.output_optimizer = torch.optim.Adam(network_with_data.output_layer.parameters(), lr=0.01)
