@@ -216,6 +216,7 @@ one on the adapter):
 **FIX-1: `get_recent_metrics()` (lines 74-77)**
 
 Current:
+
 ```python
 def get_recent_metrics(self, count: int = 100) -> list:
     try:
@@ -226,6 +227,7 @@ def get_recent_metrics(self, count: int = 100) -> list:
 ```
 
 Fix:
+
 ```python
 def get_recent_metrics(self, count: int = 100) -> list:
     try:
@@ -244,6 +246,7 @@ def get_recent_metrics(self, count: int = 100) -> list:
 **FIX-2: `is_training` property (lines 60-66)**
 
 Current:
+
 ```python
 @property
 def is_training(self) -> bool:
@@ -255,6 +258,7 @@ def is_training(self) -> bool:
 ```
 
 Fix:
+
 ```python
 @property
 def is_training(self) -> bool:
@@ -273,6 +277,7 @@ def is_training(self) -> bool:
 **FIX-3: `get_current_metrics()` (lines 68-72)**
 
 Current:
+
 ```python
 def get_current_metrics(self) -> Dict[str, Any]:
     try:
@@ -282,6 +287,7 @@ def get_current_metrics(self) -> Dict[str, Any]:
 ```
 
 Fix:
+
 ```python
 def get_current_metrics(self) -> Dict[str, Any]:
     try:
@@ -304,12 +310,14 @@ has nested sub-objects (`state_machine`, `monitor`, `training_state`). The
 dashboard expects a flat dict with specific keys matching `DemoBackend.get_status()`.
 
 Current:
+
 ```python
 def get_status(self) -> Dict[str, Any]:
     return self._adapter.get_training_status()
 ```
 
 Fix — add a transformation method:
+
 ```python
 def get_status(self) -> Dict[str, Any]:
     raw = self._adapter.get_training_status()
@@ -396,6 +404,7 @@ bug as `_ServiceTrainingMonitor.is_training` (FIX-2). It is used by
 `ServiceBackend.start_training()`.
 
 Current (lines 281-286):
+
 ```python
 def is_training_in_progress(self) -> bool:
     try:
@@ -406,6 +415,7 @@ def is_training_in_progress(self) -> bool:
 ```
 
 Fix (same pattern as FIX-2):
+
 ```python
 def is_training_in_progress(self) -> bool:
     try:
@@ -464,6 +474,7 @@ client's flat structure. With the real server, the data is nested in
 `state_machine`, `monitor`, and `training_state` sub-objects.
 
 Current (lines 57-65):
+
 ```python
 status_response = self._client.get_training_status()
 state.is_training = status_response.get("is_training", False)
@@ -475,6 +486,7 @@ state.max_epochs = data.get("max_epochs", 0)
 ```
 
 Fix:
+
 ```python
 status_response = self._client.get_training_status()
 data = status_response.get("data", {})
@@ -536,6 +548,7 @@ else:
 **FIX-13**: Add `"started"` to the status normalization mapping:
 
 Current mapping in `_normalize_status()`:
+
 ```python
 mapping = {
     "idle": "Stopped",
@@ -548,6 +561,7 @@ mapping = {
 ```
 
 Add these entries:
+
 ```python
 "started": "Started",       # Real server uses title case
 "completed": "Completed",   # Real server state_machine.status
@@ -562,6 +576,7 @@ Add these entries:
 but the real server returns the list directly in `data`.
 
 Current (lines 89-93):
+
 ```python
 history_response = self._client.get_metrics_history(count=metrics_limit)
 if isinstance(history_response, dict):
@@ -571,6 +586,7 @@ elif isinstance(history_response, list):
 ```
 
 Fix:
+
 ```python
 history_response = self._client.get_metrics_history(count=metrics_limit)
 if isinstance(history_response, dict):
@@ -593,6 +609,7 @@ elif isinstance(history_response, list):
 real server returns params as flat fields directly in `data`.
 
 Current (lines 68-72):
+
 ```python
 params_response = self._client.get_training_params()
 state.params = params_response.get("data", {}).get("params", {})
@@ -606,6 +623,7 @@ This code's fallback actually handles the real server format correctly — if
 `epochs`/`dataset`. However, the fallback filter should be expanded:
 
 Fix:
+
 ```python
 params_response = self._client.get_training_params()
 data = params_response.get("data", {})
@@ -852,6 +870,7 @@ curl -s http://localhost:8050/api/dataset | python -m json.tool
 ```
 
 Visual verification checklist:
+
 - [ ] Status bar shows Running/Paused/Stopped correctly
 - [ ] Epoch counter increments during training
 - [ ] Hidden units count updates on cascade events

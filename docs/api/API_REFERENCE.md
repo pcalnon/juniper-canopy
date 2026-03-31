@@ -970,7 +970,6 @@ Most WebSocket messages use this shape:
 - Some control-channel messages may omit `timestamp`.
 - Runtime dashboard updates consume `metrics`, `state`, `topology`, and `event` message types.
 
-
 ### WS /ws/training
 
 **Description:** Stream training state/metrics/topology/event updates.
@@ -1097,7 +1096,6 @@ ws.onmessage = (event) => {
   }
 };
 ```
-
 
 ### WS /ws/control
 

@@ -23,6 +23,7 @@ Both occur while training is actively running (e.g., Epoch 359, Hidden Units 11)
 **File**: `src/backend/demo_backend.py` lines 162-168
 
 `DemoBackend.get_network_topology()` returns:
+
 ```python
 {"nodes": [...], "connections": [...], "input_size": 2, "output_size": 2, "hidden_units": 11}
 ```
@@ -30,6 +31,7 @@ Both occur while training is actively running (e.g., Epoch 359, Hidden Units 11)
 **File**: `src/frontend/components/network_visualizer.py` line 351
 
 `NetworkVisualizer` checks:
+
 ```python
 if not topology_data or topology_data.get("input_units", 0) == 0:
     # Shows empty graph
@@ -42,6 +44,7 @@ Since the key is `input_size` (not `input_units`), `.get("input_units", 0)` retu
 **File**: `src/backend/demo_backend.py` lines 223-232
 
 `DemoBackend.get_decision_boundary()` returns:
+
 ```python
 {"x": [1D linspace], "y": [1D linspace], "z": [[2D grid]], ...}
 ```
@@ -49,6 +52,7 @@ Since the key is `input_size` (not `input_units`), `.get("input_units", 0)` retu
 **File**: `src/frontend/components/decision_boundary.py` lines 291-296
 
 `DecisionBoundary._create_boundary_plot()` expects:
+
 ```python
 xx = np.array(boundary_data.get("xx", []))  # 2D meshgrid
 yy = np.array(boundary_data.get("yy", []))  # 2D meshgrid
@@ -56,12 +60,14 @@ Z = np.array(boundary_data.get("Z", []))    # uppercase Z
 ```
 
 And at lines 303-304:
+
 ```python
 x=xx[0],       # First row of 2D meshgrid
 y=yy[:, 0],   # First column of 2D meshgrid
 ```
 
 The mismatches are:
+
 1. Key names: `x`/`y`/`z` vs `xx`/`yy`/`Z`
 2. Data shape: Backend returns 1D linspace for x/y; frontend expects 2D meshgrid
 

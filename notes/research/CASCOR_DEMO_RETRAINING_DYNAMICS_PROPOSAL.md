@@ -95,6 +95,7 @@ After 500 steps of retrain, the Adam optimizer's moment estimates (`m` and `v`) 
 On step 501 (the first outer-loop step), the gradient is essentially the same as on step 500 -- a tiny residual. Adam takes a tiny step. On step 502, another tiny step. After 30 such steps, the total weight change is negligible:
 
 **Estimated weight change over 30 inter-cascade steps**:
+
 - Near the minimum, gradient magnitude is approximately `g ~ 0.001` (residual MSE gradient for a near-converged output layer)
 - Adam effective step: `lr * m_hat / (sqrt(v_hat) + eps) ~ 0.01 * 0.001 / (sqrt(0.000001) + 1e-8) ~ 0.01`
 - Total change over 30 steps: `~30 * 0.01 = 0.3` in the most optimistic case
@@ -141,6 +142,7 @@ The critical issue: `improvement = recent[0] - recent[-1]` compares the **first 
 The feedback loop creates an accelerating cycle of diminishing returns:
 
 **Cycle for hidden unit #1**:
+
 1. Output training converges at ~0.24 MSE over 30 initial epochs
 2. Convergence detected; unit #1 installed; 500 retrain steps internally
 3. Loss drops to ~0.22 (retrain finds a better configuration using the new feature)
@@ -148,12 +150,14 @@ The feedback loop creates an accelerating cycle of diminishing returns:
 5. Convergence detected again; unit #2 installed
 
 **Cycle for hidden unit #2**:
+
 1. 500 retrain steps internally; loss drops from 0.219 to ~0.217
 2. But unit #2's contribution is marginal because unit #1's weight was not fully optimized
 3. 10 outer epochs produce ~0.0005 total improvement
 4. Convergence detected; unit #3 installed
 
 **Cycle for hidden unit #N**:
+
 - Each successive unit contributes less because the output layer has accumulated N weight columns that were never given enough post-retrain optimization to reach their full potential
 - The new unit's candidate was trained against a residual that still contains unexploited information from the previous units (whose weights are suboptimal)
 - The retrain attempts to jointly optimize all N+2 columns (input_size + N hidden) in 500 steps, but the optimization surface grows more complex with each added dimension

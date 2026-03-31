@@ -171,6 +171,7 @@ params = {
 ```
 
 **Why 1 rotation works**:
+
 - 2 decision boundary crossings (vs. 6 for 3 rotations)
 - Requires only ~3-5 hidden units for good classification
 - Each hidden unit contributes **0.01-0.03 MSE improvement** (10x larger than 3-rotation case)

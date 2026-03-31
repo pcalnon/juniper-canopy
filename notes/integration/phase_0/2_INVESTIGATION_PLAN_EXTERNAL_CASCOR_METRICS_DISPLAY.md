@@ -91,6 +91,7 @@ cascor /ws/training broadcasts
 ### Hypothesis
 
 The cascor REST API wraps all responses in a `ResponseEnvelope`:
+
 ```json
 {"status": "success", "data": <payload>, "meta": {"timestamp": ..., "version": "0.4.0"}}
 ```

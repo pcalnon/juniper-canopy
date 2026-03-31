@@ -37,6 +37,7 @@ git status
 ```
 
 **GATE**: Working tree must be clean. Commit any remaining changes:
+
 ```bash
 git add -A
 git commit -m "final changes for <task>"

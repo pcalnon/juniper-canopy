@@ -108,6 +108,7 @@ The text IS correct because `dark_mode.css` applies `color` to text elements glo
    - `id=f"{self.component_id}-stats-summary"`
 
 2. **Add theme callback** in `register_callbacks`:
+
    ```python
    @app.callback(
        Output(f"{self.component_id}-stats-summary", "style"),
@@ -150,6 +151,7 @@ hidden_weights=(network.hidden_units[0]["weights"] if network.hidden_units else 
 ```
 
 This means:
+
 - When no hidden units exist yet: `hidden_weights=None` (correct initially)
 - After 1+ hidden units added: only first unit's weights captured, all subsequent units ignored
 - Weight statistics are incomplete and do not reflect topology changes
@@ -161,6 +163,7 @@ This means:
 **Handler**: `dashboard_manager.py` lines 1170-1186 — calls `/api/network/stats` and passes result to `_create_network_info_table` (working correctly)
 
 **API Endpoint**: `main.py` lines 555-595 — creates `DataAdapter` and calls `get_network_statistics()`:
+
 - Demo mode (line 575): `network.hidden_units[0]["weights"]` — **only first hidden unit**
 - Service mode (lines 583-593): uses `network_data.get("hidden_weights")` — depends on service adapter
 
@@ -173,6 +176,7 @@ This means:
 1. **Fix demo mode hidden weights collection** (`src/main.py`, line 575):
    - Collect ALL hidden unit weights, not just index [0]
    - Concatenate all hidden unit weight arrays into a single array
+
    ```python
    # Before:
    hidden_weights=(network.hidden_units[0]["weights"] if network.hidden_units else None),
@@ -258,6 +262,7 @@ slow-update-interval (5s) → callback → _update_network_info_details_handler(
 ### Investigation Phase (2026-03-17)
 
 **Sub-agent 1 — Network Topology Dark Mode**:
+
 - Identified `network_visualizer.py` as the source
 - Found hardcoded `#e3f2fd` background at lines 187-197 and 452-460
 - Found missing `theme-state` input in `handle_node_selection` callback
@@ -265,23 +270,27 @@ slow-update-interval (5s) → callback → _update_network_info_details_handler(
 - Confirmed `update_stats_bar_theme` (lines 417-430) as working reference pattern
 
 **Sub-agent 2 — Dataset Summary Dark Mode**:
+
 - Identified `dataset_plotter.py` as the source
 - Found missing ID on stats div (lines 118-149)
 - Found hardcoded `#f8f9fa` at line 146
 - Confirmed text is correct via CSS global rules, but backgroundColor inline style overrides CSS
 
 **Sub-agent 3 — Network Details Not Updating**:
+
 - Identified `main.py` `/api/network/stats` endpoint (lines 555-595) as the root cause
 - Found `hidden_units[0]` bug at line 575 — only first hidden unit captured
 - Confirmed polling callback and handler are working correctly
 - Confirmed `_create_network_info_table` in `metrics_panel.py` (lines 1835-1908) is correct
 
 **Sub-agent 4 — Backend API Deep Dive**:
+
 - Confirmed endpoint creates fresh `DataAdapter` on each call (no caching issue)
 - Confirmed `get_network_statistics()` in `data_adapter.py` correctly computes stats from provided weights
 - Identified the single-unit indexing as the sole blocker
 
 **Sub-agent 5 — Test Suite Analysis**:
+
 - Found existing test patterns in `test_network_visualizer_callbacks.py`, `test_dataset_plotter.py`, `test_network_info_enhancements.py`
 - Found existing dark mode integration tests in `tests/integration/test_dark_mode.py`
 - Documented callback simulation and mock patterns used across the suite
@@ -289,6 +298,7 @@ slow-update-interval (5s) → callback → _update_network_info_details_handler(
 ### Implementation Phase (2026-03-17)
 
 **Fix 1 — Network Topology Node Detail Dark Mode**:
+
 - Modified `handle_node_selection` callback in `network_visualizer.py`:
   - Added `State("theme-state", "data")` to callback inputs
   - Built `base_style` with conditional colors based on `is_dark`
@@ -297,10 +307,12 @@ slow-update-interval (5s) → callback → _update_network_info_details_handler(
 - Updated 3 existing tests to pass `theme` parameter
 
 **Fix 2 — Dataset Summary Dark Mode**:
+
 - Added `id=f"{self.component_id}-stats-summary"` to the stats div in `dataset_plotter.py`
 - Added `update_stats_summary_theme` callback with dark/light color switching
 
 **Fix 3 — Network Info Details Not Updating**:
+
 - Fixed `main.py` `/api/network/stats` endpoint:
   - Changed `network.hidden_units[0]["weights"]` to `torch.cat([hu["weights"] for hu in network.hidden_units])`
   - Now captures weights from ALL hidden units
@@ -412,6 +424,7 @@ Git worktrees in the juniper-canopy project have infrastructure gaps that cause 
 **Root Cause**: `src/logs` is a symlink to `../logs`. In the main repo, `../logs` resolves to a real directory. In a worktree, `../logs` points to a non-existent path because the `logs/` directory at the repo root is gitignored and not created during `git worktree add`.
 
 **Affected Tests** (worktree-only failures):
+
 - `tests/integration/test_api_contracts.py` — collection error
 - `tests/integration/test_button_layout.py` — collection error
 - `tests/integration/test_cascor_ws_control.py` — collection error
@@ -422,6 +435,7 @@ Git worktrees in the juniper-canopy project have infrastructure gaps that cause 
 **Workaround**: `mkdir -p <worktree>/logs` after creating the worktree.
 
 **Proper Fix Options**:
+
 1. Add `logs/` creation to `WORKTREE_SETUP_PROCEDURE.md` as a post-setup step
 2. Make the logger factory handle the case where `logs/` is a broken symlink (create target directory if missing)
 3. Replace the symlink with a direct reference in the logger config to an absolute or computed path
@@ -435,6 +449,7 @@ Git worktrees in the juniper-canopy project have infrastructure gaps that cause 
 **Workaround**: `mkdir -p <worktree>/reports` after creating the worktree.
 
 **Proper Fix Options**:
+
 1. Add `reports/` creation to `WORKTREE_SETUP_PROCEDURE.md`
 2. Add a `.gitkeep` file inside `reports/` so it's tracked by git
 3. Make `test_directories` create missing directories instead of failing, or skip the check in worktree environments
@@ -464,6 +479,7 @@ These tests fail on the `main` branch (confirmed 2026-03-17) and are not caused 
 **Root Cause**: The `/api/state` endpoint accesses `backend.backend_type` but the `backend` global is `None` at test time. The test creates a `TestClient` from the FastAPI `app` but the backend initialization (which happens during app lifespan/startup) is not triggered.
 
 **Failing Tests**:
+
 - `TestStateEndpoint::test_state_endpoint_exists`
 - `TestStateEndpoint::test_state_endpoint_returns_json`
 - `TestStateEndpoint::test_state_endpoint_has_required_fields`
@@ -507,6 +523,7 @@ The pre-commit hook `pytest-coverage` runs ALL tests (`tests/` with `-m "not slo
 **Workaround Applied**: Created `logs/` and `reports/` directories manually before committing.
 
 **Recommendation**: Either:
+
 1. Scope the pre-commit hook to unit and regression tests only: `tests/unit/ tests/regression/`
 2. Add worktree infrastructure setup to the pre-commit hook itself
 3. Add a conftest fixture that auto-creates missing gitignored directories

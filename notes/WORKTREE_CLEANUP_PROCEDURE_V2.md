@@ -119,6 +119,7 @@ gh pr create \
 ```
 
 **PR description**: Generate using:
+
 - Template: `notes/templates/TEMPLATE_PULL_REQUEST_DESCRIPTION.md`
 - Reference: `notes/pull_requests/PR_*.md` (format and content examples)
 

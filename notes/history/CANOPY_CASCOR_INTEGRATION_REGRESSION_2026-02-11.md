@@ -177,6 +177,7 @@ Even if a network were created, users could not control training via the dashboa
 JuniperCascor's `main.py` runs `sp.evaluate()` synchronously — it trains the network and then exits. The startup script captures its PID, but by the time the Canopy dashboard is fully loaded and a user interacts with it, the CasCor process may have already completed training and terminated.
 
 The script later tries to `kill -KILL "${PID}"` on shutdown, which may target:
+
 - A process that already exited
 - A PID that was recycled by the OS for a different process
 
@@ -219,6 +220,7 @@ cascor_integration.create_monitoring_callback("cascade_add", on_cascade_add)
 ```
 
 These callbacks are registered on the `cascor_integration` instance, but since `network is None`:
+
 - No monitoring hooks are installed (no methods to wrap)
 - No monitoring thread is running (nothing to poll)
 - The callbacks are never invoked
@@ -240,6 +242,7 @@ The startup script does not export `CASCOR_DEMO_MODE` based on `DEMO_MODE`, so t
 ### CF-2: Process Detection Fragility
 
 `pgrep -f "${CASCOR_PROCESS_NAME}"` (startup script line 119) matches against the full command line, which can:
+
 - Match unrelated Python processes with overlapping path substrings
 - Miss the CasCor process if the command line format differs
 - Return stale results if the process exits between check and use

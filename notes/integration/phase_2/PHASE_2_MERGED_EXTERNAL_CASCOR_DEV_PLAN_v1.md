@@ -386,6 +386,7 @@ and ISS-5.
 1. **`src/backend/cascor_service_adapter.py`** — Fix `_ServiceTrainingMonitor`:
 
    **RC-1: `get_recent_metrics()` (lines 74-79):**
+
    ```python
    def get_recent_metrics(self, count: int = 100) -> list:
        try:
@@ -396,6 +397,7 @@ and ISS-5.
    ```
 
    **RC-2: `is_training` property (lines 60-66):**
+
    ```python
    @property
    def is_training(self) -> bool:
@@ -417,6 +419,7 @@ and ISS-5.
    ```
 
    **RC-3: `get_current_metrics()` (lines 68-72):**
+
    ```python
    def get_current_metrics(self) -> Dict[str, Any]:
        try:
@@ -437,6 +440,7 @@ and ISS-5.
    (lines 411-418):
 
    **ISS-5:**
+
    ```python
    def extract_network_topology(self) -> Optional[Dict[str, Any]]:
        try:
@@ -503,6 +507,7 @@ and ISS-5.
 5. **`src/backend/service_backend.py`** — Fix `get_dataset()`:
 
    **ISS-4:**
+
    ```python
    def get_dataset(self) -> Optional[Dict[str, Any]]:
        raw = self._adapter.get_dataset_info()
@@ -636,6 +641,7 @@ accept the adapter instead of the raw client.
 4. **`src/backend/state_sync.py`** — Fix `_normalize_status()`:
 
    Ensure it handles real cascor's state names (both cases):
+
    ```python
    mapping = {
        "idle": "Stopped",
@@ -725,6 +731,7 @@ This fixes RC-5 at the systemic level.
 #### Changes
 
 1. **Add `_success_response()` helper:**
+
    ```python
    def _success_response(self, data: Any) -> dict:
        return {

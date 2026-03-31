@@ -61,11 +61,13 @@ Second and third hidden units will have **lower best-candidate correlations** th
 The CasCor reference uses **600 epochs with early stopping (patience=30)**. This means it runs up to 600 steps but will terminate earlier if correlation plateaus for 30 consecutive epochs -- an adaptive budget. The demo uses a **hard-coded 200 steps with no convergence check at all**.
 
 For the first hidden unit (2 inputs, `tanh` candidate), 200 Adam steps at lr=0.01 is often sufficient because:
+
 - The input dimension is small (2 features).
 - The residual is large and has clear directional structure.
 - Adam's adaptive learning rate finds the gradient quickly.
 
 For the second hidden unit (3 inputs: 2 original + 1 hidden output), the problem is harder:
+
 - The input dimension has grown.
 - The residual landscape is more complex (the "easy" correlations were already captured).
 - The correlation surface may have shallow gradients and require more steps to navigate.
@@ -105,6 +107,7 @@ d(corr)/d(weights) = d(corr)/d(v) * d(v)/d(z) * d(z)/d(weights)
 ```
 
 where:
+
 - `v = tanh(z)`, `z = x @ weights + bias`
 - `d(corr)/d(v)` involves the mean-centered error `e_centered`
 
@@ -126,6 +129,7 @@ Additionally, the demo computes correlation via autograd through `(-correlation)
 ### The Demo vs. CasCor Reference Difference
 
 The demo (`demo_mode.py` lines 279-285):
+
 ```python
 v_centered = v - v.mean()
 e_centered = residual - residual.mean(dim=0)
@@ -136,6 +140,7 @@ correlation = (cov / (std_v * std_e)).abs().sum()
 ```
 
 The CasCor reference (`candidate_unit.py` lines 1053-1079):
+
 ```python
 numerator = torch.sum(norm_output * norm_error)
 sum_output_sq = torch.sum(norm_output**2)

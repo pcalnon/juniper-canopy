@@ -14,43 +14,44 @@
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-<YYYY for current year> Paul Calnon
 #
-# Description:
-#     This config file contains an automatically generated list of environment dependencies managed by conda / mamba for the juniper-canopy application.
+# Description
+# This config file contains an automatically generated list of environment dependencies managed by conda / mamba for the juniper-canopy application
 #
 #####################################################################################################################################################################################################
-# Notes:
-#     created-by: conda <YYYY.MM.dd for current date>
-#     platform: linux-64
-#     python: <Python Version>
+# Notes
+# created-by: conda <YYYY.MM.dd for current date>
+# platform: linux-64
+# python: <Python Version>
 #
 #####################################################################################################################################################################################################
-# References:
+# References
 #
-#     This file may be used to create the Juniper Project, juniper-canopy Application environment
-#         with conda and miniforge3 using:
-#     create env: conda create --name [env] --file [filename]
-#         e.g., $ conda create --name JuniperCanopy --file juniper-canopy/conf/conda_environment_ci.yaml
-#     Update env: conda env update --name [env] --file [filename]
-#         e.g., $ conda env update --name JuniperCanopy --file juniper-canopy/conf/conda_environment_ci.yaml
-#     Generate deps: conda env export --no-builds (via generate_dep_docs.sh)
-#         e.g., $ bash scripts/generate_dep_docs.sh
-#
-#####################################################################################################################################################################################################
-# TODO :
+# This file may be used to create the Juniper Project, juniper-canopy Application environment
+# with conda and miniforge3 using
+# create env: conda create --name [env] --file [filename]
+# e.g., $ conda create --name JuniperCanopy --file juniper-canopy/conf/conda_environment_ci.yaml
+# Update env: conda env update --name [env] --file [filename]
+# e.g., $ conda env update --name JuniperCanopy --file juniper-canopy/conf/conda_environment_ci.yaml
+# Generate deps: conda env export --no-builds (via generate_dep_docs.sh)
+# e.g., $ bash scripts/generate_dep_docs.sh
 #
 #####################################################################################################################################################################################################
-# COMPLETED:
+# TODO
+#
+#####################################################################################################################################################################################################
+# COMPLETED
 #
 #####################################################################################################################################################################################################
 name: JuniperCanopy
 channels:
-  - conda-forge
-  - pytorch
-  - nvidia
-  - plotly
-  - RMG
-  - numba
-  - jasonb857
-  - ehmoussi
-  - konstantin-orangeqs
+
+- conda-forge
+- pytorch
+- nvidia
+- plotly
+- RMG
+- numba
+- jasonb857
+- ehmoussi
+- konstantin-orangeqs
 dependencies:

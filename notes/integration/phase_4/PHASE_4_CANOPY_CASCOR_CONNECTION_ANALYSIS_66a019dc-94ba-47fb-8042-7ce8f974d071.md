@@ -391,6 +391,7 @@ raw_state = data.get("state") or (sm.get("status", "").lower() if isinstance(sm,
 #### Impact
 
 When CasCor reports `"STARTED"` via WebSocket, the relay normalizes it to `"Stopped"`. This means:
+
 - Status display may flash "Stopped" during active training
 - State-dependent logic may incorrectly treat running training as stopped
 - The bug is asymmetric: `sync()` works correctly (uses `.lower()`), but relay does not
@@ -432,6 +433,7 @@ def on_epoch_end(self, ...):
 ```
 
 **Phase transitions update TrainingState, not TrainingMonitor**:
+
 - manager.py:218: `state.update_state(phase="Candidate")` — updates `TrainingState`
 - state_machine.py:116: OUTPUT phase set on START — updates state machine
 - Neither propagates phase changes to `TrainingMonitor`
@@ -740,6 +742,7 @@ The `_CANOPY_TO_CASCOR_PARAM_MAP` contains a mapping `"cn_training_iterations": 
 #### Fix Recommendation
 
 Either:
+
 1. Remove the dead mapping from `_CANOPY_TO_CASCOR_PARAM_MAP`
 2. Add `candidate_epochs` support to CasCor's params endpoint (if the parameter is meaningful)
 

@@ -1629,9 +1629,7 @@ class TestPhaseDurationHandler:
 
     def test_phase_duration_invalid_timestamp(self, metrics_panel):
         """Returns empty string when phase_started_at is malformed."""
-        result = metrics_panel._update_phase_duration_handler(
-            state={"status": "STARTED", "phase_started_at": "not-a-timestamp"}
-        )
+        result = metrics_panel._update_phase_duration_handler(state={"status": "STARTED", "phase_started_at": "not-a-timestamp"})
         assert result == ""
 
     def test_phase_duration_future_timestamp(self, metrics_panel):
@@ -1639,9 +1637,7 @@ class TestPhaseDurationHandler:
         from datetime import datetime, timedelta, timezone
 
         future = (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()
-        result = metrics_panel._update_phase_duration_handler(
-            state={"status": "STARTED", "phase_started_at": future}
-        )
+        result = metrics_panel._update_phase_duration_handler(state={"status": "STARTED", "phase_started_at": future})
         assert result == ""
 
     def test_phase_duration_naive_timestamp_is_supported(self, metrics_panel):
@@ -1649,9 +1645,7 @@ class TestPhaseDurationHandler:
         from datetime import datetime, timedelta
 
         started = (datetime.now() - timedelta(seconds=90)).isoformat()
-        result = metrics_panel._update_phase_duration_handler(
-            state={"status": "STARTED", "phase_started_at": started}
-        )
+        result = metrics_panel._update_phase_duration_handler(state={"status": "STARTED", "phase_started_at": started})
         assert result.startswith("Phase Duration:")
 
 

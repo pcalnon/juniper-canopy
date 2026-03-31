@@ -43,6 +43,7 @@ self.target_loss *= 0.8
 The inflated value 0.225 is written to `self.current_loss` but is **never recorded in history**. It is immediately overwritten by the real MSE at the start of epoch N+1. This means the inflation at line 871 has **no lasting effect on history** and **no effect on convergence detection**.
 
 However, the inflation *does* affect:
+
 - `get_current_state()` (line 1210) -- returns the inflated value to API consumers between epochs
 - `pause()` candidate state save (line 1037) -- would snapshot the inflated value if pause happens during this narrow window
 
@@ -83,18 +84,21 @@ After the 500-step retraining, the network has already extracted most of the ava
 **Mathematical demonstration:**
 
 Suppose before unit addition, the 10-epoch history is:
+
 ```
 [0.18, 0.17, 0.165, 0.162, 0.160, 0.158, 0.157, 0.156, 0.155, 0.154]
 improvement = 0.18 - 0.154 = 0.026  (> 0.001, so no trigger)
 ```
 
 The 500-step retraining converges the output layer to approximately its new floor, say 0.082. Post-cascade epochs then look like:
+
 ```
 [0.082, 0.081, 0.0808, 0.0805, 0.0803, 0.0801, 0.0800, 0.0799, 0.0798, 0.0797]
 improvement = 0.082 - 0.0797 = 0.0023  (barely > 0.001)
 ```
 
 By epoch 12-15 post-cascade:
+
 ```
 improvement = 0.0801 - 0.0795 = 0.0006  (< 0.001, TRIGGERS another cascade)
 ```
@@ -104,6 +108,7 @@ The system adds a second hidden unit, which again runs 500 invisible retraining 
 ### 3. `target_loss` Is Dead Code
 
 `self.target_loss` is:
+
 - Initialized to 0.1 (line 391)
 - Multiplied by 0.8 after each cascade (line 872)
 - Reset to 0.1 on full reset (line 982)
@@ -168,16 +173,20 @@ The candidate pool simulation is cosmetic -- it populates the candidate pool pan
 ### 7. History Records Manipulated vs. True Values
 
 The loss value recorded in history at line 829:
+
 ```python
 self.network.history["train_loss"].append(loss)
 ```
+
 ...uses the `loss` variable returned from `_simulate_training_step()`, which is the **real MSE** computed at line 703-704:
+
 ```python
 mse = ((predictions - self.network.train_y) ** 2).mean()
 self.current_loss = float(mse)
 ```
 
 This is the true network performance metric. The history does NOT record the inflated `current_loss * 1.5` value because:
+
 1. The `loss` local variable is captured from `_simulate_training_step()` return at line 817
 2. The inflation at line 871 modifies `self.current_loss` but NOT the local `loss` variable
 3. History append at line 829 uses the local `loss` (which was set before the cascade addition code runs)

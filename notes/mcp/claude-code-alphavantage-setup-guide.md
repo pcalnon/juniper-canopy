@@ -11,6 +11,7 @@ claude mcp add -t http alphavantage https://mcp.alphavantage.co/mcp?apikey=YOUR_
 ### Local server setup
 
 **Maybe not the curl pipe to shell crazyness**
+
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
@@ -19,7 +20,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 claude mcp add alphavantage -- uvx av-mcp YOUR_API_KEY
 ```
 
-## Examples:
+## Examples
 
 ### Remote Connection Example
 

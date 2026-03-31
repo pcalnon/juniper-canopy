@@ -22,6 +22,7 @@ The demo performs **exactly one output gradient step per epoch** inside `_simula
 ### Evidence from Code
 
 **Demo** (`demo_mode.py` lines 681-713, 816-817):
+
 ```python
 def _simulate_training_step(self) -> Tuple[float, float]:
     # Perform an actual weight update (full-batch, inline)
@@ -29,9 +30,11 @@ def _simulate_training_step(self) -> Tuple[float, float]:
         self.network.train_output_step()    # <-- ONE step
     # ... compute metrics ...
 ```
+
 The training loop calls this once per epoch iteration. After that single step, it records the loss, checks convergence, and potentially triggers cascade addition.
 
 **Reference** (`cascade_correlation.py` lines 1141-1145, 1304):
+
 ```python
 # fit() -- initial output training
 train_loss = self.train_output_layer(x_train, y_train, max_epochs)  # max_epochs defaults to 1000
@@ -40,6 +43,7 @@ train_loss = self.train_output_layer(x_train, y_train, max_epochs)  # max_epochs
 for epoch in range(epochs):   # epochs = 1000 (from _PROJECT_MODEL_OUTPUT_EPOCHS)
     # ... gradient step ...
 ```
+
 The reference trains the output layer for `_PROJECT_MODEL_OUTPUT_EPOCHS = 1000` full gradient steps before returning. After `fit()` calls `train_output_layer()`, it then enters `grow_network()` which also calls `train_output_layer()` for 1000 steps each time a unit is added.
 
 ### Mathematical Impact
@@ -72,6 +76,7 @@ When a new hidden unit is installed, the demo **warm-starts** the output layer b
 ### Evidence from Code
 
 **Demo** (`demo_mode.py` lines 223-237):
+
 ```python
 # Expand output layer to accommodate new hidden unit (warm-start)
 old_layer = self.output_layer
@@ -84,6 +89,7 @@ with torch.no_grad():
 ```
 
 **Reference** (`cascade_correlation.py` lines 2822-2836):
+
 ```python
 # Ensure new weights have requires_grad=True
 self.output_weights = torch.randn(new_input_size, self.output_size, requires_grad=True) * 0.1
@@ -122,6 +128,7 @@ The demo triggers cascade addition based on **loss stagnation over a 10-epoch sl
 ### Evidence from Code
 
 **Demo** (`demo_mode.py` lines 751-780):
+
 ```python
 def _should_add_cascade_unit(self) -> bool:
     # ...
@@ -135,6 +142,7 @@ def _should_add_cascade_unit(self) -> bool:
 ```
 
 **Reference** (`cascade_correlation.py` lines 2959-2976):
+
 ```python
 for epoch in range(max_epochs):
     residual_error = self._calculate_residual_error_safe(x_train, y_train)
@@ -143,6 +151,7 @@ for epoch in range(max_epochs):
     if training_results.best_candidate.get_correlation() < self.correlation_threshold:
         break   # Stop growing -- no useful candidate found
 ```
+
 The reference's `grow_network()` loop: at each iteration, it computes residual error, trains a full candidate pool, checks if the best candidate exceeds the correlation threshold (0.0005), and only then installs it. Output layer convergence is implicit because `train_output_layer()` ran for 1000 epochs before `grow_network()` was called, and again for 1000 epochs after each unit is added.
 
 ### Mathematical Impact
@@ -182,6 +191,7 @@ In contrast, the reference computes residual error at the TOP of each `grow_netw
 ### Evidence from Code
 
 **Demo** (`demo_mode.py` lines 816-865):
+
 ```python
 # STEP 1: Single training step
 loss, accuracy = self._simulate_training_step()
@@ -195,6 +205,7 @@ if self._should_add_cascade_unit():
 ```
 
 **Reference** (`cascade_correlation.py` lines 2959-2998):
+
 ```python
 for epoch in range(max_epochs):
     # STEP 1: Compute fresh residual (output already converged from last round)
@@ -238,6 +249,7 @@ After installing a hidden unit, the demo artificially manipulates `self.current_
 ### Evidence from Code
 
 **Demo** (`demo_mode.py` lines 870-872):
+
 ```python
 # Reset loss target to simulate retraining
 self.current_loss = min(1.0, self.current_loss * 1.5)
@@ -245,6 +257,7 @@ self.target_loss *= 0.8
 ```
 
 Meanwhile, `self.current_loss` is also being set from actual predictions in `_simulate_training_step()` (lines 703-704):
+
 ```python
 mse = ((predictions - self.network.train_y) ** 2).mean()
 self.current_loss = float(mse)

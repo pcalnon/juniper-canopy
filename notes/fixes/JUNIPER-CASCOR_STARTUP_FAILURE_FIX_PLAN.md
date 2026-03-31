@@ -69,6 +69,7 @@ try (bash) → init.conf → juniper_cascor.conf (sets JUNIPER_DATA_URL)
 #### Fix 3A — Pre-flight check in `main.py` (Primary Fix)
 
 Add a connectivity check early in `main()` that:
+
 - Reads `JUNIPER_DATA_URL` from environment
 - Validates it is set (fail fast with `ConfigurationError` if missing)
 - Performs an HTTP health check (`GET /v1/health`)

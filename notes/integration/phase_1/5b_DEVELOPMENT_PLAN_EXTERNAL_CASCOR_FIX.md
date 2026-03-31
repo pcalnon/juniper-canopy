@@ -206,6 +206,7 @@ coherent change.
 2. **`src/backend/cascor_service_adapter.py`** — Fix `_ServiceTrainingMonitor`:
 
    - `is_training` property (line 60-66):
+
      ```python
      @property
      def is_training(self) -> bool:
@@ -220,6 +221,7 @@ coherent change.
      ```
 
    - `get_current_metrics` (line 68-72):
+
      ```python
      def get_current_metrics(self) -> Dict[str, Any]:
          try:
@@ -231,6 +233,7 @@ coherent change.
      ```
 
    - `get_recent_metrics` (line 74-79):
+
      ```python
      def get_recent_metrics(self, count: int = 100) -> list:
          try:
@@ -272,6 +275,7 @@ fixes ISS-1.
 1. **`src/backend/service_backend.py`** — Replace `get_status()`:
 
    The current implementation (line 100-101) does:
+
    ```python
    def get_status(self) -> Dict[str, Any]:
        return self._adapter.get_training_status()
@@ -374,6 +378,7 @@ cleanup pass. This minimizes the blast radius and keeps the fix focused.
 1. **`src/backend/state_sync.py`** — Fix `sync()` method (lines 57-65):
 
    Current code reads wrong nesting:
+
    ```python
    state.is_training = status_response.get("is_training", False)
    data = status_response.get("data", {})
@@ -383,6 +388,7 @@ cleanup pass. This minimizes the blast radius and keeps the fix focused.
    ```
 
    Fix to navigate real cascor structure:
+
    ```python
    # Unwrap ResponseEnvelope
    data = status_response.get("data", status_response)
@@ -428,11 +434,13 @@ cleanup pass. This minimizes the blast radius and keeps the fix focused.
 2. **`src/backend/state_sync.py`** — Fix metrics history parsing (line ~89-93):
 
    Current code:
+
    ```python
    state.metrics_history = history_response.get("data", {}).get("history", [])
    ```
 
    Fix:
+
    ```python
    data = history_response.get("data", history_response)
    if isinstance(data, list):
@@ -478,6 +486,7 @@ map from the forward map. This fixes ISS-2.
 1. **`src/backend/cascor_service_adapter.py`** — Fix param maps:
 
    Current forward map (lines 322-330):
+
    ```python
    _CANOPY_TO_CASCOR_PARAM_MAP = {
        "nn_learning_rate": "learning_rate",
@@ -494,6 +503,7 @@ map from the forward map. This fixes ISS-2.
    to `cn_training_convergence_threshold` instead of `nn_growth_convergence_threshold`.
 
    Fix: **Generate reverse map from forward map:**
+
    ```python
    _CASCOR_TO_CANOPY_PARAM_MAP = {v: k for k, v in _CANOPY_TO_CASCOR_PARAM_MAP.items()}
    ```
@@ -543,6 +553,7 @@ format. This fixes RC-5 at the systemic level.
    | `get_topology()` | Graph-oriented (layers/nodes/connections) | Weight-oriented (hidden_units array, output_weights) |
 
 2. **Add helper method** to fake client for consistency:
+
    ```python
    def _success_response(self, data: Any) -> dict:
        return {
@@ -602,6 +613,7 @@ Fix dataset and topology format translation. This fixes ISS-4 partially.
 1. **`src/backend/cascor_service_adapter.py`** — Add dataset normalization:
 
    Map cascor metadata keys to canopy's expected format:
+
    ```python
    @staticmethod
    def _normalize_dataset(data: dict) -> dict:
@@ -661,22 +673,26 @@ pytest tests/ -v -k "dataset or topology"
 #### Automated Tests
 
 1. **Run full canopy test suite** (demo mode, no cascor needed):
+
    ```bash
    cd /home/pcalnon/Development/python/Juniper/juniper-canopy/src
    pytest tests/ -v --tb=short
    ```
 
 2. **Run characterization tests** (Phase 0 tests should now all pass):
+
    ```bash
    pytest tests/unit/test_response_normalization.py -v
    ```
 
 3. **Run canopy test suite with coverage**:
+
    ```bash
    pytest tests/ --cov=. --cov-report=term-missing
    ```
 
 4. **Run cascor regression tests** (verify no upstream breakage):
+
    ```bash
    cd /home/pcalnon/Development/python/Juniper/juniper-cascor/src/tests
    conda activate JuniperCascor
@@ -684,6 +700,7 @@ pytest tests/ -v -k "dataset or topology"
    ```
 
 5. **Run cascor-client tests** (if FakeCascorClient was updated):
+
    ```bash
    cd /home/pcalnon/Development/python/Juniper/juniper-cascor-client
    pytest tests/ -v

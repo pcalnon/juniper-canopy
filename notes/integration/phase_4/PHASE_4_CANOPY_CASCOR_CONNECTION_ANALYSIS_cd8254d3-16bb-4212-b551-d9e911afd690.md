@@ -224,6 +224,7 @@ def _to_dashboard_metric(flat: dict) -> dict:
 **Apply in**: `_ServiceTrainingMonitor.get_recent_metrics()` and `get_current_metrics()`, wrapping results after `_normalize_metric()`.
 
 **Advantages** (synthesized from all proposals):
+
 - Single transformation point — all metrics pass through one function
 - Preserves the existing normalization layer separation of concerns
 - Dashboard code untouched — no changes to 9+ MetricsPanel locations
@@ -232,6 +233,7 @@ def _to_dashboard_metric(flat: dict) -> dict:
 - Minimal blast radius
 
 **Risks**:
+
 - LOW: Must preserve falsy-but-valid values (epoch=0, loss=0.0) — `_first_defined()` helper already handles this
 - LOW: `network_topology` dict in service mode would only have `hidden_units`, missing `input_units` and `output_units` — but dashboard currently only reads `hidden_units`
 

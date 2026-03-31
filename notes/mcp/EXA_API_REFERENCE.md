@@ -70,6 +70,7 @@ claude mcp add --transport http exa "https://mcp.exa.ai/mcp?exaApiKey=${EXA_API_
 | Highlights | `"highlights": {"max_characters": 2000}` | Snippets, summaries, lower cost |
 
 **Token usage warning:** Using `text: true` (full page text) can significantly increase token count. Mitigate with:
+
 - `max_characters` limit: `"text": {"max_characters": 10000}`
 - Use `highlights` instead if you don't need contiguous text
 
@@ -169,7 +170,7 @@ if response.stop_reason == "tool_use":
 
 ## Resources
 
-- Docs: https://exa.ai/docs
-- Dashboard: https://dashboard.exa.ai
-- API Status: https://status.exa.ai
-- Full MCP docs: https://docs.exa.ai/reference/exa-mcp
+- Docs: <https://exa.ai/docs>
+- Dashboard: <https://dashboard.exa.ai>
+- API Status: <https://status.exa.ai>
+- Full MCP docs: <https://docs.exa.ai/reference/exa-mcp>

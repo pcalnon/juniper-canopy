@@ -427,7 +427,7 @@ Items that improve code quality, CI/CD reliability, or developer experience.
 
 **Validation Note**: `src/constants.py` has been deleted from the codebase but stale `.pyc` files remain and CLAUDE.md still references `Constants` classes extensively.
 
-> Audit note (2026-03-15): AGENTS.md references now correct (canopy_constants.py). Only stale .pyc files remain in src/__pycache__/.
+> Audit note (2026-03-15): AGENTS.md references now correct (canopy_constants.py). Only stale .pyc files remain in src/**pycache**/.
 
 **Estimated Scope**: Small-Medium (documentation and file cleanup)
 **Files**: `CLAUDE.md`, stale `__pycache__` files

@@ -130,15 +130,18 @@ rate_limit_enabled: bool = False
 Add tests that detect these specific regressions:
 
 **Test 1: CSP allows Bootstrap CDN** (`src/tests/regression/test_csp_bootstrap_cdn.py`)
+
 - Verify that the CSP header in responses to `/dashboard/` includes `cdn.jsdelivr.net` in `style-src`
 - Verify that `dbc.themes.BOOTSTRAP` URL domain is allowed by the CSP
 
 **Test 2: Rate limiting disabled by default** (`src/tests/regression/test_rate_limit_default.py`)
+
 - Verify that `get_rate_limiter()` returns a disabled limiter when no env vars are set
 - Verify that the settings default for `rate_limit_enabled` is `False`
 - Verify that enabling via env var still works
 
 **Test 3: Dashboard status bar handles API responses** (extend existing tests)
+
 - Verify status bar callback does not show "Error" when API is healthy
 - Verify graceful handling when API returns 429
 

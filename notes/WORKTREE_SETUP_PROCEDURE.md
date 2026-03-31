@@ -32,6 +32,7 @@ git status
 ```
 
 **GATE**: Working tree must be clean. If dirty, stash or commit before proceeding:
+
 ```bash
 git stash push -m "WIP before worktree setup"
 ```
