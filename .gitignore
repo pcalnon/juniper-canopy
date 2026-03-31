@@ -46,6 +46,21 @@ cascor_snapshot_*.h5
 */encryption.bash
 */external_drive.readme
 
+# Cache files
+__pycache__
+__pycache__/
+__pycache__/*
+**/__pycache__
+**/__pycache__/
+**/__pycache__/*
+
+.mypy_cache
+.mypy_cache/
+.mypy_cache/*
+**/.mypy_cache
+**/.mypy_cache/
+**/.mypy_cache/*
+
 # Node artifact files
 node_modules/
 dist/

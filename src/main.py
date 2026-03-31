@@ -54,6 +54,7 @@ from a2wsgi import WSGIMiddleware
 # from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.requests import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 # from dash import html, dcc
@@ -66,7 +67,7 @@ from backend.training_monitor import TrainingState  # trunk-ignore(ruff/E402)
 from canopy_constants import TrainingConstants  # trunk-ignore(ruff/E402)
 from communication.websocket_manager import websocket_manager
 from frontend.dashboard_manager import DashboardManager
-from health import DependencyStatus, ReadinessResponse, probe_dependency
+from health import DependencyStatus, ErrorResponse, ReadinessResponse, probe_dependency
 from logger.logger import (
     get_system_logger,
     get_training_logger,
@@ -262,6 +263,16 @@ if settings.metrics_enabled:
 
     app.add_middleware(PrometheusMiddleware, service_name="juniper-canopy", namespace="juniper_canopy")
     app.mount("/metrics", get_prometheus_app())
+
+
+# Global exception handler for unhandled errors — returns standardized ErrorResponse.
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Catch-all handler returning a consistent JSON error shape."""
+    system_logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}")
+    body = ErrorResponse(error="Internal server error", detail=str(exc), status_code=500)
+    return JSONResponse(body.model_dump(), status_code=500)
+
 
 # Backend is initialized in lifespan via create_backend() factory
 backend = None

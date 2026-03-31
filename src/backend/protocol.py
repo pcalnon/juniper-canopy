@@ -41,7 +41,77 @@
 #
 #####################################################################################################################################################################################################
 
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, TypedDict, runtime_checkable
+
+# ---------------------------------------------------------------------------
+# TypedDict return types
+# ---------------------------------------------------------------------------
+
+
+class StatusResult(TypedDict, total=False):
+    """Return type for get_status()."""
+
+    is_training: bool
+    is_running: bool
+    is_paused: bool
+    completed: bool
+    failed: bool
+    fsm_status: str
+    phase: str
+    current_epoch: int
+    hidden_units: int
+    network_connected: bool
+    monitoring_active: bool
+    input_size: int
+    output_size: int
+    learning_rate: float
+    max_hidden_units: int
+    max_epochs: int
+
+
+class MetricsResult(TypedDict, total=False):
+    """Return type for get_metrics()."""
+
+    epoch: int
+    loss: float
+    accuracy: float
+    learning_rate: float
+    timestamp: str
+    validation_loss: float
+    validation_accuracy: float
+    hidden_units: int
+    cascade_phase: str
+    train_loss: float
+    train_accuracy: float
+    val_loss: float
+    val_accuracy: float
+
+
+class TopologyResult(TypedDict, total=False):
+    """Return type for get_network_topology()."""
+
+    nodes: List[Dict[str, Any]]
+    connections: List[Dict[str, Any]]
+    input_units: int
+    output_units: int
+    hidden_units: int
+    cascade_history: List[Dict[str, Any]]
+    current_epoch: int
+    hidden_units_count: int
+
+
+class DatasetResult(TypedDict, total=False):
+    """Return type for get_dataset()."""
+
+    num_samples: int
+    num_features: int
+    num_classes: int
+    inputs: Any
+    targets: Any
+    loaded: bool
+    train_samples: int
+    test_samples: int
+    dataset_name: str
 
 
 @runtime_checkable
@@ -82,15 +152,15 @@ class BackendProtocol(Protocol):
 
     # --- Status and metrics ---
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> StatusResult:
         """Return current backend status (training state, phase, epoch, etc.)."""
         ...
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> MetricsResult:
         """Return current training metrics snapshot."""
         ...
 
-    def get_metrics_history(self, count: int = 100) -> List[Dict[str, Any]]:
+    def get_metrics_history(self, count: int = 100) -> List[MetricsResult]:
         """Return recent training metrics history."""
         ...
 
@@ -100,7 +170,7 @@ class BackendProtocol(Protocol):
         """Return True if a neural network exists."""
         ...
 
-    def get_network_topology(self) -> Optional[Dict[str, Any]]:
+    def get_network_topology(self) -> Optional[TopologyResult]:
         """Return network topology for visualization, or None."""
         ...
 
@@ -108,7 +178,7 @@ class BackendProtocol(Protocol):
         """Return network statistics (weights, unit counts, etc.)."""
         ...
 
-    def get_dataset(self) -> Optional[Dict[str, Any]]:
+    def get_dataset(self) -> Optional[DatasetResult]:
         """Return current dataset info, or None."""
         ...
 

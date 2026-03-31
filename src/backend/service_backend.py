@@ -43,6 +43,7 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from backend.cascor_service_adapter import CascorServiceAdapter, _first_defined
+from backend.protocol import DatasetResult, MetricsResult, StatusResult, TopologyResult
 from backend.state_sync import CascorStateSync, SyncedState
 
 logger = logging.getLogger("juniper_canopy.backend.service_backend")
@@ -97,7 +98,7 @@ class ServiceBackend:
 
     # --- Status and metrics ---
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> StatusResult:
         raw = self._adapter.get_training_status()
         if not isinstance(raw, dict) or not CascorServiceAdapter._is_cascor_nested(raw):
             return raw
@@ -135,10 +136,10 @@ class ServiceBackend:
             "max_epochs": ts.get("max_epochs", 0),
         }
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> MetricsResult:
         return self._adapter.training_monitor.get_current_metrics()
 
-    def get_metrics_history(self, count: int = 100) -> List[Dict[str, Any]]:
+    def get_metrics_history(self, count: int = 100) -> List[MetricsResult]:
         return self._adapter.training_monitor.get_recent_metrics(count)
 
     # --- Network and data ---
@@ -146,13 +147,13 @@ class ServiceBackend:
     def has_network(self) -> bool:
         return self._adapter.network is not None
 
-    def get_network_topology(self) -> Optional[Dict[str, Any]]:
+    def get_network_topology(self) -> Optional[TopologyResult]:
         return self._adapter.extract_network_topology()
 
     def get_network_stats(self) -> Dict[str, Any]:
         return self._adapter.get_network_data()
 
-    def get_dataset(self) -> Optional[Dict[str, Any]]:
+    def get_dataset(self) -> Optional[DatasetResult]:
         raw = self._adapter.get_dataset_info()
         if not raw:
             return None

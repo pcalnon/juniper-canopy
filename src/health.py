@@ -7,9 +7,17 @@ services, and a dependency probe utility for readiness checks.
 import time
 import urllib.request
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
+
+
+class ErrorResponse(BaseModel):
+    """Standardized error response model for all Canopy REST endpoints."""
+
+    error: str
+    detail: Optional[str] = None
+    status_code: int
 
 
 class DependencyStatus(BaseModel):

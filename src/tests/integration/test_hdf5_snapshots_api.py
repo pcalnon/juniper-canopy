@@ -233,18 +233,34 @@ class TestSnapshotsWithRealFiles:
             yield tmpdir
 
     @pytest.mark.integration
-    @pytest.mark.skip(reason="Requires patching global _snapshots_dir which is complex in demo mode")
-    def test_lists_real_hdf5_files(self, temp_snapshot_dir):
+    def test_lists_real_hdf5_files(self, client, temp_snapshot_dir, monkeypatch):
         """Should list real HDF5 files from snapshot directory."""
-        # This test would require mocking the global _snapshots_dir
-        # Skipped for now as demo mode returns mock data
-        pass
+        import main
+
+        monkeypatch.setattr(main, "_snapshots_dir", temp_snapshot_dir)
+        monkeypatch.setattr(type(main.backend), "backend_type", property(lambda self: "service"))
+
+        response = client.get("/api/v1/snapshots")
+
+        assert response.status_code == 200
+        data = response.json()
+        names = [s["name"] for s in data["snapshots"]]
+        assert "snapshot_001.h5" in names
+        assert "snapshot_002.hdf5" in names
 
     @pytest.mark.integration
-    @pytest.mark.skip(reason="Requires patching global _snapshots_dir which is complex in demo mode")
-    def test_ignores_non_hdf5_files(self, temp_snapshot_dir):
+    def test_ignores_non_hdf5_files(self, client, temp_snapshot_dir, monkeypatch):
         """Should ignore non-HDF5 files in snapshot directory."""
-        pass
+        import main
+
+        monkeypatch.setattr(main, "_snapshots_dir", temp_snapshot_dir)
+        monkeypatch.setattr(type(main.backend), "backend_type", property(lambda self: "service"))
+
+        response = client.get("/api/v1/snapshots")
+
+        data = response.json()
+        names = [s["name"] for s in data["snapshots"]]
+        assert "not_a_snapshot.txt" not in names
 
 
 # =============================================================================

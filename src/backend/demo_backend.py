@@ -44,6 +44,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
 
+from backend.protocol import DatasetResult, MetricsResult, StatusResult, TopologyResult
 from demo_mode import DemoMode
 
 logger = logging.getLogger("juniper_canopy.backend.demo_backend")
@@ -84,7 +85,7 @@ class DemoBackend:
 
     # --- Status and metrics ---
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> StatusResult:
         state = self._demo.get_current_state()
         network = self._demo.get_network()
         fsm = self._demo.state_machine.get_state_summary()
@@ -112,10 +113,10 @@ class DemoBackend:
                     state[k] = ts[k]
         return state
 
-    def get_metrics(self) -> Dict[str, Any]:
+    def get_metrics(self) -> MetricsResult:
         return self._demo.get_current_state()
 
-    def get_metrics_history(self, count: int = 100) -> List[Dict[str, Any]]:
+    def get_metrics_history(self, count: int = 100) -> List[MetricsResult]:
         history = self._demo.get_metrics_history()
         if count and len(history) > count:
             return history[-count:]
@@ -126,7 +127,7 @@ class DemoBackend:
     def has_network(self) -> bool:
         return self._demo.get_network() is not None
 
-    def get_network_topology(self) -> Optional[Dict[str, Any]]:
+    def get_network_topology(self) -> Optional[TopologyResult]:
         network = self._demo.get_network()
         if network is None:
             return None
@@ -179,7 +180,7 @@ class DemoBackend:
             **state,
         }
 
-    def get_dataset(self) -> Optional[Dict[str, Any]]:
+    def get_dataset(self) -> Optional[DatasetResult]:
         dataset = self._demo.get_dataset()
         if dataset is None:
             return None

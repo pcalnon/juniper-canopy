@@ -45,6 +45,7 @@ from typing import Any, Dict, List, Tuple
 # from plotly.subplots import make_subplots
 import dash
 import dash_bootstrap_components as dbc
+import numpy as np
 import plotly.graph_objects as go
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
@@ -1306,6 +1307,16 @@ class MetricsPanel(BaseComponent):
         # Create plots
         loss_fig = self._create_loss_plot(plot_data, theme)
         accuracy_fig = self._create_accuracy_plot(plot_data, theme)
+
+        # Apply adaptive Y-axis scaling for loss chart (percentile-based clamping)
+        # Only apply when the user hasn't manually zoomed the Y-axis
+        user_has_y_zoom = view_state and view_state.get("loss_yaxis_range")
+        if not user_has_y_zoom:
+            loss_values = [m.get("metrics", {}).get("loss", 0) for m in plot_data]
+            if len(loss_values) >= 2:
+                p95 = float(np.percentile(loss_values, 95))
+                if p95 > 0:
+                    loss_fig.update_layout(yaxis_range=[0, p95 * 1.1])
 
         # Apply stored view state to preserve user's zoom/pan
         if view_state:

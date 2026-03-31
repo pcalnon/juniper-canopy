@@ -121,7 +121,7 @@ class TrainingConstants:
     MAX_RANDOM_CANDIDATES_COUNT: Final[int] = 20
 
     # ── Cascade correlation internal constants (Phase 6 — matches CasCor reference) ──
-    CASCADE_COOLDOWN_EPOCHS: Final[int] = 50
+    CASCADE_COOLDOWN_EPOCHS: Final[int] = 50  # DEPRECATED: only used by _should_add_cascade_unit (not production loop)
     CANDIDATE_POOL_SIZE: Final[int] = 32  # internal CasCor constant, distinct from UI DEFAULT_CANDIDATE_POOL_SIZE
     CANDIDATE_TRAINING_STEPS: Final[int] = 600
     CANDIDATE_PATIENCE: Final[int] = 30

@@ -142,9 +142,10 @@ skips = ["B101", "B311"]
 # ==========================================
 [tool.mypy]
 python_version = "3.14"
+mypy_path = "src"
+explicit_package_bases = true
 warn_return_any = false
 warn_unused_configs = true
-ignore_missing_imports = true
 no_strict_optional = true
 exclude = [
     "^data/",
@@ -157,10 +158,28 @@ exclude = [
 [[tool.mypy.overrides]]
 module = [
     "dash.*",
+    "dash_bootstrap_components.*",
     "plotly.*",
     "fastapi.*",
     "uvicorn.*",
     "starlette.*",
+    "requests.*",
+    "yaml.*",
+    "scipy.*",
+    "colorama.*",
+    "psutil.*",
+    "networkx.*",
+    "redis.*",
+    "cassandra.*",
+    "h5py.*",
+    "a2wsgi.*",
+    "nest_asyncio.*",
+    "websockets.*",
+    "werkzeug.*",
+    "flask.*",
+    "torch.*",
+    "juniper_data_client.*",
+    "juniper_cascor_client.*",
 ]
 ignore_missing_imports = true
 

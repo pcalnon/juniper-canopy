@@ -271,18 +271,37 @@ class TestErrorHandling:
 
 
 class TestCORS:
-    """Test CORS headers."""
+    """Test CORS headers using a standalone FastAPI app with CORS enabled."""
 
-    @pytest.mark.skip(reason="TestClient bypasses CORS middleware - headers not visible in tests")
-    def test_cors_headers_present(self, client):
-        """CORS headers should be present."""
-        response = client.get("/api/health")
+    @pytest.fixture(scope="class")
+    def cors_client(self):
+        """TestClient for a minimal FastAPI app with CORSMiddleware enabled."""
+        from fastapi import FastAPI
+        from starlette.middleware.cors import CORSMiddleware as _CORSMiddleware
+
+        cors_app = FastAPI()
+        cors_app.add_middleware(
+            _CORSMiddleware,
+            allow_origins=["*"],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+        @cors_app.get("/api/health")
+        async def health():
+            return {"status": "healthy"}
+
+        with TestClient(cors_app) as c:
+            yield c
+
+    def test_cors_headers_present(self, cors_client):
+        """CORS headers should be present when Origin is sent."""
+        response = cors_client.get("/api/health", headers={"Origin": "http://example.com"})
         assert "access-control-allow-origin" in response.headers
 
-    @pytest.mark.skip(reason="TestClient bypasses CORS middleware - headers not visible in tests")
-    def test_cors_allows_all_origins(self, client):
+    def test_cors_allows_all_origins(self, cors_client):
         """CORS should allow all origins."""
-        response = client.get("/api/health")
+        response = cors_client.get("/api/health", headers={"Origin": "http://example.com"})
         assert response.headers.get("access-control-allow-origin") == "*"
 
     def test_preflight_request(self, client):

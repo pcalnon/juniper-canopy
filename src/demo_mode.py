@@ -556,9 +556,11 @@ class DemoMode:
 
         self.max_epochs = int(training_defaults.get("epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS))
         self.max_hidden_units = int(training_defaults.get("hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS))
-        self.cascade_every = _settings.demo_cascade_every  # Deprecated: only used by _should_add_cascade_unit
-
-        # Convergence-based cascade addition parameters
+        # DEPRECATED: cascade_every, convergence_enabled, convergence_threshold, and
+        # _cascade_cooldown_remaining are vestigial from the pre-Phase-6C epoch-based
+        # cascade trigger (_should_add_cascade_unit). The production _training_loop uses
+        # candidate correlation threshold instead. Retained for test compatibility.
+        self.cascade_every = _settings.demo_cascade_every
         self.convergence_enabled = TrainingConstants.DEFAULT_CONVERGENCE_ENABLED
         self.convergence_threshold = TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD
         self._cascade_cooldown_remaining = 0
@@ -920,6 +922,9 @@ class DemoMode:
                 f1_score=f1,
             )
 
+    # DEPRECATED: _should_add_cascade_unit is not called by the production
+    # _training_loop (which uses candidate correlation threshold). Retained
+    # for test compatibility only.
     def _should_add_cascade_unit(self) -> bool:
         """
         Determine if a cascade unit should be added using convergence-based criteria.
@@ -1294,6 +1299,7 @@ class DemoMode:
         self.network.output_optimizer = torch.optim.Adam(self.network.output_layer.parameters(), lr=self.network.learning_rate)
 
         # Restore convergence parameters, cooldown, and spiral rotations to defaults
+        # (DEPRECATED — convergence fields retained for test compatibility only)
         self.convergence_enabled = TrainingConstants.DEFAULT_CONVERGENCE_ENABLED
         self.convergence_threshold = TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD
         self._cascade_cooldown_remaining = 0
