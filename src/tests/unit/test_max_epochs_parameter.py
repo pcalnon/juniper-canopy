@@ -11,6 +11,7 @@
 # Copyright:     Copyright (c) 2024-2025 Paul Calnon
 # Description:   Unit tests for Maximum Total Epochs parameter enhancement
 #####################################################################
+"""Unit tests for Maximum Total Epochs parameter enhancement in training controls."""
 
 import pytest
 

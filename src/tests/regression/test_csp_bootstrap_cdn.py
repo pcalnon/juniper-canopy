@@ -30,6 +30,7 @@
 #     dash-bootstrap-components and does not regress to blocking it.
 #
 #####################################################################################################################################################################################################
+"""Regression tests for CSP compatibility with dash-bootstrap-components CDN stylesheet loading."""
 
 from urllib.parse import urlparse
 

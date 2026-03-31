@@ -23,6 +23,8 @@ def _fake_client_or_skip(scenario: str):
 
 
 class TestCascorStateSync:
+    """Tests for CasCor backend state synchronization into Canopy training state."""
+
     def test_sync_idle_state(self):
         from backend.state_sync import CascorStateSync
 

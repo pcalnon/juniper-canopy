@@ -16,6 +16,8 @@
 #    Integration tests for GET /api/state endpoint.
 #
 #####################################################################################################################################################################################################
+"""Integration tests for GET /api/state endpoint."""
+
 import pytest
 from fastapi.testclient import TestClient
 

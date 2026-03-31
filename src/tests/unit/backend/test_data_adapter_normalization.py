@@ -17,6 +17,8 @@
 #    These methods handle key naming differences between Cascor backend and Canopy frontend.
 #
 #####################################################################################################################################################################################################
+"""Unit tests for DataAdapter.normalize_metrics() and denormalize_metrics() key mapping."""
+
 # Notes:
 #
 # Integration Issue 4.3: Data Format Alignment

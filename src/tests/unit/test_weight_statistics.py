@@ -16,6 +16,8 @@
 #    Unit tests for weight statistics computation module.
 #
 #####################################################################################################################################################################################################
+"""Unit tests for weight statistics computation module."""
+
 import numpy as np
 import pytest
 

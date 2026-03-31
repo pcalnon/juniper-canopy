@@ -16,6 +16,8 @@
 #    Unit tests for WebSocket message builder functions.
 #
 #####################################################################################################################################################################################################
+"""Unit tests for WebSocket message builder functions."""
+
 import time
 
 import pytest  # noqa: F401

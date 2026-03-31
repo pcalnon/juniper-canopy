@@ -11,6 +11,7 @@
 # Copyright:     Copyright (c) 2024-2025 Paul Calnon
 # Description:   Unit tests for constants module
 #####################################################################
+"""Unit tests for constants module — training, dashboard, and server constants."""
 
 import pytest  # noqa: F401 - needed for test fixtures
 

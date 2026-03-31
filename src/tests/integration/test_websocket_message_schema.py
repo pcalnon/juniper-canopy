@@ -16,6 +16,8 @@
 #    Integration tests verifying WebSocket messages follow standardized schema.
 #
 #####################################################################################################################################################################################################
+"""Integration tests for WebSocket message schema standardization."""
+
 import contextlib
 
 import pytest

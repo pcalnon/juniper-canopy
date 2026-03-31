@@ -82,6 +82,8 @@ def _make_track_args(**overrides):
 
 
 class TestToggleNnGrowthInputs:
+    """Tests for neural network growth input toggle callbacks."""
+
     def test_preset_epochs_mode(self, dm):
         result = dm._toggle_nn_growth_inputs_handler("preset_epochs")
         assert result == (False, True)
@@ -92,6 +94,8 @@ class TestToggleNnGrowthInputs:
 
 
 class TestToggleCnTrainingInputs:
+    """Tests for candidate network training input toggle callbacks."""
+
     def test_preset_epochs_mode(self, dm):
         result = dm._toggle_cn_training_inputs_handler("preset_epochs")
         assert result == (False, True)
@@ -102,6 +106,8 @@ class TestToggleCnTrainingInputs:
 
 
 class TestToggleCnSelectionInputs:
+    """Tests for candidate network selection input toggle callbacks."""
+
     def test_top_tier_mode(self, dm):
         result = dm._toggle_cn_selection_inputs_handler("top_tier")
         assert result == (False, True)
@@ -116,6 +122,8 @@ class TestToggleCnSelectionInputs:
 
 
 class TestToggleCnMultiCandidateSubgroup:
+    """Tests for multi-candidate subgroup toggle callbacks."""
+
     def test_unchecked_disables_all(self, dm):
         style, top_disabled, random_disabled = dm._toggle_cn_multi_candidate_subgroup_handler([])
         assert top_disabled is True
@@ -128,6 +136,8 @@ class TestToggleCnMultiCandidateSubgroup:
 
 
 class TestSyncMultiNodeCheckboxes:
+    """Tests for multi-node checkbox synchronization callbacks."""
+
     def test_cn_checked_forces_nn_on(self, dm):
         with patch("frontend.dashboard_manager.dash.callback_context") as mock_ctx:
             mock_ctx.triggered = [{"prop_id": "cn-multi-candidate-checkbox.value"}]
@@ -151,6 +161,8 @@ class TestSyncMultiNodeCheckboxes:
 
 
 class TestTrackParamChanges:
+    """Tests for parameter change tracking callbacks."""
+
     def test_no_changes_returns_disabled(self, dm):
         args = _make_track_args()
         disabled, status = dm._track_param_changes_handler(**args)
@@ -191,6 +203,8 @@ class TestTrackParamChanges:
 
 
 class TestApplyParameters:
+    """Tests for apply-parameters button callback."""
+
     def test_no_clicks_returns_no_update(self, dm):
         args = [None] + [None] * 22
         result = dm._apply_parameters_handler(*args)
@@ -264,6 +278,8 @@ class TestApplyParameters:
 
 
 class TestInitParamsFromBackend:
+    """Tests for initial parameter loading from backend."""
+
     def test_already_initialized_returns_no_update(self, dm):
         result = dm._init_params_from_backend_handler(1, {"some": "data"})
         assert len(result) == 23

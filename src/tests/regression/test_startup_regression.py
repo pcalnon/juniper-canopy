@@ -38,6 +38,7 @@
 #     ST-1 through ST-6 initial implementation
 #
 #####################################################################################################################################################################################################
+"""Regression tests for JuniperCanopy startup failure caused by JuniperData integration refactor."""
 
 from unittest.mock import MagicMock, patch
 

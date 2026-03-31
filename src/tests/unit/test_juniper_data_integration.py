@@ -23,6 +23,8 @@
 #    and DataAdapter backward-compatible interface.
 #
 #####################################################################################################################################################################################################
+"""Unit tests for JuniperData integration — client exceptions, URL enforcement, dataset schema, and DataAdapter."""
+
 # Notes:
 #    These tests validate:
 #    - CAN-INT-001: Shared JuniperDataClient exception hierarchy and package exports

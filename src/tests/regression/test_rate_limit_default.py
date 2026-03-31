@@ -32,6 +32,7 @@
 #     clears the cached _rate_limiter singleton.
 #
 #####################################################################################################################################################################################################
+"""Regression tests for rate limiting default configuration."""
 
 import pytest
 

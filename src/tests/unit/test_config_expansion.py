@@ -26,6 +26,8 @@
 #     EO-* tests verify shell-only variable exclusion and valid CASCOR_ overrides.
 #
 #####################################################################################################################################################################################################
+"""Tests for ConfigManager ${VAR:default} expansion and shell-only variable exclusion."""
+
 # References:
 #     src/config_manager.py - _expand_env_vars, _apply_environment_overrides
 #

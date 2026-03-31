@@ -17,6 +17,8 @@
 #    Tests the full flow: click → disable → send command → receive ack → re-enable
 #
 #####################################################################################################################################################################################################
+"""Integration tests for button state management — click → disable → command → ack → re-enable flow."""
+
 import time
 from unittest.mock import patch
 

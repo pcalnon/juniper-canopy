@@ -17,6 +17,8 @@
 #    endpoints are accessible and functional when running in demo mode.
 #
 #####################################################################################################################################################################################################
+"""Integration tests for demo mode API and WebSocket endpoints."""
+
 import contextlib
 import os
 import time

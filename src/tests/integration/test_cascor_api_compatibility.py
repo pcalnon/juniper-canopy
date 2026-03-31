@@ -24,6 +24,8 @@
 #    - Metrics format alignment
 #
 #####################################################################################################################################################################################################
+"""Integration tests for API/Protocol compatibility between Juniper Cascor backend and Canopy frontend."""
+
 # Notes:
 #
 # Integration Issue 4.2: API/Protocol Compatibility Verification

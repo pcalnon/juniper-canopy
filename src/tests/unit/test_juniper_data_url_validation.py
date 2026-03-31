@@ -24,6 +24,7 @@
 #    env var via a field_validator fallback.
 #
 #####################################################################################################################################################################################################
+"""Unit tests for JUNIPER_DATA_URL validation via Pydantic Settings."""
 
 import os
 from unittest.mock import patch

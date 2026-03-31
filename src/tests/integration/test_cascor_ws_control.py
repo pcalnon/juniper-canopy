@@ -44,6 +44,7 @@
 # COMPLETED:
 #
 #####################################################################################################################################################################################################
+"""Integration tests for WebSocket control command dispatch to CascorIntegration in real backend mode."""
 
 import json
 from unittest.mock import MagicMock, patch

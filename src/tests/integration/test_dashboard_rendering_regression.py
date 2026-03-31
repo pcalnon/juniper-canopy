@@ -17,6 +17,8 @@
 #    Tests for Issue: Dashboard image rendering regression.
 #
 #####################################################################################################################################################################################################
+"""Regression tests for dashboard plot rendering across all tabs."""
+
 from pathlib import Path
 
 import pytest  # noqa: F401

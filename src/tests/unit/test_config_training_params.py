@@ -11,6 +11,7 @@
 # Copyright:     Copyright (c) 2024-2025 Paul Calnon
 # Description:   Unit tests for training parameter configuration
 #####################################################################
+"""Unit tests for training parameter configuration management."""
 
 import pytest
 

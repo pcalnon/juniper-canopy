@@ -18,6 +18,8 @@
 #    duplicate commands are prevented.
 #
 #####################################################################################################################################################################################################
+"""Performance tests for button responsiveness and duplicate command prevention."""
+
 import contextlib
 import time
 from unittest.mock import patch

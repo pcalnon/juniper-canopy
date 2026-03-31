@@ -5,6 +5,8 @@ from juniper_cascor_client.testing import FakeCascorClient
 
 
 class TestServiceModeControls:
+    """Tests for training control dispatch in service backend mode."""
+
     def test_pause_training_delegates_to_cascor(self):
         from backend.cascor_service_adapter import CascorServiceAdapter
         from backend.service_backend import ServiceBackend

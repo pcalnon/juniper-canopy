@@ -16,6 +16,8 @@
 #    Integration tests for /api/network/stats endpoint.
 #
 #####################################################################################################################################################################################################
+"""Integration tests for /api/network/stats endpoint."""
+
 from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np

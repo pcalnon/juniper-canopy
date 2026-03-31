@@ -30,6 +30,7 @@
 #     boundary plot to show "No boundary data available" even during training.
 #
 #####################################################################################################################################################################################################
+"""Regression tests for topology and decision boundary data contract between DemoBackend and frontend."""
 
 import numpy as np
 import pytest

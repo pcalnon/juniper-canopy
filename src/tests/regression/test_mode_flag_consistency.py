@@ -46,6 +46,7 @@
 #     CF-1-1 through CF-1-6 initial implementation
 #
 #####################################################################################################################################################################################################
+"""Regression tests for CASCOR_DEMO_MODE flag consistency between shell and Python."""
 
 import os
 

@@ -8,6 +8,8 @@ from discovery import discover_cascor, probe_cascor_url
 
 
 class TestProbeCascorUrl:
+    """Tests for probe_cascor_url() HTTP probe function."""
+
     async def test_probe_returns_true_on_healthy_response(self):
         mock_response = MagicMock()
         mock_response.status = 200
@@ -48,6 +50,8 @@ class TestProbeCascorUrl:
 
 
 class TestDiscoverCascor:
+    """Tests for discover_cascor() async discovery function."""
+
     async def test_returns_url_when_cascor_found(self):
         with patch("discovery.probe_cascor_url", new_callable=AsyncMock, return_value=True):
             result = await discover_cascor(host="localhost", ports=[8200])

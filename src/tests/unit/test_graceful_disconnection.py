@@ -7,6 +7,8 @@ from juniper_cascor_client.testing import FakeCascorClient
 
 
 class TestGracefulDisconnection:
+    """Tests for graceful WebSocket disconnection handling."""
+
     @pytest.mark.asyncio
     async def test_shutdown_does_not_call_stop_training(self):
         from backend.cascor_service_adapter import CascorServiceAdapter

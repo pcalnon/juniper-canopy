@@ -40,6 +40,7 @@
 #     DS-1 through DS-6 initial implementation
 #
 #####################################################################################################################################################################################################
+"""Regression tests for demo startup script error handling and dependency check validation."""
 
 import re
 from pathlib import Path

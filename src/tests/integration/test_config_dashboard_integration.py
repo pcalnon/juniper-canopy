@@ -11,6 +11,7 @@
 # Copyright:     Copyright (c) 2024-2025 Paul Calnon
 # Description:   Integration tests for configuration and dashboard
 #####################################################################
+"""Integration tests for configuration and dashboard constant integration."""
 
 import pytest
 

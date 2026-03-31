@@ -6,6 +6,8 @@ from juniper_cascor_client.testing import FakeCascorClient
 
 
 class TestAttachToExisting:
+    """Tests for non-destructive attachment to existing CasCor training sessions."""
+
     def test_attach_returns_true_when_network_exists(self):
         from backend.cascor_service_adapter import CascorServiceAdapter
 

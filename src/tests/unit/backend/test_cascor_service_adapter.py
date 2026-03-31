@@ -248,6 +248,8 @@ class TestNetworkProperty:
 
 
 class TestTrainingStopRequested:
+    """Tests for training stop request flag in CascorServiceAdapter."""
+
     def test_always_false(self, adapter):
         assert adapter._training_stop_requested is False
 
@@ -455,6 +457,8 @@ class TestShutdown:
 
 
 class TestWebSocketURL:
+    """Tests for WebSocket URL construction from service URL."""
+
     def test_ws_url_from_http(self):
         adapter = CascorServiceAdapter(service_url="http://localhost:8200")
         assert adapter._ws_url == "ws://localhost:8200"

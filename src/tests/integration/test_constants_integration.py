@@ -11,6 +11,7 @@
 # Copyright:     Copyright (c) 2024-2025 Paul Calnon
 # Description:   Integration tests for constants usage across components
 #####################################################################
+"""Integration tests for constants usage across components."""
 
 import pytest
 

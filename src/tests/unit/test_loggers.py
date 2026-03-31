@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Smoke test script for logger initialization — system, training, and UI loggers."""
+
 import sys
 
 from config_manager import get_config

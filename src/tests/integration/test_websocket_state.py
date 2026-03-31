@@ -17,6 +17,8 @@
 #    Tests verify the state message sent on /ws/training connect.
 #
 #####################################################################################################################################################################################################
+"""Integration tests for WebSocket state message broadcasts on /ws/training connect."""
+
 import time
 
 import pytest

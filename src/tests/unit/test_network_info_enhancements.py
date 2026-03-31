@@ -11,6 +11,7 @@
 # Copyright:     Copyright (c) 2024-2025 Paul Calnon
 # Description:   Unit tests for Network Information enhancements (collapsible sections)
 #####################################################################
+"""Unit tests for Network Information collapsible sections enhancement."""
 
 import pytest
 
