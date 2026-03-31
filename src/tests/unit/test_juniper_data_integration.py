@@ -467,6 +467,152 @@ class TestDemoModeDatasetSchema:
 
 
 # ---------------------------------------------------------------------------
+# Step 2.4: NPZ dtype and shape validation
+# ---------------------------------------------------------------------------
+
+
+class TestNpzValidation:
+    """Test DemoMode._validate_npz_arrays() for dtype, shape, and consistency (Step 2.4)."""
+
+    @pytest.mark.unit
+    def test_valid_npz_passes(self):
+        from demo_mode import DemoMode
+
+        npz = {
+            "X_full": np.zeros((100, 2), dtype=np.float32),
+            "y_full": np.zeros((100, 2), dtype=np.float32),
+        }
+        DemoMode._validate_npz_arrays(npz)
+
+    @pytest.mark.unit
+    def test_missing_x_full_raises(self):
+        from demo_mode import DemoMode
+
+        npz = {"y_full": np.zeros((10, 2), dtype=np.float32)}
+        with pytest.raises(ValueError, match="missing required keys"):
+            DemoMode._validate_npz_arrays(npz)
+
+    @pytest.mark.unit
+    def test_missing_y_full_raises(self):
+        from demo_mode import DemoMode
+
+        npz = {"X_full": np.zeros((10, 2), dtype=np.float32)}
+        with pytest.raises(ValueError, match="missing required keys"):
+            DemoMode._validate_npz_arrays(npz)
+
+    @pytest.mark.unit
+    def test_wrong_dtype_raises(self):
+        from demo_mode import DemoMode
+
+        npz = {
+            "X_full": np.zeros((10, 2), dtype=np.float64),
+            "y_full": np.zeros((10, 2), dtype=np.float32),
+        }
+        with pytest.raises(ValueError, match="float32"):
+            DemoMode._validate_npz_arrays(npz)
+
+    @pytest.mark.unit
+    def test_1d_input_raises(self):
+        from demo_mode import DemoMode
+
+        npz = {
+            "X_full": np.zeros(10, dtype=np.float32),
+            "y_full": np.zeros((10, 2), dtype=np.float32),
+        }
+        with pytest.raises(ValueError, match="2D"):
+            DemoMode._validate_npz_arrays(npz)
+
+    @pytest.mark.unit
+    def test_sample_count_mismatch_raises(self):
+        from demo_mode import DemoMode
+
+        npz = {
+            "X_full": np.zeros((10, 2), dtype=np.float32),
+            "y_full": np.zeros((20, 2), dtype=np.float32),
+        }
+        with pytest.raises(ValueError, match="Sample count mismatch"):
+            DemoMode._validate_npz_arrays(npz)
+
+    @pytest.mark.unit
+    def test_non_numpy_raises(self):
+        from demo_mode import DemoMode
+
+        npz = {"X_full": [[1, 2]], "y_full": [[0, 1]]}
+        with pytest.raises(ValueError, match="numpy arrays"):
+            DemoMode._validate_npz_arrays(npz)
+
+
+# ---------------------------------------------------------------------------
+# Step 2.3: JuniperData error handling — user-friendly messages
+# ---------------------------------------------------------------------------
+
+
+class TestUserFriendlyDataErrors:
+    """Test DemoMode._user_friendly_data_error() exception mapping (Step 2.3)."""
+
+    @pytest.mark.unit
+    def test_connection_error_message(self):
+        from juniper_data_client.exceptions import JuniperDataConnectionError
+
+        from demo_mode import DemoMode
+
+        msg = DemoMode._user_friendly_data_error(JuniperDataConnectionError("refused"))
+        assert "Cannot connect" in msg
+
+    @pytest.mark.unit
+    def test_timeout_error_message(self):
+        from juniper_data_client.exceptions import JuniperDataTimeoutError
+
+        from demo_mode import DemoMode
+
+        msg = DemoMode._user_friendly_data_error(JuniperDataTimeoutError("timeout"))
+        assert "timed out" in msg
+
+    @pytest.mark.unit
+    def test_not_found_error_message(self):
+        from juniper_data_client.exceptions import JuniperDataNotFoundError
+
+        from demo_mode import DemoMode
+
+        msg = DemoMode._user_friendly_data_error(JuniperDataNotFoundError("404"))
+        assert "not found" in msg
+
+    @pytest.mark.unit
+    def test_validation_error_message(self):
+        from juniper_data_client.exceptions import JuniperDataValidationError
+
+        from demo_mode import DemoMode
+
+        msg = DemoMode._user_friendly_data_error(JuniperDataValidationError("bad"))
+        assert "invalid parameters" in msg
+
+    @pytest.mark.unit
+    def test_configuration_error_message(self):
+        from juniper_data_client.exceptions import JuniperDataConfigurationError
+
+        from demo_mode import DemoMode
+
+        msg = DemoMode._user_friendly_data_error(JuniperDataConfigurationError("no url"))
+        assert "misconfigured" in msg
+
+    @pytest.mark.unit
+    def test_generic_client_error_message(self):
+        from juniper_data_client.exceptions import JuniperDataClientError
+
+        from demo_mode import DemoMode
+
+        msg = DemoMode._user_friendly_data_error(JuniperDataClientError("generic"))
+        assert "service error" in msg
+
+    @pytest.mark.unit
+    def test_unknown_exception_message(self):
+        from demo_mode import DemoMode
+
+        msg = DemoMode._user_friendly_data_error(RuntimeError("crash"))
+        assert "Unexpected error" in msg
+
+
+# ---------------------------------------------------------------------------
 # CAN-INT-003: DataAdapter canonical schema
 # ---------------------------------------------------------------------------
 

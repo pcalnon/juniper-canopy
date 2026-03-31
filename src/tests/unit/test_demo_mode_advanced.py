@@ -7,6 +7,7 @@ import time
 
 import pytest
 
+from canopy_constants import TrainingConstants
 from demo_mode import DemoMode, get_demo_mode
 
 
@@ -141,8 +142,8 @@ class TestDemoModeThreadSafety:
         time.sleep(2.0)  # Let it accumulate many metrics
         demo.stop()
 
-        # Should be bounded by maxlen=1000
-        assert len(demo.get_metrics_history()) <= 1000
+        # Should be bounded by METRICS_HISTORY_MAXLEN
+        assert len(demo.get_metrics_history()) <= TrainingConstants.METRICS_HISTORY_MAXLEN
 
     def test_network_history_bounded(self):
         """Test that network history doesn't grow unbounded."""
@@ -154,7 +155,7 @@ class TestDemoModeThreadSafety:
         # Network history should also be bounded
         network = demo.get_network()
         for key in network.history:
-            assert len(network.history[key]) <= 1000
+            assert len(network.history[key]) <= TrainingConstants.METRICS_HISTORY_MAXLEN
 
 
 class TestDemoModeSingleton:

@@ -129,6 +129,7 @@ class TrainingConstants:
     OUTPUT_RETRAIN_EMIT_EVERY: Final[int] = 50
     OUTPUT_WEIGHT_INIT_STD: Final[float] = 0.1
     MIN_CANDIDATE_CORRELATION: Final[float] = 0.01
+    METRICS_HISTORY_MAXLEN: Final[int] = 10000
 
 
 class DashboardConstants:

@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import torch
 
+from canopy_constants import TrainingConstants
 from demo_mode import DemoMode, MockCascorNetwork, get_demo_mode
 
 
@@ -90,10 +91,11 @@ class TestMockCascorNetwork:
         """Test that history collections are bounded deques."""
         network = MockCascorNetwork()
 
-        for i in range(1500):
+        overflow_count = TrainingConstants.METRICS_HISTORY_MAXLEN + 500
+        for i in range(overflow_count):
             network.history["train_loss"].append(float(i))
 
-        assert len(network.history["train_loss"]) == 1000
+        assert len(network.history["train_loss"]) == TrainingConstants.METRICS_HISTORY_MAXLEN
 
 
 class TestDemoModeEnvironmentVariables:

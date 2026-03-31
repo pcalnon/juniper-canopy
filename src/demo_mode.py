@@ -93,10 +93,10 @@ class MockCascorNetwork:
 
         # Training history (use deque with maxlen to prevent unbounded growth)
         self.history = {
-            "train_loss": deque(maxlen=1000),
-            "train_accuracy": deque(maxlen=1000),
-            "val_loss": deque(maxlen=1000),
-            "val_accuracy": deque(maxlen=1000),
+            "train_loss": deque(maxlen=TrainingConstants.METRICS_HISTORY_MAXLEN),
+            "train_accuracy": deque(maxlen=TrainingConstants.METRICS_HISTORY_MAXLEN),
+            "val_loss": deque(maxlen=TrainingConstants.METRICS_HISTORY_MAXLEN),
+            "val_accuracy": deque(maxlen=TrainingConstants.METRICS_HISTORY_MAXLEN),
         }
 
         # Output layer: nn.Linear + Adam optimizer (matching CasCor)
@@ -577,7 +577,7 @@ class DemoMode:
         self.cascade_events = []
 
         # Metrics buffer for realistic curves
-        self.metrics_history = deque(maxlen=1000)
+        self.metrics_history = deque(maxlen=TrainingConstants.METRICS_HISTORY_MAXLEN)
 
         self.logger.info(f"DemoMode configuration: " f"max_epochs={self.max_epochs}, " f"max_hidden_units={self.max_hidden_units}, " f"cascade_every={self.cascade_every}, " f"update_interval={self.update_interval}s")
 
@@ -726,6 +726,70 @@ class DemoMode:
         self.logger.info(f"Fetching dataset from JuniperData at {juniper_data_url} (n_rotations={n_rotations})")
         return self._generate_spiral_dataset_from_juniper_data(n_samples, juniper_data_url, algorithm=algorithm, n_rotations=n_rotations)
 
+    @staticmethod
+    def _validate_npz_arrays(npz_data: Dict[str, Any]) -> None:
+        """Validate NPZ dataset arrays for dtype, shape, and consistency.
+
+        Args:
+            npz_data: Dictionary of numpy arrays from NPZ artifact.
+
+        Raises:
+            ValueError: If validation fails (wrong dtype, shape, or mismatched counts).
+        """
+        inputs = npz_data.get("X_full")
+        targets = npz_data.get("y_full")
+
+        if inputs is None or targets is None:
+            raise ValueError("JuniperData artifact missing required keys: X_full, y_full")
+
+        if not isinstance(inputs, np.ndarray) or not isinstance(targets, np.ndarray):
+            raise ValueError(f"Expected numpy arrays, got X_full={type(inputs).__name__}, y_full={type(targets).__name__}")
+
+        if inputs.dtype != np.float32:
+            raise ValueError(f"X_full dtype must be float32, got {inputs.dtype}")
+
+        if inputs.ndim != 2:
+            raise ValueError(f"X_full must be 2D (samples, features), got shape {inputs.shape}")
+
+        if inputs.shape[0] != targets.shape[0]:
+            raise ValueError(f"Sample count mismatch: X_full has {inputs.shape[0]} samples, y_full has {targets.shape[0]}")
+
+    @staticmethod
+    def _user_friendly_data_error(exc: Exception) -> str:
+        """Map JuniperData client exceptions to user-friendly messages.
+
+        Args:
+            exc: The caught exception.
+
+        Returns:
+            A human-readable error message.
+        """
+        from juniper_data_client.exceptions import (
+            JuniperDataClientError,
+            JuniperDataConfigurationError,
+            JuniperDataConnectionError,
+            JuniperDataNotFoundError,
+            JuniperDataTimeoutError,
+            JuniperDataValidationError,
+        )
+
+        error_map = {
+            JuniperDataConnectionError: "Cannot connect to JuniperData service. Verify JUNIPER_DATA_URL and that the service is running.",
+            JuniperDataTimeoutError: "JuniperData request timed out. The service may be overloaded or unreachable.",
+            JuniperDataNotFoundError: "Requested dataset or artifact not found on JuniperData service.",
+            JuniperDataValidationError: "JuniperData rejected the request due to invalid parameters.",
+            JuniperDataConfigurationError: "JuniperData client is misconfigured. Check JUNIPER_DATA_URL.",
+        }
+
+        for exc_type, message in error_map.items():
+            if isinstance(exc, exc_type):
+                return message
+
+        if isinstance(exc, JuniperDataClientError):
+            return f"JuniperData service error: {exc}"
+
+        return f"Unexpected error communicating with JuniperData: {exc}"
+
     def _generate_spiral_dataset_from_juniper_data(
         self,
         n_samples: int,
@@ -735,6 +799,9 @@ class DemoMode:
     ) -> Dict[str, Any]:
         """
         Generate spiral dataset using JuniperData service.
+
+        Includes structured logging for API interactions, exception-to-user-message
+        mapping, and NPZ dtype/shape validation.
 
         Args:
             n_samples: Number of total samples (split across classes)
@@ -747,8 +814,10 @@ class DemoMode:
 
         Raises:
             JuniperDataClientError: If the JuniperData request fails
+            ValueError: If NPZ validation fails
         """
         from juniper_data_client import JuniperDataClient
+        from juniper_data_client.exceptions import JuniperDataClientError
 
         client = JuniperDataClient(base_url=juniper_data_url)
 
@@ -763,22 +832,38 @@ class DemoMode:
         if algorithm is not None:
             params["algorithm"] = algorithm
 
-        response = client.create_dataset(
-            generator="spiral",
-            params=params,
-            persist=True,
-        )
+        try:
+            t0 = time.monotonic()
+            response = client.create_dataset(
+                generator="spiral",
+                params=params,
+                persist=True,
+            )
+            create_ms = (time.monotonic() - t0) * 1000
+            self.logger.info("JuniperData create_dataset completed", extra={"latency_ms": f"{create_ms:.1f}", "url": juniper_data_url})
+        except JuniperDataClientError as exc:
+            msg = self._user_friendly_data_error(exc)
+            self.logger.error("JuniperData create_dataset failed: %s (raw: %s)", msg, exc, extra={"url": juniper_data_url})
+            raise
 
         dataset_id = response.get("dataset_id")
         if not dataset_id:
             raise ValueError("JuniperData response missing dataset_id")
 
-        npz_data = client.download_artifact_npz(dataset_id)
+        try:
+            t0 = time.monotonic()
+            npz_data = client.download_artifact_npz(dataset_id)
+            download_ms = (time.monotonic() - t0) * 1000
+            self.logger.info("JuniperData download_artifact_npz completed", extra={"latency_ms": f"{download_ms:.1f}", "dataset_id": dataset_id})
+        except JuniperDataClientError as exc:
+            msg = self._user_friendly_data_error(exc)
+            self.logger.error("JuniperData download_artifact_npz failed: %s (raw: %s)", msg, exc, extra={"dataset_id": dataset_id})
+            raise
 
-        inputs = npz_data.get("X_full")
-        targets_one_hot = npz_data.get("y_full")
-        if inputs is None or targets_one_hot is None:
-            raise ValueError("JuniperData artifact missing required keys: X_full, y_full")
+        self._validate_npz_arrays(npz_data)
+
+        inputs = npz_data["X_full"]
+        targets_one_hot = npz_data["y_full"]
 
         targets = np.argmax(targets_one_hot, axis=1).astype(np.float32)
 
