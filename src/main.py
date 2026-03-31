@@ -472,8 +472,9 @@ async def websocket_control_endpoint(websocket: WebSocket):
 
 @app.get("/health", deprecated=True)
 @app.get("/api/health", deprecated=True)
-async def health_check_deprecated():
+async def health_check_deprecated(request: Request):
     """Health check endpoint (deprecated — use /v1/health instead)."""
+    system_logger.warning(f"Deprecated health endpoint {request.url.path} called — use /v1/health, /v1/health/live, or /v1/health/ready instead")
     return {
         "status": "healthy",
         "timestamp": time.time(),

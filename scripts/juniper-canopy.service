@@ -1,0 +1,51 @@
+# =============================================================================
+# juniper-canopy — systemd User Service Unit
+#
+# Installation:
+#   mkdir -p ~/.config/systemd/user
+#   cp scripts/juniper-canopy.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable juniper-canopy
+#   systemctl --user start juniper-canopy
+#
+# Logs:
+#   journalctl --user -u juniper-canopy -f
+#
+# Prerequisites:
+#   - conda environment "JuniperPython" with all dependencies installed
+#   - .env file configured in the project root (or use .env.prod as template)
+#   - JuniperData service running at JUNIPER_CANOPY_JUNIPER_DATA_URL
+# =============================================================================
+
+[Unit]
+Description=Juniper Canopy — CasCor Monitoring Dashboard
+Documentation=https://github.com/pcalnon/juniper-canopy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Development/python/Juniper/juniper-canopy/src
+EnvironmentFile=-%h/Development/python/Juniper/juniper-canopy/.env
+ExecStart=/opt/miniforge3/envs/JuniperPython/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8050
+Restart=on-failure
+RestartSec=5
+
+# Resource limits
+MemoryMax=2G
+CPUQuota=200%%
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/Development/python/Juniper/juniper-canopy/logs
+ReadWritePaths=%h/Development/python/Juniper/juniper-canopy/snapshots
+ReadWritePaths=%h/Development/python/Juniper/juniper-canopy/conf/layouts
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+
+[Install]
+WantedBy=default.target
