@@ -96,6 +96,7 @@ class NetworkVisualizer(BaseComponent):
         Returns:
             Dash Div containing the network visualization
         """
+        is_dark = False
         return html.Div(
             [
                 # Header with controls
@@ -179,7 +180,7 @@ class NetworkVisualizer(BaseComponent):
                     style={
                         "marginBottom": "15px",
                         "padding": "10px",
-                        "backgroundColor": "#f8f9fa",
+                        "backgroundColor": "#2d2d2d" if is_dark else "#f8f9fa",
                         "borderRadius": "3px",
                     },
                 ),

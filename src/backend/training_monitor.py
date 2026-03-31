@@ -426,21 +426,27 @@ class TrainingMonitor:
             event_type: Type of event ('epoch_start', 'epoch_end', etc.)
             callback: Callback function
         """
-        if event_type in self.callbacks:
-            self.callbacks[event_type].append(callback)
-            self.logger.debug(f"Registered callback for {event_type}")
-        else:
-            self.logger.warning(f"Unknown event type: {event_type}")
+        with self.lock:
+            if event_type in self.callbacks:
+                self.callbacks[event_type].append(callback)
+                self.logger.debug(f"Registered callback for {event_type}")
+            else:
+                self.logger.warning(f"Unknown event type: {event_type}")
 
     def _trigger_callbacks(self, event_type: str, **kwargs):
         """
         Trigger all callbacks for an event type.
 
+        Takes a snapshot of the callback list under lock to avoid races
+        with concurrent register_callback() calls.
+
         Args:
             event_type: Type of event
             **kwargs: Event data
         """
-        for callback in self.callbacks.get(event_type, []):
+        with self.lock:
+            callbacks = list(self.callbacks.get(event_type, []))
+        for callback in callbacks:
             try:
                 callback(**kwargs)
             except Exception as e:
@@ -504,19 +510,22 @@ class TrainingMonitor:
             validation_loss: Validation loss (optional)
             validation_accuracy: Validation accuracy (optional)
         """
-        # Create metrics object
+        # Snapshot state under lock, then create metrics outside lock
+        with self.lock:
+            hidden_units = self.current_hidden_units
+            cascade_phase = self.current_phase
+
         metrics = self.data_adapter.extract_training_metrics(
             epoch=epoch,
             loss=loss,
             accuracy=accuracy,
             learning_rate=learning_rate,
-            hidden_units=self.current_hidden_units,
-            cascade_phase=self.current_phase,
+            hidden_units=hidden_units,
+            cascade_phase=cascade_phase,
             validation_loss=validation_loss,
             validation_accuracy=validation_accuracy,
         )
 
-        # Add to buffer
         with self.lock:
             self.metrics_buffer.append(metrics)
             if len(self.metrics_buffer) > self.max_buffer_size:
@@ -536,12 +545,13 @@ class TrainingMonitor:
         """
         with self.lock:
             self.current_hidden_units += 1
+            total_hidden = self.current_hidden_units
 
         cascade_event = {
             "timestamp": datetime.now().isoformat(),
             "hidden_unit_index": hidden_unit_index,
             "correlation": correlation,
-            "total_hidden_units": self.current_hidden_units,
+            "total_hidden_units": total_hidden,
         }
 
         self.logger.info(f"Cascade unit {hidden_unit_index} added " f"(correlation={correlation:.4f})")

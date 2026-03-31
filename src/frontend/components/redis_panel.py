@@ -42,6 +42,8 @@ import dash_bootstrap_components as dbc
 import requests
 from dash import dcc, html
 
+from settings import get_settings
+
 from ..base_component import BaseComponent
 
 DEFAULT_REFRESH_INTERVAL_MS = 5000
@@ -95,7 +97,8 @@ class RedisPanel(BaseComponent):
         Returns:
             Full API URL
         """
-        base_url = self.config.get("api_base_url", "http://localhost:8050")
+        _settings = get_settings()
+        base_url = self.config.get("api_base_url", f"http://127.0.0.1:{_settings.server.port}")
         return f"{base_url}{path}"
 
     def get_layout(self) -> html.Div:

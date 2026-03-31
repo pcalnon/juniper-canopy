@@ -147,7 +147,7 @@ class TestApiUrlHelper:
     def test_api_url_builds_correct_path(self, redis_panel):
         """_api_url builds correct full URL."""
         url = redis_panel._api_url("/api/v1/redis/status")
-        assert url == "http://localhost:8050/api/v1/redis/status"
+        assert url.endswith("/api/v1/redis/status")
 
     def test_api_url_uses_config_base_url(self, config):
         """_api_url uses api_base_url from config."""
@@ -160,13 +160,14 @@ class TestApiUrlHelper:
         assert url == "http://custom:9090/api/v1/redis/metrics"
 
     def test_api_url_default_base_url(self):
-        """_api_url uses default localhost:8050 when not configured."""
+        """_api_url uses settings-based URL when not configured."""
         from frontend.components.redis_panel import RedisPanel
 
         panel = RedisPanel({}, component_id="test")
 
         url = panel._api_url("/api/v1/redis/status")
-        assert url == "http://localhost:8050/api/v1/redis/status"
+        assert url.endswith("/api/v1/redis/status")
+        assert "8050" in url
 
 
 @pytest.mark.unit

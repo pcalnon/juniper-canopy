@@ -44,13 +44,12 @@ import requests
 from dash import callback_context, dcc, html
 from dash.dependencies import ALL, Input, Output, State
 
+from settings import get_settings
+
 from ..base_component import BaseComponent
 
 # Default refresh interval in milliseconds
 DEFAULT_REFRESH_INTERVAL_MS = 10000  # 10 seconds
-
-# Default API base URL
-DEFAULT_API_BASE_URL = "http://localhost:8050"
 
 
 class HDF5SnapshotsPanel(BaseComponent):
@@ -74,6 +73,9 @@ class HDF5SnapshotsPanel(BaseComponent):
             component_id: Unique identifier for this component
         """
         super().__init__(config, component_id)
+
+        _settings = get_settings()
+        self._api_base_url = f"http://127.0.0.1:{_settings.server.port}"
 
         # Refresh interval: config > env > default
         if "refresh_interval" in config:
@@ -361,7 +363,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 params["description"] = description
 
             resp = requests.post(
-                f"{DEFAULT_API_BASE_URL}/api/v1/snapshots",
+                f"{self._api_base_url}/api/v1/snapshots",
                 params=params,
                 timeout=self.api_timeout + 3,  # Allow extra time for creation
             )
@@ -416,7 +418,7 @@ class HDF5SnapshotsPanel(BaseComponent):
         """
         self.logger.info("Fetching snapshots from API")
         resp = requests.get(
-            "http://localhost:8050/api/v1/snapshots",
+            f"{self._api_base_url}/api/v1/snapshots",
             timeout=self.api_timeout,
         )
         if resp.status_code != 200:
@@ -442,7 +444,7 @@ class HDF5SnapshotsPanel(BaseComponent):
 
         try:
             resp = requests.get(
-                f"http://localhost:8050/api/v1/snapshots/{snapshot_id}",
+                f"{self._api_base_url}/api/v1/snapshots/{snapshot_id}",
                 timeout=self.api_timeout,
             )
             if resp.status_code != 200:
@@ -476,7 +478,7 @@ class HDF5SnapshotsPanel(BaseComponent):
 
         try:
             resp = requests.post(
-                f"{DEFAULT_API_BASE_URL}/api/v1/snapshots/{snapshot_id}/restore",
+                f"{self._api_base_url}/api/v1/snapshots/{snapshot_id}/restore",
                 timeout=self.api_timeout + 5,  # Allow extra time for restore
             )
 
@@ -518,7 +520,7 @@ class HDF5SnapshotsPanel(BaseComponent):
         """
         try:
             resp = requests.get(
-                f"{DEFAULT_API_BASE_URL}/api/v1/snapshots/history",
+                f"{self._api_base_url}/api/v1/snapshots/history",
                 params={"limit": limit},
                 timeout=self.api_timeout,
             )

@@ -41,6 +41,8 @@ from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 from juniper_cascor_client import CascorTrainingStream, JuniperCascorClient, JuniperCascorClientError
 
+from backend.circuit_breaker import CircuitBreaker
+
 # from juniper_cascor_client.juniper_cascor_client.client import CascorTrainingStream, JuniperCascorClient
 # from juniper_cascor_client.client import CascorTrainingStream, JuniperCascorClient
 
@@ -150,6 +152,7 @@ class CascorServiceAdapter:
         self._relay_task: Optional[asyncio.Task] = None
         self._attached_to_existing: bool = False
         self._state_update_callback: Optional[Callable] = None
+        self._circuit = CircuitBreaker(name="cascor", failure_threshold=5, recovery_timeout=60.0)
 
         # Derive WebSocket URL from HTTP URL
         ws_url = service_url.replace("http://", "ws://").replace("https://", "wss://")
@@ -545,14 +548,20 @@ class CascorServiceAdapter:
 
     def get_training_status(self) -> Dict[str, Any]:
         try:
-            return self._unwrap_response(self._client.get_training_status())
+            return self._cb.call(
+                lambda: self._unwrap_response(self._client.get_training_status()),
+                fallback=lambda: {"is_training": False, "error": "circuit open"},
+            )
         except JuniperCascorClientError as e:
             logger.error(f"Failed to get training status: {e}")
             return {"is_training": False, "error": str(e)}
 
     def get_network_data(self) -> Dict[str, Any]:
         try:
-            return self._unwrap_response(self._client.get_statistics())
+            return self._cb.call(
+                lambda: self._unwrap_response(self._client.get_statistics()),
+                fallback=lambda: {},
+            )
         except JuniperCascorClientError as e:
             logger.error(f"Failed to get network data: {e}")
             return {}
@@ -631,9 +640,21 @@ class CascorServiceAdapter:
             "connections": connections,
         }
 
+    @property
+    def _cb(self) -> CircuitBreaker:
+        """Lazy circuit breaker accessor (safe for __new__-created instances)."""
+        try:
+            return self._circuit
+        except AttributeError:
+            self._circuit = CircuitBreaker(name="cascor", failure_threshold=5, recovery_timeout=60.0)
+            return self._circuit
+
     def extract_network_topology(self) -> Optional[Dict[str, Any]]:
         try:
-            raw = self._unwrap_response(self._client.get_topology())
+            raw = self._cb.call(
+                lambda: self._unwrap_response(self._client.get_topology()),
+                fallback=lambda: None,
+            )
             if isinstance(raw, dict):
                 return self._transform_topology(raw)
             return raw
@@ -645,7 +666,10 @@ class CascorServiceAdapter:
 
     def get_dataset_info(self, x=None, y=None) -> Optional[Dict[str, Any]]:
         try:
-            return self._unwrap_response(self._client.get_dataset())
+            return self._cb.call(
+                lambda: self._unwrap_response(self._client.get_dataset()),
+                fallback=lambda: None,
+            )
         except Exception:
             return None
 

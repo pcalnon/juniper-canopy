@@ -124,6 +124,7 @@ class MetricsPanel(BaseComponent):
         Returns:
             Dash Div containing the metrics visualization
         """
+        is_dark = False
         return html.Div(
             [
                 # Header
@@ -346,7 +347,7 @@ class MetricsPanel(BaseComponent):
                     style={
                         "marginBottom": "15px",
                         "padding": "10px",
-                        "backgroundColor": "#f8f9fa",
+                        "backgroundColor": "#2d2d2d" if is_dark else "#f8f9fa",
                         "borderRadius": "5px",
                         "display": "none",
                     },
