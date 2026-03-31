@@ -310,10 +310,11 @@ class TestCandidateHyperparameters:
 
         calls = []
         original = network_with_data._train_candidate
+        assert original is not None
 
         def spy(unit, steps=TrainingConstants.CANDIDATE_TRAINING_STEPS, lr=0.01):
             calls.append({"steps": steps, "lr": lr})
-            return original(unit, steps=steps, lr=lr)
+            return 0.5  # dummy correlation — we only care about call args
 
         with patch.object(network_with_data, "_train_candidate", side_effect=spy):
             network_with_data.add_hidden_unit(

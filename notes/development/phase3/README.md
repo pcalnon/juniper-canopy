@@ -308,7 +308,7 @@ Response (404 Not Found):
 
 #### Status, P3-2
 
-**Status:** Not Started
+**Status:** ✅ COMPLETE
 
 ---
 
@@ -396,7 +396,7 @@ Response (200 OK):
 
 #### Status, P3-3
 
-**Status:** Not Started
+**Status:** ✅ COMPLETE
 
 ---
 

@@ -1,0 +1,42 @@
+#####################################################################################################################################################################################################
+# Project:       Juniper
+# Sub-Project:   JuniperCanopy
+# Application:   juniper_canopy
+# File Name:     .flake8
+# Author:        Paul Calnon
+#
+# Date Created:  2026-03-31
+#
+# License:       MIT License
+# Copyright:     Copyright (c) 2024-2026 Paul Calnon
+#
+# Description:
+#    Flake8 configuration reference for Juniper Canopy.
+#
+#    NOTE: This file documents the canonical flake8 settings but is NOT used
+#    directly by the pre-commit hooks. Flake8 does not natively support
+#    per-directory profiles, so the two profiles (strict for src/, relaxed
+#    for src/tests/) are maintained as inline args in .pre-commit-config.yaml.
+#
+#    If flake8 gains per-path overrides, migrate the inline args here.
+#
+# Profiles:
+#    Strict (src/ excluding tests):
+#        max-line-length = 512
+#        extend-ignore = E203,E265,E266,E501,W503,E402,E226,C409,C901,B904,B907
+#        max-complexity = 15
+#        select = B,C,E,F,W,T4,B9
+#
+#    Relaxed (src/tests/):
+#        max-line-length = 512
+#        extend-ignore = E203,E265,E266,E501,W503,E402,E226,C409,C901,B008,B904,B905,B907,F401,S101,S311
+#        max-complexity = 20
+#        select = B,C,E,F,W,T4,B9
+#
+#####################################################################################################################################################################################################
+
+[flake8]
+max-line-length = 512
+extend-ignore = E203,E265,E266,E501,W503,E402,E226,C409,C901,B904,B907
+max-complexity = 15
+select = B,C,E,F,W,T4,B9

@@ -111,7 +111,7 @@ class TestCascorStateSync:
         assert synced.status == "Started"
         assert synced.phase == "output"
         assert synced.current_epoch == 42
-        assert synced.max_epochs == 500
+        assert synced.max_epochs == 1000
         assert isinstance(synced.topology, dict)
         assert len(synced.metrics_history) == 3
 
@@ -143,8 +143,8 @@ class TestCascorStateSync:
                 return {"data": []}
 
         synced = CascorStateSync(MockClient()).sync()
-        assert synced.params["learning_rate"] == 0.01
-        assert synced.params["epochs_max"] == 100
+        assert synced.params["nn_learning_rate"] == 0.01
+        assert synced.params["nn_max_total_epochs"] == 100
         assert "status" not in synced.params
         assert "meta" not in synced.params
         assert "timestamp" not in synced.params
