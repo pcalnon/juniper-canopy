@@ -58,7 +58,9 @@ from .components.decision_boundary import DecisionBoundary
 from .components.hdf5_snapshots_panel import HDF5SnapshotsPanel
 from .components.metrics_panel import MetricsPanel
 from .components.network_visualizer import NetworkVisualizer
+from .components.parameters_panel import ParametersPanel
 from .components.redis_panel import RedisPanel
+from .components.tutorial_panel import TutorialPanel
 from .tooltips import CONTROL_TOOLTIPS
 
 
@@ -187,6 +189,10 @@ class DashboardManager:
         # P3-7: Cassandra Monitoring Panel
         self.cassandra_panel = CassandraPanel(self.config.get("cassandra_panel", {}), component_id="cassandra-panel")
 
+        # Parameters Panel
+        self.parameters_panel = ParametersPanel(self.config.get("parameters_panel", {}), component_id="parameters-panel")
+        self.tutorial_panel = TutorialPanel(self.config.get("tutorial_panel", {}), component_id="tutorial-panel")
+
         # Register components
         self.register_component(self.metrics_panel)
         self.register_component(self.network_visualizer)
@@ -196,6 +202,8 @@ class DashboardManager:
         self.register_component(self.hdf5_snapshots_panel)
         self.register_component(self.redis_panel)
         self.register_component(self.cassandra_panel)
+        self.register_component(self.parameters_panel)
+        self.register_component(self.tutorial_panel)
 
         self.logger.info("All MVP components initialized and registered")
 
@@ -859,6 +867,16 @@ class DashboardManager:
                                             label="About",
                                             tab_id="about",
                                         ),
+                                        dbc.Tab(
+                                            self.parameters_panel.get_layout(),
+                                            label="Parameters",
+                                            tab_id="parameters",
+                                        ),
+                                        dbc.Tab(
+                                            self.tutorial_panel.get_layout(),
+                                            label="Tutorial",
+                                            tab_id="tutorial",
+                                        ),
                                     ],
                                     id="visualization-tabs",
                                     active_tab="metrics",
@@ -877,6 +895,43 @@ class DashboardManager:
                 dcc.Store(id="ws-metrics-buffer", data=[]),
                 # Tooltips for parameter controls
                 *[dbc.Tooltip(text, target=target_id, placement="top") for target_id, text in CONTROL_TOOLTIPS.items()],
+                # Getting Started welcome modal (shows on first visit)
+                dbc.Modal(
+                    [
+                        dbc.ModalHeader(dbc.ModalTitle("Welcome to Juniper Canopy")),
+                        dbc.ModalBody(
+                            [
+                                html.P(
+                                    "Juniper Canopy is a real-time monitoring dashboard for Cascade Correlation " "Neural Network training. Here's how to get started:",
+                                    className="lead",
+                                ),
+                                html.Ol(
+                                    [
+                                        html.Li("Configure parameters in the sidebar (or use defaults)"),
+                                        html.Li("Click Start to begin training"),
+                                        html.Li("Watch metrics, topology, and decision boundaries update live"),
+                                        html.Li("Save snapshots to checkpoint your progress"),
+                                    ]
+                                ),
+                                html.P(
+                                    [
+                                        "See the ",
+                                        html.Strong("Tutorial"),
+                                        " tab for a complete reference guide.",
+                                    ],
+                                    className="text-muted",
+                                ),
+                            ]
+                        ),
+                        dbc.ModalFooter(
+                            dbc.Button("Get Started", id="welcome-modal-close", color="primary"),
+                        ),
+                    ],
+                    id="welcome-modal",
+                    is_open=False,
+                    centered=True,
+                    size="lg",
+                ),
                 # Hidden div to store WebSocket data
                 html.Div(id="websocket-data", style={"display": "none"}),
                 dcc.Store(id="training-control-action", data=None),
@@ -964,6 +1019,33 @@ class DashboardManager:
             """,
             Output("dark-mode-store", "data", allow_duplicate=True),
             Input("dark-mode-store", "data"),
+            prevent_initial_call=True,
+        )
+
+        # ── Welcome modal: show on first visit, dismiss with localStorage ──
+        self.app.clientside_callback(
+            """
+            function(n) {
+                if (!localStorage.getItem('juniper_canopy_welcomed')) {
+                    return true;
+                }
+                return window.dash_clientside.no_update;
+            }
+            """,
+            Output("welcome-modal", "is_open", allow_duplicate=True),
+            Input("params-init-interval", "n_intervals"),
+            prevent_initial_call=True,
+        )
+
+        self.app.clientside_callback(
+            """
+            function(n) {
+                localStorage.setItem('juniper_canopy_welcomed', '1');
+                return false;
+            }
+            """,
+            Output("welcome-modal", "is_open", allow_duplicate=True),
+            Input("welcome-modal-close", "n_clicks"),
             prevent_initial_call=True,
         )
 
@@ -1097,6 +1179,17 @@ class DashboardManager:
             Input("fast-update-interval", "n_intervals"),
             prevent_initial_call=False,
         )
+
+        @self.app.callback(
+            Output("parameters-panel-params-store", "data"),
+            Input("applied-params-store", "data"),
+            dash.dependencies.State("visualization-tabs", "active_tab"),
+        )
+        def update_parameters_panel_store(applied_data, active_tab):
+            """Propagate applied parameters to the parameters panel store."""
+            if not applied_data:
+                return {}
+            return applied_data
 
         @self.app.callback(
             Output("metrics-panel-metrics-store", "data"),

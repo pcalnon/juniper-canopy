@@ -977,6 +977,8 @@ async def get_snapshot_detail(snapshot_id: str):
                     "hidden_units": 0,
                     "created_in_session": True,
                 }
+                if "meta_params" in s:
+                    s_copy["meta_params"] = s["meta_params"]
                 return s_copy
 
         # Then check mock snapshots
@@ -1024,6 +1026,9 @@ async def get_snapshot_detail(snapshot_id: str):
 
         with h5py.File(snapshot_file, "r") as f:
             detail["attributes"] = {k: str(v) for k, v in f.attrs.items()}
+            if "meta_params" in f:
+                mp_group = f["meta_params"]
+                detail["meta_params"] = {k: mp_group.attrs[k] for k in mp_group.attrs.keys()}
     except ImportError:
         system_logger.debug("h5py not available, skipping HDF5 attribute extraction")
     except Exception as e:
@@ -1034,6 +1039,15 @@ async def get_snapshot_detail(snapshot_id: str):
 
 # Session-persistent storage for demo mode snapshots (P3-1)
 _demo_snapshots: list = []
+
+# Meta parameter key prefixes captured in snapshots
+_META_PARAM_PREFIXES = ("nn_", "cn_")
+
+
+def _extract_meta_params() -> dict:
+    """Extract current nn_*/cn_* meta parameters from the backend status."""
+    status = backend.get_status()
+    return {k: v for k, v in status.items() if any(k.startswith(p) for p in _META_PARAM_PREFIXES)}
 
 
 def _log_snapshot_activity(action: str, snapshot_id: str, details: dict = None, message: str = None):
@@ -1102,6 +1116,7 @@ async def create_snapshot(
     # Demo mode: create mock snapshot entry
     if backend.backend_type == "demo":
         size_bytes = 1024 * 1024 + int(now.timestamp()) % (512 * 1024)  # ~1-1.5 MB mock size
+        meta_params = _extract_meta_params()
 
         snapshot = {
             "id": snapshot_id,
@@ -1110,6 +1125,7 @@ async def create_snapshot(
             "size_bytes": size_bytes,
             "description": description or "Demo snapshot (no real HDF5 file)",
             "path": f"{_snapshots_dir}/{snapshot_name}",
+            "meta_params": meta_params,
         }
 
         # Add to session-persistent demo snapshots list
@@ -1154,6 +1170,14 @@ async def create_snapshot(
                         for key, value in training_state.__dict__.items():
                             if not key.startswith("_") and isinstance(value, (int, float, str, bool)):
                                 state_group.attrs[key] = value
+
+                    # Store nn_*/cn_* meta parameters
+                    meta_params = _extract_meta_params()
+                    if meta_params:
+                        mp_group = f.create_group("meta_params")
+                        for key, value in meta_params.items():
+                            if isinstance(value, (int, float, str, bool)):
+                                mp_group.attrs[key] = value
 
             except ImportError as e:
                 raise HTTPException(
@@ -1283,6 +1307,11 @@ async def restore_snapshot(snapshot_id: str):
                     current_step=0,
                 )
 
+            # Restore meta parameters if the snapshot captured them
+            meta_params = snapshot_data.get("meta_params")
+            if meta_params:
+                backend.apply_params(**meta_params)
+
             restored_state = {
                 "snapshot_id": snapshot_id,
                 "restored_at": f"{now.isoformat()}Z",
@@ -1290,6 +1319,8 @@ async def restore_snapshot(snapshot_id: str):
                 "current_epoch": 0,
                 "training_status": "Stopped",
             }
+            if meta_params:
+                restored_state["meta_params"] = meta_params
 
             # Log the activity
             _log_snapshot_activity(
@@ -1321,6 +1352,7 @@ async def restore_snapshot(snapshot_id: str):
 
         # Real mode: load from HDF5 file
         snapshot_path = Path(snapshot_data.get("path", f"{_snapshots_dir}/{snapshot_id}.h5"))
+        meta_params = None
 
         if hasattr(backend, "_adapter") and hasattr(backend._adapter, "load_snapshot"):
             backend._adapter.load_snapshot(str(snapshot_path))
@@ -1336,11 +1368,30 @@ async def restore_snapshot(snapshot_id: str):
                         if training_state and restored_attrs:
                             training_state.update_state(**restored_attrs)
 
+                    if "meta_params" in f:
+                        mp_group = f["meta_params"]
+                        meta_params = {k: mp_group.attrs[k] for k in mp_group.attrs.keys()}
+
             except ImportError as e:
                 raise HTTPException(
                     status_code=500,
                     detail="h5py not available for reading HDF5 snapshots",
                 ) from e
+
+        # Also try reading meta_params when adapter handled the load
+        if meta_params is None:
+            try:
+                import h5py
+
+                with h5py.File(snapshot_path, "r") as f:
+                    if "meta_params" in f:
+                        mp_group = f["meta_params"]
+                        meta_params = {k: mp_group.attrs[k] for k in mp_group.attrs.keys()}
+            except Exception:  # nosec B110 — best-effort meta_params extraction
+                pass
+
+        if meta_params:
+            backend.apply_params(**meta_params)
 
         restored_state = {
             "snapshot_id": snapshot_id,
@@ -1348,6 +1399,8 @@ async def restore_snapshot(snapshot_id: str):
             "mode": "real",
             "path": str(snapshot_path),
         }
+        if meta_params:
+            restored_state["meta_params"] = meta_params
 
         # Log the activity
         _log_snapshot_activity(
