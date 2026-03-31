@@ -88,11 +88,11 @@ class MockCascorNetwork:
         """
         self.input_size = input_size
         self.output_size = output_size
-        self.hidden_units = []
+        self.hidden_units: List[Dict[str, Any]] = []
         self.learning_rate = 0.01
 
         # Training history (use deque with maxlen to prevent unbounded growth)
-        self.history = {
+        self.history: Dict[str, deque] = {
             "train_loss": deque(maxlen=TrainingConstants.METRICS_HISTORY_MAXLEN),
             "train_accuracy": deque(maxlen=TrainingConstants.METRICS_HISTORY_MAXLEN),
             "val_loss": deque(maxlen=TrainingConstants.METRICS_HISTORY_MAXLEN),
@@ -110,8 +110,8 @@ class MockCascorNetwork:
         self.input_weights = torch.randn(input_size, output_size) * 0.1
 
         # Input normalization parameters (set when dataset is loaded)
-        self._input_min = None
-        self._input_max = None
+        self._input_min: Optional[torch.Tensor] = None
+        self._input_max: Optional[torch.Tensor] = None
 
         # Training state
         self.current_epoch = 0
@@ -169,7 +169,7 @@ class MockCascorNetwork:
         Returns:
             Features tensor of shape (batch_size, input_size + num_hidden)
         """
-        hidden_outputs = []
+        hidden_outputs: List[torch.Tensor] = []
         for unit in self.hidden_units:
             if hidden_outputs:
                 unit_input = torch.cat([x] + hidden_outputs, dim=1)
@@ -552,7 +552,7 @@ class DemoMode:
         self.current_loss = 1.0
         self.current_accuracy = 0.5
         self.is_running = False
-        self.thread = None
+        self.thread: Optional[threading.Thread] = None
 
         # Thread safety
         self._lock = threading.Lock()
@@ -574,10 +574,10 @@ class DemoMode:
         self.spiral_rotations = TrainingConstants.DEFAULT_SPIRAL_ROTATIONS
 
         # Cascade event markers for loss chart (epoch, unit_index, correlation)
-        self.cascade_events = []
+        self.cascade_events: List[Dict[str, Any]] = []
 
         # Metrics buffer for realistic curves
-        self.metrics_history = deque(maxlen=TrainingConstants.METRICS_HISTORY_MAXLEN)
+        self.metrics_history: deque = deque(maxlen=TrainingConstants.METRICS_HISTORY_MAXLEN)
 
         self.logger.info(f"DemoMode configuration: " f"max_epochs={self.max_epochs}, " f"max_hidden_units={self.max_hidden_units}, " f"cascade_every={self.cascade_every}, " f"update_interval={self.update_interval}s")
 
@@ -821,7 +821,7 @@ class DemoMode:
 
         client = JuniperDataClient(base_url=juniper_data_url)
 
-        params = {
+        params: Dict[str, Any] = {
             "n_points_per_spiral": n_samples // 2,
             "n_spirals": 2,
             "noise": 0.1,
