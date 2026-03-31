@@ -476,7 +476,8 @@ class MockCascorNetwork:
             Output predictions of shape (batch_size, output_size)
         """
         features = self._cascade_features(x)
-        return self.output_layer(features)
+        output: torch.Tensor = self.output_layer(features)
+        return output
 
     def train_output_step(self, batch_size: Optional[int] = None):
         """Perform one gradient step on the output layer using Adam optimizer.

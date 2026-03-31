@@ -84,10 +84,10 @@ class _ServiceTrainingMonitor:
             status = self._client.get_training_status()
             is_training_top = status.get("is_training")
             if is_training_top is not None:
-                return is_training_top
+                return bool(is_training_top)
             data = status.get("data", {})
             if isinstance(data, dict):
-                return data.get("training_active", False)
+                return bool(data.get("training_active", False))
             return False
         except Exception:
             return False
@@ -169,7 +169,7 @@ class CascorServiceAdapter:
     async def connect(self) -> bool:
         """Connect to the CasCor service and verify it is reachable."""
         try:
-            return self._client.is_alive()
+            return bool(self._client.is_alive())
         except Exception:
             logger.error(f"Failed to connect to CasCor service at {self._service_url}")
             return False
@@ -345,7 +345,8 @@ class CascorServiceAdapter:
 
     def create_network(self, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         try:
-            return self._client.create_network(**(config or {}))
+            result: Dict[str, Any] = self._client.create_network(**(config or {}))
+            return result
         except JuniperCascorClientError as e:
             logger.error(f"Failed to create network: {e}")
             return {"error": str(e)}
@@ -367,10 +368,10 @@ class CascorServiceAdapter:
             status = self._client.get_training_status()
             is_training_top = status.get("is_training")
             if is_training_top is not None:
-                return is_training_top
+                return bool(is_training_top)
             data = status.get("data", {})
             if isinstance(data, dict):
-                return data.get("training_active", False)
+                return bool(data.get("training_active", False))
             return False
         except JuniperCascorClientError:
             return False
@@ -669,7 +670,8 @@ class CascorServiceAdapter:
             )
             if isinstance(raw, dict):
                 return self._transform_topology(raw)
-            return raw
+            result: Optional[Dict[str, Any]] = raw
+            return result
         except Exception:
             return None
 
@@ -678,10 +680,11 @@ class CascorServiceAdapter:
 
     def get_dataset_info(self, x=None, y=None) -> Optional[Dict[str, Any]]:
         try:
-            return self._cb.call(
+            result: Optional[Dict[str, Any]] = self._cb.call(
                 lambda: self._unwrap_response(self._client.get_dataset()),
                 fallback=lambda: None,
             )
+            return result
         except Exception:
             return None
 

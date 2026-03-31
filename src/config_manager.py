@@ -43,7 +43,7 @@ import re
 
 # import traceback
 from pathlib import Path
-from typing import Any, Dict, Optional, TypedDict, Union
+from typing import Any, Dict, Optional, TypedDict, Union, cast
 
 import yaml
 
@@ -300,7 +300,7 @@ class ConfigManager:
         Returns:
             Section dictionary or empty dict if not found
         """
-        return self.config.get(section, {})
+        return dict(self.config.get(section, {}))
 
     def reload(self):
         """Reload configuration from file."""
@@ -336,7 +336,7 @@ class ConfigManager:
             if not (param_config["min"] <= param_config["default"] <= param_config["max"]):
                 raise ValueError(f"Invalid range for {param_name}: " f"min={param_config['min']}, default={param_config['default']}, max={param_config['max']}")
 
-            return param_config
+            return cast(TrainingParamConfig, param_config)
 
         except KeyError as e:
             raise KeyError(f"Training parameter {param_name!r} not found in configuration") from e

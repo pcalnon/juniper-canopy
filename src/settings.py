@@ -303,7 +303,7 @@ class Settings(BaseSettings):
         config = getattr(self.training, param, None)
         if config is None:
             return False
-        return config.min <= value <= config.max
+        return bool(config.min <= value <= config.max)
 
     def get_training_param_config(self, param: str) -> dict:
         """Get training parameter config as dict (backward-compatible)."""

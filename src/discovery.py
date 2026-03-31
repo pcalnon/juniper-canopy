@@ -25,7 +25,7 @@ def _probe_url_sync(url: str, timeout: float) -> bool:
             if resp.status != 200:
                 return False
             body = json.loads(resp.read())
-            return body.get("status") == "alive"
+            return bool(body.get("status") == "alive")
     except Exception:
         return False
 

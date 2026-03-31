@@ -112,7 +112,7 @@ class CassandraPanel(BaseComponent):
         # Use relative path - works when served from same origin
         return path.lstrip("/")
 
-    def _render_hosts_table(self, hosts: List[Dict[str, Any]]) -> html.Div:
+    def _render_hosts_table(self, hosts: List[Dict[str, Any]]) -> html.Div | dbc.Table:
         """
         Render the host status table.
 

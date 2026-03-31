@@ -85,7 +85,8 @@ class CallbackContextAdapter:
         try:
             import dash
 
-            return dash.callback_context.triggered_id
+            triggered_id: str | None = dash.callback_context.triggered_id
+            return triggered_id
         except Exception:
             return None
 
@@ -120,7 +121,7 @@ class CallbackContextAdapter:
         try:
             import dash
 
-            return dash.callback_context.triggered_prop_ids
+            return dict(dash.callback_context.triggered_prop_ids)
         except Exception:
             return {}
 
@@ -137,7 +138,7 @@ class CallbackContextAdapter:
         try:
             import dash
 
-            return dash.callback_context.inputs_list
+            return list(dash.callback_context.inputs_list)
         except Exception:
             return []
 

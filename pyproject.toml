@@ -144,9 +144,9 @@ skips = ["B101", "B311"]
 python_version = "3.14"
 mypy_path = "src"
 explicit_package_bases = true
-warn_return_any = false
+warn_return_any = true
 warn_unused_configs = true
-no_strict_optional = true
+strict_optional = true
 exclude = [
     "^data/",
     "^logs/",
@@ -182,6 +182,21 @@ module = [
     "juniper_cascor_client.*",
 ]
 ignore_missing_imports = true
+
+# Modules pending strict_optional migration (CAN-MED-014)
+[[tool.mypy.overrides]]
+module = [
+    "main",
+    "config_manager",
+    "demo_mode",
+    "backend.data_adapter",
+    "backend.cassandra_client",
+    "frontend.dashboard_manager",
+    "frontend.components.metrics_panel",
+    "frontend.components.network_visualizer",
+    "frontend.components.hdf5_snapshots_panel",
+]
+strict_optional = false
 
 # ==========================================
 # Pytest Configuration (additional)

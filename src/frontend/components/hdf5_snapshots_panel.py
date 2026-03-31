@@ -398,7 +398,7 @@ class HDF5SnapshotsPanel(BaseComponent):
             Dict with 'snapshots' list and optional 'message'
         """
         try:
-            return self._parse_snapshots_response()
+            return dict(self._parse_snapshots_response())
         except requests.exceptions.Timeout:
             self.logger.warning("Snapshots API request timed out")
             return {"snapshots": [], "message": "Request timed out"}
@@ -451,7 +451,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 self.logger.warning(f"Snapshot detail API returned status {resp.status_code}")
                 return {}
 
-            return resp.json()
+            return dict(resp.json())
 
         except requests.exceptions.Timeout:
             self.logger.warning(f"Snapshot detail request timed out for {snapshot_id}")

@@ -1380,7 +1380,7 @@ def _load_layouts() -> dict:
     if layouts_file.exists():
         try:
             with open(layouts_file) as f:
-                return json.load(f)
+                return dict(json.load(f))
         except Exception as e:
             system_logger.warning(f"Failed to load layouts file: {e}")
     return {}

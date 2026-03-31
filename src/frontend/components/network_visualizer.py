@@ -703,13 +703,13 @@ class NetworkVisualizer(BaseComponent):
             Dictionary mapping node IDs to (x, y) positions
         """
         if layout_type == "circular":
-            return self._layout_type_circular(G=G, scale=scale)
+            return dict(self._layout_type_circular(G=G, scale=scale))
         elif layout_type == "hierarchical":  # Hierarchical layout with layers
-            return self._layout_type_hierarchical(G=G, n_input=n_input, n_hidden=n_hidden, n_output=n_output)
+            return dict(self._layout_type_hierarchical(G=G, n_input=n_input, n_hidden=n_hidden, n_output=n_output))
         elif layout_type == "spring":  # Spring layout with constraints
-            return self._layout_type_sprint(G=G, k=2, iterations=50, seed=42)  # TODO: Convert these magic numbers into constants
+            return dict(self._layout_type_sprint(G=G, k=2, iterations=50, seed=42))  # TODO: Convert these magic numbers into constants
         elif layout_type == "staggered":
-            return self._layout_type_staggered(G=G, n_input=n_input, n_hidden=n_hidden, n_output=n_output)
+            return dict(self._layout_type_staggered(G=G, n_input=n_input, n_hidden=n_hidden, n_output=n_output))
         else:  # Default to hierarchical
             return self._calculate_layout(G=G, layout_type="hierarchical", n_input=n_input, n_hidden=n_hidden, n_output=n_output)
 

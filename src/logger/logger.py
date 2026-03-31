@@ -494,7 +494,7 @@ class LoggingConfig:
 
         try:
             with open(self.config_path, "r") as f:
-                config = yaml.safe_load(f)
+                config: dict = yaml.safe_load(f)
         except Exception:
             # Fallback to default config if YAML is invalid
             return self._get_default_config()

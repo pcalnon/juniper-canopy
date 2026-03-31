@@ -137,10 +137,13 @@ import time
 from datetime import datetime
 
 # from typing import Set, Dict, Any, Optional
-from typing import Any, Dict, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, Optional, Set
 
 # from fastapi import WebSocket, WebSocketDisconnect
 from fastapi import WebSocket
+
+if TYPE_CHECKING:
+    from logger.logger import SystemLogger
 
 
 class WebSocketManager:
@@ -194,7 +197,7 @@ class WebSocketManager:
         self.event_loop = loop
         self.logger.debug("Event loop set for WebSocketManager")
 
-    def _setup_logger(self) -> logging.Logger:
+    def _setup_logger(self) -> logging.Logger | SystemLogger:
         """
         Setup logger for WebSocket manager.
 

@@ -81,7 +81,7 @@ class DemoBackend:
         return self._demo.reset()
 
     def is_training_active(self) -> bool:
-        return self._demo.get_current_state().get("is_running", False)
+        return bool(self._demo.get_current_state().get("is_running", False))
 
     # --- Status and metrics ---
 

@@ -171,7 +171,7 @@ class TestCheckForPausedStateWithNoPausedPhase:
 
         # Manually clear the paused_phase to simulate edge case
         # Access private attribute to set up the edge case
-        fsm._TrainingStateMachine__paused_phase = None
+        fsm._paused_phase = None
 
         assert fsm.get_paused_phase() is None  # Verify it's None
 
@@ -191,7 +191,7 @@ class TestCheckForPausedStateWithNoPausedPhase:
         fsm.handle_command(Command.PAUSE)
 
         # Manually clear paused_phase
-        fsm._TrainingStateMachine__paused_phase = None
+        fsm._paused_phase = None
 
         # START from PAUSED with no paused_phase
         result = fsm.handle_command(Command.START)

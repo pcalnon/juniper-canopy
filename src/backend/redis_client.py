@@ -183,19 +183,23 @@ class RedisClient:
             True if connection initialized successfully, False otherwise.
         """
         if not REDIS_AVAILABLE:
-            return self._no_pool_for_you(
-                "Redis library not installed - Redis integration disabled",
-                "redis-py library not installed",
+            return bool(
+                self._no_pool_for_you(
+                    "Redis library not installed - Redis integration disabled",
+                    "redis-py library not installed",
+                )
             )
         config = self._get_redis_config()
 
         if not config.get("enabled", False):
-            return self._no_pool_for_you(
-                "Redis disabled in configuration",
-                "Redis disabled in configuration",
+            return bool(
+                self._no_pool_for_you(
+                    "Redis disabled in configuration",
+                    "Redis disabled in configuration",
+                )
             )
         try:
-            return self._create_connection_pool(config)
+            return bool(self._create_connection_pool(config))
         except (RedisConnectionError, RedisTimeoutError) as e:
             self._last_error = str(e)
             self._last_ping_success = False
@@ -253,9 +257,9 @@ class RedisClient:
             self._last_error = None
             return True
         except (RedisConnectionError, RedisTimeoutError) as e:
-            return self._ping_gets_no_pong(e)
+            return bool(self._ping_gets_no_pong(e))
         except Exception as e:
-            return self._ping_gets_no_pong(e)
+            return bool(self._ping_gets_no_pong(e))
 
     def _ping_gets_no_pong(self, e):
         self._last_error = str(e)
@@ -438,7 +442,7 @@ class RedisClient:
 
         # Get live metrics
         try:
-            return self._get_live_metrics_for_moment(timestamp)
+            return dict(self._get_live_metrics_for_moment(timestamp))
         except Exception as e:
             self.logger.error(f"Failed to get Redis metrics: {type(e).__name__}: {e}")
             return {

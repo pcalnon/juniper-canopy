@@ -83,7 +83,7 @@ class APIKeyAuth:
                 detail="Invalid API key.",
             )
 
-        return api_key
+        return str(api_key)
 
 
 class RateLimiter:
