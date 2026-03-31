@@ -1712,6 +1712,79 @@ async def get_cassandra_metrics():
     return client.get_metrics()
 
 
+# ============================================================================
+# Remote Worker Monitoring API (CAN-HIGH-005)
+# ============================================================================
+
+
+@app.get("/api/v1/workers/stats")
+async def get_worker_stats():
+    """
+    Get aggregate remote worker statistics (CAN-HIGH-005).
+
+    In service mode, delegates to JuniperCascor /v1/workers/stats endpoint.
+    In demo mode, returns synthetic worker statistics.
+    """
+    if backend.backend_type == "service" and hasattr(backend, "_adapter"):
+        try:
+            result = backend._adapter._client.get_worker_stats()
+            return result.get("data", result)
+        except Exception as e:
+            system_logger.warning(f"Failed to fetch worker stats from CasCor: {e}")
+            return {"total": 0, "idle": 0, "busy": 0, "stale": 0, "total_tasks_completed": 0, "total_tasks_failed": 0, "average_health_score": 0, "error": str(e)}
+
+    import time
+
+    return {"total": 2, "idle": 1, "busy": 1, "stale": 0, "total_tasks_completed": 42, "total_tasks_failed": 1, "average_health_score": 0.9767, "timestamp": time.time()}
+
+
+@app.get("/api/v1/workers/list")
+async def get_worker_list():
+    """
+    List all registered remote workers with status (CAN-HIGH-005).
+
+    In service mode, delegates to JuniperCascor /v1/workers endpoint.
+    In demo mode, returns synthetic worker data.
+    """
+    if backend.backend_type == "service" and hasattr(backend, "_adapter"):
+        try:
+            result = backend._adapter._client.list_workers()
+            return result.get("data", result)
+        except Exception as e:
+            system_logger.warning(f"Failed to fetch worker list from CasCor: {e}")
+            return {"workers": [], "count": 0, "error": str(e)}
+
+    import time
+
+    return {
+        "workers": [
+            {
+                "worker_id": "worker-demo-01",
+                "capabilities": {"cpu_cores": 8, "gpu": False, "python": "3.13"},
+                "connected_at": time.time() - 600,
+                "last_heartbeat": time.time() - 2,
+                "tasks_completed": 25,
+                "tasks_failed": 0,
+                "active_task_id": None,
+                "health_score": 1.0,
+                "idle": True,
+            },
+            {
+                "worker_id": "worker-demo-02",
+                "capabilities": {"cpu_cores": 4, "gpu": True, "python": "3.13"},
+                "connected_at": time.time() - 300,
+                "last_heartbeat": time.time() - 1,
+                "tasks_completed": 17,
+                "tasks_failed": 1,
+                "active_task_id": "task-cn-round-7-cand-3",
+                "health_score": 0.9444,
+                "idle": False,
+            },
+        ],
+        "count": 2,
+    }
+
+
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket):
     """

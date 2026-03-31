@@ -61,6 +61,7 @@ from .components.network_visualizer import NetworkVisualizer
 from .components.parameters_panel import ParametersPanel
 from .components.redis_panel import RedisPanel
 from .components.tutorial_panel import TutorialPanel
+from .components.worker_panel import WorkerPanel
 from .tooltips import CONTROL_TOOLTIPS
 
 
@@ -193,6 +194,9 @@ class DashboardManager:
         self.parameters_panel = ParametersPanel(self.config.get("parameters_panel", {}), component_id="parameters-panel")
         self.tutorial_panel = TutorialPanel(self.config.get("tutorial_panel", {}), component_id="tutorial-panel")
 
+        # Remote Worker Monitoring Panel
+        self.worker_panel = WorkerPanel(self.config.get("worker_panel", {}), component_id="worker-panel")
+
         # Register components
         self.register_component(self.metrics_panel)
         self.register_component(self.network_visualizer)
@@ -204,6 +208,7 @@ class DashboardManager:
         self.register_component(self.cassandra_panel)
         self.register_component(self.parameters_panel)
         self.register_component(self.tutorial_panel)
+        self.register_component(self.worker_panel)
 
         self.logger.info("All MVP components initialized and registered")
 
@@ -861,6 +866,11 @@ class DashboardManager:
                                             self.cassandra_panel.get_layout(),
                                             label="Cassandra",
                                             tab_id="cassandra",
+                                        ),
+                                        dbc.Tab(
+                                            self.worker_panel.get_layout(),
+                                            label="Workers",
+                                            tab_id="workers",
                                         ),
                                         dbc.Tab(
                                             self.about_panel.get_layout(),
@@ -1952,13 +1962,13 @@ class DashboardManager:
             response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
             if not response.ok:
                 self.logger.warning(f"Topology API returned {response.status_code}")
-                return {}
+                return dash.no_update
             topology = response.json()
             self.logger.debug(f"Fetched topology from {url}: {topology.get('total_connections', 0)} connections")
             return topology
         except Exception as e:
             self.logger.warning(f"Failed to fetch topology from API: {type(e).__name__}: {e}")
-            return {}
+            return dash.no_update
 
     def _update_dataset_store_handler(self, n=None, active_tab=None):
         """Fetch dataset from API and update dataset plotter store."""
@@ -1971,13 +1981,13 @@ class DashboardManager:
             response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
             if not response.ok:
                 self.logger.warning(f"Dataset API returned {response.status_code}")
-                return None
+                return dash.no_update
             dataset = response.json()
             self.logger.debug(f"Fetched dataset from {url}: {dataset.get('num_samples', 0)} samples")
             return dataset
         except Exception as e:
             self.logger.warning(f"Failed to fetch dataset from API: {type(e).__name__}: {e}")
-            return None
+            return dash.no_update
 
     def _update_boundary_store_handler(self, n=None, active_tab=None, resolution=None):
         """Fetch decision boundary from API and update decision boundary store."""
@@ -1992,13 +2002,13 @@ class DashboardManager:
             response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
             if not response.ok:
                 self.logger.warning(f"Decision boundary API returned {response.status_code}")
-                return None
+                return dash.no_update
             boundary_data = response.json()
             self.logger.debug(f"Fetched decision boundary from {url}")
             return boundary_data
         except Exception as e:
             self.logger.warning(f"Failed to fetch decision boundary from API: {type(e).__name__}: {e}")
-            return None
+            return dash.no_update
 
     def _update_boundary_dataset_store_handler(self, n=None, active_tab=None):
         """Sync dataset data to decision boundary component."""
@@ -2011,11 +2021,11 @@ class DashboardManager:
             response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
             if not response.ok:
                 self.logger.warning(f"Boundary dataset API returned {response.status_code}")
-                return None
+                return dash.no_update
             return response.json()
         except Exception as e:
             self.logger.warning(f"Failed to fetch dataset for boundary from API: {type(e).__name__}: {e}")
-            return None
+            return dash.no_update
 
     def _handle_training_buttons_handler(
         self,
