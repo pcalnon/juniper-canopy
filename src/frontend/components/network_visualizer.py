@@ -45,6 +45,7 @@ import networkx as nx
 import plotly.graph_objects as go
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
+from plotly.subplots import make_subplots
 
 from canopy_constants import DashboardConstants
 
@@ -123,6 +124,20 @@ class NetworkVisualizer(BaseComponent):
                                     options=[{"label": "", "value": "show"}],
                                     value=["show"] if self.show_weights else [],
                                     style={"display": "inline-block"},
+                                ),
+                                # OF-1: Display Mode Toggle (Node Graph / Weight Matrix)
+                                html.Label("Display:", style={"marginLeft": "20px", "marginRight": "10px"}),
+                                dcc.RadioItems(
+                                    id=f"{self.component_id}-display-mode",
+                                    options=[
+                                        {"label": "Node Graph", "value": "node_graph"},
+                                        {"label": "Weight Matrix", "value": "weight_matrix"},
+                                    ],
+                                    value="node_graph",
+                                    inline=True,
+                                    style={"display": "inline-block"},
+                                    inputStyle={"marginRight": "5px"},
+                                    labelStyle={"marginRight": "15px"},
                                 ),
                                 # P3-5: 2D/3D View Toggle
                                 html.Label("View:", style={"marginLeft": "20px", "marginRight": "10px"}),
@@ -296,6 +311,8 @@ class NetworkVisualizer(BaseComponent):
                 Input(f"{self.component_id}-layout-selector", "value"),
                 Input(f"{self.component_id}-show-weights", "value"),
                 Input(f"{self.component_id}-view-mode", "value"),  # P3-5: 2D/3D toggle
+                Input(f"{self.component_id}-display-mode", "value"),  # OF-1: Node Graph / Weight Matrix
+                Input(f"{self.component_id}-raw-topology-store", "data"),  # OF-1: Raw topology for heatmap
                 Input("metrics-panel-metrics-store", "data"),
                 Input("theme-state", "data"),
                 Input(f"{self.component_id}-selected-nodes", "data"),
@@ -312,6 +329,8 @@ class NetworkVisualizer(BaseComponent):
             layout_type: str,
             show_weights: List[str],
             view_mode: str,  # P3-5: 2D/3D mode
+            display_mode: str,  # OF-1: "node_graph" or "weight_matrix"
+            raw_topology: Optional[Dict[str, Any]],  # OF-1: Raw topology for heatmap
             metrics_data: List[Dict[str, Any]],
             theme: str,
             selected_nodes: List[str],
@@ -328,6 +347,8 @@ class NetworkVisualizer(BaseComponent):
                 layout_type: Layout algorithm to use
                 show_weights: List containing 'show' if weights should be displayed
                 view_mode: View mode ('2d' or '3d')
+                display_mode: Display mode ('node_graph' or 'weight_matrix')
+                raw_topology: Raw weight-oriented topology for heatmap view
                 metrics_data: Historical metrics data for detecting new units
                 theme: Current theme
                 selected_nodes: List of selected node IDs
@@ -348,6 +369,19 @@ class NetworkVisualizer(BaseComponent):
                     "connections": len(topo.get("connections", [])),
                 }
                 return hashlib.md5(json.dumps(key, sort_keys=True).encode(), usedforsecurity=False).hexdigest()
+
+            # OF-1: Weight Matrix display mode
+            if display_mode == "weight_matrix":
+                if raw_topology and raw_topology.get("input_size", 0) > 0:
+                    fig = self._create_weight_heatmap(raw_topology, theme=theme)
+                    input_count = str(raw_topology.get("input_size", 0))
+                    hidden_count = str(len(raw_topology.get("hidden_units", [])))
+                    output_count = str(raw_topology.get("output_size", 0))
+                    connection_count = "—"
+                    return fig, input_count, hidden_count, output_count, connection_count, prev_hash, current_highlight
+                else:
+                    empty_fig = self._create_empty_graph(theme)
+                    return empty_fig, "0", "0", "0", "—", None, None
 
             if not topology_data or topology_data.get("input_units", 0) == 0:
                 empty_fig = self._create_empty_graph(theme, view_mode=view_mode)
@@ -970,6 +1004,109 @@ class NetworkVisualizer(BaseComponent):
                     )
                 )
         return highlight_traces
+
+    def _create_weight_heatmap(self, raw_topology: Dict[str, Any], theme: str = "light") -> go.Figure:
+        """Create a weight matrix heatmap from raw CasCor topology (OF-1).
+
+        Args:
+            raw_topology: Raw weight-oriented topology dict from CasCor
+            theme: Current theme ("light" or "dark")
+
+        Returns:
+            Plotly figure with weight heatmaps for hidden units and output layer
+        """
+        hidden_units = raw_topology.get("hidden_units", [])
+        output_weights = raw_topology.get("output_weights", [])
+        input_size = raw_topology.get("input_size", 0)
+        output_size = raw_topology.get("output_size", 0)
+
+        is_dark = theme == "dark"
+        n_rows = len(hidden_units) + (1 if output_weights else 0)
+
+        if n_rows == 0:
+            return self._create_empty_graph(theme)
+
+        subplot_titles = [f"Hidden Unit {i} Weights" for i in range(len(hidden_units))]
+        if output_weights:
+            subplot_titles.append("Output Weights")
+
+        row_heights = [1] * len(hidden_units)
+        if output_weights:
+            row_heights.append(max(output_size, 1))
+
+        fig = make_subplots(
+            rows=n_rows,
+            cols=1,
+            subplot_titles=subplot_titles,
+            vertical_spacing=0.08 if n_rows <= 5 else 0.04,
+            row_heights=row_heights,
+        )
+
+        # Hidden unit weight vectors as single-row heatmaps
+        for i, unit in enumerate(hidden_units):
+            weights = unit.get("weights", [])
+            labels = [f"in_{j}" for j in range(input_size)] + [f"h_{j}" for j in range(i)]
+            bias = unit.get("bias", 0.0)
+            activation = unit.get("activation", "?")
+            fig.add_trace(
+                go.Heatmap(
+                    z=[weights],
+                    x=labels,
+                    y=[f"H{i}"],
+                    colorscale="RdBu",
+                    zmid=0,
+                    showscale=(i == 0),
+                    hovertemplate="From: %{x}<br>Weight: %{z:.4f}<extra>H" + str(i) + f" (bias={bias:.3f}, {activation})</extra>",
+                ),
+                row=i + 1,
+                col=1,
+            )
+
+        # Output weight matrix as 2D heatmap
+        if output_weights:
+            row_labels = [f"in_{j}" for j in range(input_size)] + [f"h_{j}" for j in range(len(hidden_units))]
+            # output_weights from CasCor: list of columns, each column has output_size values
+            # Transpose to (num_outputs, num_input_sources) for display
+            n_sources = len(output_weights)
+            z_matrix = []
+            for out_idx in range(output_size):
+                row = [output_weights[src][out_idx] if out_idx < len(output_weights[src]) else 0.0 for src in range(n_sources)]
+                z_matrix.append(row)
+            out_labels = [f"out_{j}" for j in range(output_size)]
+
+            output_bias = raw_topology.get("output_bias", [])
+            bias_text = ", ".join(f"{b:.3f}" for b in output_bias) if output_bias else "N/A"
+            fig.add_trace(
+                go.Heatmap(
+                    z=z_matrix,
+                    x=row_labels,
+                    y=out_labels,
+                    colorscale="RdBu",
+                    zmid=0,
+                    showscale=True,
+                    hovertemplate="From: %{x}<br>To: %{y}<br>Weight: %{z:.4f}<extra>Output (bias=" + bias_text + ")</extra>",
+                ),
+                row=n_rows,
+                col=1,
+            )
+
+        # Calculate dynamic height based on content
+        height = max(400, 100 * n_rows + 100)
+
+        fig.update_layout(
+            template="plotly_dark" if is_dark else "plotly",
+            plot_bgcolor="#242424" if is_dark else "#f8f9fa",
+            paper_bgcolor="#242424" if is_dark else "#ffffff",
+            height=height,
+            margin={"l": 60, "r": 20, "t": 40, "b": 20},
+            title={
+                "text": "Weight Matrix View",
+                "font": {"size": 14, "color": "#adb5bd" if is_dark else "#495057"},
+                "x": 0.5,
+            },
+        )
+
+        return fig
 
     def _create_empty_graph(self, theme: str = "light", view_mode: str = "2d") -> go.Figure:
         """

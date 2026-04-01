@@ -43,7 +43,7 @@ import dash
 import dash_bootstrap_components as dbc
 import requests
 from dash import dcc, html
-from dash.dependencies import Input, Output
+from dash.dependencies import Input, Output, State
 from flask import request
 
 from canopy_constants import DashboardConstants, TrainingConstants
@@ -905,6 +905,8 @@ class DashboardManager:
                 dcc.Store(id="ws-metrics-buffer", data=[]),
                 # WebSocket real-time topology buffer (OI-2)
                 dcc.Store(id="ws-topology-buffer", data=None),
+                # Raw weight-oriented topology for heatmap view (OF-1)
+                dcc.Store(id="network-visualizer-raw-topology-store", data=None),
                 # Tooltips for parameter controls
                 *[dbc.Tooltip(text, target=target_id, placement="top") for target_id, text in CONTROL_TOOLTIPS.items()],
                 # Getting Started welcome modal (shows on first visit)
@@ -1259,6 +1261,19 @@ class DashboardManager:
 
             # REST fallback — only poll when topology tab is active
             return self._update_topology_store_handler(n=n, active_tab=active_tab)
+
+        @self.app.callback(
+            Output("network-visualizer-raw-topology-store", "data"),
+            Input("slow-update-interval", "n_intervals"),
+            Input("visualization-tabs", "active_tab"),
+            State("network-visualizer-view-mode", "value"),
+        )
+        def update_raw_topology_store(n, active_tab, view_mode):
+            """Fetch raw weight-oriented topology for heatmap view (OF-1).
+
+            Only polls when topology tab is active AND weight matrix view is selected.
+            """
+            return self._update_raw_topology_store_handler(n=n, active_tab=active_tab, view_mode=view_mode)
 
         @self.app.callback(
             Output("dataset-plotter-dataset-store", "data"),
@@ -2004,6 +2019,22 @@ class DashboardManager:
             return topology
         except Exception as e:
             self.logger.warning(f"Failed to fetch topology from API: {type(e).__name__}: {e}")
+            return dash.no_update
+
+    def _update_raw_topology_store_handler(self, n=None, active_tab=None, view_mode=None):
+        """Fetch raw weight-oriented topology from API for heatmap view (OF-1)."""
+        if active_tab != "topology" or view_mode != "weight_matrix":
+            return dash.no_update
+
+        try:
+            url = self._api_url("/api/topology/raw")
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            if not response.ok:
+                self.logger.warning(f"Raw topology API returned {response.status_code}")
+                return dash.no_update
+            return response.json()
+        except Exception as e:
+            self.logger.warning(f"Failed to fetch raw topology from API: {type(e).__name__}: {e}")
             return dash.no_update
 
     def _update_dataset_store_handler(self, n=None, active_tab=None):

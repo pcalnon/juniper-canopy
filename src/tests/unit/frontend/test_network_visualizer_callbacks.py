@@ -932,10 +932,12 @@ class TestCallbackInvocation:
                 dcc.Store(id=f"{visualizer.component_id}-topology-store"),
                 dcc.Store(id=f"{visualizer.component_id}-topology-hash"),
                 dcc.Store(id=f"{visualizer.component_id}-selected-nodes"),
+                dcc.Store(id=f"{visualizer.component_id}-raw-topology-store"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
                 dcc.Checklist(id=f"{visualizer.component_id}-show-weights"),
+                dcc.RadioItems(id=f"{visualizer.component_id}-display-mode"),
                 html.Div(id=f"{visualizer.component_id}-stats-bar"),
                 html.Span(id=f"{visualizer.component_id}-input-count"),
                 html.Span(id=f"{visualizer.component_id}-hidden-count"),
@@ -956,6 +958,8 @@ class TestCallbackInvocation:
                     "hierarchical",  # layout_type
                     ["show"],  # show_weights
                     "2d",  # view_mode (P3-5)
+                    "node_graph",  # display_mode (OF-1)
+                    None,  # raw_topology (OF-1)
                     [],  # metrics_data
                     "light",  # theme
                     [],  # selected_nodes
@@ -983,10 +987,12 @@ class TestCallbackInvocation:
                 dcc.Store(id=f"{visualizer.component_id}-topology-store"),
                 dcc.Store(id=f"{visualizer.component_id}-topology-hash"),
                 dcc.Store(id=f"{visualizer.component_id}-selected-nodes"),
+                dcc.Store(id=f"{visualizer.component_id}-raw-topology-store"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
                 dcc.Checklist(id=f"{visualizer.component_id}-show-weights"),
+                dcc.RadioItems(id=f"{visualizer.component_id}-display-mode"),
                 html.Div(id=f"{visualizer.component_id}-stats-bar"),
                 html.Span(id=f"{visualizer.component_id}-input-count"),
                 html.Span(id=f"{visualizer.component_id}-hidden-count"),
@@ -1006,6 +1012,8 @@ class TestCallbackInvocation:
                     "hierarchical",
                     [],
                     "2d",  # view_mode (P3-5)
+                    "node_graph",  # display_mode (OF-1)
+                    None,  # raw_topology (OF-1)
                     [],
                     "light",
                     [],
@@ -1032,10 +1040,12 @@ class TestCallbackInvocation:
                 dcc.Store(id=f"{visualizer.component_id}-topology-store"),
                 dcc.Store(id=f"{visualizer.component_id}-topology-hash"),
                 dcc.Store(id=f"{visualizer.component_id}-selected-nodes"),
+                dcc.Store(id=f"{visualizer.component_id}-raw-topology-store"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
                 dcc.Checklist(id=f"{visualizer.component_id}-show-weights"),
+                dcc.RadioItems(id=f"{visualizer.component_id}-display-mode"),
                 html.Div(id=f"{visualizer.component_id}-stats-bar"),
                 html.Span(id=f"{visualizer.component_id}-input-count"),
                 html.Span(id=f"{visualizer.component_id}-hidden-count"),
@@ -1055,7 +1065,7 @@ class TestCallbackInvocation:
         for key, callback_info in app.callback_map.items():
             if callback_key in key:
                 func = callback_info["callback"]
-                result = func.__wrapped__(simple_topology, "hierarchical", ["show"], "2d", metrics_data, "light", [], 0, None, None, None)
+                result = func.__wrapped__(simple_topology, "hierarchical", ["show"], "2d", "node_graph", None, metrics_data, "light", [], 0, None, None, None)
                 fig, _, _, _, _, _, new_highlight = result
                 assert isinstance(fig, go.Figure)
                 # Should have detected new unit and created highlight

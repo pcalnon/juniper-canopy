@@ -174,6 +174,10 @@ class BackendProtocol(Protocol):
         """Return network topology for visualization, or None."""
         ...
 
+    def get_raw_topology(self) -> Optional[Dict[str, Any]]:
+        """Return raw weight-oriented topology without graph transformation, or None."""
+        ...
+
     def get_network_stats(self) -> Dict[str, Any]:
         """Return network statistics (weights, unit counts, etc.)."""
         ...

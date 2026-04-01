@@ -153,6 +153,9 @@ class ServiceBackend:
     def get_network_topology(self) -> Optional[TopologyResult]:
         return cast(Optional[TopologyResult], self._adapter.extract_network_topology())
 
+    def get_raw_topology(self) -> Optional[Dict[str, Any]]:
+        return self._adapter.get_raw_topology()
+
     def get_network_stats(self) -> Dict[str, Any]:
         return self._adapter.get_network_data()
 

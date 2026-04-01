@@ -177,6 +177,44 @@ class DemoBackend:
             "hidden_units": len(network.hidden_units),
         }
 
+    def get_raw_topology(self) -> Optional[Dict[str, Any]]:
+        """Get raw weight-oriented topology matching CasCor's native format."""
+        network = self._demo.get_network()
+        if network is None:
+            return None
+
+        hidden_units = []
+        for unit in network.hidden_units:
+            hidden_units.append(
+                {
+                    "weights": [w.item() for w in unit["weights"]],
+                    "bias": unit.get("bias", 0.0),
+                    "activation": unit.get("activation", "sigmoid"),
+                }
+            )
+
+        output_weight = network.output_layer.weight.data
+        num_inputs_plus_hidden = network.input_size + len(network.hidden_units)
+        output_weights = []
+        for col in range(num_inputs_plus_hidden):
+            col_weights = []
+            for row in range(network.output_size):
+                w = output_weight[row, col].item() if col < output_weight.shape[1] else 0.0
+                col_weights.append(w)
+            output_weights.append(col_weights)
+
+        output_bias = []
+        if hasattr(network.output_layer, "bias") and network.output_layer.bias is not None:
+            output_bias = [b.item() for b in network.output_layer.bias.data]
+
+        return {
+            "input_size": network.input_size,
+            "output_size": network.output_size,
+            "hidden_units": hidden_units,
+            "output_weights": output_weights,
+            "output_bias": output_bias,
+        }
+
     def get_network_stats(self) -> Dict[str, Any]:
         network = self._demo.get_network()
         state = self._demo.get_current_state()

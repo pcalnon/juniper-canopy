@@ -730,6 +730,18 @@ async def get_topology():
     return topology
 
 
+@app.get("/api/topology/raw")
+async def get_raw_topology():
+    """
+    Get raw weight-oriented network topology (pre-transformation).
+    Returns CasCor's native format with weight arrays for heatmap visualization.
+    """
+    raw = backend.get_raw_topology()
+    if raw is None:
+        return JSONResponse({"error": "No raw topology available"}, status_code=503)
+    return raw
+
+
 @app.get("/api/dataset")
 async def get_dataset():
     """
