@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Contextual Left Menu**: Sidebar sections dynamically show/hide based on the active visualization tab. Training Controls always visible; Meta Parameters card, Network Information, and subsections toggle per tab via `TAB_SIDEBAR_CONFIG`. Card header text updates dynamically (e.g., "Network Parameters", "Candidate Parameters", "Dataset Parameters")
+- **Candidate Metrics Tab**: New top-level tab (`tab_id="candidates"`) for dedicated candidate pool monitoring, placed immediately after Training Metrics. Features pool status badge, epoch progress bar, top-2 candidates table, pool training metrics, candidate loss plot (orange trace), and collapsible pool history (max 20 entries, memory storage)
+- New `CandidateMetricsPanel` component (`src/frontend/components/candidate_metrics_panel.py`) extending `BaseComponent` with own data fetch callback gated on `active_tab == "candidates"`
+- Collapsible contextual section wrappers (`ctx-growth-triggers-*`, `ctx-multi-node-*`, `ctx-spiral-dataset-*`, `ctx-pool-training-*`) with toggle callbacks, defaulting to `is_open=True`
+- Sidebar decomposition: 15 addressable wrapper div IDs (`sidebar-nn-*`, `sidebar-cn-*`, `sidebar-network-info-section`, `sidebar-meta-params-card`, `sidebar-apply-section`)
+- Unit tests for sidebar visibility configuration and CandidateMetricsPanel layout/helpers
+
+### Changed
+
+- Extracted candidate pool section, history tracking, and pool display from `MetricsPanel` to `CandidateMetricsPanel`. Training Metrics tab retains candidate training trace in loss plot and candidate epoch progress bar for context
+- Component count increased from 11 to 12; updated test assertions accordingly
+
 - Namespaced Prometheus metrics (`juniper_canopy_` prefix) with WebSocket and demo mode metrics
 - `juniper_canopy_websocket_connections_active` Gauge (by channel)
 - `juniper_canopy_websocket_messages_total` Counter (by channel, type)

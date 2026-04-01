@@ -39,7 +39,6 @@
 # import logging
 # from typing import Dict, Any, List, Optional
 import os
-import time
 from typing import Any, Dict, List, Tuple
 
 # from plotly.subplots import make_subplots
@@ -496,45 +495,11 @@ class MetricsPanel(BaseComponent):
                     config={"displayModeBar": True, "displaylogo": False},
                     style={"height": "300px"},
                 ),
-                # Network Information: Details section has been moved to left sidebar in dashboard_manager.py
-                # Candidate Pool Section - always visible with collapsible content
-                html.Div(
-                    id=f"{self.component_id}-candidate-pool-section",
-                    children=[
-                        html.H4(
-                            [
-                                "Candidate Pool ",
-                                html.Span(
-                                    "▼",
-                                    id=f"{self.component_id}-candidate-toggle-icon",
-                                    style={"cursor": "pointer", "fontSize": "12px", "marginLeft": "5px"},
-                                ),
-                            ],
-                            id=f"{self.component_id}-candidate-toggle",
-                            style={"marginTop": "20px", "marginBottom": "10px", "cursor": "pointer"},
-                        ),
-                        dbc.Collapse(
-                            id=f"{self.component_id}-candidate-collapse",
-                            is_open=True,
-                            children=[
-                                html.Div(id=f"{self.component_id}-candidate-pool-info", children=[]),
-                            ],
-                        ),
-                        # Historical pools section
-                        html.Div(
-                            id=f"{self.component_id}-candidate-history-section",
-                            children=[],
-                            style={"marginTop": "10px"},
-                        ),
-                    ],
-                    style={"marginTop": "20px"},
-                ),
+                # Candidate Pool Section moved to CandidateMetricsPanel (candidate_metrics_panel.py)
                 # Data store for metrics
                 dcc.Store(id=f"{self.component_id}-metrics-store", data=[]),
                 dcc.Store(id=f"{self.component_id}-network-stats-store", data={}),
                 dcc.Store(id=f"{self.component_id}-training-state-store", data={}),
-                # Candidate pool history store (keyed by pool ID, contains all completed pools)
-                dcc.Store(id=f"{self.component_id}-candidate-pools-history", data=[]),
                 # View state store for preserving graph zoom/pan
                 dcc.Store(
                     id=f"{self.component_id}-view-state",
@@ -592,16 +557,7 @@ class MetricsPanel(BaseComponent):
         def fetch_training_state(n_intervals):
             return self._fetch_training_state_handler(n_intervals=n_intervals)
 
-        # NOTE: Network info callback moved to dashboard_manager.py (now in left sidebar)
-        @app.callback(
-            [
-                Output(f"{self.component_id}-candidate-pool-info", "children"),
-                Output(f"{self.component_id}-candidate-pool-section", "style"),
-            ],
-            [Input(f"{self.component_id}-training-state-store", "data")],
-        )
-        def update_candidate_pool(state):
-            return self._update_candidate_pool_handler(state=state)
+        # Candidate pool callbacks moved to CandidateMetricsPanel (candidate_metrics_panel.py)
 
         @app.callback(
             Output(f"{self.component_id}-progress-detail", "children"),
@@ -1130,29 +1086,6 @@ class MetricsPanel(BaseComponent):
             self.logger.debug(f"Failed to fetch training state: {e}")
 
         return {}
-
-    def _update_candidate_pool_handler(self, state=None):
-        """
-        Update candidate pool display.
-
-        Args:
-            state: Training state dictionary
-
-        Returns:
-            Tuple of (pool info children, section style)
-        """
-        if not state:
-            return [], {"marginTop": "20px"}
-
-        pool_status = state.get("candidate_pool_status", "Inactive")
-
-        if pool_status == "Inactive":
-            return html.Div(
-                "No active candidate pool",
-                style={"color": "#6c757d", "fontStyle": "italic", "padding": "10px"},
-            ), {"marginTop": "20px"}
-
-        return self._create_candidate_pool_display(state), {"marginTop": "20px"}
 
     def _update_progress_detail_handler(self, state=None):
         """Build inline progress text from training state progress fields."""

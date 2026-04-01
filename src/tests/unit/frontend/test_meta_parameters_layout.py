@@ -55,6 +55,7 @@ def dashboard():
     dm.app = Dash(__name__, suppress_callback_exceptions=True)
     dm.components = []
     dm.metrics_panel = type("Mock", (), {"get_layout": lambda self: None})()
+    dm.candidate_metrics_panel = type("Mock", (), {"get_layout": lambda self: None})()
     dm.network_visualizer = type("Mock", (), {"get_layout": lambda self: None})()
     dm.decision_boundary = type("Mock", (), {"get_layout": lambda self: None})()
     dm.dataset_plotter = type("Mock", (), {"get_layout": lambda self: None})()
