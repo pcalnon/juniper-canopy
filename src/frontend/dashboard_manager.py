@@ -52,6 +52,7 @@ from settings import get_settings
 from .base_component import BaseComponent
 from .callback_context import get_callback_context
 from .components.about_panel import AboutPanel
+from .components.candidate_metrics_panel import CandidateMetricsPanel
 from .components.cassandra_panel import CassandraPanel
 from .components.dataset_plotter import DatasetPlotter
 from .components.decision_boundary import DecisionBoundary
@@ -295,6 +296,8 @@ class DashboardManager:
         # Create component instances
         self.metrics_panel = MetricsPanel(self.config.get("metrics_panel", {}), component_id="metrics-panel")
 
+        self.candidate_metrics_panel = CandidateMetricsPanel(self.config.get("candidate_metrics_panel", {}), component_id="candidate-metrics-panel")
+
         self.network_visualizer = NetworkVisualizer(self.config.get("network_visualizer", {}), component_id="network-visualizer")
 
         self.dataset_plotter = DatasetPlotter(self.config.get("dataset_plotter", {}), component_id="dataset-plotter")
@@ -320,6 +323,7 @@ class DashboardManager:
 
         # Register components
         self.register_component(self.metrics_panel)
+        self.register_component(self.candidate_metrics_panel)
         self.register_component(self.network_visualizer)
         self.register_component(self.dataset_plotter)
         self.register_component(self.decision_boundary)
@@ -1072,6 +1076,11 @@ class DashboardManager:
                                             self.metrics_panel.get_layout(),
                                             label="Training Metrics",
                                             tab_id="metrics",
+                                        ),
+                                        dbc.Tab(
+                                            self.candidate_metrics_panel.get_layout(),
+                                            label="Candidate Metrics",
+                                            tab_id="candidates",
                                         ),
                                         dbc.Tab(
                                             self.network_visualizer.get_layout(),
