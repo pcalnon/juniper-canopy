@@ -810,25 +810,6 @@ class TestUpdatePlayButton:
 
 
 @pytest.mark.unit
-class TestUpdateCandidatePoolHandler:
-    """Tests for _update_candidate_pool_handler method."""
-
-    def test_returns_empty_for_none_state(self, metrics_panel):
-        """Should return empty display for None state."""
-        result = metrics_panel._update_candidate_pool_handler(state=None)
-
-        assert result[0] == []
-        assert result[1] == {"marginTop": "20px"}
-
-    def test_returns_inactive_message(self, metrics_panel):
-        """Should return inactive message for inactive pool."""
-        state = {"candidate_pool_status": "Inactive"}
-
-        result = metrics_panel._update_candidate_pool_handler(state=state)
-
-        assert result[1] == {"marginTop": "20px"}
-
-
 @pytest.mark.unit
 class TestUpdateProgressDetailHandler:
     """Tests for _update_progress_detail_handler method."""

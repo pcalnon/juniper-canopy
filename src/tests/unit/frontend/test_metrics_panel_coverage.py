@@ -244,46 +244,6 @@ class TestStatusStyling:
         assert style["backgroundColor"] == "#6c757d"
 
 
-class TestCandidatePoolDisplay:
-    """Test candidate pool information display."""
-
-    def test_create_candidate_pool_display(self, metrics_panel):
-        """Should create candidate pool display."""
-        state = {
-            "candidate_pool_status": "Active",
-            "candidate_pool_phase": "Training",
-            "candidate_pool_size": 8,
-            "top_candidate_id": "cand_001",
-            "top_candidate_score": 0.8,
-            "second_candidate_id": "cand_002",
-            "second_candidate_score": 0.7,
-            "pool_metrics": {
-                "avg_loss": 0.3,
-                "avg_accuracy": 0.85,
-                "avg_precision": 0.82,
-                "avg_recall": 0.88,
-                "avg_f1_score": 0.85,
-            },
-        }
-        display = metrics_panel._create_candidate_pool_display(state)
-        from dash import html
-
-        assert isinstance(display, html.Div)
-
-    def test_candidate_pool_display_no_candidates(self, metrics_panel):
-        """Should handle empty candidate pool."""
-        state = {
-            "candidate_pool_status": "Active",
-            "candidate_pool_phase": "Idle",
-            "candidate_pool_size": 0,
-            "pool_metrics": {},
-        }
-        display = metrics_panel._create_candidate_pool_display(state)
-        from dash import html
-
-        assert isinstance(display, html.Div)
-
-
 class TestNetworkInfoTable:
     """Test network information table creation."""
 

@@ -34,7 +34,7 @@ class TestDashboardEnhancementsIntegration:
 
     def test_all_components_registered(self, dashboard):
         """Test that all components are registered."""
-        assert len(dashboard.components) == 11  # metrics, network, dataset, decision, about, hdf5_snapshots, redis, cassandra, parameters, tutorial, worker
+        assert len(dashboard.components) == 12  # metrics, candidate_metrics, network, dataset, decision, about, hdf5_snapshots, redis, cassandra, parameters, tutorial, worker
         assert dashboard.metrics_panel in dashboard.components
         assert dashboard.network_visualizer in dashboard.components
         assert dashboard.dataset_plotter in dashboard.components
