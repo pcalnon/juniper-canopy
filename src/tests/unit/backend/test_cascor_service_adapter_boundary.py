@@ -391,6 +391,7 @@ class TestRelayStateHandling:
         assert kwargs["top_candidate_score"] == 0.9753
         assert kwargs["second_candidate_id"] == "7"
         assert kwargs["second_candidate_score"] == 0.8421
+        assert kwargs["all_correlations"] == [0.9753, 0.8421, 0.7100]
         fake_websocket_manager.broadcast.assert_awaited()
 
         await adapter.stop_metrics_relay()
