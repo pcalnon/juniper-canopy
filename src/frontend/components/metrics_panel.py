@@ -39,7 +39,6 @@
 # import logging
 # from typing import Dict, Any, List, Optional
 import os
-import time
 from typing import Any, Dict, List, Tuple
 
 # from plotly.subplots import make_subplots
@@ -496,45 +495,11 @@ class MetricsPanel(BaseComponent):
                     config={"displayModeBar": True, "displaylogo": False},
                     style={"height": "300px"},
                 ),
-                # Network Information: Details section has been moved to left sidebar in dashboard_manager.py
-                # Candidate Pool Section - always visible with collapsible content
-                html.Div(
-                    id=f"{self.component_id}-candidate-pool-section",
-                    children=[
-                        html.H4(
-                            [
-                                "Candidate Pool ",
-                                html.Span(
-                                    "▼",
-                                    id=f"{self.component_id}-candidate-toggle-icon",
-                                    style={"cursor": "pointer", "fontSize": "12px", "marginLeft": "5px"},
-                                ),
-                            ],
-                            id=f"{self.component_id}-candidate-toggle",
-                            style={"marginTop": "20px", "marginBottom": "10px", "cursor": "pointer"},
-                        ),
-                        dbc.Collapse(
-                            id=f"{self.component_id}-candidate-collapse",
-                            is_open=True,
-                            children=[
-                                html.Div(id=f"{self.component_id}-candidate-pool-info", children=[]),
-                            ],
-                        ),
-                        # Historical pools section
-                        html.Div(
-                            id=f"{self.component_id}-candidate-history-section",
-                            children=[],
-                            style={"marginTop": "10px"},
-                        ),
-                    ],
-                    style={"marginTop": "20px"},
-                ),
+                # Candidate Pool Section moved to CandidateMetricsPanel (candidate_metrics_panel.py)
                 # Data store for metrics
                 dcc.Store(id=f"{self.component_id}-metrics-store", data=[]),
                 dcc.Store(id=f"{self.component_id}-network-stats-store", data={}),
                 dcc.Store(id=f"{self.component_id}-training-state-store", data={}),
-                # Candidate pool history store (keyed by pool ID, contains all completed pools)
-                dcc.Store(id=f"{self.component_id}-candidate-pools-history", data=[]),
                 # View state store for preserving graph zoom/pan
                 dcc.Store(
                     id=f"{self.component_id}-view-state",
@@ -592,16 +557,7 @@ class MetricsPanel(BaseComponent):
         def fetch_training_state(n_intervals):
             return self._fetch_training_state_handler(n_intervals=n_intervals)
 
-        # NOTE: Network info callback moved to dashboard_manager.py (now in left sidebar)
-        @app.callback(
-            [
-                Output(f"{self.component_id}-candidate-pool-info", "children"),
-                Output(f"{self.component_id}-candidate-pool-section", "style"),
-            ],
-            [Input(f"{self.component_id}-training-state-store", "data")],
-        )
-        def update_candidate_pool(state):
-            return self._update_candidate_pool_handler(state=state)
+        # Candidate pool callbacks moved to CandidateMetricsPanel (candidate_metrics_panel.py)
 
         @app.callback(
             Output(f"{self.component_id}-progress-detail", "children"),
@@ -637,139 +593,7 @@ class MetricsPanel(BaseComponent):
         def update_training_progress(state):
             return self._update_training_progress_handler(state=state)
 
-        @app.callback(
-            [
-                Output(f"{self.component_id}-candidate-collapse", "is_open"),
-                Output(f"{self.component_id}-candidate-toggle-icon", "children"),
-            ],
-            Input(f"{self.component_id}-candidate-toggle", "n_clicks"),
-            State(f"{self.component_id}-candidate-collapse", "is_open"),
-            prevent_initial_call=True,
-        )
-        def toggle_candidate_section(n_clicks, is_open):
-            """Toggle candidate pool section visibility."""
-            if n_clicks:
-                new_state = not is_open
-                icon = "▼" if new_state else "▶"
-                return new_state, icon
-            return is_open, "▼"
-
-        @app.callback(
-            Output(f"{self.component_id}-candidate-pools-history", "data"),
-            Input(f"{self.component_id}-training-state-store", "data"),
-            State(f"{self.component_id}-candidate-pools-history", "data"),
-        )
-        def update_candidate_history(state, history):
-            """Update candidate pool history when a pool completes."""
-            if not state:
-                return history or []
-
-            pool_status = state.get("candidate_pool_status", "Inactive")
-            pool_phase = state.get("candidate_pool_phase", "Idle")
-            current_epoch = state.get("current_epoch", 0)
-
-            # Create pool snapshot if we have active pool data
-            if pool_status != "Inactive":
-                pool_snapshot = {
-                    "epoch": current_epoch,
-                    "status": pool_status,
-                    "phase": pool_phase,
-                    "size": state.get("candidate_pool_size", 0),
-                    "top_candidate_id": state.get("top_candidate_id", ""),
-                    "top_candidate_score": state.get("top_candidate_score", 0.0),
-                    "second_candidate_id": state.get("second_candidate_id", ""),
-                    "second_candidate_score": state.get("second_candidate_score", 0.0),
-                    "pool_metrics": state.get("pool_metrics", {}),
-                    "timestamp": time.time(),
-                }
-
-                # Check if this pool is already in history (by epoch)
-                current_history = history or []
-                existing = next((p for p in current_history if p.get("epoch") == current_epoch), None)
-
-                if not existing:
-                    # Add new pool to history (max 10 entries)
-                    current_history = [pool_snapshot] + current_history[:19]
-                    return current_history
-
-            return history or []
-
-        @app.callback(
-            Output(f"{self.component_id}-candidate-history-section", "children"),
-            Input(f"{self.component_id}-candidate-pools-history", "data"),
-        )
-        def render_candidate_history(history):
-            """Render historical candidate pools as expandable sections."""
-            if not history:
-                return []
-
-            # Show all historical pools as expandable cards
-            history_items = []
-            for pool in history:
-                epoch = pool.get("epoch", 0)
-                top_id = pool.get("top_candidate_id", "N/A")
-                top_score = pool.get("top_candidate_score", 0.0)
-
-                history_items.append(
-                    dbc.Card(
-                        [
-                            dbc.CardHeader(
-                                html.Div(
-                                    [
-                                        html.Span(f"Pool @ Epoch {epoch}", style={"fontWeight": "600"}),
-                                        html.Span(
-                                            f" - Best: {top_id} ({top_score:.3f})",
-                                            style={"color": "#6c757d", "fontSize": "12px"},
-                                        ),
-                                    ]
-                                ),
-                                style={"padding": "8px 12px", "cursor": "pointer"},
-                                id={"type": "history-pool-header", "index": epoch},
-                            ),
-                            dbc.Collapse(
-                                dbc.CardBody(
-                                    html.Div(
-                                        [
-                                            html.P([html.Strong("Size: "), str(pool.get("size", 0))]),
-                                            html.P([html.Strong("Top Candidate: "), pool.get("top_candidate_id", "N/A")]),
-                                            html.P([html.Strong("Score: "), f"{pool.get('top_candidate_score', 0.0):.4f}"]),
-                                        ]
-                                        + (
-                                            [
-                                                html.P([html.Strong("2nd Candidate: "), pool.get("second_candidate_id", "N/A")]),
-                                                html.P([html.Strong("2nd Score: "), f"{pool.get('second_candidate_score', 0.0):.4f}"]),
-                                            ]
-                                            if pool.get("second_candidate_id")
-                                            else []
-                                        )
-                                        + (
-                                            [
-                                                html.Hr(style={"margin": "8px 0"}),
-                                                html.P([html.Strong("Avg Loss: "), f"{pm.get('avg_loss', 0):.4f}"]),
-                                                html.P([html.Strong("Avg Accuracy: "), f"{pm.get('avg_accuracy', 0):.4f}"]),
-                                            ]
-                                            if (pm := pool.get("pool_metrics", {}))
-                                            else []
-                                        )
-                                    ),
-                                    style={"padding": "10px"},
-                                ),
-                                id={"type": "history-pool-collapse", "index": epoch},
-                                is_open=False,
-                            ),
-                        ],
-                        style={"marginBottom": "5px"},
-                    )
-                )
-
-            if history_items:
-                return html.Div(
-                    [
-                        html.H6("Previous Pools", style={"marginTop": "15px", "marginBottom": "10px", "color": "#6c757d"}),
-                        *history_items,
-                    ]
-                )
-            return []
+        # Candidate pool toggle, history, and render callbacks moved to CandidateMetricsPanel
 
         @app.callback(
             Output(f"{self.component_id}-view-state", "data"),
@@ -1129,29 +953,6 @@ class MetricsPanel(BaseComponent):
             self.logger.debug(f"Failed to fetch training state: {e}")
 
         return {}
-
-    def _update_candidate_pool_handler(self, state=None):
-        """
-        Update candidate pool display.
-
-        Args:
-            state: Training state dictionary
-
-        Returns:
-            Tuple of (pool info children, section style)
-        """
-        if not state:
-            return [], {"marginTop": "20px"}
-
-        pool_status = state.get("candidate_pool_status", "Inactive")
-
-        if pool_status == "Inactive":
-            return html.Div(
-                "No active candidate pool",
-                style={"color": "#6c757d", "fontStyle": "italic", "padding": "10px"},
-            ), {"marginTop": "20px"}
-
-        return self._create_candidate_pool_display(state), {"marginTop": "20px"}
 
     def _update_progress_detail_handler(self, state=None):
         """Build inline progress text from training state progress fields."""
@@ -1935,165 +1736,6 @@ class MetricsPanel(BaseComponent):
             List of metrics dictionaries
         """
         return self.metrics_history.copy()
-
-    def _create_candidate_pool_display(self, state: Dict[str, Any]) -> html.Div:
-        """
-        Create candidate pool information display.
-
-        Args:
-            state: Training state dictionary with candidate pool data
-
-        Returns:
-            Dash Div with candidate pool information
-        """
-        pool_status = state.get("candidate_pool_status", "Inactive")
-        pool_phase = state.get("candidate_pool_phase", "Idle")
-        pool_size = state.get("candidate_pool_size", 0)
-        top_cand_id = state.get("top_candidate_id", "")
-        top_cand_score = state.get("top_candidate_score", 0.0)
-        second_cand_id = state.get("second_candidate_id", "")
-        second_cand_score = state.get("second_candidate_score", 0.0)
-        pool_metrics = state.get("pool_metrics", {})
-
-        # Top 2 candidates table
-        candidate_rows = []
-        if top_cand_id:
-            candidate_rows.append(
-                html.Tr(
-                    [
-                        html.Td("1", style={"padding": "6px 10px", "fontWeight": "600"}),
-                        html.Td(top_cand_id, style={"padding": "6px 10px"}),
-                        html.Td(f"{top_cand_score:.4f}", style={"padding": "6px 10px", "textAlign": "right"}),
-                    ]
-                )
-            )
-        if second_cand_id:
-            candidate_rows.append(
-                html.Tr(
-                    [
-                        html.Td("2", style={"padding": "6px 10px", "fontWeight": "600"}),
-                        html.Td(second_cand_id, style={"padding": "6px 10px"}),
-                        html.Td(f"{second_cand_score:.4f}", style={"padding": "6px 10px", "textAlign": "right"}),
-                    ]
-                )
-            )
-
-        candidates_table = html.Table(
-            [
-                html.Thead(
-                    html.Tr(
-                        [
-                            html.Th(
-                                "Rank",
-                                style={"padding": "6px 10px", "textAlign": "left", "borderBottom": "2px solid #dee2e6"},
-                            ),
-                            html.Th(
-                                "Candidate ID",
-                                style={"padding": "6px 10px", "textAlign": "left", "borderBottom": "2px solid #dee2e6"},
-                            ),
-                            html.Th(
-                                "Correlation",
-                                style={
-                                    "padding": "6px 10px",
-                                    "textAlign": "right",
-                                    "borderBottom": "2px solid #dee2e6",
-                                },
-                            ),
-                        ]
-                    )
-                ),
-                (
-                    html.Tbody(candidate_rows)
-                    if candidate_rows
-                    else html.Tbody(
-                        [
-                            html.Tr(
-                                [
-                                    html.Td(
-                                        "No candidates",
-                                        colSpan=3,
-                                        style={"padding": "10px", "textAlign": "center", "color": "#888"},
-                                    )
-                                ]
-                            )
-                        ]
-                    )
-                ),
-            ],
-            style={
-                "width": "100%",
-                "borderCollapse": "collapse",
-                "borderRadius": "4px",
-                "marginBottom": "15px",
-            },
-        )
-
-        # Pool status info
-        pool_info = html.Div(
-            [
-                html.Div(
-                    [
-                        html.Span("Status: ", style={"fontWeight": "600"}),
-                        html.Span(pool_status, style={"color": "#28a745" if pool_status == "Active" else "#6c757d"}),
-                    ],
-                    style={"marginBottom": "5px"},
-                ),
-                html.Div(
-                    [
-                        html.Span("Phase: ", style={"fontWeight": "600"}),
-                        html.Span(pool_phase),
-                    ],
-                    style={"marginBottom": "5px"},
-                ),
-                html.Div(
-                    [
-                        html.Span("Pool Size: ", style={"fontWeight": "600"}),
-                        html.Span(str(pool_size)),
-                    ],
-                    style={"marginBottom": "15px"},
-                ),
-            ]
-        )
-
-        # Pool metrics
-        pool_metrics_rows = [
-            ("Avg Loss", f"{pool_metrics.get('avg_loss', 0.0):.4f}"),
-            ("Avg Accuracy", f"{pool_metrics.get('avg_accuracy', 0.0):.4f}"),
-            ("Avg Precision", f"{pool_metrics.get('avg_precision', 0.0):.4f}"),
-            ("Avg Recall", f"{pool_metrics.get('avg_recall', 0.0):.4f}"),
-            ("Avg F1 Score", f"{pool_metrics.get('avg_f1_score', 0.0):.4f}"),
-        ]
-
-        pool_metrics_table = html.Table(
-            [
-                html.Tbody(
-                    [
-                        html.Tr(
-                            [
-                                html.Td(label, style={"fontWeight": "600", "padding": "4px 8px", "fontSize": "13px"}),
-                                html.Td(value, style={"padding": "4px 8px", "fontSize": "13px", "textAlign": "right"}),
-                            ]
-                        )
-                        for label, value in pool_metrics_rows
-                    ]
-                ),
-            ],
-            style={
-                "width": "100%",
-                "borderCollapse": "collapse",
-                "borderRadius": "4px",
-            },
-        )
-
-        return html.Div(
-            [
-                html.H5("Top 2 Candidates", style={"marginBottom": "10px"}),
-                candidates_table,
-                pool_info,
-                html.H5("Pool Training Metrics", style={"marginTop": "15px", "marginBottom": "10px"}),
-                pool_metrics_table,
-            ]
-        )
 
     def _create_network_info_table(self, stats: Dict[str, Any]) -> html.Div:
         """
