@@ -62,6 +62,9 @@ def dashboard():
     dm.redis_panel = type("Mock", (), {"get_layout": lambda self: None})()
     dm.cassandra_panel = type("Mock", (), {"get_layout": lambda self: None})()
     dm.about_panel = type("Mock", (), {"get_layout": lambda self: None})()
+    dm.parameters_panel = type("Mock", (), {"get_layout": lambda self: None})()
+    dm.tutorial_panel = type("Mock", (), {"get_layout": lambda self: None})()
+    dm.worker_panel = type("Mock", (), {"get_layout": lambda self: None})()
     dm._setup_layout()
     return dm
 

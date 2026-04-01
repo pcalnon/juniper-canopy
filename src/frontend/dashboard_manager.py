@@ -903,6 +903,8 @@ class DashboardManager:
                 dcc.Interval(id="params-init-interval", interval=1000, max_intervals=1, n_intervals=0),
                 # WebSocket real-time metrics buffer (P5-RC-05)
                 dcc.Store(id="ws-metrics-buffer", data=[]),
+                # WebSocket real-time topology buffer (OI-2)
+                dcc.Store(id="ws-topology-buffer", data=None),
                 # Tooltips for parameter controls
                 *[dbc.Tooltip(text, target=target_id, placement="top") for target_id, text in CONTROL_TOOLTIPS.items()],
                 # Getting Started welcome modal (shows on first visit)
@@ -1178,6 +1180,9 @@ class DashboardManager:
                                     window._juniper_ws_buffer = window._juniper_ws_buffer.slice(-5000);
                                 }
                             }
+                            if (msg.type === 'topology' && msg.data) {
+                                window._juniper_ws_topology = msg.data;
+                            }
                         } catch(e) {}
                     };
                     ws.onclose = function() { window._juniper_ws = null; };
@@ -1188,6 +1193,25 @@ class DashboardManager:
             Output("ws-metrics-buffer", "data"),
             Input("fast-update-interval", "n_intervals"),
             prevent_initial_call=False,
+        )
+
+        # OI-2: Clientside callback to drain WebSocket topology buffer into Dash store.
+        # The WS onmessage handler stores the latest topology in window._juniper_ws_topology.
+        # This callback checks for it on each fast-interval tick and pushes it to the store.
+        self.app.clientside_callback(
+            """
+            function(n) {
+                if (window._juniper_ws_topology) {
+                    var topo = window._juniper_ws_topology;
+                    window._juniper_ws_topology = null;
+                    return topo;
+                }
+                return window.dash_clientside.no_update;
+            }
+            """,
+            Output("ws-topology-buffer", "data"),
+            Input("fast-update-interval", "n_intervals"),
+            prevent_initial_call=True,
         )
 
         @self.app.callback(
@@ -1217,11 +1241,23 @@ class DashboardManager:
         @self.app.callback(
             Output("network-visualizer-topology-store", "data"),
             Input("slow-update-interval", "n_intervals"),
+            Input("ws-topology-buffer", "data"),
             Input("visualization-tabs", "active_tab"),
         )
-        def update_topology_store(n, active_tab):
-            """Fetch topology from API and update network visualizer store."""
-            # Only update if topology tab is active
+        def update_topology_store(n, ws_topology, active_tab):
+            """Fetch topology from API or accept WebSocket push.
+
+            OI-2: WebSocket topology pushes (from cascade_add events) take
+            priority over REST polling for near-real-time updates.
+            """
+            ctx = dash.callback_context
+            trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
+
+            # WebSocket push takes priority — provides near-real-time updates
+            if "ws-topology-buffer" in trigger and ws_topology:
+                return ws_topology
+
+            # REST fallback — only poll when topology tab is active
             return self._update_topology_store_handler(n=n, active_tab=active_tab)
 
         @self.app.callback(

@@ -628,48 +628,45 @@ class TestEndToEndTrainingLoop:
 
     def test_training_loop_produces_cascade_units(self):
         """Training loop should install cascade units and track cascade events."""
-        import time
-
         demo = DemoMode(update_interval=0.01)
         demo.max_epochs = 300
         demo.max_hidden_units = 3
         demo.start()
 
-        # Wait for at least 1 cascade unit
-        deadline = time.time() + 90
-        while time.time() < deadline:
-            state = demo.get_current_state()
-            if state["hidden_units"] >= 1:
-                break
-            time.sleep(0.5)
+        # Wait for training to complete naturally instead of polling during
+        # training. Polling get_current_state() during CPU-intensive candidate
+        # training causes GIL contention that starves the poll thread.
+        demo.thread.join(timeout=90)
+        assert not demo.thread.is_alive(), "Training did not complete within 90s"
+
+        # Training completed naturally (is_running=False), state is preserved
+        state = demo.get_current_state()
+        found_units = state["hidden_units"]
+        cascade_count = len(state["cascade_events"])
 
         demo.stop()
 
-        state = demo.get_current_state()
-        assert state["hidden_units"] >= 1, f"Expected at least 1 hidden unit, got {state['hidden_units']}"
-        assert len(demo.cascade_events) >= 1, "Expected at least 1 cascade event"
+        assert found_units >= 1, f"Expected at least 1 hidden unit, got {found_units}"
+        assert cascade_count >= 1, f"Expected at least 1 cascade event, got {cascade_count}"
 
     def test_loss_decreases_across_training(self):
         """Overall loss should decrease from start to after cascade additions."""
-        import time
-
         demo = DemoMode(update_interval=0.01)
         demo.max_epochs = 300
         demo.max_hidden_units = 2
         demo.start()
 
-        # Wait for training to produce some results
-        deadline = time.time() + 90
-        while time.time() < deadline:
-            state = demo.get_current_state()
-            if state["hidden_units"] >= 1 or state["current_epoch"] >= 50:
-                break
-            time.sleep(0.5)
+        # Wait for training to complete naturally (same GIL contention fix)
+        demo.thread.join(timeout=90)
+        assert not demo.thread.is_alive(), "Training did not complete within 90s"
+
+        # Capture loss before stop() which may reset state
+        final_loss = demo.current_loss
 
         demo.stop()
 
         # Loss should be less than initial (1.0)
-        assert demo.current_loss < 0.5, f"Expected loss < 0.5 after training, got {demo.current_loss}"
+        assert final_loss < 0.5, f"Expected loss < 0.5 after training, got {final_loss}"
 
     def test_metrics_history_populated(self):
         """Training loop should populate metrics_history with real metrics."""
