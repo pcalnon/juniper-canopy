@@ -241,6 +241,44 @@ table tbody tr:hover {
 /* Muted text light: #6c757d on #ffffff = 4.6:1 ✓ */
 /* Muted text dark: #adb5bd on #1a1a1a = 9.7:1 ✓ */
 
+/* Accordion */
+.accordion-item {
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+.accordion-button {
+    background-color: var(--bg-secondary) !important;
+    color: var(--text-color) !important;
+}
+
+.accordion-button:not(.collapsed) {
+    background-color: var(--bg-secondary) !important;
+    color: var(--primary-color) !important;
+}
+
+.dark-mode .accordion-button::after {
+    filter: invert(1);
+}
+
+.accordion-body {
+    background-color: var(--bg-card) !important;
+    color: var(--text-color) !important;
+}
+
+/* List group */
+.list-group-item {
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+/* Table row backgrounds */
+table tbody tr {
+    background-color: var(--bg-card) !important;
+}
+
 /* Metrics layout toolbar */
 .metrics-layout-toolbar {
     background-color: var(--bg-secondary);
@@ -277,6 +315,7 @@ table tbody tr:hover {
 /* Animation for smooth transitions - scoped to avoid breaking Plotly */
 body, .card, .card-header, .card-body, .btn, .form-control,
 .nav-link, .tab-content, table, h1, h2, h3, h4, h5, h6,
-.metrics-layout-toolbar {
+.metrics-layout-toolbar, .accordion-item, .accordion-button,
+.accordion-body, .list-group-item {
     transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }

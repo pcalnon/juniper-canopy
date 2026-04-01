@@ -156,11 +156,11 @@ class ParametersPanel(BaseComponent):
                     [
                         html.H3(
                             "Meta Parameters",
-                            style={"color": "#2c3e50", "marginBottom": "5px"},
+                            style={"color": "var(--header-color)", "marginBottom": "5px"},
                         ),
                         html.P(
                             "Read-only overview of current applied parameter values. " "Use the sidebar controls to edit parameters.",
-                            style={"fontSize": "13px", "color": "#6c757d", "marginBottom": "20px"},
+                            style={"fontSize": "13px", "color": "var(--text-muted)", "marginBottom": "20px"},
                         ),
                     ],
                 ),
