@@ -243,6 +243,11 @@ class DemoBackend:
             result["inputs"] = inputs.tolist() if isinstance(inputs, np.ndarray) else inputs
             if targets is not None:
                 result["targets"] = targets.tolist() if isinstance(targets, np.ndarray) else targets
+        # Include dataset versioning metadata when available
+        if "dataset_name" in dataset:
+            result["dataset_name"] = dataset["dataset_name"]
+        if "dataset_version" in dataset:
+            result["dataset_version"] = dataset["dataset_version"]
         return cast(DatasetResult, result)
 
     def regenerate_dataset(self, n_samples: int = 200, n_spirals: int = 2, noise: float = 0.1, n_rotations: float = 1.5) -> Optional[DatasetResult]:

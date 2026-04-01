@@ -1141,6 +1141,13 @@ async def create_snapshot(
             "meta_params": meta_params,
         }
 
+        # Include dataset versioning metadata for reproducibility
+        status = backend.get_status()
+        if "dataset_name" in status:
+            snapshot["dataset_name"] = status["dataset_name"]
+        if "dataset_version" in status:
+            snapshot["dataset_version"] = status["dataset_version"]
+
         # Add to session-persistent demo snapshots list
         _demo_snapshots.insert(0, snapshot)
 
@@ -1210,6 +1217,13 @@ async def create_snapshot(
             "description": description,
             "path": str(snapshot_path.absolute()),
         }
+
+        # Include dataset versioning metadata for reproducibility
+        status = backend.get_status()
+        if "dataset_name" in status:
+            snapshot["dataset_name"] = status["dataset_name"]
+        if "dataset_version" in status:
+            snapshot["dataset_version"] = status["dataset_version"]
 
         # Log the activity
         _log_snapshot_activity(

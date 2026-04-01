@@ -2236,6 +2236,15 @@ class DashboardManager:
                         ]
                     ),
                 ]
+                + (
+                    [
+                        html.Hr(),
+                        html.P([html.Strong("Dataset: "), str(status.get("dataset_name", ""))]),
+                    ]
+                    + ([html.P([html.Strong("Version: "), str(status["dataset_version"])])] if status.get("dataset_version") else [])
+                    if status.get("dataset_name")
+                    else []
+                )
             )
         except Exception as e:
             self.logger.warning(f"Failed to fetch network info: {e}")

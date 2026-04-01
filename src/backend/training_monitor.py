@@ -237,6 +237,7 @@ class TrainingState:
         "current_step",
         "network_name",
         "dataset_name",
+        "dataset_version",
         "threshold_function",
         "optimizer_name",
         "timestamp",
@@ -272,6 +273,7 @@ class TrainingState:
         self.__current_step: int = 0
         self.__network_name: str = ""
         self.__dataset_name: str = ""
+        self.__dataset_version: int = 0
         self.__threshold_function: str = ""
         self.__optimizer_name: str = ""
         self.__timestamp: float = time.time()
@@ -314,6 +316,7 @@ class TrainingState:
                 "current_step": self.__current_step,
                 "network_name": self.__network_name,
                 "dataset_name": self.__dataset_name,
+                "dataset_version": self.__dataset_version,
                 "threshold_function": self.__threshold_function,
                 "optimizer_name": self.__optimizer_name,
                 "timestamp": self.__timestamp,

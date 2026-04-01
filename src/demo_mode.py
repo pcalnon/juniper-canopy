@@ -603,6 +603,8 @@ class DemoMode:
     def _initialize_training_state(self):
         """Initialize TrainingState with demo values."""
         if self.training_state:
+            ds_name = self.dataset.get("dataset_name", "Spiral2D") if hasattr(self, "dataset") and self.dataset else "Spiral2D"
+            ds_version = self.dataset.get("dataset_version", 0) if hasattr(self, "dataset") and self.dataset else 0
             self.training_state.update_state(
                 status="Stopped",
                 phase="Idle",
@@ -612,7 +614,8 @@ class DemoMode:
                 current_epoch=0,
                 current_step=0,
                 network_name="MockCascorNetwork",
-                dataset_name="Spiral2D",
+                dataset_name=ds_name,
+                dataset_version=ds_version,
                 threshold_function="tanh",
                 optimizer_name="Adam",
             )
@@ -659,6 +662,8 @@ class DemoMode:
 
             pool_metrics = self.candidate_pool.get_pool_metrics()
 
+        ds_name = self.dataset.get("dataset_name", "Spiral2D") if hasattr(self, "dataset") and self.dataset else "Spiral2D"
+        ds_version = self.dataset.get("dataset_version", 0) if hasattr(self, "dataset") and self.dataset else 0
         self.training_state.update_state(
             status=status,
             phase=phase,
@@ -668,7 +673,8 @@ class DemoMode:
             current_epoch=self.current_epoch,
             current_step=self.current_epoch,
             network_name="MockCascorNetwork",
-            dataset_name="Spiral2D",
+            dataset_name=ds_name,
+            dataset_version=ds_version,
             threshold_function="tanh",
             optimizer_name="Adam",
             candidate_pool_status=pool_status,
@@ -839,6 +845,8 @@ class DemoMode:
                 generator="spiral",
                 params=params,
                 persist=True,
+                name="Spiral2D",
+                created_by="juniper-canopy-demo",
             )
             create_ms = (time.monotonic() - t0) * 1000
             self.logger.info("JuniperData create_dataset completed", extra={"latency_ms": f"{create_ms:.1f}", "url": juniper_data_url})
@@ -881,7 +889,9 @@ class DemoMode:
 
         self.logger.info(f"Generated spiral dataset via JuniperData: {len(inputs)} samples (normalized to [-1, 1])")
 
-        return {
+        # Extract versioning metadata from response (if present)
+        meta = response.get("meta", {})
+        result = {
             "inputs": inputs,
             "targets": targets,
             "inputs_tensor": inputs_tensor,
@@ -890,6 +900,12 @@ class DemoMode:
             "num_features": inputs.shape[1] if len(inputs.shape) > 1 else 2,
             "num_classes": 2,
         }
+        if "dataset_name" in meta:
+            result["dataset_name"] = meta["dataset_name"]
+        if "dataset_version" in meta:
+            result["dataset_version"] = meta["dataset_version"]
+
+        return result
 
     def _generate_spiral_dataset_local(self, n_samples: int = 200) -> Dict[str, Any]:
         """
@@ -1628,7 +1644,7 @@ class DemoMode:
             State dictionary
         """
         with self._lock:
-            return {
+            state = {
                 "is_running": self.is_running,
                 "is_paused": self._pause.is_set(),
                 "current_epoch": self.current_epoch,
@@ -1643,6 +1659,13 @@ class DemoMode:
                 "spiral_rotations": self.spiral_rotations,
                 "cascade_events": list(self.cascade_events),
             }
+            # Include dataset versioning metadata when available
+            if hasattr(self, "dataset") and self.dataset:
+                if "dataset_name" in self.dataset:
+                    state["dataset_name"] = self.dataset["dataset_name"]
+                if "dataset_version" in self.dataset:
+                    state["dataset_version"] = self.dataset["dataset_version"]
+            return state
 
     def apply_params(
         self,

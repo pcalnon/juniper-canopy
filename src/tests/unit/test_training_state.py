@@ -82,7 +82,7 @@ class TestTrainingStateSerialization:
         data = state.get_state()
 
         assert isinstance(data, dict)
-        assert len(data) == 30  # 12 original + 8 candidate fields + 10 progress fields
+        assert len(data) == 31  # 13 original (incl. dataset_version) + 8 candidate fields + 10 progress fields
 
 
 class TestTrainingStateUpdate:

@@ -617,6 +617,7 @@ class TestTrainingStateAdditionalCoverage:
             "current_step",
             "network_name",
             "dataset_name",
+            "dataset_version",
             "threshold_function",
             "optimizer_name",
             "timestamp",
