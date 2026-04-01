@@ -75,8 +75,9 @@ def create_backend(
     if resolved_url:
         from backend.cascor_service_adapter import CascorServiceAdapter
         from backend.service_backend import ServiceBackend
+        from secrets_util import get_secret
 
-        api_key = os.getenv("JUNIPER_CASCOR_API_KEY") or os.getenv("JUNIPER_DATA_API_KEY")
+        api_key = get_secret("JUNIPER_CASCOR_API_KEY") or get_secret("JUNIPER_DATA_API_KEY")
         logger.info(f"Service mode: connecting to CasCor at {resolved_url}")
         adapter = CascorServiceAdapter(service_url=resolved_url, api_key=api_key)
         return ServiceBackend(adapter)

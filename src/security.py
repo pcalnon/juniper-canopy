@@ -15,6 +15,8 @@ from threading import Lock
 from fastapi import HTTPException, Request, status
 from fastapi.security import APIKeyHeader
 
+from secrets_util import get_secret
+
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
@@ -217,7 +219,7 @@ def get_api_key_auth() -> APIKeyAuth:
     """Get the global API key auth handler, creating if needed."""
     global _api_key_auth
     if _api_key_auth is None:
-        api_key = os.environ.get("CANOPY_API_KEY")
+        api_key = get_secret("CANOPY_API_KEY")
         api_keys = [api_key] if api_key else None
         _api_key_auth = APIKeyAuth(api_keys)
     return _api_key_auth

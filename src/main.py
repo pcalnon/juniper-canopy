@@ -80,6 +80,7 @@ from observability import (
     get_prometheus_app,
     set_build_info,
 )
+from secrets_util import get_secret
 from settings import get_settings
 
 # import logging
@@ -223,7 +224,7 @@ async def lifespan(app: FastAPI):
 
 
 # Disable interactive API docs when authentication is enabled (production).
-_docs_enabled = not os.environ.get("CANOPY_API_KEY")
+_docs_enabled = not get_secret("CANOPY_API_KEY")
 # Initialize FastAPI
 app = FastAPI(
     title="Juniper Canopy",
