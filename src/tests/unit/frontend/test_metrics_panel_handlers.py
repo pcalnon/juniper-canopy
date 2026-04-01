@@ -1786,3 +1786,49 @@ class TestTrainingProgressHandler:
         assert grow_lbl == ""
         assert cand_val == 0
         assert cand_lbl == ""
+
+    def test_grow_uses_max_hidden_units_over_grow_max(self, metrics_panel):
+        """Grow bar uses max_hidden_units as denominator, not grow_max."""
+        state = {
+            "status": "RUNNING",
+            "grow_iteration": 5,
+            "grow_max": 10000,
+            "max_hidden_units": 10,
+        }
+        style, grow_val, grow_lbl, _, _ = metrics_panel._update_training_progress_handler(state=state)
+
+        assert style["display"] == "block"
+        assert grow_val == 50
+        assert grow_lbl == "5/10"
+
+    def test_grow_falls_back_to_grow_max_when_no_max_hidden_units(self, metrics_panel):
+        """Grow bar falls back to grow_max when max_hidden_units is absent."""
+        state = {"status": "RUNNING", "grow_iteration": 3, "grow_max": 10}
+        _, grow_val, grow_lbl, _, _ = metrics_panel._update_training_progress_handler(state=state)
+
+        assert grow_val == 30
+        assert grow_lbl == "3/10"
+
+    def test_grow_caps_at_100_percent(self, metrics_panel):
+        """Grow bar caps at 100% when iteration exceeds max_hidden_units."""
+        state = {
+            "status": "RUNNING",
+            "grow_iteration": 15,
+            "max_hidden_units": 10,
+        }
+        _, grow_val, grow_lbl, _, _ = metrics_panel._update_training_progress_handler(state=state)
+
+        assert grow_val == 100
+        assert grow_lbl == "15/10"
+
+    def test_candidate_epoch_caps_at_100_percent(self, metrics_panel):
+        """Candidate epoch bar caps at 100%."""
+        state = {
+            "status": "RUNNING",
+            "candidate_epoch": 120,
+            "candidate_total_epochs": 100,
+        }
+        _, _, _, cand_val, cand_lbl = metrics_panel._update_training_progress_handler(state=state)
+
+        assert cand_val == 100
+        assert cand_lbl == "120/100"

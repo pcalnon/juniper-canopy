@@ -1210,7 +1210,9 @@ class MetricsPanel(BaseComponent):
             return hidden_style, 0, "", 0, ""
 
         grow_iter = state.get("grow_iteration")
-        grow_max = state.get("grow_max")
+        # Use max_hidden_units as meaningful progress target; fall back to grow_max
+        # (grow_max is max_epochs from grow_network, which is a theoretical limit)
+        grow_max = state.get("max_hidden_units") or state.get("grow_max")
         cand_epoch = state.get("candidate_epoch")
         cand_total = state.get("candidate_total_epochs")
 
@@ -1220,9 +1222,9 @@ class MetricsPanel(BaseComponent):
         if not has_grow and not has_cand:
             return hidden_style, 0, "", 0, ""
 
-        grow_pct = int(100 * grow_iter / grow_max) if has_grow else 0
+        grow_pct = min(100, int(100 * grow_iter / grow_max)) if has_grow else 0
         grow_label = f"{grow_iter}/{grow_max}" if has_grow else ""
-        cand_pct = int(100 * cand_epoch / cand_total) if has_cand else 0
+        cand_pct = min(100, int(100 * cand_epoch / cand_total)) if has_cand else 0
         cand_label = f"{cand_epoch}/{cand_total}" if has_cand else ""
 
         return visible_style, grow_pct, grow_label, cand_pct, cand_label
