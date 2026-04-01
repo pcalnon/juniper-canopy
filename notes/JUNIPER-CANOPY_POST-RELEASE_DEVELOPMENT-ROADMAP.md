@@ -4,7 +4,7 @@
 **Created**: 2026-02-17
 **Last Updated**: 2026-03-26
 **Author**: Paul Calnon
-**Status**: Active - Post-Release Assessment with Polyrepo Migration Updates
+**Status**: SUPERSEDED — Execution tracked in juniper-ml/notes/CANOPY_DEFERRED_AND_BACKLOG_PLAN.md (all sprints complete as of 2026-04-01). This document retained as historical audit reference.
 **Source**: Full codebase audit of all notes/ files with validation against source code (2026-02-17); polyrepo migration impact analysis (2026-02-25)
 
 ---
@@ -1052,3 +1052,4 @@ The Juniper ecosystem completed a polyrepo migration (2026-02-22 to 2026-02-25) 
 | 2026-02-25 | AI Agent | Codebase re-validation: fixed INTEG-004 validation (REST delegation, not ThreadPoolExecutor), corrected CAN-HIGH-007 test file list (WebSocket tests already converted; actual `requires_server` files identified), updated `-p no:warnings` to PARTIALLY COMPLETE (still in .pre-commit-config.yaml), corrected summary table arithmetic. |
 | 2026-03-15 | Documentation Audit | CAN-HIGH-001, CAN-MED-002, CAN-MED-005 marked COMPLETE. CAN-HIGH-007 path corrected. CAN-MED-011 description updated. CasCor integration and Cassandra/Redis status verified. |
 | 2026-03-26 | Documentation Automation | Updated API contracts documentation for external CasCor normalization and backend parity. Refreshed endpoint/websocket schemas in `docs/api/API_REFERENCE.md` and `docs/api/API_SCHEMAS.md` to match current source behavior (`ServiceBackend`/`CascorServiceAdapter`). |
+| 2026-04-01 | AI Agent | Marked SUPERSEDED. All 6 sprints from the backlog execution plan (CANOPY_DEFERRED_AND_BACKLOG_PLAN.md) are complete: 4144 tests passing, 56 skipped. ~30 items previously marked NOT STARTED are now complete. Remaining work items are in the Icebox (blocked on external dependencies) or tracked in DASHBOARD_AUGMENTATION_PLAN.md. |
