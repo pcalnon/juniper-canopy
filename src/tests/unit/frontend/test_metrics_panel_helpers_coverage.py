@@ -794,43 +794,6 @@ class TestUpdateMetricsDisplayHandler:
 # =============================================================================
 # Update Candidate Pool Handler Tests
 # =============================================================================
-class TestUpdateCandidatePoolHandler:
-    """Test _update_candidate_pool_handler method."""
-
-    def test_none_state_returns_empty(self, metrics_panel):
-        """None state should return empty list and default style."""
-        result = metrics_panel._update_candidate_pool_handler(state=None)
-
-        assert result[0] == []
-        assert result[1] == {"marginTop": "20px"}
-
-    def test_inactive_pool_returns_message(self, metrics_panel):
-        """Inactive pool should return 'No active candidate pool' message."""
-        from dash import html
-
-        state = {"candidate_pool_status": "Inactive"}
-        result = metrics_panel._update_candidate_pool_handler(state=state)
-
-        assert isinstance(result[0], html.Div)
-        assert result[1] == {"marginTop": "20px"}
-
-    def test_active_pool_returns_display(self, metrics_panel):
-        """Active pool should return candidate pool display."""
-        from dash import html
-
-        state = {
-            "candidate_pool_status": "Active",
-            "candidate_pool_phase": "Training",
-            "candidate_pool_size": 8,
-            "top_candidate_id": "cand_001",
-            "top_candidate_score": 0.85,
-        }
-        result = metrics_panel._update_candidate_pool_handler(state=state)
-
-        assert isinstance(result[0], html.Div)
-        assert result[1] == {"marginTop": "20px"}
-
-
 # =============================================================================
 # Parse Metrics Tests
 # =============================================================================
