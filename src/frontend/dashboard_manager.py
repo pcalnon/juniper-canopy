@@ -64,6 +64,127 @@ from .components.tutorial_panel import TutorialPanel
 from .components.worker_panel import WorkerPanel
 from .tooltips import CONTROL_TOOLTIPS
 
+# ── Sidebar Contextual Visibility Configuration ──
+# Defines which sidebar sections are visible for each tab.
+# Sections not listed (or with False) are hidden via display:none.
+# Training Controls card is always visible and not included here.
+SIDEBAR_SECTION_IDS = [
+    "sidebar-meta-params-card",
+    "sidebar-nn-section",
+    "sidebar-nn-top-params",
+    "sidebar-nn-growth-triggers",
+    "sidebar-nn-multi-node-layers",
+    "sidebar-nn-spiral-dataset",
+    "sidebar-nn-cn-divider",
+    "sidebar-cn-section",
+    "sidebar-cn-pool-params",
+    "sidebar-cn-pool-training",
+    "sidebar-cn-multi-candidate",
+    "sidebar-apply-section",
+    "sidebar-params-divider",
+    "sidebar-network-info-section",
+]
+
+TAB_SIDEBAR_CONFIG = {
+    "metrics": {
+        "sidebar-meta-params-card": True,
+        "sidebar-nn-section": True,
+        "sidebar-nn-top-params": True,
+        "sidebar-nn-growth-triggers": True,
+        "sidebar-nn-multi-node-layers": False,
+        "sidebar-nn-spiral-dataset": False,
+        "sidebar-nn-cn-divider": False,
+        "sidebar-cn-section": False,
+        "sidebar-cn-pool-params": False,
+        "sidebar-cn-pool-training": False,
+        "sidebar-cn-multi-candidate": False,
+        "sidebar-apply-section": True,
+        "sidebar-params-divider": False,
+        "sidebar-network-info-section": True,
+    },
+    "candidates": {
+        "sidebar-meta-params-card": True,
+        "sidebar-nn-section": False,
+        "sidebar-nn-top-params": False,
+        "sidebar-nn-growth-triggers": False,
+        "sidebar-nn-multi-node-layers": True,
+        "sidebar-nn-spiral-dataset": False,
+        "sidebar-nn-cn-divider": False,
+        "sidebar-cn-section": True,
+        "sidebar-cn-pool-params": True,
+        "sidebar-cn-pool-training": True,
+        "sidebar-cn-multi-candidate": False,
+        "sidebar-apply-section": True,
+        "sidebar-params-divider": False,
+        "sidebar-network-info-section": False,
+    },
+    "topology": {
+        "sidebar-meta-params-card": True,
+        "sidebar-nn-section": True,
+        "sidebar-nn-top-params": True,
+        "sidebar-nn-growth-triggers": False,
+        "sidebar-nn-multi-node-layers": True,
+        "sidebar-nn-spiral-dataset": False,
+        "sidebar-nn-cn-divider": False,
+        "sidebar-cn-section": False,
+        "sidebar-cn-pool-params": False,
+        "sidebar-cn-pool-training": False,
+        "sidebar-cn-multi-candidate": False,
+        "sidebar-apply-section": True,
+        "sidebar-params-divider": False,
+        "sidebar-network-info-section": True,
+    },
+    "boundaries": {
+        "sidebar-meta-params-card": True,
+        "sidebar-nn-section": False,
+        "sidebar-nn-top-params": False,
+        "sidebar-nn-growth-triggers": False,
+        "sidebar-nn-multi-node-layers": False,
+        "sidebar-nn-spiral-dataset": False,
+        "sidebar-nn-cn-divider": False,
+        "sidebar-cn-section": True,
+        "sidebar-cn-pool-params": True,
+        "sidebar-cn-pool-training": False,
+        "sidebar-cn-multi-candidate": False,
+        "sidebar-apply-section": True,
+        "sidebar-params-divider": False,
+        "sidebar-network-info-section": True,
+    },
+    "dataset": {
+        "sidebar-meta-params-card": True,
+        "sidebar-nn-section": True,
+        "sidebar-nn-top-params": False,
+        "sidebar-nn-growth-triggers": False,
+        "sidebar-nn-multi-node-layers": False,
+        "sidebar-nn-spiral-dataset": True,
+        "sidebar-nn-cn-divider": False,
+        "sidebar-cn-section": False,
+        "sidebar-cn-pool-params": False,
+        "sidebar-cn-pool-training": False,
+        "sidebar-cn-multi-candidate": False,
+        "sidebar-apply-section": True,
+        "sidebar-params-divider": False,
+        "sidebar-network-info-section": True,
+    },
+    # Tabs with only Training Controls visible:
+    "snapshots": {},
+    "redis": {},
+    "cassandra": {},
+    "workers": {},
+    "about": {},
+    "parameters": {},
+    "tutorial": {},
+}
+
+# Dynamic card header text per tab
+TAB_HEADER_MAP = {
+    "metrics": "Network Parameters",
+    "topology": "Network Parameters",
+    "candidates": "Candidate Parameters",
+    "boundaries": "Candidate Parameters",
+    "dataset": "Dataset Parameters",
+}
+
 
 class DashboardManager:
     """
@@ -1044,11 +1165,36 @@ class DashboardManager:
     def _setup_callbacks(self):
         """Set up dashboard callbacks."""
         self._setup_theme_callbacks()  # Define theme callbacks
+        self._setup_sidebar_visibility_callback()  # Contextual sidebar visibility
         self._setup_status_bar_callbacks()  # Define Status Bar callbacks
         self._setup_network_callbacks()  # Define Network callbacks
         self._setup_datastore_callbacks()  # Component data store updaters
         self._setup_button_action_callbacks()  # Define button action callbacks
         self._setup_backend_callbacks()  # Define backend callbacks
+
+    def _setup_sidebar_visibility_callback(self):
+        """Set up sidebar contextual visibility based on active tab."""
+
+        @self.app.callback(
+            [Output(section_id, "style") for section_id in SIDEBAR_SECTION_IDS]
+            + [
+                Output("nn-subsection-collapse", "is_open", allow_duplicate=True),
+                Output("cn-subsection-collapse", "is_open", allow_duplicate=True),
+                Output("sidebar-meta-params-header", "children"),
+            ],
+            Input("visualization-tabs", "active_tab"),
+            prevent_initial_call=True,
+        )
+        def update_sidebar_visibility(active_tab):
+            """Toggle sidebar section visibility based on active tab."""
+            config = TAB_SIDEBAR_CONFIG.get(active_tab, {})
+            styles = [{"display": "block"} if config.get(section_id, False) else {"display": "none"} for section_id in SIDEBAR_SECTION_IDS]
+            # Auto-open NN/CN collapses when their content is contextually visible
+            nn_open = config.get("sidebar-nn-section", False)
+            cn_open = config.get("sidebar-cn-section", False)
+            # Dynamic card header text
+            header_text = TAB_HEADER_MAP.get(active_tab, "Meta Parameters")
+            return styles + [nn_open, cn_open, header_text]
 
     # Define theme callbacks
     def _setup_theme_callbacks(self):
