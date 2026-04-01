@@ -187,6 +187,49 @@ class TestNetworkAndData:
             assert "to" in conn
             assert "weight" in conn
 
+    def test_get_network_topology_cascade_connections(self, demo_backend):
+        """Hidden unit 1+ must have cascade connections from prior hidden units."""
+        network = demo_backend._demo.get_network()
+        # Add 3 hidden units to exercise cascade wiring
+        for _ in range(3):
+            network.add_hidden_unit()
+
+        topo = demo_backend.get_network_topology()
+        assert topo["hidden_units"] == 3
+
+        # hidden_1 must connect from hidden_0 (cascade)
+        h1_sources = {c["from"] for c in topo["connections"] if c["to"] == "hidden_1"}
+        assert "hidden_0" in h1_sources, "Missing cascade connection hidden_0 -> hidden_1"
+
+        # hidden_2 must connect from hidden_0 AND hidden_1 (cascade)
+        h2_sources = {c["from"] for c in topo["connections"] if c["to"] == "hidden_2"}
+        assert "hidden_0" in h2_sources, "Missing cascade connection hidden_0 -> hidden_2"
+        assert "hidden_1" in h2_sources, "Missing cascade connection hidden_1 -> hidden_2"
+
+        # hidden_0 should only have input connections (no cascade — it's the first)
+        h0_sources = {c["from"] for c in topo["connections"] if c["to"] == "hidden_0"}
+        assert all(s.startswith("input_") for s in h0_sources), "hidden_0 should only have input connections"
+
+    def test_get_network_topology_cascade_connection_count(self, demo_backend):
+        """Total connections must include cascade edges: n*(n-1)/2 for n hidden units."""
+        network = demo_backend._demo.get_network()
+        for _ in range(3):
+            network.add_hidden_unit()
+
+        topo = demo_backend.get_network_topology()
+        input_size = topo["input_units"]
+        n_hidden = topo["hidden_units"]
+        output_size = topo["output_units"]
+
+        # Expected connections:
+        # input->hidden: input_size * n_hidden
+        # cascade hidden->hidden: 0 + 1 + 2 = n*(n-1)/2
+        # input->output: input_size * output_size
+        # hidden->output: n_hidden * output_size
+        expected_cascade = n_hidden * (n_hidden - 1) // 2
+        expected_total = (input_size * n_hidden) + expected_cascade + (input_size + n_hidden) * output_size
+        assert len(topo["connections"]) == expected_total
+
     def test_get_network_stats_returns_dict(self, demo_backend):
         """get_network_stats() should return a dict."""
         result = demo_backend.get_network_stats()

@@ -3,6 +3,7 @@
 
 from unittest.mock import MagicMock
 
+import dash
 import pytest
 
 from frontend.base_component import BaseComponent
@@ -139,8 +140,8 @@ class TestDashboardManagerInitialization:
     def test_dashboard_manager_registers_default_components(self, minimal_config):
         """Test that DashboardManager registers all default components."""
         dm = DashboardManager(minimal_config)
-        # 8 default components: metrics, network, dataset, decision, about, hdf5_snapshots, redis, cassandra
-        assert len(dm.components) == 8  # metrics, network, dataset, decision, about, hdf5_snapshots, redis, cassandra
+        # 11 default components: metrics, network, dataset, decision, about, hdf5_snapshots, redis, cassandra, parameters, tutorial, worker
+        assert len(dm.components) == 11
 
     def test_dashboard_manager_components_initialized(self, minimal_config):
         """Test that all default components are initialized."""
@@ -430,12 +431,12 @@ class TestDashboardManagerHandlersWithMocking:
             assert result == {"nodes": [], "total_connections": 5}
 
     def test_update_topology_store_handler_exception(self, dashboard_manager, mocker):
-        """Test topology store handler returns empty dict on exception."""
+        """Test topology store handler preserves last state on exception."""
         mocker.patch("requests.get", side_effect=Exception("Timeout"))
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_topology_store_handler(n=1, active_tab="topology")
-            assert result == {}
+            assert result is dash.no_update
 
     def test_update_dataset_store_handler_success(self, dashboard_manager, mocker):
         """Test dataset store handler fetches and returns dataset."""
@@ -448,12 +449,12 @@ class TestDashboardManagerHandlersWithMocking:
             assert result == {"num_samples": 100, "data": []}
 
     def test_update_dataset_store_handler_exception(self, dashboard_manager, mocker):
-        """Test dataset store handler returns None on exception."""
+        """Test dataset store handler preserves last state on exception."""
         mocker.patch("requests.get", side_effect=Exception("Server error"))
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_dataset_store_handler(n=1, active_tab="dataset")
-            assert result is None
+            assert result is dash.no_update
 
     def test_update_boundary_store_handler_success(self, dashboard_manager, mocker):
         """Test boundary store handler fetches and returns boundary data."""
@@ -466,12 +467,12 @@ class TestDashboardManagerHandlersWithMocking:
             assert result == {"grid": [], "predictions": []}
 
     def test_update_boundary_store_handler_exception(self, dashboard_manager, mocker):
-        """Test boundary store handler returns None on exception."""
+        """Test boundary store handler preserves last state on exception."""
         mocker.patch("requests.get", side_effect=Exception("Network error"))
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_boundary_store_handler(n=1, active_tab="boundaries")
-            assert result is None
+            assert result is dash.no_update
 
     def test_update_boundary_dataset_store_handler_success(self, dashboard_manager, mocker):
         """Test boundary dataset store handler fetches and returns data."""
@@ -484,12 +485,12 @@ class TestDashboardManagerHandlersWithMocking:
             assert result == {"samples": []}
 
     def test_update_boundary_dataset_store_handler_exception(self, dashboard_manager, mocker):
-        """Test boundary dataset store handler returns None on exception."""
+        """Test boundary dataset store handler preserves last state on exception."""
         mocker.patch("requests.get", side_effect=Exception("API down"))
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_boundary_dataset_store_handler(n=1, active_tab="boundaries")
-            assert result is None
+            assert result is dash.no_update
 
     def test_update_network_info_handler_success(self, dashboard_manager, mocker):
         """Test network info handler fetches and returns HTML panel."""

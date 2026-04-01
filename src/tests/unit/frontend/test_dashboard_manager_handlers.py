@@ -461,13 +461,13 @@ class TestDataStoreHandlers:
 
     @patch("requests.get")
     def test_update_topology_store_handler_failure(self, mock_get, dashboard_manager):
-        """Test topology store update with failure."""
+        """Test topology store update preserves last state on failure."""
         mock_get.side_effect = Exception("API error")
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_topology_store_handler(n=1, active_tab="topology")
 
-        assert result == {}
+        assert result is dash.no_update
 
     @patch("requests.get")
     def test_update_dataset_store_handler_active_tab(self, mock_get, dashboard_manager):
@@ -489,13 +489,13 @@ class TestDataStoreHandlers:
 
     @patch("requests.get")
     def test_update_dataset_store_handler_failure(self, mock_get, dashboard_manager):
-        """Test dataset store update with failure."""
+        """Test dataset store update preserves last state on failure."""
         mock_get.side_effect = Exception("API error")
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_dataset_store_handler(n=1, active_tab="dataset")
 
-        assert result is None
+        assert result is dash.no_update
 
     @patch("requests.get")
     def test_update_boundary_store_handler_active_tab(self, mock_get, dashboard_manager):
@@ -517,13 +517,13 @@ class TestDataStoreHandlers:
 
     @patch("requests.get")
     def test_update_boundary_store_handler_failure(self, mock_get, dashboard_manager):
-        """Test boundary store update with failure."""
+        """Test boundary store update preserves last state on failure."""
         mock_get.side_effect = Exception("API error")
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_boundary_store_handler(n=1, active_tab="boundaries")
 
-        assert result is None
+        assert result is dash.no_update
 
     @patch("requests.get")
     def test_update_boundary_store_handler_passes_resolution(self, mock_get, dashboard_manager):
@@ -571,13 +571,13 @@ class TestDataStoreHandlers:
 
     @patch("requests.get")
     def test_update_boundary_dataset_store_handler_failure(self, mock_get, dashboard_manager):
-        """Test boundary dataset store update with failure."""
+        """Test boundary dataset store update preserves last state on failure."""
         mock_get.side_effect = Exception("API error")
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_boundary_dataset_store_handler(n=1, active_tab="boundaries")
 
-        assert result is None
+        assert result is dash.no_update
 
 
 # =============================================================================

@@ -139,13 +139,21 @@ class DemoBackend:
         for i in range(network.input_size):
             nodes.append({"id": f"input_{i}", "type": "input", "layer": 0})
 
-        # Hidden nodes
+        # Hidden nodes with cascade connections
         for i, unit in enumerate(network.hidden_units):
             nodes.append({"id": f"hidden_{i}", "type": "hidden", "layer": 1})
+            weights = unit["weights"]
+            w_idx = 0
             # Connections from inputs to hidden
             for j in range(network.input_size):
-                weight = unit["weights"][j].item() if j < len(unit["weights"]) else 0.0
+                weight = weights[w_idx].item() if w_idx < len(weights) else 0.0
                 connections.append({"from": f"input_{j}", "to": f"hidden_{i}", "weight": weight})
+                w_idx += 1
+            # Cascade connections from prior hidden units
+            for prior_h in range(i):
+                weight = weights[w_idx].item() if w_idx < len(weights) else 0.0
+                connections.append({"from": f"hidden_{prior_h}", "to": f"hidden_{i}", "weight": weight})
+                w_idx += 1
 
         # Output nodes
         for i in range(network.output_size):

@@ -672,7 +672,8 @@ class CascorServiceAdapter:
                 return self._transform_topology(raw)
             result: Optional[Dict[str, Any]] = raw
             return result
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to extract network topology: %s: %s", type(e).__name__, e)
             return None
 
     def get_network_topology(self) -> Optional[Dict[str, Any]]:
