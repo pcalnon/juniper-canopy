@@ -1364,3 +1364,136 @@ class TestCallbackInvocation:
                 )
                 assert result["yaxis_range"] == [-10, 10]
                 break
+
+
+class TestWeightHeatmapRendering:
+    """Tests for OF-1: Weight-centric topology heatmap view."""
+
+    @pytest.mark.unit
+    def test_create_weight_heatmap_basic(self, visualizer):
+        """Heatmap renders correctly for a 2-input, 1-hidden, 1-output network."""
+        raw_topology = {
+            "input_size": 2,
+            "output_size": 1,
+            "hidden_units": [
+                {"weights": [0.5, -0.3], "bias": 0.1, "activation": "sigmoid"},
+            ],
+            "output_weights": [[0.8], [-0.2], [0.6]],  # 3 sources (2 inputs + 1 hidden) x 1 output
+            "output_bias": [0.05],
+        }
+        fig = visualizer._create_weight_heatmap(raw_topology, theme="light")
+        assert isinstance(fig, go.Figure)
+        # 2 heatmap traces: 1 hidden unit + 1 output
+        heatmap_traces = [t for t in fig.data if isinstance(t, go.Heatmap)]
+        assert len(heatmap_traces) == 2
+
+    @pytest.mark.unit
+    def test_create_weight_heatmap_multiple_hidden(self, visualizer):
+        """Heatmap renders correctly with cascade connections (multiple hidden units)."""
+        raw_topology = {
+            "input_size": 2,
+            "output_size": 1,
+            "hidden_units": [
+                {"weights": [0.5, -0.3], "bias": 0.1, "activation": "sigmoid"},
+                {"weights": [0.2, 0.4, -0.1], "bias": -0.2, "activation": "sigmoid"},  # 2 inputs + 1 prior hidden
+            ],
+            "output_weights": [[0.8], [-0.2], [0.6], [0.3]],  # 4 sources x 1 output
+            "output_bias": [0.05],
+        }
+        fig = visualizer._create_weight_heatmap(raw_topology, theme="dark")
+        heatmap_traces = [t for t in fig.data if isinstance(t, go.Heatmap)]
+        assert len(heatmap_traces) == 3  # 2 hidden + 1 output
+
+    @pytest.mark.unit
+    def test_create_weight_heatmap_no_hidden(self, visualizer):
+        """Heatmap with no hidden units shows only output weights."""
+        raw_topology = {
+            "input_size": 2,
+            "output_size": 1,
+            "hidden_units": [],
+            "output_weights": [[0.5], [-0.3]],
+            "output_bias": [0.1],
+        }
+        fig = visualizer._create_weight_heatmap(raw_topology, theme="light")
+        heatmap_traces = [t for t in fig.data if isinstance(t, go.Heatmap)]
+        assert len(heatmap_traces) == 1  # output only
+
+    @pytest.mark.unit
+    def test_create_weight_heatmap_empty_topology(self, visualizer):
+        """Heatmap with no content returns empty graph."""
+        raw_topology = {
+            "input_size": 0,
+            "output_size": 0,
+            "hidden_units": [],
+            "output_weights": [],
+            "output_bias": [],
+        }
+        fig = visualizer._create_weight_heatmap(raw_topology, theme="light")
+        # Should produce empty graph since n_rows == 0
+        assert isinstance(fig, go.Figure)
+
+    @pytest.mark.unit
+    def test_weight_matrix_display_mode_in_callback(self, visualizer):
+        """Weight matrix display mode renders heatmap via callback."""
+        from dash import Dash, dcc, html
+
+        app = Dash(__name__)
+        app.layout = html.Div(
+            [
+                dcc.Graph(id=f"{visualizer.component_id}-graph"),
+                dcc.Store(id=f"{visualizer.component_id}-view-state", data={}),
+                dcc.Store(id=f"{visualizer.component_id}-topology-store"),
+                dcc.Store(id=f"{visualizer.component_id}-topology-hash"),
+                dcc.Store(id=f"{visualizer.component_id}-selected-nodes"),
+                dcc.Store(id=f"{visualizer.component_id}-raw-topology-store"),
+                dcc.Store(id="metrics-panel-metrics-store"),
+                dcc.Store(id="theme-state"),
+                dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
+                dcc.Checklist(id=f"{visualizer.component_id}-show-weights"),
+                dcc.RadioItems(id=f"{visualizer.component_id}-display-mode"),
+                html.Div(id=f"{visualizer.component_id}-stats-bar"),
+                html.Span(id=f"{visualizer.component_id}-input-count"),
+                html.Span(id=f"{visualizer.component_id}-hidden-count"),
+                html.Span(id=f"{visualizer.component_id}-output-count"),
+                html.Span(id=f"{visualizer.component_id}-connection-count"),
+                html.Div(id=f"{visualizer.component_id}-selection-info"),
+            ]
+        )
+        visualizer.register_callbacks(app)
+
+        raw_topology = {
+            "input_size": 2,
+            "output_size": 1,
+            "hidden_units": [
+                {"weights": [0.5, -0.3], "bias": 0.1, "activation": "sigmoid"},
+            ],
+            "output_weights": [[0.8], [-0.2], [0.6]],
+            "output_bias": [0.05],
+        }
+
+        callback_key = f"{visualizer.component_id}-graph.figure"
+        for key, callback_info in app.callback_map.items():
+            if callback_key in key:
+                func = callback_info["callback"]
+                result = func.__wrapped__(
+                    None,  # topology_data (not used in weight_matrix mode)
+                    "hierarchical",
+                    [],
+                    "2d",
+                    "weight_matrix",  # display_mode
+                    raw_topology,  # raw_topology
+                    [],
+                    "light",
+                    [],
+                    0,
+                    None,
+                    None,
+                    None,
+                )
+                fig, input_ct, hidden_ct, output_ct, conn_ct, _, _ = result
+                assert isinstance(fig, go.Figure)
+                assert input_ct == "2"
+                assert hidden_ct == "1"
+                assert output_ct == "1"
+                assert conn_ct == "—"
+                break

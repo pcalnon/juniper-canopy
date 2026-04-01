@@ -805,11 +805,8 @@ class CascorServiceAdapter:
                 "y_max": y_range[1],
                 "resolution": res,
             }
-        except JuniperCascorClientError as e:
-            logger.warning(f"Failed to get decision boundary: {e}")
-            return None
-        except (KeyError, ValueError, IndexError) as e:
-            logger.warning(f"Failed to transform decision boundary data: {e}")
+        except Exception as e:
+            logger.warning("Failed to get decision boundary: %s: %s", type(e).__name__, e)
             return None
 
     def get_prediction_function(self) -> Optional[Callable]:
