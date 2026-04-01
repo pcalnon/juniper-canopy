@@ -637,6 +637,7 @@ class TestTrainingStateAdditionalCoverage:
             "phase_started_at",
             "candidate_epoch",
             "candidate_total_epochs",
+            "all_correlations",
         }
 
         assert set(result.keys()) == expected_fields

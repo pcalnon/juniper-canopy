@@ -257,6 +257,7 @@ class TrainingState:
         "phase_started_at",
         "candidate_epoch",
         "candidate_total_epochs",
+        "all_correlations",
     }
 
     def __init__(self):
@@ -293,6 +294,7 @@ class TrainingState:
         self.__phase_started_at: str = ""
         self.__candidate_epoch: int = 0
         self.__candidate_total_epochs: int = 0
+        self.__all_correlations: List[float] = []
 
     def get_state(self) -> Dict[str, Any]:
         """
@@ -332,6 +334,7 @@ class TrainingState:
                 "phase_started_at": self.__phase_started_at,
                 "candidate_epoch": self.__candidate_epoch,
                 "candidate_total_epochs": self.__candidate_total_epochs,
+                "all_correlations": list(self.__all_correlations),
             }
 
     def update_state(self, **kwargs) -> None:

@@ -276,6 +276,7 @@ class CascorServiceAdapter:
                                     top_candidate_score=data.get("best_correlation", 0.0),
                                     second_candidate_id=str(second_cand_id) if second_cand_id is not None else "",
                                     second_candidate_score=second_cand_corr,
+                                    all_correlations=data.get("all_correlations", []),
                                 )
                             except Exception as se:  # nosec B110
                                 logger.debug(f"State update callback error: {se}")
@@ -804,11 +805,8 @@ class CascorServiceAdapter:
                 "y_max": y_range[1],
                 "resolution": res,
             }
-        except JuniperCascorClientError as e:
-            logger.warning(f"Failed to get decision boundary: {e}")
-            return None
-        except (KeyError, ValueError, IndexError) as e:
-            logger.warning(f"Failed to transform decision boundary data: {e}")
+        except Exception as e:
+            logger.warning("Failed to get decision boundary: %s: %s", type(e).__name__, e)
             return None
 
     def get_prediction_function(self) -> Optional[Callable]:

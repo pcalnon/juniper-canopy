@@ -200,3 +200,6 @@ __RESUME_CLAUDE_SESSION__
 
 # MCP server config (contains API keys)
 .mcp.json
+
+# Test backup files
+*.test-backup

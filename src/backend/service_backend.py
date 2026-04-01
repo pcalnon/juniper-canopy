@@ -151,7 +151,11 @@ class ServiceBackend:
         return self._adapter.network is not None
 
     def get_network_topology(self) -> Optional[TopologyResult]:
-        return cast(Optional[TopologyResult], self._adapter.extract_network_topology())
+        result = cast(Optional[TopologyResult], self._adapter.extract_network_topology())
+        # OI-5: Fall back to synced topology if live fetch fails (e.g. during startup)
+        if result is None and self._synced_state and self._synced_state.topology:
+            return cast(TopologyResult, self._synced_state.topology)
+        return result
 
     def get_raw_topology(self) -> Optional[Dict[str, Any]]:
         return self._adapter.get_raw_topology()
