@@ -430,338 +430,386 @@ class DashboardManager:
                                 ),
                                 dbc.Card(
                                     [
-                                        dbc.CardHeader(html.H5("Meta Parameters")),
+                                        dbc.CardHeader(html.H5("Meta Parameters", id="sidebar-meta-params-header")),
                                         dbc.CardBody(
                                             [
                                                 # ── Neural Network Subsection ──
-                                                html.H6(
+                                                html.Div(
                                                     [
-                                                        html.Span("▼", id="nn-subsection-icon", className="collapse-icon"),
-                                                        "Neural Network",
+                                                        html.H6(
+                                                            [
+                                                                html.Span("▼", id="nn-subsection-icon", className="collapse-icon"),
+                                                                "Neural Network",
+                                                            ],
+                                                            id="nn-subsection-header",
+                                                            className="collapsible-header",
+                                                        ),
+                                                        dbc.Collapse(
+                                                            html.Div(
+                                                                [
+                                                                    # ── Top-level NN params ──
+                                                                    html.Div(
+                                                                        [
+                                                                            html.P("Maximum Iterations:", className="mb-1 fw-bold"),
+                                                                            dbc.Input(
+                                                                                id="nn-max-iterations-input",
+                                                                                type="number",
+                                                                                value=self.training_defaults.get("max_iterations", TrainingConstants.DEFAULT_MAX_ITERATIONS),
+                                                                                step=100,
+                                                                                min=TrainingConstants.MIN_MAX_ITERATIONS,
+                                                                                max=TrainingConstants.MAX_MAX_ITERATIONS,
+                                                                                className="mb-2",
+                                                                                debounce=True,
+                                                                            ),
+                                                                            html.P("Maximum Total Epochs:", className="mb-1 fw-bold"),
+                                                                            dbc.Input(
+                                                                                id="nn-max-total-epochs-input",
+                                                                                type="number",
+                                                                                value=self.training_defaults.get("epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS),
+                                                                                step=1000,
+                                                                                min=self._settings.get_training_param_config("epochs")["min"],
+                                                                                max=self._settings.get_training_param_config("epochs")["max"],
+                                                                                className="mb-2",
+                                                                                debounce=True,
+                                                                            ),
+                                                                            html.P("Learning Rate:", className="mb-1 fw-bold"),
+                                                                            dbc.Input(
+                                                                                id="nn-learning-rate-input",
+                                                                                type="number",
+                                                                                value=self.training_defaults.get("learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE),
+                                                                                step=0.001,
+                                                                                min=self._settings.get_training_param_config("learning_rate")["min"],
+                                                                                max=self._settings.get_training_param_config("learning_rate")["max"],
+                                                                                className="mb-2",
+                                                                                debounce=True,
+                                                                            ),
+                                                                            html.P("Maximum Hidden Units:", className="mb-1 fw-bold"),
+                                                                            dbc.Input(
+                                                                                id="nn-max-hidden-units-input",
+                                                                                type="number",
+                                                                                value=self.training_defaults.get("hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS),
+                                                                                step=1,
+                                                                                min=self._settings.get_training_param_config("hidden_units")["min"],
+                                                                                max=self._settings.get_training_param_config("hidden_units")["max"],
+                                                                                className="mb-2",
+                                                                                debounce=True,
+                                                                            ),
+                                                                        ],
+                                                                        id="sidebar-nn-top-params",
+                                                                    ),
+                                                                    # ── Multi-Node Layers ──
+                                                                    html.Div(
+                                                                        [
+                                                                            html.P("Multi-Node Layers:", className="mb-1 fw-bold"),
+                                                                            dcc.Checklist(
+                                                                                id="nn-multi-node-layers-checkbox",
+                                                                                options=[{"label": " Enable multi-node layers", "value": "enabled"}],
+                                                                                value=[],
+                                                                                className="mb-2",
+                                                                            ),
+                                                                        ],
+                                                                        id="sidebar-nn-multi-node-layers",
+                                                                    ),
+                                                                    # ── Network Growth Triggers ──
+                                                                    html.Div(
+                                                                        [
+                                                                            html.Hr(),
+                                                                            html.P("Network Growth Triggers:", className="mb-1 fw-bold"),
+                                                                            dbc.RadioItems(
+                                                                                id="nn-growth-trigger-radio",
+                                                                                options=[
+                                                                                    {"label": "Preset Epochs", "value": "preset_epochs"},
+                                                                                    {"label": "Convergence Detection", "value": "convergence"},
+                                                                                ],
+                                                                                value="convergence",
+                                                                                className="mb-2",
+                                                                            ),
+                                                                            html.Div(
+                                                                                [
+                                                                                    html.P("Number of Epochs:", className="mb-1 ms-4"),
+                                                                                    dbc.Input(
+                                                                                        id="nn-growth-preset-epochs-input",
+                                                                                        type="number",
+                                                                                        value=self.training_defaults.get("preset_epochs", TrainingConstants.DEFAULT_PRESET_EPOCHS),
+                                                                                        step=10,
+                                                                                        min=TrainingConstants.MIN_PRESET_EPOCHS,
+                                                                                        max=TrainingConstants.MAX_PRESET_EPOCHS,
+                                                                                        className="mb-2 ms-4",
+                                                                                        debounce=True,
+                                                                                        disabled=True,
+                                                                                        style={"width": "calc(100% - 1.5rem)"},
+                                                                                    ),
+                                                                                ],
+                                                                                id="nn-growth-preset-epochs-container",
+                                                                            ),
+                                                                            html.Div(
+                                                                                [
+                                                                                    html.P("Convergence Threshold:", className="mb-1 ms-4"),
+                                                                                    dbc.Input(
+                                                                                        id="nn-growth-convergence-threshold-input",
+                                                                                        type="number",
+                                                                                        value=TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD,
+                                                                                        step=0.0001,
+                                                                                        min=TrainingConstants.MIN_CONVERGENCE_THRESHOLD,
+                                                                                        max=TrainingConstants.MAX_CONVERGENCE_THRESHOLD,
+                                                                                        className="mb-2 ms-4",
+                                                                                        debounce=True,
+                                                                                        disabled=False,
+                                                                                        style={"width": "calc(100% - 1.5rem)"},
+                                                                                    ),
+                                                                                ],
+                                                                                id="nn-growth-convergence-threshold-container",
+                                                                            ),
+                                                                        ],
+                                                                        id="sidebar-nn-growth-triggers",
+                                                                    ),
+                                                                    # ── Spiral Dataset ──
+                                                                    html.Div(
+                                                                        [
+                                                                            html.Hr(),
+                                                                            html.P("Spiral Dataset:", className="mb-1 fw-bold"),
+                                                                            html.P("Spiral:", className="mb-1 fw-bold mt-1"),
+                                                                            html.P("Rotations:", className="mb-1 ms-3"),
+                                                                            dbc.Input(
+                                                                                id="nn-spiral-rotations-input",
+                                                                                type="number",
+                                                                                value=TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
+                                                                                step=0.5,
+                                                                                min=TrainingConstants.MIN_SPIRAL_ROTATIONS,
+                                                                                max=TrainingConstants.MAX_SPIRAL_ROTATIONS,
+                                                                                className="mb-2 ms-3",
+                                                                                debounce=True,
+                                                                                style={"width": "calc(100% - 1rem)"},
+                                                                            ),
+                                                                            html.P("Number:", className="mb-1 ms-3"),
+                                                                            dbc.Input(
+                                                                                id="nn-spiral-number-input",
+                                                                                type="number",
+                                                                                value=TrainingConstants.DEFAULT_SPIRAL_NUMBER,
+                                                                                step=1,
+                                                                                min=TrainingConstants.MIN_SPIRAL_NUMBER,
+                                                                                max=TrainingConstants.MAX_SPIRAL_NUMBER,
+                                                                                className="mb-2 ms-3",
+                                                                                debounce=True,
+                                                                                style={"width": "calc(100% - 1rem)"},
+                                                                            ),
+                                                                            html.P("Dataset:", className="mb-1 fw-bold mt-2"),
+                                                                            html.P("Elements:", className="mb-1 ms-3"),
+                                                                            dbc.Input(
+                                                                                id="nn-dataset-elements-input",
+                                                                                type="number",
+                                                                                value=TrainingConstants.DEFAULT_DATASET_ELEMENTS,
+                                                                                step=100,
+                                                                                min=TrainingConstants.MIN_DATASET_ELEMENTS,
+                                                                                max=TrainingConstants.MAX_DATASET_ELEMENTS,
+                                                                                className="mb-2 ms-3",
+                                                                                debounce=True,
+                                                                                style={"width": "calc(100% - 1rem)"},
+                                                                            ),
+                                                                            html.P("Noise:", className="mb-1 ms-3"),
+                                                                            dbc.Input(
+                                                                                id="nn-dataset-noise-input",
+                                                                                type="number",
+                                                                                value=TrainingConstants.DEFAULT_DATASET_NOISE,
+                                                                                step=0.05,
+                                                                                min=TrainingConstants.MIN_DATASET_NOISE,
+                                                                                max=TrainingConstants.MAX_DATASET_NOISE,
+                                                                                className="mb-2 ms-3",
+                                                                                debounce=True,
+                                                                                style={"width": "calc(100% - 1rem)"},
+                                                                            ),
+                                                                        ],
+                                                                        id="sidebar-nn-spiral-dataset",
+                                                                    ),
+                                                                ]
+                                                            ),
+                                                            id="nn-subsection-collapse",
+                                                            is_open=True,
+                                                        ),
                                                     ],
-                                                    id="nn-subsection-header",
-                                                    className="collapsible-header",
+                                                    id="sidebar-nn-section",
                                                 ),
-                                                dbc.Collapse(
-                                                    html.Div(
-                                                        [
-                                                            html.P("Maximum Iterations:", className="mb-1 fw-bold"),
-                                                            dbc.Input(
-                                                                id="nn-max-iterations-input",
-                                                                type="number",
-                                                                value=self.training_defaults.get("max_iterations", TrainingConstants.DEFAULT_MAX_ITERATIONS),
-                                                                step=100,
-                                                                min=TrainingConstants.MIN_MAX_ITERATIONS,
-                                                                max=TrainingConstants.MAX_MAX_ITERATIONS,
-                                                                className="mb-2",
-                                                                debounce=True,
-                                                            ),
-                                                            html.P("Maximum Total Epochs:", className="mb-1 fw-bold"),
-                                                            dbc.Input(
-                                                                id="nn-max-total-epochs-input",
-                                                                type="number",
-                                                                value=self.training_defaults.get("epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS),
-                                                                step=1000,
-                                                                min=self._settings.get_training_param_config("epochs")["min"],
-                                                                max=self._settings.get_training_param_config("epochs")["max"],
-                                                                className="mb-2",
-                                                                debounce=True,
-                                                            ),
-                                                            html.P("Learning Rate:", className="mb-1 fw-bold"),
-                                                            dbc.Input(
-                                                                id="nn-learning-rate-input",
-                                                                type="number",
-                                                                value=self.training_defaults.get("learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE),
-                                                                step=0.001,
-                                                                min=self._settings.get_training_param_config("learning_rate")["min"],
-                                                                max=self._settings.get_training_param_config("learning_rate")["max"],
-                                                                className="mb-2",
-                                                                debounce=True,
-                                                            ),
-                                                            html.P("Maximum Hidden Units:", className="mb-1 fw-bold"),
-                                                            dbc.Input(
-                                                                id="nn-max-hidden-units-input",
-                                                                type="number",
-                                                                value=self.training_defaults.get("hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS),
-                                                                step=1,
-                                                                min=self._settings.get_training_param_config("hidden_units")["min"],
-                                                                max=self._settings.get_training_param_config("hidden_units")["max"],
-                                                                className="mb-2",
-                                                                debounce=True,
-                                                            ),
-                                                            html.P("Multi-Node Layers:", className="mb-1 fw-bold"),
-                                                            dcc.Checklist(
-                                                                id="nn-multi-node-layers-checkbox",
-                                                                options=[{"label": " Enable multi-node layers", "value": "enabled"}],
-                                                                value=[],
-                                                                className="mb-2",
-                                                            ),
-                                                            html.Hr(),
-                                                            # Network Growth Triggers
-                                                            html.P("Network Growth Triggers:", className="mb-1 fw-bold"),
-                                                            dbc.RadioItems(
-                                                                id="nn-growth-trigger-radio",
-                                                                options=[
-                                                                    {"label": "Preset Epochs", "value": "preset_epochs"},
-                                                                    {"label": "Convergence Detection", "value": "convergence"},
-                                                                ],
-                                                                value="convergence",
-                                                                className="mb-2",
-                                                            ),
-                                                            html.Div(
-                                                                [
-                                                                    html.P("Number of Epochs:", className="mb-1 ms-4"),
-                                                                    dbc.Input(
-                                                                        id="nn-growth-preset-epochs-input",
-                                                                        type="number",
-                                                                        value=self.training_defaults.get("preset_epochs", TrainingConstants.DEFAULT_PRESET_EPOCHS),
-                                                                        step=10,
-                                                                        min=TrainingConstants.MIN_PRESET_EPOCHS,
-                                                                        max=TrainingConstants.MAX_PRESET_EPOCHS,
-                                                                        className="mb-2 ms-4",
-                                                                        debounce=True,
-                                                                        disabled=True,
-                                                                        style={"width": "calc(100% - 1.5rem)"},
-                                                                    ),
-                                                                ],
-                                                                id="nn-growth-preset-epochs-container",
-                                                            ),
-                                                            html.Div(
-                                                                [
-                                                                    html.P("Convergence Threshold:", className="mb-1 ms-4"),
-                                                                    dbc.Input(
-                                                                        id="nn-growth-convergence-threshold-input",
-                                                                        type="number",
-                                                                        value=TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD,
-                                                                        step=0.0001,
-                                                                        min=TrainingConstants.MIN_CONVERGENCE_THRESHOLD,
-                                                                        max=TrainingConstants.MAX_CONVERGENCE_THRESHOLD,
-                                                                        className="mb-2 ms-4",
-                                                                        debounce=True,
-                                                                        disabled=False,
-                                                                        style={"width": "calc(100% - 1.5rem)"},
-                                                                    ),
-                                                                ],
-                                                                id="nn-growth-convergence-threshold-container",
-                                                            ),
-                                                            html.Hr(),
-                                                            # Spiral Dataset
-                                                            html.P("Spiral Dataset:", className="mb-1 fw-bold"),
-                                                            html.P("Spiral:", className="mb-1 fw-bold mt-1"),
-                                                            html.P("Rotations:", className="mb-1 ms-3"),
-                                                            dbc.Input(
-                                                                id="nn-spiral-rotations-input",
-                                                                type="number",
-                                                                value=TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
-                                                                step=0.5,
-                                                                min=TrainingConstants.MIN_SPIRAL_ROTATIONS,
-                                                                max=TrainingConstants.MAX_SPIRAL_ROTATIONS,
-                                                                className="mb-2 ms-3",
-                                                                debounce=True,
-                                                                style={"width": "calc(100% - 1rem)"},
-                                                            ),
-                                                            html.P("Number:", className="mb-1 ms-3"),
-                                                            dbc.Input(
-                                                                id="nn-spiral-number-input",
-                                                                type="number",
-                                                                value=TrainingConstants.DEFAULT_SPIRAL_NUMBER,
-                                                                step=1,
-                                                                min=TrainingConstants.MIN_SPIRAL_NUMBER,
-                                                                max=TrainingConstants.MAX_SPIRAL_NUMBER,
-                                                                className="mb-2 ms-3",
-                                                                debounce=True,
-                                                                style={"width": "calc(100% - 1rem)"},
-                                                            ),
-                                                            html.P("Dataset:", className="mb-1 fw-bold mt-2"),
-                                                            html.P("Elements:", className="mb-1 ms-3"),
-                                                            dbc.Input(
-                                                                id="nn-dataset-elements-input",
-                                                                type="number",
-                                                                value=TrainingConstants.DEFAULT_DATASET_ELEMENTS,
-                                                                step=100,
-                                                                min=TrainingConstants.MIN_DATASET_ELEMENTS,
-                                                                max=TrainingConstants.MAX_DATASET_ELEMENTS,
-                                                                className="mb-2 ms-3",
-                                                                debounce=True,
-                                                                style={"width": "calc(100% - 1rem)"},
-                                                            ),
-                                                            html.P("Noise:", className="mb-1 ms-3"),
-                                                            dbc.Input(
-                                                                id="nn-dataset-noise-input",
-                                                                type="number",
-                                                                value=TrainingConstants.DEFAULT_DATASET_NOISE,
-                                                                step=0.05,
-                                                                min=TrainingConstants.MIN_DATASET_NOISE,
-                                                                max=TrainingConstants.MAX_DATASET_NOISE,
-                                                                className="mb-2 ms-3",
-                                                                debounce=True,
-                                                                style={"width": "calc(100% - 1rem)"},
-                                                            ),
-                                                        ]
-                                                    ),
-                                                    id="nn-subsection-collapse",
-                                                    is_open=True,
-                                                ),
-                                                html.Hr(),
+                                                html.Hr(id="sidebar-nn-cn-divider"),
                                                 # ── Candidate Nodes Subsection ──
-                                                html.H6(
+                                                html.Div(
                                                     [
-                                                        html.Span("▶", id="cn-subsection-icon", className="collapse-icon"),
-                                                        "Candidate Nodes",
+                                                        html.H6(
+                                                            [
+                                                                html.Span("▶", id="cn-subsection-icon", className="collapse-icon"),
+                                                                "Candidate Nodes",
+                                                            ],
+                                                            id="cn-subsection-header",
+                                                            className="collapsible-header",
+                                                        ),
+                                                        dbc.Collapse(
+                                                            html.Div(
+                                                                [
+                                                                    # ── Candidate Pool Meta Params ──
+                                                                    html.Div(
+                                                                        [
+                                                                            html.P("Candidate Pool Size:", className="mb-1 fw-bold"),
+                                                                            dbc.Input(
+                                                                                id="cn-pool-size-input",
+                                                                                type="number",
+                                                                                value=TrainingConstants.DEFAULT_CANDIDATE_POOL_SIZE,
+                                                                                step=1,
+                                                                                min=TrainingConstants.MIN_CANDIDATE_POOL_SIZE,
+                                                                                max=TrainingConstants.MAX_CANDIDATE_POOL_SIZE,
+                                                                                className="mb-2",
+                                                                                debounce=True,
+                                                                            ),
+                                                                            html.P("Correlation Threshold:", className="mb-1 fw-bold"),
+                                                                            dbc.Input(
+                                                                                id="cn-correlation-threshold-input",
+                                                                                type="number",
+                                                                                value=TrainingConstants.DEFAULT_CANDIDATE_CORRELATION_THRESHOLD,
+                                                                                step=0.0001,
+                                                                                min=TrainingConstants.MIN_CANDIDATE_CORRELATION_THRESHOLD,
+                                                                                max=TrainingConstants.MAX_CANDIDATE_CORRELATION_THRESHOLD,
+                                                                                className="mb-2",
+                                                                                debounce=True,
+                                                                            ),
+                                                                            html.P("Selected Candidates:", className="mb-1 fw-bold"),
+                                                                            dbc.Input(
+                                                                                id="cn-selected-candidates-input",
+                                                                                type="number",
+                                                                                value=TrainingConstants.DEFAULT_SELECTED_CANDIDATES,
+                                                                                step=1,
+                                                                                min=TrainingConstants.MIN_SELECTED_CANDIDATES,
+                                                                                max=TrainingConstants.MAX_SELECTED_CANDIDATES,
+                                                                                className="mb-2",
+                                                                                debounce=True,
+                                                                            ),
+                                                                        ],
+                                                                        id="sidebar-cn-pool-params",
+                                                                    ),
+                                                                    # ── Pool Training Complete ──
+                                                                    html.Div(
+                                                                        [
+                                                                            html.Hr(className="my-2"),
+                                                                            html.P("Pool Training Complete:", className="mb-1 fw-bold"),
+                                                                            dbc.RadioItems(
+                                                                                id="cn-training-complete-radio",
+                                                                                options=[
+                                                                                    {"label": "Preset Epochs", "value": "preset_epochs"},
+                                                                                    {"label": "Convergence Detection", "value": "convergence"},
+                                                                                ],
+                                                                                value="preset_epochs",
+                                                                                className="mb-2",
+                                                                            ),
+                                                                            html.Div(
+                                                                                [
+                                                                                    html.P("Training Iterations:", className="mb-1 ms-4"),
+                                                                                    dbc.Input(
+                                                                                        id="cn-training-iterations-input",
+                                                                                        type="number",
+                                                                                        value=TrainingConstants.DEFAULT_CANDIDATE_TRAINING_ITERATIONS,
+                                                                                        step=10,
+                                                                                        min=TrainingConstants.MIN_CANDIDATE_TRAINING_ITERATIONS,
+                                                                                        max=TrainingConstants.MAX_CANDIDATE_TRAINING_ITERATIONS,
+                                                                                        className="mb-2 ms-4",
+                                                                                        debounce=True,
+                                                                                        disabled=False,
+                                                                                        style={"width": "calc(100% - 1.5rem)"},
+                                                                                    ),
+                                                                                ],
+                                                                                id="cn-training-iterations-container",
+                                                                            ),
+                                                                            html.Div(
+                                                                                [
+                                                                                    html.P("Convergence Threshold:", className="mb-1 ms-4"),
+                                                                                    dbc.Input(
+                                                                                        id="cn-training-convergence-threshold-input",
+                                                                                        type="number",
+                                                                                        value=TrainingConstants.DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD,
+                                                                                        step=0.00001,
+                                                                                        min=TrainingConstants.MIN_CANDIDATE_CONVERGENCE_THRESHOLD,
+                                                                                        max=TrainingConstants.MAX_CANDIDATE_CONVERGENCE_THRESHOLD,
+                                                                                        className="mb-2 ms-4",
+                                                                                        debounce=True,
+                                                                                        disabled=True,
+                                                                                        style={"width": "calc(100% - 1.5rem)"},
+                                                                                    ),
+                                                                                ],
+                                                                                id="cn-training-convergence-threshold-container",
+                                                                            ),
+                                                                        ],
+                                                                        id="sidebar-cn-pool-training",
+                                                                    ),
+                                                                    # ── Multi Candidate Selection ──
+                                                                    html.Div(
+                                                                        [
+                                                                            html.Hr(className="my-2"),
+                                                                            html.P("Multi Candidate Selection:", className="mb-1 fw-bold"),
+                                                                            dcc.Checklist(
+                                                                                id="cn-multi-candidate-checkbox",
+                                                                                options=[{"label": " Enable multi-candidate selection", "value": "enabled"}],
+                                                                                value=[],
+                                                                                className="mb-2",
+                                                                            ),
+                                                                            html.Div(
+                                                                                [
+                                                                                    dbc.RadioItems(
+                                                                                        id="cn-candidate-selection-radio",
+                                                                                        options=[
+                                                                                            {"label": "Add Top Tier Candidates", "value": "top_tier"},
+                                                                                            {"label": "Add Random Candidates", "value": "random"},
+                                                                                        ],
+                                                                                        value=None,
+                                                                                        className="mb-2",
+                                                                                        style={"opacity": "0.5"},
+                                                                                    ),
+                                                                                    html.Div(
+                                                                                        [
+                                                                                            html.P("Number of Top Candidates:", className="mb-1 ms-4"),
+                                                                                            dbc.Input(
+                                                                                                id="cn-top-candidates-input",
+                                                                                                type="number",
+                                                                                                value=TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT,
+                                                                                                step=1,
+                                                                                                min=TrainingConstants.MIN_TOP_CANDIDATES_COUNT,
+                                                                                                max=TrainingConstants.MAX_TOP_CANDIDATES_COUNT,
+                                                                                                className="mb-2 ms-4",
+                                                                                                debounce=True,
+                                                                                                disabled=True,
+                                                                                                style={"width": "calc(100% - 1.5rem)"},
+                                                                                            ),
+                                                                                        ],
+                                                                                        id="cn-top-candidates-container",
+                                                                                    ),
+                                                                                    html.Div(
+                                                                                        [
+                                                                                            html.P("Number of Random Candidates:", className="mb-1 ms-4"),
+                                                                                            dbc.Input(
+                                                                                                id="cn-random-candidates-input",
+                                                                                                type="number",
+                                                                                                value=TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT,
+                                                                                                step=1,
+                                                                                                min=TrainingConstants.MIN_RANDOM_CANDIDATES_COUNT,
+                                                                                                max=TrainingConstants.MAX_RANDOM_CANDIDATES_COUNT,
+                                                                                                className="mb-2 ms-4",
+                                                                                                debounce=True,
+                                                                                                disabled=True,
+                                                                                                style={"width": "calc(100% - 1.5rem)"},
+                                                                                            ),
+                                                                                        ],
+                                                                                        id="cn-random-candidates-container",
+                                                                                    ),
+                                                                                ],
+                                                                                id="cn-multi-candidate-content",
+                                                                            ),
+                                                                        ],
+                                                                        id="sidebar-cn-multi-candidate",
+                                                                    ),
+                                                                ]
+                                                            ),
+                                                            id="cn-subsection-collapse",
+                                                            is_open=False,
+                                                        ),
                                                     ],
-                                                    id="cn-subsection-header",
-                                                    className="collapsible-header",
+                                                    id="sidebar-cn-section",
                                                 ),
-                                                dbc.Collapse(
-                                                    html.Div(
-                                                        [
-                                                            html.P("Candidate Pool Size:", className="mb-1 fw-bold"),
-                                                            dbc.Input(
-                                                                id="cn-pool-size-input",
-                                                                type="number",
-                                                                value=TrainingConstants.DEFAULT_CANDIDATE_POOL_SIZE,
-                                                                step=1,
-                                                                min=TrainingConstants.MIN_CANDIDATE_POOL_SIZE,
-                                                                max=TrainingConstants.MAX_CANDIDATE_POOL_SIZE,
-                                                                className="mb-2",
-                                                                debounce=True,
-                                                            ),
-                                                            html.P("Correlation Threshold:", className="mb-1 fw-bold"),
-                                                            dbc.Input(
-                                                                id="cn-correlation-threshold-input",
-                                                                type="number",
-                                                                value=TrainingConstants.DEFAULT_CANDIDATE_CORRELATION_THRESHOLD,
-                                                                step=0.0001,
-                                                                min=TrainingConstants.MIN_CANDIDATE_CORRELATION_THRESHOLD,
-                                                                max=TrainingConstants.MAX_CANDIDATE_CORRELATION_THRESHOLD,
-                                                                className="mb-2",
-                                                                debounce=True,
-                                                            ),
-                                                            html.P("Selected Candidates:", className="mb-1 fw-bold"),
-                                                            dbc.Input(
-                                                                id="cn-selected-candidates-input",
-                                                                type="number",
-                                                                value=TrainingConstants.DEFAULT_SELECTED_CANDIDATES,
-                                                                step=1,
-                                                                min=TrainingConstants.MIN_SELECTED_CANDIDATES,
-                                                                max=TrainingConstants.MAX_SELECTED_CANDIDATES,
-                                                                className="mb-2",
-                                                                debounce=True,
-                                                            ),
-                                                            html.Hr(className="my-2"),
-                                                            # Pool Training Complete
-                                                            html.P("Pool Training Complete:", className="mb-1 fw-bold"),
-                                                            dbc.RadioItems(
-                                                                id="cn-training-complete-radio",
-                                                                options=[
-                                                                    {"label": "Preset Epochs", "value": "preset_epochs"},
-                                                                    {"label": "Convergence Detection", "value": "convergence"},
-                                                                ],
-                                                                value="preset_epochs",
-                                                                className="mb-2",
-                                                            ),
-                                                            html.Div(
-                                                                [
-                                                                    html.P("Training Iterations:", className="mb-1 ms-4"),
-                                                                    dbc.Input(
-                                                                        id="cn-training-iterations-input",
-                                                                        type="number",
-                                                                        value=TrainingConstants.DEFAULT_CANDIDATE_TRAINING_ITERATIONS,
-                                                                        step=10,
-                                                                        min=TrainingConstants.MIN_CANDIDATE_TRAINING_ITERATIONS,
-                                                                        max=TrainingConstants.MAX_CANDIDATE_TRAINING_ITERATIONS,
-                                                                        className="mb-2 ms-4",
-                                                                        debounce=True,
-                                                                        disabled=False,
-                                                                        style={"width": "calc(100% - 1.5rem)"},
-                                                                    ),
-                                                                ],
-                                                                id="cn-training-iterations-container",
-                                                            ),
-                                                            html.Div(
-                                                                [
-                                                                    html.P("Convergence Threshold:", className="mb-1 ms-4"),
-                                                                    dbc.Input(
-                                                                        id="cn-training-convergence-threshold-input",
-                                                                        type="number",
-                                                                        value=TrainingConstants.DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD,
-                                                                        step=0.00001,
-                                                                        min=TrainingConstants.MIN_CANDIDATE_CONVERGENCE_THRESHOLD,
-                                                                        max=TrainingConstants.MAX_CANDIDATE_CONVERGENCE_THRESHOLD,
-                                                                        className="mb-2 ms-4",
-                                                                        debounce=True,
-                                                                        disabled=True,
-                                                                        style={"width": "calc(100% - 1.5rem)"},
-                                                                    ),
-                                                                ],
-                                                                id="cn-training-convergence-threshold-container",
-                                                            ),
-                                                            html.Hr(className="my-2"),
-                                                            # Multi Candidate Selection
-                                                            html.P("Multi Candidate Selection:", className="mb-1 fw-bold"),
-                                                            dcc.Checklist(
-                                                                id="cn-multi-candidate-checkbox",
-                                                                options=[{"label": " Enable multi-candidate selection", "value": "enabled"}],
-                                                                value=[],
-                                                                className="mb-2",
-                                                            ),
-                                                            html.Div(
-                                                                [
-                                                                    dbc.RadioItems(
-                                                                        id="cn-candidate-selection-radio",
-                                                                        options=[
-                                                                            {"label": "Add Top Tier Candidates", "value": "top_tier"},
-                                                                            {"label": "Add Random Candidates", "value": "random"},
-                                                                        ],
-                                                                        value=None,
-                                                                        className="mb-2",
-                                                                        style={"opacity": "0.5"},
-                                                                    ),
-                                                                    html.Div(
-                                                                        [
-                                                                            html.P("Number of Top Candidates:", className="mb-1 ms-4"),
-                                                                            dbc.Input(
-                                                                                id="cn-top-candidates-input",
-                                                                                type="number",
-                                                                                value=TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT,
-                                                                                step=1,
-                                                                                min=TrainingConstants.MIN_TOP_CANDIDATES_COUNT,
-                                                                                max=TrainingConstants.MAX_TOP_CANDIDATES_COUNT,
-                                                                                className="mb-2 ms-4",
-                                                                                debounce=True,
-                                                                                disabled=True,
-                                                                                style={"width": "calc(100% - 1.5rem)"},
-                                                                            ),
-                                                                        ],
-                                                                        id="cn-top-candidates-container",
-                                                                    ),
-                                                                    html.Div(
-                                                                        [
-                                                                            html.P("Number of Random Candidates:", className="mb-1 ms-4"),
-                                                                            dbc.Input(
-                                                                                id="cn-random-candidates-input",
-                                                                                type="number",
-                                                                                value=TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT,
-                                                                                step=1,
-                                                                                min=TrainingConstants.MIN_RANDOM_CANDIDATES_COUNT,
-                                                                                max=TrainingConstants.MAX_RANDOM_CANDIDATES_COUNT,
-                                                                                className="mb-2 ms-4",
-                                                                                debounce=True,
-                                                                                disabled=True,
-                                                                                style={"width": "calc(100% - 1.5rem)"},
-                                                                            ),
-                                                                        ],
-                                                                        id="cn-random-candidates-container",
-                                                                    ),
-                                                                ],
-                                                                id="cn-multi-candidate-content",
-                                                            ),
-                                                        ]
-                                                    ),
-                                                    id="cn-subsection-collapse",
-                                                    is_open=False,
-                                                ),
-                                                html.Hr(),
+                                                html.Hr(id="sidebar-params-divider"),
                                                 # ── Shared Apply Button ──
                                                 html.Div(
                                                     [
@@ -781,48 +829,55 @@ class DashboardManager:
                                                                 "textAlign": "center",
                                                             },
                                                         ),
-                                                    ]
+                                                    ],
+                                                    id="sidebar-apply-section",
                                                 ),
                                             ]
                                         ),
                                     ],
                                     className="mb-3",
+                                    id="sidebar-meta-params-card",
                                 ),
-                                dbc.Card(
+                                html.Div(
                                     [
-                                        dbc.CardHeader(
-                                            html.H5(
-                                                "Network Information",
-                                                id="network-info-header",
-                                                style={"cursor": "pointer", "userSelect": "none"},
-                                            ),
-                                            id="network-info-card-header",
-                                        ),
-                                        dbc.Collapse(
-                                            dbc.CardBody(
-                                                [
-                                                    html.Div(id="network-info-panel"),
-                                                    html.Hr(),
-                                                    html.H6(
+                                        dbc.Card(
+                                            [
+                                                dbc.CardHeader(
+                                                    html.H5(
+                                                        "Network Information",
+                                                        id="network-info-header",
+                                                        style={"cursor": "pointer", "userSelect": "none"},
+                                                    ),
+                                                    id="network-info-card-header",
+                                                ),
+                                                dbc.Collapse(
+                                                    dbc.CardBody(
                                                         [
-                                                            html.Span("▶", id="network-info-details-icon", className="collapse-icon"),
-                                                            "Network Information: Details",
-                                                        ],
-                                                        id="network-info-details-header",
-                                                        className="collapsible-header",
-                                                        style={"marginTop": "10px"},
+                                                            html.Div(id="network-info-panel"),
+                                                            html.Hr(),
+                                                            html.H6(
+                                                                [
+                                                                    html.Span("▶", id="network-info-details-icon", className="collapse-icon"),
+                                                                    "Network Information: Details",
+                                                                ],
+                                                                id="network-info-details-header",
+                                                                className="collapsible-header",
+                                                                style={"marginTop": "10px"},
+                                                            ),
+                                                            dbc.Collapse(
+                                                                html.Div(id="network-info-details-panel", style={"marginTop": "10px"}),
+                                                                id="network-info-details-collapse",
+                                                                is_open=False,
+                                                            ),
+                                                        ]
                                                     ),
-                                                    dbc.Collapse(
-                                                        html.Div(id="network-info-details-panel", style={"marginTop": "10px"}),
-                                                        id="network-info-details-collapse",
-                                                        is_open=False,
-                                                    ),
-                                                ]
-                                            ),
-                                            id="network-info-collapse",
-                                            is_open=True,
+                                                    id="network-info-collapse",
+                                                    is_open=True,
+                                                ),
+                                            ]
                                         ),
-                                    ]
+                                    ],
+                                    id="sidebar-network-info-section",
                                 ),
                             ],
                             width=3,
