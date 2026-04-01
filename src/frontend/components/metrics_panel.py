@@ -677,6 +677,7 @@ class MetricsPanel(BaseComponent):
                     "size": state.get("candidate_pool_size", 0),
                     "top_candidate_id": state.get("top_candidate_id", ""),
                     "top_candidate_score": state.get("top_candidate_score", 0.0),
+                    "best_correlation": state.get("best_correlation", 0.0),
                     "second_candidate_id": state.get("second_candidate_id", ""),
                     "second_candidate_score": state.get("second_candidate_score", 0.0),
                     "pool_metrics": state.get("pool_metrics", {}),
@@ -707,8 +708,8 @@ class MetricsPanel(BaseComponent):
             history_items = []
             for pool in history:
                 epoch = pool.get("epoch", 0)
-                top_id = pool.get("top_candidate_id", "N/A")
-                top_score = pool.get("top_candidate_score", 0.0)
+                top_id = pool.get("top_candidate_id", "") or "N/A"
+                top_score = pool.get("top_candidate_score") or pool.get("best_correlation", 0.0)
 
                 history_items.append(
                     dbc.Card(
@@ -1953,7 +1954,6 @@ class MetricsPanel(BaseComponent):
         top_cand_score = state.get("top_candidate_score", 0.0)
         second_cand_id = state.get("second_candidate_id", "")
         second_cand_score = state.get("second_candidate_score", 0.0)
-        pool_metrics = state.get("pool_metrics", {})
 
         # Top 2 candidates table
         candidate_rows = []
@@ -2055,14 +2055,29 @@ class MetricsPanel(BaseComponent):
             ]
         )
 
-        # Pool metrics
-        pool_metrics_rows = [
-            ("Avg Loss", f"{pool_metrics.get('avg_loss', 0.0):.4f}"),
-            ("Avg Accuracy", f"{pool_metrics.get('avg_accuracy', 0.0):.4f}"),
-            ("Avg Precision", f"{pool_metrics.get('avg_precision', 0.0):.4f}"),
-            ("Avg Recall", f"{pool_metrics.get('avg_recall', 0.0):.4f}"),
-            ("Avg F1 Score", f"{pool_metrics.get('avg_f1_score', 0.0):.4f}"),
-        ]
+        # Pool metrics — correlation statistics (CasCor optimizes correlation, not loss)
+        all_corrs = state.get("all_correlations", [])
+        if all_corrs and len(all_corrs) > 0:
+            import statistics
+
+            avg_corr = statistics.mean(all_corrs)
+            max_corr = max(all_corrs)
+            min_corr = min(all_corrs)
+            std_corr = statistics.stdev(all_corrs) if len(all_corrs) > 1 else 0.0
+            success_count = sum(1 for c in all_corrs if c > 0)
+            pool_metrics_rows = [
+                ("Avg Correlation", f"{avg_corr:.4f}"),
+                ("Max Correlation", f"{max_corr:.4f}"),
+                ("Min Correlation", f"{min_corr:.4f}"),
+                ("Std Deviation", f"{std_corr:.4f}"),
+                ("Success Rate", f"{success_count}/{len(all_corrs)}"),
+            ]
+        else:
+            best_corr = state.get("best_correlation", 0.0)
+            pool_metrics_rows = [
+                ("Best Correlation", f"{best_corr:.4f}"),
+                ("Pool Size", str(state.get("candidate_pool_size", 0))),
+            ]
 
         pool_metrics_table = html.Table(
             [
@@ -2090,7 +2105,7 @@ class MetricsPanel(BaseComponent):
                 html.H5("Top 2 Candidates", style={"marginBottom": "10px"}),
                 candidates_table,
                 pool_info,
-                html.H5("Pool Training Metrics", style={"marginTop": "15px", "marginBottom": "10px"}),
+                html.H5("Pool Correlation Metrics", style={"marginTop": "15px", "marginBottom": "10px"}),
                 pool_metrics_table,
             ]
         )

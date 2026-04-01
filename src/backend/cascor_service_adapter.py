@@ -276,6 +276,7 @@ class CascorServiceAdapter:
                                     top_candidate_score=data.get("best_correlation", 0.0),
                                     second_candidate_id=str(second_cand_id) if second_cand_id is not None else "",
                                     second_candidate_score=second_cand_corr,
+                                    all_correlations=data.get("all_correlations", []),
                                 )
                             except Exception as se:  # nosec B110
                                 logger.debug(f"State update callback error: {se}")
