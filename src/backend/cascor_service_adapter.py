@@ -241,10 +241,17 @@ class CascorServiceAdapter:
                                 phase_detail = data.get("phase_detail", "")
                                 if phase_detail in ("training_candidates", "candidate_training"):
                                     candidate_pool_status = "Training"
+                                    candidate_pool_phase = "Training"
                                 elif phase_detail == "adding_candidate":
                                     candidate_pool_status = "Selecting Best"
+                                    candidate_pool_phase = "Selecting"
                                 else:
                                     candidate_pool_status = "Inactive"
+                                    candidate_pool_phase = "Idle"
+                                # Map top candidate identity from CasCor state
+                                best_cand_id = data.get("best_candidate_id")
+                                second_cand_id = data.get("second_candidate_id")
+                                second_cand_corr = data.get("second_candidate_correlation", 0.0)
                                 self._state_update_callback(
                                     status=status,
                                     phase=data.get("phase", ""),
@@ -263,7 +270,12 @@ class CascorServiceAdapter:
                                     candidate_epoch=data.get("candidate_epoch"),
                                     candidate_total_epochs=data.get("candidate_total_epochs"),
                                     candidate_pool_status=candidate_pool_status,
+                                    candidate_pool_phase=candidate_pool_phase,
                                     candidate_pool_size=data.get("candidates_total"),
+                                    top_candidate_id=str(best_cand_id) if best_cand_id is not None and best_cand_id != -1 else "",
+                                    top_candidate_score=data.get("best_correlation", 0.0),
+                                    second_candidate_id=str(second_cand_id) if second_cand_id is not None else "",
+                                    second_candidate_score=second_cand_corr,
                                 )
                             except Exception as se:  # nosec B110
                                 logger.debug(f"State update callback error: {se}")
@@ -678,6 +690,20 @@ class CascorServiceAdapter:
 
     def get_network_topology(self) -> Optional[Dict[str, Any]]:
         return self.extract_network_topology()
+
+    def get_raw_topology(self) -> Optional[Dict[str, Any]]:
+        """Get raw weight-oriented topology from CasCor without graph transformation."""
+        try:
+            raw = self._cb.call(
+                lambda: self._unwrap_response(self._client.get_topology()),
+                fallback=lambda: None,
+            )
+            if isinstance(raw, dict):
+                return raw
+            return None
+        except Exception as e:
+            logger.warning("Failed to get raw topology: %s: %s", type(e).__name__, e)
+            return None
 
     def get_dataset_info(self, x=None, y=None) -> Optional[Dict[str, Any]]:
         try:

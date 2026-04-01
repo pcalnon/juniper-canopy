@@ -354,6 +354,11 @@ class TestRelayStateHandling:
                 "candidates_trained": 5,
                 "candidates_total": 10,
                 "phase_started_at": "2026-03-29T13:00:00Z",
+                "best_candidate_id": 3,
+                "best_candidate_uuid": "cand-uuid-3",
+                "second_candidate_id": 7,
+                "second_candidate_correlation": 0.8421,
+                "all_correlations": [0.9753, 0.8421, 0.7100],
             },
         }
 
@@ -381,7 +386,78 @@ class TestRelayStateHandling:
         assert kwargs["candidates_total"] == 10
         assert kwargs["phase_started_at"] == "2026-03-29T13:00:00Z"
         assert kwargs["candidate_pool_status"] == "Training"
+        assert kwargs["candidate_pool_phase"] == "Training"
+        assert kwargs["top_candidate_id"] == "3"
+        assert kwargs["top_candidate_score"] == 0.9753
+        assert kwargs["second_candidate_id"] == "7"
+        assert kwargs["second_candidate_score"] == 0.8421
         fake_websocket_manager.broadcast.assert_awaited()
+
+        await adapter.stop_metrics_relay()
+
+    @pytest.mark.asyncio
+    async def test_adding_candidate_phase_derives_selecting(self, adapter, monkeypatch):
+        """phase_detail='adding_candidate' should derive pool_phase='Selecting' and pool_status='Selecting Best'."""
+        callback = MagicMock()
+        adapter.set_state_update_callback(callback)
+
+        message = {
+            "type": "state",
+            "data": {
+                "status": "started",
+                "phase": "Candidate",
+                "phase_detail": "adding_candidate",
+                "best_candidate_id": 5,
+                "best_correlation": 0.95,
+            },
+        }
+
+        class StreamFactory(_SingleStateMessageStream):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, message=message, **kwargs)
+
+        fake_websocket_manager = MagicMock()
+        fake_websocket_manager.broadcast = AsyncMock()
+        monkeypatch.setattr("communication.websocket_manager.websocket_manager", fake_websocket_manager)
+        monkeypatch.setattr("backend.cascor_service_adapter.CascorTrainingStream", StreamFactory)
+
+        await adapter.start_metrics_relay()
+        await asyncio.wait_for(adapter._relay_task, timeout=1.0)
+
+        kwargs = callback.call_args.kwargs
+        assert kwargs["candidate_pool_status"] == "Selecting Best"
+        assert kwargs["candidate_pool_phase"] == "Selecting"
+        assert kwargs["top_candidate_id"] == "5"
+        assert kwargs["top_candidate_score"] == 0.95
+
+        await adapter.stop_metrics_relay()
+
+    @pytest.mark.asyncio
+    async def test_idle_phase_derives_idle_pool_phase(self, adapter, monkeypatch):
+        """phase_detail='' should derive pool_phase='Idle' and pool_status='Inactive'."""
+        callback = MagicMock()
+        adapter.set_state_update_callback(callback)
+
+        message = {
+            "type": "state",
+            "data": {"status": "started", "phase": "Output", "phase_detail": ""},
+        }
+
+        class StreamFactory(_SingleStateMessageStream):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, message=message, **kwargs)
+
+        fake_websocket_manager = MagicMock()
+        fake_websocket_manager.broadcast = AsyncMock()
+        monkeypatch.setattr("communication.websocket_manager.websocket_manager", fake_websocket_manager)
+        monkeypatch.setattr("backend.cascor_service_adapter.CascorTrainingStream", StreamFactory)
+
+        await adapter.start_metrics_relay()
+        await asyncio.wait_for(adapter._relay_task, timeout=1.0)
+
+        kwargs = callback.call_args.kwargs
+        assert kwargs["candidate_pool_status"] == "Inactive"
+        assert kwargs["candidate_pool_phase"] == "Idle"
 
         await adapter.stop_metrics_relay()
 
