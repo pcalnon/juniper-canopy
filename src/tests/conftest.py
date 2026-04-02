@@ -182,6 +182,24 @@ def pytest_collection_modifyitems(config, items):
             if "slow" in item.keywords:
                 item.add_marker(skip_slow)
 
+    # Skip Cassandra tests when driver is not installed
+    try:
+        import cassandra  # noqa: F401
+    except ImportError:
+        skip_cassandra = pytest.mark.skip(reason="Cassandra driver not installed (pip install cassandra-driver)")
+        for item in items:
+            if "requires_cassandra" in item.keywords:
+                item.add_marker(skip_cassandra)
+
+    # Skip Redis tests when library is not installed
+    try:
+        import redis  # noqa: F401
+    except ImportError:
+        skip_redis = pytest.mark.skip(reason="Redis library not installed (pip install redis)")
+        for item in items:
+            if "requires_redis" in item.keywords:
+                item.add_marker(skip_redis)
+
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -225,9 +243,8 @@ def mock_juniper_data_client():
     # Train/test split (80/20)
     train_end = int(n_samples * 0.8)
 
-    mock_client_instance = MagicMock()
-    mock_client_instance.create_dataset.return_value = {"dataset_id": "mock-dataset-001"}
-    mock_client_instance.download_artifact_npz.return_value = {
+    # Default NPZ data (200-sample, 2-class spiral) used by DemoMode and most tests
+    default_npz = {
         "X_full": X,
         "y_full": y_one_hot,
         "X_train": X[:train_end],
@@ -235,8 +252,95 @@ def mock_juniper_data_client():
         "X_test": X[train_end:],
         "y_test": y_one_hot[train_end:],
     }
+
+    # Import exception classes (real or stub — both available at this point)
+    from juniper_data_client.exceptions import JuniperDataClientError, JuniperDataNotFoundError
+
+    valid_generators = {"spiral", "xor", "circle", "moon"}
+    _created = {}  # dataset_id → creation params
+
+    def _make_npz(n_samples, n_classes, seed=42):
+        """Generate NPZ data with the requested sample count and class count."""
+        _rng = np.random.RandomState(seed)
+        _X = _rng.randn(n_samples, 2).astype(np.float32)
+        _y = np.zeros((n_samples, n_classes), dtype=np.float32)
+        for i in range(n_samples):
+            _y[i, i % n_classes] = 1.0
+        _split = int(n_samples * 0.8)
+        return {
+            "X_full": _X,
+            "y_full": _y,
+            "X_train": _X[:_split],
+            "y_train": _y[:_split],
+            "X_test": _X[_split:],
+            "y_test": _y[_split:],
+        }
+
+    def _create_dataset(*args, **kwargs):
+        generator_name = args[0] if args else kwargs.get("generator")
+        if generator_name not in valid_generators:
+            raise JuniperDataClientError(f"Unknown generator: {generator_name}")
+        import uuid as _uuid
+
+        params = args[1] if len(args) > 1 else kwargs.get("params", {}) or {}
+        dataset_id = f"mock-dataset-{_uuid.uuid4().hex[:8]}"
+        _created[dataset_id] = {"generator": generator_name, "params": params}
+        return {"dataset_id": dataset_id, "generator": generator_name}
+
+    def _get_npz_for(dataset_id):
+        info = _created.get(dataset_id)
+        if info is None:
+            raise JuniperDataNotFoundError(f"Dataset not found: {dataset_id}")
+        params = info["params"]
+        gen = info["generator"]
+        # Determine sample count and class count from creation params
+        if gen == "spiral":
+            n_spirals = int(params.get("n_spirals", 2))
+            n_per = int(params.get("n_points_per_spiral", 100))
+            return _make_npz(n_spirals * n_per, n_spirals, params.get("seed", 42))
+        elif gen == "xor":
+            n_pts = int(params.get("n_points", 100))
+            return _make_npz(n_pts, 2, params.get("seed", 42))
+        elif gen in ("circle", "moon"):
+            n_pts = int(params.get("n_points", 100))
+            return _make_npz(n_pts, 2, params.get("seed", 42))
+        return dict(default_npz)
+
+    def _download_artifact_npz(dataset_id):
+        return _get_npz_for(dataset_id)
+
+    def _download_artifact_bytes(dataset_id):
+        import io as _io
+
+        data = _get_npz_for(dataset_id)
+        buf = _io.BytesIO()
+        np.savez(buf, **data)
+        return buf.getvalue()
+
+    def _delete_dataset(dataset_id):
+        if dataset_id not in _created:
+            raise JuniperDataNotFoundError(f"Dataset not found: {dataset_id}")
+        del _created[dataset_id]
+        return True
+
+    mock_client_instance = MagicMock()
+    mock_client_instance.create_dataset.side_effect = _create_dataset
+    mock_client_instance.download_artifact_npz.side_effect = _download_artifact_npz
+    mock_client_instance.download_artifact_bytes.side_effect = _download_artifact_bytes
+    mock_client_instance.delete_dataset.side_effect = _delete_dataset
     mock_client_instance.health_check.return_value = {"status": "healthy"}
     mock_client_instance.is_ready.return_value = True
+    mock_client_instance.list_generators.return_value = [
+        {"name": "spiral"},
+        {"name": "xor"},
+        {"name": "circle"},
+        {"name": "moon"},
+    ]
+
+    # Configure context manager protocol so `with JuniperDataClient(...) as client:`
+    # returns the configured mock instance, not a new unconfigured MagicMock
+    mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+    mock_client_instance.__exit__ = MagicMock(return_value=False)
 
     mock_client_class = MagicMock(return_value=mock_client_instance)
 
