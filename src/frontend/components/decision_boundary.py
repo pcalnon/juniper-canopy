@@ -147,7 +147,7 @@ class DecisionBoundary(BaseComponent):
                 dcc.Graph(
                     id=f"{self.component_id}-plot",
                     config={"displayModeBar": True, "displaylogo": False},
-                    style={"height": "600px"},
+                    style={"height": "70vh", "maxHeight": "800px", "minHeight": "400px"},
                 ),
                 # Data stores (updates driven by dashboard_manager slow-update-interval)
                 dcc.Store(id=f"{self.component_id}-boundary-data", data=None),

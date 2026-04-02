@@ -100,17 +100,24 @@ class CassandraPanel(BaseComponent):
         """
         Build API URL for Cassandra endpoints.
 
-        Uses relative paths which work correctly when served from the same origin.
-        For absolute URLs, constructs from config or uses default localhost.
+        Constructs absolute URL using Flask request context when available,
+        falling back to localhost default for testing contexts.
 
         Args:
             path: API path (e.g., "/api/v1/cassandra/status")
 
         Returns:
-            API URL string
+            Full API URL string
         """
-        # Use relative path - works when served from same origin
-        return path.lstrip("/")
+        from urllib.parse import urljoin
+
+        try:
+            from flask import request
+
+            origin = f"{request.scheme}://{request.host}"
+        except RuntimeError:
+            origin = "http://127.0.0.1:8050"
+        return urljoin(f"{origin}/", path.lstrip("/"))
 
     def _render_hosts_table(self, hosts: List[Dict[str, Any]]) -> html.Div | dbc.Table:
         """

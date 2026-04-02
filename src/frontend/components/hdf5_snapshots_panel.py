@@ -107,7 +107,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 html.Div(
                     [
                         html.H3(
-                            "HDF5 Snapshots",
+                            "Snapshots",
                             style={"display": "inline-block", "marginRight": "20px", "color": "#2c3e50"},
                         ),
                         dbc.Button(

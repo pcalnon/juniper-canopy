@@ -258,6 +258,29 @@ table tbody tr:hover {
     color: var(--primary-color) !important;
 }
 
+/* Card dark mode */
+.dark-mode .card {
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+.dark-mode .card-header {
+    background-color: var(--bg-secondary) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+.dark-mode .card-body {
+    background-color: var(--bg-card) !important;
+    color: var(--text-color) !important;
+}
+
+/* Plotly graph dark mode containers */
+.dark-mode .js-plotly-plot .plotly .main-svg {
+    background-color: var(--bg-card) !important;
+}
+
 .dark-mode .accordion-button::after {
     filter: invert(1);
 }

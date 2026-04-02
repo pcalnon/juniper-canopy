@@ -219,13 +219,13 @@ class DatasetPlotter(BaseComponent):
                 dcc.Graph(
                     id=f"{self.component_id}-scatter-plot",
                     config={"displayModeBar": True, "displaylogo": False},
-                    style={"height": "500px"},
+                    style={"height": "65vh", "maxHeight": "750px", "minHeight": "400px"},
                 ),
                 # Feature distribution histograms
                 dcc.Graph(
                     id=f"{self.component_id}-distribution-plot",
                     config={"displayModeBar": False},
-                    style={"height": "300px"},
+                    style={"height": "25vh", "maxHeight": "350px", "minHeight": "200px"},
                 ),
                 # Dataset data store
                 dcc.Store(id=f"{self.component_id}-dataset-store", data=None),
