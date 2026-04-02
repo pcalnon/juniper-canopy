@@ -214,24 +214,28 @@ hr {
 }
 
 /* Table styles */
-table {
+table,
+.table {
     background-color: var(--bg-card) !important;
     border-color: var(--border-color) !important;
     color: var(--text-color) !important;
 }
 
-table thead th {
+table thead th,
+.table thead th {
     background-color: var(--bg-secondary) !important;
     border-color: var(--border-color) !important;
     color: var(--text-color) !important;
 }
 
-table tbody td {
+table tbody td,
+.table tbody td {
     border-color: var(--border-color) !important;
     color: var(--text-color) !important;
 }
 
-table tbody tr:hover {
+table tbody tr:hover,
+.table tbody tr:hover {
     background-color: var(--bg-secondary) !important;
 }
 
@@ -275,7 +279,8 @@ table tbody tr:hover {
 }
 
 /* Table row backgrounds */
-table tbody tr {
+table tbody tr,
+.table tbody tr {
     background-color: var(--bg-card) !important;
 }
 

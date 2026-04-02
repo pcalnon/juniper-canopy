@@ -303,10 +303,13 @@ class CandidateMetricsPanel(BaseComponent):
         # ── Update candidate loss plot ──
         @app.callback(
             Output(f"{self.component_id}-loss-plot", "figure"),
-            [Input(f"{self.component_id}-training-state-store", "data")],
+            [
+                Input(f"{self.component_id}-training-state-store", "data"),
+                Input("theme-state", "data"),
+            ],
         )
-        def update_loss_plot(state):
-            return self._create_candidate_loss_figure(state)
+        def update_loss_plot(state, theme):
+            return self._create_candidate_loss_figure(state, theme=theme or "light")
 
         # ── Toggle pool details collapse ──
         @app.callback(
@@ -526,20 +529,22 @@ class CandidateMetricsPanel(BaseComponent):
             ]
         )
 
-    def _create_candidate_loss_figure(self, state: Dict[str, Any] = None) -> go.Figure:
+    def _create_candidate_loss_figure(self, state: Dict[str, Any] = None, theme: str = "light") -> go.Figure:
         """
         Create candidate training loss plot.
 
         Args:
             state: Training state dictionary
+            theme: Current theme ("light" or "dark")
 
         Returns:
             Plotly figure with candidate loss trace
         """
         fig = go.Figure()
+        is_dark = theme == "dark"
 
         if not state:
-            return self._create_empty_plot()
+            return self._create_empty_plot(theme=theme)
 
         # Extract candidate-phase data from training history
         epochs = state.get("epochs", [])
@@ -547,7 +552,7 @@ class CandidateMetricsPanel(BaseComponent):
         phases = state.get("phases", [])
 
         if not epochs or not losses or not phases:
-            return self._create_empty_plot()
+            return self._create_empty_plot(theme=theme)
 
         candidate_epochs = [e for e, p in zip(epochs, phases, strict=False) if "candidate" in p]
         candidate_losses = [lo for lo, p in zip(losses, phases, strict=False) if "candidate" in p]
@@ -567,15 +572,16 @@ class CandidateMetricsPanel(BaseComponent):
             fig.update_layout(
                 xaxis_title="Epoch",
                 yaxis_title="Loss",
-                template="plotly",
-                plot_bgcolor="#f8f9fa",
-                paper_bgcolor="#ffffff",
+                template="plotly_dark" if is_dark else "plotly",
+                plot_bgcolor="#242424" if is_dark else "#f8f9fa",
+                paper_bgcolor="#242424" if is_dark else "#ffffff",
+                font={"color": "#e9ecef" if is_dark else "#212529"},
                 margin={"l": 50, "r": 20, "t": 20, "b": 40},
                 showlegend=True,
                 legend={"x": 0, "y": 1},
             )
         else:
-            return self._create_empty_plot()
+            return self._create_empty_plot(theme=theme)
 
         return fig
 

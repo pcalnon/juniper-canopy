@@ -1089,7 +1089,7 @@ class DashboardManager:
                                         ),
                                         dbc.Tab(
                                             self.decision_boundary.get_layout(),
-                                            label="Decision Boundaries",
+                                            label="Decision Boundary",
                                             tab_id="boundaries",
                                         ),
                                         dbc.Tab(
@@ -1098,8 +1098,18 @@ class DashboardManager:
                                             tab_id="dataset",
                                         ),
                                         dbc.Tab(
+                                            self.worker_panel.get_layout(),
+                                            label="Workers",
+                                            tab_id="workers",
+                                        ),
+                                        dbc.Tab(
+                                            self.parameters_panel.get_layout(),
+                                            label="Parameters",
+                                            tab_id="parameters",
+                                        ),
+                                        dbc.Tab(
                                             self.hdf5_snapshots_panel.get_layout(),
-                                            label="HDF5 Snapshots",
+                                            label="Snapshots",
                                             tab_id="snapshots",
                                         ),
                                         dbc.Tab(
@@ -1113,24 +1123,14 @@ class DashboardManager:
                                             tab_id="cassandra",
                                         ),
                                         dbc.Tab(
-                                            self.worker_panel.get_layout(),
-                                            label="Workers",
-                                            tab_id="workers",
+                                            self.tutorial_panel.get_layout(),
+                                            label="Tutorial",
+                                            tab_id="tutorial",
                                         ),
                                         dbc.Tab(
                                             self.about_panel.get_layout(),
                                             label="About",
                                             tab_id="about",
-                                        ),
-                                        dbc.Tab(
-                                            self.parameters_panel.get_layout(),
-                                            label="Parameters",
-                                            tab_id="parameters",
-                                        ),
-                                        dbc.Tab(
-                                            self.tutorial_panel.get_layout(),
-                                            label="Tutorial",
-                                            tab_id="tutorial",
                                         ),
                                     ],
                                     id="visualization-tabs",
