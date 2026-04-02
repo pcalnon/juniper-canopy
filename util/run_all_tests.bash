@@ -59,6 +59,10 @@ log_verbose "Current Directory: $(pwd)"
 #####################################################################################################################################################################################################
 # Run Tests with designated reports
 #####################################################################################################################################################################################################
+export CASSANDRA_INTEGRATION_TEST=1
+export JUNIPER_DATA_E2E_TEST=1
+export REDIS_INTEGRATION_TEST=1
+
 log_trace "Run Tests with designated reports"
 if [[ "${COVERAGE_REPORT}" == "${FALSE}" ]]; then
     RUN_TESTS_NO_COV_RPT="pytest -vv ./src/tests"
