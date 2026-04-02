@@ -1,6 +1,6 @@
 # Juniper Canopy - Agent Development Guide
 
-**Version**: 0.3.0
+**Version**: 0.4.0
 
 ## Project Overview
 
@@ -32,15 +32,16 @@ For agents and subagents working on this codebase, follow this checklist:
    ```
 
 3. **Before changing configuration**
-   - Check `src/canopy_constants.py` and `conf/app_config.yaml`
-   - Respect the hierarchy: env vars (`CASCOR_*`) > YAML > constants
+   - Check `src/settings.py` (Pydantic BaseSettings), `src/canopy_constants.py`, and `conf/app_config.yaml`
+   - Respect the hierarchy: Pydantic Settings (`JUNIPER_CANOPY_*` env vars) > YAML > constants
+   - Legacy `CASCOR_*` env vars are supported with deprecation warnings
 
 4. **Before changing WebSocket or API routes**
    - Update both FastAPI (`main.py`, `communication/websocket_manager.py`) and any Dash callbacks using those routes
    - Update `docs/api/` and tests in `src/tests/integration/`
 
 5. **Before changing demo mode behavior**
-   - Understand `src/demo_mode.py` and how `CASCOR_DEMO_MODE` controls app startup
+   - Understand `src/demo_mode.py` and how `JUNIPER_CANOPY_DEMO_MODE` (or legacy `CASCOR_DEMO_MODE`) controls app startup
    - Ensure `./demo` still starts successfully and tests still pass
 
 6. **Singleton reset guidance**
@@ -123,7 +124,10 @@ xdg-open reports/coverage/index.html  # Linux
 | `requires_cascor`  | Needs a real CasCor backend               | Real backend integration tests              |
 | `requires_server`  | Needs a running server                    | External client tests vs pre-started server |
 | `requires_redis`   | Needs Redis                               | Cache / pub-sub integration tests           |
+| `requires_cassandra` | Needs Cassandra connection              | Cassandra integration tests                 |
 | `requires_display` | Needs a GUI/display                       | Visualization / UI snapshot tests           |
+| `api`              | API endpoint tests                        | FastAPI route / response tests              |
+| `generators`       | Data generator tests                      | Test data generation functions              |
 
 Example marker usage:
 
@@ -149,8 +153,11 @@ The test suite auto-skips certain tests unless you opt in via environment variab
 | `RUN_SERVER_TESTS`         | Enable tests marked `requires_server`                           | unset   |
 | `RUN_DISPLAY_TESTS`        | Enable tests marked `requires_display` in headless environments | unset   |
 | `ENABLE_SLOW_TESTS`        | Run tests marked `slow`                                         | unset   |
+| `CASSANDRA_INTEGRATION_TEST` | Enable Cassandra integration tests                            | unset   |
+| `REDIS_INTEGRATION_TEST`  | Enable Redis integration tests                                  | unset   |
+| `JUNIPER_DATA_E2E_TEST`   | Enable JuniperData end-to-end tests                             | unset   |
 
-> **Note:** `conftest.py` **forces** `CASCOR_DEMO_MODE=1` for the test process by default so tests do **not** require a real backend unless you explicitly enable it via `CASCOR_BACKEND_AVAILABLE=1`.
+> **Note:** `conftest.py` **forces** `JUNIPER_CANOPY_DEMO_MODE=1` for the test process by default so tests do **not** require a real backend unless you explicitly enable it via `CASCOR_BACKEND_AVAILABLE=1`.
 
 Example:
 
@@ -166,13 +173,21 @@ pytest -m "not requires_display" -v
 
 These fixtures are defined in `src/tests/conftest.py` and are available everywhere under `src/tests/`:
 
-- **`client`** (module scope): FastAPI `TestClient` against `main.app` with `CASCOR_DEMO_MODE=1`. Use this for exercising API endpoints in tests without starting uvicorn.
+- **`client`** (module scope): FastAPI `TestClient` against `main.app` with `JUNIPER_CANOPY_DEMO_MODE=1`. Use this for exercising API endpoints in tests without starting uvicorn.
 
-- **`reset_singletons`** (function scope, autouse): Resets `ConfigManager`, `DemoMode`, and `CallbackContextAdapter` singletons before and after each test. **Agent guidance:** Do not bypass this fixture; if you introduce new singletons, extend this fixture to reset them.
+- **`mock_juniper_data_client`** (session scope, autouse): Mocks `JuniperDataClient` with realistic spiral dataset responses. Generates 200-sample 2-class spiral data. Required for all tests that touch data fetching.
 
-- **`fake_backend_root`**: Creates a fake CasCor backend modules tree under a temporary directory. Use it to test `CascorIntegration` behavior without a real backend.
+- **`reset_singletons`** (function scope, autouse): Resets `ConfigManager`, `DemoMode`, `Settings`, `CallbackContextAdapter`, and security state singletons before and after each test. **Agent guidance:** Do not bypass this fixture; if you introduce new singletons, extend this fixture to reset them.
+
+- **`preserve_metrics_layouts`** (session scope, autouse): Backs up and restores `conf/layouts/metrics_layouts.json` to prevent tests from polluting the working tree.
+
+- **`cleanup_test_environment`** (function scope, autouse): Clears test-specific environment variables after each test.
+
+- **`fake_backend_root`**: Creates a fake CasCor backend modules tree under a temporary directory. Use it to test backend behavior without a real backend.
 
 - **`ensure_test_data_directory`** (session scope, autouse): Ensures `src/tests/data/` exists and creates `sample_metrics.json` if missing.
+
+- **`test_config`** (function scope): Provides a safe-defaults configuration dictionary for tests.
 
 - **`sample_training_metrics`, `sample_network_topology`, `sample_dataset`**: Provide realistic test data for metrics/topology/dataset-related code.
 
@@ -212,6 +227,15 @@ python -m py_compile src/**/*.py
 
 ### CI/CD
 
+**GitHub Actions Workflows** (`.github/workflows/`):
+
+| Workflow | File | Purpose |
+|----------|------|---------|
+| Continuous Integration | `ci.yml` | Test, lint, type-check on PR and push |
+| Lockfile Update | `lockfile-update.yml` | Automated dependency lock updates |
+| Publish | `publish.yml` | Release publishing automation |
+| Security Scan | `security-scan.yml` | Security vulnerability scanning |
+
 ```bash
 # Local CI simulation (requires act - optional)
 act -j test
@@ -249,122 +273,233 @@ flake8 src/
 ```bash
 juniper_canopy/
 ├── conf/                         # Configuration & infrastructure
-│   ├── app_config.yaml           # Main application config (see "Configuration Management")
-│   ├── conda_environment.yaml    # Conda env spec for JuniperCanopy
+│   ├── app_config.yaml           # Main application config (YAML layer)
+│   ├── layouts/                  # Dashboard layout definitions
+│   │   └── metrics_layouts.json  # Metrics panel layout config
+│   ├── conda_environment.yaml    # Conda env spec
+│   ├── conda_environment_ci.yaml # CI-specific conda env
 │   ├── requirements.txt          # Pip dependencies
+│   ├── requirements_ci.txt       # CI pip dependencies
 │   ├── Dockerfile                # Container image for Juniper Canopy
 │   ├── docker-compose.yaml       # Local stack (app + services like Redis)
 │   ├── logging_config.yaml       # Logging configuration
+│   ├── logging_colors.conf       # Color output configuration
 │   ├── init.conf                 # Shared shell init for utility scripts
-│   └── ... (35+ shell/logging/env configs)
+│   └── ... (60+ shell/logging/env configs)
 ├── data/                         # Datasets for training/testing
 ├── docs/                         # Reference & subsystem documentation
-│   ├── api/                      # API-level docs for FastAPI/Dash endpoints
+│   ├── api/                      # API schema and reference docs
 │   ├── cascor/                   # CasCor backend integration docs
-│   ├── cassandra/                # Persistence / Cassandra integration docs
+│   ├── cassandra/                # Cassandra integration docs
 │   ├── ci_cd/                    # CI/CD pipeline documentation
 │   ├── demo/                     # Demo mode behavior & usage
+│   ├── deployment/               # Kubernetes deployment plan
 │   ├── history/                  # Archived/superseded documentation
-│   ├── phase0-3/                 # Historical design docs / early phases
 │   ├── redis/                    # Redis/cache integration docs
 │   ├── testing/                  # Testing guides and advanced scenarios
-│   └── *.md                      # Quick start, environment setup, etc.
+│   └── *.md                      # Quick start, environment setup, reference, etc.
 ├── images/                       # Generated images/screenshots
 ├── logs/                         # Log files (runtime)
 ├── notes/                        # Development notes and implementation details
+│   ├── analysis/                 # Technical analyses
+│   ├── development/              # Dev roadmaps and phase work
+│   ├── fixes/                    # Bug fix plans and reports
+│   ├── history/                  # Historical analyses and audits
+│   ├── integration/              # Integration phase analysis (phases 0-5)
+│   ├── mcp/                      # MCP server setup guides
+│   ├── pull_requests/            # PR descriptions
+│   ├── releases/                 # Release notes (v0.14.0+)
+│   ├── research/                 # Research proposals
+│   └── templates/                # Issue, PR, release note templates
 ├── reports/                      # Test coverage and CI reports
+├── scripts/                      # Service management scripts
+│   ├── generate_dep_docs.sh      # Dependency documentation generator
+│   ├── juniper-canopy.service    # Systemd service file
+│   └── juniper-ctl               # Service control utility
 ├── src/                          # Source code
 │   ├── backend/                  # CasCor backend integration & adapters
+│   │   ├── __init__.py           # Backend factory (create_backend)
+│   │   ├── protocol.py           # BackendProtocol typing interface
+│   │   ├── demo_backend.py       # DemoBackend (wraps DemoMode)
+│   │   ├── service_backend.py    # ServiceBackend (wraps CascorServiceAdapter)
+│   │   ├── cascor_service_adapter.py # juniper-cascor-client wrapper
+│   │   ├── circuit_breaker.py    # Fault tolerance
+│   │   ├── cassandra_client.py   # Optional Cassandra integration
+│   │   ├── redis_client.py       # Optional Redis caching
+│   │   ├── data_adapter.py       # Data normalization
+│   │   ├── training_monitor.py   # Metrics collection (TrainingState)
+│   │   ├── training_state_machine.py # FSM for training control
+│   │   ├── state_sync.py         # State synchronization
+│   │   └── statistics.py         # Statistics module
 │   ├── communication/            # WebSocket management & protocol
+│   │   └── websocket_manager.py  # WebSocket connection and broadcast management
 │   ├── frontend/                 # Dash dashboard components & callbacks
-│   │   └── components/           # Individual UI components
+│   │   ├── dashboard_manager.py  # DashboardManager orchestrator
+│   │   ├── base_component.py     # BaseComponent for UI modules
+│   │   ├── callback_context.py   # Callback context utilities
+│   │   ├── tooltips.py           # UI tooltips
+│   │   └── components/           # Individual UI panel components
+│   │       ├── about_panel.py
+│   │       ├── candidate_metrics_panel.py
+│   │       ├── cassandra_panel.py
+│   │       ├── dataset_plotter.py
+│   │       ├── decision_boundary.py
+│   │       ├── hdf5_snapshots_panel.py
+│   │       ├── metrics_panel.py
+│   │       ├── network_visualizer.py
+│   │       ├── parameters_panel.py
+│   │       ├── redis_panel.py
+│   │       ├── training_metrics.py
+│   │       ├── tutorial_panel.py
+│   │       └── worker_panel.py
 │   ├── logger/                   # Logging system
+│   │   └── logger.py             # Structured JSON/text logging
 │   ├── tests/                    # Test suite
 │   │   ├── unit/                 # Unit tests (fast, no external deps)
+│   │   │   ├── backend/          # Backend component unit tests
+│   │   │   └── frontend/         # Frontend component unit tests
 │   │   ├── integration/          # Integration tests (DB, files, backend)
+│   │   │   └── backend/          # Backend integration tests
 │   │   ├── regression/           # Regression tests for fixed bugs
 │   │   ├── performance/          # Performance/benchmark tests
 │   │   ├── fixtures/             # Additional test fixtures
 │   │   ├── mocks/                # Mock implementations
+│   │   ├── data/                 # Test data generators
 │   │   └── helpers/              # Test utility functions
-│   ├── config_manager.py         # Configuration management
+│   ├── main.py                   # FastAPI + Dash application entrypoint
+│   ├── settings.py               # Pydantic BaseSettings configuration (primary)
+│   ├── config_manager.py         # Legacy YAML-based configuration (deprecated)
 │   ├── canopy_constants.py       # Central constants (see "Constants Management")
 │   ├── demo_mode.py              # Demo mode simulation
-│   └── main.py                   # FastAPI + Dash application entrypoint
+│   ├── discovery.py              # Auto-discovery of cascor instances
+│   ├── health.py                 # Health check probes (/v1/health/*)
+│   ├── middleware.py             # Security, rate limiting, CSP headers
+│   ├── observability.py          # Sentry, Prometheus, request ID middleware
+│   ├── security.py               # API key authentication, rate limiting
+│   └── secrets_util.py           # Environment secret management
 ├── util/                         # Utility scripts (bash, invoked via ./demo, etc.)
-├── demo                          # Root-level demo launcher script (bash)
+│   └── verification/             # Verification helper scripts
+├── .env.dev                      # Development environment variables
+├── .env.example                  # Example environment template
+├── .env.prod                     # Production environment variables
+├── .mcp.json                     # MCP server configuration
+├── AGENTS.md                     # This file
+├── CHANGELOG.md                  # Chronological change history
+├── CLAUDE.md -> AGENTS.md        # Symlink for Claude Code
+├── Dockerfile                    # Root-level container image
+├── LICENSE                       # MIT License
+├── README.md                     # Project overview
 ├── conftest.py                   # Root pytest config (adds src/ to path)
+├── demo                          # Symlink -> util/juniper_canopy-demo.bash
 ├── pyproject.toml                # Python project config (black, isort, pytest, coverage)
-└── AGENTS.md                     # This file
+├── requirements.lock             # Locked dependencies
+└── try                           # Symlink -> util/juniper_canopy.bash
 ```
 
 ### Key Components
 
 1. **FastAPI Backend** (`src/main.py`)
-   - RESTful API endpoints
-   - WebSocket endpoints for real-time communication
-   - Integration with Dash dashboard
+   - RESTful API endpoints (30+ routes)
+   - WebSocket endpoints for real-time communication (`/ws/training`, `/ws/control`, `/ws`)
+   - Dash app integration via WSGI middleware (`a2wsgi`)
+   - Async lifespan manager for startup/shutdown orchestration
 
-2. **Dash Dashboard** (`src/frontend/dashboard_manager.py`)
-   - Interactive web UI
-   - Real-time plotting
-   - Network visualization
+2. **Pydantic Settings** (`src/settings.py`)
+   - Primary configuration via `JUNIPER_CANOPY_*` env vars
+   - Typed, validated settings with nested model hierarchy
+   - Legacy `CASCOR_*` fallback with deprecation warnings
+   - See [Configuration Management](#configuration-management) for details
 
-3. **Demo Mode** (`src/demo_mode.py`)
-   - Simulated training for development
-   - Thread-safe operation
-   - Realistic metric generation
+3. **Dash Dashboard** (`src/frontend/dashboard_manager.py`)
+   - `DashboardManager` orchestrates all UI components
+   - 13 specialized panel components in `frontend/components/`
+   - Interactive real-time plotting via Plotly/Dash callbacks
 
-4. **WebSocket Manager** (`src/communication/websocket_manager.py`)
-   - Connection management
-   - Thread-safe broadcasting
-   - Async/sync bridge
+4. **Backend Protocol & Factory** (`src/backend/protocol.py`, `src/backend/__init__.py`)
+   - `BackendProtocol` defines the typing interface for all backends
+   - Factory function `create_backend()` selects DemoBackend or ServiceBackend based on settings
+   - Dependency injection pattern for testability
 
-5. **Constants Module** (`src/canopy_constants.py`)
-   - Centralized application constants
-   - Type-safe configuration values
-   - Training parameters, UI settings, server config
+5. **Service Backend** (`src/backend/service_backend.py`, `src/backend/cascor_service_adapter.py`)
+   - `ServiceBackend` wraps `CascorServiceAdapter` for production use
+   - `CascorServiceAdapter` uses `juniper-cascor-client` for REST/WebSocket communication
+   - Circuit breaker pattern for fault tolerance (`src/backend/circuit_breaker.py`)
+   - State synchronization with remote cascor (`src/backend/state_sync.py`)
 
-6. **CasCor Integration** (`src/backend/cascor_integration.py`) - P1-NEW-003, P1-NEW-002
-   - Async training support via `ThreadPoolExecutor`
-   - `fit_async()` and `start_training_background()` methods
-   - RemoteWorkerClient integration for distributed training
-   - Thread-safe training status tracking
+6. **Demo Backend** (`src/backend/demo_backend.py`, `src/demo_mode.py`)
+   - `DemoBackend` wraps `DemoMode` for offline development
+   - Simulated CasCor training loop with realistic metrics
+   - Thread-safe operation via locks and events
+
+7. **Training State Machine** (`src/backend/training_state_machine.py`, `src/backend/training_monitor.py`)
+   - FSM for training command validation (START, STOP, PAUSE, RESUME, RESET)
+   - `TrainingPhase` enum: IDLE, OUTPUT, CANDIDATE, INFERENCE
+   - `TrainingStatus` enum: STOPPED, STARTED, PAUSED, COMPLETED, FAILED
+   - Thread-safe global state tracking via `TrainingState`
+
+8. **WebSocket Manager** (`src/communication/websocket_manager.py`)
+   - Connection management with heartbeat
+   - Thread-safe broadcasting via `broadcast_from_thread()`
+   - Message builder functions for standardized schemas
+
+9. **Health & Observability** (`src/health.py`, `src/observability.py`)
+   - Health check probes: `/v1/health`, `/v1/health/live`, `/v1/health/ready`
+   - Dependency probing (JuniperData, CasCor availability)
+   - Sentry integration, Prometheus metrics, request ID middleware
+
+10. **Infrastructure Clients** (`src/backend/redis_client.py`, `src/backend/cassandra_client.py`)
+    - Optional Redis caching (soft-fail if not installed)
+    - Optional Cassandra time-series storage (soft-fail if not installed)
+    - Status endpoints for monitoring
+
+11. **Security & Middleware** (`src/security.py`, `src/middleware.py`)
+    - API key authentication
+    - Rate limiting
+    - CSP headers, CORS configuration
+
+12. **Constants Module** (`src/canopy_constants.py`)
+    - Centralized application constants
+    - Type-safe configuration values
+    - Training parameters, UI settings, server config
 
 ## Demo Mode vs Real Backend
 
 ### Demo Mode (Default for Development)
 
-- **Activation:** Set `CASCOR_DEMO_MODE=1` (the `./demo` script does this automatically)
-- **Behavior:** Simulated training loop, no real CasCor backend required
+- **Activation:** Set `JUNIPER_CANOPY_DEMO_MODE=1` (the `./demo` script does this automatically)
+- **Behavior:** Uses `DemoBackend` with simulated training loop, no real CasCor backend required
 - **Use case:** UI development, testing, demonstrations
+- **Legacy:** `CASCOR_DEMO_MODE=1` also works but emits a deprecation warning
 
 ```bash
 # Run in demo mode
 ./demo
 # or explicitly:
-export CASCOR_DEMO_MODE=1
+export JUNIPER_CANOPY_DEMO_MODE=1
 cd src && uvicorn main:app --host 0.0.0.0 --port 8050
 ```
 
 ### Real Backend Mode (Production)
 
-- **Activation:** Unset `CASCOR_DEMO_MODE` and set `CASCOR_BACKEND_PATH`
-- **Behavior:** Connects to real CasCor neural network backend
+- **Activation:** Do not set `JUNIPER_CANOPY_DEMO_MODE`; configure `JUNIPER_CANOPY_CASCOR_SERVICE_URL`
+- **Behavior:** Uses `ServiceBackend` with `CascorServiceAdapter` connecting to real CasCor service
+- **Auto-discovery:** Enabled by default; probes `localhost:8200`
 - **Use case:** Production, real training sessions
 
 ```bash
-# Run with real backend
-unset CASCOR_DEMO_MODE
-export CASCOR_BACKEND_PATH=/path/to/cascor
+# Run with real backend (auto-discovery)
+cd src && uvicorn main:app --host 0.0.0.0 --port 8050
+
+# Or with explicit service URL
+export JUNIPER_CANOPY_CASCOR_SERVICE_URL=http://cascor-host:8200
 cd src && uvicorn main:app --host 0.0.0.0 --port 8050
 ```
 
 ### Agent Guidance for Demo Mode
 
-- **Tests must work with demo mode**: `conftest.py` forces `CASCOR_DEMO_MODE=1` by default
-- **New features must be demo-aware**: Check `demo_mode_active` before calling real backend
-- **Use `CascorIntegration` carefully**: Only behind checks that respect demo mode and `CASCOR_BACKEND_AVAILABLE`
+- **Tests must work with demo mode**: `conftest.py` forces `JUNIPER_CANOPY_DEMO_MODE=1` by default
+- **New features must be demo-aware**: The `BackendProtocol` interface ensures both backends expose identical APIs
+- **Use `ServiceBackend`/`CascorServiceAdapter` carefully**: Only behind checks that respect demo mode and `CASCOR_BACKEND_AVAILABLE`
 
 ## Docker and Local Stack
 
@@ -401,7 +536,7 @@ All application constants are centralized in `src/canopy_constants.py` for maint
 **Import and use constants:**
 
 ```python
-from constants import TrainingConstants, DashboardConstants
+from canopy_constants import TrainingConstants, DashboardConstants
 
 # Use in your code
 max_epochs = TrainingConstants.MAX_TRAINING_EPOCHS
@@ -437,137 +572,144 @@ See the comprehensive [Constants Guide](docs/cascor/CONSTANTS_GUIDE.md) for deta
 
 The juniper_canopy application uses a three-level configuration hierarchy (highest to lowest priority):
 
-1. **Environment Variables** (CASCOR_*) - Runtime overrides
-2. **YAML Configuration** (conf/app_config.yaml) - Deployment-specific settings
-3. **Constants Module** (src/canopy_constants.py) - Application defaults
+1. **Pydantic BaseSettings** (`src/settings.py`) - `JUNIPER_CANOPY_*` environment variables with typed validation
+2. **YAML Configuration** (`conf/app_config.yaml`) - Deployment-specific settings (legacy)
+3. **Constants Module** (`src/canopy_constants.py`) - Application defaults
 
-This hierarchy allows flexible deployment while maintaining sensible defaults.
+> **Note**: The previous `CASCOR_*` environment variable prefix is deprecated but still supported with deprecation warnings. All new code should use `JUNIPER_CANOPY_*`.
+
+### Pydantic Settings (Primary)
+
+The `Settings` class in `src/settings.py` provides typed, validated configuration:
+
+```python
+from settings import get_settings
+
+settings = get_settings()
+host = settings.server.host       # "127.0.0.1"
+port = settings.server.port       # 8050
+demo = settings.demo_mode         # False
+```
 
 ### Environment Variable Overrides
 
-All configuration values can be overridden via environment variables with the `CASCOR_` prefix.
+All configuration values can be overridden via environment variables with the `JUNIPER_CANOPY_` prefix. Nested settings use double-underscore (`__`) as delimiter.
 
 #### Server Configuration
 
 ```bash
-export CASCOR_SERVER_HOST=0.0.0.0          # Server bind address (default: 127.0.0.1)
-export CASCOR_SERVER_PORT=8051             # Server port (default: 8050)
-export CASCOR_SERVER_DEBUG=1               # Debug mode: 1/true/yes or 0/false/no
+export JUNIPER_CANOPY_SERVER__HOST=0.0.0.0      # Server bind address (default: 127.0.0.1)
+export JUNIPER_CANOPY_SERVER__PORT=8051          # Server port (default: 8050)
+export JUNIPER_CANOPY_SERVER__DEBUG=true         # Debug mode (default: false)
 ```
 
 #### Training Parameters
 
 ```bash
-export CASCOR_TRAINING_EPOCHS=300          # Maximum training epochs (default: 200)
-export CASCOR_TRAINING_LEARNING_RATE=0.02  # Learning rate (default: 0.01)
-export CASCOR_TRAINING_HIDDEN_UNITS=15     # Max hidden units (default: 10)
-```
-
-#### Frontend Components
-
-```bash
-# Metrics Panel
-export JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS=500  # Update interval in ms (default: 1000)
-export JUNIPER_CANOPY_METRICS_BUFFER_SIZE=5000        # Data buffer size (default: 10000)
-export JUNIPER_CANOPY_METRICS_SMOOTHING_WINDOW=20     # Smoothing window (default: 10)
+export JUNIPER_CANOPY_TRAINING__EPOCHS__DEFAULT=300          # Default epochs (default: 1000000)
+export JUNIPER_CANOPY_TRAINING__LEARNING_RATE__DEFAULT=0.02  # Learning rate (default: 0.01)
+export JUNIPER_CANOPY_TRAINING__HIDDEN_UNITS__DEFAULT=500    # Max hidden units (default: 1000)
 ```
 
 #### Backend Integration
 
 ```bash
-export CASCOR_BACKEND_PATH=/custom/path/to/cascor  # CasCor backend path (default: ../cascor)
+export JUNIPER_CANOPY_BACKEND_PATH=/path/to/cascor  # CasCor backend path (default: ../juniper-cascor)
+export JUNIPER_CANOPY_CASCOR_SERVICE_URL=http://localhost:8200  # CasCor service URL
+export JUNIPER_CANOPY_JUNIPER_DATA_URL=http://localhost:8100    # JuniperData service URL
+```
+
+#### CasCor Auto-Discovery
+
+```bash
+export JUNIPER_CANOPY_CASCOR_DISCOVERY__ENABLED=true          # Enable auto-discovery (default: true)
+export JUNIPER_CANOPY_CASCOR_DISCOVERY__HOST=localhost         # Discovery host (default: localhost)
+export JUNIPER_CANOPY_CASCOR_DISCOVERY__PORTS=[8200]           # Ports to probe (default: [8200])
+export JUNIPER_CANOPY_CASCOR_DISCOVERY__TIMEOUT_SECONDS=2.0   # Probe timeout (default: 2.0)
 ```
 
 #### WebSocket Configuration
 
 ```bash
-export CASCOR_WEBSOCKET_MAX_CONNECTIONS=100      # Max concurrent connections (default: 50)
-export CASCOR_WEBSOCKET_HEARTBEAT_INTERVAL=60    # Heartbeat interval in seconds (default: 30)
-export CASCOR_WEBSOCKET_RECONNECT_ATTEMPTS=10    # Reconnection attempts (default: 5)
-export CASCOR_WEBSOCKET_RECONNECT_DELAY=5        # Delay between reconnects in seconds (default: 2)
+export JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS=100      # Max concurrent connections (default: 50)
+export JUNIPER_CANOPY_WEBSOCKET__HEARTBEAT_INTERVAL=60    # Heartbeat interval in seconds (default: 30)
+export JUNIPER_CANOPY_WEBSOCKET__RECONNECT_ATTEMPTS=10    # Reconnection attempts (default: 5)
+export JUNIPER_CANOPY_WEBSOCKET__RECONNECT_DELAY=5        # Delay between reconnects (default: 2)
 ```
 
 #### Demo Mode
 
 ```bash
-export CASCOR_DEMO_UPDATE_INTERVAL=0.5   # Simulation step interval in seconds (default: 1.0)
-export CASCOR_DEMO_CASCADE_EVERY=40      # Add hidden unit every N epochs (default: 30)
+export JUNIPER_CANOPY_DEMO_MODE=true             # Enable demo mode (default: false)
+export JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL=0.5   # Simulation step interval (default: 1.0)
+export JUNIPER_CANOPY_DEMO_CASCADE_EVERY=40      # Add hidden unit every N epochs (default: 30)
 ```
 
-### YAML Configuration
+#### Logging & Observability
+
+```bash
+export JUNIPER_CANOPY_LOG_LEVEL=DEBUG             # Log level (default: INFO)
+export JUNIPER_CANOPY_LOG_FORMAT=json             # Log format: text or json (default: text)
+export JUNIPER_CANOPY_SENTRY_DSN=https://...      # Sentry DSN for error tracking (default: unset)
+export JUNIPER_CANOPY_METRICS_ENABLED=true        # Enable Prometheus metrics (default: false)
+```
+
+#### Rate Limiting & CORS
+
+```bash
+export JUNIPER_CANOPY_RATE_LIMIT_ENABLED=true                  # Enable rate limiting (default: false)
+export JUNIPER_CANOPY_RATE_LIMIT_REQUESTS_PER_MINUTE=120       # Requests per minute (default: 60)
+export JUNIPER_CANOPY_CORS_ORIGINS='["http://localhost:3000"]'  # Allowed CORS origins (default: [])
+```
+
+#### Shared / Cross-Service Variables
+
+```bash
+export JUNIPER_DATA_URL=http://localhost:8100       # JuniperData URL (shared, no prefix)
+export JUNIPER_DATA_API_KEY=your-api-key            # JuniperData API key
+export JUNIPER_CASCOR_API_KEY=your-api-key          # CasCor API key
+export CANOPY_API_KEY=your-api-key                  # Canopy API key (disables /docs if set)
+```
+
+### Legacy CASCOR_* Environment Variables
+
+The following legacy variables are supported with deprecation warnings:
+
+| Legacy Variable | New Variable | Notes |
+|----------------|-------------|-------|
+| `CASCOR_DEMO_MODE` | `JUNIPER_CANOPY_DEMO_MODE` | Boolean flag |
+| `CASCOR_BACKEND_PATH` | `JUNIPER_CANOPY_BACKEND_PATH` | Path to cascor |
+| `CASCOR_SERVICE_URL` | `JUNIPER_CANOPY_CASCOR_SERVICE_URL` | Service URL |
+
+If both legacy and new variables are set, the new `JUNIPER_CANOPY_*` variable takes precedence.
+
+### YAML Configuration (Secondary)
 
 Configuration file location: `conf/app_config.yaml`
 
-Example configuration structure:
-
-```yaml
-application:
-  server:
-    host: "127.0.0.1"
-    port: 8050
-    debug: false
-
-training:
-  parameters:
-    epochs:
-      min: 10
-      max: 1000
-      default: 200
-      description: "Maximum training epochs"
-      modifiable_during_training: false
-
-    learning_rate:
-      min: 0.0001
-      max: 1.0
-      default: 0.01
-      description: "Learning rate for training"
-      modifiable_during_training: true
-
-frontend:
-  training_metrics:
-    enabled: true
-    buffer_size: 5000
-    update_frequency_hz: 10
-    smoothing_window: 10
-
-backend:
-  cascor_integration:
-    backend_path: "../cascor"
-
-  communication:
-    websocket:
-      enabled: true
-      max_connections: 50
-      heartbeat_interval: 30
-      reconnect_attempts: 5
-      reconnect_delay: 2
-```
+The YAML configuration is a secondary layer used by the legacy `ConfigManager`. New settings should be added to `settings.py` instead.
 
 ### Using Configuration in Code
 
 ```python
-import os
-from config_manager import ConfigManager
-from constants import ServerConstants
+from settings import get_settings
+from canopy_constants import ServerConstants
 
-# Initialize ConfigManager
-config_mgr = ConfigManager()
+# Primary: use Pydantic Settings
+settings = get_settings()
+host = settings.server.host       # Typed, validated
+port = settings.server.port
 
-# Get configuration with proper fallback hierarchy
-host_config = config_mgr.config.get('application', {}).get('server', {}).get('host')
-host = os.getenv("CASCOR_SERVER_HOST") or host_config or ServerConstants.DEFAULT_HOST
-
-# Log configuration source for transparency
-host_source = "env" if os.getenv("CASCOR_SERVER_HOST") else ("config" if host_config else "constant")
-logger.info(f"Using host={host} (source: {host_source})")
+# Constants: for values not in Settings
+default_host = ServerConstants.DEFAULT_HOST
 ```
 
 ### Configuration Best Practices
 
-1. **Always provide fallbacks**: Use the three-level hierarchy (env > config > constant)
-2. **Validate user input**: Use `config_mgr.validate_training_param_value()` for user-provided values
-3. **Log configuration sources**: Help users debug configuration issues
-4. **Handle errors gracefully**: Invalid env vars should fall back to config/constant
+1. **Use Pydantic Settings**: Add new config to `settings.py`, not `config_manager.py`
+2. **Validate via type system**: Pydantic handles validation automatically
+3. **Use the `JUNIPER_CANOPY_` prefix**: All new env vars must use this prefix
+4. **Double-underscore for nesting**: `JUNIPER_CANOPY_SERVER__PORT=8051`
 5. **Document all overrides**: Comment why environment variables are being set
 
 ### Testing Configuration
@@ -575,40 +717,43 @@ logger.info(f"Using host={host} (source: {host_source})")
 ```bash
 # Run configuration tests
 cd src
-pytest tests/unit/test_config_refactoring.py -v          # Unit tests (35 tests)
-pytest tests/integration/test_config_integration.py -v   # Integration tests (24 tests)
+pytest tests/unit/test_config_refactoring.py -v          # Unit tests
+pytest tests/integration/test_config_integration.py -v   # Integration tests
 
 # Test with environment variable overrides
-export CASCOR_TRAINING_EPOCHS=500
-export CASCOR_SERVER_PORT=8051
+export JUNIPER_CANOPY_TRAINING__EPOCHS__DEFAULT=500
+export JUNIPER_CANOPY_SERVER__PORT=8051
 ./demo
-# Verify dashboard shows epochs=500 and server starts on port 8051
+# Verify dashboard shows updated settings
 
-# Validate configuration loading
-python -c "from config_manager import ConfigManager; cm = ConfigManager(); print('Config valid')"
+# Validate Settings loading
+python -c "from settings import get_settings; s = get_settings(); print(f'port={s.server.port}')"
 ```
 
 ### Configuration Troubleshooting
 
 **Problem**: Environment variable not taking effect
 
-**Solution**: Check variable name exactly matches expected format (CASCOR_*)
+**Solution**: Check variable name and nesting delimiter
 
 ```bash
-# Correct
-export CASCOR_TRAINING_EPOCHS=300
+# Correct (new prefix with double-underscore nesting)
+export JUNIPER_CANOPY_SERVER__PORT=8051
 
-# Incorrect (missing CASCOR_ prefix)
-export TRAINING_EPOCHS=300
+# Incorrect (single underscore — not nested)
+export JUNIPER_CANOPY_SERVER_PORT=8051
+
+# Legacy (still works but deprecated)
+export CASCOR_SERVER_PORT=8051
 ```
 
 **Problem**: Configuration value seems wrong
 
-**Solution**: Check configuration source logging to see which level is being used
+**Solution**: Check which settings layer is being used
 
 ```bash
-# Application logs show configuration sources
-# Example: "Starting server on 127.0.0.1:8051 (host source: config, port source: env)"
+# Inspect resolved settings
+python -c "from settings import get_settings; s = get_settings(); print(s.model_dump())"
 ```
 
 **Problem**: YAML configuration not loading
@@ -618,9 +763,6 @@ export TRAINING_EPOCHS=300
 ```bash
 # Validate YAML syntax
 python -c "import yaml; yaml.safe_load(open('conf/app_config.yaml'))"
-
-# Check config path
-python -c "from config_manager import ConfigManager; cm = ConfigManager(); print(cm.config_path)"
 ```
 
 ## Code Style Guidelines
@@ -752,33 +894,33 @@ def robust_function():
 
 ### Conda Environment
 
-The project uses the JuniperCanopy conda environment:
+The project uses the JuniperPython conda environment:
 
 ```bash
 # Location
-/opt/miniforge3/envs/JuniperCanopy
+/opt/miniforge3/envs/JuniperPython
 
 # Activate manually
-conda activate JuniperCanopy
+conda activate JuniperPython
 
 # Python interpreter path
-/opt/miniforge3/envs/JuniperCanopy/bin/python
+/opt/miniforge3/envs/JuniperPython/bin/python
 ```
 
 ### Configuration
 
-Configuration is managed via:
+Configuration is managed via Pydantic BaseSettings (`src/settings.py`):
 
-1. `conf/app_config.yaml` - Base configuration
-2. Environment variables - Override config values
-3. Environment variable format: `CASCOR_<SECTION>_<KEY>`
+1. `JUNIPER_CANOPY_*` environment variables (primary, typed validation)
+2. `conf/app_config.yaml` - Legacy YAML configuration
+3. `src/canopy_constants.py` - Application defaults
 
 Example:
 
 ```bash
-export CASCOR_SERVER_PORT=8051
-export CASCOR_DEBUG=1
-export CASCOR_DEMO_MODE=1
+export JUNIPER_CANOPY_SERVER__PORT=8051
+export JUNIPER_CANOPY_SERVER__DEBUG=true
+export JUNIPER_CANOPY_DEMO_MODE=true
 ```
 
 ## Common Issues and Solutions
@@ -794,10 +936,10 @@ export CASCOR_DEMO_MODE=1
 python main.py
 
 # Correct (uses conda Python)
-/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
+/opt/miniforge3/envs/JuniperPython/bin/python main.py
 
 # Or activate environment first
-conda activate JuniperCanopy
+conda activate JuniperPython
 python main.py
 ```
 
@@ -919,10 +1061,10 @@ logs/
 
 ```bash
 # Enable debug logging
-export CASCOR_DEBUG=1
+export JUNIPER_CANOPY_LOG_LEVEL=DEBUG
 
 # Run with verbose output
-/opt/miniforge3/envs/JuniperCanopy/bin/python -u main.py
+/opt/miniforge3/envs/JuniperPython/bin/python -u main.py
 ```
 
 ## Deployment
@@ -936,46 +1078,132 @@ export CASCOR_DEBUG=1
 ### Production Mode
 
 ```bash
-# Set backend path
-export CASCOR_BACKEND_PATH=/path/to/cascor
+# Configure backend (auto-discovery or explicit URL)
+export JUNIPER_CANOPY_CASCOR_SERVICE_URL=http://cascor-host:8200
 
 # Run application
 cd src
-/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
+/opt/miniforge3/envs/JuniperPython/bin/python main.py
 ```
 
-### Docker (Future)
+### Docker
 
 ```bash
-docker-compose up
+# Build image (root Dockerfile)
+docker build -t juniper-canopy .
+
+# Run container
+docker run --rm -p 8050:8050 juniper-canopy
+
+# Or with docker-compose (conf/ directory)
+docker compose -f conf/docker-compose.yaml up --build
 ```
 
 ## API and WebSocket Contracts
 
 ### REST API Endpoints
 
-All REST endpoints defined in [src/main.py](src/main.py). Document request/response schemas in code docstrings.
+All REST endpoints defined in [src/main.py](src/main.py) and [src/health.py](src/health.py). Document request/response schemas in code docstrings.
 
-**Key Endpoints:**
+#### Health & Status
 
-- `GET /api/metrics` - Current training metrics
-- `GET /api/metrics/history` - Historical metrics
-- `GET /api/network/topology` - Network structure
-- `GET /api/decision_boundary` - Decision boundary data for visualization
-- `GET /api/dataset` - Current dataset points
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/` | Root redirect |
+| `GET` | `/health` | Legacy health check |
+| `GET` | `/api/health` | Legacy health check |
+| `GET` | `/v1/health` | Standard health check |
+| `GET` | `/v1/health/live` | Liveness probe |
+| `GET` | `/v1/health/ready` | Readiness probe (checks JuniperData, CasCor) |
+
+#### Training Control
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/train/start` | Start training |
+| `POST` | `/api/train/pause` | Pause training |
+| `POST` | `/api/train/resume` | Resume training |
+| `POST` | `/api/train/stop` | Stop training |
+| `POST` | `/api/train/reset` | Reset training state |
+| `GET` | `/api/train/status` | Get training status |
+| `POST` | `/api/set_params` | Apply training parameters |
+
+#### Metrics & State
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/state` | Current training state |
+| `GET` | `/api/status` | Training status |
+| `GET` | `/api/metrics` | Current training metrics |
+| `GET` | `/api/metrics/history` | Historical metrics |
+| `GET` | `/api/network/stats` | Network statistics |
+
+#### Network & Topology
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/topology` | Network topology |
+| `GET` | `/api/topology/raw` | Raw topology data |
+| `GET` | `/api/dataset` | Dataset information |
+| `POST` | `/api/dataset/generate` | Generate dataset |
+| `GET` | `/api/decision_boundary` | Decision boundary visualization |
+| `GET` | `/api/statistics` | Network statistics |
+
+#### Snapshots (HDF5)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/snapshots` | List snapshots |
+| `GET` | `/api/v1/snapshots/history` | Snapshot history |
+| `GET` | `/api/v1/snapshots/{id}` | Get specific snapshot |
+| `POST` | `/api/v1/snapshots` | Create snapshot |
+| `POST` | `/api/v1/snapshots/{id}/restore` | Restore snapshot |
+
+#### Metrics Layouts
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/metrics/layouts` | List metric layouts |
+| `GET` | `/api/v1/metrics/layouts/{name}` | Get layout |
+| `POST` | `/api/v1/metrics/layouts` | Create layout |
+| `DELETE` | `/api/v1/metrics/layouts/{name}` | Delete layout |
+
+#### Infrastructure (Redis/Cassandra)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/redis/status` | Redis status |
+| `GET` | `/api/v1/redis/metrics` | Redis metrics |
+| `GET` | `/api/v1/cassandra/status` | Cassandra status |
+| `GET` | `/api/v1/cassandra/metrics` | Cassandra metrics |
+| `GET` | `/api/v1/workers/stats` | Worker statistics |
+| `GET` | `/api/v1/workers/list` | Worker list |
+
+#### Remote Workers
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/remote/status` | Remote worker status |
+| `POST` | `/api/remote/connect` | Connect to remote manager |
+| `POST` | `/api/remote/start_workers` | Start workers |
+| `POST` | `/api/remote/stop_workers` | Stop workers |
+| `POST` | `/api/remote/disconnect` | Disconnect |
 
 ### WebSocket Channels
 
 **Channels:**
 
-- `/ws/training` - Stream metrics and state updates in real-time
-- `/ws/control` - Send commands (start, stop, pause, resume, reset)
+| Path | Description |
+|------|-------------|
+| `/ws/training` | Stream metrics and state updates in real-time |
+| `/ws/control` | Send commands (start, stop, pause, resume, reset) |
+| `/ws` | Legacy WebSocket endpoint |
 
 **Message Format:**
 
 ```python
 {
-    "type": "metrics" | "state" | "topology" | "event",
+    "type": "metrics" | "state" | "topology" | "event" | "control_ack",
     "timestamp": 1234567890.123,  # Unix timestamp in seconds
     "data": {...}  # Payload varies by type
 }
@@ -1000,13 +1228,13 @@ await websocket_manager.broadcast(message)
 
 ## Demo Mode Contract
 
-The demo mode must accurately simulate the real CasCor backend to enable UI development without backend dependency.
+The demo mode must accurately simulate the real CasCor backend to enable UI development without backend dependency. Both `DemoBackend` and `ServiceBackend` implement the same `BackendProtocol` interface.
 
 **Requirements:**
 
 - Produce realistic training loop with pause/resume/reset capabilities
 - Match CasCor backend payload shapes, keys, and update cadence
-- Expose identical API/WebSocket interfaces (UI code must be agnostic)
+- Expose identical API/WebSocket interfaces via `BackendProtocol` (UI code must be agnostic)
 - Support thread-safe control via Events (clean stop/pause)
 - Started via `./demo` or `util/juniper_canopy-demo.bash` (conda activation required)
 
@@ -1022,14 +1250,14 @@ The demo mode must accurately simulate the real CasCor backend to enable UI deve
 
 ### Conda Environment, Path and Environment
 
-**Always use JuniperCanopy conda environment:**
+**Always use JuniperPython conda environment:**
 
 ```bash
 # Location
-/opt/miniforge3/envs/JuniperCanopy
+/opt/miniforge3/envs/JuniperPython
 
 # Python interpreter path
-/opt/miniforge3/envs/JuniperCanopy/bin/python
+/opt/miniforge3/envs/JuniperPython/bin/python
 ```
 
 **Launch via scripts in `util/`** (they activate conda automatically):
@@ -1059,17 +1287,17 @@ logs_dir = (ROOT / "logs").resolve()
 
 **Configuration priority:**
 
-1. `conf/app_config.yaml` - Base configuration
-2. Environment variable overrides: `CASCOR_<SECTION>_<KEY>`
-3. Supports `${VAR}` and `$VAR` expansion
+1. Pydantic BaseSettings (`src/settings.py`) with `JUNIPER_CANOPY_*` env vars
+2. YAML configuration (`conf/app_config.yaml`) — legacy
+3. Constants module (`src/canopy_constants.py`) — defaults
 
 **Example:**
 
 ```bash
-export CASCOR_SERVER_PORT=8051
-export CASCOR_DEBUG=1
-export CASCOR_DEMO_MODE=1
-export CASCOR_BACKEND_PATH=/path/to/cascor  # Default: ../cascor
+export JUNIPER_CANOPY_SERVER__PORT=8051
+export JUNIPER_CANOPY_SERVER__DEBUG=true
+export JUNIPER_CANOPY_DEMO_MODE=true
+export JUNIPER_CANOPY_BACKEND_PATH=/path/to/cascor  # Default: ../juniper-cascor
 ```
 
 ## File Placement Rules
@@ -1090,8 +1318,8 @@ Organize files according to their purpose:
 **Mirror package structure in tests:**
 
 ```bash
-src/demo_mode.py           -> src/tests/unit/test_demo_mode.py
-src/communication/         -> src/tests/unit/test_websocket_manager.py
+src/demo_mode.py           -> src/tests/unit/test_demo_mode_*.py
+src/communication/         -> src/tests/unit/test_websocket_*.py
 ```
 
 ## Documentation Organization
@@ -1103,11 +1331,21 @@ The project documentation follows a structured organization with clear separatio
 High-level documentation in the project root for quick access:
 
 - **README.md** - Project overview, quick start, features
-- **QUICK_START.md** - 5-minute setup guide (get running ASAP)
-- **ENVIRONMENT_SETUP.md** - Complete environment configuration
 - **CHANGELOG.md** - Chronological change history with impact analysis
 - **AGENTS.md** - This file - comprehensive developer guide
-- **DOCUMENTATION_OVERVIEW.md** - Navigation guide to all documentation
+- **CLAUDE.md** - Symlink to AGENTS.md (Claude Code integration)
+- **LICENSE** - MIT License
+
+### docs/ Directory Documentation
+
+Reference and subsystem documentation:
+
+- **docs/QUICK_START.md** - 5-minute setup guide (get running ASAP)
+- **docs/ENVIRONMENT_SETUP.md** - Complete environment configuration
+- **docs/DOCUMENTATION_OVERVIEW.md** - Navigation guide to all documentation
+- **docs/DEVELOPER_CHEATSHEET.md** - Quick reference for developers
+- **docs/REFERENCE.md** - Technical reference
+- **docs/USER_MANUAL.md** - End-user documentation
 
 ### Integration-Specific Documentation
 
@@ -1133,24 +1371,26 @@ Comprehensive testing documentation suite:
 - **TESTING_ENVIRONMENT_SETUP.md** - Test environment configuration
 - **TESTING_REPORTS_COVERAGE.md** - Coverage analysis and reports
 
-### docs/ Subdirectory
+### docs/ Subdirectories
 
-Technical deep-dive documentation:
+Technical deep-dive documentation organized by topic:
 
-- **docs/ci_cd/CICD_MANUAL.md** - CI/CD comprehensive usage guide
-- **docs/ci_cd/CICD_QUICK_START.md** - CI/CD 5-minute setup
-- **docs/ci_cd/CICD_REFERENCE.md** - CI/CD technical reference
-- **docs/ARCHITECTURE.md** - System architecture (future)
-- **docs/API_REFERENCE.md** - API documentation (future)
-- **docs/DEPLOYMENT.md** - Deployment guide (future)
+- **docs/api/** - API schema and reference documentation
+- **docs/cascor/** - CasCor backend integration (manual, quick start, reference, constants guide)
+- **docs/cassandra/** - Cassandra integration documentation
+- **docs/ci_cd/** - CI/CD pipeline documentation (manual, quick start, reference, environment setup)
+- **docs/demo/** - Demo mode documentation (manual, quick start, reference, environment setup)
+- **docs/deployment/** - Kubernetes deployment plan
+- **docs/history/** - Archived/superseded documentation
+- **docs/redis/** - Redis integration documentation
+- **docs/testing/** - Testing guides, analysis reports, selective test enablement
 
 ### docs/history/ Archive
 
 Historical documentation with timestamp-based naming:
 
-- **notes/history/INDEX.md** - Archive index with descriptions
 - **docs/history/FILENAME_YYYY-MM-DD.ext** - Archived versions
-- **docs/history/consolidated/** - Superseded consolidated docs
+- **notes/history/INDEX.md** - Archive index with descriptions
 
 Examples:
 
@@ -2228,6 +2468,31 @@ All new or modified code must meet these requirements before merging:
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
 - [Dash Documentation](https://dash.plotly.com/)
 - [WebSocket RFC](https://tools.ietf.org/html/rfc6455)
+
+## MCP Server Availability
+
+The project includes MCP (Model Context Protocol) server configuration for AI-assisted development:
+
+- **`.mcp.json`** - MCP server configuration (Exa API integration)
+- **`notes/mcp/`** - Setup guides:
+  - `claude-code-serena-setup-guide.md` - Serena MCP setup for semantic code analysis
+  - `claude-code-alphavantage-setup-guide.md` - AlphaVantage API setup
+  - `EXA_API_REFERENCE.md` - Exa search API reference
+
+---
+
+## Worktree Procedures
+
+> **OPERATING INSTRUCTION**: All feature, bugfix, and task work SHOULD use git worktrees for isolation.
+
+Full procedures are defined in:
+
+- **`notes/WORKTREE_SETUP_PROCEDURE.md`** — Creating a worktree for a new task
+- **`notes/WORKTREE_CLEANUP_PROCEDURE_V2.md`** — Merging, removing, and pushing after task completion
+
+Worktrees are centralized in `/home/pcalnon/Development/python/Juniper/worktrees/`. See the parent `CLAUDE.md` for the full cross-project worktree standard.
+
+---
 
 ## Recent Changes
 
