@@ -1123,13 +1123,16 @@ class DemoMode:
             return
 
         # Check if max_epochs was reached during Phase 1
+        phase1_done = False
         with self._lock:
             if self.current_epoch >= self.max_epochs:
                 self.logger.info(f"Training complete: reached max_epochs={self.max_epochs} during initial training")
                 self.state_machine.mark_completed()
-                self._update_training_status()
                 self.is_running = False
-                return
+                phase1_done = True
+        if phase1_done:
+            self._update_training_status()
+            return
 
         # Phase 2: Cascade growth
         while not self._stop.is_set():
