@@ -219,7 +219,7 @@ class DatasetPlotter(BaseComponent):
                 dcc.Graph(
                     id=f"{self.component_id}-scatter-plot",
                     config={"displayModeBar": True, "displaylogo": False},
-                    style={"height": "65vh", "maxHeight": "750px", "minHeight": "400px"},
+                    style={"height": "600px", "maxWidth": "700px", "margin": "0 auto"},
                 ),
                 # Feature distribution histograms
                 dcc.Graph(
@@ -284,6 +284,53 @@ class DatasetPlotter(BaseComponent):
                 "color": "#e9ecef" if is_dark else "#212529",
                 "borderRadius": "3px",
             }
+
+        # ── Populate dataset selector dropdown from available generators ──
+        @app.callback(
+            [
+                Output(f"{self.component_id}-dataset-selector", "options"),
+                Output(f"{self.component_id}-dataset-selector", "value"),
+            ],
+            Input("params-init-interval", "n_intervals"),
+        )
+        def populate_dataset_selector(n):
+            """Fetch available dataset generators and populate the dropdown."""
+            import requests as _requests
+
+            try:
+                from flask import request as _flask_request
+
+                origin = f"{_flask_request.scheme}://{_flask_request.host}"
+            except RuntimeError:
+                origin = "http://127.0.0.1:8050"
+
+            options = []
+            current_value = None
+            try:
+                resp = _requests.get(f"{origin}/api/dataset/generators", timeout=5)
+                if resp.ok:
+                    data = resp.json()
+                    generators = data.get("generators", [])
+                    for gen in generators:
+                        name = gen.get("name", "")
+                        display = gen.get("display_name", name.capitalize())
+                        options.append({"label": display, "value": name})
+                    # Default to "spiral" if available
+                    gen_names = [g.get("name") for g in generators]
+                    if "spiral" in gen_names:
+                        current_value = "spiral"
+                    elif options:
+                        current_value = options[0]["value"]
+            except Exception:
+                # Fallback: provide basic generator list
+                options = [
+                    {"label": "Spiral", "value": "spiral"},
+                    {"label": "XOR", "value": "xor"},
+                    {"label": "Circle", "value": "circle"},
+                    {"label": "Moon", "value": "moon"},
+                ]
+                current_value = "spiral"
+            return options, current_value
 
         self.logger.debug(f"Callbacks registered for {self.component_id}")
 
@@ -432,7 +479,7 @@ class DatasetPlotter(BaseComponent):
                     )
                 )
 
-            fig.update_layout(title="Dataset Scatter Plot (First 2 Features)", xaxis_title="Feature 0", yaxis_title="Feature 1")
+            fig.update_layout(title="Dataset Scatter Plot (First 2 Features)", xaxis_title="Feature 0", yaxis_title="Feature 1", yaxis={"scaleanchor": "x", "scaleratio": 1})
 
         is_dark = theme == "dark"
         fig.update_layout(

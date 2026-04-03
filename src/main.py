@@ -787,6 +787,44 @@ async def generate_dataset(request: Request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.get("/api/dataset/generators")
+async def list_dataset_generators():
+    """
+    List available dataset generators from JuniperData service.
+    Returns a list of generator names available for dataset creation.
+    Falls back to built-in demo generators when JuniperData is unavailable.
+    """
+    generators = []
+
+    # Try JuniperData service first
+    if juniper_data_available:
+        try:
+            import httpx
+
+            data_url = settings.juniper_data_url.rstrip("/")
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{data_url}/v1/generators")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if isinstance(data, list):
+                        generators = data
+                    elif isinstance(data, dict) and "generators" in data:
+                        generators = data["generators"]
+        except Exception as e:
+            system_logger.debug(f"Failed to fetch generators from JuniperData: {e}")
+
+    # Fallback to built-in demo generators
+    if not generators:
+        generators = [
+            {"name": "spiral", "display_name": "Spiral", "description": "N-arm spiral classification"},
+            {"name": "xor", "display_name": "XOR", "description": "XOR gate classification"},
+            {"name": "circle", "display_name": "Circle", "description": "Concentric circle classification"},
+            {"name": "moon", "display_name": "Moon", "description": "Two interleaving half-moon classification"},
+        ]
+
+    return {"generators": generators}
+
+
 @app.get("/api/decision_boundary")
 async def get_decision_boundary(resolution: int = 100):
     """

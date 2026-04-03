@@ -130,6 +130,7 @@ class MockCascorNetwork:
     def output_weights(self, value):
         """Backward-compatible setter — rebuilds output_layer from raw tensor."""
         out_features, in_features = value.shape
+        self.output_size = out_features  # Keep output_size synchronized with actual layer shape
         self.output_layer = torch.nn.Linear(in_features, out_features)
         self.output_layer.weight.data = value
         self.output_optimizer = torch.optim.Adam(self.output_layer.parameters(), lr=self.learning_rate)
