@@ -1164,7 +1164,7 @@ class DemoMode:
                     target=0.85,
                 )
 
-            min_corr = self.convergence_threshold if self.convergence_enabled else 0.0
+            min_corr = getattr(self, "cn_correlation_threshold", TrainingConstants.MIN_CANDIDATE_CORRELATION)
             last_candidate_emit = [time.monotonic()]  # mutable for closure
 
             def _candidate_progress(idx, pool_size, best_corr, _emit_tracker=last_candidate_emit):
