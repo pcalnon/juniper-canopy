@@ -8,13 +8,13 @@
 
 ## Roadmap Summary
 
-| Phase | Description | Tasks | Priority | Dependencies |
-|-------|-------------|-------|----------|--------------|
-| 1 | CasCor Training Fix | 6 | P0 (Critical) | None |
-| 2 | Canopy-CasCor Connection | 4 | P0 (Critical) | Phase 1 |
-| 3 | Canopy UI Fixes | 14 | P1 (High) | None (parallel with Phase 2) |
-| 4 | Validation & Release | 6 | P1 (High) | Phases 1, 2, 3 |
-| **Total** | | **30** | | |
+| Phase     | Description              | Tasks  | Priority      | Dependencies                 |
+|-----------|--------------------------|--------|---------------|------------------------------|
+| 1         | CasCor Training Fix      | 6      | P0 (Critical) | None                         |
+| 2         | Canopy-CasCor Connection | 4      | P0 (Critical) | Phase 1                      |
+| 3         | Canopy UI Fixes          | 14     | P1 (High)     | None (parallel with Phase 2) |
+| 4         | Validation & Release     | 6      | P1 (High)     | Phases 1, 2, 3               |
+| **Total** |                          | **30** |               |                              |
 
 ---
 

@@ -22,7 +22,7 @@ This plan addresses all 17 issues identified in the regression analysis. Work is
 
 **File**: `juniper-cascor/src/cascade_correlation/cascade_correlation.py`
 
-**Approach A (Recommended): Remove _fallback_tensors from metadata dict**
+**Approach A (Recommended): Remove _fallback_tensors from metadata dict:**
 
 Rationale: The `_fallback_tensors` key defeats the OPT-5 optimization by including full tensor data in every task. Removing it eliminates the 100x redundant serialization that causes queue timeouts.
 
@@ -45,7 +45,7 @@ Changes:
 
 **Risks**: If `_execute_candidate_training` doesn't have direct access to the original tensors, the sequential fallback can't regenerate tasks. Mitigated by passing tensors as method parameters.
 
-**Approach B (Alternative): Lazy fallback via closure**
+**Approach B (Alternative): Lazy fallback via closure:**
 
 Instead of storing fallback tensors in the dict, use a factory function that regenerates the legacy tuple format only when needed.
 
