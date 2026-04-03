@@ -541,6 +541,7 @@ class CandidateMetricsPanel(BaseComponent):
             Plotly figure with candidate loss trace
         """
         fig = go.Figure()
+        is_dark = theme == "dark"
 
         if not state:
             return self._create_empty_plot(theme=theme)
@@ -575,6 +576,7 @@ class CandidateMetricsPanel(BaseComponent):
                 template="plotly_dark" if is_dark else "plotly",
                 plot_bgcolor="#242424" if is_dark else "#f8f9fa",
                 paper_bgcolor="#242424" if is_dark else "#ffffff",
+                font={"color": "#e9ecef" if is_dark else "#212529"},
                 margin={"l": 50, "r": 20, "t": 20, "b": 40},
                 showlegend=True,
                 legend={"x": 0, "y": 1},
