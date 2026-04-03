@@ -280,8 +280,11 @@ table tbody tr:hover,
     color: var(--text-color) !important;
 }
 
-/* Plotly graph dark mode containers */
-.dark-mode .js-plotly-plot .plotly .main-svg {
+/* Plotly graph dark mode containers.
+   Plotly 3.x renders 3 stacked .main-svg elements: [0] data/axes, [1] drag layer,
+   [2] modebar overlay. Only the first should have a background — applying it to all
+   three makes the overlay SVGs opaque and hides the chart data underneath. */
+.dark-mode .js-plotly-plot .plotly .svg-container > .main-svg:first-child {
     background-color: var(--bg-card) !important;
 }
 
