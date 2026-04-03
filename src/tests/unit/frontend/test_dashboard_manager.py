@@ -421,14 +421,25 @@ class TestDashboardManagerHandlersWithMocking:
             assert result == []
 
     def test_update_topology_store_handler_success(self, dashboard_manager, mocker):
-        """Test topology store handler fetches and returns topology."""
+        """Test topology store handler fetches, unwraps envelope, and transforms topology."""
+        raw_topology = {
+            "input_size": 2,
+            "output_size": 1,
+            "hidden_units": [],
+            "output_weights": [[0.1], [0.2]],
+            "output_bias": [0.0],
+        }
         mock_response = MagicMock()
-        mock_response.json.return_value = {"nodes": [], "total_connections": 5}
+        mock_response.json.return_value = {"status": "success", "data": raw_topology}
         mocker.patch("requests.get", return_value=mock_response)
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_topology_store_handler(n=1, active_tab="topology")
-            assert result == {"nodes": [], "total_connections": 5}
+            assert result["input_units"] == 2
+            assert result["output_units"] == 1
+            assert result["hidden_units"] == 0
+            assert "connections" in result
+            assert "nodes" in result
 
     def test_update_topology_store_handler_exception(self, dashboard_manager, mocker):
         """Test topology store handler preserves last state on exception."""

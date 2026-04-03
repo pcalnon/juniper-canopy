@@ -290,13 +290,13 @@ class CandidateMetricsPanel(BaseComponent):
             if not state:
                 return html.Div(
                     "No active candidate pool",
-                    style={"color": "#6c757d", "fontStyle": "italic", "padding": "10px"},
+                    style={"color": "var(--text-muted)", "fontStyle": "italic", "padding": "10px"},
                 )
             pool_status = state.get("candidate_pool_status", "Inactive")
             if pool_status == "Inactive":
                 return html.Div(
                     "No active candidate pool",
-                    style={"color": "#6c757d", "fontStyle": "italic", "padding": "10px"},
+                    style={"color": "var(--text-muted)", "fontStyle": "italic", "padding": "10px"},
                 )
             return self._create_candidate_pool_display(state)
 
@@ -447,18 +447,18 @@ class CandidateMetricsPanel(BaseComponent):
                         [
                             html.Th(
                                 "Rank",
-                                style={"padding": "6px 10px", "textAlign": "left", "borderBottom": "2px solid #dee2e6"},
+                                style={"padding": "6px 10px", "textAlign": "left", "borderBottom": "2px solid var(--border-color)"},
                             ),
                             html.Th(
                                 "Candidate ID",
-                                style={"padding": "6px 10px", "textAlign": "left", "borderBottom": "2px solid #dee2e6"},
+                                style={"padding": "6px 10px", "textAlign": "left", "borderBottom": "2px solid var(--border-color)"},
                             ),
                             html.Th(
                                 "Correlation",
                                 style={
                                     "padding": "6px 10px",
                                     "textAlign": "right",
-                                    "borderBottom": "2px solid #dee2e6",
+                                    "borderBottom": "2px solid var(--border-color)",
                                 },
                             ),
                         ]
@@ -558,6 +558,7 @@ class CandidateMetricsPanel(BaseComponent):
         candidate_losses = [lo for lo, p in zip(losses, phases, strict=False) if "candidate" in p]
 
         if candidate_epochs:
+            is_dark = theme == "dark"
             fig.add_trace(
                 go.Scatter(
                     x=candidate_epochs,
@@ -642,7 +643,7 @@ class CandidateMetricsPanel(BaseComponent):
             return [
                 html.Div(
                     "No pool history yet",
-                    style={"color": "#6c757d", "fontStyle": "italic", "padding": "10px"},
+                    style={"color": "var(--text-muted)", "fontStyle": "italic", "padding": "10px"},
                 )
             ]
 
@@ -677,7 +678,7 @@ class CandidateMetricsPanel(BaseComponent):
                                     html.Span(f"Pool @ Epoch {epoch}", style={"fontWeight": "600"}),
                                     html.Span(
                                         f" - Best: {top_id} ({top_score:.3f})",
-                                        style={"color": "#6c757d", "fontSize": "12px"},
+                                        style={"color": "var(--text-muted)", "fontSize": "12px"},
                                     ),
                                 ]
                             ),

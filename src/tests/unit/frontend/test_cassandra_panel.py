@@ -265,15 +265,15 @@ class TestCassandraPanelApiUrl:
 
     @pytest.mark.unit
     def test_api_url_strips_leading_slash(self, panel):
-        """_api_url should strip leading slash for relative path."""
+        """_api_url should build absolute URL, stripping leading slash from path."""
         result = panel._api_url("/api/v1/cassandra/status")
-        assert result == "api/v1/cassandra/status"
+        assert result == "http://127.0.0.1:8050/api/v1/cassandra/status"
 
     @pytest.mark.unit
     def test_api_url_handles_no_leading_slash(self, panel):
-        """_api_url should handle path without leading slash."""
+        """_api_url should build absolute URL from path without leading slash."""
         result = panel._api_url("api/v1/cassandra/status")
-        assert result == "api/v1/cassandra/status"
+        assert result == "http://127.0.0.1:8050/api/v1/cassandra/status"
 
 
 class TestCassandraPanelStatusColors:
