@@ -103,24 +103,12 @@ class HDF5SnapshotsPanel(BaseComponent):
         """
         return html.Div(
             [
-                # Header with title and controls
+                # Header with title
                 html.Div(
                     [
                         html.H3(
                             "Snapshots",
-                            style={"display": "inline-block", "marginRight": "20px", "color": "#2c3e50"},
-                        ),
-                        dbc.Button(
-                            "🔄 Refresh",
-                            id=f"{self.component_id}-refresh-button",
-                            color="primary",
-                            size="sm",
-                            className="me-2",
-                        ),
-                        html.Span(
-                            id=f"{self.component_id}-status",
-                            children="Loading snapshots...",
-                            style={"fontSize": "0.9rem", "color": "#6c757d", "marginLeft": "10px"},
+                            style={"display": "inline-block", "marginRight": "20px", "color": "var(--header-color)"},
                         ),
                     ],
                     style={"marginBottom": "15px"},
@@ -190,14 +178,31 @@ class HDF5SnapshotsPanel(BaseComponent):
                 # Description
                 html.P(
                     "View and manage HDF5 training state snapshots. Snapshots contain saved network states " "that can be loaded for analysis or resumed training.",
-                    style={"fontSize": "14px", "color": "#6c757d", "marginBottom": "20px"},
+                    style={"fontSize": "14px", "color": "var(--text-muted)", "marginBottom": "20px"},
                 ),
                 html.Hr(),
                 # Snapshots table card
                 dbc.Card(
                     [
                         dbc.CardHeader(
-                            html.H5("Available Snapshots", className="mb-0"),
+                            html.Div(
+                                [
+                                    html.H5("Available Snapshots", className="mb-0", style={"display": "inline-block"}),
+                                    dbc.Button(
+                                        "🔄 Refresh",
+                                        id=f"{self.component_id}-refresh-button",
+                                        color="primary",
+                                        size="sm",
+                                        className="ms-3",
+                                    ),
+                                    html.Span(
+                                        id=f"{self.component_id}-status",
+                                        children="Loading snapshots...",
+                                        style={"fontSize": "0.9rem", "color": "var(--text-muted)", "marginLeft": "10px"},
+                                    ),
+                                ],
+                                style={"display": "flex", "alignItems": "center"},
+                            ),
                         ),
                         dbc.CardBody(
                             [
@@ -212,7 +217,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                                                     html.Th("Size", style={"width": "15%", "padding": "10px"}),
                                                     html.Th("", style={"width": "15%", "padding": "10px"}),
                                                 ],
-                                                style={"backgroundColor": "#e9ecef"},
+                                                style={"backgroundColor": "var(--bg-secondary)"},
                                             )
                                         ),
                                         html.Tbody(id=f"{self.component_id}-table-body"),
@@ -221,7 +226,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                                     style={
                                         "width": "100%",
                                         "borderCollapse": "collapse",
-                                        "border": "1px solid #dee2e6",
+                                        "border": "1px solid var(--border-color, #dee2e6)",
                                     },
                                 ),
                                 # Empty state message
@@ -230,7 +235,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                                     children="No snapshots available.",
                                     style={
                                         "marginTop": "15px",
-                                        "color": "#6c757d",
+                                        "color": "var(--text-muted)",
                                         "fontSize": "0.9rem",
                                         "textAlign": "center",
                                         "padding": "20px",
@@ -252,7 +257,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                             id=f"{self.component_id}-detail-panel",
                             children=html.P(
                                 "Select a snapshot from the table above to view its details.",
-                                style={"color": "#6c757d", "fontStyle": "italic"},
+                                style={"color": "var(--text-muted)", "fontStyle": "italic"},
                             ),
                         ),
                     ],
@@ -307,7 +312,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                                 id=f"{self.component_id}-history-toggle",
                                 color="link",
                                 className="p-0 text-decoration-none",
-                                style={"color": "#2c3e50", "fontWeight": "500"},
+                                style={"color": "var(--header-color)", "fontWeight": "500"},
                             ),
                         ),
                         dbc.Collapse(
@@ -665,9 +670,9 @@ class HDF5SnapshotsPanel(BaseComponent):
                 rows.append(
                     html.Tr(
                         [
-                            html.Td(name, style={"padding": "10px", "borderBottom": "1px solid #dee2e6"}),
-                            html.Td(timestamp, style={"padding": "10px", "borderBottom": "1px solid #dee2e6"}),
-                            html.Td(size, style={"padding": "10px", "borderBottom": "1px solid #dee2e6"}),
+                            html.Td(name, style={"padding": "10px", "borderBottom": "1px solid var(--border-color, #dee2e6)"}),
+                            html.Td(timestamp, style={"padding": "10px", "borderBottom": "1px solid var(--border-color, #dee2e6)"}),
+                            html.Td(size, style={"padding": "10px", "borderBottom": "1px solid var(--border-color, #dee2e6)"}),
                             html.Td(
                                 html.Div(
                                     [
@@ -689,7 +694,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                                     ],
                                     style={"display": "flex", "gap": "5px"},
                                 ),
-                                style={"padding": "10px", "borderBottom": "1px solid #dee2e6"},
+                                style={"padding": "10px", "borderBottom": "1px solid var(--border-color, #dee2e6)"},
                             ),
                         ]
                     )
@@ -705,7 +710,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 status_text = message or "No snapshots available"
                 empty_style = {
                     "marginTop": "15px",
-                    "color": "#6c757d",
+                    "color": "var(--text-muted)",
                     "fontSize": "0.9rem",
                     "textAlign": "center",
                     "padding": "20px",
@@ -768,7 +773,7 @@ class HDF5SnapshotsPanel(BaseComponent):
             if not selected_id:
                 return html.P(
                     "Select a snapshot from the table above to view its details.",
-                    style={"color": "#6c757d", "fontStyle": "italic"},
+                    style={"color": "var(--text-muted)", "fontStyle": "italic"},
                 )
 
             detail = self._fetch_snapshot_detail_handler(selected_id)
@@ -782,7 +787,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                         ),
                         html.P(
                             "The snapshot may no longer exist or the service may be unavailable.",
-                            style={"color": "#6c757d", "fontSize": "0.9rem"},
+                            style={"color": "var(--text-muted)", "fontSize": "0.9rem"},
                         ),
                     ]
                 )
@@ -847,7 +852,7 @@ class HDF5SnapshotsPanel(BaseComponent):
             attrs = detail.get("attributes")
             if attrs and isinstance(attrs, dict):
                 items.append(html.Hr())
-                items.append(html.H6("HDF5 Attributes", style={"color": "#2c3e50", "marginBottom": "10px"}))
+                items.append(html.H6("HDF5 Attributes", style={"color": "var(--header-color)", "marginBottom": "10px"}))
                 attr_items = [
                     html.Li(
                         [html.Strong(f"{k}: "), html.Span(str(v))],
@@ -1004,7 +1009,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 if not history:
                     content = html.P(
                         "No snapshot activity recorded yet.",
-                        style={"color": "#6c757d", "fontStyle": "italic"},
+                        style={"color": "var(--text-muted)", "fontStyle": "italic"},
                     )
                 else:
                     # Build history entries
@@ -1024,7 +1029,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                             "restore": ("🔄", "#ffc107"),
                             "delete": ("🗑️", "#dc3545"),
                         }
-                        action_icon, action_color = action_config.get(action, ("•", "#6c757d"))
+                        action_icon, action_color = action_config.get(action, ("•", "var(--text-muted)"))
 
                         entries.append(
                             html.Div(
@@ -1045,11 +1050,11 @@ class HDF5SnapshotsPanel(BaseComponent):
                                     ),
                                     html.Span(
                                         ts_formatted,
-                                        style={"color": "#6c757d", "fontSize": "0.85rem", "marginRight": "10px"},
+                                        style={"color": "var(--text-muted)", "fontSize": "0.85rem", "marginRight": "10px"},
                                     ),
                                     html.Span(
                                         message,
-                                        style={"color": "#495057", "fontSize": "0.9rem"},
+                                        style={"color": "var(--text-color)", "fontSize": "0.9rem"},
                                     ),
                                 ],
                                 style={
