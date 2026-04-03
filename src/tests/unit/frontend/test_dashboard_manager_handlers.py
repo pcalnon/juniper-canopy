@@ -443,15 +443,27 @@ class TestDataStoreHandlers:
 
     @patch("requests.get")
     def test_update_topology_store_handler_active_tab(self, mock_get, dashboard_manager):
-        """Test topology store update when topology tab is active."""
+        """Test topology store update when topology tab is active.
+
+        The handler now unwraps a success envelope and passes the payload
+        through CascorServiceAdapter._transform_topology.  Providing a
+        graph-format dict (with 'input_units') triggers the passthrough path.
+        """
+        graph_topology = {
+            "input_units": 2,
+            "output_units": 1,
+            "hidden_units": 0,
+            "nodes": [],
+            "connections": [],
+        }
         mock_response = Mock()
-        mock_response.json.return_value = {"nodes": [], "connections": []}
+        mock_response.json.return_value = graph_topology
         mock_get.return_value = mock_response
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_topology_store_handler(n=1, active_tab="topology")
 
-        assert result == {"nodes": [], "connections": []}
+        assert result == graph_topology
 
     def test_update_topology_store_handler_inactive_tab(self, dashboard_manager):
         """Test topology store update when different tab is active."""

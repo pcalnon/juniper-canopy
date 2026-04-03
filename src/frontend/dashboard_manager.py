@@ -725,7 +725,7 @@ class DashboardManager:
                                                                             html.H6(
                                                                                 [
                                                                                     html.Span("▼", id="ctx-spiral-dataset-icon", className="collapse-icon"),
-                                                                                    "Spiral Dataset",
+                                                                                    "Current Dataset",
                                                                                 ],
                                                                                 id="ctx-spiral-dataset-header",
                                                                                 className="collapsible-header",
@@ -1089,7 +1089,7 @@ class DashboardManager:
                                         ),
                                         dbc.Tab(
                                             self.decision_boundary.get_layout(),
-                                            label="Decision Boundaries",
+                                            label="Decision Boundary",
                                             tab_id="boundaries",
                                         ),
                                         dbc.Tab(
@@ -1098,8 +1098,18 @@ class DashboardManager:
                                             tab_id="dataset",
                                         ),
                                         dbc.Tab(
+                                            self.worker_panel.get_layout(),
+                                            label="Workers",
+                                            tab_id="workers",
+                                        ),
+                                        dbc.Tab(
+                                            self.parameters_panel.get_layout(),
+                                            label="Parameters",
+                                            tab_id="parameters",
+                                        ),
+                                        dbc.Tab(
                                             self.hdf5_snapshots_panel.get_layout(),
-                                            label="HDF5 Snapshots",
+                                            label="Snapshots",
                                             tab_id="snapshots",
                                         ),
                                         dbc.Tab(
@@ -1113,24 +1123,14 @@ class DashboardManager:
                                             tab_id="cassandra",
                                         ),
                                         dbc.Tab(
-                                            self.worker_panel.get_layout(),
-                                            label="Workers",
-                                            tab_id="workers",
+                                            self.tutorial_panel.get_layout(),
+                                            label="Tutorial",
+                                            tab_id="tutorial",
                                         ),
                                         dbc.Tab(
                                             self.about_panel.get_layout(),
                                             label="About",
                                             tab_id="about",
-                                        ),
-                                        dbc.Tab(
-                                            self.parameters_panel.get_layout(),
-                                            label="Parameters",
-                                            tab_id="parameters",
-                                        ),
-                                        dbc.Tab(
-                                            self.tutorial_panel.get_layout(),
-                                            label="Tutorial",
-                                            tab_id="tutorial",
                                         ),
                                     ],
                                     id="visualization-tabs",
@@ -1527,7 +1527,9 @@ class DashboardManager:
 
             # WebSocket push takes priority — provides near-real-time updates
             if "ws-topology-buffer" in trigger and ws_topology:
-                return ws_topology
+                from backend.cascor_service_adapter import CascorServiceAdapter
+
+                return CascorServiceAdapter._transform_topology(ws_topology)
 
             # REST fallback — only poll when topology tab is active
             return self._update_topology_store_handler(n=n, active_tab=active_tab)
@@ -2331,8 +2333,15 @@ class DashboardManager:
             if not response.ok:
                 self.logger.warning(f"Topology API returned {response.status_code}")
                 return dash.no_update
-            topology = response.json()
-            self.logger.debug(f"Fetched topology from {url}: {topology.get('total_connections', 0)} connections")
+            result = response.json()
+            # Unwrap success envelope: {"status": "success", "data": {...}}
+            topology = result.get("data", result) if isinstance(result, dict) else result
+            # Transform CasCor weight-oriented format to graph-oriented format
+            # expected by NetworkVisualizer (input_units/output_units/connections)
+            from backend.cascor_service_adapter import CascorServiceAdapter
+
+            topology = CascorServiceAdapter._transform_topology(topology)
+            self.logger.debug(f"Fetched topology from {url}: {len(topology.get('connections', []))} connections")
             return topology
         except Exception as e:
             self.logger.warning(f"Failed to fetch topology from API: {type(e).__name__}: {e}")

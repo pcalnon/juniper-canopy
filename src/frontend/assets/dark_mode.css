@@ -258,6 +258,37 @@ table tbody tr:hover {
     color: var(--primary-color) !important;
 }
 
+/* Card dark mode */
+.dark-mode .card {
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+.dark-mode .card-header {
+    background-color: var(--bg-secondary) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+.dark-mode .card-body {
+    background-color: var(--bg-card) !important;
+    color: var(--text-color) !important;
+}
+
+/* Plotly graph dark mode containers */
+.dark-mode .js-plotly-plot .plotly .main-svg {
+    background-color: var(--bg-card) !important;
+}
+
+.dark-mode .js-plotly-plot .plotly .main-svg .bg {
+    fill: var(--bg-card) !important;
+}
+
+.dark-mode .js-plotly-plot .plot-container {
+    background-color: var(--bg-card) !important;
+}
+
 .dark-mode .accordion-button::after {
     filter: invert(1);
 }
@@ -277,6 +308,56 @@ table tbody tr:hover {
 /* Table row backgrounds */
 table tbody tr {
     background-color: var(--bg-card) !important;
+}
+
+/* Dark mode table overrides — higher specificity for dbc.Table */
+.dark-mode .table,
+.dark-mode table.table {
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+    --bs-table-bg: var(--bg-card);
+    --bs-table-striped-bg: var(--bg-secondary);
+    --bs-table-hover-bg: var(--bg-secondary);
+    --bs-table-color: var(--text-color);
+    --bs-table-border-color: var(--border-color);
+}
+
+.dark-mode .table thead th,
+.dark-mode table.table thead th {
+    background-color: var(--bg-secondary) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+.dark-mode .table tbody td,
+.dark-mode table.table tbody td {
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+.dark-mode .table tbody tr:hover,
+.dark-mode table.table tbody tr:hover {
+    background-color: var(--bg-secondary) !important;
+}
+
+/* Bootstrap table-bordered overrides for dark mode — needed because dbc.Table(bordered=True)
+   generates .table-bordered which sets border-color via --bs-border-width and --bs-table-border-color
+   that can override lower-specificity selectors */
+.dark-mode .table-bordered,
+.dark-mode .table-bordered > thead,
+.dark-mode .table-bordered > tbody,
+.dark-mode .table-bordered > thead > tr > th,
+.dark-mode .table-bordered > tbody > tr > td {
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+    --bs-table-bg: var(--bg-card) !important;
+}
+
+.dark-mode .table-bordered > thead > tr > th {
+    background-color: var(--bg-secondary) !important;
 }
 
 /* Metrics layout toolbar */

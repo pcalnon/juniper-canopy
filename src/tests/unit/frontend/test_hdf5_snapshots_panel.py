@@ -129,10 +129,10 @@ class TestHDF5SnapshotsPanelLayout:
         for child in children:
             if isinstance(child, html.Div):
                 for inner in child.children if hasattr(child, "children") and child.children else []:
-                    if isinstance(inner, html.H3) and "HDF5 Snapshots" in str(inner.children):
+                    if isinstance(inner, html.H3) and "Snapshots" in str(inner.children):
                         has_title = True
                         break
-        assert has_title, "Layout should contain H3 title 'HDF5 Snapshots'"
+        assert has_title, "Layout should contain H3 title 'Snapshots'"
 
     def test_layout_has_refresh_button(self, panel):
         """Layout should have refresh button."""

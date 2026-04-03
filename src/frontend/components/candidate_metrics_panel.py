@@ -290,23 +290,26 @@ class CandidateMetricsPanel(BaseComponent):
             if not state:
                 return html.Div(
                     "No active candidate pool",
-                    style={"color": "#6c757d", "fontStyle": "italic", "padding": "10px"},
+                    style={"color": "var(--text-muted)", "fontStyle": "italic", "padding": "10px"},
                 )
             pool_status = state.get("candidate_pool_status", "Inactive")
             if pool_status == "Inactive":
                 return html.Div(
                     "No active candidate pool",
-                    style={"color": "#6c757d", "fontStyle": "italic", "padding": "10px"},
+                    style={"color": "var(--text-muted)", "fontStyle": "italic", "padding": "10px"},
                 )
             return self._create_candidate_pool_display(state)
 
         # ── Update candidate loss plot ──
         @app.callback(
             Output(f"{self.component_id}-loss-plot", "figure"),
-            [Input(f"{self.component_id}-training-state-store", "data")],
+            [
+                Input(f"{self.component_id}-training-state-store", "data"),
+                Input("theme-state", "data"),
+            ],
         )
-        def update_loss_plot(state):
-            return self._create_candidate_loss_figure(state)
+        def update_loss_plot(state, theme):
+            return self._create_candidate_loss_figure(state, theme=theme or "light")
 
         # ── Toggle pool details collapse ──
         @app.callback(
@@ -444,18 +447,18 @@ class CandidateMetricsPanel(BaseComponent):
                         [
                             html.Th(
                                 "Rank",
-                                style={"padding": "6px 10px", "textAlign": "left", "borderBottom": "2px solid #dee2e6"},
+                                style={"padding": "6px 10px", "textAlign": "left", "borderBottom": "2px solid var(--border-color)"},
                             ),
                             html.Th(
                                 "Candidate ID",
-                                style={"padding": "6px 10px", "textAlign": "left", "borderBottom": "2px solid #dee2e6"},
+                                style={"padding": "6px 10px", "textAlign": "left", "borderBottom": "2px solid var(--border-color)"},
                             ),
                             html.Th(
                                 "Correlation",
                                 style={
                                     "padding": "6px 10px",
                                     "textAlign": "right",
-                                    "borderBottom": "2px solid #dee2e6",
+                                    "borderBottom": "2px solid var(--border-color)",
                                 },
                             ),
                         ]
@@ -526,12 +529,13 @@ class CandidateMetricsPanel(BaseComponent):
             ]
         )
 
-    def _create_candidate_loss_figure(self, state: Dict[str, Any] = None) -> go.Figure:
+    def _create_candidate_loss_figure(self, state: Dict[str, Any] = None, theme: str = "light") -> go.Figure:
         """
         Create candidate training loss plot.
 
         Args:
             state: Training state dictionary
+            theme: Current theme ("light" or "dark")
 
         Returns:
             Plotly figure with candidate loss trace
@@ -539,7 +543,7 @@ class CandidateMetricsPanel(BaseComponent):
         fig = go.Figure()
 
         if not state:
-            return self._create_empty_plot()
+            return self._create_empty_plot(theme=theme)
 
         # Extract candidate-phase data from training history
         epochs = state.get("epochs", [])
@@ -547,12 +551,13 @@ class CandidateMetricsPanel(BaseComponent):
         phases = state.get("phases", [])
 
         if not epochs or not losses or not phases:
-            return self._create_empty_plot()
+            return self._create_empty_plot(theme=theme)
 
         candidate_epochs = [e for e, p in zip(epochs, phases, strict=False) if "candidate" in p]
         candidate_losses = [lo for lo, p in zip(losses, phases, strict=False) if "candidate" in p]
 
         if candidate_epochs:
+            is_dark = theme == "dark"
             fig.add_trace(
                 go.Scatter(
                     x=candidate_epochs,
@@ -567,15 +572,15 @@ class CandidateMetricsPanel(BaseComponent):
             fig.update_layout(
                 xaxis_title="Epoch",
                 yaxis_title="Loss",
-                template="plotly",
-                plot_bgcolor="#f8f9fa",
-                paper_bgcolor="#ffffff",
+                template="plotly_dark" if is_dark else "plotly",
+                plot_bgcolor="#242424" if is_dark else "#f8f9fa",
+                paper_bgcolor="#242424" if is_dark else "#ffffff",
                 margin={"l": 50, "r": 20, "t": 20, "b": 40},
                 showlegend=True,
                 legend={"x": 0, "y": 1},
             )
         else:
-            return self._create_empty_plot()
+            return self._create_empty_plot(theme=theme)
 
         return fig
 
@@ -636,7 +641,7 @@ class CandidateMetricsPanel(BaseComponent):
             return [
                 html.Div(
                     "No pool history yet",
-                    style={"color": "#6c757d", "fontStyle": "italic", "padding": "10px"},
+                    style={"color": "var(--text-muted)", "fontStyle": "italic", "padding": "10px"},
                 )
             ]
 
@@ -671,7 +676,7 @@ class CandidateMetricsPanel(BaseComponent):
                                     html.Span(f"Pool @ Epoch {epoch}", style={"fontWeight": "600"}),
                                     html.Span(
                                         f" - Best: {top_id} ({top_score:.3f})",
-                                        style={"color": "#6c757d", "fontSize": "12px"},
+                                        style={"color": "var(--text-muted)", "fontSize": "12px"},
                                     ),
                                 ]
                             ),

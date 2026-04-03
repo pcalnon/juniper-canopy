@@ -46,6 +46,8 @@ import dash_bootstrap_components as dbc
 import requests
 from dash import dcc, html
 
+from settings import get_settings
+
 from ..base_component import BaseComponent
 
 # Default configuration values
@@ -90,6 +92,10 @@ class CassandraPanel(BaseComponent):
         """
         super().__init__(config, component_id)
 
+        # API base URL from settings (consistent with other panels)
+        _settings = get_settings()
+        self._api_base_url = f"http://127.0.0.1:{_settings.server.port}"
+
         # Configuration with defaults
         self.interval_ms = config.get("interval_ms", DEFAULT_REFRESH_INTERVAL_MS)
         self.api_timeout = config.get("api_timeout", DEFAULT_API_TIMEOUT_SECONDS)
@@ -100,17 +106,18 @@ class CassandraPanel(BaseComponent):
         """
         Build API URL for Cassandra endpoints.
 
-        Uses relative paths which work correctly when served from the same origin.
-        For absolute URLs, constructs from config or uses default localhost.
+        Constructs absolute URL using application settings, consistent with
+        other panel components.
 
         Args:
             path: API path (e.g., "/api/v1/cassandra/status")
 
         Returns:
-            API URL string
+            Full API URL string
         """
-        # Use relative path - works when served from same origin
-        return path.lstrip("/")
+        if path and not path.startswith("/"):
+            path = f"/{path}"
+        return f"{self._api_base_url}{path}"
 
     def _render_hosts_table(self, hosts: List[Dict[str, Any]]) -> html.Div | dbc.Table:
         """
@@ -198,7 +205,7 @@ class CassandraPanel(BaseComponent):
                                     style={"fontSize": "14px", "verticalAlign": "middle"},
                                 ),
                             ],
-                            style={"color": "#2c3e50", "marginBottom": "10px"},
+                            style={"color": "var(--header-color)", "marginBottom": "10px"},
                         ),
                         # Mode indicator
                         html.Div(
