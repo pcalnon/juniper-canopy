@@ -292,14 +292,14 @@ Visual verification only. If tables still show white backgrounds after recent co
 
 ## Risk Assessment
 
-| Phase | Risk | Mitigation |
-|-------|------|------------|
-| 1 | OPT-5 fix introduces new serialization bug | Fallback to legacy tuple format is well-tested |
-| 1 | Weight threshold change allows corrupted results | NaN/Inf checks still active; 1000.0 is conservative |
-| 2 | Client format change breaks other consumers | Use defensive coding (handle both formats) |
-| 3 | Aspect ratio changes break layout on some screens | Use maxHeight constraint to prevent overflow |
-| 3 | Decision boundary replay requires significant new code | Implement as separate sub-task; can ship without |
-| 3 | Dataset generator integration requires running juniper-data | Graceful degradation when service unavailable |
+| Phase | Risk                                                        | Mitigation                                          |
+|-------|-------------------------------------------------------------|-----------------------------------------------------|
+| 1     | OPT-5 fix introduces new serialization bug                  | Fallback to legacy tuple format is well-tested      |
+| 1     | Weight threshold change allows corrupted results            | NaN/Inf checks still active; 1000.0 is conservative |
+| 2     | Client format change breaks other consumers                 | Use defensive coding (handle both formats)          |
+| 3     | Aspect ratio changes break layout on some screens           | Use maxHeight constraint to prevent overflow        |
+| 3     | Decision boundary replay requires significant new code      | Implement as separate sub-task; can ship without    |
+| 3     | Dataset generator integration requires running juniper-data | Graceful degradation when service unavailable       |
 
 ---
 
@@ -307,7 +307,7 @@ Visual verification only. If tables still show white backgrounds after recent co
 
 ```text
 Phase 1 (CasCor Fix) ──────> Phase 2 (Connection Fix) ──────> Phase 4 (Validation)
-                       └────> Phase 3 (Canopy UI)      ──────> Phase 4 (Validation)
+                      └────> Phase 3 (Canopy UI)      ──────> Phase 4 (Validation)
 ```
 
 Phases 2 and 3 can execute in parallel after Phase 1 completes. Phase 4 requires all prior phases.

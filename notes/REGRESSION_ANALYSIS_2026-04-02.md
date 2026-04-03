@@ -266,7 +266,7 @@ Same issue as HIGH-4: fixed height (`500px`) without aspect ratio enforcement.
 **File**: `src/frontend/components/dataset_plotter.py`
 **Impact**: Dataset dropdown not populated; sidebar hardcoded to "Spiral Dataset"
 
-#### Root Cause (Multiple Sub-Issues)
+#### Root Cause, HIGH-7 (Multiple Sub-Issues)
 
 1. **Dropdown population**: The `dcc.Dropdown` at line 101 starts with `options=[]` (empty). It should be populated with generators from the juniper-data service via `/api/dataset/generators` or equivalent.
 
@@ -303,7 +303,7 @@ This may be a configuration issue rather than a code bug. Verify the network cre
 **File**: `src/frontend/components/hdf5_snapshots_panel.py`
 **Impact**: Poor dark mode readability
 
-#### Details
+#### Details, MED-1
 
 Three hardcoded color values:
 
@@ -321,7 +321,7 @@ These should use CSS variables: `var(--header-color)`, `var(--text-muted)`, `var
 **File**: `src/frontend/components/cassandra_panel.py`, line 200
 **Impact**: Header text invisible/low-contrast in dark mode
 
-#### Details
+#### Details, MED-2
 
 ```python
 style={"color": "#2c3e50", "marginBottom": "10px"}
@@ -336,7 +336,7 @@ Should use `var(--header-color)`.
 **Application**: juniper-canopy
 **Impact**: UI organization
 
-#### Status: PARTIALLY RESOLVED
+#### Status, MED-3: PARTIALLY RESOLVED
 
 - Tab label already renamed from "HDF5 Snapshots" to "Snapshots" (verified: `dashboard_manager.py` line 1112)
 - Panel header at `hdf5_snapshots_panel.py` line 110 shows "Snapshots" (verified)
@@ -351,11 +351,11 @@ Should use `var(--header-color)`.
 **File**: `src/frontend/components/parameters_panel.py`
 **Impact**: White table backgrounds in dark mode
 
-#### Analysis
+#### Analysis, MED-4
 
 The `_build_table` function (lines 79-118) creates `dbc.Table` components. The `dark_mode.css` file has comprehensive table styling (lines 217-281) with `!important` overrides. However, if the Parameters panel uses inline `style` attributes that override CSS (e.g., `"backgroundColor": "white"` or Bootstrap default classes), the CSS overrides may not take effect.
 
-#### Status
+#### Status, MED-4
 
 The recent commit `5901047` (2026-04-01) addressed this issue by replacing hardcoded colors with CSS variables. Requires verification that all table elements are properly themed.
 
@@ -367,11 +367,11 @@ The recent commit `5901047` (2026-04-01) addressed this issue by replacing hardc
 **File**: `src/frontend/components/tutorial_panel.py`
 **Impact**: White table backgrounds in dark mode
 
-#### Analysis
+#### Analysis, MED-5
 
 Same pattern as MED-4. The tutorial panel uses `dbc.Table`, `dbc.Accordion`, and `dbc.ListGroup` components. The `dark_mode.css` file covers all these (lines 244-275). The recent commit `5901047` added dark mode rules for accordion components.
 
-#### Status
+#### Status, MED-5
 
 Requires verification that all table and accordion elements in the Tutorial tab properly inherit dark mode styles.
 
@@ -413,9 +413,18 @@ The following reported issues were investigated and found to be already resolved
 
 The tab order in `dashboard_manager.py` lines 1073-1134 matches the expected order:
 
-1. Training Metrics, 2. Candidate Metrics, 3. Network Topology, 4. Decision Boundary,
-5. Dataset View, 6. Workers, 7. Parameters, 8. Snapshots, 9. Redis, 10. Cassandra,
-11. Tutorial, 12. About
+1. Training Metrics
+2. Candidate Metrics
+3. Network Topology
+4. Decision Boundary
+5. Dataset View
+6. Workers
+7. Parameters
+8. Snapshots
+9. Redis
+10. Cassandra
+11. Tutorial
+12. About
 
 ### Tab Labels
 
@@ -455,7 +464,7 @@ Candidate pool information requires successful candidate training rounds, which 
 
 ## 6. Root Cause Chain Analysis
 
-```text
+```bash
                   ROOT CAUSES                          VISIBLE SYMPTOMS
                   ===========                          ================
 
@@ -491,25 +500,25 @@ Candidate pool information requires successful candidate training rounds, which 
 
 ## 7. Evidence Summary
 
-| Issue ID | File(s) | Line(s) | Root Cause | Severity | Status |
-|----------|---------|---------|------------|----------|--------|
-| CRIT-1 | cascade_correlation.py | 1835, 2093, 2155, 3630 | OPT-5 serialization + validation | CRITICAL | Open |
-| CRIT-2 | cascade_correlation.py | 1708 | Walrus operator precedence | CRITICAL | Open |
-| HIGH-1 | service_backend.py, cascor_client | - | Data contract mismatch | HIGH | Documented |
-| HIGH-2 | candidate_metrics_panel.py | 567-576 | Hardcoded light theme | HIGH | Open |
-| HIGH-3 | cassandra_panel.py | 389 | API route missing/misconfigured | HIGH | Open |
-| HIGH-4 | decision_boundary.py | 149 | Fixed height, no aspect ratio | HIGH | Open |
-| HIGH-5 | decision_boundary.py | - | Missing replay feature | HIGH | Open (New Feature) |
-| HIGH-6 | dataset_plotter.py | 222 | Fixed height, no aspect ratio | HIGH | Open |
-| HIGH-7 | dataset_plotter.py, dashboard_manager.py | 101 | Empty dropdown, hardcoded labels | HIGH | Open |
-| HIGH-8 | network_visualizer.py | 612-626 | Backend config issue | HIGH | Investigation Needed |
-| MED-1 | hdf5_snapshots_panel.py | 111, 123, 216 | Hardcoded colors | MEDIUM | Open |
-| MED-2 | cassandra_panel.py | 200 | Hardcoded colors | MEDIUM | Open |
-| MED-3 | hdf5_snapshots_panel.py | 113-118 | Refresh button placement | MEDIUM | Partial |
-| MED-4 | parameters_panel.py | - | Dark mode tables | MEDIUM | Likely Fixed |
-| MED-5 | tutorial_panel.py | - | Dark mode tables | MEDIUM | Likely Fixed |
-| LOW-1 | demo_mode.py | 1126-1132 | Threading deadlock | LOW | Fixed |
-| LOW-2 | cascade_correlation.py | 3614 | validate_training_results | LOW | Acknowledged |
+| Issue ID | File(s)                                  | Line(s)                | Root Cause                       | Severity | Status               |
+|----------|------------------------------------------|------------------------|----------------------------------|----------|----------------------|
+| CRIT-1   | cascade_correlation.py                   | 1835, 2093, 2155, 3630 | OPT-5 serialization + validation | CRITICAL | Open                 |
+| CRIT-2   | cascade_correlation.py                   | 1708                   | Walrus operator precedence       | CRITICAL | Open                 |
+| HIGH-1   | service_backend.py, cascor_client        | -                      | Data contract mismatch           | HIGH     | Documented           |
+| HIGH-2   | candidate_metrics_panel.py               | 567-576                | Hardcoded light theme            | HIGH     | Open                 |
+| HIGH-3   | cassandra_panel.py                       | 389                    | API route missing/misconfigured  | HIGH     | Open                 |
+| HIGH-4   | decision_boundary.py                     | 149                    | Fixed height, no aspect ratio    | HIGH     | Open                 |
+| HIGH-5   | decision_boundary.py                     | -                      | Missing replay feature           | HIGH     | Open (New Feature)   |
+| HIGH-6   | dataset_plotter.py                       | 222                    | Fixed height, no aspect ratio    | HIGH     | Open                 |
+| HIGH-7   | dataset_plotter.py, dashboard_manager.py | 101                    | Empty dropdown, hardcoded labels | HIGH     | Open                 |
+| HIGH-8   | network_visualizer.py                    | 612-626                | Backend config issue             | HIGH     | Investigation Needed |
+| MED-1    | hdf5_snapshots_panel.py                  | 111, 123, 216          | Hardcoded colors                 | MEDIUM   | Open                 |
+| MED-2    | cassandra_panel.py                       | 200                    | Hardcoded colors                 | MEDIUM   | Open                 |
+| MED-3    | hdf5_snapshots_panel.py                  | 113-118                | Refresh button placement         | MEDIUM   | Partial              |
+| MED-4    | parameters_panel.py                      | -                      | Dark mode tables                 | MEDIUM   | Likely Fixed         |
+| MED-5    | tutorial_panel.py                        | -                      | Dark mode tables                 | MEDIUM   | Likely Fixed         |
+| LOW-1    | demo_mode.py                             | 1126-1132              | Threading deadlock               | LOW      | Fixed                |
+| LOW-2    | cascade_correlation.py                   | 3614                   | validate_training_results        | LOW      | Acknowledged         |
 
 ---
 
@@ -548,7 +557,7 @@ In `_build_candidate_inputs`, if SharedMemory reconstruction fails and no fallba
 
 ### Status Reporting Chain
 
-```text
+```bash
 cascor: TrainingLifecycleManager.state_machine → WebSocket broadcast
     ↓
 cascor: /ws/training endpoint → JSON message {type: "state", data: {...}}
@@ -562,7 +571,7 @@ canopy: Status bar displays "Failed" / "Running" / etc.
 
 ### Connection Establishment
 
-```text
+```bash
 canopy: ServiceBackend.connect()
     → is_ready() → GET /health/ready → expects {"data": {"network_loaded": true}}
     → cascor returns {"details": {"network_loaded": true}}

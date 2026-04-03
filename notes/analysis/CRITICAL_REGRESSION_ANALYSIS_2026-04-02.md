@@ -401,31 +401,31 @@ The issue is that the Cassandra panel constructs its OWN `_api_url` method indep
 
 ### P0 - Catastrophic (Blocks All Development)
 
-1. **Cascor RC-1**: Non-writable SharedMemory tensor views
-2. **Cascor RC-2**: SharedMemory use-after-free race condition
-3. **Cascor RC-3**: Correlation validation rejects valid results
+**1. Cascor RC-1**: Non-writable SharedMemory tensor views
+**2. Cascor RC-2**: SharedMemory use-after-free race condition
+**3. Cascor RC-3**: Correlation validation rejects valid results
 
 ### P1 - High (Broken Features)
 
-4. **Cascor RC-4**: Walrus operator precedence bug
-5. **Canopy**: Candidate loss plot dark mode theming
-6. **Canopy**: Network topology output node count
-7. **Canopy**: Dataset dropdown not populated
-8. **Canopy**: Cassandra API URL construction
+**4. Cascor RC-4**: Walrus operator precedence bug
+**5. Canopy**: Candidate loss plot dark mode theming
+**6. Canopy**: Network topology output node count
+**7. Canopy**: Dataset dropdown not populated
+**8. Canopy**: Cassandra API URL construction
 
 ### P2 - Medium (Incomplete Features / Visual Issues)
 
-9. **Canopy**: Decision boundary aspect ratio
-10. **Canopy**: Dataset view aspect ratio
-11. **Canopy**: Parameters tab dark mode
-12. **Canopy**: Tutorial tab dark mode
-13. **Canopy**: Snapshot refresh button positioning
+**9.  Canopy**: Decision boundary aspect ratio
+**10. Canopy**: Dataset view aspect ratio
+**11. Canopy**: Parameters tab dark mode
+**12. Canopy**: Tutorial tab dark mode
+**13. Canopy**: Snapshot refresh button positioning
 
 ### P3 - Feature Gaps (New Development)
 
-14. **Canopy**: Decision boundary historical display / replay
-15. **Canopy**: Dynamic dataset parameters based on selection
-16. **Canopy**: Generate dataset training integration
+**14. Canopy**: Decision boundary historical display / replay
+**15. Canopy**: Dynamic dataset parameters based on selection
+**16. Canopy**: Generate dataset training integration
 
 ---
 
