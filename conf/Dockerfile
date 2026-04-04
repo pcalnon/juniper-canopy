@@ -61,6 +61,8 @@ ENV PYTHONPATH=/app/src
 # Service configuration
 ENV CASCOR_ENV=production
 ENV CASCOR_DEBUG=false
+# Default to demo mode for standalone deployment
+ENV JUNIPER_CANOPY_DEMO_MODE=1
 
 EXPOSE 8050
 
