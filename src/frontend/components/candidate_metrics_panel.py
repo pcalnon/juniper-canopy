@@ -675,7 +675,7 @@ class CandidateMetricsPanel(BaseComponent):
                         dbc.CardHeader(
                             html.Div(
                                 [
-                                    html.Span(f"Pool @ Epoch {epoch}", style={"fontWeight": "600"}),
+                                    html.Span(f"Pool @ Iteration {epoch}", style={"fontWeight": "600"}),
                                     html.Span(
                                         f" - Best: {top_id} ({top_score:.3f})",
                                         style={"color": "var(--text-muted)", "fontSize": "12px"},

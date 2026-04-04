@@ -836,7 +836,7 @@ class TestUpdateProgressDetailHandler:
         }
 
         result = metrics_panel._update_progress_detail_handler(state=state)
-        assert result == "Candidate Training | Iteration 2/10 | Best Corr: 0.9123 | Candidates: 3/8"
+        assert result == "Candidate Training | Cascade Iteration 2/10 | Best Corr: 0.9123 | Candidates: 3/8"
 
     def test_formats_candidate_epoch_progress_segment(self, metrics_panel):
         """Should include candidate epoch progress text and percent."""
@@ -1162,7 +1162,7 @@ class TestRegisteredCallbacks:
             }
             result = func(state)
             assert "Candidate Training" in result
-            assert "Iteration 1/5" in result
+            assert "Cascade Iteration 1/5" in result
 
     def test_render_candidate_history_empty(self, registered_callbacks):
         """Test render_candidate_history with empty history."""
@@ -1188,7 +1188,7 @@ class TestRegisteredCallbacks:
         if func := callbacks.get("render_candidate_history"):
             result = func([{"epoch": 42}])
             result_str = str(result)
-            assert "Pool @ Epoch 42" in result_str
+            assert "Pool @ Iteration 42" in result_str
 
     def test_render_candidate_history_single_entry_has_header(self, registered_callbacks):
         """Test render_candidate_history single entry includes Previous Pools header."""
@@ -1223,9 +1223,9 @@ class TestRegisteredCallbacks:
             ]
             result = func(history)
             result_str = str(result)
-            assert "Pool @ Epoch 50" in result_str
-            assert "Pool @ Epoch 40" in result_str
-            assert "Pool @ Epoch 30" in result_str
+            assert "Pool @ Iteration 50" in result_str
+            assert "Pool @ Iteration 40" in result_str
+            assert "Pool @ Iteration 30" in result_str
 
     def test_capture_view_state_no_trigger(self, registered_callbacks):
         """Test capture_view_state with no trigger."""
