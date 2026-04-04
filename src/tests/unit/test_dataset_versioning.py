@@ -20,6 +20,8 @@
 #####################################################################################################################################################################################################
 """Unit tests for dataset versioning integration (CAN-DEF-005 Phase 3)."""
 
+import pytest
+
 from backend.training_monitor import TrainingState
 
 
@@ -181,13 +183,21 @@ class TestSnapshotVersioning:
         assert snapshot["id"] == "test_snap_002"
 
 
+_has_jdc_testing = False
+try:
+    from juniper_data_client.testing import FakeDataClient  # noqa: F401
+
+    _has_jdc_testing = True
+except ImportError:
+    pass
+
+
+@pytest.mark.skipif(not _has_jdc_testing, reason="requires juniper-data-client[testing]")
 class TestFakeDataClientVersioning:
     """Test that FakeDataClient returns versioning fields when name is provided."""
 
     def test_create_dataset_with_name_has_version(self):
         """create_dataset with name returns dataset_name and dataset_version in meta."""
-        from juniper_data_client.testing import FakeDataClient
-
         with FakeDataClient() as client:
             result = client.create_dataset(
                 "spiral",
@@ -200,8 +210,6 @@ class TestFakeDataClientVersioning:
 
     def test_create_dataset_without_name_no_version(self):
         """create_dataset without name does not include versioning fields."""
-        from juniper_data_client.testing import FakeDataClient
-
         with FakeDataClient() as client:
             result = client.create_dataset(
                 "spiral",
@@ -213,8 +221,6 @@ class TestFakeDataClientVersioning:
 
     def test_version_increments_for_same_name(self):
         """Successive create_dataset calls with same name increment version."""
-        from juniper_data_client.testing import FakeDataClient
-
         with FakeDataClient() as client:
             r1 = client.create_dataset("spiral", {"seed": 1}, name="IncrTest")
             r2 = client.create_dataset("spiral", {"seed": 2}, name="IncrTest")
