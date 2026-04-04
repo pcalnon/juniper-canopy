@@ -1492,10 +1492,22 @@ class DashboardManager:
             dash.dependencies.State("visualization-tabs", "active_tab"),
         )
         def update_parameters_panel_store(applied_data, active_tab):
-            """Propagate applied parameters to the parameters panel store."""
+            """Propagate applied parameters to the parameters panel store.
+
+            Strips nn_/cn_ prefixes so the parameters panel can look up
+            values by their unprefixed canonical names.
+            """
             if not applied_data:
                 return {}
-            return applied_data
+            stripped = {}
+            for key, value in applied_data.items():
+                if key.startswith("nn_"):
+                    stripped[key[3:]] = value
+                elif key.startswith("cn_"):
+                    stripped[key[3:]] = value
+                else:
+                    stripped[key] = value
+            return stripped
 
         @self.app.callback(
             Output("metrics-panel-metrics-store", "data"),
@@ -2215,7 +2227,7 @@ class DashboardManager:
                     html.Hr(),
                     html.P(
                         [
-                            html.Strong("Current Epoch: "),
+                            html.Strong("Training Step: "),
                             str(status.get("current_epoch", 0)),
                         ]
                     ),

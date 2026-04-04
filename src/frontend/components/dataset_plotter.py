@@ -219,7 +219,7 @@ class DatasetPlotter(BaseComponent):
                 dcc.Graph(
                     id=f"{self.component_id}-scatter-plot",
                     config={"displayModeBar": True, "displaylogo": False},
-                    style={"height": "600px", "maxWidth": "700px", "margin": "0 auto"},
+                    style={"height": "800px", "maxWidth": "900px", "margin": "0 auto"},
                 ),
                 # Feature distribution histograms
                 dcc.Graph(

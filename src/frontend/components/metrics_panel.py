@@ -403,7 +403,7 @@ class MetricsPanel(BaseComponent):
                     [
                         html.Div(
                             [
-                                html.H5("Current Epoch"),
+                                html.H5("Training Step"),
                                 html.H2(id=f"{self.component_id}-current-epoch", children="0", style={"color": "#007bff"}),
                             ],
                             className="metric-card",
