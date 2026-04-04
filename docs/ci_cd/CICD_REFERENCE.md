@@ -37,28 +37,36 @@ graph TB
     end
 
     subgraph "GitHub Actions Runners"
-        E[Lint Job]
-        F[Test Matrix]
-        G[Build Job]
-        H[Integration Job]
-        I[Quality Gate]
-        J[Notify]
+        E[Pre-commit Matrix]
+        F[Unit Test Matrix]
+        G[Integration Tests]
+        H[Build Distribution]
+        I[Dependency Docs]
+        J[Security Scans]
+        K[Lockfile Freshness]
+        L[Documentation Links]
+        M[Docker Smoke Test]
+        N[Quality Gate]
+        O[Build Notification]
 
         D --> E
         D --> F
-        E --> G
+        D --> J
+        D --> K
+        D --> L
         F --> G
         F --> H
-        G --> I
         H --> I
-        I --> J
-    end
-
-    subgraph "External Services"
-        K[Codecov]
-        L[GitHub Checks API]
-        F --> K
-        J --> L
+        H --> M
+        E --> N
+        F --> N
+        G --> N
+        J --> N
+        I --> N
+        K --> N
+        L --> N
+        M --> N
+        N --> O
     end
 ```
 
@@ -66,32 +74,46 @@ graph TB
 
 ```yaml
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-
-  test:
-    runs-on: ubuntu-latest
+  pre-commit:
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
+
+  unit-tests:
+    needs: [pre-commit]
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+
+  integration-tests:
+    needs: [unit-tests]
+    if: github.event_name == 'pull_request' || github.ref_name == 'main' || github.ref_name == 'develop'
 
   build:
-    runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [unit-tests]
 
-  integration:
-    runs-on: ubuntu-latest
-    needs: [test]
-    if: github.event_name == 'pull_request'
+  dependency-docs:
+    needs: [build]
 
-  quality-gate:
+  security:
+    needs: [pre-commit]
+
+  lockfile-check:
     runs-on: ubuntu-latest
-    needs: [lint, test, build]
+
+  docs:
+    runs-on: ubuntu-latest
+
+  docker-build:
+    needs: [build]
+    if: github.event_name == 'pull_request' || github.ref_name == 'main' || github.ref_name == 'develop'
+
+  required-checks:
     if: always()
+    needs: [pre-commit, unit-tests, integration-tests, security, build, dependency-docs, lockfile-check, docs, docker-build]
 
   notify:
-    runs-on: ubuntu-latest
-    needs: [quality-gate]
+    needs: [required-checks]
     if: always()
 ```
 
@@ -103,46 +125,19 @@ jobs:
 
 ```yaml
 on:
-  # Push triggers
   push:
     branches:
-      - main                # Production branch
-      - develop             # Development branch
-      - 'feature/**'        # Feature branches
-      - 'fix/**'            # Bugfix branches
-    paths-ignore:
-      - '**.md'             # Skip docs-only changes
-      - 'docs/**'
-      - 'notes/**'
-
-  # Pull request triggers
+      - main
+      - develop
+      - feature/**
+      - fix/**
   pull_request:
     branches:
       - main
       - develop
-    types:
-      - opened              # PR created
-      - synchronize         # New commits pushed
-      - reopened            # PR reopened
-      - ready_for_review    # Draft → Ready
-
-  # Manual trigger
+  repository_dispatch:
+    types: [data-client-updated, cascor-client-updated]
   workflow_dispatch:
-    inputs:
-      python-version:
-        description: 'Python version to test'
-        required: false
-        default: '3.13'
-        type: choice
-        options:
-          - '3.11'
-          - '3.12'
-          - '3.13'
-      skip-slow-tests:
-        description: 'Skip slow tests'
-        required: false
-        default: true
-        type: boolean
 ```
 
 ### Job Specification
@@ -198,94 +193,55 @@ lint:
 #### Test Job
 
 ```yaml
-test:
-  name: Test Suite (Python ${{ matrix.python-version }})
+unit-tests:
+  name: Unit Tests + Coverage (Python ${{ matrix.python-version }})
   runs-on: ubuntu-latest
-  timeout-minutes: 30
-
+  needs: [pre-commit]
   strategy:
     fail-fast: false
     matrix:
-      python-version: ["3.11", "3.12", "3.13"]
+      python-version: ["3.12", "3.13", "3.14"]
 
   steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-
-    - name: Set up Conda
-      uses: conda-incubator/setup-miniconda@v3
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
-        channels: conda-forge,pytorch,plotly,defaults
-        channel-priority: flexible
-        activate-environment: JuniperPython-CI
-        environment-file: conf/conda_environment.yaml
-        auto-activate-base: false
+        cache: pip
 
-    - name: Verify Environment
-      shell: bash -el {0}
-      run: |
-        conda info
-        conda list
-        which python
-        python --version
-
-    - name: Install Dependencies
-      shell: bash -el {0}
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r conf/requirements.txt
+        pip install torch --index-url https://download.pytorch.org/whl/cpu
+        pip install -r conf/requirements_ci.txt
+        pip install -e .
 
-    - name: Run Tests
-      shell: bash -el {0}
+    - name: Run Unit Tests with Coverage Gate
       run: |
-        cd src
-        pytest tests/ \
+        set +e
+        python -m pytest \
+          -m "not requires_cascor and not requires_server and not slow" \
+          src/tests/unit/ src/tests/regression/ \
           --verbose \
-          --cov=. \
-          --cov-report=xml:../coverage.xml \
+          --timeout=60 \
+          --maxfail=5 \
+          --junitxml=reports/junit/junit-unit.xml \
+          --cov=src \
           --cov-report=term-missing \
-          --cov-report=html:../reports/coverage \
-          --junit-xml=../reports/junit/results.xml \
-          --html=../reports/test_report.html \
-          --self-contained-html
+          --cov-report=xml:reports/coverage.xml \
+          --cov-report=html:reports/htmlcov \
+          --cov-fail-under=80
+        PYTEST_EXIT=$?
+        set -e
 
-    - name: Upload Coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        file: ./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
-        token: ${{ secrets.CODECOV_TOKEN }}
-        fail_ci_if_error: false
-      continue-on-error: true
-
-    - name: Upload Test Results
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: test-results-${{ matrix.python-version }}
-        path: |
-          reports/
-          coverage.xml
-        retention-days: 30
-
-    - name: Check Coverage Threshold
-      shell: bash -el {0}
-      run: |
-        cd src
-        COVERAGE=$(pytest tests/ --cov=. --cov-report=term-missing | grep "TOTAL" | awk '{print $NF}' | sed 's/%//')
-        echo "Current coverage: ${COVERAGE}%"
-
-        if (( $(echo "$COVERAGE < 80" | bc -l) )); then
-          echo "::warning::Coverage below 80%: ${COVERAGE}%"
+        if [ $PYTEST_EXIT -eq 134 ] && [ -f reports/junit/junit-unit.xml ]; then
+          FAILURES=$(python -c "import xml.etree.ElementTree as ET; root = ET.parse('reports/junit/junit-unit.xml').getroot(); print(root.attrib.get('failures', '0'))")
+          ERRORS=$(python -c "import xml.etree.ElementTree as ET; root = ET.parse('reports/junit/junit-unit.xml').getroot(); print(root.attrib.get('errors', '0'))")
+          if [ "$FAILURES" = "0" ] && [ "$ERRORS" = "0" ]; then
+            exit 0
+          fi
         fi
-
-        if (( $(echo "$COVERAGE < 60" | bc -l) )); then
-          echo "::error::Coverage critically low: ${COVERAGE}%"
-          exit 1
-        fi
-      continue-on-error: true
+        exit $PYTEST_EXIT
 ```
 
 ---
@@ -361,38 +317,13 @@ repos:
 
 **Location:** `.codecov.yml`
 
-**Purpose:** Codecov configuration
+**Status:** Not used in current CI pipeline
 
-**Key Settings:**
+**Notes:**
 
-```yaml
-coverage:
-  precision: 2              # Decimal places
-  round: down               # Rounding method
-  range: 70..100            # Color range
-
-  status:
-    project:
-      default:
-        target: 80%         # Project-wide target
-        threshold: 5%       # Allowed drop
-        base: auto          # Compare to parent
-
-    patch:
-      default:
-        target: 60%         # New code target
-        threshold: 10%      # More lenient
-```
-
-**Ignore Patterns:**
-
-```yaml
-ignore:
-  - src/tests/**           # Test files
-  - utils/**               # Utility scripts
-  - docs/**                # Documentation
-  - "**/__pycache__/**"    # Cache files
-```
+- The current `ci.yml` does not upload coverage to Codecov.
+- Coverage enforcement happens directly in pytest with `--cov-fail-under=80`.
+- Coverage artifacts are uploaded via `actions/upload-artifact` as `coverage-report-py{python-version}`.
 
 ### pyproject.toml
 
@@ -416,7 +347,7 @@ ignore:
    ```toml
    [tool.black]
    line-length = 120
-   target-version = ['py311', 'py312', 'py313']
+   target-version = ['py312', 'py313']
    ```
 
 3. **isort configuration**
@@ -439,7 +370,7 @@ ignore:
 
    ```toml
    [tool.mypy]
-   python_version = "3.11"
+   python_version = "3.14"
    ignore_missing_imports = true
    ```
 
@@ -457,7 +388,7 @@ ignore:
    ```toml
    [tool.coverage.report]
    show_missing = true
-   fail_under = 60
+   fail_under = 80
    precision = 2
    ```
 
@@ -474,7 +405,7 @@ ignore:
 ```toml
 [tool.black]
 line-length = 120
-target-version = ['py311', 'py312', 'py313']
+target-version = ['py312', 'py313']
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -565,7 +496,7 @@ flake8 src/ --extend-ignore=E501,W503
 
 ```toml
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.14"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
@@ -676,7 +607,7 @@ branch = true
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
-fail_under = 60
+fail_under = 80
 precision = 2
 exclude_lines = [
     "pragma: no cover",
@@ -761,8 +692,9 @@ env:
   PYTEST_ADDOPTS: "--verbose --color=yes"
   COVERAGE_CORE: sysmon
 
-  # Conda
-  CONDA_ENV_NAME: JuniperPython-CI
+  # CI workflow
+  PYTHON_TEST_VERSION: "3.14"
+  COVERAGE_FAIL_UNDER: "80"
 ```
 
 ### Accessing Environment Variables
@@ -798,46 +730,42 @@ demo_mode = os.getenv('CASCOR_DEMO_MODE', '0') == '1'
 
 ### Test Results Artifact
 
-**Name:** `test-results-{python-version}`
+**Name:** `unit-test-results-py{python-version}`
 
 **Contents:**
 
 ```bash
-reports/
-├── junit/
-│   └── results.xml          # JUnit XML report
-├── test_report.html         # HTML test report
-└── coverage/
-    └── index.html           # Coverage HTML report
+reports/junit/
+└── junit-unit.xml           # Unit test JUnit XML report
 ```
 
 **Metadata:**
 
 ```yaml
-name: test-results-3.13
+name: unit-test-results-py3.14
 retention-days: 30
-size: ~2-5 MB
+size: ~0.2-1 MB
 format: ZIP archive
 ```
 
 ### Coverage Report Artifact
 
-**Name:** `coverage-report-{python-version}`
+**Name:** `coverage-report-py{python-version}`
 
 **Contents:**
 
 ```bash
-reports/coverage/
+reports/htmlcov/
 ├── index.html               # Main coverage page
 ├── *.html                   # Per-file coverage
 ├── style.css                # Styling
-└── coverage.xml             # XML report
+reports/coverage.xml         # XML report
 ```
 
 **Metadata:**
 
 ```yaml
-name: coverage-report-3.13
+name: coverage-report-py3.14
 retention-days: 30
 size: ~1-3 MB
 format: ZIP archive
@@ -858,7 +786,7 @@ format: ZIP archive
 gh run view RUN_ID --log-failed
 
 # Download specific artifact
-gh run download RUN_ID -n test-results-3.13
+gh run download RUN_ID -n unit-test-results-py3.14
 
 # Download all artifacts
 gh run download RUN_ID
@@ -923,21 +851,12 @@ GET /repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip
 DELETE /repos/{owner}/{repo}/actions/artifacts/{artifact_id}
 ```
 
-### Codecov API
+### Coverage Artifact Retrieval
 
-#### Upload Coverage
-
-```bash
-curl -X POST \
-  --data-binary @coverage.xml \
-  -H "Authorization: token $CODECOV_TOKEN" \
-  https://codecov.io/upload/v4
-```
-
-#### Get Coverage Report
+#### Download Coverage Artifact
 
 ```bash
-curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
+gh run download RUN_ID -n coverage-report-py3.14
 ```
 
 ---
@@ -1019,16 +938,18 @@ grep "coverage" workflow.log | grep -i "low\|fail"
 
 ## Version History
 
+### Version 1.1.0 (2026-04-04)
+
+**Updates:**
+
+- Updated workflow model to match `pre-commit`, `unit-tests`, `integration-tests`, `security`, `dependency-docs`, `lockfile-check`, `docs`, `docker-build`, `required-checks`.
+- Updated Python matrix references to `3.12`, `3.13`, `3.14`.
+- Updated artifact names and paths to current CI outputs.
+- Updated coverage enforcement references to 80% minimum threshold.
+
 ### Version 1.0.0 (2025-11-05)
 
-**Initial release:**
-
-- Complete CI/CD pipeline
-- Multi-version Python testing
-- Coverage reporting
-- Pre-commit hooks
-- Quality gates
-- Comprehensive documentation
+**Initial release.**
 
 ---
 
@@ -1041,7 +962,6 @@ grep "coverage" workflow.log | grep -i "low\|fail"
 - [Pytest Docs](https://docs.pytest.org/)
 - [Coverage.py Docs](https://coverage.readthedocs.io/)
 - [Pre-commit Docs](https://pre-commit.com/)
-- [Codecov Docs](https://docs.codecov.com/)
 
 ### Project Documentation
 
@@ -1053,7 +973,7 @@ grep "coverage" workflow.log | grep -i "low\|fail"
 
 ---
 
-**Last Updated:** 2026-01-29  
-**Version:** 0.25.0  
+**Last Updated:** 2026-04-04  
+**Version:** 0.26.0  
 **Maintained By:** Development Team  
 **Status:** ✅ Current

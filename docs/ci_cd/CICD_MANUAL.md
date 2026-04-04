@@ -39,11 +39,13 @@
 
 ```bash
 GitHub Actions     # CI/CD platform
-├── Conda          # Environment management
+├── setup-python   # Python runtime setup
+├── pip            # Dependency installation
 ├── Pytest         # Test framework
 ├── Coverage.py    # Coverage tracking
-├── Codecov        # Coverage reporting
 ├── Pre-commit     # Local quality checks
+├── Link Checker   # Documentation link validation
+├── uv             # Lockfile freshness checks
 └── Artifacts      # Build outputs
 ```
 
@@ -53,16 +55,26 @@ GitHub Actions     # CI/CD platform
 graph LR
     A[Developer] -->|git push| B[GitHub]
     B --> C{Trigger CI}
-    C --> D[Lint]
-    C --> E[Test Matrix]
-    D --> F[Build]
-    E --> F
-    E --> G[Integration]
-    F --> H[Quality Gate]
-    G --> H
-    H -->|Pass| I[Merge Allowed]
-    H -->|Fail| J[Fix Required]
-    I --> K[Deploy]
+    C --> D[Pre-commit Matrix]
+    C --> E[Unit Test Matrix]
+    E --> F[Integration]
+    C --> G[Security]
+    E --> H[Build]
+    H --> I[Dependency Docs]
+    C --> J[Lockfile Check]
+    C --> K[Docs Link Check]
+    H --> L[Docker Smoke Test]
+    D --> M[Quality Gate]
+    E --> M
+    F --> M
+    G --> M
+    I --> M
+    J --> M
+    K --> M
+    L --> M
+    M -->|Pass| N[Merge Allowed]
+    M -->|Fail| O[Fix Required]
+    N --> P[Deploy]
 ```
 
 ---
@@ -92,20 +104,19 @@ git checkout -b feature/your-feature
 **Run tests frequently:**
 
 ```bash
-cd src
-pytest tests/ -v
+python -m pytest src/tests/ -v
 ```
 
 **Check specific module:**
 
 ```bash
-pytest tests/unit/test_demo_mode.py -v
+python -m pytest src/tests/unit/test_demo_mode.py -v
 ```
 
 **Watch mode (if pytest-watch installed):**
 
 ```bash
-ptw tests/ -- -v
+ptw src/tests/ -- -v
 ```
 
 #### 3. Before Committing
@@ -126,16 +137,15 @@ isort src/ --profile=black
 **Run full test suite with coverage:**
 
 ```bash
-cd src
-pytest tests/ --cov=. --cov-report=term-missing
+python -m pytest src/tests/ --cov=src --cov-report=term-missing
 ```
 
-**Check coverage meets minimum (60%):**
+**Check coverage meets minimum (80%):**
 
 ```bash
 # Look for line:
 # TOTAL    1234   456    63%
-# Must be ≥60%
+# Must be ≥80%
 ```
 
 #### 4. Committing
@@ -213,12 +223,16 @@ Add pause/resume functionality to demo mode
 
 1. Go to "Checks" tab on your PR
 2. Watch jobs complete:
-   - ✓ Lint (~2 min)
-   - ✓ Test Suite Python 3.11 (~8 min)
-   - ✓ Test Suite Python 3.12 (~8 min)
-   - ✓ Test Suite Python 3.13 (~8 min)
-   - ✓ Build (~2 min)
-   - ✓ Quality Gate (~30 sec)
+   - ✓ Pre-commit (Python 3.12/3.13/3.14)
+   - ✓ Unit Tests + Coverage (Python 3.12/3.13/3.14)
+   - ✓ Integration Tests
+   - ✓ Security Scans
+   - ✓ Build Distribution
+   - ✓ Dependency Documentation
+   - ✓ Lockfile Freshness
+   - ✓ Documentation Links
+   - ✓ Docker Build & Smoke Test
+   - ✓ Quality Gate
 
 **If CI fails:**
 
@@ -243,7 +257,7 @@ Add pause/resume functionality to demo mode
 vim src/your_file.py
 
 # Test locally
-pytest tests/unit/test_your_file.py -v
+python -m pytest src/tests/unit/test_your_file.py -v
 
 # Commit
 git add src/your_file.py
@@ -335,15 +349,15 @@ frontend/components/*.py
 
 ```bash
 # Single test
-pytest tests/unit/test_demo_mode.py::test_start_stop -v
+python -m pytest src/tests/unit/test_demo_mode.py::test_start_stop -v
 
 # Test class
-pytest tests/unit/test_demo_mode.py::TestDemoMode -v
+python -m pytest src/tests/unit/test_demo_mode.py::TestDemoMode -v
 
 # By marker
-pytest -m unit -v
-pytest -m integration -v
-pytest -m "not slow" -v
+python -m pytest -m unit -v
+python -m pytest -m integration -v
+python -m pytest -m "not slow" -v
 ```
 
 ### Coverage Workflow
@@ -351,21 +365,20 @@ pytest -m "not slow" -v
 #### Generate Coverage Report
 
 ```bash
-cd src
-pytest tests/ --cov=. --cov-report=html --cov-report=term-missing
+python -m pytest src/tests/ --cov=src --cov-report=html:reports/htmlcov --cov-report=term-missing
 ```
 
 #### View HTML Report
 
 ```bash
 # macOS
-open ../reports/coverage/index.html
+open reports/htmlcov/index.html
 
 # Linux
-xdg-open ../reports/coverage/index.html
+xdg-open reports/htmlcov/index.html
 
 # Windows
-start ../reports/coverage/index.html
+start reports/htmlcov/index.html
 ```
 
 #### Identify Gaps
@@ -413,7 +426,7 @@ git checkout -b fix/quick-fix
 vim src/config_manager.py
 
 # 3. Test
-pytest tests/unit/test_config_manager.py -v
+python -m pytest src/tests/unit/test_config_manager.py -v
 
 # 4. Commit
 git add src/config_manager.py
@@ -447,8 +460,7 @@ git fetch origin
 git rebase origin/develop
 
 # 4. Run full test suite before PR
-cd src
-pytest tests/ --cov=. --cov-report=term
+python -m pytest src/tests/ --cov=src --cov-report=term
 
 # 5. Create PR when complete
 # 6. Address review feedback
@@ -463,24 +475,24 @@ pytest tests/ --cov=. --cov-report=term
 python --version  # Local
 
 # 2. Test with CI Python versions
-conda create -n test-py311 python=3.11
-conda activate test-py311
+conda create -n test-py314 python=3.14
+conda activate test-py314
 pip install -r conf/requirements.txt
-cd src && pytest tests/ -v
+python -m pytest src/tests/ -v
 
-# 3. Identify issue (e.g., Python 3.11 incompatibility)
+# 3. Identify issue (e.g., Python 3.12+ incompatibility)
 
 # 4. Fix
 vim src/problematic_file.py
 
 # 5. Test with all versions
-for ver in 3.11 3.12 3.13; do
+for ver in 3.12 3.13 3.14; do
     conda activate test-py${ver}
-    pytest tests/ -v
+    python -m pytest src/tests/ -v
 done
 
 # 6. Commit fix
-git commit -am "fix: Ensure compatibility with Python 3.11+"
+git commit -am "fix: Ensure compatibility with Python 3.12+"
 git push
 ```
 
@@ -656,7 +668,7 @@ Approved pending green CI.
 
 - GitHub Actions minutes used
 - Artifact storage used
-- Codecov credits used
+- Security scan trends (Bandit/pip-audit findings)
 
 **3. Review failed builds:**
 
@@ -674,8 +686,8 @@ pre-commit autoupdate
 
 # Update GitHub Actions versions
 # Edit .github/workflows/ci.yml
-# - uses: actions/checkout@v4  # Check for v5
-# - uses: codecov/codecov-action@v4  # Check for v5
+# - uses: actions/checkout@v6  # check for new major
+# - uses: actions/setup-python@v6  # check for new major
 ```
 
 **2. Review coverage trends:**
@@ -686,7 +698,7 @@ pre-commit autoupdate
 
 **3. Audit secrets:**
 
-- Rotate Codecov token
+- Rotate any CI service/API secrets in use
 - Check secret access logs
 - Remove unused secrets
 
@@ -698,7 +710,7 @@ pre-commit autoupdate
 # Are thresholds appropriate?
 coverage:
   target: 80%  # Too high/low?
-  minimum: 60%  # Adjust based on reality
+  minimum: 80%  # Adjust based on reality
 ```
 
 **2. Optimize build performance:**
@@ -720,7 +732,7 @@ coverage:
 ```yaml
 Coverage:
   Warning: <80%
-  Failure: <60%
+  Failure: <80%
 
 Test Pass Rate:
   Requirement: 100%
@@ -758,16 +770,16 @@ Build:
 - Check Coverage Threshold
   if (( $(echo "$COVERAGE < 60" | bc -l) )); then
 
-# .codecov.yml
-coverage:
-  status:
-    project:
-      default:
-        target: 80%
+# .github/workflows/ci.yml
+- name: Run Unit Tests with Coverage Gate
+  run: |
+    python -m pytest src/tests/unit/ src/tests/regression/ \
+      --cov=src \
+      --cov-fail-under=80
 
-# pyproject.toml
+# pyproject.toml (local tooling)
 [tool.coverage.report]
-fail_under = 60
+fail_under = 80
 ```
 
 3. Announce change to team
@@ -796,7 +808,7 @@ fail_under = 60
 
 # Known issue → Document
 # Known Issues:
-# - Test X fails on Python 3.11 (Issue #456)
+# - Test X fails on Python 3.12 (Issue #456)
 ```
 
 **3. Long-term fixes:**
@@ -859,35 +871,18 @@ done
        mock_get.return_value.json.return_value = {...}
    ```
 
-### Managing Codecov
+### Managing Coverage Artifacts
 
 #### Setup and Configuration
 
-**File:** `.codecov.yml`
+Coverage is enforced directly by pytest in CI (`--cov-fail-under=80`) and stored as build artifacts.
 
-```yaml
-coverage:
-  precision: 2
-  round: down
-  range: 70..100
+#### Understanding Coverage Artifacts
 
-  status:
-    project:
-      default:
-        target: 80%
-        threshold: 5%
-    patch:
-      default:
-        target: 60%
-        threshold: 10%
-```
-
-#### Understanding Codecov Reports
-
-**PR Comment:**
+**Typical coverage summary:**
 
 ```markdown
-## Codecov Report
+## Coverage Summary
 
 Coverage: 73.45% (+0.23%)
 Files Changed: 3
@@ -902,31 +897,30 @@ Lines Changed: +45 / -12
 
 **Interpreting:**
 
-- **Overall coverage:** 73.45% (up from 73.22%)
-- **Δ** (delta): Change from base branch
+- **Overall coverage:** reported in job logs and coverage artifact
+- **Δ** (delta): compare to base branch manually or with repository tooling
 - **Green:** Coverage increased
 - **Red:** Coverage decreased
 
-#### Troubleshooting Codecov
+#### Troubleshooting Coverage Artifacts
 
-**Coverage not uploading:**
+**Coverage artifact missing:**
 
 ```yaml
 # Check GitHub Actions logs
-- name: Upload Coverage to Codecov
-  uses: codecov/codecov-action@v4
+- name: Upload Coverage Artifacts
+  uses: actions/upload-artifact@v4
   with:
-    file: ./coverage.xml
-    token: ${{ secrets.CODECOV_TOKEN }}  # Verify secret set
-    fail_ci_if_error: false  # Change to true to debug
+    name: coverage-report-py${{ matrix.python-version }}
+    path: reports/htmlcov/
 ```
 
 **Coverage report missing files:**
 
 ```yaml
-# Check .codecov.yml ignore section
-ignore:
-  - src/tests/**  # Are you ignoring too much?
+# Verify coverage include/omit patterns in pyproject.toml
+[tool.coverage.run]
+source = ["src"]
 ```
 
 ---
@@ -961,25 +955,25 @@ ignore:
 **Matrix:**
 
 ```yaml
-python-version: ["3.11", "3.12", "3.13"]
+python-version: ["3.12", "3.13", "3.14"]
 ```
 
 **For each version:**
 
-1. Set up Conda environment
-2. Install dependencies
+1. Set up Python with `actions/setup-python`
+2. Install dependencies from `conf/requirements_ci.txt`
 3. Run pytest with coverage
 4. Generate reports (XML, HTML, JUnit)
-5. Upload to Codecov
-6. Upload artifacts
-7. Check coverage threshold
+5. Upload artifacts
+6. Check coverage threshold
+7. Apply Python 3.12 exit-134 workaround via JUnit XML validation
 
 **Duration:** ~8 minutes per version
 
 **Failure conditions:**
 
 - Any test fails
-- Coverage <60%
+- Coverage <80%
 - Collection errors
 
 ### Build Stage
@@ -1007,7 +1001,7 @@ python-version: ["3.11", "3.12", "3.13"]
 
 **Steps:**
 
-1. Run integration tests (`tests/integration/`)
+1. Run integration tests (`src/tests/integration/`)
 2. Skip external dependencies (`-m "not requires_cascor"`)
 
 **Duration:** ~5 minutes
@@ -1023,14 +1017,23 @@ python-version: ["3.11", "3.12", "3.13"]
 **Checks:**
 
 ```python
-if test_result == "failure":
-    fail("Tests failed")
-elif build_result == "failure":
-    fail("Build failed")
-elif lint_result == "failure":
-    warn("Linting failed")
-else:
-    pass("Quality gate passed")
+if pre_commit_result != "success":
+    fail("Pre-commit checks failed")
+if unit_tests_result != "success":
+    fail("Unit tests failed")
+if security_result == "failure":
+    fail("Security scans failed")
+if integration_result == "failure":
+    fail("Integration tests failed")
+if dependency_docs_result == "failure":
+    fail("Dependency documentation generation failed")
+if docs_result == "failure":
+    fail("Documentation link validation failed")
+if lockfile_result != "success":
+    fail("requirements.lock is stale")
+if docker_result == "failure":
+    fail("Docker build/smoke test failed")
+pass_()
 ```
 
 **Duration:** ~30 seconds
@@ -1060,7 +1063,7 @@ else:
 ```bash
 Current:  73%
 Target:   80%
-Minimum:  60%
+Minimum:  80%
 ```
 
 **By module:**
@@ -1070,8 +1073,8 @@ Minimum:  60%
 | config_manager    | 93%     | 100%   | ⚠️ Close   |
 | demo_mode         | 84%     | 100%   | ⚠️ Close   |
 | websocket_manager | 78%     | 100%   | ❌ Gap     |
-| dashboard_manager | 84%     | 60%    | ✅ Exceeds |
-| metrics_panel     | 94%     | 60%    | ✅ Exceeds |
+| dashboard_manager | 84%     | 80%    | ✅ Exceeds |
+| metrics_panel     | 94%     | 80%    | ✅ Exceeds |
 
 ### Test Metrics
 
@@ -1098,9 +1101,9 @@ Status:       ✅ Pass
 
 ```bash
 Lint:         2 min
-Test (3.11):  8 min
 Test (3.12):  8 min
 Test (3.13):  8 min
+Test (3.14):  8 min
 Build:        2 min
 Integration:  5 min
 Total:        ~15 min (with parallelization)
@@ -1138,26 +1141,25 @@ Total:        ~15 min (with parallelization)
 
 ```bash
 # Match CI environment
-conda create -n debug-ci python=3.13
+conda create -n debug-ci python=3.14
 conda activate debug-ci
 pip install -r conf/requirements.txt
 
 # Run failing test
-cd src
-pytest tests/unit/test_failing.py -vv
+python -m pytest src/tests/unit/test_failing.py -vv
 ```
 
 **4. Debug with more verbosity:**
 
 ```bash
 # Maximum verbosity
-pytest tests/ -vv -s --tb=long
+python -m pytest src/tests/ -vv -s --tb=long
 
 # Drop into debugger on failure
-pytest tests/ --pdb
+python -m pytest src/tests/ --pdb
 
 # Show local variables
-pytest tests/ --showlocals
+python -m pytest src/tests/ --showlocals
 ```
 
 **5. Fix and verify:**
@@ -1167,10 +1169,10 @@ pytest tests/ --showlocals
 vim src/module.py
 
 # Verify fix
-pytest tests/unit/test_module.py -v
+python -m pytest src/tests/unit/test_module.py -v
 
 # Run full suite
-pytest tests/ -v
+python -m pytest src/tests/ -v
 ```
 
 **6. Push fix:**
@@ -1205,7 +1207,7 @@ echo "uvicorn>=0.20.0" >> conf/requirements.txt
 
 # Verify locally
 pip install -r conf/requirements.txt
-pytest tests/ -v
+python -m pytest src/tests/ -v
 ```
 
 #### Pattern 2: Fixture Not Found
@@ -1268,7 +1270,7 @@ def test_metrics():
 **Symptom:**
 
 ```bash
-ERROR: Coverage is critically low: 55% (minimum: 60%)
+ERROR: Coverage is critically low: 76% (minimum: 80%)
 ```
 
 **Causes:**
@@ -1281,14 +1283,13 @@ ERROR: Coverage is critically low: 55% (minimum: 60%)
 
 ```bash
 # Generate coverage report
-cd src
-pytest tests/ --cov=. --cov-report=html
+python -m pytest src/tests/ --cov=src --cov-report=html:reports/htmlcov
 
 # View report
-open ../reports/coverage/index.html
+xdg-open reports/htmlcov/index.html
 
 # Add tests for uncovered code
-vim tests/unit/test_new_feature.py
+vim src/tests/unit/test_new_feature.py
 ```
 
 ---
@@ -1353,8 +1354,8 @@ Total:        33 min sequential
 pip install pytest-xdist
 
 # Run tests in parallel
-pytest tests/ -n auto  # Auto-detect CPU count
-pytest tests/ -n 4     # Use 4 workers
+python -m pytest src/tests/ -n auto  # Auto-detect CPU count
+python -m pytest src/tests/ -n 4     # Use 4 workers
 ```
 
 **Savings:** 30-50% reduction in test time
@@ -1374,7 +1375,7 @@ def test_long_running_operation():
 
 ```yaml
 - name: Run Tests (skip slow)
-  run: pytest tests/ -m "not slow"
+  run: python -m pytest src/tests/ -m "not slow"
 ```
 
 **Savings:** Variable, depends on slow tests
@@ -1385,14 +1386,14 @@ def test_long_running_operation():
 
 ```yaml
 matrix:
-  python-version: ["3.11", "3.12", "3.13"]
+  python-version: ["3.12", "3.13", "3.14"]
 ```
 
 **After:** Primary version + periodic full matrix
 
 ```yaml
 matrix:
-  python-version: ["3.13"]  # Fast feedback
+  python-version: ["3.14"]  # Fast feedback
 
 # Full matrix on:
 # - Pull requests to main
@@ -1528,7 +1529,7 @@ updates:
 
 ```bash
 # Run tests locally before merge
-pytest tests/ --cov=. -v
+python -m pytest src/tests/ --cov=src -v
 
 # Get manual approval from maintainer
 # Merge with --no-verify if urgent
@@ -1548,7 +1549,7 @@ git checkout -b hotfix/critical-fix
 vim src/broken_module.py
 
 # 3. Test locally
-pytest tests/ -v
+python -m pytest src/tests/ -v
 
 # 4. Commit
 git commit -am "hotfix: Fix critical bug"
@@ -1679,11 +1680,10 @@ Fix by: 2025-11-12
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
 - [Pytest Documentation](https://docs.pytest.org/)
 - [Coverage.py Documentation](https://coverage.readthedocs.io/)
-- [Codecov Documentation](https://docs.codecov.com/)
 - [Pre-commit Documentation](https://pre-commit.com/)
 
 ---
 
-**Last Updated:** 2026-03-30  
-**Version:** 0.25.1  
+**Last Updated:** 2026-04-04  
+**Version:** 0.26.0  
 **Status:** ✅ Complete

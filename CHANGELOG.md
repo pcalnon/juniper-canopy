@@ -51,6 +51,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
   - `docs/ci_cd/CICD_MANUAL.md`
   - `notes/juniper-canopy_OTHER_DEPENDENCIES.md`
+- Updated CI/CD documentation to reflect current workflow behavior introduced in PR #79:
+  - `docs/ci_cd/CICD_QUICK_START.md`
+  - `docs/ci_cd/CICD_MANUAL.md`
+  - `docs/ci_cd/CICD_REFERENCE.md`
+  - `README.md`
+  - Coverage includes:
+    - New `Documentation Links` CI job and `scripts/check_doc_links.py` local usage (`--cross-repo skip`)
+    - Current Python matrix (`3.12`, `3.13`, `3.14`) and pytest invocation paths (`src/tests`, `--cov=src`)
+    - Updated lockfile regeneration command including `--extra observability`
+    - Quality gate semantics requiring `docs` and `lockfile-check` success
 
 - Renamed HTTP metrics: `http_requests_total` → `juniper_canopy_http_requests_total`, `http_request_duration_seconds` → `juniper_canopy_http_request_duration_seconds`
 - Updated CasCor backend documentation to cover service-mode behavior (`CascorServiceAdapter`, `ServiceBackend`, `CascorStateSync`), including startup attach/sync workflow, response normalization contracts, and service-mode troubleshooting:

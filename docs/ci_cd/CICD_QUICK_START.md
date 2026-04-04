@@ -1,24 +1,24 @@
 # CI/CD Quick Start Guide
 
-**Last Updated:** 2026-01-29  
+**Last Updated:** 2026-04-04  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.25.0
+**Version:** 0.26.0
 
 ---
 
 ## Prerequisites
 
-- ✅ Conda environment activated (`JuniperPython`)
+- ✅ Conda environment activated (`JuniperCanopy`)
 - ✅ Dependencies installed (`pip install -r conf/requirements.txt`)
 - ✅ Git repository initialized
-- ✅ Python 3.11+ installed
+- ✅ Python 3.11+ installed (CI matrix currently validates 3.12, 3.13, 3.14)
 
 **Verify:**
 
 ```bash
 python --version      # Should be 3.11+
 pytest --version      # Should be 7.0+
-conda env list | grep JuniperPython  # Should show active
+conda env list | grep JuniperCanopy  # Should show active
 ```
 
 ---
@@ -50,15 +50,13 @@ pre-commit --version  # Output: pre-commit 3.x.x
 **Quick test:**
 
 ```bash
-cd src
-pytest tests/ -v
+python -m pytest src/tests/ -v
 ```
 
 **With coverage:**
 
 ```bash
-cd src
-pytest tests/ --cov=. --cov-report=term-missing
+python -m pytest src/tests/ --cov=src --cov-report=term-missing
 ```
 
 **Expected output:**
@@ -72,7 +70,7 @@ tests/unit/test_demo_mode.py::test_start_stop PASSED        [ 2%]
 ...
 ================== 170 passed in 5.23s =======================
 
-------------- coverage: platform linux, python 3.13.x --------------
+------------- coverage: platform linux, python 3.14.x --------------
 Name                          Stmts   Miss  Cover   Missing
 ------------------------------------------------------------
 config_manager.py               120      8    93%   45-52
@@ -82,26 +80,17 @@ TOTAL                          2341    622    73%
 ```
 
 **View HTML report:**
-<file:///home/pcalnon/Development/python/Juniper/juniper-canopy/src/tests/reports/coverage/index.html>
+
+```bash
+python -m pytest src/tests/ --cov=src --cov-report=html:reports/htmlcov
+xdg-open reports/htmlcov/index.html  # Linux
+```
 
 ---
 
 ## Set Up GitHub Secrets
 
-**1. Generate Codecov token:**
-
-- Go to [codecov.io](https://codecov.io)
-- Sign in with GitHub
-- Add repository
-- Copy upload token
-
-**2. Add to GitHub:**
-
-- Repository → **Settings** → **Secrets and variables** → **Actions**
-- Click **New repository secret**
-- Name: `CODECOV_TOKEN`
-- Value: Paste token
-- Click **Add secret**
+The current CI workflow does not require a `CODECOV_TOKEN`. Coverage is enforced in pytest (`--cov-fail-under=80`) and uploaded as GitHub artifacts.
 
 ---
 
@@ -149,15 +138,17 @@ git push origin feature/your-branch
 
 ```bash
 CI/CD Pipeline
-├── ✓ Lint (Code Quality)              ~2 min
-├── ✓ Test Suite (Python 3.11)         ~8 min
-├── ✓ Test Suite (Python 3.12)         ~8 min
-├── ✓ Test Suite (Python 3.13)         ~8 min
-├── ✓ Build                            ~2 min
-├── ✓ Quality Gate                     ~30 sec
-└── ✓ Notify                           ~10 sec
-
-Total: ~10 minutes
+├── ✓ Pre-commit (Python 3.12/3.13/3.14)
+├── ✓ Unit Tests + Coverage (Python 3.12/3.13/3.14)
+├── ✓ Integration Tests
+├── ✓ Security Scans
+├── ✓ Build Distribution
+├── ✓ Dependency Documentation
+├── ✓ Lockfile Freshness
+├── ✓ Documentation Links
+├── ✓ Docker Build & Smoke Test
+├── ✓ Quality Gate
+└── ✓ Build Notification
 ```
 
 **3. Download artifacts:**
@@ -171,15 +162,13 @@ Total: ~10 minutes
 
 ### Add Coverage Badge
 
-```markdown
-[![codecov](https://codecov.io/gh/USERNAME/REPO/branch/main/graph/badge.svg)](https://codecov.io/gh/USERNAME/REPO)
-```
+Use a project-supported coverage source (for example, a generated static badge or a GitHub artifact summary) if you want a badge in `README.md`.
 
 ### Enable Branch Protection
 
 - Settings → Branches → Add rule
 - ☑ Require pull request reviews
-- ☑ Require status checks (Test Suite Python 3.13, Quality Gate)
+- ☑ Require status checks (`Quality Gate`)
 - ☑ Require branches up to date
 
 ---
@@ -191,11 +180,17 @@ Total: ~10 minutes
 pre-commit run --all-files
 
 # Tests
-pytest tests/unit/test_demo_mode.py -v
+python -m pytest src/tests/unit/test_demo_mode.py -v
 
 # Coverage
-cd src && pytest tests/ --cov=. --cov-report=html
-open ../reports/coverage/index.html
+python -m pytest src/tests/ --cov=src --cov-report=html:reports/htmlcov
+xdg-open reports/htmlcov/index.html
+
+# Documentation link checks (same validator used in CI)
+python scripts/check_doc_links.py --cross-repo skip
+
+# Lockfile refresh (after dependency changes)
+uv pip compile pyproject.toml --extra juniper-data --extra juniper-cascor --extra observability -o requirements.lock
 
 # Formatting
 black src/ --line-length=120
@@ -218,19 +213,19 @@ git commit -m "Apply formatting"
 ### Tests fail locally
 
 ```bash
-conda activate JuniperPython
+conda activate JuniperCanopy
 pip install -r conf/requirements.txt
-pytest tests/unit/test_demo_mode.py::test_name -vv
+python -m pytest src/tests/unit/test_demo_mode.py::test_name -vv
 ```
 
 ### CI fails but local passes
 
 ```bash
 # Test with CI Python version
-conda create -n test-py311 python=3.11
-conda activate test-py311
+conda create -n test-py314 python=3.14
+conda activate test-py314
 pip install -r conf/requirements.txt
-cd src && pytest tests/ -v
+python -m pytest src/tests/ -v
 ```
 
 ---
@@ -249,11 +244,10 @@ cd src && pytest tests/ -v
 
 ✅ Installed pre-commit hooks  
 ✅ Ran tests with coverage  
-✅ Set up Codecov  
 ✅ Made first CI/CD commit  
 ✅ Viewed CI results
 
-**CI/CD is active!** Every push triggers quality checks, tests, and coverage reporting.
+**CI/CD is active!** Every push triggers quality checks, tests, and artifact publication.
 
 ---
 
