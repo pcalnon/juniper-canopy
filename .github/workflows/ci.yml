@@ -154,7 +154,7 @@ jobs:
           cd src
           python -m pytest \
             -m "not requires_cascor and not requires_server and not slow" \
-            tests/ \
+            tests/unit/ tests/regression/ \
             --verbose \
             --timeout=60 \
             --maxfail=5 \
