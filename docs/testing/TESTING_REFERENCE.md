@@ -1,7 +1,7 @@
 # Testing Reference - Technical Documentation
 
-**Last Updated:** March 30, 2026  
-**Version:** v0.26.0
+**Last Updated:** April 4, 2026  
+**Version:** v0.26.1
 
 Complete technical reference for the Juniper Canopy testing infrastructure.
 
@@ -67,132 +67,85 @@ Testing Infrastructure
 
 ## Configuration Reference
 
-### pytest.ini
+### `pyproject.toml` (pytest)
 
-```ini
-[pytest]
-# Test discovery paths
-testpaths = src/tests
-
-# File patterns
-python_files = test_*.py
-python_classes = Test*
-python_functions = test_*
-
-# Default options
-addopts =
-    --verbose                              # Verbose output
-    --color=yes                            # Colored output
-    --cov=src                              # Coverage source
-    --cov-report=html:reports/coverage     # HTML coverage report
-    --cov-report=term-missing              # Terminal with missing lines
-    --junit-xml=reports/junit/results.xml  # JUnit XML report
-    --html=reports/test_report.html        # HTML test report
-    --self-contained-html                  # Standalone HTML report
-
-# Async mode
-asyncio_mode = auto
-
-# Custom markers
-markers =
-    unit: Unit tests
-    integration: Integration tests
-    performance: Performance tests
-    regression: Regression tests
-    end2end: End-to-end tests
-    slow: Slow-running tests
-    requires_redis: Tests requiring Redis connection
-    requires_cascor: Tests requiring CasCor backend
-```
-
-### pyproject.toml
+Primary pytest configuration lives in `pyproject.toml`:
 
 ```toml
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["src/tests"]
+pythonpath = ["src"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-
+timeout = 60
+timeout_method = "signal"
 addopts = [
-    "--verbose",
-    "--color=yes",
-    "--cov=src",
-    "--cov-report=html:reports/coverage",
-    "--cov-report=term-missing",
-    "--junit-xml=reports/junit/results.xml",
-    "--html=reports/test_report.html",
-    "--self-contained-html",
+    "-ra",
+    "-q",
+    "--strict-markers",
+    "--strict-config",
+    "--continue-on-collection-errors",
+    "--tb=short",
 ]
-
 markers = [
-    "unit: Unit tests",
-    "integration: Integration tests",
-    "performance: Performance tests",
+  "unit: Unit tests (fast, no external dependencies)",
+  "integration: Integration tests (may use DB, files, etc.)",
+  "performance: Performance tests",
+  "regression: Regression tests",
+  "e2e: End-to-end tests (require full system)",
+  "slow: Slow-running tests (>1 second)",
+  "requires_redis: Tests requiring Redis connection (set REDIS_INTEGRATION_TEST=1)",
+  "requires_cassandra: Tests requiring Cassandra connection (set CASSANDRA_INTEGRATION_TEST=1)",
+  "requires_cascor: Tests requiring CasCor backend",
+  "requires_server: Tests requiring live server running",
+  "requires_display: Tests requiring display for visualization",
+  "api: Tests for API endpoints",
+  "generators: Tests for data generators",
 ]
-
 asyncio_mode = "auto"
 ```
 
-### .coveragerc
+### Coverage Configuration
 
-```ini
-[run]
-# Source code directory
-source = src
+Coverage is defined in both `pyproject.toml` and `.coveragerc`.
 
-# Files to omit from coverage
-omit =
-    */tests/*
-    */test_*.py
-    */__pycache__/*
-    */site-packages/*
-    */conftest.py
-    */venv/*
-    */.venv/*
+`pyproject.toml` coverage settings:
 
-# Enable branch coverage
-branch = True
+```toml
+[tool.coverage.run]
+source = ["src"]
+omit = [
+  "tests/*",
+  "tests/**/*",
+  "*/tests/*",
+  "**/tests/*",
+  "**/test_*.py",
+  "**/__pycache__/*",
+  "*/__pycache__/*",
+  "**/site-packages/*",
+  "*/site-packages/*",
+  "**/conftest.py",
+  "*/conftest.py",
+  "conftest.py",
+  "**/venv/*",
+  "*/venv/*",
+  "**/.venv/*",
+  "*/.venv/*",
+]
+branch = true
+parallel = true
 
-# Enable parallel coverage
-parallel = True
-
-[report]
-# Display settings
-show_missing = True        # Show missing lines
-skip_covered = False       # Show covered files
-skip_empty = True          # Skip empty files
-
-# Coverage threshold
-fail_under = 60            # Minimum 60% coverage
-
-# Precision
-precision = 2              # Two decimal places
-
-# Lines to exclude from coverage
-exclude_lines =
-    pragma: no cover
-    def __repr__
-    def __str__
-    raise AssertionError
-    raise NotImplementedError
-    if __name__ == .__main__.:
-    if TYPE_CHECKING:
-    @abstractmethod
-    @abc.abstractmethod
-
-[html]
-directory = reports/coverage
-title = Juniper Canopy Coverage Report
-
-[xml]
-output = coverage.xml
-
-[json]
-output = coverage.json
-pretty_print = True
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+skip_empty = true
+fail_under = 80
+precision = 2
 ```
+
+`.coveragerc` keeps equivalent defaults and module-level guidance; both should stay aligned.
 
 ## Fixture Reference
 
@@ -827,7 +780,7 @@ show_missing = True  # in .coveragerc
 ```ini
 [report]
 # Minimum coverage required
-fail_under = 60  # Overall project
+fail_under = 80  # Overall project
 
 # Module-specific (in comments/documentation)
 # Critical: 100%
@@ -852,6 +805,23 @@ exclude_lines =
 ```
 
 ## API Testing Reference
+
+### Optional Client Testing Extras
+
+Some service-mode tests are intentionally dependency-gated to avoid collection failures in minimal environments.
+
+Install extras when running adapter and fake-client suites:
+
+```bash
+pip install "juniper-cascor-client[testing]" "juniper-data-client[testing]"
+```
+
+Current gating patterns in tests:
+
+- `pytest.importorskip("juniper_cascor_client.testing", ...)`
+- `pytest.mark.skipif(..., reason="requires juniper-data-client[testing]")`
+
+If extras are missing, these tests skip by design rather than failing collection.
 
 ### Testing FastAPI Endpoints
 

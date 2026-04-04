@@ -1,7 +1,7 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** March 30, 2026  
-**Version:** v0.26.0
+**Last Updated:** April 4, 2026  
+**Version:** v0.26.1
 
 Complete guide to testing the Juniper Canopy application.
 
@@ -117,6 +117,22 @@ pytest --cov=src --cov-report=html
 # Multiple report formats
 pytest --cov=src --cov-report=html --cov-report=term-missing --cov-report=xml
 ```
+
+### Optional Testing Extras for Service-Mode Suites
+
+Some backend/service tests rely on testing helpers from optional client extras.
+
+Install when needed:
+
+```bash
+pip install "juniper-cascor-client[testing]" "juniper-data-client[testing]"
+```
+
+Why this matters:
+
+- Service-mode tests now gate on `pytest.importorskip("juniper_cascor_client.testing", ...)`.
+- Dataset versioning tests using `FakeDataClient` gate on `juniper_data_client.testing`.
+- Without these extras, tests are skipped by design instead of failing collection.
 
 ### High-Signal Regression Commands
 
@@ -813,37 +829,58 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, feature/**, fix/**]
   pull_request:
     branches: [main, develop]
 
 jobs:
-  test:
+  pre-commit:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Run pre-commit hooks
+        run: pre-commit run --all-files
+
+  unit-tests:
+    needs: [pre-commit]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install dependencies
         run: |
-          pip install -r conf/requirements.txt
-          pip install pytest pytest-cov
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r conf/requirements_ci.txt
+          pip install -e .
 
       - name: Run tests
-        run: pytest --cov=src --cov-report=xml
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-        with:
-          file: ./coverage.xml
+        run: |
+          python -m pytest \
+            -m "not requires_cascor and not requires_server and not slow" \
+            src/tests/unit/ src/tests/regression/ \
+            --cov=src \
+            --cov-fail-under=80
 ```
 
 ### Pre-commit Hooks
