@@ -20,6 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated CI/CD documentation to match current workflow behavior in `.github/workflows/ci.yml` and `.github/workflows/lockfile-update.yml`:
+  - `docs/ci_cd/CICD_QUICK_START.md`
+  - `docs/ci_cd/CICD_MANUAL.md`
+  - `docs/ci_cd/CICD_REFERENCE.md`
+  - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
+  - Coverage includes:
+    - Python matrix and job topology updates (`3.12`/`3.13`/`3.14`)
+    - Pip-based CI installation model and `src/tests/...` test-path conventions
+    - lockfile freshness command and header-insensitive diff behavior
+    - documentation-link validation runbook using `scripts/check_doc_links.py`
+- Updated `README.md` lockfile guidance to include `--extra observability` and documented observability optional dependencies (`prometheus-client`, `sentry-sdk`) used by `src/observability.py`.
+
 - Extracted candidate pool section, history tracking, and pool display from `MetricsPanel` to `CandidateMetricsPanel`. Training Metrics tab retains candidate training trace in loss plot and candidate epoch progress bar for context
 - Component count increased from 11 to 12; updated test assertions accordingly
 

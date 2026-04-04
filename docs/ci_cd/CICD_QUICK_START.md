@@ -1,24 +1,24 @@
 # CI/CD Quick Start Guide
 
-**Last Updated:** 2026-01-29  
+**Last Updated:** 2026-04-04  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.25.0
+**Version:** 0.26.0
 
 ---
 
 ## Prerequisites
 
-- ✅ Conda environment activated (`JuniperPython`)
-- ✅ Dependencies installed (`pip install -r conf/requirements.txt`)
+- ✅ Python 3.12+ available
+- ✅ Virtual environment or conda environment activated
+- ✅ Dependencies installed (`pip install -r conf/requirements_ci.txt`)
 - ✅ Git repository initialized
-- ✅ Python 3.11+ installed
 
 **Verify:**
 
 ```bash
-python --version      # Should be 3.11+
+python --version      # Should be 3.12+
 pytest --version      # Should be 7.0+
-conda env list | grep JuniperPython  # Should show active
+pip --version
 ```
 
 ---
@@ -50,35 +50,30 @@ pre-commit --version  # Output: pre-commit 3.x.x
 **Quick test:**
 
 ```bash
-cd src
-pytest tests/ -v
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/ \
+  --verbose
 ```
 
 **With coverage:**
 
 ```bash
-cd src
-pytest tests/ --cov=. --cov-report=term-missing
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/ \
+  --cov=src --cov-report=term-missing \
+  --cov-fail-under=80
 ```
 
 **Expected output:**
 
 ```bash
-===================== test session starts ======================
-collected 170 items
-
-tests/unit/test_config_manager.py::test_load_config PASSED  [ 1%]
-tests/unit/test_demo_mode.py::test_start_stop PASSED        [ 2%]
+============================= test session starts =============================
 ...
-================== 170 passed in 5.23s =======================
-
-------------- coverage: platform linux, python 3.13.x --------------
-Name                          Stmts   Miss  Cover   Missing
-------------------------------------------------------------
-config_manager.py               120      8    93%   45-52
-demo_mode.py                    156     25    84%   120-145
+============================== 320 passed in XXs ==============================
 ...
-TOTAL                          2341    622    73%
+TOTAL                                         ...                        80%+
 ```
 
 **View HTML report:**
@@ -149,15 +144,18 @@ git push origin feature/your-branch
 
 ```bash
 CI/CD Pipeline
-├── ✓ Lint (Code Quality)              ~2 min
-├── ✓ Test Suite (Python 3.11)         ~8 min
-├── ✓ Test Suite (Python 3.12)         ~8 min
-├── ✓ Test Suite (Python 3.13)         ~8 min
-├── ✓ Build                            ~2 min
-├── ✓ Quality Gate                     ~30 sec
-└── ✓ Notify                           ~10 sec
+├── ✓ Pre-commit (Python 3.12/3.13/3.14)
+├── ✓ Unit Tests + Coverage (Python 3.12/3.13/3.14)
+├── ✓ Integration Tests
+├── ✓ Security Scans
+├── ✓ Build Distribution
+├── ✓ Dependency Documentation
+├── ✓ Lockfile Freshness
+├── ✓ Documentation Links
+├── ✓ Docker Build & Smoke Test
+└── ✓ Quality Gate
 
-Total: ~10 minutes
+Total: ~10-15 minutes (parallel jobs)
 ```
 
 **3. Download artifacts:**
@@ -179,8 +177,27 @@ Total: ~10 minutes
 
 - Settings → Branches → Add rule
 - ☑ Require pull request reviews
-- ☑ Require status checks (Test Suite Python 3.13, Quality Gate)
+- ☑ Require status checks (Quality Gate)
 - ☑ Require branches up to date
+
+### Validate Docs and Lockfile Locally
+
+```bash
+# Check documentation links (same exclusions as CI)
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+
+# Regenerate lockfile after dependency changes
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
+```
 
 ---
 
@@ -218,19 +235,22 @@ git commit -m "Apply formatting"
 ### Tests fail locally
 
 ```bash
-conda activate JuniperPython
-pip install -r conf/requirements.txt
-pytest tests/unit/test_demo_mode.py::test_name -vv
+python -m venv .venv-ci
+# activate .venv-ci for your shell, then:
+pip install -r conf/requirements_ci.txt
+python -m pytest src/tests/unit/test_demo_mode.py::test_name -vv
 ```
 
 ### CI fails but local passes
 
 ```bash
-# Test with CI Python version
-conda create -n test-py311 python=3.11
-conda activate test-py311
-pip install -r conf/requirements.txt
-cd src && pytest tests/ -v
+# Test with CI Python versions
+for ver in 3.12 3.13 3.14; do
+  python -m venv ".venv-$ver"
+  # activate env per shell, then:
+  pip install -r conf/requirements_ci.txt
+  python -m pytest -m "not requires_cascor and not requires_server and not slow" src/tests/unit/ src/tests/regression/
+done
 ```
 
 ---

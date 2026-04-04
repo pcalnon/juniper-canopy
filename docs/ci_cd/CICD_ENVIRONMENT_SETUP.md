@@ -1,484 +1,199 @@
-# CI/CD Environment Setup Guide
+# CI/CD Environment Setup
 
-**Last Updated:** 2026-03-30  
-**Version:** 0.25.1
+**Last Updated:** 2026-04-04  
+**Version:** 0.26.0  
+**Status:** Current
 
-Complete guide to configuring the GitHub Actions CI/CD environment.
+Complete setup and verification guide for the GitHub Actions CI environment used by JuniperCanopy.
 
 ---
 
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [GitHub Actions Configuration](#github-actions-configuration)
-3. [Environment Variables](#environment-variables)
-4. [Secrets Management](#secrets-management)
-5. [Conda Environment Setup](#conda-environment-setup)
-6. [Python Version Matrix](#python-version-matrix)
-7. [Dependencies and Caching](#dependencies-and-caching)
-8. [Artifact Management](#artifact-management)
-9. [Workflow Triggers](#workflow-triggers)
-10. [Troubleshooting](#troubleshooting)
+2. [Runner and Python Configuration](#runner-and-python-configuration)
+3. [Dependency Installation Model](#dependency-installation-model)
+4. [Optional Extras and Lockfile Policy](#optional-extras-and-lockfile-policy)
+5. [Documentation Link Validation](#documentation-link-validation)
+6. [Required Secrets and Tokens](#required-secrets-and-tokens)
+7. [Local Reproduction Checklist](#local-reproduction-checklist)
+8. [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Overview
 
-The CI/CD pipeline runs in GitHub Actions using Ubuntu runners with Conda environments, testing across Python 3.11, 3.12, and 3.13.
+The CI pipeline is defined in `.github/workflows/ci.yml` and runs on `ubuntu-latest` with pip-based environments.
 
-**Key Components:**
+Core environment characteristics:
 
-- **Runner:** ubuntu-latest
-- **Environment:** Miniconda
-- **Python:** 3.11, 3.12, 3.13
-- **Test Framework:** Pytest with coverage
-- **Artifacts:** 30-day retention
-
----
-
-## GitHub Actions Configuration
-
-### Workflow File
-
-**Location:** `.github/workflows/ci.yml`
-
-```yaml
-name: CI/CD Pipeline
-
-on:
-  push:
-    branches: [main, develop, feature/**, fix/**]
-  pull_request:
-    branches: [main, develop]
-
-jobs:
-  lint:          # Code quality
-  test:          # Test matrix
-  build:         # Verification
-  integration:   # Integration tests
-  quality-gate:  # Standards enforcement
-  notify:        # Status reporting
-```
-
-### Job Dependencies
-
-```mermaid
-graph TD
-    A[Push/PR] --> B[Lint]
-    A --> C[Test Matrix]
-    B --> D[Build]
-    C --> D
-    C --> E[Integration]
-    D --> F[Quality Gate]
-    E --> F
-    F --> G[Notify]
-```
+- Base OS: `ubuntu-latest`
+- Python matrix (quality and tests): `3.12`, `3.13`, `3.14`
+- Primary single-version jobs: Python `3.14`
+- Dependency source for CI jobs: `conf/requirements_ci.txt`
+- Test paths in CI: `src/tests/...` (not `tests/...`)
 
 ---
 
-## Environment Variables
+## Runner and Python Configuration
 
-### GitHub Actions Defaults
-
-```bash
-# Workflow context
-GITHUB_WORKFLOW="CI/CD Pipeline"
-GITHUB_RUN_ID="1234567890"
-GITHUB_ACTION="run-tests"
-
-# Repository
-GITHUB_REPOSITORY="owner/repo"
-GITHUB_SHA="abc123..."
-GITHUB_REF="refs/heads/main"
-
-# Runner
-RUNNER_OS="Linux"
-RUNNER_ARCH="X64"
-CI="true"
-```
-
-### Custom Variables
+Use `actions/setup-python` for each job. In this repository, the matrix and default values are:
 
 ```yaml
 env:
-  # Python
-  PYTHONUNBUFFERED: 1
-  PYTHONDONTWRITEBYTECODE: 1
+  PYTHON_TEST_VERSION: "3.14"
 
-  # Application
-  CASCOR_DEBUG: 0
-  CASCOR_DEMO_MODE: 1
-  CASCOR_DEMO_INTERVAL: 0.1
-
-  # Testing
-  PYTEST_ADDOPTS: "--verbose --color=yes"
-  COVERAGE_CORE: sysmon
-```
-
-### Accessing Variables
-
-**In workflow:**
-
-```yaml
-- run: echo "Python: ${{ matrix.python-version }}"
-```
-
-**In Python:**
-
-```python
-import os
-is_ci = os.getenv('CI') == 'true'
-debug = os.getenv('CASCOR_DEBUG', '0') == '1'
-```
-
----
-
-## Secrets Management
-
-### Required Secrets
-
-**CODECOV_TOKEN** (for coverage reporting)
-
-**Setup:**
-
-1. Go to [codecov.io](https://codecov.io)
-2. Sign in with GitHub
-3. Add repository
-4. Copy token
-5. Add to GitHub:
-   - Settings → Secrets → Actions
-   - Name: `CODECOV_TOKEN`
-   - Value: [token]
-
-**Use in workflow:**
-
-```yaml
-- uses: codecov/codecov-action@v4
-  with:
-    token: ${{ secrets.CODECOV_TOKEN }}
-```
-
-### Security Best Practices
-
-- ✅ Never log secret values
-- ✅ Rotate secrets regularly
-- ✅ Limit access to necessary jobs
-- ❌ Never commit secrets
-- ❌ Never use in untrusted PRs
-
----
-
-## Conda Environment Setup
-
-### Environment File
-
-**Location:** `conf/conda_environment.yaml`
-
-```yaml
-name: JuniperPython
-channels:
-  - conda-forge
-  - pytorch
-  - plotly
-dependencies:
-  - python=3.14
-  - pip
-  - numpy
-  - pandas
-  - plotly
-  - dash
-  - fastapi
-  - uvicorn
-  - pytest
-  - pytest-cov
-```
-
-### Workflow Configuration
-
-```yaml
-- uses: conda-incubator/setup-miniconda@v3
-  with:
-    python-version: ${{ matrix.python-version }}
-    channels: conda-forge,pytorch,plotly,defaults
-    environment-file: conf/conda_environment.yaml
-```
-
-### Conda Activation
-
-**All steps must use:**
-
-```yaml
-- name: Run Command
-  shell: bash -el {0}  # Activates conda
-  run: |
-    python --version
-    pytest --version
-```
-
-**Why `bash -el {0}`?**
-
-- `-e`: Exit on error
-- `-l`: Login shell (sources conda)
-- `{0}`: Command placeholder
-
----
-
-## Python Version Matrix
-
-### Configuration
-
-```yaml
 strategy:
-  fail-fast: false
   matrix:
-    python-version: ["3.11", "3.12", "3.13"]
+    python-version: ["3.12", "3.13", "3.14"]
 ```
 
-### Execution
+Jobs that run a matrix:
 
-3 parallel jobs:
+- `pre-commit`
+- `unit-tests`
+
+Jobs pinned to a single Python version (`3.14`):
+
+- `integration-tests`
+- `build`
+- `security`
+- `dependency-docs`
+- `lockfile-check`
+- `docs`
+
+---
+
+## Dependency Installation Model
+
+CI currently uses pip installation, not conda environment activation, for workflow execution.
+
+Canonical install sequence used in test jobs:
 
 ```bash
-Test Suite (Python 3.11)  ─┐
-Test Suite (Python 3.12)  ─┼─ Parallel
-Test Suite (Python 3.13)  ─┘
+python -m pip install --upgrade pip
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install -r conf/requirements_ci.txt
+pip install -e .
 ```
 
-### Using Matrix Values
+Notes:
 
-```yaml
-- name: Test Python ${{ matrix.python-version }}
-  run: pytest tests/ -v
-
-- uses: actions/upload-artifact@v4
-  with:
-    name: test-results-${{ matrix.python-version }}
-```
+- CPU-only PyTorch is intentional for runner compatibility.
+- Editable install (`pip install -e .`) ensures package resolution matches source checkout behavior.
 
 ---
 
-## Dependencies and Caching
+## Optional Extras and Lockfile Policy
 
-### Without Caching
+`pyproject.toml` defines optional extras that are included in lockfile generation:
 
-```yaml
-- name: Install Dependencies
-  run: pip install -r conf/requirements.txt
-```
+- `juniper-data`
+- `juniper-cascor`
+- `observability` (`prometheus-client`, `sentry-sdk`)
 
-**Duration:** ~2-3 minutes
-
-### With Caching
-
-```yaml
-- uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7  # v5.0.4
-  with:
-    path: ~/.cache/pip
-    key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-
-- run: pip install -r conf/requirements.txt
-```
-
-**Benefits:**
-
-- ~30 seconds vs 2-3 minutes
-- Reduced bandwidth
-- More reliable
-
-### Cache Conda
-
-```yaml
-- uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7  # v5.0.4
-  with:
-    path: |
-      /usr/share/miniconda/envs/JuniperPython-CI
-      ~/.conda/pkgs
-    key: conda-${{ hashFiles('**/conda_environment.yaml') }}
-```
-
----
-
-## Artifact Management
-
-### Test Results
-
-```yaml
-- uses: actions/upload-artifact@v4
-  if: always()
-  with:
-    name: test-results-${{ matrix.python-version }}
-    path: |
-      reports/junit/results.xml
-      reports/test_report.html
-    retention-days: 30
-```
-
-### Coverage Reports
-
-```yaml
-- uses: actions/upload-artifact@v4
-  with:
-    name: coverage-report-${{ matrix.python-version }}
-    path: reports/coverage/
-    retention-days: 30
-```
-
-### Downloading
-
-**Via UI:**
-
-1. Workflow run page
-2. Artifacts section
-3. Download
-
-**Via CLI:**
+Canonical compile command:
 
 ```bash
-gh run download RUN_ID -n coverage-report-3.13
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
 ```
+
+CI lockfile freshness behavior:
+
+- Compiles to `/tmp/requirements.lock.check`
+- Compares the file body from line 3 onward to ignore uv header path differences
+- Fails if content differs
+
+Dependabot lockfile update workflow:
+
+- Regenerates via `/tmp/requirements.lock.check`
+- Moves output to `requirements.lock`
+- Commits only when diff exists
 
 ---
 
-## Workflow Triggers
+## Documentation Link Validation
 
-### Push Triggers
+CI includes a dedicated docs job that runs link checks:
 
-```yaml
-on:
-  push:
-    branches:
-      - main
-      - develop
-      - feature/**
-      - fix/**
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
+```bash
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
 ```
 
-### Pull Request
+When reproducing locally, use the same exclusion list to match CI behavior.
 
-```yaml
-on:
-  pull_request:
-    branches: [main, develop]
-    types:
-      - opened
-      - synchronize
-      - reopened
-```
+---
 
-### Manual Dispatch
+## Required Secrets and Tokens
 
-```yaml
-on:
-  workflow_dispatch:
-    inputs:
-      python-version:
-        type: choice
-        options: ['3.11', '3.12', '3.13']
-```
+Required for specific workflows:
 
-### Schedule
+- `CROSS_REPO_DISPATCH_TOKEN`: used by lockfile update workflow for pushing lockfile commits from Dependabot branches
 
-```yaml
-on:
-  schedule:
-    - cron: '0 2 * * *'  # Daily 2 AM UTC
-```
+May be required depending on project policy:
+
+- `CODECOV_TOKEN`: only if coverage upload to Codecov is enabled in your workflows
+
+---
+
+## Local Reproduction Checklist
+
+Use this checklist when validating CI-affecting changes before pushing:
+
+1. Install CI deps: `pip install -r conf/requirements_ci.txt`
+2. Run unit/regression subset:
+   `python -m pytest -m "not requires_cascor and not requires_server and not slow" src/tests/unit/ src/tests/regression/ --cov=src --cov-fail-under=80`
+3. Run integration subset:
+   `python -m pytest -m "integration and not requires_cascor and not requires_server and not slow" src/tests/integration`
+4. Validate lockfile freshness using the canonical uv compile command.
+5. Validate docs links with `scripts/check_doc_links.py` CI flags.
 
 ---
 
 ## Troubleshooting
 
-### Conda Activation Fails
+### `requirements.lock` freshness check fails
 
-**Problem:** `conda: command not found`
+Cause:
 
-**Fix:**
+- `pyproject.toml` extras changed but lockfile not regenerated with all required extras.
 
-```yaml
-shell: bash -el {0}  # Correct
+Fix:
+
+```bash
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
 ```
 
-### Dependencies Not Found
+### Documentation link validation fails in CI only
 
-**Problem:** `ModuleNotFoundError`
+Cause:
 
-**Debug:**
+- Local run used different exclusion/cross-repo flags than CI.
 
-```yaml
-- run: |
-    which python
-    python --version
-    pip list
-    conda list
-  shell: bash -el {0}
-```
+Fix:
 
-### Artifacts Too Large
+- Re-run `scripts/check_doc_links.py` with the exact CI argument set.
 
-**Limit:** 500 MB
+### Tests pass locally but fail in CI path resolution
 
-**Fix:**
+Cause:
 
-```yaml
-- run: tar -czf reports.tar.gz reports/
-- uses: actions/upload-artifact@v4
-  with:
-    path: reports.tar.gz
-```
+- Running `pytest` from `src/` with old path assumptions (`tests/...`) instead of repository-root paths (`src/tests/...`).
 
-### Workflow Not Triggering
+Fix:
 
-**Check:**
+- Run commands from repository root using CI-equivalent test paths.
 
-1. File location: `.github/workflows/ci.yml`
-2. YAML syntax valid
-3. Actions enabled in settings
-4. Correct branch/path filters
-
----
-
-## Best Practices
-
-### Environment
-
-1. Use environment files for dependencies
-2. Pin versions for reproducibility
-3. Cache dependencies
-4. Minimize setup time (<5 min)
-
-### Secrets
-
-1. Never commit secrets
-2. Rotate quarterly
-3. Use minimum permissions
-4. Audit access regularly
-
-### Resources
-
-1. Use caching
-2. Set appropriate timeouts
-3. Use concurrency limits
-4. Archive old artifacts
-
----
-
-## Project Resources
-
-### Documentation
-
-- [GitHub Actions](https://docs.github.com/en/actions)
-- [Setup Miniconda](https://github.com/conda-incubator/setup-miniconda)
-- [Codecov Action](https://github.com/codecov/codecov-action)
-
-### Project Files
-
-- [Quick Start](CICD_QUICK_START.md)
-- [Manual](CICD_MANUAL.md)
-- [Reference](CICD_REFERENCE.md)
-
----
-
-**Status:** ✅ Production ready
