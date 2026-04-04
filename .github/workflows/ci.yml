@@ -481,6 +481,33 @@ jobs:
           echo "::notice::requirements.lock is up to date ✓"
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # Documentation Links: Validate internal markdown links
+  # ════════════════════════════════════════════��══════════════════════════════════════════════════
+  docs:
+    name: Documentation Links
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: "3.13"
+
+      - name: Validate Documentation Links
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Documentation Link Validation      ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          python scripts/check_doc_links.py \
+            --exclude templates --exclude history \
+            --exclude pull_requests --exclude releases \
+            --exclude analysis --exclude fixes --exclude development \
+            --cross-repo skip
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
   # Docker Build & Smoke Test: Verify Dockerfile builds and container starts
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   docker-build:
@@ -544,7 +571,7 @@ jobs:
     name: Quality Gate
     runs-on: ubuntu-latest
     if: always()
-    needs: [pre-commit, unit-tests, integration-tests, security, build, dependency-docs, lockfile-check, docker-build]
+    needs: [pre-commit, unit-tests, integration-tests, security, build, dependency-docs, lockfile-check, docs, docker-build]
 
     steps:
       - name: Check Quality Gate Status
@@ -559,6 +586,7 @@ jobs:
           echo "Security:          ${{ needs.security.result }}"
           echo "Build:             ${{ needs.build.result }}"
           echo "Dependency Docs:   ${{ needs.dependency-docs.result }}"
+          echo "Documentation:     ${{ needs.docs.result }}"
           echo "Lockfile Check:    ${{ needs.lockfile-check.result }}"
           echo "Docker Build:      ${{ needs.docker-build.result }}"
           echo ""
@@ -587,6 +615,11 @@ jobs:
           if [[ "${{ needs.dependency-docs.result }}" == "failure" ]]; then
             echo "::error::Dependency documentation generation failed"
             exit 1
+          fi
+
+          # Documentation links: failure = warning (non-blocking during initial rollout)
+          if [[ "${{ needs.docs.result }}" == "failure" ]]; then
+            echo "::warning::Documentation link validation found broken links (non-blocking)"
           fi
 
           # Lockfile must be fresh (stale lockfile = Docker builds don't match CI)
