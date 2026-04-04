@@ -435,8 +435,6 @@ class CascorServiceAdapter:
         "cn_pool_size": "candidate_pool_size",
         "cn_correlation_threshold": "correlation_threshold",
         "cn_candidate_learning_rate": "candidate_learning_rate",
-        "cn_patience": "candidate_patience",
-        "cn_training_convergence_threshold": "candidate_convergence_threshold",
     }
 
     _CASCOR_TO_CANOPY_PARAM_MAP = {v: k for k, v in _CANOPY_TO_CASCOR_PARAM_MAP.items()}

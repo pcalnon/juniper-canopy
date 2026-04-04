@@ -15,6 +15,14 @@ The juniper_canopy prototype is a real-time monitoring and diagnostic frontend f
 
 ## AI Agent Quick Start
 
+### Conda Environment
+
+> **Required:** Activate the `JuniperCanopy` conda environment before running any commands.
+
+```bash
+conda activate JuniperCanopy
+```
+
 For agents and subagents working on this codebase, follow this checklist:
 
 1. **Run the app in demo mode**
@@ -894,17 +902,17 @@ def robust_function():
 
 ### Conda Environment
 
-The project uses the JuniperPython conda environment:
+The project uses the JuniperCanopy conda environment:
 
 ```bash
 # Location
-/opt/miniforge3/envs/JuniperPython
+/opt/miniforge3/envs/JuniperCanopy
 
 # Activate manually
-conda activate JuniperPython
+conda activate JuniperCanopy
 
 # Python interpreter path
-/opt/miniforge3/envs/JuniperPython/bin/python
+/opt/miniforge3/envs/JuniperCanopy/bin/python
 ```
 
 ### Configuration
@@ -936,10 +944,10 @@ export JUNIPER_CANOPY_DEMO_MODE=true
 python main.py
 
 # Correct (uses conda Python)
-/opt/miniforge3/envs/JuniperPython/bin/python main.py
+/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
 
 # Or activate environment first
-conda activate JuniperPython
+conda activate JuniperCanopy
 python main.py
 ```
 
@@ -1064,7 +1072,7 @@ logs/
 export JUNIPER_CANOPY_LOG_LEVEL=DEBUG
 
 # Run with verbose output
-/opt/miniforge3/envs/JuniperPython/bin/python -u main.py
+/opt/miniforge3/envs/JuniperCanopy/bin/python -u main.py
 ```
 
 ## Deployment
@@ -1083,7 +1091,7 @@ export JUNIPER_CANOPY_CASCOR_SERVICE_URL=http://cascor-host:8200
 
 # Run application
 cd src
-/opt/miniforge3/envs/JuniperPython/bin/python main.py
+/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
 ```
 
 ### Docker
@@ -1250,14 +1258,14 @@ The demo mode must accurately simulate the real CasCor backend to enable UI deve
 
 ### Conda Environment, Path and Environment
 
-**Always use JuniperPython conda environment:**
+**Always use JuniperCanopy conda environment:**
 
 ```bash
 # Location
-/opt/miniforge3/envs/JuniperPython
+/opt/miniforge3/envs/JuniperCanopy
 
 # Python interpreter path
-/opt/miniforge3/envs/JuniperPython/bin/python
+/opt/miniforge3/envs/JuniperCanopy/bin/python
 ```
 
 **Launch via scripts in `util/`** (they activate conda automatically):
