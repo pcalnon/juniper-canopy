@@ -74,11 +74,15 @@ pydantic==2.12.5
     # via
     #   juniper-canopy (pyproject.toml)
     #   fastapi
+    #   pydantic-settings
 pydantic-core==2.41.5
     # via pydantic
+pydantic-settings==2.13.1
+    # via juniper-canopy (pyproject.toml)
 python-dotenv==1.2.1
     # via
     #   juniper-canopy (pyproject.toml)
+    #   pydantic-settings
     #   uvicorn
 pyyaml==6.0.3
     # via
@@ -109,6 +113,7 @@ typing-inspection==0.4.2
     # via
     #   fastapi
     #   pydantic
+    #   pydantic-settings
 urllib3==2.6.3
     # via
     #   juniper-cascor-client
