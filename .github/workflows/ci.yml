@@ -151,18 +151,17 @@ jobs:
           echo "║       Juniper Canopy - Unit Tests (Fast Only)              ║"
           echo "╚════════════════════════════════════════════════════════════╝"
 
-          cd src
           python -m pytest \
             -m "not requires_cascor and not requires_server and not slow" \
-            tests/unit/ tests/regression/ \
+            src/tests/unit/ src/tests/regression/ \
             --verbose \
             --timeout=60 \
             --maxfail=5 \
-            --junitxml=../reports/junit/junit-unit.xml \
-            --cov=. \
+            --junitxml=reports/junit/junit-unit.xml \
+            --cov=src \
             --cov-report=term-missing \
-            --cov-report=xml:../reports/coverage.xml \
-            --cov-report=html:../reports/htmlcov \
+            --cov-report=xml:reports/coverage.xml \
+            --cov-report=html:reports/htmlcov \
             --cov-fail-under=${COVERAGE_FAIL_UNDER}
 
       - name: Upload Coverage Artifacts
@@ -226,14 +225,13 @@ jobs:
           echo "║       Juniper Canopy - Integration Tests (Fast Only)       ║"
           echo "╚════════════════════════════════════════════════════════════╝"
 
-          cd src
           python -m pytest \
             -m "integration and not requires_cascor and not requires_server and not slow" \
-            tests/integration \
+            src/tests/integration \
             --verbose \
             --timeout=120 \
             --maxfail=3 \
-            --junitxml=../reports/junit/junit-integration.xml
+            --junitxml=reports/junit/junit-integration.xml
 
       - name: Upload Integration Test Results
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
