@@ -51,6 +51,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
   - `docs/ci_cd/CICD_MANUAL.md`
   - `notes/juniper-canopy_OTHER_DEPENDENCIES.md`
+- Realigned CI/testing documentation with the current workflow implementation in `.github/workflows/ci.yml`:
+  - Rewrote `docs/ci_cd/CICD_QUICK_START.md`, `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`, `docs/ci_cd/CICD_MANUAL.md`, and `docs/ci_cd/CICD_REFERENCE.md` to document:
+    - Python matrix `3.12/3.13/3.14` and `3.14` default job versioning
+    - pip-based CI dependency installation via `conf/requirements_ci.txt` and editable install
+    - documentation-link validation job (`scripts/check_doc_links.py --cross-repo skip`)
+    - lockfile freshness behavior (`uv pip compile ...` with header-stripped diff)
+    - Docker build/smoke-test and quality-gate aggregation
+  - Updated testing docs for optional testing modules and skip semantics:
+    - `docs/testing/SELECTIVE_TEST_GUIDE.md`
+    - `docs/testing/TESTING_MANUAL.md`
+    - `docs/testing/TESTING_REFERENCE.md`
+    - Added explicit guidance for `pytest.importorskip(...)` use with `juniper_cascor_client.testing` and `juniper_data_client.testing`.
 
 - Renamed HTTP metrics: `http_requests_total` → `juniper_canopy_http_requests_total`, `http_request_duration_seconds` → `juniper_canopy_http_request_duration_seconds`
 - Updated CasCor backend documentation to cover service-mode behavior (`CascorServiceAdapter`, `ServiceBackend`, `CascorStateSync`), including startup attach/sync workflow, response normalization contracts, and service-mode troubleshooting:

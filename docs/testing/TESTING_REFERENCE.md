@@ -1,7 +1,7 @@
 # Testing Reference - Technical Documentation
 
-**Last Updated:** March 30, 2026  
-**Version:** v0.26.0
+**Last Updated:** April 04, 2026  
+**Version:** v0.26.1
 
 Complete technical reference for the Juniper Canopy testing infrastructure.
 
@@ -484,6 +484,22 @@ def test_with_cascor_backend():
 @pytest.mark.asyncio
 async def test_async_operation():
     await async_function()
+```
+
+### Optional Client Testing Modules
+
+Some tests depend on helper modules provided by optional client packages and use `pytest.importorskip(...)` so collection succeeds when extras are missing.
+
+Guarded module imports in the current suite:
+
+- `juniper_cascor_client.testing`
+- `juniper_data_client.testing`
+
+Install the extras when running those scenarios locally:
+
+```bash
+pip install "juniper-cascor-client[testing]"
+pip install "juniper-data-client[testing]"
 ```
 
 ### Skip Markers
