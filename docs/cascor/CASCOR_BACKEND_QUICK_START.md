@@ -703,7 +703,7 @@ integration.create_monitoring_callback('epoch_end', on_epoch_end)
 
 - **[CASCOR_BACKEND_MANUAL.md](CASCOR_BACKEND_MANUAL.md)** - Complete integration guide
 - **[CASCOR_BACKEND_REFERENCE.md](CASCOR_BACKEND_REFERENCE.md)** - Technical reference
-- **[CasCor Backend](../cascor/README.md)** - CasCor prototype documentation
+- **[CasCor Backend](../../../juniper-cascor/README.md)** - CasCor prototype documentation
 - **[AGENTS.md](AGENTS.md)** - Development guide
 
 ---

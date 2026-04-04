@@ -84,6 +84,10 @@ juniper-data = [
 juniper-cascor = [
     "juniper-cascor-client>=0.1.0",
 ]
+observability = [
+    "prometheus-client>=0.20.0",
+    "sentry-sdk>=2.0.0",
+]
 
 # ==========================================
 # Setuptools Package Discovery
@@ -250,6 +254,8 @@ filterwarnings = [
 [tool.coverage.run]
 source = ["src"]
 omit = [
+  "tests/*",
+  "tests/**/*",
   "*/tests/*",
   "**/tests/*",
   "**/test_*.py",
@@ -259,6 +265,7 @@ omit = [
   "*/site-packages/*",
   "**/conftest.py",
   "*/conftest.py",
+  "conftest.py",
   "**/venv/*",
   "*/venv/*",
   "**/.venv/*",

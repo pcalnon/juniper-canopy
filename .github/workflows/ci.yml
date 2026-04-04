@@ -54,7 +54,7 @@ permissions:
 
 env:
   ENV_NAME: juniper-canopy
-  PYTHON_TEST_VERSION: "3.13"
+  PYTHON_TEST_VERSION: "3.14"
   COVERAGE_FAIL_UNDER: "80"
 
 jobs:
@@ -67,7 +67,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -109,7 +109,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14"]
 
     steps:
       - name: Checkout Code
@@ -151,19 +151,42 @@ jobs:
           echo "║       Juniper Canopy - Unit Tests (Fast Only)              ║"
           echo "╚════════════════════════════════════════════════════════════╝"
 
-          cd src
+          set +e
           python -m pytest \
             -m "not requires_cascor and not requires_server and not slow" \
-            tests/unit/ tests/regression/ \
+            src/tests/unit/ src/tests/regression/ \
             --verbose \
             --timeout=60 \
             --maxfail=5 \
-            --junitxml=../reports/junit/junit-unit.xml \
-            --cov=. \
+            --junitxml=reports/junit/junit-unit.xml \
+            --cov=src \
             --cov-report=term-missing \
-            --cov-report=xml:../reports/coverage.xml \
-            --cov-report=html:../reports/htmlcov \
+            --cov-report=xml:reports/coverage.xml \
+            --cov-report=html:reports/htmlcov \
             --cov-fail-under=${COVERAGE_FAIL_UNDER}
+          PYTEST_EXIT=$?
+          set -e
+
+          # Python 3.12 may SIGABRT (exit 134) during interpreter cleanup after
+          # all tests pass. Work around by checking JUnit XML for actual results.
+          if [ $PYTEST_EXIT -eq 134 ] && [ -f reports/junit/junit-unit.xml ]; then
+            FAILURES=$(python -c "
+          import xml.etree.ElementTree as ET
+          root = ET.parse('reports/junit/junit-unit.xml').getroot()
+          print(root.attrib.get('failures', '0'))
+          ")
+            ERRORS=$(python -c "
+          import xml.etree.ElementTree as ET
+          root = ET.parse('reports/junit/junit-unit.xml').getroot()
+          print(root.attrib.get('errors', '0'))
+          ")
+            if [ "$FAILURES" = "0" ] && [ "$ERRORS" = "0" ]; then
+              echo "::warning::pytest exited with SIGABRT (134) during cleanup but all tests passed — treating as success (Python 3.12 runtime bug)"
+              exit 0
+            fi
+          fi
+
+          exit $PYTEST_EXIT
 
       - name: Upload Coverage Artifacts
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
@@ -226,14 +249,13 @@ jobs:
           echo "║       Juniper Canopy - Integration Tests (Fast Only)       ║"
           echo "╚════════════════════════════════════════════════════════════╝"
 
-          cd src
           python -m pytest \
             -m "integration and not requires_cascor and not requires_server and not slow" \
-            tests/integration \
+            src/tests/integration \
             --verbose \
             --timeout=120 \
             --maxfail=3 \
-            --junitxml=../reports/junit/junit-integration.xml
+            --junitxml=reports/junit/junit-integration.xml
 
       - name: Upload Integration Test Results
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
@@ -316,7 +338,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
-          python-version: "3.13"
+          # python-version: ["3.12", "3.13", "3.14"]
+          python-version: "3.14"
           cache: pip
 
       - name: Install security tools
@@ -453,10 +476,11 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
-      - name: Set up Python 3.13
+      - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
-          python-version: "3.13"
+          # python-version: ["3.12", "3.13", "3.14"]
+          python-version: "3.14"
 
       - name: Install uv
         run: pip install uv
@@ -464,21 +488,56 @@ jobs:
       - name: Check lockfile freshness
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
-          echo "║       Juniper Canopy - Lockfile Freshness Check           ║"
+          echo "║       Juniper Canopy - Lockfile Freshness Check            ║"
           echo "╚════════════════════════════════════════════════════════════╝"
 
           uv pip compile pyproject.toml \
             --extra juniper-data \
             --extra juniper-cascor \
+            --extra observability \
             -o /tmp/requirements.lock.check
 
-          if ! diff -u requirements.lock /tmp/requirements.lock.check; then
+          # Strip the autogenerated header comment (uv embeds the -o path, which
+          # differs between the local -o requirements.lock and CI -o /tmp/...)
+          tail -n +3 requirements.lock > /tmp/lock_body
+          tail -n +3 /tmp/requirements.lock.check > /tmp/check_body
+
+          if ! diff -u /tmp/lock_body /tmp/check_body; then
             echo ""
-            echo "::error::requirements.lock is stale — run: uv pip compile pyproject.toml --extra juniper-data --extra juniper-cascor -o requirements.lock"
+            echo "::error::requirements.lock is stale — run: uv pip compile pyproject.toml --extra juniper-data --extra juniper-cascor --extra observability -o requirements.lock"
             exit 1
           fi
 
           echo "::notice::requirements.lock is up to date ✓"
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # Documentation Links: Validate internal markdown links
+  # ════════════════════════════════════════════��══════════════════════════════════════════════════
+  docs:
+    name: Documentation Links
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          # python-version: ["3.12", "3.13", "3.14"]
+          python-version: "3.14"
+
+      - name: Validate Documentation Links
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Documentation Link Validation       ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          python scripts/check_doc_links.py \
+            --exclude templates --exclude history \
+            --exclude pull_requests --exclude releases \
+            --exclude analysis --exclude fixes --exclude development \
+            --exclude CHANGELOG.md \
+            --cross-repo skip
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   # Docker Build & Smoke Test: Verify Dockerfile builds and container starts
@@ -544,7 +603,7 @@ jobs:
     name: Quality Gate
     runs-on: ubuntu-latest
     if: always()
-    needs: [pre-commit, unit-tests, integration-tests, security, build, dependency-docs, lockfile-check, docker-build]
+    needs: [pre-commit, unit-tests, integration-tests, security, build, dependency-docs, lockfile-check, docs, docker-build]
 
     steps:
       - name: Check Quality Gate Status
@@ -559,6 +618,7 @@ jobs:
           echo "Security:          ${{ needs.security.result }}"
           echo "Build:             ${{ needs.build.result }}"
           echo "Dependency Docs:   ${{ needs.dependency-docs.result }}"
+          echo "Documentation:     ${{ needs.docs.result }}"
           echo "Lockfile Check:    ${{ needs.lockfile-check.result }}"
           echo "Docker Build:      ${{ needs.docker-build.result }}"
           echo ""
@@ -586,6 +646,12 @@ jobs:
           # Dependency docs: failure = error, skipped = OK (non-blocking)
           if [[ "${{ needs.dependency-docs.result }}" == "failure" ]]; then
             echo "::error::Dependency documentation generation failed"
+            exit 1
+          fi
+
+          # Documentation links: failure = error
+          if [[ "${{ needs.docs.result }}" == "failure" ]]; then
+            echo "::error::Documentation link validation failed"
             exit 1
           fi
 

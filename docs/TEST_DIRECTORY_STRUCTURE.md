@@ -120,4 +120,4 @@ pytest tests/ --cov=. --cov-report=html
 ## Related Documentation
 
 - [ADR-001: Valid Test Skips](testing/ADR_001_VALID_TEST_SKIPS.md)
-- [CLAUDE.md - Testing Section](../../CLAUDE.md#testing)
+- [CLAUDE.md - Testing Section](../CLAUDE.md#testing)

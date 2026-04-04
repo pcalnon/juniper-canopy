@@ -1,7 +1,8 @@
 """Tests for service mode training controls (pause/resume/reset)."""
 
 import pytest
-from juniper_cascor_client.testing import FakeCascorClient
+
+FakeCascorClient = pytest.importorskip("juniper_cascor_client.testing", reason="requires juniper-cascor-client[testing]").FakeCascorClient
 
 
 class TestServiceModeControls:

@@ -2,7 +2,8 @@
 
 import pytest
 from juniper_cascor_client.exceptions import JuniperCascorNotFoundError
-from juniper_cascor_client.testing import FakeCascorClient
+
+FakeCascorClient = pytest.importorskip("juniper_cascor_client.testing", reason="requires juniper-cascor-client[testing]").FakeCascorClient
 
 
 class TestAttachToExisting:

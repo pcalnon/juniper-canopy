@@ -915,7 +915,7 @@ with CascorIntegration() as integration:
 
 - **[CASCOR_BACKEND_QUICK_START.md](CASCOR_BACKEND_QUICK_START.md)** - Quick setup guide
 - **[CASCOR_BACKEND_REFERENCE.md](CASCOR_BACKEND_REFERENCE.md)** - Technical reference
-- **[CasCor Backend README](../cascor/README.md)** - CasCor prototype docs
+- **[CasCor Backend README](../../../juniper-cascor/README.md)** - CasCor prototype docs
 - **[AGENTS.md](AGENTS.md)** - Development guide
 
 ---

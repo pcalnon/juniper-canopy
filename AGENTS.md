@@ -15,6 +15,14 @@ The juniper_canopy prototype is a real-time monitoring and diagnostic frontend f
 
 ## AI Agent Quick Start
 
+### Conda Environment
+
+> **Required:** Activate the `JuniperCanopy` conda environment before running any commands.
+
+```bash
+conda activate JuniperCanopy
+```
+
 For agents and subagents working on this codebase, follow this checklist:
 
 1. **Run the app in demo mode**
@@ -894,17 +902,17 @@ def robust_function():
 
 ### Conda Environment
 
-The project uses the JuniperPython conda environment:
+The project uses the JuniperCanopy conda environment:
 
 ```bash
 # Location
-/opt/miniforge3/envs/JuniperPython
+/opt/miniforge3/envs/JuniperCanopy
 
 # Activate manually
-conda activate JuniperPython
+conda activate JuniperCanopy
 
 # Python interpreter path
-/opt/miniforge3/envs/JuniperPython/bin/python
+/opt/miniforge3/envs/JuniperCanopy/bin/python
 ```
 
 ### Configuration
@@ -936,10 +944,10 @@ export JUNIPER_CANOPY_DEMO_MODE=true
 python main.py
 
 # Correct (uses conda Python)
-/opt/miniforge3/envs/JuniperPython/bin/python main.py
+/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
 
 # Or activate environment first
-conda activate JuniperPython
+conda activate JuniperCanopy
 python main.py
 ```
 
@@ -1064,7 +1072,7 @@ logs/
 export JUNIPER_CANOPY_LOG_LEVEL=DEBUG
 
 # Run with verbose output
-/opt/miniforge3/envs/JuniperPython/bin/python -u main.py
+/opt/miniforge3/envs/JuniperCanopy/bin/python -u main.py
 ```
 
 ## Deployment
@@ -1083,7 +1091,7 @@ export JUNIPER_CANOPY_CASCOR_SERVICE_URL=http://cascor-host:8200
 
 # Run application
 cd src
-/opt/miniforge3/envs/JuniperPython/bin/python main.py
+/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
 ```
 
 ### Docker
@@ -1250,14 +1258,14 @@ The demo mode must accurately simulate the real CasCor backend to enable UI deve
 
 ### Conda Environment, Path and Environment
 
-**Always use JuniperPython conda environment:**
+**Always use JuniperCanopy conda environment:**
 
 ```bash
 # Location
-/opt/miniforge3/envs/JuniperPython
+/opt/miniforge3/envs/JuniperCanopy
 
 # Python interpreter path
-/opt/miniforge3/envs/JuniperPython/bin/python
+/opt/miniforge3/envs/JuniperCanopy/bin/python
 ```
 
 **Launch via scripts in `util/`** (they activate conda automatically):
@@ -1515,8 +1523,8 @@ Maintain consistent cross-references across documentation:
 
 Use relative markdown links with descriptive text:
 
-✓ See [Testing Quick Start](TESTING_QUICK_START.md) for setup
-✓ Refer to [API Reference](docs/API_REFERENCE.md) for details
+✓ See [Testing Quick Start](docs/testing/TESTING_QUICK_START.md) for setup
+✓ Refer to [API Reference](docs/api/API_REFERENCE.md) for details
 ✓ Check [Archive Index](notes/history/INDEX.md) for older versions
 
 ✗ See docs/API_REFERENCE.md
@@ -1645,13 +1653,13 @@ Before committing documentation changes:
 
 Use relative paths with descriptive link text:
 
-✓ [Quick Start Guide](QUICK_START.md)
-✓ [Testing Manual](TESTING_MANUAL.md)
+✓ [Quick Start Guide](docs/QUICK_START.md)
+✓ [Testing Manual](docs/testing/TESTING_MANUAL.md)
 ✓ [CI/CD Manual](docs/ci_cd/CICD_MANUAL.md)
 ✓ [CI/CD Quick Start](docs/ci_cd/CICD_QUICK_START.md)
 ✓ [Archive Index](notes/history/INDEX.md)
 
-✗ [Example Link](./docs/../TESTING_MANUAL.md)
+✗ `[Example Link](./docs/../TESTING_MANUAL.md)`
 ✗ See TESTING_MANUAL.md
 
 #### Section Links
@@ -1735,13 +1743,15 @@ All manuals and reference docs must include a table of contents:
 
 #### Document Table of Contents
 
-- [Installation](#installation link)
-- [Configuration](#configuration link)
-- [Usage](#usage link)
-  - [Basic Usage](#basic usage link)
-  - [Advanced Usage](#advanced usage link)
-- [Troubleshooting](#troubleshooting link)
-- [Reference](#reference link)
+```markdown
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+  - [Basic Usage](#basic-usage)
+  - [Advanced Usage](#advanced-usage)
+- [Troubleshooting](#troubleshooting)
+- [Reference](#reference)
+```
 
 **TOC Requirements:**
 
@@ -1832,8 +1842,10 @@ All documentation should include metadata:
 
 ##### Next Steps
 
+```markdown
 - [Full Manual](FEATURE_MANUAL.md)
 - [Reference](FEATURE_REFERENCE.md)
+```
 
 **Characteristics:**
 
@@ -1857,12 +1869,14 @@ All documentation should include metadata:
 
 ##### Table of Contents, Environment Setup
 
-- [System Requirements](#system-requirements: environment setup)
-- [Conda Environment](#conda-environment: environment setup)
-- [Dependencies](#dependencies: environment setup)
-- [Configuration](#configuration: environment setup)
-- [Verification](#verification: environment setup)
-- [Troubleshooting](#troubleshooting: environment setup)
+```markdown
+- [System Requirements](#system-requirements)
+- [Conda Environment](#conda-environment)
+- [Dependencies](#dependencies)
+- [Configuration](#configuration)
+- [Verification](#verification)
+- [Troubleshooting](#troubleshooting)
+```
 
 ##### System Requirements, Environment Setup
 
@@ -1913,14 +1927,16 @@ Common issues and solutions...
 
 ##### Table of Contents, User Manual
 
-- [Overview](#overview: user manual)
-- [Getting Started](#getting-started: user manual)
-- [Basic Usage](#basic-usage: user manual)
-- [Advanced Usage](#advanced-usage: user manual)
-- [Best Practices](#best-practices: user manual)
-- [Troubleshooting](#troubleshooting: user manual)
-- [Examples](#examples: user manual)
-- [Reference](#reference: user manual)
+```markdown
+- [Overview](#overview)
+- [Getting Started](#getting-started)
+- [Basic Usage](#basic-usage)
+- [Advanced Usage](#advanced-usage)
+- [Best Practices](#best-practices)
+- [Troubleshooting](#troubleshooting)
+- [Examples](#examples)
+- [Reference](#reference)
+```
 
 ##### Overview: User Manual
 
@@ -1978,10 +1994,12 @@ Links to technical reference...
 
 ##### Table of Contents: Reference
 
-- [API Reference](#api-reference: reference)
-- [Configuration](#configuration: docs)
-- [Commands](#commands: reference)
-- [Error Codes](#error-codes: reference)
+```markdown
+- [API Reference](#api-reference)
+- [Configuration](#configuration)
+- [Commands](#commands)
+- [Error Codes](#error-codes)
+```
 
 ##### API Reference: Reference
 
@@ -2084,8 +2102,8 @@ result = function_name(value1, value2)
 
 **Examples:**
 
-- [RELEASE_NOTES_v0.14.1-alpha.md](notes/RELEASE_NOTES_v0.14.1-alpha.md) - filelock TOCTOU vulnerability
-- [RELEASE_NOTES_v0.15.1-alpha.md](notes/RELEASE_NOTES_v0.15.1-alpha.md) - urllib3 decompression bomb vulnerability
+- [RELEASE_NOTES_v0.14.1-alpha.md](notes/releases/RELEASE_NOTES_v0.14.1-alpha.md) - filelock TOCTOU vulnerability
+- [RELEASE_NOTES_v0.15.1-alpha.md](notes/releases/RELEASE_NOTES_v0.15.1-alpha.md) - urllib3 decompression bomb vulnerability
 
 ## Update Triggers
 
@@ -2295,6 +2313,7 @@ mv "$ORIGINAL" "docs/history/$ARCHIVED"
 
 Add entry to `notes/history/INDEX.md`:
 
+```markdown
 ## 2025-11-04: Testing Documentation Split
 
 **Archived Files:**
@@ -2308,6 +2327,7 @@ Add entry to `notes/history/INDEX.md`:
     - [TESTING_ENVIRONMENT_SETUP.md](../TESTING_ENVIRONMENT_SETUP.md) - Environment config
     - [TESTING_REPORTS_COVERAGE.md](../TESTING_REPORTS_COVERAGE.md) - Coverage reports
   - Content: Comprehensive testing guide with all sections consolidated
+```
 
 **4. Add Redirect Notice:**
 
@@ -2315,13 +2335,13 @@ In replacement documentation, add note at top:
 
 ```markdown
 # Testing Quick Start
-```
 
 **Last Updated:** 2025-11-04
 **Version:** 1.0.0
 
 > **Note:** This document is part of the split testing documentation, replacing the consolidated guide
 > [Testing Guide](docs/history/TESTING_GUIDE_CONSOLIDATED_2025-11-04.md) archived on 2025-11-04.
+```
 
 **5. Update Cross-References:**
 
@@ -2364,7 +2384,6 @@ This directory contains historical documentation that has been superseded or con
   - Replaced by: [API_REFERENCE.md](../API_REFERENCE.md) (v2)
 
 ## 2025-11-04: Testing Documentation Split
-```
 
 - **[TESTING_GUIDE_CONSOLIDATED_2025-11-04.md](TESTING_GUIDE_CONSOLIDATED_2025-11-04.md)**
   - Consolidated testing guide
@@ -2380,6 +2399,7 @@ This directory contains historical documentation that has been superseded or con
 
 - Latest documentation: [Documentation Overview](../DOCUMENTATION_OVERVIEW.md)
 - Changelog: [CHANGELOG.md](../CHANGELOG.md)
+```
 
 ## Documentation Update Workflow
 
@@ -2463,8 +2483,8 @@ All new or modified code must meet these requirements before merging:
 
 ## Additional Resources
 
-- [Main Juniper Documentation](../../../docs/)
-- [CasCor Prototype](../../cascor/)
+- Juniper Ecosystem Guide: see `../CLAUDE.md` (parent directory)
+- CasCor Repository: see `../juniper-cascor/`
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
 - [Dash Documentation](https://dash.plotly.com/)
 - [WebSocket RFC](https://tools.ietf.org/html/rfc6455)
@@ -2496,274 +2516,14 @@ Worktrees are centralized in `/home/pcalnon/Development/python/Juniper/worktrees
 
 ## Recent Changes
 
-### 2026-02-05: Integration Development Plan - Comprehensive Assessment Complete
+See `git log --oneline -20` and [CHANGELOG.md](CHANGELOG.md) for recent changes.
 
-**Scope**: Evaluated 4 planning documents + rigorous source code review across JuniperCascor, JuniperCanopy, and JuniperData to consolidate all outstanding integration work.
-
-**Source Documents Evaluated**:
-
-- `JUNIPER_CASCOR_SPIRAL_DATA_GEN_REFACTOR_PLAN.md` (Phases 0-4 Complete, Phase 5 Deferred)
-- `INTEGRATION_ROADMAP.md` (Most issues RESOLVED)
-- `PRE-DEPLOYMENT_ROADMAP.md` (P0-P1 RESOLVED, some P2-P3 remaining)
-- `PRE-DEPLOYMENT_ROADMAP-2.md` (74% complete, 26% remaining)
-
-**Key Findings**:
-
-- **3 CRITICAL code issues**: Real backend control not implemented (`main.py:433-442`), decision boundary incomplete for real backend (`main.py:779-788`), `get_network_data()` method missing from CascorIntegration (`main.py:627`)
-- **3 HIGH issues**: `save_snapshot()`/`load_snapshot()` missing, async/sync boundary untested, no tests exercise real backend paths
-- **8 MEDIUM issues**: Coverage gaps, type errors, remote workers untested, Cassandra/Redis integration gaps, monitoring race conditions, legacy code cleanup
-- **30+ enhancement items**: CAN-001 through CAN-021 (Canopy), CAS-001 through CAS-010 (Cascor)
-
-**Deliverable**: [notes/INTEGRATION_DEVELOPMENT_PLAN.md](notes/INTEGRATION_DEVELOPMENT_PLAN.md) - 53+ items organized into 4 prioritized phases
-
----
-
-### 2026-02-04: Non-Passing Test Analysis and Remediation - Complete (Rounds 1 & 2)
-
-**Round 1:** Analyzed and fixed 67 non-passing tests (54 ERROR, 10 FAILED, 3 XFAIL). Result: 3,207 passed.
-
-**Round 1 Fixes:**
-
-- **P0**: Installed `pytest-mock>=3.12` (resolved 54 ERROR tests in dashboard handler tests)
-- **P1**: `main.py` - Added `not key.startswith("_")` filter in HDF5 snapshot creation (data integrity fix)
-- **P2**: `test_main_coverage_extended.py` - Fixed race condition by draining broadcast messages before asserting control response
-- **P3**: No change needed - 8 server-dependent tests correctly skip when `RUN_SERVER_TESTS` not set
-- **P4**: `logger/logger.py` - Changed `logging.VERBOSE` to `self.VERBOSE_LEVEL` in `verbose()` method (Epic 3.6 CQ-001)
-- **P5**: `logger/logger.py` - Added null check for empty YAML files in `LoggingConfig._load_config()` (Epic 3.6 CQ-001)
-
-**Round 2:** Fixed additional test failures (5 skipping, 2 failing, 1 skipped, 1 race condition).
-
-**Round 2 Fixes:**
-
-- `main.py` - Added state message on `/ws/training` connect using `training_state.get_state()` format
-- `test_websocket_state.py` - Rewrote 7 tests to consume deterministic connect sequence; removed `requires_server` marker
-- `test_main_coverage.py`, `test_main_ws.py` - Updated ping-pong tests to drain 3rd connect message
-- `test_logger_coverage.py` - Removed skip marker from `test_verbose_logging`
-- `test_main_coverage_extended.py` - Fixed `test_unknown_command_returns_error` race condition
-- `conftest.py` - Extended `reset_singletons` to reset `demo_mode._demo_instance` singleton
-
-**Final result: 3,215 passed, 0 failed, 0 errors, 0 xfail, 37 skipped (all legitimate):**
-
-**See:** [notes/FIX_FAILING_TESTS.md](notes/FIX_FAILING_TESTS.md)
-
----
-
-### 2026-02-04: Test Suite & CI/CD Enhancement - Phase 2 Complete
-
-**Conftest Consolidation (Epic 2.1):**
-
-- Deleted duplicate `src/tests/fixtures/conftest.py`
-- Single conftest.py now serves as source of truth for all fixtures
-
-**Type Annotation Fixes (Epic 2.2):**
-
-- Fixed ConfigManager `__init__` type annotation to accept Path objects
-
-**Test Linting Enabled (Epic 2.3):**
-
-- Added separate flake8 hook for tests with relaxed configuration
-- Tests now linted with appropriate allowances (assert, random, higher complexity)
-
----
-
-### 2026-02-04: Test Suite & CI/CD Enhancement - Phase 1 Complete
-
-**Test Quality Improvements (Epic 1.1):**
-
-Eliminated all false-positive tests that used `assert True` patterns:
-
-- **test_button_responsiveness.py**: 4 tests now verify actual button behavior
-- **test_button_state.py**: 1 test now verifies actual state changes
-- **test_metrics_panel_coverage.py**: 1 test now verifies None handling
-- **test_dashboard_manager.py**: Fixed exception handling test pattern
-- **test_config_refactoring.py**: Converted to pytest.raises pattern
-- **test_candidate_visibility.py**: Converted from manual script to proper pytest
-
-**Test Organization Improvements (Epic 1.2):**
-
-Moved 5 non-test files from test directory to `util/verification/`:
-
-- `verify_yaml.py` - YAML configuration verification
-- `verify_dashboard_init.py` - Dashboard initialization verification
-- `verify_button_layout.py` - Button layout verification
-- `implementation_script.py` - Implementation test script
-- `verify_config_integration.py` - Config integration verification
-
-**CI/CD Security Improvements (Epic 1.3):**
-
-- Fixed Bandit security scan to properly fail on issues (removed `|| true`)
-- Fixed pip-audit to fail on vulnerabilities (changed from warning to error)
-- Added `.bandit.yml` configuration for security scan settings
-
-**See:** [TEST_SUITE_CICD_ENHANCEMENT_DEVELOPMENT_PLAN.md](notes/TEST_SUITE_CICD_ENHANCEMENT_DEVELOPMENT_PLAN.md)
-
----
-
-### 2026-02-01: CI/CD Parity Across All Juniper Applications
-
-**Complete CI/CD Standardization:**
-
-All three Juniper applications (JuniperCascor, JuniperData, JuniperCanopy) now use identical CI/CD settings:
-
-- **Line Length**: 512 for all linters (black, isort, flake8)
-- **Coverage Threshold**: 80% fail-under, 90% target
-- **Build Stage**: Added to PR CI for all applications
-- **yamllint**: Added to pre-commit for all applications
-- **mypy**: Fully enabled in CI for all applications
-- **Artifact Paths**: Standardized to reports/junit/, reports/htmlcov/, reports/coverage.xml
-- **Python Matrix**: 3.12, 3.13, 3.14
-
-**Files Updated:**
-
-- `.pre-commit-config.yaml` (v1.2.0)
-- `.github/workflows/ci.yml` (v0.12.0)
-- `pyproject.toml` (v0.2.3)
-
-**See:** `JuniperCascor/juniper_cascor/notes/JUNIPER_CASCOR_SPIRAL_DATA_GEN_REFACTOR_PLAN.md#15-cicd-parity-status` (external repo — see [pcalnon/juniper-cascor](https://github.com/pcalnon/juniper-cascor))
-
----
-
-### 2025-11-11: CI/CD Documentation Consolidation
-
-**Complete Reorganization:**
-
-- **Consolidated:** 12 CI/CD files → 4 focused documents in docs/ci_cd/
-- **New structure:**
-  - CICD_QUICK_START.md - 5-minute setup
-  - CICD_ENVIRONMENT_SETUP.md - Complete environment config
-  - CICD_MANUAL.md - Comprehensive usage guide
-  - CICD_REFERENCE.md - Technical reference
-- **Archived:** 8 legacy files to docs/history/ (2025-11-11)
-- **Result:** Cleaner navigation, reduced redundancy, single CI/CD location
-
-**See:** [docs/ci_cd/CONSOLIDATION_SUMMARY.md](docs/ci_cd/CONSOLIDATION_SUMMARY.md)
-
----
-
-### 2025-11-03: Complete Testing Infrastructure & CI/CD Implementation
-
-**Massive Testing Overhaul:**
-
-1. **Test Infrastructure Fixed (Task 1-2)**
-   - Created `src/tests/conftest.py` at root for fixture discovery
-   - Added singleton reset fixture for test isolation
-   - Fixed pytest configuration
-   - Eliminated all 21 fixture discovery errors
-   - Result: 100% test pass rate
-
-2. **WebSocket Implementation Fixed (Task 3)**
-   - Added connection confirmation to `/ws/control` endpoint
-   - Fixed demo mode initialization in test context
-   - Resolved epoch reset race condition
-   - Fixed command response handling
-   - Result: All 10 WebSocket tests passing
-
-3. **Frontend Testing Added (Task 4)**
-   - Created 73 new frontend component tests
-   - test_metrics_panel.py: 34 tests, 94% coverage
-   - test_network_visualizer.py: 26 tests, 81% coverage
-   - test_decision_boundary.py: 31 tests, 71% coverage
-   - test_dataset_plotter.py: 25 tests, 82% coverage
-   - test_dashboard_manager.py: 38 tests, 84% coverage
-   - Result: Frontend coverage 71-94% (up from 22-45%)
-
-4. **Complete CI/CD Pipeline (Task 5)**
-   - GitHub Actions workflow with 6-stage pipeline
-   - Multi-version Python testing (3.12, 3.13, 3.14)
-   - Pre-commit hooks (Black, isort, Flake8, MyPy, Bandit)
-   - Codecov integration
-   - Quality gates (60% min coverage, 100% pass rate)
-   - Result: Production-ready automation
-
-**Metrics:**
-
-- Test Errors: 21 → 0 (100% elimination)
-- Test Failures: 17 → 0 (100% resolution)
-- Tests Passing: 66 → 170+ (158% increase)
-- Coverage: 5% → 73% (1,360% increase)
-- Pass Rate: 58% → 100% (perfect)
-
-**Documentation Created:** 15+ files, 10,000+ lines
-
-**See:**
-
-- [notes/FINAL_STATUS_2025-11-03.md](notes/FINAL_STATUS_2025-11-03.md) - Complete status
-- [notes/TEST_FIXES_2025-11-03.md](notes/TEST_FIXES_2025-11-03.md) - Test fixes
-- [notes/CI_CD_IMPLEMENTATION_2025-11-03.md](notes/CI_CD_IMPLEMENTATION_2025-11-03.md) - CI/CD details
-- [docs/ci_cd/CICD_MANUAL.md](docs/ci_cd/CICD_MANUAL.md) - CI/CD complete guide
-- [docs/ci_cd/CONSOLIDATION_SUMMARY.md](docs/ci_cd/CONSOLIDATION_SUMMARY.md) - CI/CD docs consolidated (2025-11-11)
-
-### 2025-10-30: Pre-Deployment MVP Enhancements - Phase 2 Complete
-
-**All P1 Priority Items Implemented:**
-
-1. **Client-Side WebSocket (P1B)**
-   - Created `src/frontend/assets/websocket_client.js` for real-time push updates
-   - Dual WebSocket channels: `/ws/training` and `/ws/control`
-   - Automatic reconnection with exponential backoff
-   - <100ms latency for metrics updates
-   - Replaces HTTP polling with efficient push architecture
-
-2. **Training Controls (P1C)**
-   - Added pause/resume/reset methods to DemoMode
-   - Enhanced `/ws/control` endpoint for command handling
-   - Thread-safe control flow with Events
-   - Commands: start, stop, pause, resume, reset
-   - Real-time status broadcasting to clients
-
-3. **Comprehensive Testing (P1D)**
-   - Created `test_demo_mode_advanced.py` (13 tests)
-   - Created `test_config_manager_advanced.py` (12 tests)
-   - Created `test_websocket_control.py` (10 tests)
-   - 84% coverage for DemoMode (target 60%+ met)
-   - Thread safety and integration tests
-
-4. **Configuration Improvements (P1E)**
-   - Environment variable expansion (${VAR}, $VAR)
-   - Nested override collision handling
-   - Configuration validation with defaults
-   - Force reload support for tests
-   - Enhanced error handling and logging
-
-**Result:** ✅ MVP READY FOR DEPLOYMENT - All Phase 2 P1 items complete
-
-**See:**
-
-- [MVP_PRE_DEPLOYMENT_IMPLEMENTATION_2025-10-30.md](notes/MVP_PRE_DEPLOYMENT_IMPLEMENTATION_2025-10-30.md) - Complete implementation details
-- [DEVELOPMENT_ROADMAP.md](notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md) - Updated roadmap
-
-### 2025-10-29: Complete MVP Achievement
-
-**Three Critical Fixes Applied:**
-
-1. **Demo Script Python Interpreter** (Morning)
-   - Fixed demo script to use conda environment Python
-   - Added `exec "$CONDA_PREFIX/bin/python" -u main.py`
-   - Resolves: `ModuleNotFoundError: No module named 'uvicorn'`
-
-2. **Thread Safety & Architecture** (Morning)
-   - Added locks and events to DemoMode
-   - Implemented thread-safe WebSocket broadcasting
-   - Standardized metric key naming (`val_loss`, `val_accuracy`)
-   - Added bounded collections for memory management
-   - Improved error handling and logging
-
-3. **Dashboard Data Flow** (Afternoon)
-   - Fixed API URL construction in dashboard callbacks
-   - Added `_api_url()` helper using origin instead of host_url
-   - Resolves: "No data available" in all dashboard tabs
-   - All 4 tabs now display real-time data correctly
-
-**Result:** ✅ MVP FULLY FUNCTIONAL - All tabs display data
-
-**See:**
-
-- [REGRESSION_FIX_REPORT.md](notes/REGRESSION_FIX_REPORT.md) - Thread safety fixes
-- [MISSING_DATA_FIX_2025-10-29.md](notes/MISSING_DATA_FIX_2025-10-29.md) - Dashboard fix
-- [COMPLETE_FIX_SUMMARY_2025-10-29.md](notes/COMPLETE_FIX_SUMMARY_2025-10-29.md) - All fixes
-- [START_HERE.md](START_HERE.md) - Quick start guide
+<!-- Historical session log (2025-10 through 2026-02) removed — content was obsolete
+     with broken links to relocated/deleted files. Consult git history for details. -->
 
 ## WebSocket Message Schema
+
+<!-- Historical session log deleted — see git history for details -->
 
 All WebSocket messages follow a standardized schema for consistency. See `src/communication/websocket_manager.py` for detailed documentation and message builder functions.
 

@@ -20,6 +20,8 @@
 #
 #    Uses CROSS_REPO_DISPATCH_TOKEN (not GITHUB_TOKEN) so the push re-triggers CI.
 #
+#    /tmp/requirements.lock.check
+#
 # References:
 #    - Step 7.5.2: Dependency Update Workflow (POLYREPO_MIGRATION_PLAN.md)
 #####################################################################################################################################################################################################
@@ -47,10 +49,10 @@ jobs:
           token: ${{ secrets.CROSS_REPO_DISPATCH_TOKEN }}
           ref: ${{ github.ref }}
 
-      - name: Set up Python 3.13
+      - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
-          python-version: "3.13"
+          python-version: "3.14"
 
       - name: Install uv
         run: pip install uv
@@ -61,10 +63,14 @@ jobs:
           echo "║       Juniper Canopy - Regenerate Lockfile                 ║"
           echo "╚════════════════════════════════════════════════════════════╝"
 
+            # -o requirements.lock
+            #
           uv pip compile pyproject.toml \
             --extra juniper-data \
             --extra juniper-cascor \
-            -o requirements.lock
+            -o /tmp/requirements.lock.check
+
+          mv /tmp/requirements.lock.check requirements.lock
 
       - name: Commit updated lockfile
         run: |

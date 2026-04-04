@@ -214,8 +214,9 @@ repos:
           - --fix
         files: \.(md|markdown)$
         # Note: docs/ now included for linting (Epic 4.2.1)
-        # Excluding CHANGELOG.md (auto-generated format) and docs/history/
-        exclude: ^(CHANGELOG\.md|docs/history/)
+        # Excluding CHANGELOG.md (auto-generated format), docs/history/, and
+        # dependency header templates (used as YAML/requirements templates)
+        exclude: ^(CHANGELOG\.md|docs/history/|notes/.*_HEADER\.md)
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Shell Script Linting - shellcheck

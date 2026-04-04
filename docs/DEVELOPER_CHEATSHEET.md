@@ -193,7 +193,7 @@ Extended log levels: `TRACE (5)`, `VERBOSE (7)`, `DEBUG`, `INFO`, `WARNING`, `ER
 | Resource                              | Location                                                                 |
 |---------------------------------------|--------------------------------------------------------------------------|
 | Ecosystem cheatsheet                  | `../../juniper-ml/docs/DEVELOPER_CHEATSHEET.md`                          |
-| Parent ecosystem guide                | [../../CLAUDE.md](../../CLAUDE.md)                                       |
+| Parent ecosystem guide                | [../CLAUDE.md](../CLAUDE.md)                                             |
 | juniper-cascor-client (WebSocket)     | `../../juniper-cascor-client/docs/DEVELOPER_CHEATSHEET.md`               |
 | juniper-deploy (Docker orchestration) | `../../juniper-deploy/docs/DEVELOPER_CHEATSHEET.md`                      |
 | API Reference                         | [api/API_REFERENCE.md](api/API_REFERENCE.md)                             |
