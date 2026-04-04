@@ -403,7 +403,7 @@ class MetricsPanel(BaseComponent):
                     [
                         html.Div(
                             [
-                                html.H5("Current Iteration"),
+                                html.H5("Training Step"),
                                 html.H2(id=f"{self.component_id}-current-epoch", children="0", style={"color": "#007bff"}),
                             ],
                             className="metric-card",
@@ -1104,7 +1104,7 @@ class MetricsPanel(BaseComponent):
         grow_iter = state.get("grow_iteration")
         grow_max = state.get("grow_max")
         if grow_iter is not None and grow_max:
-            parts.append(f"Cascade Iteration {grow_iter}/{grow_max}")
+            parts.append(f"Growth Iteration {grow_iter}/{grow_max}")
 
         best_corr = state.get("best_correlation")
         if best_corr:

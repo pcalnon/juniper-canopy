@@ -579,10 +579,10 @@ class DashboardManager:
                                                                             dbc.Input(
                                                                                 id="nn-max-iterations-input",
                                                                                 type="number",
-                                                                                value=self.training_defaults.get("max_iterations", TrainingConstants.DEFAULT_MAX_ITERATIONS),
+                                                                                value=self.training_defaults.get("max_iterations", TrainingConstants.DEFAULT_MAX_GROWTH_ITERATIONS),
                                                                                 step=100,
-                                                                                min=TrainingConstants.MIN_MAX_ITERATIONS,
-                                                                                max=TrainingConstants.MAX_MAX_ITERATIONS,
+                                                                                min=TrainingConstants.MIN_MAX_GROWTH_ITERATIONS,
+                                                                                max=TrainingConstants.MAX_MAX_GROWTH_ITERATIONS,
                                                                                 className="mb-2",
                                                                                 debounce=True,
                                                                             ),
@@ -1186,6 +1186,8 @@ class DashboardManager:
                 dcc.Store(id="ws-metrics-buffer", data=[]),
                 # WebSocket real-time topology buffer (OI-2)
                 dcc.Store(id="ws-topology-buffer", data=None),
+                # WebSocket real-time state change buffer
+                dcc.Store(id="ws-state-buffer", data=None),
                 # Raw weight-oriented topology for heatmap view (OF-1)
                 dcc.Store(id="network-visualizer-raw-topology-store", data=None),
                 # Tooltips for parameter controls
@@ -1491,6 +1493,9 @@ class DashboardManager:
                             if (msg.type === 'topology' && msg.data) {
                                 window._juniper_ws_topology = msg.data;
                             }
+                            if (msg.type === 'state_change' && msg.data) {
+                                window._juniper_ws_state = msg.data;
+                            }
                         } catch(e) {}
                     };
                     ws.onclose = function() { window._juniper_ws = null; };
@@ -1522,16 +1527,47 @@ class DashboardManager:
             prevent_initial_call=True,
         )
 
+        # Clientside callback to drain WebSocket state buffer into Dash store.
+        # The WS onmessage handler stores the latest state_change in window._juniper_ws_state.
+        # This callback checks for it on each fast-interval tick and pushes it to the store.
+        self.app.clientside_callback(
+            """
+            function(n) {
+                if (window._juniper_ws_state) {
+                    var state = window._juniper_ws_state;
+                    window._juniper_ws_state = null;
+                    return state;
+                }
+                return window.dash_clientside.no_update;
+            }
+            """,
+            Output("ws-state-buffer", "data"),
+            Input("fast-update-interval", "n_intervals"),
+            prevent_initial_call=True,
+        )
+
         @self.app.callback(
             Output("parameters-panel-params-store", "data"),
             Input("applied-params-store", "data"),
             dash.dependencies.State("visualization-tabs", "active_tab"),
         )
         def update_parameters_panel_store(applied_data, active_tab):
-            """Propagate applied parameters to the parameters panel store."""
+            """Propagate applied parameters to the parameters panel store.
+
+            Strips nn_/cn_ prefixes so the parameters panel can look up
+            values by their unprefixed canonical names.
+            """
             if not applied_data:
                 return {}
-            return applied_data
+            stripped = {}
+            for key, value in applied_data.items():
+                if key.startswith("nn_"):
+                    stripped[key[3:]] = value
+                elif key.startswith("cn_"):
+                    stripped[key[3:]] = value
+                else:
+                    stripped[key] = value
+            return stripped
 
         @self.app.callback(
             Output("metrics-panel-metrics-store", "data"),
@@ -2265,7 +2301,7 @@ class DashboardManager:
                     html.Hr(),
                     html.P(
                         [
-                            html.Strong("Current Epoch: "),
+                            html.Strong("Training Step: "),
                             str(status.get("current_epoch", 0)),
                         ]
                     ),
@@ -2758,7 +2794,7 @@ class DashboardManager:
             return "enabled" in (v or [])
 
         params = {
-            "nn_max_iterations": int(nn_max_iter) if nn_max_iter is not None else TrainingConstants.DEFAULT_MAX_ITERATIONS,
+            "nn_max_iterations": int(nn_max_iter) if nn_max_iter is not None else TrainingConstants.DEFAULT_MAX_GROWTH_ITERATIONS,
             "nn_max_total_epochs": int(nn_max_epochs) if nn_max_epochs is not None else TrainingConstants.DEFAULT_TRAINING_EPOCHS,
             "nn_learning_rate": float(nn_lr) if nn_lr is not None else TrainingConstants.DEFAULT_LEARNING_RATE,
             "nn_max_hidden_units": int(nn_max_hu) if nn_max_hu is not None else TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS,
@@ -2836,7 +2872,7 @@ class DashboardManager:
             response = requests.get(self._api_url("/api/state"), timeout=DashboardConstants.API_TIMEOUT_SECONDS)
             if response.status_code == 200:
                 state = response.json()
-                nn_max_iter = state.get("nn_max_iterations", TrainingConstants.DEFAULT_MAX_ITERATIONS)
+                nn_max_iter = state.get("nn_max_iterations", TrainingConstants.DEFAULT_MAX_GROWTH_ITERATIONS)
                 nn_max_epochs = state.get("nn_max_total_epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS)
                 nn_lr = state.get("nn_learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE)
                 nn_max_hu = state.get("nn_max_hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)

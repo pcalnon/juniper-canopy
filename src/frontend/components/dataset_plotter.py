@@ -225,7 +225,7 @@ class DatasetPlotter(BaseComponent):
                 dcc.Graph(
                     id=f"{self.component_id}-distribution-plot",
                     config={"displayModeBar": False},
-                    style={"height": "30vh", "maxHeight": "450px", "minHeight": "200px"},
+                    style={"height": "30vh", "maxHeight": "450px", "minHeight": "250px"},
                 ),
                 # Dataset data store
                 dcc.Store(id=f"{self.component_id}-dataset-store", data=None),
@@ -532,7 +532,7 @@ class DatasetPlotter(BaseComponent):
         is_dark = theme == "dark"
         fig.update_layout(
             title="Feature Distributions",
-            height=300,
+            height=400,
             margin={"l": 40, "r": 20, "t": 60, "b": 40},
             template="plotly_dark" if is_dark else "plotly",
             plot_bgcolor="#242424" if is_dark else "#f8f9fa",

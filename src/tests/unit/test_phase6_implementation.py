@@ -66,6 +66,7 @@ def _make_demo():
     demo.training_state = None
     demo._update_training_status = MagicMock()
     demo._broadcast_metrics = MagicMock()
+    demo.current_iteration = 0
     return demo
 
 

@@ -14,7 +14,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-pytest.importorskip("juniper_cascor_client", reason="juniper-cascor-client not installed")
+_jcc = pytest.importorskip("juniper_cascor_client", reason="juniper-cascor-client not installed")
+if getattr(_jcc, "_is_stub", False):
+    pytest.skip("juniper-cascor-client is a test stub, not the real package", allow_module_level=True)
 
 from backend.cascor_service_adapter import CascorServiceAdapter, _ServiceTrainingMonitor
 

@@ -43,10 +43,10 @@ class TrainingConstants:
     MAX_TRAINING_EPOCHS: Final[int] = 10000000
     DEFAULT_TRAINING_EPOCHS: Final[int] = 1000000
 
-    # ── Neural Network: Maximum iterations (network growth and output training) ──
-    DEFAULT_MAX_ITERATIONS: Final[int] = 1000
-    MIN_MAX_ITERATIONS: Final[int] = 1
-    MAX_MAX_ITERATIONS: Final[int] = 100000
+    # ── Neural Network: Maximum growth iterations (hidden unit additions) ──
+    DEFAULT_MAX_GROWTH_ITERATIONS: Final[int] = 1000
+    MIN_MAX_GROWTH_ITERATIONS: Final[int] = 1
+    MAX_MAX_GROWTH_ITERATIONS: Final[int] = 100000
 
     # ── Neural Network: Learning rate ──
     DEFAULT_LEARNING_RATE: Final[float] = 0.01
