@@ -578,6 +578,7 @@ async def get_state():
         state["nn_growth_trigger"] = getattr(demo, "nn_growth_trigger", TrainingConstants.DEFAULT_GROWTH_TRIGGER)
         state["nn_growth_preset_epochs"] = getattr(demo, "nn_growth_preset_epochs", TrainingConstants.DEFAULT_PRESET_EPOCHS)
         state["nn_growth_convergence_threshold"] = getattr(demo, "nn_growth_convergence_threshold", TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD)
+        state["nn_patience"] = getattr(demo, "nn_patience", TrainingConstants.DEFAULT_PATIENCE)
         state["nn_spiral_rotations"] = getattr(demo, "nn_spiral_rotations", TrainingConstants.DEFAULT_SPIRAL_ROTATIONS)
         state["nn_spiral_number"] = getattr(demo, "nn_spiral_number", TrainingConstants.DEFAULT_SPIRAL_NUMBER)
         state["nn_dataset_elements"] = getattr(demo, "nn_dataset_elements", TrainingConstants.DEFAULT_DATASET_ELEMENTS)
@@ -587,6 +588,7 @@ async def get_state():
         state["cn_pool_size"] = getattr(demo, "cn_pool_size", TrainingConstants.DEFAULT_CANDIDATE_POOL_SIZE)
         state["cn_correlation_threshold"] = getattr(demo, "cn_correlation_threshold", TrainingConstants.DEFAULT_CANDIDATE_CORRELATION_THRESHOLD)
         state["cn_selected_candidates"] = getattr(demo, "cn_selected_candidates", TrainingConstants.DEFAULT_SELECTED_CANDIDATES)
+        state["cn_patience"] = getattr(demo, "cn_patience", TrainingConstants.DEFAULT_CN_PATIENCE)
         state["cn_training_complete"] = getattr(demo, "cn_training_complete", TrainingConstants.DEFAULT_CN_TRAINING_COMPLETE)
         state["cn_training_iterations"] = getattr(demo, "cn_training_iterations", TrainingConstants.DEFAULT_CANDIDATE_TRAINING_ITERATIONS)
         state["cn_training_convergence_threshold"] = getattr(demo, "cn_training_convergence_threshold", TrainingConstants.DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD)
@@ -611,6 +613,7 @@ async def get_state():
         state.setdefault("nn_growth_trigger", TrainingConstants.DEFAULT_GROWTH_TRIGGER)
         state.setdefault("nn_growth_preset_epochs", TrainingConstants.DEFAULT_PRESET_EPOCHS)
         state.setdefault("nn_growth_convergence_threshold", TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD)
+        state.setdefault("nn_patience", TrainingConstants.DEFAULT_PATIENCE)
         state.setdefault("nn_spiral_rotations", TrainingConstants.DEFAULT_SPIRAL_ROTATIONS)
         state.setdefault("nn_spiral_number", TrainingConstants.DEFAULT_SPIRAL_NUMBER)
         state.setdefault("nn_dataset_elements", TrainingConstants.DEFAULT_DATASET_ELEMENTS)
@@ -618,6 +621,7 @@ async def get_state():
         state.setdefault("cn_pool_size", TrainingConstants.DEFAULT_CANDIDATE_POOL_SIZE)
         state.setdefault("cn_correlation_threshold", TrainingConstants.DEFAULT_CANDIDATE_CORRELATION_THRESHOLD)
         state.setdefault("cn_selected_candidates", TrainingConstants.DEFAULT_SELECTED_CANDIDATES)
+        state.setdefault("cn_patience", TrainingConstants.DEFAULT_CN_PATIENCE)
         state.setdefault("cn_training_complete", TrainingConstants.DEFAULT_CN_TRAINING_COMPLETE)
         state.setdefault("cn_training_iterations", TrainingConstants.DEFAULT_CANDIDATE_TRAINING_ITERATIONS)
         state.setdefault("cn_training_convergence_threshold", TrainingConstants.DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD)
@@ -1972,6 +1976,7 @@ async def api_set_params(params: dict):
             "max_epochs": "nn_max_total_epochs",
             "convergence_enabled": "convergence_enabled",
             "convergence_threshold": "nn_growth_convergence_threshold",
+            "patience": "nn_patience",
             "spiral_rotations": "nn_spiral_rotations",
         }
         # Normalize old-style keys into prefixed keys (prefixed keys take precedence)
@@ -2001,6 +2006,7 @@ async def api_set_params(params: dict):
             "cn_candidate_learning_rate",
             "cn_patience",
             "cn_selected_candidates",
+            "cn_patience",
             "cn_training_complete",
             "cn_training_iterations",
             "cn_training_convergence_threshold",

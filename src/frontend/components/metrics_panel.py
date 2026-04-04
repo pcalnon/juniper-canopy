@@ -454,7 +454,7 @@ class MetricsPanel(BaseComponent):
                     children=[
                         html.Div(
                             [
-                                html.Small("Grow Iteration", style={"marginRight": "10px", "minWidth": "110px"}),
+                                html.Small("Cascade Iteration", style={"marginRight": "10px", "minWidth": "120px"}),
                                 dbc.Progress(
                                     id=f"{self.component_id}-grow-progress",
                                     value=0,
@@ -674,7 +674,7 @@ class MetricsPanel(BaseComponent):
                             dbc.CardHeader(
                                 html.Div(
                                     [
-                                        html.Span(f"Pool @ Epoch {epoch}", style={"fontWeight": "600"}),
+                                        html.Span(f"Pool @ Iteration {epoch}", style={"fontWeight": "600"}),
                                         html.Span(
                                             f" - Best: {top_id} ({top_score:.3f})",
                                             style={"color": "#6c757d", "fontSize": "12px"},
@@ -1652,7 +1652,7 @@ class MetricsPanel(BaseComponent):
         is_dark = theme == "dark"
         fig.update_layout(
             title="Training Loss Over Time",
-            xaxis_title="Epoch",
+            xaxis_title="Iteration",
             yaxis_title="Loss",
             hovermode="closest",
             showlegend=True,
@@ -1764,7 +1764,7 @@ class MetricsPanel(BaseComponent):
         is_dark = theme == "dark"
         fig.update_layout(
             title="Training Accuracy Over Time",
-            xaxis_title="Epoch",
+            xaxis_title="Iteration",
             yaxis_title="Accuracy",
             yaxis={"range": [0, 1.0]},
             hovermode="closest",

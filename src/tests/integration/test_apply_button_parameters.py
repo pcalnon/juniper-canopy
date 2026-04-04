@@ -162,6 +162,7 @@ class TestApplyButtonDashboardIntegration:
                     nn_growth_trigger="convergence",
                     nn_growth_epochs=50,
                     nn_growth_conv_thresh=0.001,
+                    nn_patience=50,
                     nn_spiral_rot=1.5,
                     nn_spiral_num=2,
                     nn_dataset_elem=1000,
@@ -172,6 +173,7 @@ class TestApplyButtonDashboardIntegration:
                     cn_training_complete="preset_epochs",
                     cn_training_iter=500,
                     cn_training_conv_thresh=0.0001,
+                    cn_patience=30,
                     cn_multi_cand=[],
                     cn_cand_selection=None,
                     cn_top_cands=1,
@@ -207,6 +209,7 @@ class TestApplyButtonDashboardIntegration:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -217,6 +220,7 @@ class TestApplyButtonDashboardIntegration:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
@@ -232,6 +236,7 @@ class TestApplyButtonDashboardIntegration:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -242,6 +247,7 @@ class TestApplyButtonDashboardIntegration:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -260,6 +266,7 @@ class TestApplyButtonDashboardIntegration:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -270,6 +277,7 @@ class TestApplyButtonDashboardIntegration:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -288,6 +296,7 @@ class TestApplyButtonDashboardIntegration:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -298,6 +307,7 @@ class TestApplyButtonDashboardIntegration:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -328,6 +338,7 @@ class TestApplyButtonDashboardIntegration:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -338,6 +349,7 @@ class TestApplyButtonDashboardIntegration:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
@@ -356,6 +368,7 @@ class TestApplyButtonDashboardIntegration:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -366,6 +379,7 @@ class TestApplyButtonDashboardIntegration:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -390,6 +404,7 @@ class TestApplyButtonDashboardIntegration:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -400,6 +415,7 @@ class TestApplyButtonDashboardIntegration:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
@@ -416,6 +432,7 @@ class TestApplyButtonDashboardIntegration:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -426,6 +443,7 @@ class TestApplyButtonDashboardIntegration:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -445,6 +463,7 @@ class TestApplyButtonDashboardIntegration:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -455,6 +474,7 @@ class TestApplyButtonDashboardIntegration:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -494,8 +514,8 @@ class TestApplyButtonDashboardIntegration:
             with manager.app.server.request_context(env):
                 result = manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-            # Result is a 23-tuple: (...22 values..., applied_dict)
-            applied = result[22]
+            # Result is a 25-tuple: (...24 values..., applied_dict)
+            applied = result[24]
             assert "nn_max_hidden_units" in applied
             assert "nn_max_total_epochs" in applied
             assert "nn_growth_trigger" in applied
@@ -594,6 +614,7 @@ class TestLearningRateApplyButtonP012:
                     nn_growth_trigger="convergence",
                     nn_growth_epochs=50,
                     nn_growth_conv_thresh=0.001,
+                    nn_patience=50,
                     nn_spiral_rot=1.5,
                     nn_spiral_num=2,
                     nn_dataset_elem=1000,
@@ -604,6 +625,7 @@ class TestLearningRateApplyButtonP012:
                     cn_training_complete="preset_epochs",
                     cn_training_iter=500,
                     cn_training_conv_thresh=0.0001,
+                    cn_patience=30,
                     cn_multi_cand=[],
                     cn_cand_selection=None,
                     cn_top_cands=1,
@@ -724,6 +746,7 @@ class TestConvergenceApplyRoundTrip:
                     nn_growth_trigger="convergence",
                     nn_growth_epochs=50,
                     nn_growth_conv_thresh=0.001,
+                    nn_patience=50,
                     nn_spiral_rot=1.5,
                     nn_spiral_num=2,
                     nn_dataset_elem=1000,
@@ -734,6 +757,7 @@ class TestConvergenceApplyRoundTrip:
                     cn_training_complete="preset_epochs",
                     cn_training_iter=500,
                     cn_training_conv_thresh=0.0001,
+                    cn_patience=30,
                     cn_multi_cand=[],
                     cn_cand_selection=None,
                     cn_top_cands=1,
@@ -741,7 +765,7 @@ class TestConvergenceApplyRoundTrip:
                 )
 
             assert params["nn_multi_node_layers"] is False
-            assert status == "✓ Parameters applied"
+            assert status == "Parameters applied"
 
     def test_apply_with_custom_threshold_stores_value(self, reset_singletons):
         """Applying with edited threshold stores the user's value, not the default."""
@@ -770,6 +794,7 @@ class TestConvergenceApplyRoundTrip:
                     nn_growth_trigger="convergence",
                     nn_growth_epochs=50,
                     nn_growth_conv_thresh=0.05,
+                    nn_patience=50,
                     nn_spiral_rot=1.5,
                     nn_spiral_num=2,
                     nn_dataset_elem=1000,
@@ -780,6 +805,7 @@ class TestConvergenceApplyRoundTrip:
                     cn_training_complete="preset_epochs",
                     cn_training_iter=500,
                     cn_training_conv_thresh=0.0001,
+                    cn_patience=30,
                     cn_multi_cand=[],
                     cn_cand_selection=None,
                     cn_top_cands=1,
@@ -805,6 +831,7 @@ class TestConvergenceApplyRoundTrip:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -815,6 +842,7 @@ class TestConvergenceApplyRoundTrip:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
@@ -830,6 +858,7 @@ class TestConvergenceApplyRoundTrip:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -840,6 +869,7 @@ class TestConvergenceApplyRoundTrip:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -864,6 +894,7 @@ class TestConvergenceApplyRoundTrip:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -874,6 +905,7 @@ class TestConvergenceApplyRoundTrip:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
@@ -889,6 +921,7 @@ class TestConvergenceApplyRoundTrip:
             "preset_epochs",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -899,6 +932,7 @@ class TestConvergenceApplyRoundTrip:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -923,6 +957,7 @@ class TestConvergenceApplyRoundTrip:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -933,6 +968,7 @@ class TestConvergenceApplyRoundTrip:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
@@ -948,6 +984,7 @@ class TestConvergenceApplyRoundTrip:
             "convergence",
             50,
             0.05,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -958,6 +995,7 @@ class TestConvergenceApplyRoundTrip:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,

@@ -950,6 +950,7 @@ class TestParameterTrackingHandler:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -960,12 +961,13 @@ class TestParameterTrackingHandler:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
             "cn_random_candidates": 1,
         }
-        disabled, status = manager._track_param_changes_handler(1000, 1000000, 0.01, 1000, [], "convergence", 50, 0.001, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, [], None, 1, 1, applied)
+        disabled, status = manager._track_param_changes_handler(1000, 1000000, 0.01, 1000, [], "convergence", 50, 0.001, 50, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, 30, [], None, 1, 1, applied)
 
         assert disabled is True  # Button disabled when no changes
         assert status is dash.no_update
@@ -985,6 +987,7 @@ class TestParameterTrackingHandler:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -995,12 +998,13 @@ class TestParameterTrackingHandler:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
             "cn_random_candidates": 1,
         }
-        disabled, status = manager._track_param_changes_handler(1000, 1000000, 0.05, 1000, [], "convergence", 50, 0.001, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, [], None, 1, 1, applied)
+        disabled, status = manager._track_param_changes_handler(1000, 1000000, 0.05, 1000, [], "convergence", 50, 0.001, 50, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, 30, [], None, 1, 1, applied)
 
         assert disabled is False  # Button enabled when changes exist
         assert "Unsaved" in status
@@ -1011,7 +1015,7 @@ class TestParameterTrackingHandler:
 
         manager = DashboardManager({})
 
-        disabled, status = manager._track_param_changes_handler(1000, 1000000, 0.01, 1000, [], "convergence", 50, 0.001, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, [], None, 1, 1, None)
+        disabled, status = manager._track_param_changes_handler(1000, 1000000, 0.01, 1000, [], "convergence", 50, 0.001, 50, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, 30, [], None, 1, 1, None)
 
         assert disabled is True
         assert status == ""
@@ -1039,11 +1043,11 @@ class TestApplyParametersHandler:
         env = builder.get_environ()
 
         with manager.app.server.request_context(env):
-            params, status = manager._apply_parameters_handler(1, 1000, 1000000, 0.02, 15, [], "convergence", 50, 0.001, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, [], None, 1, 1)
+            params, status = manager._apply_parameters_handler(1, 1000, 1000000, 0.02, 15, [], "convergence", 50, 0.001, 50, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, 30, [], None, 1, 1)
 
         assert params["nn_learning_rate"] == 0.02
         assert params["nn_max_hidden_units"] == 15
-        assert "✓" in status
+        assert "Parameters applied" in status
 
     @patch("requests.post")
     def test_apply_parameters_failure(self, mock_post, reset_singletons):
@@ -1064,10 +1068,10 @@ class TestApplyParametersHandler:
         env = builder.get_environ()
 
         with manager.app.server.request_context(env):
-            params, status = manager._apply_parameters_handler(1, 1000, 1000000, 0.02, 15, [], "convergence", 50, 0.001, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, [], None, 1, 1)
+            params, status = manager._apply_parameters_handler(1, 1000, 1000000, 0.02, 15, [], "convergence", 50, 0.001, 50, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, 30, [], None, 1, 1)
 
         assert params == dash.no_update
-        assert "❌" in status
+        assert "Error:" in status or "Failed" in status
 
     def test_apply_parameters_no_clicks(self, reset_singletons):
         """Test apply with no clicks returns no_update."""
@@ -1075,5 +1079,5 @@ class TestApplyParametersHandler:
 
         manager = DashboardManager({})
 
-        result = manager._apply_parameters_handler(None, 1000, 1000000, 0.01, 1000, [], "convergence", 50, 0.001, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, [], None, 1, 1)
+        result = manager._apply_parameters_handler(None, 1000, 1000000, 0.01, 1000, [], "convergence", 50, 0.001, 50, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, 30, [], None, 1, 1)
         assert result == (dash.no_update, dash.no_update)

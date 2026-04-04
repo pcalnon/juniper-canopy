@@ -1188,7 +1188,7 @@ class TestRegisteredCallbacks:
         if func := callbacks.get("render_candidate_history"):
             result = func([{"epoch": 42}])
             result_str = str(result)
-            assert "Pool @ Epoch 42" in result_str
+            assert "Pool @ Iteration 42" in result_str
 
     def test_render_candidate_history_single_entry_has_header(self, registered_callbacks):
         """Test render_candidate_history single entry includes Previous Pools header."""
@@ -1223,9 +1223,9 @@ class TestRegisteredCallbacks:
             ]
             result = func(history)
             result_str = str(result)
-            assert "Pool @ Epoch 50" in result_str
-            assert "Pool @ Epoch 40" in result_str
-            assert "Pool @ Epoch 30" in result_str
+            assert "Pool @ Iteration 50" in result_str
+            assert "Pool @ Iteration 40" in result_str
+            assert "Pool @ Iteration 30" in result_str
 
     def test_capture_view_state_no_trigger(self, registered_callbacks):
         """Test capture_view_state with no trigger."""

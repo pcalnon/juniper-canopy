@@ -797,6 +797,7 @@ class TestParameterHandlers:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -807,6 +808,7 @@ class TestParameterHandlers:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -829,6 +831,7 @@ class TestParameterHandlers:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -839,6 +842,7 @@ class TestParameterHandlers:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
@@ -853,6 +857,7 @@ class TestParameterHandlers:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -863,6 +868,7 @@ class TestParameterHandlers:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -883,6 +889,7 @@ class TestParameterHandlers:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -893,6 +900,7 @@ class TestParameterHandlers:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
@@ -907,6 +915,7 @@ class TestParameterHandlers:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -917,6 +926,7 @@ class TestParameterHandlers:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -937,6 +947,7 @@ class TestParameterHandlers:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -947,6 +958,7 @@ class TestParameterHandlers:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
@@ -961,6 +973,7 @@ class TestParameterHandlers:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -971,6 +984,7 @@ class TestParameterHandlers:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -991,6 +1005,7 @@ class TestParameterHandlers:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -1001,6 +1016,7 @@ class TestParameterHandlers:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
@@ -1015,6 +1031,7 @@ class TestParameterHandlers:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -1025,6 +1042,7 @@ class TestParameterHandlers:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -1047,6 +1065,7 @@ class TestParameterHandlers:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -1057,6 +1076,7 @@ class TestParameterHandlers:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
@@ -1071,6 +1091,7 @@ class TestParameterHandlers:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -1081,6 +1102,7 @@ class TestParameterHandlers:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -1104,6 +1126,7 @@ class TestParameterHandlers:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -1114,6 +1137,7 @@ class TestParameterHandlers:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -1139,6 +1163,7 @@ class TestParameterHandlers:
                 "convergence",
                 50,
                 0.001,
+                50,  # nn_patience
                 1.5,
                 2,
                 1000,
@@ -1149,6 +1174,7 @@ class TestParameterHandlers:
                 "preset_epochs",
                 500,
                 0.0001,
+                30,  # cn_patience
                 [],
                 None,
                 1,
@@ -1179,6 +1205,7 @@ class TestParameterHandlers:
                 "convergence",
                 50,
                 0.001,
+                50,  # nn_patience
                 1.5,
                 2,
                 1000,
@@ -1189,6 +1216,7 @@ class TestParameterHandlers:
                 "preset_epochs",
                 500,
                 0.0001,
+                30,  # cn_patience
                 [],
                 None,
                 1,
@@ -1214,6 +1242,7 @@ class TestParameterHandlers:
                 "convergence",
                 50,
                 0.001,
+                50,  # nn_patience
                 1.5,
                 2,
                 1000,
@@ -1224,6 +1253,7 @@ class TestParameterHandlers:
                 "preset_epochs",
                 500,
                 0.0001,
+                30,  # cn_patience
                 [],
                 None,
                 1,
@@ -1237,7 +1267,7 @@ class TestParameterHandlers:
         import dash
 
         result = dashboard_manager._init_params_from_backend_handler(1, {"nn_learning_rate": 0.01})
-        assert result == (dash.no_update,) * 23
+        assert result == (dash.no_update,) * 25
 
     def test_init_params_from_backend_success(self, dashboard_manager, mocker):
         """Test init_params_from_backend fetches from backend when empty."""
@@ -1254,14 +1284,14 @@ class TestParameterHandlers:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(1, None)
-            # 23-tuple: (nn_max_iter, nn_max_epochs, nn_lr, nn_max_hu, ...)
+            # 24-tuple: (nn_max_iter, nn_max_epochs, nn_lr, nn_max_hu, ...)
             assert result[2] == 0.02  # nn_learning_rate
             assert result[3] == 15  # nn_max_hidden_units
             assert result[1] == 300  # nn_max_total_epochs
             assert result[5] == "convergence"  # nn_growth_trigger
             assert result[7] == 0.001  # nn_growth_convergence_threshold
-            assert result[22]["nn_learning_rate"] == 0.02
-            assert result[22]["nn_growth_trigger"] == "convergence"
+            assert result[24]["nn_learning_rate"] == 0.02
+            assert result[24]["nn_growth_trigger"] == "convergence"
 
     def test_init_params_from_backend_error(self, dashboard_manager, mocker):
         """Test init_params_from_backend returns no_update on error."""
@@ -1271,7 +1301,7 @@ class TestParameterHandlers:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(1, None)
-            assert result == (dash.no_update,) * 23
+            assert result == (dash.no_update,) * 25
 
     def test_track_param_changes_none_values(self, dashboard_manager):
         """Test track_param_changes handles None values in float comparison."""
@@ -1284,6 +1314,7 @@ class TestParameterHandlers:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -1294,6 +1325,7 @@ class TestParameterHandlers:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
@@ -1308,6 +1340,7 @@ class TestParameterHandlers:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -1318,6 +1351,7 @@ class TestParameterHandlers:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -1337,6 +1371,7 @@ class TestParameterHandlers:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -1347,6 +1382,7 @@ class TestParameterHandlers:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
@@ -1361,6 +1397,7 @@ class TestParameterHandlers:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -1371,6 +1408,7 @@ class TestParameterHandlers:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,

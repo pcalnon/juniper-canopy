@@ -50,6 +50,7 @@ class TestB51CheckboxDoesNotRevertAfterApply:
                     nn_growth_trigger="convergence",
                     nn_growth_epochs=50,
                     nn_growth_conv_thresh=0.001,
+                    nn_patience=50,
                     nn_spiral_rot=1.5,
                     nn_spiral_num=2,
                     nn_dataset_elem=1000,
@@ -60,6 +61,7 @@ class TestB51CheckboxDoesNotRevertAfterApply:
                     cn_training_complete="preset_epochs",
                     cn_training_iter=500,
                     cn_training_conv_thresh=0.0001,
+                    cn_patience=30,
                     cn_multi_cand=[],
                     cn_cand_selection=None,
                     cn_top_cands=1,
@@ -83,6 +85,7 @@ class TestB51CheckboxDoesNotRevertAfterApply:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -93,6 +96,7 @@ class TestB51CheckboxDoesNotRevertAfterApply:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
@@ -108,6 +112,7 @@ class TestB51CheckboxDoesNotRevertAfterApply:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -118,6 +123,7 @@ class TestB51CheckboxDoesNotRevertAfterApply:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -169,6 +175,7 @@ class TestB52ThresholdDoesNotRevertAfterApply:
                     nn_growth_trigger="convergence",
                     nn_growth_epochs=50,
                     nn_growth_conv_thresh=0.05,
+                    nn_patience=50,
                     nn_spiral_rot=1.5,
                     nn_spiral_num=2,
                     nn_dataset_elem=1000,
@@ -179,6 +186,7 @@ class TestB52ThresholdDoesNotRevertAfterApply:
                     cn_training_complete="preset_epochs",
                     cn_training_iter=500,
                     cn_training_conv_thresh=0.0001,
+                    cn_patience=30,
                     cn_multi_cand=[],
                     cn_cand_selection=None,
                     cn_top_cands=1,
@@ -202,6 +210,7 @@ class TestB52ThresholdDoesNotRevertAfterApply:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.05,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -212,6 +221,7 @@ class TestB52ThresholdDoesNotRevertAfterApply:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
@@ -227,6 +237,7 @@ class TestB52ThresholdDoesNotRevertAfterApply:
             "convergence",
             50,
             0.05,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -237,6 +248,7 @@ class TestB52ThresholdDoesNotRevertAfterApply:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -271,6 +283,7 @@ class TestB52ThresholdDoesNotRevertAfterApply:
                         nn_growth_trigger="convergence",
                         nn_growth_epochs=50,
                         nn_growth_conv_thresh=threshold,
+                        nn_patience=50,
                         nn_spiral_rot=1.5,
                         nn_spiral_num=2,
                         nn_dataset_elem=1000,
@@ -281,6 +294,7 @@ class TestB52ThresholdDoesNotRevertAfterApply:
                         cn_training_complete="preset_epochs",
                         cn_training_iter=500,
                         cn_training_conv_thresh=0.0001,
+                        cn_patience=30,
                         cn_multi_cand=[],
                         cn_cand_selection=None,
                         cn_top_cands=1,
@@ -318,7 +332,7 @@ class TestB53NoPeriodicMetaParameterRefresh:
         # Simulate already-initialized state
         current_applied = {"learning_rate": 0.01, "max_hidden_units": 10}
         result = manager._init_params_from_backend_handler(n=1, current_applied=current_applied)
-        assert result == (dash.no_update,) * 23
+        assert result == (dash.no_update,) * 25
 
     @pytest.mark.regression
     def test_no_backend_params_store_in_layout(self, reset_singletons):
@@ -480,6 +494,7 @@ class TestB57StatusMessagePreserved:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -490,6 +505,7 @@ class TestB57StatusMessagePreserved:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
@@ -505,6 +521,7 @@ class TestB57StatusMessagePreserved:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -515,6 +532,7 @@ class TestB57StatusMessagePreserved:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -539,6 +557,7 @@ class TestB57StatusMessagePreserved:
             "nn_growth_trigger": "convergence",
             "nn_growth_preset_epochs": 50,
             "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
             "nn_spiral_rotations": 1.5,
             "nn_spiral_number": 2,
             "nn_dataset_elements": 1000,
@@ -549,6 +568,7 @@ class TestB57StatusMessagePreserved:
             "cn_training_complete": "preset_epochs",
             "cn_training_iterations": 500,
             "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
             "cn_multi_candidate": False,
             "cn_candidate_selection": None,
             "cn_top_candidates": 1,
@@ -564,6 +584,7 @@ class TestB57StatusMessagePreserved:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -574,6 +595,7 @@ class TestB57StatusMessagePreserved:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -607,6 +629,7 @@ class TestB57StatusMessagePreserved:
                     nn_growth_trigger="convergence",
                     nn_growth_epochs=50,
                     nn_growth_conv_thresh=0.001,
+                    nn_patience=50,
                     nn_spiral_rot=1.5,
                     nn_spiral_num=2,
                     nn_dataset_elem=1000,
@@ -617,6 +640,7 @@ class TestB57StatusMessagePreserved:
                     cn_training_complete="preset_epochs",
                     cn_training_iter=500,
                     cn_training_conv_thresh=0.0001,
+                    cn_patience=30,
                     cn_multi_cand=[],
                     cn_cand_selection=None,
                     cn_top_cands=1,
