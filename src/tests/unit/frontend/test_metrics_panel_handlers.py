@@ -836,7 +836,7 @@ class TestUpdateProgressDetailHandler:
         }
 
         result = metrics_panel._update_progress_detail_handler(state=state)
-        assert result == "Candidate Training | Iteration 2/10 | Best Corr: 0.9123 | Candidates: 3/8"
+        assert result == "Candidate Training | Growth Iteration 2/10 | Best Corr: 0.9123 | Candidates: 3/8"
 
     def test_formats_candidate_epoch_progress_segment(self, metrics_panel):
         """Should include candidate epoch progress text and percent."""
@@ -1162,7 +1162,7 @@ class TestRegisteredCallbacks:
             }
             result = func(state)
             assert "Candidate Training" in result
-            assert "Iteration 1/5" in result
+            assert "Growth Iteration 1/5" in result
 
     def test_render_candidate_history_empty(self, registered_callbacks):
         """Test render_candidate_history with empty history."""

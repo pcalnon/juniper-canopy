@@ -1104,7 +1104,7 @@ class MetricsPanel(BaseComponent):
         grow_iter = state.get("grow_iteration")
         grow_max = state.get("grow_max")
         if grow_iter is not None and grow_max:
-            parts.append(f"Iteration {grow_iter}/{grow_max}")
+            parts.append(f"Growth Iteration {grow_iter}/{grow_max}")
 
         best_corr = state.get("best_correlation")
         if best_corr:

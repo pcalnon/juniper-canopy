@@ -119,6 +119,50 @@ except ImportError:
     sys.modules["juniper_data_client.exceptions"] = _mock_jdc_exceptions
     print("[src/tests/conftest.py] juniper_data_client not installed; injected stub into sys.modules")
 
+# Inject stub juniper_cascor_client into sys.modules when not installed.
+# This allows lazy imports (e.g., in _update_topology_store_handler) to
+# resolve CascorServiceAdapter without the real client package.
+try:
+    import juniper_cascor_client  # noqa: F401
+except ImportError:
+    import types
+    from unittest.mock import MagicMock
+
+    class _JuniperCascorClientError(Exception):
+        pass
+
+    class _JuniperCascorConnectionError(_JuniperCascorClientError):
+        pass
+
+    class _JuniperCascorNotFoundError(_JuniperCascorClientError):
+        pass
+
+    _mock_jcc_exceptions = types.ModuleType("juniper_cascor_client.exceptions")
+    _mock_jcc_exceptions.JuniperCascorClientError = _JuniperCascorClientError
+    _mock_jcc_exceptions.JuniperCascorConnectionError = _JuniperCascorConnectionError
+    _mock_jcc_exceptions.JuniperCascorNotFoundError = _JuniperCascorNotFoundError
+
+    _mock_jcc_client = types.ModuleType("juniper_cascor_client.client")
+    _mock_jcc_client.JuniperCascorClient = MagicMock()
+
+    _mock_jcc = types.ModuleType("juniper_cascor_client")
+    _mock_jcc.JuniperCascorClient = MagicMock()  # type: ignore[attr-defined]
+    _mock_jcc.JuniperCascorClientError = _JuniperCascorClientError  # type: ignore[attr-defined]
+    _mock_jcc.CascorTrainingStream = MagicMock()  # type: ignore[attr-defined]
+    _mock_jcc.exceptions = _mock_jcc_exceptions  # type: ignore[attr-defined]
+    _mock_jcc.client = _mock_jcc_client  # type: ignore[attr-defined]
+    _mock_jcc.__version__ = "0.0.0-stub"  # type: ignore[attr-defined]
+    _mock_jcc._is_stub = True  # type: ignore[attr-defined]  # marker for tests that need the real package
+    _mock_jcc.__path__ = []  # type: ignore[attr-defined]  # make it a package so submodule imports work
+
+    sys.modules["juniper_cascor_client"] = _mock_jcc
+    sys.modules["juniper_cascor_client.exceptions"] = _mock_jcc_exceptions
+    sys.modules["juniper_cascor_client.client"] = _mock_jcc_client
+    # NOTE: Do NOT stub juniper_cascor_client.testing — tests that need
+    # FakeCascorClient should skip via pytest.importorskip() when the real
+    # package is absent.
+    print("[src/tests/conftest.py] juniper_cascor_client not installed; injected stub into sys.modules")
+
 
 def pytest_configure(config):
     """Configure pytest with custom markers and settings."""

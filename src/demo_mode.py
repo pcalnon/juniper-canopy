@@ -115,6 +115,7 @@ class MockCascorNetwork:
 
         # Training state
         self.current_epoch = 0
+        self.current_iteration = 0
         self.is_training = False
 
         # Dataset storage
@@ -1196,6 +1197,7 @@ class DemoMode:
             # Step 2b: Install candidate (BRIEF LOCK — modifies shared network state)
             with self._lock:
                 self.network.install_candidate(best_unit)
+                self.current_iteration += 1
                 hidden_count = len(self.network.hidden_units)
                 unit_index = hidden_count - 1
                 epoch_snapshot = self.current_epoch
@@ -1277,6 +1279,7 @@ class DemoMode:
             phase_name = self.state_machine.get_phase().name.lower()
             metrics = {
                 "epoch": self.current_epoch,
+                "iteration": self.current_iteration,
                 "metrics": {
                     "loss": float(loss),
                     "accuracy": float(accuracy),
@@ -1392,6 +1395,7 @@ class DemoMode:
     def _reset_state_and_history(self):
         # Reset all state for fresh run
         self.current_epoch = 0
+        self.current_iteration = 0
         self.current_loss = 1.0
         self.current_accuracy = 0.5
         self.metrics_history.clear()
