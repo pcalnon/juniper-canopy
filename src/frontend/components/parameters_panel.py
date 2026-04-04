@@ -46,7 +46,7 @@ from ..base_component import BaseComponent
 
 # Parameter definitions: (key, display_name, default, min, max)
 NETWORK_TRAINING_PARAMS = [
-    ("max_iterations", "Maximum Iterations", TrainingConstants.DEFAULT_MAX_ITERATIONS, TrainingConstants.MIN_MAX_ITERATIONS, TrainingConstants.MAX_MAX_ITERATIONS),
+    ("max_iterations", "Maximum Growth Iterations", TrainingConstants.DEFAULT_MAX_GROWTH_ITERATIONS, TrainingConstants.MIN_MAX_GROWTH_ITERATIONS, TrainingConstants.MAX_MAX_GROWTH_ITERATIONS),
     ("max_total_epochs", "Maximum Total Epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS, TrainingConstants.MIN_TRAINING_EPOCHS, TrainingConstants.MAX_TRAINING_EPOCHS),
     ("learning_rate", "Learning Rate", TrainingConstants.DEFAULT_LEARNING_RATE, TrainingConstants.MIN_LEARNING_RATE, TrainingConstants.MAX_LEARNING_RATE),
     ("max_hidden_units", "Maximum Hidden Units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS, TrainingConstants.MIN_HIDDEN_UNITS, TrainingConstants.MAX_HIDDEN_UNITS),

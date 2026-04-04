@@ -570,7 +570,7 @@ async def get_state():
         state["spiral_rotations"] = getattr(demo, "spiral_rotations", 3.0)
 
         # ── Neural Network meta-parameters ──
-        state["nn_max_iterations"] = getattr(demo, "nn_max_iterations", TrainingConstants.DEFAULT_MAX_ITERATIONS)
+        state["nn_max_iterations"] = getattr(demo, "nn_max_iterations", TrainingConstants.DEFAULT_MAX_GROWTH_ITERATIONS)
         state["nn_max_total_epochs"] = getattr(demo, "nn_max_total_epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS)
         state["nn_learning_rate"] = getattr(demo, "nn_learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE)
         state["nn_max_hidden_units"] = getattr(demo, "nn_max_hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)
@@ -603,7 +603,7 @@ async def get_state():
         state = training_state.get_state()
 
         # Populate all nn_*/cn_* keys with defaults first (dashboard reads all 22)
-        state.setdefault("nn_max_iterations", TrainingConstants.DEFAULT_MAX_ITERATIONS)
+        state.setdefault("nn_max_iterations", TrainingConstants.DEFAULT_MAX_GROWTH_ITERATIONS)
         state.setdefault("nn_max_total_epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS)
         state.setdefault("nn_learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE)
         state.setdefault("nn_max_hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)
@@ -1989,6 +1989,7 @@ async def api_set_params(params: dict):
             "nn_growth_trigger",
             "nn_growth_preset_epochs",
             "nn_growth_convergence_threshold",
+            "nn_patience",
             "nn_spiral_rotations",
             "nn_spiral_number",
             "nn_dataset_elements",
@@ -1997,6 +1998,8 @@ async def api_set_params(params: dict):
         cn_keys = [
             "cn_pool_size",
             "cn_correlation_threshold",
+            "cn_candidate_learning_rate",
+            "cn_patience",
             "cn_selected_candidates",
             "cn_training_complete",
             "cn_training_iterations",
@@ -2028,15 +2031,31 @@ async def api_set_params(params: dict):
             ts_updates["max_hidden_units"] = int(backend_updates["nn_max_hidden_units"])
         if "nn_max_total_epochs" in backend_updates:
             ts_updates["max_epochs"] = int(backend_updates["nn_max_total_epochs"])
+        if "cn_pool_size" in backend_updates:
+            ts_updates["candidate_pool_size"] = int(backend_updates["cn_pool_size"])
+        if "nn_growth_convergence_threshold" in backend_updates:
+            ts_updates["convergence_threshold"] = float(backend_updates["nn_growth_convergence_threshold"])
+        if "nn_patience" in backend_updates:
+            ts_updates["patience"] = int(backend_updates["nn_patience"])
+        if "cn_correlation_threshold" in backend_updates:
+            ts_updates["correlation_threshold"] = float(backend_updates["cn_correlation_threshold"])
+        if "cn_candidate_learning_rate" in backend_updates:
+            ts_updates["candidate_learning_rate"] = float(backend_updates["cn_candidate_learning_rate"])
+        # Forward all params to backend FIRST (offloaded to thread for sync backends)
+        result = await asyncio.to_thread(backend.apply_params, **backend_updates)
+        if isinstance(result, dict) and not result.get("ok", True):
+            error_msg = result.get("error", "unknown")
+            system_logger.warning(f"Backend parameter application failed: {error_msg}")
+            return JSONResponse({"error": f"Backend rejected parameters: {error_msg}"}, status_code=502)
+
+        # Only update TrainingState AFTER backend confirms success
         if ts_updates:
             training_state.update_state(**ts_updates)
-
-        # Forward all params to backend
-        backend.apply_params(**backend_updates)
         system_logger.info(f"Parameters updated: {backend_updates}")
 
-        # Broadcast state change
-        await websocket_manager.broadcast({"type": "state_change", "data": training_state.get_state()})
+        # Broadcast params update with applied parameters
+        broadcast_data = {**training_state.get_state(), "applied_params": backend_updates}
+        await websocket_manager.broadcast({"type": "params_updated", "data": broadcast_data})
 
         return {"status": "success", "state": training_state.get_state()}
     except Exception as e:
