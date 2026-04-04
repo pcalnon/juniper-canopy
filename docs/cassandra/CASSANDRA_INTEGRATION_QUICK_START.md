@@ -529,8 +529,8 @@ request_timeout: 20
 
 **To track implementation progress:**
 
-1. Check [DEVELOPMENT_ROADMAP.md](notes/DEVELOPMENT_ROADMAP.md)
-2. Review [CHANGELOG.md](CHANGELOG.md) for updates
+1. Check [DEVELOPMENT_ROADMAP.md](../notes/development/DEVELOPMENT_ROADMAP.md)
+2. Review [CHANGELOG.md](../CHANGELOG.md) for updates
 3. Monitor GitHub issues for Cassandra integration milestone
 
 ### For Developers
@@ -641,7 +641,7 @@ with open('metrics.json', 'w') as f:
 - **Phase 3:** Advanced queries and analytics
 
 **Track Progress:**
-Check [DEVELOPMENT_ROADMAP.md](notes/DEVELOPMENT_ROADMAP.md) for Cassandra implementation status.
+Check [DEVELOPMENT_ROADMAP.md](../notes/development/DEVELOPMENT_ROADMAP.md) for Cassandra implementation status.
 
 ---
 

@@ -49,10 +49,10 @@ jobs:
           token: ${{ secrets.CROSS_REPO_DISPATCH_TOKEN }}
           ref: ${{ github.ref }}
 
-      - name: Set up Python 3.14
+      - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
-          python-version: "3.14"
+          python-version: ["3.12", "3.13", "3.14"]
 
       - name: Install uv
         run: pip install uv
@@ -69,6 +69,7 @@ jobs:
             --extra juniper-data \
             --extra juniper-cascor \
             -o /tmp/requirements.lock.check
+
           mv /tmp/requirements.lock.check requirements.lock
 
       - name: Commit updated lockfile

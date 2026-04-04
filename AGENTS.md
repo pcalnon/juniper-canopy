@@ -1523,8 +1523,8 @@ Maintain consistent cross-references across documentation:
 
 Use relative markdown links with descriptive text:
 
-✓ See [Testing Quick Start](TESTING_QUICK_START.md) for setup
-✓ Refer to [API Reference](docs/API_REFERENCE.md) for details
+✓ See [Testing Quick Start](docs/testing/TESTING_QUICK_START.md) for setup
+✓ Refer to [API Reference](docs/api/API_REFERENCE.md) for details
 ✓ Check [Archive Index](notes/history/INDEX.md) for older versions
 
 ✗ See docs/API_REFERENCE.md
@@ -1653,13 +1653,13 @@ Before committing documentation changes:
 
 Use relative paths with descriptive link text:
 
-✓ [Quick Start Guide](QUICK_START.md)
-✓ [Testing Manual](TESTING_MANUAL.md)
+✓ [Quick Start Guide](docs/QUICK_START.md)
+✓ [Testing Manual](docs/testing/TESTING_MANUAL.md)
 ✓ [CI/CD Manual](docs/ci_cd/CICD_MANUAL.md)
 ✓ [CI/CD Quick Start](docs/ci_cd/CICD_QUICK_START.md)
 ✓ [Archive Index](notes/history/INDEX.md)
 
-✗ [Example Link](./docs/../TESTING_MANUAL.md)
+✗ `[Example Link](./docs/../TESTING_MANUAL.md)`
 ✗ See TESTING_MANUAL.md
 
 #### Section Links
@@ -1743,13 +1743,15 @@ All manuals and reference docs must include a table of contents:
 
 #### Document Table of Contents
 
-- [Installation](#installation link)
-- [Configuration](#configuration link)
-- [Usage](#usage link)
-  - [Basic Usage](#basic usage link)
-  - [Advanced Usage](#advanced usage link)
-- [Troubleshooting](#troubleshooting link)
-- [Reference](#reference link)
+```markdown
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+  - [Basic Usage](#basic-usage)
+  - [Advanced Usage](#advanced-usage)
+- [Troubleshooting](#troubleshooting)
+- [Reference](#reference)
+```
 
 **TOC Requirements:**
 
@@ -1840,8 +1842,10 @@ All documentation should include metadata:
 
 ##### Next Steps
 
+```markdown
 - [Full Manual](FEATURE_MANUAL.md)
 - [Reference](FEATURE_REFERENCE.md)
+```
 
 **Characteristics:**
 
@@ -1865,12 +1869,14 @@ All documentation should include metadata:
 
 ##### Table of Contents, Environment Setup
 
-- [System Requirements](#system-requirements: environment setup)
-- [Conda Environment](#conda-environment: environment setup)
-- [Dependencies](#dependencies: environment setup)
-- [Configuration](#configuration: environment setup)
-- [Verification](#verification: environment setup)
-- [Troubleshooting](#troubleshooting: environment setup)
+```markdown
+- [System Requirements](#system-requirements)
+- [Conda Environment](#conda-environment)
+- [Dependencies](#dependencies)
+- [Configuration](#configuration)
+- [Verification](#verification)
+- [Troubleshooting](#troubleshooting)
+```
 
 ##### System Requirements, Environment Setup
 
@@ -1921,14 +1927,16 @@ Common issues and solutions...
 
 ##### Table of Contents, User Manual
 
-- [Overview](#overview: user manual)
-- [Getting Started](#getting-started: user manual)
-- [Basic Usage](#basic-usage: user manual)
-- [Advanced Usage](#advanced-usage: user manual)
-- [Best Practices](#best-practices: user manual)
-- [Troubleshooting](#troubleshooting: user manual)
-- [Examples](#examples: user manual)
-- [Reference](#reference: user manual)
+```markdown
+- [Overview](#overview)
+- [Getting Started](#getting-started)
+- [Basic Usage](#basic-usage)
+- [Advanced Usage](#advanced-usage)
+- [Best Practices](#best-practices)
+- [Troubleshooting](#troubleshooting)
+- [Examples](#examples)
+- [Reference](#reference)
+```
 
 ##### Overview: User Manual
 
@@ -1986,10 +1994,12 @@ Links to technical reference...
 
 ##### Table of Contents: Reference
 
-- [API Reference](#api-reference: reference)
-- [Configuration](#configuration: docs)
-- [Commands](#commands: reference)
-- [Error Codes](#error-codes: reference)
+```markdown
+- [API Reference](#api-reference)
+- [Configuration](#configuration)
+- [Commands](#commands)
+- [Error Codes](#error-codes)
+```
 
 ##### API Reference: Reference
 
@@ -2092,8 +2102,8 @@ result = function_name(value1, value2)
 
 **Examples:**
 
-- [RELEASE_NOTES_v0.14.1-alpha.md](notes/RELEASE_NOTES_v0.14.1-alpha.md) - filelock TOCTOU vulnerability
-- [RELEASE_NOTES_v0.15.1-alpha.md](notes/RELEASE_NOTES_v0.15.1-alpha.md) - urllib3 decompression bomb vulnerability
+- [RELEASE_NOTES_v0.14.1-alpha.md](notes/releases/RELEASE_NOTES_v0.14.1-alpha.md) - filelock TOCTOU vulnerability
+- [RELEASE_NOTES_v0.15.1-alpha.md](notes/releases/RELEASE_NOTES_v0.15.1-alpha.md) - urllib3 decompression bomb vulnerability
 
 ## Update Triggers
 
@@ -2303,6 +2313,7 @@ mv "$ORIGINAL" "docs/history/$ARCHIVED"
 
 Add entry to `notes/history/INDEX.md`:
 
+```markdown
 ## 2025-11-04: Testing Documentation Split
 
 **Archived Files:**
@@ -2316,6 +2327,7 @@ Add entry to `notes/history/INDEX.md`:
     - [TESTING_ENVIRONMENT_SETUP.md](../TESTING_ENVIRONMENT_SETUP.md) - Environment config
     - [TESTING_REPORTS_COVERAGE.md](../TESTING_REPORTS_COVERAGE.md) - Coverage reports
   - Content: Comprehensive testing guide with all sections consolidated
+```
 
 **4. Add Redirect Notice:**
 
@@ -2323,13 +2335,13 @@ In replacement documentation, add note at top:
 
 ```markdown
 # Testing Quick Start
-```
 
 **Last Updated:** 2025-11-04
 **Version:** 1.0.0
 
 > **Note:** This document is part of the split testing documentation, replacing the consolidated guide
 > [Testing Guide](docs/history/TESTING_GUIDE_CONSOLIDATED_2025-11-04.md) archived on 2025-11-04.
+```
 
 **5. Update Cross-References:**
 
@@ -2471,8 +2483,8 @@ All new or modified code must meet these requirements before merging:
 
 ## Additional Resources
 
-- [Main Juniper Documentation](../../../docs/)
-- [CasCor Prototype](../../cascor/)
+- [Juniper Ecosystem Guide](../CLAUDE.md)
+- [CasCor Repository](../juniper-cascor/)
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
 - [Dash Documentation](https://dash.plotly.com/)
 - [WebSocket RFC](https://tools.ietf.org/html/rfc6455)
@@ -2504,11 +2516,15 @@ Worktrees are centralized in `/home/pcalnon/Development/python/Juniper/worktrees
 
 ## Recent Changes
 
-### 2026-02-05: Integration Development Plan - Comprehensive Assessment Complete
+See `git log --oneline -20` and [CHANGELOG.md](CHANGELOG.md) for recent changes.
 
-**Scope**: Evaluated 4 planning documents + rigorous source code review across JuniperCascor, JuniperCanopy, and JuniperData to consolidate all outstanding integration work.
+<!-- Historical session log (2025-10 through 2026-02) removed — content was obsolete
+     with broken links to relocated/deleted files. Consult git history for details. -->
 
-**Source Documents Evaluated**:
+## WebSocket Message Schema
+
+<!-- Deleted: historical session log content -->
+<!-- Source Documents Evaluated:
 
 - `JUNIPER_CASCOR_SPIRAL_DATA_GEN_REFACTOR_PLAN.md` (Phases 0-4 Complete, Phase 5 Deferred)
 - `INTEGRATION_ROADMAP.md` (Most issues RESOLVED)

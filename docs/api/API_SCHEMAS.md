@@ -904,6 +904,6 @@ Network connections are represented as:
 **See Also:**
 
 - [API Reference](API_REFERENCE.md) - Complete API documentation
-- [WebSocket Manager](../src/communication/websocket_manager.py) - WebSocket implementation
-- [Demo Mode](../src/demo_mode.py) - Demo mode implementation
-- [Main Application](../src/main.py) - Endpoint definitions
+- [WebSocket Manager](../../src/communication/websocket_manager.py) - WebSocket implementation
+- [Demo Mode](../../src/demo_mode.py) - Demo mode implementation
+- [Main Application](../../src/main.py) - Endpoint definitions

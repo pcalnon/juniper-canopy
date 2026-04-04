@@ -144,7 +144,7 @@ Determine which existing class best fits the constant:
 - **UI/Display-related** → `DashboardConstants`
 - **Server/Network-related** → `ServerConstants`
 
-If no class fits, consider creating a new class (see [Creating New Classes](#Example 2: Creating a New Constant Class)).
+If no class fits, consider creating a new class (see [Creating New Classes](#example-2-creating-a-new-constant-class)).
 
 ### Step 3: Name the Constant
 
