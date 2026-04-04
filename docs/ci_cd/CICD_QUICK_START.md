@@ -1,8 +1,8 @@
 # CI/CD Quick Start Guide
 
-**Last Updated:** 2026-01-29  
+**Last Updated:** 2026-04-04  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.25.0
+**Version:** 0.25.2
 
 ---
 
@@ -11,12 +11,12 @@
 - ✅ Conda environment activated (`JuniperPython`)
 - ✅ Dependencies installed (`pip install -r conf/requirements.txt`)
 - ✅ Git repository initialized
-- ✅ Python 3.11+ installed
+- ✅ Python 3.12+ installed
 
 **Verify:**
 
 ```bash
-python --version      # Should be 3.11+
+python --version      # Should be 3.12+
 pytest --version      # Should be 7.0+
 conda env list | grep JuniperPython  # Should show active
 ```
@@ -149,12 +149,15 @@ git push origin feature/your-branch
 
 ```bash
 CI/CD Pipeline
-├── ✓ Lint (Code Quality)              ~2 min
-├── ✓ Test Suite (Python 3.11)         ~8 min
-├── ✓ Test Suite (Python 3.12)         ~8 min
-├── ✓ Test Suite (Python 3.13)         ~8 min
-├── ✓ Build                            ~2 min
-├── ✓ Quality Gate                     ~30 sec
+├── ✓ Pre-commit (Python 3.12/3.13/3.14)  ~2-3 min
+├── ✓ Unit Tests + Coverage (3.12/3.13/3.14) ~8 min
+├── ✓ Integration Tests                   ~5 min
+├── ✓ Security Scans                      ~3-5 min
+├── ✓ Lockfile Freshness                  ~1 min
+├── ✓ Documentation Links                 ~1 min
+├── ✓ Docker Build & Smoke Test           ~3-6 min
+├── ✓ Build Distribution                  ~2 min
+├── ✓ Quality Gate                        ~30 sec
 └── ✓ Notify                           ~10 sec
 
 Total: ~10 minutes
@@ -179,7 +182,7 @@ Total: ~10 minutes
 
 - Settings → Branches → Add rule
 - ☑ Require pull request reviews
-- ☑ Require status checks (Test Suite Python 3.13, Quality Gate)
+- ☑ Require status checks (`Quality Gate` and other required jobs)
 - ☑ Require branches up to date
 
 ---
@@ -227,8 +230,8 @@ pytest tests/unit/test_demo_mode.py::test_name -vv
 
 ```bash
 # Test with CI Python version
-conda create -n test-py311 python=3.11
-conda activate test-py311
+conda create -n test-py312 python=3.12
+conda activate test-py312
 pip install -r conf/requirements.txt
 cd src && pytest tests/ -v
 ```

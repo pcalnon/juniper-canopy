@@ -73,7 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
 
   build:
     runs-on: ubuntu-latest
@@ -132,12 +132,12 @@ on:
       python-version:
         description: 'Python version to test'
         required: false
-        default: '3.13'
+        default: '3.14'
         type: choice
         options:
-          - '3.11'
           - '3.12'
           - '3.13'
+          - '3.14'
       skip-slow-tests:
         description: 'Skip slow tests'
         required: false
@@ -164,7 +164,7 @@ lint:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.13'
+        python-version: '3.14'
         cache: 'pip'
 
     - name: Install Linting Tools
@@ -206,7 +206,7 @@ test:
   strategy:
     fail-fast: false
     matrix:
-      python-version: ["3.11", "3.12", "3.13"]
+      python-version: ["3.12", "3.13", "3.14"]
 
   steps:
     - name: Checkout Code
@@ -310,10 +310,15 @@ test:
    - Manual dispatch
 
 3. **Job definitions**
-   - Lint
-   - Test (matrix)
+   - Pre-commit (matrix)
+   - Unit tests + coverage (matrix)
+   - Integration tests
+   - Security scans
    - Build
-   - Integration
+   - Dependency docs
+   - Lockfile freshness
+   - Documentation links
+   - Docker build + smoke test
    - Quality gate
    - Notify
 
@@ -416,7 +421,7 @@ ignore:
    ```toml
    [tool.black]
    line-length = 120
-   target-version = ['py311', 'py312', 'py313']
+   target-version = ['py312', 'py313']
    ```
 
 3. **isort configuration**
@@ -439,7 +444,7 @@ ignore:
 
    ```toml
    [tool.mypy]
-   python_version = "3.11"
+   python_version = "3.14"
    ignore_missing_imports = true
    ```
 
@@ -474,7 +479,7 @@ ignore:
 ```toml
 [tool.black]
 line-length = 120
-target-version = ['py311', 'py312', 'py313']
+target-version = ['py312', 'py313']
 include = '\.pyi?$'
 extend-exclude = '''
 /(
@@ -565,7 +570,7 @@ flake8 src/ --extend-ignore=E501,W503
 
 ```toml
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.14"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
@@ -1019,6 +1024,15 @@ grep "coverage" workflow.log | grep -i "low\|fail"
 
 ## Version History
 
+### Version 0.25.1 (2026-04-04)
+
+**CI observability and dependency alignment update:**
+
+- Updated Python CI matrix examples to 3.12/3.13/3.14.
+- Added coverage of the `Documentation Links` job (`scripts/check_doc_links.py` with `--cross-repo skip`).
+- Documented lockfile freshness behavior that compiles with `--extra observability` and compares lock bodies (excluding uv-generated header path differences).
+- Aligned tool configuration snippets with current `pyproject.toml` settings (`black` targets `py312`/`py313`, `mypy` uses Python 3.14).
+
 ### Version 1.0.0 (2025-11-05)
 
 **Initial release:**
@@ -1053,7 +1067,7 @@ grep "coverage" workflow.log | grep -i "low\|fail"
 
 ---
 
-**Last Updated:** 2026-01-29  
-**Version:** 0.25.0  
+**Last Updated:** 2026-04-04  
+**Version:** 0.25.1  
 **Maintained By:** Development Team  
 **Status:** ✅ Current

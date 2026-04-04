@@ -213,11 +213,14 @@ Add pause/resume functionality to demo mode
 
 1. Go to "Checks" tab on your PR
 2. Watch jobs complete:
-   - ✓ Lint (~2 min)
-   - ✓ Test Suite Python 3.11 (~8 min)
-   - ✓ Test Suite Python 3.12 (~8 min)
-   - ✓ Test Suite Python 3.13 (~8 min)
-   - ✓ Build (~2 min)
+   - ✓ Pre-commit (Python 3.12/3.13/3.14) (~2-3 min)
+   - ✓ Unit Tests + Coverage (Python 3.12/3.13/3.14) (~8 min each, parallel)
+   - ✓ Integration Tests (~5 min)
+   - ✓ Security Scans (~3-5 min)
+   - ✓ Lockfile Freshness (~1 min)
+   - ✓ Documentation Links (~1 min)
+   - ✓ Build Distribution (~2 min)
+   - ✓ Docker Build & Smoke Test (~3-6 min)
    - ✓ Quality Gate (~30 sec)
 
 **If CI fails:**
@@ -463,24 +466,24 @@ pytest tests/ --cov=. --cov-report=term
 python --version  # Local
 
 # 2. Test with CI Python versions
-conda create -n test-py311 python=3.11
-conda activate test-py311
+conda create -n test-py312 python=3.12
+conda activate test-py312
 pip install -r conf/requirements.txt
 cd src && pytest tests/ -v
 
-# 3. Identify issue (e.g., Python 3.11 incompatibility)
+# 3. Identify issue (e.g., Python 3.12+ incompatibility)
 
 # 4. Fix
 vim src/problematic_file.py
 
 # 5. Test with all versions
-for ver in 3.11 3.12 3.13; do
+for ver in 3.12 3.13 3.14; do
     conda activate test-py${ver}
     pytest tests/ -v
 done
 
 # 6. Commit fix
-git commit -am "fix: Ensure compatibility with Python 3.11+"
+git commit -am "fix: Ensure compatibility with Python 3.12+"
 git push
 ```
 
@@ -961,16 +964,16 @@ ignore:
 **Matrix:**
 
 ```yaml
-python-version: ["3.11", "3.12", "3.13"]
+python-version: ["3.12", "3.13", "3.14"]
 ```
 
 **For each version:**
 
-1. Set up Conda environment
-2. Install dependencies
+1. Set up Python with `actions/setup-python`
+2. Install dependencies from `conf/requirements_ci.txt`
 3. Run pytest with coverage
 4. Generate reports (XML, HTML, JUnit)
-5. Upload to Codecov
+5. Install the project in editable mode (`pip install -e .`)
 6. Upload artifacts
 7. Check coverage threshold
 
@@ -979,7 +982,7 @@ python-version: ["3.11", "3.12", "3.13"]
 **Failure conditions:**
 
 - Any test fails
-- Coverage <60%
+- Coverage <80%
 - Collection errors
 
 ### Build Stage
@@ -1015,6 +1018,39 @@ python-version: ["3.11", "3.12", "3.13"]
 **Failure conditions:**
 
 - Integration test failures
+
+### Lockfile Freshness Stage
+
+**Purpose:** Ensure `requirements.lock` matches the dependency graph in `pyproject.toml`.
+
+**Checks:**
+
+1. Recompile lockfile using:
+   - `--extra juniper-data`
+   - `--extra juniper-cascor`
+   - `--extra observability`
+2. Compare generated lockfile body to `requirements.lock` (header stripped to avoid path-only diffs)
+
+**Failure conditions:**
+
+- Lockfile drift detected
+- Missing extras in compile command
+
+### Documentation Links Stage
+
+**Purpose:** Validate internal markdown links as part of the quality gate.
+
+**Checks:**
+
+1. Runs `python scripts/check_doc_links.py`
+2. Excludes archival/template and release-note trees in CI
+3. Uses `--cross-repo skip` for CI-safe validation in isolated runners
+
+**Failure conditions:**
+
+- Broken internal file links
+- Broken same-file anchors
+- Invalid relative traversal patterns detected by link checker
 
 ### Quality Gate Stage
 
@@ -1097,13 +1133,16 @@ Status:       ✅ Pass
 **Build times:**
 
 ```bash
-Lint:         2 min
-Test (3.11):  8 min
+Pre-commit:   2-3 min
 Test (3.12):  8 min
 Test (3.13):  8 min
-Build:        2 min
+Test (3.14):  8 min
+Security:     3-5 min
+Lockfile:     ~1 min
+Docs Links:   ~1 min
+Build:        ~2 min
 Integration:  5 min
-Total:        ~15 min (with parallelization)
+Total:        ~15-18 min (with parallelization)
 ```
 
 **Targets:**
@@ -1385,14 +1424,14 @@ def test_long_running_operation():
 
 ```yaml
 matrix:
-  python-version: ["3.11", "3.12", "3.13"]
+  python-version: ["3.12", "3.13", "3.14"]
 ```
 
 **After:** Primary version + periodic full matrix
 
 ```yaml
 matrix:
-  python-version: ["3.13"]  # Fast feedback
+  python-version: ["3.14"]  # Fast feedback
 
 # Full matrix on:
 # - Pull requests to main
@@ -1684,6 +1723,6 @@ Fix by: 2025-11-12
 
 ---
 
-**Last Updated:** 2026-03-30  
-**Version:** 0.25.1  
+**Last Updated:** 2026-04-04  
+**Version:** 0.25.2  
 **Status:** ✅ Complete
