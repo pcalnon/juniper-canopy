@@ -456,11 +456,11 @@ class DashboardManager:
                                                             " | ",
                                                             style={"color": "#6c757d", "marginRight": "8px"},
                                                         ),
-                                                        # Hidden Units display
+                                                        # Iteration (Hidden Units) display
                                                         html.Span(
                                                             [
                                                                 html.Span(
-                                                                    "Hidden Units: ",
+                                                                    "Iteration: ",
                                                                     style={"color": "#6c757d"},
                                                                 ),
                                                                 html.Span(
@@ -710,6 +710,24 @@ class DashboardManager:
                                                                                             ],
                                                                                             id="nn-growth-convergence-threshold-container",
                                                                                         ),
+                                                                                        html.Div(
+                                                                                            [
+                                                                                                html.P("Patience (epochs):", className="mb-1 ms-4"),
+                                                                                                dbc.Input(
+                                                                                                    id="nn-patience-input",
+                                                                                                    type="number",
+                                                                                                    value=TrainingConstants.DEFAULT_PATIENCE,
+                                                                                                    step=1,
+                                                                                                    min=TrainingConstants.MIN_PATIENCE,
+                                                                                                    max=TrainingConstants.MAX_PATIENCE,
+                                                                                                    className="mb-2 ms-4",
+                                                                                                    debounce=True,
+                                                                                                    disabled=False,
+                                                                                                    style={"width": "calc(100% - 1.5rem)"},
+                                                                                                ),
+                                                                                            ],
+                                                                                            id="nn-patience-container",
+                                                                                        ),
                                                                                     ]
                                                                                 ),
                                                                                 id="ctx-growth-triggers-collapse",
@@ -912,6 +930,24 @@ class DashboardManager:
                                                                                                 ),
                                                                                             ],
                                                                                             id="cn-training-convergence-threshold-container",
+                                                                                        ),
+                                                                                        html.Div(
+                                                                                            [
+                                                                                                html.P("Patience (epochs):", className="mb-1 ms-4"),
+                                                                                                dbc.Input(
+                                                                                                    id="cn-patience-input",
+                                                                                                    type="number",
+                                                                                                    value=TrainingConstants.DEFAULT_CN_PATIENCE,
+                                                                                                    step=1,
+                                                                                                    min=TrainingConstants.MIN_CN_PATIENCE,
+                                                                                                    max=TrainingConstants.MAX_CN_PATIENCE,
+                                                                                                    className="mb-2 ms-4",
+                                                                                                    debounce=True,
+                                                                                                    disabled=False,
+                                                                                                    style={"width": "calc(100% - 1.5rem)"},
+                                                                                                ),
+                                                                                            ],
+                                                                                            id="cn-patience-container",
                                                                                         ),
                                                                                     ]
                                                                                 ),
@@ -1826,7 +1862,7 @@ class DashboardManager:
                 Output("params-status", "children"),
             ],
             [
-                # Neural Network (12)
+                # Neural Network (13)
                 Input("nn-max-iterations-input", "value"),
                 Input("nn-max-total-epochs-input", "value"),
                 Input("nn-learning-rate-input", "value"),
@@ -1835,6 +1871,7 @@ class DashboardManager:
                 Input("nn-growth-trigger-radio", "value"),
                 Input("nn-growth-preset-epochs-input", "value"),
                 Input("nn-growth-convergence-threshold-input", "value"),
+                Input("nn-patience-input", "value"),
                 Input("nn-spiral-rotations-input", "value"),
                 Input("nn-spiral-number-input", "value"),
                 Input("nn-dataset-elements-input", "value"),
@@ -1846,6 +1883,7 @@ class DashboardManager:
                 Input("cn-training-complete-radio", "value"),
                 Input("cn-training-iterations-input", "value"),
                 Input("cn-training-convergence-threshold-input", "value"),
+                Input("cn-patience-input", "value"),
                 Input("cn-multi-candidate-checkbox", "value"),
                 Input("cn-candidate-selection-radio", "value"),
                 Input("cn-top-candidates-input", "value"),
@@ -1863,6 +1901,7 @@ class DashboardManager:
             nn_growth_trigger,
             nn_growth_epochs,
             nn_growth_conv_thresh,
+            nn_patience,
             nn_spiral_rot,
             nn_spiral_num,
             nn_dataset_elem,
@@ -1873,6 +1912,7 @@ class DashboardManager:
             cn_training_complete,
             cn_training_iter,
             cn_training_conv_thresh,
+            cn_patience,
             cn_multi_cand,
             cn_cand_selection,
             cn_top_cands,
@@ -1889,6 +1929,7 @@ class DashboardManager:
                 nn_growth_trigger,
                 nn_growth_epochs,
                 nn_growth_conv_thresh,
+                nn_patience,
                 nn_spiral_rot,
                 nn_spiral_num,
                 nn_dataset_elem,
@@ -1899,6 +1940,7 @@ class DashboardManager:
                 cn_training_complete,
                 cn_training_iter,
                 cn_training_conv_thresh,
+                cn_patience,
                 cn_multi_cand,
                 cn_cand_selection,
                 cn_top_cands,
@@ -1915,7 +1957,7 @@ class DashboardManager:
             ],
             Input("apply-params-button", "n_clicks"),
             [
-                # Neural Network (12)
+                # Neural Network (13)
                 dash.dependencies.State("nn-max-iterations-input", "value"),
                 dash.dependencies.State("nn-max-total-epochs-input", "value"),
                 dash.dependencies.State("nn-learning-rate-input", "value"),
@@ -1924,6 +1966,7 @@ class DashboardManager:
                 dash.dependencies.State("nn-growth-trigger-radio", "value"),
                 dash.dependencies.State("nn-growth-preset-epochs-input", "value"),
                 dash.dependencies.State("nn-growth-convergence-threshold-input", "value"),
+                dash.dependencies.State("nn-patience-input", "value"),
                 dash.dependencies.State("nn-spiral-rotations-input", "value"),
                 dash.dependencies.State("nn-spiral-number-input", "value"),
                 dash.dependencies.State("nn-dataset-elements-input", "value"),
@@ -1935,6 +1978,7 @@ class DashboardManager:
                 dash.dependencies.State("cn-training-complete-radio", "value"),
                 dash.dependencies.State("cn-training-iterations-input", "value"),
                 dash.dependencies.State("cn-training-convergence-threshold-input", "value"),
+                dash.dependencies.State("cn-patience-input", "value"),
                 dash.dependencies.State("cn-multi-candidate-checkbox", "value"),
                 dash.dependencies.State("cn-candidate-selection-radio", "value"),
                 dash.dependencies.State("cn-top-candidates-input", "value"),
@@ -1952,6 +1996,7 @@ class DashboardManager:
             nn_growth_trigger,
             nn_growth_epochs,
             nn_growth_conv_thresh,
+            nn_patience,
             nn_spiral_rot,
             nn_spiral_num,
             nn_dataset_elem,
@@ -1962,6 +2007,7 @@ class DashboardManager:
             cn_training_complete,
             cn_training_iter,
             cn_training_conv_thresh,
+            cn_patience,
             cn_multi_cand,
             cn_cand_selection,
             cn_top_cands,
@@ -1978,6 +2024,7 @@ class DashboardManager:
                 nn_growth_trigger,
                 nn_growth_epochs,
                 nn_growth_conv_thresh,
+                nn_patience,
                 nn_spiral_rot,
                 nn_spiral_num,
                 nn_dataset_elem,
@@ -1988,6 +2035,7 @@ class DashboardManager:
                 cn_training_complete,
                 cn_training_iter,
                 cn_training_conv_thresh,
+                cn_patience,
                 cn_multi_cand,
                 cn_cand_selection,
                 cn_top_cands,
@@ -1998,7 +2046,7 @@ class DashboardManager:
 
         @self.app.callback(
             [
-                # Neural Network (12)
+                # Neural Network (13)
                 Output("nn-max-iterations-input", "value"),
                 Output("nn-max-total-epochs-input", "value"),
                 Output("nn-learning-rate-input", "value"),
@@ -2007,6 +2055,7 @@ class DashboardManager:
                 Output("nn-growth-trigger-radio", "value"),
                 Output("nn-growth-preset-epochs-input", "value"),
                 Output("nn-growth-convergence-threshold-input", "value"),
+                Output("nn-patience-input", "value"),
                 Output("nn-spiral-rotations-input", "value"),
                 Output("nn-spiral-number-input", "value"),
                 Output("nn-dataset-elements-input", "value"),
@@ -2018,6 +2067,7 @@ class DashboardManager:
                 Output("cn-training-complete-radio", "value"),
                 Output("cn-training-iterations-input", "value"),
                 Output("cn-training-convergence-threshold-input", "value"),
+                Output("cn-patience-input", "value"),
                 Output("cn-multi-candidate-checkbox", "value", allow_duplicate=True),
                 Output("cn-candidate-selection-radio", "value"),
                 Output("cn-top-candidates-input", "value"),
@@ -2217,6 +2267,12 @@ class DashboardManager:
                         [
                             html.Strong("Current Epoch: "),
                             str(status.get("current_epoch", 0)),
+                        ]
+                    ),
+                    html.P(
+                        [
+                            html.Strong("Current Iteration: "),
+                            str(status.get("hidden_units", 0)),
                         ]
                     ),
                     html.P(
@@ -2587,6 +2643,7 @@ class DashboardManager:
         nn_growth_trigger,
         nn_growth_epochs,
         nn_growth_conv_thresh,
+        nn_patience,
         nn_spiral_rot,
         nn_spiral_num,
         nn_dataset_elem,
@@ -2597,6 +2654,7 @@ class DashboardManager:
         cn_training_complete,
         cn_training_iter,
         cn_training_conv_thresh,
+        cn_patience,
         cn_multi_cand,
         cn_cand_selection,
         cn_top_cands,
@@ -2627,6 +2685,7 @@ class DashboardManager:
             (nn_growth_trigger, "nn_growth_trigger", "str"),
             (nn_growth_epochs, "nn_growth_preset_epochs", "int"),
             (nn_growth_conv_thresh, "nn_growth_convergence_threshold", "float"),
+            (nn_patience, "nn_patience", "int"),
             (nn_spiral_rot, "nn_spiral_rotations", "float"),
             (nn_spiral_num, "nn_spiral_number", "int"),
             (nn_dataset_elem, "nn_dataset_elements", "int"),
@@ -2637,6 +2696,7 @@ class DashboardManager:
             (cn_training_complete, "cn_training_complete", "str"),
             (cn_training_iter, "cn_training_iterations", "int"),
             (cn_training_conv_thresh, "cn_training_convergence_threshold", "float"),
+            (cn_patience, "cn_patience", "int"),
             (cn_multi_cand, "cn_multi_candidate", "bool_checkbox"),
             (cn_cand_selection, "cn_candidate_selection", "str"),
             (cn_top_cands, "cn_top_candidates", "int"),
@@ -2673,6 +2733,7 @@ class DashboardManager:
         nn_growth_trigger,
         nn_growth_epochs,
         nn_growth_conv_thresh,
+        nn_patience,
         nn_spiral_rot,
         nn_spiral_num,
         nn_dataset_elem,
@@ -2683,6 +2744,7 @@ class DashboardManager:
         cn_training_complete,
         cn_training_iter,
         cn_training_conv_thresh,
+        cn_patience,
         cn_multi_cand,
         cn_cand_selection,
         cn_top_cands,
@@ -2704,6 +2766,7 @@ class DashboardManager:
             "nn_growth_trigger": nn_growth_trigger or TrainingConstants.DEFAULT_GROWTH_TRIGGER,
             "nn_growth_preset_epochs": int(nn_growth_epochs) if nn_growth_epochs is not None else TrainingConstants.DEFAULT_PRESET_EPOCHS,
             "nn_growth_convergence_threshold": float(nn_growth_conv_thresh) if nn_growth_conv_thresh is not None else TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD,
+            "nn_patience": int(nn_patience) if nn_patience is not None else TrainingConstants.DEFAULT_PATIENCE,
             "nn_spiral_rotations": float(nn_spiral_rot) if nn_spiral_rot is not None else TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
             "nn_spiral_number": int(nn_spiral_num) if nn_spiral_num is not None else TrainingConstants.DEFAULT_SPIRAL_NUMBER,
             "nn_dataset_elements": int(nn_dataset_elem) if nn_dataset_elem is not None else TrainingConstants.DEFAULT_DATASET_ELEMENTS,
@@ -2714,26 +2777,59 @@ class DashboardManager:
             "cn_training_complete": cn_training_complete or TrainingConstants.DEFAULT_CN_TRAINING_COMPLETE,
             "cn_training_iterations": int(cn_training_iter) if cn_training_iter is not None else TrainingConstants.DEFAULT_CANDIDATE_TRAINING_ITERATIONS,
             "cn_training_convergence_threshold": float(cn_training_conv_thresh) if cn_training_conv_thresh is not None else TrainingConstants.DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD,
+            "cn_patience": int(cn_patience) if cn_patience is not None else TrainingConstants.DEFAULT_CN_PATIENCE,
             "cn_multi_candidate": checkbox_to_bool(cn_multi_cand),
             "cn_candidate_selection": cn_cand_selection,
             "cn_top_candidates": int(cn_top_cands) if cn_top_cands is not None else TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT,
             "cn_random_candidates": int(cn_random_cands) if cn_random_cands is not None else TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT,
         }
 
-        try:
-            response = requests.post(self._api_url("/api/set_params"), json=params, timeout=2)
-            if response.status_code == 200:
-                self.logger.info(f"Parameters applied: {params}")
-                return params, "✓ Parameters applied"
-            self.logger.warning(f"Failed to apply: {response.status_code} {response.text}")
-            return dash.no_update, "❌ Failed to apply"
-        except Exception as e:
-            self.logger.warning(f"Apply failed: {e}")
-            return dash.no_update, f"❌ Error: {str(e)[:30]}"
+        max_retries = 3
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(self._api_url("/api/set_params"), json=params, timeout=10)
+                if response.status_code == 200:
+                    # Verify parameters were applied by reading back state
+                    try:
+                        verify_resp = requests.get(self._api_url("/api/state"), timeout=5)
+                        if verify_resp.status_code == 200:
+                            backend_state = verify_resp.json()
+                            mismatched = []
+                            for key, value in params.items():
+                                backend_val = backend_state.get(key)
+                                if backend_val is not None and str(backend_val) != str(value):
+                                    mismatched.append(key)
+                            if mismatched:
+                                self.logger.warning(f"Parameter verification: {len(mismatched)} params not confirmed: {mismatched}")
+                    except Exception as ve:
+                        self.logger.debug(f"Parameter verification skipped: {ve}")
+                    self.logger.info(f"Parameters applied (attempt {attempt + 1}): {params}")
+                    return params, "Parameters applied"
+                elif response.status_code == 429:
+                    last_error = "Rate limited (429)"
+                    self.logger.warning(f"Rate limited on attempt {attempt + 1}, retrying...")
+                    import time as _time
+
+                    _time.sleep(0.5 * (attempt + 1))
+                    continue
+                else:
+                    self.logger.warning(f"Failed to apply: {response.status_code} {response.text}")
+                    return dash.no_update, f"Failed to apply ({response.status_code})"
+            except requests.exceptions.Timeout:
+                last_error = "Request timed out"
+                self.logger.warning(f"Timeout on attempt {attempt + 1}/{max_retries}")
+                continue
+            except Exception as e:
+                last_error = str(e)
+                self.logger.warning(f"Apply failed on attempt {attempt + 1}: {e}")
+                continue
+        self.logger.error(f"All {max_retries} parameter apply attempts failed: {last_error}")
+        return dash.no_update, f"Error: {str(last_error)[:40]}"
 
     def _init_params_from_backend_handler(self, n, current_applied):
         """Initialize input values and applied params from backend on first load."""
-        NUM_OUTPUTS = 23
+        NUM_OUTPUTS = 25
         if current_applied:
             return (dash.no_update,) * NUM_OUTPUTS
         try:
@@ -2748,6 +2844,7 @@ class DashboardManager:
                 nn_growth_trigger = state.get("nn_growth_trigger", TrainingConstants.DEFAULT_GROWTH_TRIGGER)
                 nn_growth_epochs = state.get("nn_growth_preset_epochs", TrainingConstants.DEFAULT_PRESET_EPOCHS)
                 nn_growth_conv_thresh = state.get("nn_growth_convergence_threshold", TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD)
+                nn_patience = state.get("nn_patience", TrainingConstants.DEFAULT_PATIENCE)
                 nn_spiral_rot = state.get("nn_spiral_rotations", TrainingConstants.DEFAULT_SPIRAL_ROTATIONS)
                 nn_spiral_num = state.get("nn_spiral_number", TrainingConstants.DEFAULT_SPIRAL_NUMBER)
                 nn_dataset_elem = state.get("nn_dataset_elements", TrainingConstants.DEFAULT_DATASET_ELEMENTS)
@@ -2758,6 +2855,7 @@ class DashboardManager:
                 cn_training_complete = state.get("cn_training_complete", TrainingConstants.DEFAULT_CN_TRAINING_COMPLETE)
                 cn_training_iter = state.get("cn_training_iterations", TrainingConstants.DEFAULT_CANDIDATE_TRAINING_ITERATIONS)
                 cn_training_conv_thresh = state.get("cn_training_convergence_threshold", TrainingConstants.DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD)
+                cn_patience = state.get("cn_patience", TrainingConstants.DEFAULT_CN_PATIENCE)
                 cn_multi_cand = state.get("cn_multi_candidate", TrainingConstants.DEFAULT_MULTI_CANDIDATE_ENABLED)
                 cn_cand_selection = state.get("cn_candidate_selection")
                 cn_top_cands = state.get("cn_top_candidates", TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT)
@@ -2772,6 +2870,7 @@ class DashboardManager:
                     "nn_growth_trigger": nn_growth_trigger,
                     "nn_growth_preset_epochs": nn_growth_epochs,
                     "nn_growth_convergence_threshold": nn_growth_conv_thresh,
+                    "nn_patience": nn_patience,
                     "nn_spiral_rotations": nn_spiral_rot,
                     "nn_spiral_number": nn_spiral_num,
                     "nn_dataset_elements": nn_dataset_elem,
@@ -2782,6 +2881,7 @@ class DashboardManager:
                     "cn_training_complete": cn_training_complete,
                     "cn_training_iterations": cn_training_iter,
                     "cn_training_convergence_threshold": cn_training_conv_thresh,
+                    "cn_patience": cn_patience,
                     "cn_multi_candidate": cn_multi_cand,
                     "cn_candidate_selection": cn_cand_selection,
                     "cn_top_candidates": cn_top_cands,
@@ -2796,6 +2896,7 @@ class DashboardManager:
                     nn_growth_trigger,
                     nn_growth_epochs,
                     nn_growth_conv_thresh,
+                    nn_patience,
                     nn_spiral_rot,
                     nn_spiral_num,
                     nn_dataset_elem,
@@ -2806,6 +2907,7 @@ class DashboardManager:
                     cn_training_complete,
                     cn_training_iter,
                     cn_training_conv_thresh,
+                    cn_patience,
                     ["enabled"] if cn_multi_cand else [],
                     cn_cand_selection,
                     cn_top_cands,

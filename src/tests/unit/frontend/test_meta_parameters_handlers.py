@@ -33,6 +33,7 @@ DEFAULT_APPLIED = {
     "nn_growth_trigger": "convergence",
     "nn_growth_preset_epochs": 50,
     "nn_growth_convergence_threshold": 0.001,
+    "nn_patience": 50,
     "nn_spiral_rotations": 1.5,
     "nn_spiral_number": 2,
     "nn_dataset_elements": 1000,
@@ -43,6 +44,7 @@ DEFAULT_APPLIED = {
     "cn_training_complete": "preset_epochs",
     "cn_training_iterations": 500,
     "cn_training_convergence_threshold": 0.0001,
+    "cn_patience": 30,
     "cn_multi_candidate": False,
     "cn_candidate_selection": None,
     "cn_top_candidates": 1,
@@ -61,6 +63,7 @@ def _make_track_args(**overrides):
         "nn_growth_trigger": "convergence",
         "nn_growth_epochs": 50,
         "nn_growth_conv_thresh": 0.001,
+        "nn_patience": 50,
         "nn_spiral_rot": 1.5,
         "nn_spiral_num": 2,
         "nn_dataset_elem": 1000,
@@ -71,6 +74,7 @@ def _make_track_args(**overrides):
         "cn_training_complete": "preset_epochs",
         "cn_training_iter": 500,
         "cn_training_conv_thresh": 0.0001,
+        "cn_patience": 30,
         "cn_multi_cand": [],
         "cn_cand_selection": None,
         "cn_top_cands": 1,
@@ -206,7 +210,7 @@ class TestApplyParameters:
     """Tests for apply-parameters button callback."""
 
     def test_no_clicks_returns_no_update(self, dm):
-        args = [None] + [None] * 22
+        args = [None] + [None] * 24
         result = dm._apply_parameters_handler(*args)
         assert result == (dash.no_update, dash.no_update)
 
@@ -224,6 +228,7 @@ class TestApplyParameters:
             "convergence",
             50,
             0.001,  # nn checkbox/radio/numeric
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -234,12 +239,13 @@ class TestApplyParameters:
             "preset_epochs",
             500,
             0.0001,  # cn radio/numeric
+            30,  # cn_patience
             [],
             None,
             1,
             1,  # cn checkbox/radio/numeric
         )
-        assert result[1] == "✓ Parameters applied"
+        assert result[1] == "Parameters applied"
         assert isinstance(result[0], dict)
         assert "nn_learning_rate" in result[0]
         assert "cn_pool_size" in result[0]
@@ -258,6 +264,7 @@ class TestApplyParameters:
             "convergence",
             50,
             0.001,
+            50,  # nn_patience
             1.5,
             2,
             1000,
@@ -268,6 +275,7 @@ class TestApplyParameters:
             "preset_epochs",
             500,
             0.0001,
+            30,  # cn_patience
             [],
             None,
             1,
@@ -282,7 +290,7 @@ class TestInitParamsFromBackend:
 
     def test_already_initialized_returns_no_update(self, dm):
         result = dm._init_params_from_backend_handler(1, {"some": "data"})
-        assert len(result) == 23
+        assert len(result) == 25
         assert all(r is dash.no_update for r in result)
 
     @patch("frontend.dashboard_manager.requests.get")
@@ -293,7 +301,7 @@ class TestInitParamsFromBackend:
         )
         dm._api_url = MagicMock(return_value="http://test/api/state")
         result = dm._init_params_from_backend_handler(1, {})
-        assert len(result) == 23
+        assert len(result) == 25
         # Last element is the applied dict
         assert isinstance(result[-1], dict)
         assert "nn_learning_rate" in result[-1]
@@ -303,5 +311,5 @@ class TestInitParamsFromBackend:
         mock_get.side_effect = Exception("connection error")
         dm._api_url = MagicMock(return_value="http://test/api/state")
         result = dm._init_params_from_backend_handler(1, {})
-        assert len(result) == 23
+        assert len(result) == 25
         assert all(r is dash.no_update for r in result)

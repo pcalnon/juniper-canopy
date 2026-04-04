@@ -427,10 +427,13 @@ class CascorServiceAdapter:
         "nn_learning_rate": "learning_rate",
         "nn_max_hidden_units": "max_hidden_units",
         "nn_max_total_epochs": "epochs_max",
-        "nn_growth_convergence_threshold": "patience",
+        "nn_growth_convergence_threshold": "convergence_threshold",
+        "nn_patience": "patience",
         "cn_pool_size": "candidate_pool_size",
         "cn_correlation_threshold": "correlation_threshold",
         "cn_candidate_learning_rate": "candidate_learning_rate",
+        "cn_patience": "candidate_patience",
+        "cn_training_convergence_threshold": "candidate_convergence_threshold",
     }
 
     _CASCOR_TO_CANOPY_PARAM_MAP = {v: k for k, v in _CANOPY_TO_CASCOR_PARAM_MAP.items()}
@@ -439,14 +442,18 @@ class CascorServiceAdapter:
         """Forward parameter updates to the running cascor instance.
 
         Maps canopy's nn_*/cn_* parameter namespace to cascor API parameter names.
-        Keys not in the mapping are silently skipped (canopy-only parameters
+        Keys not in the mapping are skipped (canopy-only parameters
         such as nn_spiral_rotations have no cascor service equivalent).
         """
         mapped = {self._CANOPY_TO_CASCOR_PARAM_MAP[k]: v for k, v in params.items() if k in self._CANOPY_TO_CASCOR_PARAM_MAP}
+        skipped = [k for k in params if k not in self._CANOPY_TO_CASCOR_PARAM_MAP]
+        if skipped:
+            logger.debug(f"Canopy-only params (no cascor mapping): {skipped}")
         if not mapped:
             return {"ok": True, "data": {}, "message": "No cascor-mappable params provided"}
         try:
             result = self._client.update_params(mapped)
+            logger.info(f"Cascor params updated: {list(mapped.keys())}")
             return {"ok": True, "data": result}
         except JuniperCascorClientError as e:
             logger.error(f"Failed to update cascor params: {e}")

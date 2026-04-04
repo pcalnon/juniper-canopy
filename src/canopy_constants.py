@@ -73,6 +73,11 @@ class TrainingConstants:
     MIN_CONVERGENCE_THRESHOLD: Final[float] = 0.0001
     MAX_CONVERGENCE_THRESHOLD: Final[float] = 0.1
 
+    # ── Neural Network: Patience ──
+    DEFAULT_PATIENCE: Final[int] = 50
+    MIN_PATIENCE: Final[int] = 1
+    MAX_PATIENCE: Final[int] = 500
+
     # ── Neural Network: Spiral dataset ──
     DEFAULT_SPIRAL_ROTATIONS: Final[float] = 1.5
     MIN_SPIRAL_ROTATIONS: Final[float] = 0.5
@@ -101,6 +106,11 @@ class TrainingConstants:
     DEFAULT_SELECTED_CANDIDATES: Final[int] = 1
     MIN_SELECTED_CANDIDATES: Final[int] = 1
     MAX_SELECTED_CANDIDATES: Final[int] = 50
+
+    # ── Candidate Nodes: Patience ──
+    DEFAULT_CN_PATIENCE: Final[int] = 30
+    MIN_CN_PATIENCE: Final[int] = 1
+    MAX_CN_PATIENCE: Final[int] = 500
 
     # ── Candidate Nodes: Pool training complete ──
     DEFAULT_CN_TRAINING_COMPLETE: Final[str] = "preset_epochs"
