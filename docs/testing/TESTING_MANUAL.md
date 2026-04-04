@@ -84,7 +84,26 @@ pytest -m "not slow"
 
 # Skip tests requiring external services
 pytest -m "not requires_cascor"
+
+# CI-fast parity (used in workflow)
+pytest -m "not requires_cascor and not requires_server and not slow" src/tests/unit/ src/tests/regression/
+pytest -m "integration and not requires_cascor and not requires_server and not slow" src/tests/integration/
 ```
+
+### Optional Testing Extras
+
+Some tests rely on helper modules shipped as extras from sibling client packages.
+When extras are unavailable, those tests intentionally skip via `pytest.importorskip(...)`.
+
+```bash
+pip install "juniper-cascor-client[testing]"
+pip install "juniper-data-client[testing]"
+```
+
+Typical examples:
+
+- CasCor fake-client tests: `juniper_cascor_client.testing`
+- JuniperData fake-client tests: `juniper_data_client.testing`
 
 ### Running by Pattern
 
@@ -912,7 +931,15 @@ pip install pytest-asyncio
 pytest --cov=src --cov-report=term-missing
 ```
 
-#### 6. Service Metrics Shape Mismatch in Dashboard Tests
+#### 6. Tests unexpectedly skipped due to optional extras
+
+```bash
+# Symptom: SKIPPED with message "...[testing] not installed"
+# Fix: install optional testing extras used by importorskip
+pip install "juniper-cascor-client[testing]" "juniper-data-client[testing]"
+```
+
+#### 7. Service Metrics Shape Mismatch in Dashboard Tests
 
 ```bash
 # Symptom: metrics panel tests fail with missing nested keys
@@ -928,7 +955,7 @@ Expected per-entry shape:
 
 If only flat keys (`train_loss`, `train_accuracy`) are present at top-level, normalize through service adapter helpers before UI consumption.
 
-#### 7. Zero Values Dropped During Status/Metrics Assertions
+#### 8. Zero Values Dropped During Status/Metrics Assertions
 
 ```bash
 # Symptom: epoch=0 or hidden_units=0 treated as missing
