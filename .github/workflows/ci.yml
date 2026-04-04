@@ -618,9 +618,10 @@ jobs:
             exit 1
           fi
 
-          # Documentation links: failure = warning (non-blocking during initial rollout)
+          # Documentation links: failure = error
           if [[ "${{ needs.docs.result }}" == "failure" ]]; then
-            echo "::warning::Documentation link validation found broken links (non-blocking)"
+            echo "::error::Documentation link validation failed"
+            exit 1
           fi
 
           # Lockfile must be fresh (stale lockfile = Docker builds don't match CI)
