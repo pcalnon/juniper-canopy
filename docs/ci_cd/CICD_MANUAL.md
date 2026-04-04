@@ -38,13 +38,13 @@
 ### Our CI/CD Stack
 
 ```bash
-GitHub Actions     # CI/CD platform
-├── Conda          # Environment management
-├── Pytest         # Test framework
-├── Coverage.py    # Coverage tracking
-├── Codecov        # Coverage reporting
-├── Pre-commit     # Local quality checks
-└── Artifacts      # Build outputs
+GitHub Actions      # CI/CD platform
+├── Pip + uv        # CI dependency and lockfile management
+├── Pytest          # Test framework
+├── Coverage.py     # Coverage tracking and gate
+├── Pre-commit      # Local and CI quality checks
+├── Doc link check  # scripts/check_doc_links.py
+└── Artifacts       # Test/build/security outputs
 ```
 
 ### Pipeline Overview
@@ -92,14 +92,15 @@ git checkout -b feature/your-feature
 **Run tests frequently:**
 
 ```bash
-cd src
-pytest tests/ -v
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/ -v
 ```
 
 **Check specific module:**
 
 ```bash
-pytest tests/unit/test_demo_mode.py -v
+python -m pytest src/tests/unit/test_demo_mode.py -v
 ```
 
 **Watch mode (if pytest-watch installed):**
@@ -126,16 +127,18 @@ isort src/ --profile=black
 **Run full test suite with coverage:**
 
 ```bash
-cd src
-pytest tests/ --cov=. --cov-report=term-missing
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/ \
+  --cov=src --cov-report=term-missing --cov-fail-under=80
 ```
 
-**Check coverage meets minimum (60%):**
+**Check coverage meets minimum (80%):**
 
 ```bash
 # Look for line:
-# TOTAL    1234   456    63%
-# Must be ≥60%
+# TOTAL    1234   456    83%
+# Must be ≥80%
 ```
 
 #### 4. Committing
@@ -213,12 +216,16 @@ Add pause/resume functionality to demo mode
 
 1. Go to "Checks" tab on your PR
 2. Watch jobs complete:
-   - ✓ Lint (~2 min)
-   - ✓ Test Suite Python 3.11 (~8 min)
-   - ✓ Test Suite Python 3.12 (~8 min)
-   - ✓ Test Suite Python 3.13 (~8 min)
-   - ✓ Build (~2 min)
-   - ✓ Quality Gate (~30 sec)
+   - ✓ pre-commit (Python 3.12/3.13/3.14)
+   - ✓ unit-tests
+   - ✓ integration-tests
+   - ✓ build
+   - ✓ security
+   - ✓ dependency-docs
+   - ✓ lockfile-check
+   - ✓ docs
+   - ✓ docker-build
+   - ✓ required-checks
 
 **If CI fails:**
 
@@ -1060,7 +1067,7 @@ else:
 ```bash
 Current:  73%
 Target:   80%
-Minimum:  60%
+Minimum:  80%
 ```
 
 **By module:**
