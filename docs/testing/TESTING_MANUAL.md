@@ -1,6 +1,6 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** April 4, 2026  
+**Last Updated:** April 04, 2026  
 **Version:** v0.26.1
 
 Complete guide to testing the Juniper Canopy application.
@@ -100,10 +100,21 @@ pip install "juniper-cascor-client[testing]"
 pip install "juniper-data-client[testing]"
 ```
 
-Typical examples:
+### Optional Client Testing Extras
 
-- CasCor fake-client tests: `juniper_cascor_client.testing`
-- JuniperData fake-client tests: `juniper_data_client.testing`
+Some integration/e2e files use testing helpers from optional client packages and now guard import-time availability with `pytest.importorskip(...)`.
+
+Current guarded modules:
+
+- `juniper_cascor_client.testing` (for `FakeCascorClient` scenarios)
+- `juniper_data_client.testing` (for `FakeDataClient` e2e scenarios)
+
+Install these extras when you want those tests to execute locally instead of being skipped:
+
+```bash
+pip install "juniper-cascor-client[testing]"
+pip install "juniper-data-client[testing]"
+```
 
 ### Running by Pattern
 

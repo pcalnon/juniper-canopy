@@ -2,110 +2,58 @@
 
 **Last Updated:** 2026-04-04  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.26.0  
-**Status:** Current
-
----
+**Version:** 0.26.0
 
 ## Prerequisites
 
-- Python `3.14` available locally (recommended for workflow parity)
-- `pip` and `git` installed
-- Repository checked out
+- Python 3.14 locally (matches CI default jobs)
+- `pip` available
+- Git repository checked out
 
 Verify:
 
 ```bash
 python --version
-git --version
+pip --version
+git status --short --branch
 ```
 
----
-
-## 1. Install Local Quality Tooling
+## 1. Install CI-equivalent dependencies
 
 ```bash
-# From repo root
-python -m pip install --upgrade pip
-pip install pre-commit
-pre-commit install
-```
-
-Run all hooks once:
-
-```bash
-pre-commit run --all-files
+pip install -r conf/requirements_ci.txt
+pip install -e .
 ```
 
 Notes:
+- CI also installs CPU-only `torch` from the PyTorch CPU index.
+- `conf/requirements_ci.txt` includes observability/runtime deps used in CI (`prometheus-client`, `sentry-sdk`).
 
-- Documentation linting excludes `CHANGELOG.md`, `docs/history/`, and `notes/*_HEADER.md` templates.
-- CI uses the same pre-commit configuration.
+## 2. Run the same core checks as CI
 
----
-
-## 2. Run CI-Parity Unit Tests Locally
-
-From repo root:
+Run from repo root unless noted.
 
 ```bash
+# Code quality hooks
+pre-commit run --all-files
+
+# Fast unit + regression subset with coverage gate (same marker strategy as CI)
 python -m pytest \
   -m "not requires_cascor and not requires_server and not slow" \
   src/tests/unit/ src/tests/regression/ \
-  --verbose \
-  --timeout=60 \
-  --maxfail=5 \
   --cov=src \
   --cov-report=term-missing \
   --cov-fail-under=80
-```
 
-This mirrors the `unit-tests` job behavior in `.github/workflows/ci.yml`.
-
----
-
-## 3. Run Fast Integration Subset
-
-```bash
+# Fast integration subset
 python -m pytest \
   -m "integration and not requires_cascor and not requires_server and not slow" \
-  src/tests/integration \
-  --verbose \
-  --timeout=120 \
-  --maxfail=3
+  src/tests/integration
 ```
 
----
+## 3. Validate documentation links locally
 
-## 4. Validate Lockfile Freshness
-
-Install `uv` and compare lockfile body exactly as CI does:
-
-```bash
-pip install uv
-uv pip compile pyproject.toml \
-  --extra juniper-data \
-  --extra juniper-cascor \
-  --extra observability \
-  -o /tmp/requirements.lock.check
-tail -n +3 requirements.lock > /tmp/lock_body
-tail -n +3 /tmp/requirements.lock.check > /tmp/check_body
-diff -u /tmp/lock_body /tmp/check_body
-```
-
-If diff is non-empty, regenerate:
-
-```bash
-uv pip compile pyproject.toml \
-  --extra juniper-data \
-  --extra juniper-cascor \
-  --extra observability \
-  -o requirements.lock
-```
-
----
-
-## 5. Validate Documentation Links
+The CI `docs` job runs `scripts/check_doc_links.py` with cross-repo checks skipped.
 
 ```bash
 python scripts/check_doc_links.py \
@@ -116,53 +64,43 @@ python scripts/check_doc_links.py \
   --cross-repo skip
 ```
 
-Why `--cross-repo skip` in CI:
+## 4. Keep `requirements.lock` fresh
 
-- CI runners usually do not have sibling Juniper repositories checked out.
-- Internal in-repo links still fail the job if broken.
-
----
-
-## 6. Push and Monitor Required Checks
-
-Push your branch and watch GitHub Actions checks:
+CI compares a regenerated lockfile body (header-stripped) against `requirements.lock`.
 
 ```bash
-git push -u origin <branch-name>
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
 ```
 
-Required quality gate inputs:
+## 5. Know what CI runs on PRs
 
-- `pre-commit`
-- `unit-tests`
-- `integration-tests`
-- `security`
-- `build`
-- `dependency-docs`
-- `lockfile-check`
-- `docs`
-- `docker-build`
+`CI/CD Pipeline` jobs:
 
----
+- `Pre-commit (Python 3.12/3.13/3.14)`
+- `Unit Tests + Coverage (Python 3.12/3.13/3.14)`
+- `Integration Tests` (fast subset)
+- `Build Distribution`
+- `Security Scans`
+- `Dependency Documentation`
+- `Lockfile Freshness`
+- `Documentation Links`
+- `Docker Build & Smoke Test`
+- `Quality Gate`
 
-## Optional: Testing Extras for Service-Mode Suites
+## Common Pitfalls
 
-Some tests intentionally skip unless client testing extras are installed.
-
-```bash
-pip install "juniper-cascor-client[testing]" "juniper-data-client[testing]"
-```
-
-These extras are required for tests importing:
-
-- `juniper_cascor_client.testing`
-- `juniper_data_client.testing`
-
----
+- Optional client testing modules are intentionally skipped when extras are not installed:
+  - `juniper_cascor_client.testing`
+  - `juniper_data_client.testing`
+- A Python 3.12 `pytest` cleanup SIGABRT (`exit 134`) is handled in CI by checking JUnit failures/errors before failing the job.
+- Link checker failures are often from moved docs paths or broken anchors, not runtime code.
 
 ## Next Steps
 
 - [CI/CD Manual](CICD_MANUAL.md)
-- [CI/CD Reference](CICD_REFERENCE.md)
 - [CI/CD Environment Setup](CICD_ENVIRONMENT_SETUP.md)
-
+- [CI/CD Reference](CICD_REFERENCE.md)

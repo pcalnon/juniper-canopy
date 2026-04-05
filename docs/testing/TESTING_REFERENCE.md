@@ -1,6 +1,6 @@
 # Testing Reference - Technical Documentation
 
-**Last Updated:** April 4, 2026  
+**Last Updated:** April 04, 2026  
 **Version:** v0.26.1
 
 Complete technical reference for the Juniper Canopy testing infrastructure.
@@ -444,19 +444,21 @@ async def test_async_operation():
     await async_function()
 ```
 
-### CI Marker Contract
+### Optional Client Testing Modules
 
-Default CI does **not** run every marker. The `ci.yml` workflow currently enforces:
+Some tests depend on helper modules provided by optional client packages and use `pytest.importorskip(...)` so collection succeeds when extras are missing.
 
-- Unit/regression gate:
-  - `-m "not requires_cascor and not requires_server and not slow"`
-- Integration gate:
-  - `-m "integration and not requires_cascor and not requires_server and not slow"`
+Guarded module imports in the current suite:
 
-Implication:
+- `juniper_cascor_client.testing`
+- `juniper_data_client.testing`
 
-- `requires_cascor`, `requires_server`, and `slow` tests are opt-in for local or dedicated environments.
-- Marker selection is part of the public test workflow contract and should be preserved unless CI policy changes.
+Install the extras when running those scenarios locally:
+
+```bash
+pip install "juniper-cascor-client[testing]"
+pip install "juniper-data-client[testing]"
+```
 
 ### Skip Markers
 

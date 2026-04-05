@@ -4,122 +4,124 @@
 **Version:** 0.26.0  
 **Status:** Current
 
-Technical reference for the active GitHub Actions pipelines and CI quality gates.
+## Scope
 
----
+This reference documents the current CI behavior implemented in:
 
-## Table of Contents
+- `.github/workflows/ci.yml`
+- `scripts/check_doc_links.py`
+- `conf/requirements_ci.txt`
+- `pyproject.toml`
 
-1. [Workflow Inventory](#workflow-inventory)
-2. [Main CI Pipeline](#main-ci-pipeline)
-3. [Lockfile and Dependency Policy](#lockfile-and-dependency-policy)
-4. [Documentation Link Validation](#documentation-link-validation)
-5. [Security and Publish Workflows](#security-and-publish-workflows)
-6. [Artifacts](#artifacts)
-7. [Common Debug Commands](#common-debug-commands)
+## Workflow Summary
 
----
+Workflow name: `CI/CD Pipeline`
 
-## Workflow Inventory
+Trigger events:
 
-| Workflow File | Trigger | Primary Purpose |
-| --- | --- | --- |
-| `.github/workflows/ci.yml` | `push`, `pull_request`, `repository_dispatch`, `workflow_dispatch` | Full CI quality gate (tests, security, docs, lockfile, build, Docker smoke) |
-| `.github/workflows/lockfile-update.yml` | `push` on `dependabot/pip/**` | Auto-regenerate and commit `requirements.lock` for Dependabot updates |
-| `.github/workflows/security-scan.yml` | Weekly schedule + manual | Standalone security scan job |
-| `.github/workflows/publish.yml` | `release.published` | Build + TestPyPI + PyPI publish flow |
+- `push` (`main`, `develop`, `feature/**`, `fix/**`)
+- `pull_request` (`main`, `develop`)
+- `repository_dispatch` (`data-client-updated`, `cascor-client-updated`)
+- `workflow_dispatch`
 
----
+Concurrency:
 
-## Main CI Pipeline
+```yaml
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+```
 
-Source: `.github/workflows/ci.yml`
+## Job Specifications
 
-### Global Settings
+### `pre-commit`
 
-- Workflow name: `CI/CD Pipeline`
-- Concurrency group: `ci-${{ github.ref }}`
-- Default test Python: `3.14` (`PYTHON_TEST_VERSION`)
-- Coverage gate: `80` (`COVERAGE_FAIL_UNDER`)
+- Python matrix: `3.12`, `3.13`, `3.14`
+- Installs `pre-commit`
+- Runs `pre-commit run --all-files --show-diff-on-failure`
+- Caches pre-commit hooks (`~/.cache/pre-commit`)
 
-### Job Graph
+### `unit-tests`
 
-1. `pre-commit` (matrix `3.12`, `3.13`, `3.14`)
-2. `unit-tests` (matrix `3.12`, `3.13`, `3.14`, needs `pre-commit`)
-3. `integration-tests` (Python `3.14`, needs `unit-tests`)
-4. `build` (Python `3.14`, needs `unit-tests`)
-5. `security` (Python `3.14`, needs `pre-commit`)
-6. `dependency-docs` (Python `3.14`, needs `build`)
-7. `lockfile-check` (Python `3.14`)
-8. `docs` (Python `3.14`)
-9. `docker-build` (needs `build`)
-10. `required-checks` (aggregator, needs all above)
-11. `notify` (needs `required-checks`)
-
-### Test Selection Rules
-
-`unit-tests` executes:
+- Python matrix: `3.12`, `3.13`, `3.14`
+- Installs CPU torch and `conf/requirements_ci.txt`
+- Runs:
 
 ```bash
 python -m pytest \
   -m "not requires_cascor and not requires_server and not slow" \
-  src/tests/unit/ src/tests/regression/
+  src/tests/unit/ src/tests/regression/ \
+  --timeout=60 \
+  --maxfail=5 \
+  --junitxml=reports/junit/junit-unit.xml \
+  --cov=src \
+  --cov-report=term-missing \
+  --cov-report=xml:reports/coverage.xml \
+  --cov-report=html:reports/htmlcov \
+  --cov-fail-under=80
 ```
 
-`integration-tests` executes:
+Special behavior:
+
+- Handles Python 3.12 `pytest` cleanup SIGABRT (`exit 134`) by checking JUnit `failures/errors` before deciding failure.
+
+Artifacts:
+
+- `coverage-report-py<version>`
+- `unit-test-results-py<version>`
+
+### `integration-tests`
+
+- Python: `3.14`
+- Runs only on PRs and pushes to `main`/`develop`
+- Marker filter:
 
 ```bash
-python -m pytest \
-  -m "integration and not requires_cascor and not requires_server and not slow" \
-  src/tests/integration
+integration and not requires_cascor and not requires_server and not slow
 ```
 
-### Notable Runtime Behaviors
+Artifact:
 
-- CI installs CPU-only PyTorch via `https://download.pytorch.org/whl/cpu`.
-- CI installs from `conf/requirements_ci.txt` and then installs the package in editable mode (`pip install -e .`).
-- `unit-tests` includes a targeted SIGABRT workaround for Python 3.12 cleanup exit `134`: if JUnit XML reports zero failures/errors, the step is treated as success.
+- `integration-test-results`
 
----
+### `build`
 
-## Lockfile and Dependency Policy
+- Python: `3.14`
+- Uses `python -m build --sdist --wheel`
+- Verifies both `.tar.gz` and `.whl`
+- Uploads `dist-packages`
 
-### Lockfile Freshness (`lockfile-check`)
+### `security`
 
-`requirements.lock` is compared against a freshly compiled lockfile using:
+- Python: `3.14`
+- Tools: `gitleaks`, `bandit`, `pip-audit`
+- Uploads SARIF and security report artifacts
 
-```bash
-uv pip compile pyproject.toml \
-  --extra juniper-data \
-  --extra juniper-cascor \
-  --extra observability
-```
+### `dependency-docs`
 
-Comparison strips the first two header lines from both files before diffing to avoid false mismatches caused by `uv` autogenerated output path comments.
+- Python: `3.14`
+- Also configures Miniforge
+- Runs `scripts/generate_dep_docs.sh`
+- Validates generated YAML structure
 
-### Dependabot Auto-Update (`lockfile-update.yml`)
+Artifact:
 
-- Trigger: pushes to `dependabot/pip/**` by `dependabot[bot]`.
-- Regenerates `requirements.lock`.
-- Commits and pushes updated lockfile when changed.
-- Uses `CROSS_REPO_DISPATCH_TOKEN` so downstream CI re-triggers.
+- `dependency-docs`
 
-### CI Dependency Baseline
+### `lockfile-check`
 
-`conf/requirements_ci.txt` now explicitly includes observability deps used by runtime/tests:
+- Python: `3.14`
+- Installs `uv`
+- Recompiles from `pyproject.toml` extras:
+  - `juniper-data`
+  - `juniper-cascor`
+  - `observability`
+- Strips first two header lines before diff comparison
 
-- `prometheus-client>=0.20.0`
-- `sentry-sdk>=2.0.0`
+### `docs`
 
-`pyproject.toml` mirrors these under `[project.optional-dependencies].observability`.
-
----
-
-## Documentation Link Validation
-
-### CI Step
-
-`docs` job runs:
+- Python: `3.14`
+- Runs doc link validator with excluded directories/files:
 
 ```bash
 python scripts/check_doc_links.py \
@@ -130,72 +132,111 @@ python scripts/check_doc_links.py \
   --cross-repo skip
 ```
 
-### Script Behavior (`scripts/check_doc_links.py`)
+### `docker-build`
 
-- Scans markdown-like docs (`.md`, `.markdown`, `.rst`, `.txt`).
-- Ignores links inside fenced code blocks and inline code spans.
-- Validates:
-  - relative file links exist
-  - same-file anchors map to headings
-  - link paths stay within allowed repository boundaries
-- Supports cross-repo policies:
-  - `skip`: ignore cross-repo links (CI default)
-  - `warn`: report warnings but do not fail
-  - `check`: validate against sibling repo layout if available
+- Builds image from root `Dockerfile`
+- Starts container and waits for healthy state
+- Verifies:
+  - package import
+  - `/v1/health` response
 
-Use `--cross-repo check` locally when working in a full multi-repo workspace.
+### `required-checks`
 
----
+Aggregates job results and enforces final pass/fail semantics used by branch protection.
 
-## Security and Publish Workflows
+## Environment Variables Used in CI
 
-### `security-scan.yml`
+Top-level workflow env:
 
-- Weekly + manual security scan
-- Uses Python `3.14`
-- Runs Bandit and `pip-audit`
-- Uploads reports from `reports/security/`
-
-### `publish.yml`
-
-- Trigger: GitHub release publish event
-- Stages:
-  1. Build and validate artifacts
-  2. Publish to TestPyPI and verify install
-  3. Publish to PyPI
-- Uses OIDC trusted publishing (`id-token: write`)
-
----
-
-## Artifacts
-
-Generated by `ci.yml`:
-
-- Unit coverage artifacts: `coverage-report-py<version>`
-- Unit JUnit artifacts: `unit-test-results-py<version>`
-- Integration JUnit artifacts: `integration-test-results`
-- Security artifacts: `security-reports`
-- Build artifacts: `dist-packages`
-- Dependency docs artifacts: `dependency-docs`
-
-Retention is workflow-specific (typically 30 days, dependency docs 90 days).
-
----
-
-## Common Debug Commands
-
-```bash
-# Re-run local docs validation in CI mode
-python scripts/check_doc_links.py --cross-repo skip
-
-# Re-run lockfile comparison exactly as CI
-uv pip compile pyproject.toml --extra juniper-data --extra juniper-cascor --extra observability -o /tmp/requirements.lock.check
-tail -n +3 requirements.lock > /tmp/lock_body
-tail -n +3 /tmp/requirements.lock.check > /tmp/check_body
-diff -u /tmp/lock_body /tmp/check_body
-
-# Re-run CI marker subset
-python -m pytest -m "not requires_cascor and not requires_server and not slow" src/tests/unit/ src/tests/regression/ -v
+```yaml
+env:
+  ENV_NAME: juniper-canopy
+  PYTHON_TEST_VERSION: "3.14"
+  COVERAGE_FAIL_UNDER: "80"
 ```
 
-For operational usage examples, see [CICD_QUICK_START.md](CICD_QUICK_START.md) and [CICD_MANUAL.md](CICD_MANUAL.md).
+Test gating envs in unit/integration jobs:
+
+```yaml
+CASCOR_BACKEND_AVAILABLE: 0
+RUN_SERVER_TESTS: 0
+ENABLE_SLOW_TESTS: 0
+```
+
+## Dependency Reference
+
+Primary CI dependency file:
+
+- `conf/requirements_ci.txt`
+
+Notable required entries:
+
+- `prometheus-client>=0.20.0`
+- `sentry-sdk>=2.0.0`
+
+These support observability-import paths used during tests and runtime checks.
+
+## Documentation Link Checker Reference
+
+Script: `scripts/check_doc_links.py`
+
+Core capabilities:
+
+- Validates relative file links and same-file anchors.
+- Skips fenced code blocks and inline code spans.
+- Supports cross-repo handling modes:
+  - `skip` (CI default)
+  - `warn`
+  - `check`
+
+Exit codes:
+
+- `0`: all valid
+- `1`: broken links or invalid arguments
+
+## Common Failure Classes
+
+### Stale lockfile
+
+Symptom:
+
+- `lockfile-check` fails diff
+
+Fix:
+
+```bash
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
+```
+
+### Broken docs links
+
+Symptom:
+
+- `docs` job reports missing files/anchors
+
+Fix:
+
+- run checker locally with the CI command and repair relative paths or heading anchors
+
+### Optional testing modules skipped
+
+Symptom:
+
+- Service/e2e tests skipped via `importorskip`
+
+Fix (local full-run only):
+
+```bash
+pip install "juniper-cascor-client[testing]"
+pip install "juniper-data-client[testing]"
+```
+
+## Related Docs
+
+- [CI/CD Quick Start](CICD_QUICK_START.md)
+- [CI/CD Environment Setup](CICD_ENVIRONMENT_SETUP.md)
+- [CI/CD Complete Manual](CICD_MANUAL.md)
