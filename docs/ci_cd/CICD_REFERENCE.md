@@ -191,7 +191,7 @@ lint:
       continue-on-error: true
 
     - name: Run Bandit
-      run: bandit -r src/ -c pyproject.toml
+      run: bandit -r src -c .bandit.yml
       continue-on-error: true
 ```
 
@@ -199,14 +199,14 @@ lint:
 
 ```yaml
 test:
-  name: Test Suite (Python ${{ matrix.python-version }})
+  name: Unit Tests + Coverage (Python ${{ matrix.python-version }})
   runs-on: ubuntu-latest
   timeout-minutes: 30
 
   strategy:
     fail-fast: false
     matrix:
-      python-version: ["3.11", "3.12", "3.13"]
+      python-version: ["3.12", "3.13", "3.14"]
 
   steps:
     - name: Checkout Code
@@ -236,29 +236,16 @@ test:
         python -m pip install --upgrade pip
         pip install -r conf/requirements.txt
 
-    - name: Run Tests
+    - name: Run Unit Tests
       shell: bash -el {0}
       run: |
-        cd src
-        pytest tests/ \
+        python -m pytest \
+          src/tests \
           --verbose \
-          --cov=. \
-          --cov-report=xml:../coverage.xml \
+          --cov=src \
+          --cov-report=xml:reports/coverage.xml \
           --cov-report=term-missing \
-          --cov-report=html:../reports/coverage \
-          --junit-xml=../reports/junit/results.xml \
-          --html=../reports/test_report.html \
-          --self-contained-html
-
-    - name: Upload Coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        file: ./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
-        token: ${{ secrets.CODECOV_TOKEN }}
-        fail_ci_if_error: false
-      continue-on-error: true
+          --junit-xml=reports/junit/unit-tests.xml
 
     - name: Upload Test Results
       uses: actions/upload-artifact@v4
@@ -266,26 +253,12 @@ test:
       with:
         name: test-results-${{ matrix.python-version }}
         path: |
-          reports/
-          coverage.xml
+          reports/junit/unit-tests.xml
+          reports/coverage.xml
         retention-days: 30
 
-    - name: Check Coverage Threshold
-      shell: bash -el {0}
-      run: |
-        cd src
-        COVERAGE=$(pytest tests/ --cov=. --cov-report=term-missing | grep "TOTAL" | awk '{print $NF}' | sed 's/%//')
-        echo "Current coverage: ${COVERAGE}%"
-
-        if (( $(echo "$COVERAGE < 80" | bc -l) )); then
-          echo "::warning::Coverage below 80%: ${COVERAGE}%"
-        fi
-
-        if (( $(echo "$COVERAGE < 60" | bc -l) )); then
-          echo "::error::Coverage critically low: ${COVERAGE}%"
-          exit 1
-        fi
-      continue-on-error: true
+    # Coverage threshold enforcement should be configured in pytest invocation
+    # (for example: --cov-fail-under=80)
 ```
 
 ---
@@ -406,8 +379,8 @@ ignore:
 
    ```toml
    [project]
-   name = "juniper_canopy"
-   version = "0.2.1"
+   name = "juniper-canopy"
+   version = "0.4.0"
    requires-python = ">=3.11"
    ```
 
@@ -429,17 +402,22 @@ ignore:
 
 4. **Bandit configuration**
 
-   ```toml
-   [tool.bandit]
-   exclude_dirs = ["/tests/", "/.venv/"]
-   skips = ["B101", "B601"]
+   ```yaml
+   # .bandit.yml
+   exclude_dirs:
+     - src/tests
+     - util/verification
+   skips:
+     - B311
+   confidence: MEDIUM
+   severity: MEDIUM
    ```
 
 5. **MyPy configuration**
 
    ```toml
    [tool.mypy]
-   python_version = "3.11"
+   python_version = "3.14"
    ignore_missing_imports = true
    ```
 
@@ -457,7 +435,7 @@ ignore:
    ```toml
    [tool.coverage.report]
    show_missing = true
-   fail_under = 60
+   fail_under = 80
    precision = 2
    ```
 
@@ -592,26 +570,55 @@ mypy src/config_manager.py
 
 **Configuration:**
 
-```toml
-[tool.bandit]
-exclude_dirs = ["/tests/", "/.venv/"]
-skips = ["B101", "B601"]
-level = "MEDIUM"
-confidence = "MEDIUM"
+```yaml
+# .bandit.yml
+exclude_dirs:
+  - src/tests
+  - util/verification
+skips:
+  - B311
+confidence: MEDIUM
+severity: MEDIUM
 ```
 
 **Usage:**
 
 ```bash
 # Security scan
-bandit -r src/
+bandit -r src
 
 # With config
-bandit -r src/ -c pyproject.toml
+bandit -r src -c .bandit.yml
 
 # Specific severity
-bandit -r src/ -ll  # Low severity and up
+bandit -r src -ll  # Low severity and up
 ```
+
+### Lockfile and Dependency Audit
+
+**Purpose:** Keep `requirements.lock` synchronized with `pyproject.toml` extras and audit installed dependencies.
+
+**Usage:**
+
+```bash
+# Regenerate lockfile with the same extras used in CI lockfile check
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
+
+# Mimic CI security job's dependency audit input
+pip install dash fastapi uvicorn plotly numpy scipy
+pip freeze > reports/security/pip-freeze.txt
+pip-audit -r reports/security/pip-freeze.txt --output reports/security/pip-audit.txt
+```
+
+**Authoritative workflow files:**
+
+- `.github/workflows/ci.yml`
+- `.github/workflows/lockfile-update.yml`
+- `.github/workflows/security-scan.yml`
 
 ### Pytest
 
@@ -1053,7 +1060,7 @@ grep "coverage" workflow.log | grep -i "low\|fail"
 
 ---
 
-**Last Updated:** 2026-01-29  
-**Version:** 0.25.0  
+**Last Updated:** 2026-04-05  
+**Version:** 0.25.1  
 **Maintained By:** Development Team  
 **Status:** ✅ Current

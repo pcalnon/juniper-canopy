@@ -1459,7 +1459,7 @@ matrix:
 
 ```yaml
 - name: Security Scan
-  run: bandit -r src/ -c pyproject.toml
+  run: bandit -r src -c .bandit.yml
 ```
 
 **Common issues caught:**
@@ -1488,6 +1488,24 @@ updates:
     schedule:
       interval: "weekly"
 ```
+
+### Lockfile Freshness and Dependabot
+
+`requirements.lock` freshness is enforced in CI and regenerated for Dependabot branches.
+Use the same extras list as CI to avoid lockfile drift:
+
+```bash
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
+```
+
+**Reference workflows:**
+
+- `.github/workflows/ci.yml` (`lockfile-check` job)
+- `.github/workflows/lockfile-update.yml` (Dependabot lockfile regeneration)
 
 ### Code Scanning
 
@@ -1684,6 +1702,6 @@ Fix by: 2025-11-12
 
 ---
 
-**Last Updated:** 2026-03-30  
-**Version:** 0.25.1  
+**Last Updated:** 2026-04-05  
+**Version:** 0.25.2  
 **Status:** ✅ Complete

@@ -48,6 +48,9 @@
 | **Set up CI/CD environment** | [CICD_ENVIRONMENT_SETUP.md](ci_cd/CICD_ENVIRONMENT_SETUP.md)              | docs/ci_cd/    |
 | **Learn CI/CD workflow**     | [CICD_MANUAL.md](ci_cd/CICD_MANUAL.md)                                    | docs/ci_cd/    |
 | **CI/CD reference**          | [CICD_REFERENCE.md](ci_cd/CICD_REFERENCE.md)                              | docs/ci_cd/    |
+| **Review release-readiness findings** | [CODE_REVIEW_ANALYSIS_2026-04-04.md](../notes/CODE_REVIEW_ANALYSIS_2026-04-04.md) | notes/ |
+| **Review remediation execution plan** | [CODE_REVIEW_PLAN_2026-04-04.md](../notes/CODE_REVIEW_PLAN_2026-04-04.md) | notes/ |
+| **Review prioritized remediation roadmap** | [CODE_REVIEW_DEVELOPMENT_ROADMAP_2026-04-04.md](../notes/CODE_REVIEW_DEVELOPMENT_ROADMAP_2026-04-04.md) | notes/ |
 | **Find technical reference** | [REFERENCE.md](REFERENCE.md)                                              | docs/          |
 | **See version history**      | [CHANGELOG.md](../CHANGELOG.md)                                           | Root           |
 | **Quick-reference dev tasks** | [DEVELOPER_CHEATSHEET.md](DEVELOPER_CHEATSHEET.md)              | docs/         |
@@ -446,6 +449,9 @@ Contains archived documentation that has been superseded or consolidated.
 | File                                     | Lines  | Type       | Audience       | Status        |
 | ---------------------------------------- | ------ | ---------- | -------------- | ------------- |
 | **DEVELOPER_CHEATSHEET.md**              | ~100   | Cheatsheet | Developers     | ✅ **Active** |
+| **CODE_REVIEW_ANALYSIS_2026-04-04.md**   | ~1,400 | Analysis   | Maintainers    | ✅ **Active** |
+| **CODE_REVIEW_PLAN_2026-04-04.md**       | ~320   | Plan       | Maintainers    | ✅ **Active** |
+| **CODE_REVIEW_DEVELOPMENT_ROADMAP_2026-04-04.md** | ~330 | Roadmap | Maintainers | ✅ **Active** |
 
 ### docs/history/ Directory, Document Index
 
@@ -643,6 +649,14 @@ CHANGELOG.md           # Version history
 ---
 
 ## Recent Updates
+
+### 2026-04-05: Release Readiness Documentation Index Refresh
+
+- Added direct navigation links in "I Want To" for release-readiness review artifacts:
+  - `notes/CODE_REVIEW_ANALYSIS_2026-04-04.md`
+  - `notes/CODE_REVIEW_PLAN_2026-04-04.md`
+  - `notes/CODE_REVIEW_DEVELOPMENT_ROADMAP_2026-04-04.md`
+- Expanded `notes/` document index to include these three active maintenance documents.
 
 ### 2025-11-11: CI/CD Documentation Consolidation
 
