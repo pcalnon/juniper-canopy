@@ -1,7 +1,7 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** March 30, 2026  
-**Version:** v0.26.0
+**Last Updated:** 2026-04-05  
+**Version:** v0.26.1
 
 Complete guide to testing the Juniper Canopy application.
 
@@ -24,10 +24,10 @@ Complete guide to testing the Juniper Canopy application.
 
 The Juniper Canopy uses **pytest** as the testing framework with:
 
-- **272+ tests** across unit, integration, and performance categories
-- **100% pass rate** (all tests passing)
-- **73% code coverage** (target: 80%)
-- **Automated CI/CD** via GitHub Actions
+- A large multi-suite test corpus across unit, integration, regression, performance, and API categories
+- Marker-gated infrastructure tests (`requires_server`, `requires_cascor`, `requires_redis`, `requires_cassandra`, `requires_display`)
+- Coverage enforcement in CI (`fail_under = 80`)
+- Automated execution through GitHub Actions
 
 ### Testing Philosophy
 
@@ -83,7 +83,7 @@ pytest -m performance
 pytest -m "not slow"
 
 # Skip tests requiring external services
-pytest -m "not requires_cascor"
+pytest -m "not requires_cascor and not requires_server and not requires_redis and not requires_cassandra and not requires_display"
 ```
 
 ### Running by Pattern
@@ -118,6 +118,22 @@ pytest --cov=src --cov-report=html
 pytest --cov=src --cov-report=html --cov-report=term-missing --cov-report=xml
 ```
 
+### Optional Testing Extras for Service-Mode Suites
+
+Some backend/service tests rely on testing helpers from optional client extras.
+
+Install when needed:
+
+```bash
+pip install "juniper-cascor-client[testing]" "juniper-data-client[testing]"
+```
+
+Why this matters:
+
+- Service-mode tests now gate on `pytest.importorskip("juniper_cascor_client.testing", ...)`.
+- Dataset versioning tests using `FakeDataClient` gate on `juniper_data_client.testing`.
+- Without these extras, tests are skipped by design instead of failing collection.
+
 ### High-Signal Regression Commands
 
 ```bash
@@ -130,6 +146,9 @@ pytest tests/unit/test_service_backend.py -k "get_status or get_dataset" -v
 
 # Metrics panel handler edge-case tests (replay/progress/validation overlays)
 pytest tests/unit/frontend/test_metrics_panel_handlers.py -k "validation_overlay or replay or progress_detail or training_progress or hidden_units" -v
+
+# Documentation link checker regression tests
+pytest tests/unit/test_doc_link_checker.py -v
 ```
 
 ### Advanced Options
@@ -553,15 +572,22 @@ def test_with_cascor_backend():
 
 ### Available Markers
 
-| Marker                         | Description       | Usage                       |
-| ------------------------------ | ----------------- | --------------------------- |
-| `@pytest.mark.unit`            | Unit tests        | Isolated component tests    |
-| `@pytest.mark.integration`     | Integration tests | Component interaction tests |
-| `@pytest.mark.performance`     | Performance tests | Speed/resource tests        |
-| `@pytest.mark.regression`      | Regression tests  | Bug fix verification        |
-| `@pytest.mark.slow`            | Slow tests        | Long-running tests          |
-| `@pytest.mark.requires_cascor` | Requires backend  | External dependency         |
-| `@pytest.mark.asyncio`         | Async tests       | Async/await tests           |
+| Marker                            | Description                        | Usage                                 |
+| --------------------------------- | ---------------------------------- | ------------------------------------- |
+| `@pytest.mark.unit`               | Unit tests                         | Isolated component tests              |
+| `@pytest.mark.integration`        | Integration tests                  | Component interaction tests           |
+| `@pytest.mark.performance`        | Performance tests                  | Speed/resource tests                  |
+| `@pytest.mark.regression`         | Regression tests                   | Bug fix verification                  |
+| `@pytest.mark.e2e`                | End-to-end tests                   | Full-system scenarios                 |
+| `@pytest.mark.slow`               | Slow tests                         | Long-running tests                    |
+| `@pytest.mark.requires_cascor`    | Requires CasCor backend            | External dependency                   |
+| `@pytest.mark.requires_server`    | Requires running server            | Live endpoint/WebSocket validation    |
+| `@pytest.mark.requires_redis`     | Requires Redis                     | Redis integration tests               |
+| `@pytest.mark.requires_cassandra` | Requires Cassandra                 | Cassandra integration tests           |
+| `@pytest.mark.requires_display`   | Requires display                   | GUI/visual tests                      |
+| `@pytest.mark.api`                | API endpoint tests                 | HTTP contract testing                 |
+| `@pytest.mark.generators`         | Generator/data tests               | Data generation and helper coverage   |
+| `@pytest.mark.asyncio`            | Async tests                        | Async/await tests                     |
 
 ### Running by Marker
 
@@ -628,6 +654,23 @@ xdg-open reports/coverage/index.html
 - `config_manager.py` - Configuration management
 - `demo_mode.py` - Demo mode core
 - `websocket_manager.py` - WebSocket communication
+
+### Known Coverage Gap Watchlist (Release Readiness)
+
+The release-readiness review identified these modules as historically under-covered and worth tracking in regression suites:
+
+- `discovery.py` - service discovery probing behavior
+- `observability.py` - metrics labeling and Sentry/telemetry setup
+- `secrets_util.py` - secret-loading and decryption utility paths
+
+Quick verification commands:
+
+```bash
+cd src
+pytest tests/unit/test_cascor_discovery.py -v
+pytest tests/unit/test_observability.py -v
+pytest tests/unit/test_secrets_util.py -v
+```
 
 ### Excluding Lines from Coverage
 
@@ -813,37 +856,58 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, feature/**, fix/**]
   pull_request:
     branches: [main, develop]
 
 jobs:
-  test:
+  pre-commit:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Run pre-commit hooks
+        run: pre-commit run --all-files
+
+  unit-tests:
+    needs: [pre-commit]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install dependencies
         run: |
-          pip install -r conf/requirements.txt
-          pip install pytest pytest-cov
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r conf/requirements_ci.txt
+          pip install -e .
 
       - name: Run tests
-        run: pytest --cov=src --cov-report=xml
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-        with:
-          file: ./coverage.xml
+        run: |
+          python -m pytest \
+            -m "not requires_cascor and not requires_server and not slow" \
+            src/tests/unit/ src/tests/regression/ \
+            --cov=src \
+            --cov-fail-under=80
 ```
 
 ### Pre-commit Hooks
@@ -927,6 +991,16 @@ Use `pytest --collect-only -q` after dependency changes to catch import-time fai
 pytest --cov=src --cov-report=term-missing
 ```
 
+#### 6. `requires_server` Tests Are Skipped in CI
+
+```bash
+# Problem: tests marked requires_server are skipped in default CI profile
+# Solution: run with an active app server and opt-in variable
+export RUN_SERVER_TESTS=1
+cd src
+pytest tests/ -m requires_server -v
+```
+
 #### 7. Service Metrics Shape Mismatch in Dashboard Tests
 
 ```bash
@@ -952,6 +1026,26 @@ pytest tests/unit/test_response_normalization.py -k "epoch_zero_preserved or hid
 ```
 
 Avoid `or` fallbacks when zero is valid. Prefer explicit `None` checks or first-defined helper logic.
+
+#### 8. Documentation Link Validation Fails in CI
+
+```bash
+# Symptom: "FAILED: Documentation link validation"
+# Reproduce CI docs job locally from repo root
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
+
+If checker behavior appears to regress, run the dedicated test module:
+
+```bash
+cd src
+pytest tests/unit/test_doc_link_checker.py -v
+```
 
 ### Debug Tests
 

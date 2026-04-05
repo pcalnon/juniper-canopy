@@ -31,6 +31,7 @@
 #####################################################################################################################################################################################################
 # import json
 import logging
+import threading
 from enum import Enum, auto
 from typing import Optional
 
@@ -84,6 +85,7 @@ class TrainingStateMachine:
     def __init__(self) -> None:
         """Initialize state machine in Stopped state."""
         self.logger = logging.getLogger(__name__)
+        self._lock = threading.Lock()
         self._status = TrainingStatus.STOPPED
         self._phase = TrainingPhase.IDLE
         self._paused_phase: Optional[TrainingPhase] = None
@@ -133,19 +135,20 @@ class TrainingStateMachine:
         Returns:
             True if transition successful, False if invalid
         """
-        if command == Command.START:
-            return self._handle_start()
-        elif command == Command.STOP:
-            return self._handle_stop()
-        elif command == Command.PAUSE:
-            return self._handle_pause()
-        elif command == Command.RESUME:
-            return self._handle_resume()
-        elif command == Command.RESET:
-            return self._handle_reset()
-        else:
-            self.logger.error(f"Unknown command: {command}")
-            return False
+        with self._lock:
+            if command == Command.START:
+                return self._handle_start()
+            elif command == Command.STOP:
+                return self._handle_stop()
+            elif command == Command.PAUSE:
+                return self._handle_pause()
+            elif command == Command.RESUME:
+                return self._handle_resume()
+            elif command == Command.RESET:
+                return self._handle_reset()
+            else:
+                self.logger.error(f"Unknown command: {command}")
+                return False
 
     def _handle_start(self) -> bool:
         """Handle START command."""
@@ -249,13 +252,14 @@ class TrainingStateMachine:
         Args:
             phase: New training phase
         """
-        if self._status != TrainingStatus.STARTED:
-            self.logger.warning(f"Cannot set phase to {phase.name} while status is {self._status.name}")
-            return
+        with self._lock:
+            if self._status != TrainingStatus.STARTED:
+                self.logger.warning(f"Cannot set phase to {phase.name} while status is {self._status.name}")
+                return
 
-        prev_phase = self._phase
-        self._phase = phase
-        self.logger.debug(f"Phase change: {prev_phase.name} → {phase.name}")
+            prev_phase = self._phase
+            self._phase = phase
+            self.logger.debug(f"Phase change: {prev_phase.name} → {phase.name}")
 
     def save_candidate_state(self, state: dict) -> None:
         """
@@ -264,12 +268,14 @@ class TrainingStateMachine:
         Args:
             state: Candidate phase state dictionary
         """
-        self._candidate_sub_state = state.copy()
-        self.logger.debug(f"Saved candidate sub-state: {state}")
+        with self._lock:
+            self._candidate_sub_state = state.copy()
+            self.logger.debug(f"Saved candidate sub-state: {state}")
 
     def get_candidate_state(self) -> Optional[dict]:
         """Get saved candidate phase sub-state."""
-        return self._candidate_sub_state
+        with self._lock:
+            return self._candidate_sub_state
 
     def mark_completed(self) -> bool:
         """
@@ -280,16 +286,17 @@ class TrainingStateMachine:
         Returns:
             True if transition successful, False if invalid
         """
-        if self._status == TrainingStatus.STARTED:
-            prev_status = self._status.name
-            self._status = TrainingStatus.COMPLETED
-            self._paused_phase = None
-            self._candidate_sub_state = None
-            self.logger.info(f"State transition: {prev_status} → Completed (training finished successfully)")
-            return True
-        else:
-            self.logger.warning(f"Invalid transition: mark_completed while status is {self._status.name}")
-            return False
+        with self._lock:
+            if self._status == TrainingStatus.STARTED:
+                prev_status = self._status.name
+                self._status = TrainingStatus.COMPLETED
+                self._paused_phase = None
+                self._candidate_sub_state = None
+                self.logger.info(f"State transition: {prev_status} → Completed (training finished successfully)")
+                return True
+            else:
+                self.logger.warning(f"Invalid transition: mark_completed while status is {self._status.name}")
+                return False
 
     def mark_failed(self, reason: str = "Unknown error") -> bool:
         """
@@ -303,16 +310,17 @@ class TrainingStateMachine:
         Returns:
             True if transition successful, False if invalid
         """
-        if self._status in (TrainingStatus.STARTED, TrainingStatus.PAUSED):
-            prev_status = self._status.name
-            self._status = TrainingStatus.FAILED
-            self._paused_phase = None
-            self._candidate_sub_state = None
-            self.logger.info(f"State transition: {prev_status} → Failed ({reason})")
-            return True
-        else:
-            self.logger.warning(f"Invalid transition: mark_failed while status is {self._status.name}")
-            return False
+        with self._lock:
+            if self._status in (TrainingStatus.STARTED, TrainingStatus.PAUSED):
+                prev_status = self._status.name
+                self._status = TrainingStatus.FAILED
+                self._paused_phase = None
+                self._candidate_sub_state = None
+                self.logger.info(f"State transition: {prev_status} → Failed ({reason})")
+                return True
+            else:
+                self.logger.warning(f"Invalid transition: mark_failed while status is {self._status.name}")
+                return False
 
     def get_state_summary(self) -> dict:
         """
@@ -321,9 +329,10 @@ class TrainingStateMachine:
         Returns:
             Dictionary with status, phase, and paused_phase
         """
-        return {
-            "status": self._status.name,
-            "phase": self._phase.name,
-            "paused_phase": self._paused_phase.name if self._paused_phase else None,
-            "has_candidate_state": self._candidate_sub_state is not None,
-        }
+        with self._lock:
+            return {
+                "status": self._status.name,
+                "phase": self._phase.name,
+                "paused_phase": self._paused_phase.name if self._paused_phase else None,
+                "has_candidate_state": self._candidate_sub_state is not None,
+            }
