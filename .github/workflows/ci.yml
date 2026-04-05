@@ -163,13 +163,15 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml:reports/coverage.xml \
             --cov-report=html:reports/htmlcov \
-            --cov-fail-under=${COVERAGE_FAIL_UNDER}
-          PYTEST_EXIT=$?
+            --cov-fail-under=${COVERAGE_FAIL_UNDER} \
+            2>&1 | tee reports/junit/pytest-unit.log
+          PYTEST_EXIT=${PIPESTATUS[0]}
           set -e
 
           # Python 3.12 may SIGABRT (exit 134) during interpreter cleanup after
-          # all tests pass. Work around by checking JUnit XML for actual results.
-          if [ $PYTEST_EXIT -eq 134 ] && [ -f reports/junit/junit-unit.xml ]; then
+          # all tests pass. Only allow this workaround on Python 3.12 and only
+          # when pytest reached a clean "all passed" terminal summary.
+          if [ "${{ matrix.python-version }}" = "3.12" ] && [ $PYTEST_EXIT -eq 134 ] && [ -f reports/junit/junit-unit.xml ]; then
             FAILURES=$(python -c "
           import xml.etree.ElementTree as ET
           root = ET.parse('reports/junit/junit-unit.xml').getroot()
@@ -180,7 +182,18 @@ jobs:
           root = ET.parse('reports/junit/junit-unit.xml').getroot()
           print(root.attrib.get('errors', '0'))
           ")
-            if [ "$FAILURES" = "0" ] && [ "$ERRORS" = "0" ]; then
+            HAD_CLEAN_SUMMARY=$(python -c "
+          import pathlib, re
+          text = pathlib.Path('reports/junit/pytest-unit.log').read_text(encoding='utf-8', errors='replace')
+          match = re.search(r'={2,}\\s+(.+?)\\s+in\\s+[0-9.]+s\\s+={2,}\\s*$', text, re.MULTILINE)
+          if not match:
+              print('0')
+          else:
+              summary = match.group(1)
+              clean = ('passed' in summary) and ('failed' not in summary) and ('error' not in summary)
+              print('1' if clean else '0')
+          ")
+            if [ "$FAILURES" = "0" ] && [ "$ERRORS" = "0" ] && [ "$HAD_CLEAN_SUMMARY" = "1" ]; then
               echo "::warning::pytest exited with SIGABRT (134) during cleanup but all tests passed — treating as success (Python 3.12 runtime bug)"
               exit 0
             fi
