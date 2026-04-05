@@ -1,1040 +1,251 @@
-# Testing Reference - Technical Documentation
+# Testing Reference
 
-**Last Updated:** April 04, 2026  
-**Version:** v0.26.1
+**Last Updated:** 2026-04-05  
+**Version:** 0.26.1  
+**Status:** Current
 
-Complete technical reference for the Juniper Canopy testing infrastructure.
+Technical reference for the active pytest configuration, markers, fixtures, and CI-equivalent commands.
+
+---
 
 ## Table of Contents
 
-1. [Test Framework Architecture](#test-framework-architecture)
-2. [Configuration Reference](#configuration-reference)
+1. [Configuration Sources](#configuration-sources)
+2. [Marker Reference](#marker-reference)
 3. [Fixture Reference](#fixture-reference)
-4. [Marker Reference](#marker-reference)
+4. [Environment and Gating Variables](#environment-and-gating-variables)
 5. [Command Reference](#command-reference)
-6. [Plugin Reference](#plugin-reference)
-7. [Coverage Configuration](#coverage-configuration)
-8. [API Testing Reference](#api-testing-reference)
-9. [Performance Testing](#performance-testing)
-10. [Advanced Topics](#advanced-topics)
+6. [Coverage Reference](#coverage-reference)
+7. [CI Mapping](#ci-mapping)
+8. [Troubleshooting Reference](#troubleshooting-reference)
 
-## Test Framework Architecture
+---
 
-### Components
+## Configuration Sources
 
-```bash
-Testing Infrastructure
-├── pytest                    # Core test framework
-├── pytest-cov                # Coverage plugin
-├── pytest-asyncio            # Async test support
-├── pytest-html               # HTML test reports
-├── pytest-json-report        # JSON test reports
-├── pytest-mock               # Mocking utilities
-└── coverage.py               # Coverage measurement
-```
+Primary sources:
 
-### Execution Flow
+- `pyproject.toml` (`[tool.pytest.ini_options]`, `[tool.coverage.*]`)
+- `src/tests/conftest.py` (runtime setup, marker skip rules, fixtures)
+- `.github/workflows/ci.yml` (test commands and env defaults)
 
-```bash
-1. pytest collection
-   ├── Discover test files (test_*.py)
-   ├── Discover test functions (test_*)
-   ├── Discover test classes (Test*)
-   └── Apply markers and filters
-
-2. pytest setup
-   ├── Load conftest.py files
-   ├── Register fixtures
-   ├── Initialize plugins
-   └── Configure coverage
-
-3. pytest execution
-   ├── Session setup (scope="session" fixtures)
-   ├── Module setup (scope="module" fixtures)
-   ├── Function setup (scope="function" fixtures)
-   ├── Run test
-   ├── Function teardown
-   ├── Module teardown
-   └── Session teardown
-
-4. pytest reporting
-   ├── Collect results
-   ├── Generate coverage report
-   ├── Generate HTML report
-   ├── Generate JUnit XML
-   └── Display summary
-```
-
-## Configuration Reference
-
-### `pyproject.toml` (pytest)
-
-Primary pytest configuration lives in `pyproject.toml`:
+Key pytest options from `pyproject.toml`:
 
 ```toml
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["src/tests"]
 pythonpath = ["src"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
 timeout = 60
 timeout_method = "signal"
 addopts = [
-    "-ra",
-    "-q",
-    "--strict-markers",
-    "--strict-config",
-    "--continue-on-collection-errors",
-    "--tb=short",
+  "-ra",
+  "-q",
+  "--strict-markers",
+  "--strict-config",
+  "--continue-on-collection-errors",
+  "--tb=short",
 ]
-markers = [
-  "unit: Unit tests (fast, no external dependencies)",
-  "integration: Integration tests (may use DB, files, etc.)",
-  "performance: Performance tests",
-  "regression: Regression tests",
-  "e2e: End-to-end tests (require full system)",
-  "slow: Slow-running tests (>1 second)",
-  "requires_redis: Tests requiring Redis connection (set REDIS_INTEGRATION_TEST=1)",
-  "requires_cassandra: Tests requiring Cassandra connection (set CASSANDRA_INTEGRATION_TEST=1)",
-  "requires_cascor: Tests requiring CasCor backend",
-  "requires_server: Tests requiring live server running",
-  "requires_display: Tests requiring display for visualization",
-  "api: Tests for API endpoints",
-  "generators: Tests for data generators",
-]
-asyncio_mode = "auto"
 ```
 
-### Coverage Configuration
+Important note:
 
-Coverage is defined in both `pyproject.toml` and `.coveragerc`.
+- There is no active `pytest.ini` file in this repository; configuration lives in `pyproject.toml`.
 
-`pyproject.toml` coverage settings:
-
-```toml
-[tool.coverage.run]
-source = ["src"]
-omit = [
-  "tests/*",
-  "tests/**/*",
-  "*/tests/*",
-  "**/tests/*",
-  "**/test_*.py",
-  "**/__pycache__/*",
-  "*/__pycache__/*",
-  "**/site-packages/*",
-  "*/site-packages/*",
-  "**/conftest.py",
-  "*/conftest.py",
-  "conftest.py",
-  "**/venv/*",
-  "*/venv/*",
-  "**/.venv/*",
-  "*/.venv/*",
-]
-branch = true
-parallel = true
-
-[tool.coverage.report]
-show_missing = true
-skip_covered = false
-skip_empty = true
-fail_under = 80
-precision = 2
-```
-
-`.coveragerc` keeps equivalent defaults and module-level guidance; both should stay aligned.
-
-## Fixture Reference
-
-### Global Fixtures (src/tests/conftest.py)
-
-#### Session Scope Fixtures
-
-```python
-@pytest.fixture(scope="session")
-def event_loop():
-    """
-    Create event loop for async tests.
-
-    Scope: session
-    Type: Generator
-    Cleanup: Closes loop after all tests
-    """
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
-
-
-@pytest.fixture(scope="session", autouse=True)
-def ensure_test_data_directory():
-    """
-    Ensure test data directory exists.
-
-    Scope: session
-    Type: Auto-use (runs automatically)
-    Returns: Path to test data directory
-    """
-    test_data_dir = Path(__file__).parent / "data"
-    test_data_dir.mkdir(exist_ok=True)
-    return test_data_dir
-```
-
-#### Function Scope Fixtures
-
-```python
-@pytest.fixture
-def test_config() -> Dict[str, Any]:
-    """
-    Provide test configuration dictionary.
-
-    Scope: function (default)
-    Type: Factory
-    Returns: Dictionary with test configuration
-    """
-    return {
-        "application": {
-            "name": "Juniper Canopy Test",
-            "version": "1.0.0",
-            "environment": "testing",
-        },
-        "server": {
-            "host": "127.0.0.1",
-            "port": 8050,
-            "debug": False
-        },
-    }
-
-
-@pytest.fixture
-def sample_training_metrics() -> list:
-    """
-    Generate sample training metrics for testing.
-
-    Scope: function
-    Type: Factory
-    Returns: List of metric dictionaries
-    """
-    return [
-        {
-            "epoch": i,
-            "loss": 1.0 / (i + 1) + 0.1,
-            "accuracy": (i / 10) * 0.9,
-        }
-        for i in range(10)
-    ]
-
-
-@pytest.fixture
-def sample_network_topology() -> Dict[str, Any]:
-    """
-    Generate sample network topology.
-
-    Scope: function
-    Type: Factory
-    Returns: Network topology dictionary
-    """
-    return {
-        "input_units": 2,
-        "hidden_units": 5,
-        "output_units": 1,
-        "connections": [
-            {"from": "input_0", "to": "hidden_0", "weight": 0.5},
-            {"from": "input_1", "to": "hidden_0", "weight": -0.3},
-        ],
-    }
-
-
-@pytest.fixture
-def sample_dataset() -> Dict[str, Any]:
-    """
-    Generate sample dataset for testing.
-
-    Scope: function
-    Type: Factory
-    Returns: Dataset with inputs and targets
-    Uses: numpy (for data generation)
-    """
-    import numpy as np
-    np.random.seed(42)
-
-    n_samples = 100
-    X = np.random.randn(n_samples, 2)
-    y = ((X[:, 0] > 0) ^ (X[:, 1] > 0)).astype(int)
-
-    return {
-        "name": "test_dataset",
-        "inputs": X.tolist(),
-        "targets": y.tolist(),
-        "n_samples": n_samples,
-    }
-
-
-@pytest.fixture
-def temp_test_directory(tmp_path):
-    """
-    Create temporary directory structure for testing.
-
-    Scope: function
-    Type: Directory factory
-    Args: tmp_path (pytest built-in)
-    Returns: Path to temporary test directory
-    Cleanup: Automatic (tmp_path handles cleanup)
-    """
-    test_dir = tmp_path / "cascor_test"
-    test_dir.mkdir()
-    (test_dir / "logs").mkdir()
-    (test_dir / "data").mkdir()
-    (test_dir / "images").mkdir()
-    return test_dir
-
-
-@pytest.fixture
-def mock_config_file(tmp_path):
-    """
-    Create temporary configuration file for testing.
-
-    Scope: function
-    Type: File factory
-    Args: tmp_path (pytest built-in)
-    Returns: Path to temporary YAML config file
-    """
-    config_content = """
-application:
-    name: "Juniper Canopy Test"
-    version: "1.0.0"
-
-server:
-    host: "127.0.0.1"
-    port: 8050
-"""
-    config_file = tmp_path / "test_config.yaml"
-    config_file.write_text(config_content)
-    return config_file
-```
-
-#### Auto-use Fixtures
-
-```python
-@pytest.fixture(autouse=True)
-def reset_singletons():
-    """
-    Reset singleton instances before each test for proper isolation.
-
-    Scope: function
-    Type: Auto-use (runs before every test)
-    Purpose: Ensure test isolation for singleton patterns
-    """
-    with contextlib.suppress(ImportError):
-        from config_manager import ConfigManager
-        from demo_mode import DemoMode
-
-        # Reset before test
-        if hasattr(ConfigManager, "_instance"):
-            ConfigManager._instance = None
-        if hasattr(DemoMode, "_instance"):
-            if DemoMode._instance is not None:
-                DemoMode._instance.stop()
-            DemoMode._instance = None
-
-    yield  # Test runs here
-
-    # Reset after test
-    # ... cleanup code ...
-
-
-@pytest.fixture(autouse=True)
-def cleanup_test_environment():
-    """
-    Clean up test environment after each test.
-
-    Scope: function
-    Type: Auto-use
-    Purpose: Remove test-specific environment variables
-    """
-    yield  # Test runs here
-
-    # Cleanup after test
-    test_env_vars = [k for k in os.environ if k.startswith("CASCOR_TEST_")]
-    for var in test_env_vars:
-        del os.environ[var]
-```
-
-### Built-in Pytest Fixtures
-
-```python
-# Temporary directory (unique per test)
-def test_with_tmp_path(tmp_path):
-    file = tmp_path / "test.txt"
-    file.write_text("content")
-
-
-# Temporary directory (shared in module)
-def test_with_tmpdir(tmpdir):
-    p = tmpdir.mkdir("sub").join("test.txt")
-    p.write("content")
-
-
-# Capture output
-def test_with_capsys(capsys):
-    print("hello")
-    captured = capsys.readouterr()
-    assert captured.out == "hello\n"
-
-
-# Monkeypatch (modify objects/environ)
-def test_with_monkeypatch(monkeypatch):
-    monkeypatch.setenv("KEY", "value")
-    monkeypatch.setattr("module.attr", "new_value")
-
-
-# Request object (fixture introspection)
-def test_with_request(request):
-    print(request.node.name)
-    print(request.config.rootdir)
-```
+---
 
 ## Marker Reference
 
-### Standard Markers
+Registered markers include:
 
-```python
-import pytest
+- `unit`
+- `integration`
+- `regression`
+- `performance`
+- `e2e`
+- `slow`
+- `requires_cascor`
+- `requires_server`
+- `requires_display`
+- `requires_redis`
+- `requires_cassandra`
+- `api`
+- `generators`
 
-# Unit tests - isolated component tests
-@pytest.mark.unit
-def test_component_logic():
-    pass
-
-# Integration tests - component interactions
-@pytest.mark.integration
-def test_api_integration():
-    pass
-
-# Performance tests - speed/resource tests
-@pytest.mark.performance
-def test_processing_speed():
-    pass
-
-# Regression tests - bug fix verification
-@pytest.mark.regression
-def test_bug_123_fixed():
-    pass
-
-# Slow tests - long-running tests
-@pytest.mark.slow
-def test_long_operation():
-    pass
-
-# External dependencies
-@pytest.mark.requires_cascor
-def test_with_cascor_backend():
-    pass
-
-# Live server dependency
-@pytest.mark.requires_server
-def test_with_live_server():
-    pass
-
-# Async tests
-@pytest.mark.asyncio
-async def test_async_operation():
-    await async_function()
-```
-
-### Optional Client Testing Modules
-
-Some tests depend on helper modules provided by optional client packages and use `pytest.importorskip(...)` so collection succeeds when extras are missing.
-
-Guarded module imports in the current suite:
-
-- `juniper_cascor_client.testing`
-- `juniper_data_client.testing`
-
-Install the extras when running those scenarios locally:
+Common selector examples:
 
 ```bash
-pip install "juniper-cascor-client[testing]"
-pip install "juniper-data-client[testing]"
-```
-
-### Skip Markers
-
-```python
-# Skip test unconditionally
-@pytest.mark.skip(reason="Not implemented yet")
-def test_future_feature():
-    pass
-
-# Skip test conditionally
-@pytest.mark.skipif(sys.version_info < (3, 11), reason="Requires Python 3.11+")
-def test_new_feature():
-    pass
-
-# Expected to fail
-@pytest.mark.xfail(reason="Known bug #123")
-def test_known_issue():
-    pass
-
-# Expected to fail conditionally
-@pytest.mark.xfail(sys.platform == "win32", reason="Windows not supported")
-def test_unix_feature():
-    pass
-```
-
-### Parametrize Marker
-
-```python
-# Single parameter
-@pytest.mark.parametrize("value", [1, 2, 3])
-def test_values(value):
-    assert value > 0
-
-# Multiple parameters
-@pytest.mark.parametrize("input,expected", [
-    (1, 2),
-    (2, 4),
-    (3, 6),
-])
-def test_double(input, expected):
-    assert double(input) == expected
-
-# Named parameters
-@pytest.mark.parametrize("test_input,expected", [
-    pytest.param(1, 2, id="one"),
-    pytest.param(2, 4, id="two"),
-    pytest.param(3, 6, id="three"),
-])
-def test_named(test_input, expected):
-    assert double(test_input) == expected
-```
-
-## Command Reference
-
-### Basic Commands
-
-```bash
-# Run all tests
-pytest
-
-# Verbose output
-pytest -v
-
-# Extra verbose
-pytest -vv
-
-# Quiet mode (less output)
-pytest -q
-
-# Stop at first failure
-pytest -x
-
-# Stop after N failures
-pytest --maxfail=3
-
-# Run specific test
-pytest path/to/test.py::test_function
-
-# Run test class
-pytest path/to/test.py::TestClass
-
-# Run test method
-pytest path/to/test.py::TestClass::test_method
-```
-
-### Selection Commands
-
-```bash
-# By marker
-pytest -m unit
-pytest -m "unit or integration"
-pytest -m "not slow"
-pytest -m "integration and not requires_cascor and not requires_server and not slow"
-pytest -m "not requires_cascor and not requires_server and not slow"
-
-# By keyword
-pytest -k "demo_mode"
-pytest -k "not slow"
-pytest -k "demo_mode and not advanced"
-
-# By node ID
-pytest src/tests/unit/test_demo_mode.py::test_initialization
-```
-
-### Optional Extras and `importorskip`
-
-Some tests use `pytest.importorskip(...)` for optional helper modules. If these packages are not installed, tests skip cleanly.
-
-Install optional testing extras:
-
-```bash
-pip install "juniper-cascor-client[testing]"
-pip install "juniper-data-client[testing]"
-```
-
-Common skip-trigger modules:
-
-- `juniper_cascor_client.testing`
-- `juniper_data_client.testing`
-
-### Output Commands
-
-```bash
-# Show local variables on failure
-pytest -l
-
-# Show print statements
-pytest -s
-
-# Capture method (no/sys/fd)
-pytest --capture=no
-
-# Show test durations
-pytest --durations=10
-
-# Show all durations
-pytest --durations=0
-
-# Verbose traceback
-pytest --tb=long
-
-# Short traceback
-pytest --tb=short
-
-# No traceback
-pytest --tb=no
-
-# Show warnings
-pytest -W default
-
-# Treat warnings as errors
-pytest -W error
-```
-
-### Coverage Commands
-
-```bash
-# Basic coverage
-pytest --cov=src
-
-# Coverage with missing lines
-pytest --cov=src --cov-report=term-missing
-
-# HTML coverage report
-pytest --cov=src --cov-report=html
-
-# XML coverage report (for CI)
-pytest --cov=src --cov-report=xml
-
-# JSON coverage report
-pytest --cov=src --cov-report=json
-
-# Multiple report formats
-pytest --cov=src --cov-report=html --cov-report=term-missing --cov-report=xml
-
-# Coverage for specific module
-pytest --cov=src/demo_mode --cov-report=term-missing
-
-# Append coverage data
-pytest --cov-append
-```
-
-### Debugging Commands
-
-```bash
-# Drop into pdb on failure
-pytest --pdb
-
-# Drop into pdb at start of each test
-pytest --trace
-
-# Show local variables in traceback
-pytest -l
-
-# Verbose output with local vars
-pytest -vl
-
-# Run last failed tests
-pytest --lf
-pytest --last-failed
-
-# Run failures first, then rest
-pytest --ff
-pytest --failed-first
-
-# Show which tests would run (dry-run)
-pytest --collect-only
-
-# Show available fixtures
-pytest --fixtures
-
-# Show markers
-pytest --markers
-```
-
-### Reporting Commands
-
-```bash
-# JUnit XML report
-pytest --junit-xml=reports/junit.xml
-
-# HTML report
-pytest --html=reports/report.html
-
-# Self-contained HTML
-pytest --html=reports/report.html --self-contained-html
-
-# JSON report
-pytest --json-report --json-report-file=reports/report.json
-
-# All reports
-pytest \
-    --junit-xml=reports/junit.xml \
-    --html=reports/report.html \
-    --json-report --json-report-file=reports/report.json \
-    --cov=src --cov-report=html:reports/coverage
-```
-
-### Parallel Execution (requires pytest-xdist)
-
-```bash
-# Auto-detect CPU cores
-pytest -n auto
-
-# Use N workers
-pytest -n 4
-
-# Distribute by module
-pytest -n auto --dist=loadscope
-
-# Distribute by test
-pytest -n auto --dist=loadfile
-```
-
-## Plugin Reference
-
-### pytest-cov
-
-```bash
-# Installation
-pip install pytest-cov
-
-# Usage
-pytest --cov=src --cov-report=html
-
-# Options
---cov=<source>           # Source to measure
---cov-report=term        # Terminal report
---cov-report=html        # HTML report
---cov-report=xml         # XML report
---cov-report=json        # JSON report
---cov-append             # Append to existing coverage data
---cov-branch             # Enable branch coverage
---cov-fail-under=<min>   # Fail if coverage below threshold
-```
-
-### pytest-asyncio
-
-```python
-# Installation
-pip install pytest-asyncio
-
-# Configuration (pytest.ini or pyproject.toml)
-asyncio_mode = auto  # auto, strict, legacy
-
-# Usage
-@pytest.mark.asyncio
-async def test_async_function():
-    result = await async_operation()
-    assert result == expected
-
-# Fixtures
-@pytest.fixture
-async def async_fixture():
-    resource = await setup_resource()
-    yield resource
-    await cleanup_resource(resource)
-```
-
-### pytest-html
-
-```bash
-# Installation
-pip install pytest-html
-
-# Usage
-pytest --html=reports/report.html
-
-# Self-contained HTML
-pytest --html=reports/report.html --self-contained-html
-
-# Options
---html=<path>           # Path to HTML report
---self-contained-html   # Inline CSS and assets
-```
-
-### pytest-mock
-
-```python
-# Installation
-pip install pytest-mock
-
-# Usage
-def test_with_mocker(mocker):
-    # Mock object
-    mock_obj = mocker.Mock()
-    mock_obj.method.return_value = "result"
-
-    # Patch
-    mocker.patch('module.function', return_value="result")
-
-    # Spy
-    mocker.spy(object, 'method')
-```
-
-## Coverage Configuration
-
-### Coverage Metrics
-
-```python
-# Statement coverage (default)
-# Measures if each line of code is executed
-
-# Branch coverage
-# Measures if each branch (if/else) is taken
-branch = True  # in .coveragerc
-
-# Function coverage
-# Measures if each function is called
-
-# Missing coverage
-# Shows which lines were not executed
-show_missing = True  # in .coveragerc
-```
-
-### Coverage Thresholds
-
-```ini
-[report]
-# Minimum coverage required
-fail_under = 80  # Overall project
-
-# Module-specific (in comments/documentation)
-# Critical: 100%
-# Core: 80%+
-# Frontend: 60%+
-```
-
-### Excluding Code from Coverage
-
-```python
-# Pragma comment
-def debug_function():  # pragma: no cover
-    print("Debug")
-
-# Via configuration (.coveragerc)
-exclude_lines =
-    pragma: no cover
-    def __repr__
-    raise NotImplementedError
-    if __name__ == .__main__.:
-    @abstractmethod
-```
-
-## API Testing Reference
-
-### Optional Client Testing Extras
-
-Some service-mode tests are intentionally dependency-gated to avoid collection failures in minimal environments.
-
-Install extras when running adapter and fake-client suites:
-
-```bash
-pip install "juniper-cascor-client[testing]" "juniper-data-client[testing]"
-```
-
-Current gating patterns in tests:
-
-- `pytest.importorskip("juniper_cascor_client.testing", ...)`
-- `pytest.mark.skipif(..., reason="requires juniper-data-client[testing]")`
-
-If extras are missing, these tests skip by design rather than failing collection.
-
-### Testing FastAPI Endpoints
-
-```python
-from fastapi.testclient import TestClient
-from main import app
-
-client = TestClient(app)
-
-def test_api_endpoint():
-    """Test REST API endpoint."""
-    response = client.get("/api/metrics")
-    assert response.status_code == 200
-    assert "loss" in response.json()
-
-def test_api_post():
-    """Test POST endpoint."""
-    response = client.post("/api/control", json={"command": "start"})
-    assert response.status_code == 200
-```
-
-### Service Normalization Regression Matrix
-
-Use this matrix when backend/service integration changes affect dashboard-facing payload contracts.
-
-| Test File | Contract Focus | Key Behavior |
-| ------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------ |
-| `tests/unit/test_response_normalization.py` | CasCor envelope + field normalization | envelope unwrapping, nested metrics contract, status normalization, topology transform, target conversion |
-| `tests/unit/test_service_backend.py` | Service backend adapter normalization | nested `get_status()` flattening, zero-value preservation, metadata-only dataset hydration |
-| `tests/unit/frontend/test_metrics_panel_handlers.py` | Metrics panel callback handler behavior | replay control transitions, validation overlay rendering, progress/detail formatting, hidden units formatting |
-
-Recommended command subset:
-
-```bash
-cd src
-pytest tests/unit/test_response_normalization.py -k "Fix1 or Fix2 or Fix3 or Fix4 or Fix13 or DashboardMetricsContract or TopologyTransformation or DatasetTargetConversion" -v
-pytest tests/unit/test_service_backend.py -k "get_status or get_dataset" -v
-pytest tests/unit/frontend/test_metrics_panel_handlers.py -k "validation_overlay or replay or progress_detail or training_progress or hidden_units" -v
-```
-
-### Testing WebSocket Endpoints
-
-```python
-from fastapi.testclient import TestClient
-
-def test_websocket():
-    """Test WebSocket connection."""
-    with client.websocket_connect("/ws/training") as websocket:
-        websocket.send_json({"type": "subscribe"})
-        data = websocket.receive_json()
-        assert data["type"] == "metrics"
-```
-
-## Performance Testing
-
-### Timing Tests
-
-```python
-import time
-import pytest
-
-def test_performance():
-    """Test execution time."""
-    start = time.time()
-
-    # Operation to test
-    result = expensive_operation()
-
-    duration = time.time() - start
-    assert duration < 1.0  # Must complete in under 1 second
-```
-
-### Memory Testing
-
-```python
-import tracemalloc
-
-def test_memory_usage():
-    """Test memory consumption."""
-    tracemalloc.start()
-
-    # Operation to test
-    result = memory_intensive_operation()
-
-    current, peak = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
-
-    assert peak < 10 * 1024 * 1024  # Less than 10 MB
-```
-
-### Benchmark Plugin (pytest-benchmark)
-
-```python
-# Installation
-pip install pytest-benchmark
-
-# Usage
-def test_benchmark(benchmark):
-    result = benchmark(function_to_test, arg1, arg2)
-    assert result == expected
-```
-
-## Advanced Topics
-
-### Custom Markers
-
-```python
-# Register in pytest.ini
-[pytest]
-markers =
-    smoke: Smoke tests for basic functionality
-    security: Security-related tests
-
-# Use in tests
-@pytest.mark.smoke
-def test_basic_functionality():
-    pass
-```
-
-### Custom Fixtures
-
-```python
-# In conftest.py
-@pytest.fixture
-def custom_fixture():
-    # Setup
-    resource = create_resource()
-
-    yield resource
-
-    # Teardown
-    cleanup_resource(resource)
-```
-
-### Fixture Factories
-
-```python
-@pytest.fixture
-def make_user():
-    """Factory fixture for creating users."""
-    created_users = []
-
-    def _make_user(name, email):
-        user = User(name=name, email=email)
-        created_users.append(user)
-        return user
-
-    yield _make_user
-
-    # Cleanup all created users
-    for user in created_users:
-        user.delete()
-
-def test_with_factory(make_user):
-    user1 = make_user("Alice", "alice@example.com")
-    user2 = make_user("Bob", "bob@example.com")
-    # Test with multiple users
-```
-
-### Parametrize from File
-
-```python
-import json
-import pytest
-
-def load_test_cases():
-    with open('test_cases.json') as f:
-        return json.load(f)
-
-@pytest.mark.parametrize("test_case", load_test_cases())
-def test_from_file(test_case):
-    assert process(test_case['input']) == test_case['expected']
+pytest -m unit -v
+pytest -m integration -v
+pytest -m "not requires_cascor and not requires_server and not slow" -v
+pytest -m "integration and not requires_cascor and not requires_server and not slow" -v
 ```
 
 ---
 
-**For practical examples and usage, see [TESTING_MANUAL.md](TESTING_MANUAL.md).**
+## Fixture Reference
+
+Defined in `src/tests/conftest.py`:
+
+- `event_loop` (session)
+- `mock_juniper_data_client` (session, autouse)
+- `client` (module)
+- `preserve_metrics_layouts` (session, autouse)
+- `ensure_test_data_directory` (session, autouse)
+- `reset_singletons` (function, autouse)
+- `cleanup_test_environment` (function, autouse)
+- plus sample data/config fixtures (`test_config`, `sample_training_metrics`, `sample_network_topology`, `sample_dataset`)
+
+Runtime setup behaviors in `conftest.py`:
+
+- Forces `JUNIPER_CANOPY_DEMO_MODE=1`
+- Sets `JUNIPER_DATA_URL=http://localhost:8100`
+- Sets `CANOPY_RATE_LIMIT_ENABLED=false`
+- Adds `src/` to `sys.path` and `PYTHONPATH`
+- Injects stubs for `juniper_data_client` and `juniper_cascor_client` when unavailable
+
+These defaults make most unit/integration tests runnable without external services.
+
+---
+
+## Environment and Gating Variables
+
+Primary gating controls:
+
+| Variable | Enables | Default in CI unit/integration jobs |
+| --- | --- | --- |
+| `CASCOR_BACKEND_AVAILABLE=1` | tests marked `requires_cascor` | `0` |
+| `RUN_SERVER_TESTS=1` | tests marked `requires_server` | `0` |
+| `RUN_DISPLAY_TESTS=1` | tests marked `requires_display` in headless mode | unset/`0` |
+| `ENABLE_SLOW_TESTS=1` | tests marked `slow` | `0` |
+
+Automatic library-based skipping:
+
+- `requires_cassandra` skipped if Cassandra driver import fails
+- `requires_redis` skipped if Redis library import fails
+
+---
+
+## Command Reference
+
+### Fast default suite (CI-aligned)
+
+```bash
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/ \
+  --verbose
+```
+
+### Integration suite (external deps off)
+
+```bash
+python -m pytest \
+  -m "integration and not requires_cascor and not requires_server and not slow" \
+  src/tests/integration \
+  --verbose
+```
+
+### Coverage gate equivalent
+
+```bash
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/ \
+  --cov=src \
+  --cov-report=term-missing \
+  --cov-report=xml:reports/coverage.xml \
+  --cov-report=html:reports/htmlcov \
+  --cov-fail-under=80
+```
+
+### Useful diagnostics
+
+```bash
+pytest --collect-only
+pytest --markers
+pytest --fixtures
+pytest -ra
+pytest --lf
+pytest --ff
+```
+
+---
+
+## Coverage Reference
+
+Coverage configuration source: `pyproject.toml`.
+
+Key settings:
+
+- `source = ["src"]`
+- `branch = true`
+- `fail_under = 80`
+- `show_missing = true`
+- HTML output default directory: `reports/coverage`
+
+Common commands:
+
+```bash
+pytest --cov=src --cov-report=term-missing
+pytest --cov=src --cov-report=html:reports/htmlcov
+pytest --cov=src --cov-report=xml:reports/coverage.xml
+```
+
+---
+
+## CI Mapping
+
+From `.github/workflows/ci.yml`:
+
+- Unit job command scope: `src/tests/unit/` + `src/tests/regression/`
+- Integration job command scope: `src/tests/integration`
+- Unit job timeout flag: `--timeout=60`
+- Integration job timeout flag: `--timeout=120`
+- Coverage gate enforced in unit job via `--cov-fail-under=${COVERAGE_FAIL_UNDER}` (`80`)
+
+Security and docs companion checks:
+
+- security scans in `security` job (`gitleaks`, `bandit`, `pip-audit`)
+- docs link validation in `docs` job (`scripts/check_doc_links.py ...`)
+- lockfile freshness in `lockfile-check`
+
+---
+
+## Troubleshooting Reference
+
+Unexpected skips:
+
+```bash
+pytest -ra
+```
+
+Collection issues:
+
+- verify editable install: `pip install -e .`
+- inspect discovery and markers:
+
+```bash
+pytest --collect-only
+pytest --markers
+```
+
+Coverage below threshold:
+
+- run the coverage gate equivalent command
+- inspect `reports/htmlcov/index.html` for module-level gaps
+
+Backend/server tests not running:
+
+- ensure required env vars are explicitly enabled (`CASCOR_BACKEND_AVAILABLE=1`, `RUN_SERVER_TESTS=1`)
+- ensure dependent services/libraries are available for those tests
+
+---
+
+## References
+
+- [Testing Quick Start](TESTING_QUICK_START.md)
+- [Testing Environment Setup](TESTING_ENVIRONMENT_SETUP.md)
+- [Testing Manual](TESTING_MANUAL.md)
+- [Testing Coverage Reports](TESTING_REPORTS_COVERAGE.md)
+- [Selective Test Guide](SELECTIVE_TEST_GUIDE.md)
