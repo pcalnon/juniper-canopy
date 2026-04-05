@@ -545,8 +545,13 @@ class DemoMode:
         # Create mock network
         self.network = MockCascorNetwork(input_size=2, output_size=1)
 
-        # Generate demo dataset
-        self.dataset = self._generate_spiral_dataset(n_samples=200)
+        # Generate demo dataset — fall back to local generation if JuniperData
+        # is unreachable (e.g., Docker standalone, CI smoke test).
+        try:
+            self.dataset = self._generate_spiral_dataset(n_samples=200)
+        except Exception as exc:
+            self.logger.warning("JuniperData dataset generation failed (%s), falling back to local generation", exc)
+            self.dataset = self._generate_spiral_dataset_local(n_samples=200)
         self.network.train_x = self.dataset["inputs_tensor"]
         self.network.train_y = self.dataset["targets_tensor"]
 
@@ -847,8 +852,6 @@ class DemoMode:
                 generator="spiral",
                 params=params,
                 persist=True,
-                name="Spiral2D",
-                created_by="juniper-canopy-demo",
             )
             create_ms = (time.monotonic() - t0) * 1000
             self.logger.info("JuniperData create_dataset completed", extra={"latency_ms": f"{create_ms:.1f}", "url": juniper_data_url})
@@ -1614,7 +1617,11 @@ class DemoMode:
         if self.is_running:
             self.stop()
 
-        self.dataset = self._generate_spiral_dataset(n_samples=n_samples, n_rotations=n_rotations)
+        try:
+            self.dataset = self._generate_spiral_dataset(n_samples=n_samples, n_rotations=n_rotations)
+        except Exception as exc:
+            self.logger.warning("JuniperData dataset generation failed (%s), falling back to local generation", exc)
+            self.dataset = self._generate_spiral_dataset_local(n_samples=n_samples)
         self.network.train_x = self.dataset["inputs_tensor"]
         self.network.train_y = self.dataset["targets_tensor"]
         self.current_epoch = 0
@@ -1745,7 +1752,11 @@ class DemoMode:
                     self.spiral_rotations = new_rotations
                     self.logger.info(f"Demo mode: spiral_rotations set to {self.spiral_rotations} — regenerating dataset")
                     # Regenerate dataset with new rotation count and reset training
-                    self.dataset = self._generate_spiral_dataset(n_samples=200, n_rotations=self.spiral_rotations)
+                    try:
+                        self.dataset = self._generate_spiral_dataset(n_samples=200, n_rotations=self.spiral_rotations)
+                    except Exception as exc:
+                        self.logger.warning("JuniperData dataset regeneration failed (%s), falling back to local generation", exc)
+                        self.dataset = self._generate_spiral_dataset_local(n_samples=200)
                     self.network.train_x = self.dataset["inputs_tensor"]
                     self.network.train_y = self.dataset["targets_tensor"]
                     self._reset_state_and_history()
