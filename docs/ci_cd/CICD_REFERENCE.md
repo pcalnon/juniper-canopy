@@ -1,6 +1,8 @@
 # CI/CD Technical Reference
 
-## Complete technical reference for the CI/CD pipeline
+**Last Updated:** 2026-04-05  
+**Version:** 0.26.1  
+**Status:** Current
 
 ---
 
@@ -9,11 +11,12 @@
 1. [Pipeline Architecture](#pipeline-architecture)
 2. [Workflow Specification](#workflow-specification)
 3. [Configuration Files](#configuration-files)
-4. [Tool Configurations](#tool-configurations)
-5. [Environment Variables](#environment-variables)
-6. [Artifact Specifications](#artifact-specifications)
-7. [API Reference](#api-reference)
-8. [Troubleshooting Reference](#troubleshooting-reference)
+4. [Documentation Link Validation](#documentation-link-validation)
+5. [Tool Configurations](#tool-configurations)
+6. [Dependency Reference](#dependency-reference)
+7. [Documentation Link Checker Reference](#documentation-link-checker-reference)
+8. [Common Failure Classes](#common-failure-classes)
+9. [Troubleshooting Reference](#troubleshooting-reference)
 
 ---
 
@@ -251,7 +254,7 @@ lint:
       continue-on-error: true
 
     - name: Run Bandit
-      run: bandit -r src/ -c pyproject.toml
+      run: bandit -r src -c .bandit.yml
       continue-on-error: true
 ```
 
@@ -259,14 +262,14 @@ lint:
 
 ```yaml
 test:
-  name: Test Suite (Python ${{ matrix.python-version }})
+  name: Unit Tests + Coverage (Python ${{ matrix.python-version }})
   runs-on: ubuntu-latest
   timeout-minutes: 30
 
   strategy:
     fail-fast: false
     matrix:
-      python-version: ["3.11", "3.12", "3.13"]
+      python-version: ["3.12", "3.13", "3.14"]
 
   steps:
     - name: Checkout Code
@@ -296,29 +299,16 @@ test:
         python -m pip install --upgrade pip
         pip install -r conf/requirements.txt
 
-    - name: Run Tests
+    - name: Run Unit Tests
       shell: bash -el {0}
       run: |
-        cd src
-        pytest tests/ \
+        python -m pytest \
+          src/tests \
           --verbose \
-          --cov=. \
-          --cov-report=xml:../coverage.xml \
+          --cov=src \
+          --cov-report=xml:reports/coverage.xml \
           --cov-report=term-missing \
-          --cov-report=html:../reports/coverage \
-          --junit-xml=../reports/junit/results.xml \
-          --html=../reports/test_report.html \
-          --self-contained-html
-
-    - name: Upload Coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        file: ./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
-        token: ${{ secrets.CODECOV_TOKEN }}
-        fail_ci_if_error: false
-      continue-on-error: true
+          --junit-xml=reports/junit/unit-tests.xml
 
     - name: Upload Test Results
       uses: actions/upload-artifact@v4
@@ -326,27 +316,145 @@ test:
       with:
         name: test-results-${{ matrix.python-version }}
         path: |
-          reports/
-          coverage.xml
+          reports/junit/unit-tests.xml
+          reports/coverage.xml
         retention-days: 30
 
-    - name: Check Coverage Threshold
-      shell: bash -el {0}
-      run: |
-        cd src
-        COVERAGE=$(pytest tests/ --cov=. --cov-report=term-missing | grep "TOTAL" | awk '{print $NF}' | sed 's/%//')
-        echo "Current coverage: ${COVERAGE}%"
-
-        if (( $(echo "$COVERAGE < 80" | bc -l) )); then
-          echo "::warning::Coverage below 80%: ${COVERAGE}%"
-        fi
-
-        if (( $(echo "$COVERAGE < 60" | bc -l) )); then
-          echo "::error::Coverage critically low: ${COVERAGE}%"
-          exit 1
-        fi
-      continue-on-error: true
+    # Coverage threshold enforcement should be configured in pytest invocation
+    # (for example: --cov-fail-under=80)
 ```
+
+#### Documentation Links Job
+
+```yaml
+docs:
+  name: Documentation Links
+  runs-on: ubuntu-latest
+
+  steps:
+    - name: Checkout Code
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+    - name: Set up Python
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+      with:
+        python-version: "3.14"
+
+    - name: Validate Documentation Links
+      run: |
+        python scripts/check_doc_links.py \
+          --exclude templates --exclude history \
+          --exclude pull_requests --exclude releases \
+          --exclude analysis --exclude fixes --exclude development \
+          --exclude CHANGELOG.md \
+          --cross-repo skip
+```
+
+This job validates internal documentation links and same-file anchors before the quality gate passes. CI uses `--cross-repo skip` because sibling Juniper repositories are not guaranteed to exist on the runner filesystem.
+
+---
+
+## Documentation Link Validation
+
+### Purpose
+
+The documentation link checker validates:
+
+- Relative markdown links resolve to existing files
+- Same-file anchor links resolve to real headings
+- Links remain within repository boundaries
+- Unsafe patterns (absolute paths, excessive traversal, invalid cross-repo escapes) are rejected
+
+### Script
+
+- Path: `scripts/check_doc_links.py`
+- Unit tests: `src/tests/unit/test_doc_link_checker.py`
+- CI invocation: `.github/workflows/ci.yml` (`docs` job)
+
+### Local Commands
+
+```bash
+# Match CI behavior
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+
+# Validate cross-repo links when sibling repos exist locally
+python scripts/check_doc_links.py --cross-repo check
+
+### scripts/check_doc_links.py
+
+**Location:** `scripts/check_doc_links.py`
+
+**Purpose:** Validate internal markdown links and anchor references, and enforce path-safety constraints for documentation links.
+
+**Core behaviors:**
+
+1. Validates relative file links and same-file heading anchors.
+2. Skips external URL targets (`http`, `https`, `mailto`, `ftp`) and data/host-relative targets (`data:`, `//`).
+3. Ignores links inside inline code and fenced code blocks.
+4. Rejects unsafe inputs:
+   - Absolute paths
+   - Null bytes in targets
+   - Excessive traversal (`..` count > 5)
+   - Paths escaping repository boundaries
+5. Classifies Juniper cross-repo links and applies policy:
+   - `skip`: skip cross-repo checks, count skipped links
+   - `warn`: emit warnings without failing
+   - `check`: validate links against a discovered ecosystem root
+
+---
+
+## Documentation Link Validation
+
+### CI Invocation
+
+The `docs` job in `.github/workflows/ci.yml` runs:
+
+```bash
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
+
+### CLI Modes
+
+```bash
+# Default mode: validate current repo docs (cross-repo policy defaults to check)
+python scripts/check_doc_links.py
+
+# CI-equivalent mode
+python scripts/check_doc_links.py --cross-repo skip \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md
+
+# Warn for cross-repo links without failing
+python scripts/check_doc_links.py --cross-repo warn --verbose docs/ notes/
+```
+
+### Cross-Repo Policy Notes
+
+- `check` mode tries to discover an ecosystem root containing multiple sibling repositories.
+- If discovery fails in `check` mode, behavior falls back to `skip` with a warning.
+- CI intentionally uses `skip` to avoid false failures when sibling repositories are absent on runners.
+
+### .pre-commit-config.yaml
+
+### Cross-Repo Modes
+
+| Mode    | Behavior                                                          | Typical Use                           |
+|---------|-------------------------------------------------------------------|---------------------------------------|
+| `skip`  | Skip cross-repo file existence checks (still validates structure) | CI and isolated clones                |
+| `warn`  | Emit warnings for cross-repo links without failing                | Local cleanup passes                  |
+| `check` | Validate cross-repo targets on disk                               | Full local Juniper ecosystem checkout |
 
 ---
 
@@ -354,94 +462,36 @@ test:
 
 ### .github/workflows/ci.yml
 
-**Location:** `.github/workflows/ci.yml`
+**Last Updated:** 2026-04-04
+**Version:** 0.26.0
+**Status:** Current
 
-**Purpose:** Main CI/CD pipeline definition
+## Scope
 
-**Key Sections:**
+This reference documents the current CI behavior implemented in:
 
-1. **Workflow metadata**
-   - Name: `CI/CD Pipeline`
-   - Version: Tracked in file header
+- `.github/workflows/ci.yml`
+- `scripts/check_doc_links.py`
+- `conf/requirements_ci.txt`
+- `pyproject.toml`
 
-2. **Trigger configuration**
-   - Push events
-   - Pull request events
-   - Manual dispatch
+## Workflow Summary
 
-3. **Job definitions**
-   - Lint
-   - Test (matrix)
-   - Build
-   - Integration
-   - Quality gate
-   - Notify
+Workflow name: `CI/CD Pipeline`
 
-4. **Environment variables**
-   - Python settings
-   - Application settings
-   - Test settings
+Trigger events:
 
-### .pre-commit-config.yaml
+- `push` (`main`, `develop`, `feature/**`, `fix/**`)
+- `pull_request` (`main`, `develop`)
+- `repository_dispatch` (`data-client-updated`, `cascor-client-updated`)
+- `workflow_dispatch`
 
-**Location:** `.pre-commit-config.yaml`
-
-**Purpose:** Pre-commit hook configuration
-
-**Hook Categories:**
-
-1. **Standard hooks** (trailing-whitespace, end-of-file-fixer, etc.)
-2. **Black** (code formatting)
-3. **isort** (import sorting)
-4. **Flake8** (linting)
-5. **MyPy** (type checking - manual stage)
-6. **Bandit** (security scanning)
-7. **YAML lint**
-8. **Python syntax check**
-
-**Configuration:**
+Concurrency:
 
 ```yaml
-repos:
-  - repo: https://github.com/psf/black
-    rev: 24.1.1
-    hooks:
-      - id: black
-        language_version: python3.13
-        args: [--line-length=120]
-
-  - repo: https://github.com/PyCQA/isort
-    rev: 5.13.2
-    hooks:
-      - id: isort
-        args: [--profile=black, --line-length=120]
-```
-
-### .codecov.yml
-
-**Location:** `.codecov.yml`
-
-**Purpose:** Codecov configuration
-
-**Key Settings:**
-
-```yaml
-coverage:
-  precision: 2              # Decimal places
-  round: down               # Rounding method
-  range: 70..100            # Color range
-
-  status:
-    project:
-      default:
-        target: 80%         # Project-wide target
-        threshold: 5%       # Allowed drop
-        base: auto          # Compare to parent
-
-    patch:
-      default:
-        target: 60%         # New code target
-        threshold: 10%      # More lenient
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 ```
 
 **Ignore Patterns:**
@@ -466,8 +516,8 @@ ignore:
 
    ```toml
    [project]
-   name = "juniper_canopy"
-   version = "0.2.1"
+   name = "juniper-canopy"
+   version = "0.4.0"
    requires-python = ">=3.11"
    ```
 
@@ -481,25 +531,32 @@ ignore:
 
 3. **isort configuration**
 
-   ```toml
-   [tool.isort]
-   profile = "black"
-   line_length = 120
-   ```
+    ```yaml
+    # `pre-commit`
+    - Python matrix: `3.12`, `3.13`, `3.14`
+    - Installs `pre-commit`
+    - Runs `pre-commit run --all-files --show-diff-on-failure`
+    - Caches pre-commit hooks (`~/.cache/pre-commit`)
+    ```
 
 4. **Bandit configuration**
 
-   ```toml
-   [tool.bandit]
-   exclude_dirs = ["/tests/", "/.venv/"]
-   skips = ["B101", "B601"]
+   ```yaml
+   # .bandit.yml
+   exclude_dirs:
+     - src/tests
+     - util/verification
+   skips:
+     - B311
+   confidence: MEDIUM
+   severity: MEDIUM
    ```
 
 5. **MyPy configuration**
 
    ```toml
    [tool.mypy]
-   python_version = "3.11"
+   python_version = "3.14"
    ignore_missing_imports = true
    ```
 
@@ -517,7 +574,7 @@ ignore:
    ```toml
    [tool.coverage.report]
    show_missing = true
-   fail_under = 60
+   fail_under = 80
    precision = 2
    ```
 
@@ -550,128 +607,106 @@ extend-exclude = '''
 **Usage:**
 
 ```bash
-# Check formatting
-black --check --diff src/
-
-# Apply formatting
-black src/
-
-# Specific line length
-black --line-length=100 src/
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/ \
+  --timeout=60 \
+  --maxfail=5 \
+  --junitxml=reports/junit/junit-unit.xml \
+  --cov=src \
+  --cov-report=term-missing \
+  --cov-report=xml:reports/coverage.xml \
+  --cov-report=html:reports/htmlcov \
+  --cov-fail-under=80
 ```
 
-### isort
+Special behavior:
 
-**Purpose:** Import sorting
+- Handles Python 3.12 `pytest` cleanup SIGABRT (`exit 134`) by checking JUnit `failures/errors` before deciding failure.
 
-**Configuration:**
+Artifacts:
 
-```toml
-[tool.isort]
-profile = "black"
-line_length = 120
-multi_line_output = 3
-include_trailing_comma = true
-force_grid_wrap = 0
-use_parentheses = true
-```
+- `coverage-report-py<version>`
+- `unit-test-results-py<version>`
 
-**Usage:**
+### `integration-tests`
+
+- Python: `3.14`
+- Runs only on PRs and pushes to `main`/`develop`
+- Marker filter:
 
 ```bash
-# Check imports
-isort --check-only --diff src/
-
-# Sort imports
-isort src/
-
-# Specific profile
-isort --profile=black src/
+integration and not requires_cascor and not requires_server and not slow
 ```
 
-### Flake8
+Artifact:
 
-**Purpose:** Linting
+- `integration-test-results`
 
-**Configuration:**
+### `build`
 
-```ini
-# .flake8 or setup.cfg
-[flake8]
-max-line-length = 120
-extend-ignore = E203, E266, E501, W503
-max-complexity = 15
-select = B,C,E,F,W,T4,B9
+- Python: `3.14`
+- Uses `python -m build --sdist --wheel`
+- Verifies both `.tar.gz` and `.whl`
+- Uploads `dist-packages`
+
+### `security`
+
+- Python: `3.14`
+- Tools: `gitleaks`, `bandit`, `pip-audit`
+- Uploads SARIF and security report artifacts
+
+### `dependency-docs`
+
+```yaml
+# .bandit.yml
+exclude_dirs:
+  - src/tests
+  - util/verification
+skips:
+  - B311
+confidence: MEDIUM
+severity: MEDIUM
 ```
 
-**Usage:**
-
-```bash
-# Lint code
-flake8 src/
-
-# With specific options
-flake8 src/ --max-line-length=120 --statistics
-
-# Ignore specific errors
-flake8 src/ --extend-ignore=E501,W503
-```
-
-### MyPy
-
-**Purpose:** Type checking
-
-**Configuration:**
-
-```toml
-[tool.mypy]
-python_version = "3.11"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = false
-ignore_missing_imports = true
-show_error_codes = true
-```
-
-**Usage:**
-
-```bash
-# Type check
-mypy src/
-
-# With options
-mypy src/ --ignore-missing-imports --no-strict-optional
-
-# Check specific file
-mypy src/config_manager.py
-```
-
-### Bandit
-
-**Purpose:** Security scanning
-
-**Configuration:**
-
-```toml
-[tool.bandit]
-exclude_dirs = ["/tests/", "/.venv/"]
-skips = ["B101", "B601"]
-level = "MEDIUM"
-confidence = "MEDIUM"
-```
-
-**Usage:**
+Artifact:
 
 ```bash
 # Security scan
-bandit -r src/
+bandit -r src
 
 # With config
-bandit -r src/ -c pyproject.toml
+bandit -r src -c .bandit.yml
 
 # Specific severity
-bandit -r src/ -ll  # Low severity and up
+bandit -r src -ll  # Low severity and up
 ```
+
+### Lockfile and Dependency Audit
+
+**Purpose:** Keep `requirements.lock` synchronized with `pyproject.toml` extras and audit installed dependencies.
+
+**Usage:**
+
+```bash
+# Regenerate lockfile with the same extras used in CI lockfile check
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
+
+# Mimic CI security job's dependency audit input
+pip install dash fastapi uvicorn plotly numpy scipy
+pip freeze > reports/security/pip-freeze.txt
+pip-audit -r reports/security/pip-freeze.txt --output reports/security/pip-audit.txt
+```
+
+**Authoritative workflow files:**
+
+- `.github/workflows/ci.yml`
+- `.github/workflows/lockfile-update.yml`
+- `.github/workflows/security-scan.yml`
 
 ### Pytest
 
@@ -699,268 +734,119 @@ markers = [
 ]
 ```
 
-**Usage:**
+- Python: `3.14`
+- Runs doc link validator with excluded directories/files:
 
 ```bash
-# Run all tests
-pytest tests/
-
-# Run with coverage
-pytest tests/ --cov=src --cov-report=html
-
-# Run specific marker
-pytest -m unit
-
-# Verbose output
-pytest tests/ -vv
-
-# Stop on first failure
-pytest tests/ -x
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
 ```
 
-### Coverage.py
+### `docker-build`
 
-**Purpose:** Code coverage tracking
+- Builds image from root `Dockerfile`
+- Starts container and waits for healthy state
+- Verifies:
+  - package import
+  - `/v1/health` response
 
-**Configuration:**
+### `required-checks`
 
-```toml
-[tool.coverage.run]
-source = ["src"]
-omit = [
-    "*/tests/*",
-    "*/__pycache__/*"
-]
-branch = true
+Aggregates job results and enforces final pass/fail semantics used by branch protection.
 
-[tool.coverage.report]
-show_missing = true
-skip_covered = false
-fail_under = 60
-precision = 2
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise NotImplementedError"
-]
-```
+## Environment Variables Used in CI
 
-**Usage:**
-
-```bash
-# Run tests with coverage
-coverage run -m pytest tests/
-
-# Generate report
-coverage report
-
-# Generate HTML report
-coverage html
-
-# Combine coverage data
-coverage combine
-
-# Erase coverage data
-coverage erase
-```
-
----
-
-## Environment Variables
-
-### GitHub Actions Default Variables
-
-```bash
-# Workflow context
-GITHUB_WORKFLOW="CI/CD Pipeline"
-GITHUB_RUN_ID="1234567890"
-GITHUB_RUN_NUMBER="42"
-GITHUB_ACTION="run-tests"
-
-# Repository context
-GITHUB_REPOSITORY="owner/repo"
-GITHUB_REPOSITORY_OWNER="owner"
-GITHUB_SHA="abc123..."
-GITHUB_REF="refs/heads/main"
-GITHUB_REF_NAME="main"
-
-# Event context
-GITHUB_EVENT_NAME="push"
-GITHUB_EVENT_PATH="/github/workflow/event.json"
-GITHUB_ACTOR="username"
-
-# Runner context
-RUNNER_OS="Linux"
-RUNNER_ARCH="X64"
-RUNNER_NAME="GitHub Actions 1"
-RUNNER_TEMP="/tmp"
-RUNNER_WORKSPACE="/home/runner/work/repo/repo"
-
-# Other
-CI="true"
-GITHUB_ACTIONS="true"
-GITHUB_WORKSPACE="/home/runner/work/repo/repo"
-GITHUB_SERVER_URL="https://github.com"
-GITHUB_API_URL="https://api.github.com"
-```
-
-### Custom Environment Variables
+Top-level workflow env:
 
 ```yaml
 env:
-  # Python
-  PYTHONUNBUFFERED: 1
-  PYTHONDONTWRITEBYTECODE: 1
-
-  # Application
-  CASCOR_DEBUG: 0
-  CASCOR_DEMO_MODE: 1
-  CASCOR_DEMO_INTERVAL: 0.1
-
-  # Testing
-  PYTEST_ADDOPTS: "--verbose --color=yes"
-  COVERAGE_CORE: sysmon
-
-  # Conda
-  CONDA_ENV_NAME: JuniperPython-CI
+  ENV_NAME: juniper-canopy
+  PYTHON_TEST_VERSION: "3.14"
+  COVERAGE_FAIL_UNDER: "80"
 ```
 
-### Accessing Environment Variables
-
-**In workflow:**
+Test gating envs in unit/integration jobs:
 
 ```yaml
-- name: Use Environment Variable
-  run: |
-    echo "Workflow: ${{ github.workflow }}"
-    echo "Python: ${{ env.PYTHON_VERSION }}"
-    echo "Custom: ${{ env.CASCOR_DEBUG }}"
+CASCOR_BACKEND_AVAILABLE: 0
+RUN_SERVER_TESTS: 0
+ENABLE_SLOW_TESTS: 0
 ```
 
-**In Python:**
+## Dependency Reference
 
-```python
-import os
+Primary CI dependency file:
 
-# GitHub Actions variables
-is_ci = os.getenv('CI') == 'true'
-workflow = os.getenv('GITHUB_WORKFLOW')
-run_id = os.getenv('GITHUB_RUN_ID')
+- `conf/requirements_ci.txt`
 
-# Custom variables
-debug = os.getenv('CASCOR_DEBUG', '0') == '1'
-demo_mode = os.getenv('CASCOR_DEMO_MODE', '0') == '1'
-```
+Notable required entries:
 
----
+- `prometheus-client>=0.20.0`
+- `sentry-sdk>=2.0.0`
 
-## Artifact Specifications
+These support observability-import paths used during tests and runtime checks.
 
-### Test Results Artifact
+## Documentation Link Checker Reference
 
-**Name:** `test-results-{python-version}`
+Script: `scripts/check_doc_links.py`
 
-**Contents:**
+Core capabilities:
+
+- Validates relative file links and same-file anchors.
+- Skips fenced code blocks and inline code spans.
+- Supports cross-repo handling modes:
+  - `skip` (CI default)
+  - `warn`
+  - `check`
+
+Exit codes:
+
+- `0`: all valid
+- `1`: broken links or invalid arguments
+
+## Common Failure Classes
+
+### Stale lockfile
+
+Symptom:
+
+- `lockfile-check` fails diff
+
+Fix:
 
 ```bash
-reports/
-├── junit/
-│   └── results.xml          # JUnit XML report
-├── test_report.html         # HTML test report
-└── coverage/
-    └── index.html           # Coverage HTML report
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
 ```
 
-**Metadata:**
+### Broken docs links
 
-```yaml
-name: test-results-3.13
-retention-days: 30
-size: ~2-5 MB
-format: ZIP archive
-```
+Symptom:
 
-### Coverage Report Artifact
+- `docs` job reports missing files/anchors
 
-**Name:** `coverage-report-{python-version}`
+Fix:
 
-**Contents:**
+- run checker locally with the CI command and repair relative paths or heading anchors
+
+### Optional testing modules skipped
+
+Symptom:
+
+- Service/e2e tests skipped via `importorskip`
+
+Fix (local full-run only):
 
 ```bash
-reports/coverage/
-├── index.html               # Main coverage page
-├── *.html                   # Per-file coverage
-├── style.css                # Styling
-└── coverage.xml             # XML report
-```
-
-**Metadata:**
-
-```yaml
-name: coverage-report-3.13
-retention-days: 30
-size: ~1-3 MB
-format: ZIP archive
-```
-
-### Accessing Artifacts
-
-**Via GitHub UI:**
-
-1. Go to workflow run page
-2. Scroll to "Artifacts" section
-3. Click artifact name to download
-
-**Via GitHub CLI:**
-
-```bash
-# List artifacts for run
-gh run view RUN_ID --log-failed
-
-# Download specific artifact
-gh run download RUN_ID -n test-results-3.13
-
-# Download all artifacts
-gh run download RUN_ID
-```
-
-**Via REST API:**
-
-```bash
-# List artifacts
-curl -H "Authorization: token $TOKEN" \
-  https://api.github.com/repos/OWNER/REPO/actions/runs/RUN_ID/artifacts
-
-# Download artifact
-curl -L -H "Authorization: token $TOKEN" \
-  https://api.github.com/repos/OWNER/REPO/actions/artifacts/ARTIFACT_ID/zip \
-  -o artifact.zip
-```
-
----
-
-## API Reference
-
-### GitHub Actions API
-
-#### Workflow Runs
-
-**List workflow runs:**
-
-```bash
-GET /repos/{owner}/{repo}/actions/runs
-```
-
-**Get workflow run:**
-
-```bash
-GET /repos/{owner}/{repo}/actions/runs/{run_id}
-```
-
-**Re-run workflow:**
-
-```bash
-POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun
+pip install "juniper-cascor-client[testing]"
+pip install "juniper-data-client[testing]"
 ```
 
 #### Artifacts
@@ -1006,18 +892,21 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ### Common Error Codes
 
-| Error | Cause                    | Solution                         |
-| ----- | ------------------------ | -------------------------------- |
-| E001  | Workflow syntax error    | Validate YAML syntax             |
-| E002  | Missing required field   | Add required field to workflow   |
-| E003  | Invalid expression       | Fix workflow expression syntax   |
-| E101  | Job timeout              | Increase timeout or optimize job |
-| E102  | Job cancelled            | Check concurrency settings       |
-| E201  | Step failed              | Check step logs for details      |
-| E202  | Command not found        | Install required tool            |
-| E203  | Permission denied        | Check file permissions           |
-| E301  | Artifact upload failed   | Check size and path              |
-| E302  | Artifact download failed | Verify artifact exists           |
+| Error | Cause                    | Solution                            |
+|-------|--------------------------|-------------------------------------|
+| E001  | Workflow syntax error    | Validate YAML syntax                |
+| E002  | Missing required field   | Add required field to workflow      |
+| E003  | Invalid expression       | Fix workflow expression syntax      |
+| E101  | Job timeout              | Increase timeout or optimize job    |
+| E102  | Job cancelled            | Check concurrency settings          |
+| E201  | Step failed              | Check step logs for details         |
+| E202  | Command not found        | Install required tool               |
+| E203  | Permission denied        | Check file permissions              |
+| E301  | Artifact upload failed   | Check size and path                 |
+| E302  | Artifact download failed | Verify artifact exists              |
+| D401  | Broken markdown link     | Update link target path             |
+| D402  | Broken heading anchor    | Update anchor or heading            |
+| D403  | Unsafe link path         | Remove absolute/null/deep traversal |
 
 ### Exit Codes
 
@@ -1051,6 +940,39 @@ grep "FAILED" workflow.log
 grep "coverage" workflow.log | grep -i "low\|fail"
 ```
 
+### Documentation Link Validation Failures
+
+**Symptom:**
+
+```bash
+FAILED: Documentation link validation
+FOUND <N> broken link(s) in <M> file(s)
+```
+
+**Local reproduction (CI-equivalent):**
+
+```bash
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
+
+**Common causes:**
+
+- Moved/renamed markdown files without updating references
+- Heading text changed but same-file anchor remained unchanged
+- Absolute paths in markdown links
+- Directory traversal links that resolve outside repository boundaries
+
+**Fix approach:**
+
+1. Update links to repository-relative paths.
+2. Regenerate heading anchors from the current markdown heading text.
+3. Re-run the command above before pushing.
+
 ---
 
 ## Performance Metrics
@@ -1066,14 +988,57 @@ grep "coverage" workflow.log | grep -i "low\|fail"
 | Quality Gate     | 30 sec   | 1 core  | 256 MB |
 | Total (parallel) | ~15 min  | -       | -      |
 
-### Optimization Targets
+- validates internal documentation links and same-file anchors
+- enforces path-safety constraints for link targets
+- supports cross-repo policies: `skip`, `warn`, `check`
 
-| Metric            | Current | Target | Stretch |
-| ----------------- | ------- | ------ | ------- |
-| Total build time  | 15 min  | 10 min | 7 min   |
-| Test suite        | 8 min   | 5 min  | 3 min   |
-| Lint              | 2 min   | 1 min  | 30 sec  |
-| Coverage overhead | 20%     | 10%    | 5%      |
+Primary invocation in CI:
+
+```bash
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
+
+#### Supported `--cross-repo` Modes
+
+| Mode | Behavior | Typical Use |
+| ---- | -------- | ----------- |
+| `skip` | Skip cross-repo links, report skipped count | CI default for deterministic isolated runners |
+| `warn` | Print warnings for each cross-repo link, do not fail | Local visibility during documentation review |
+| `check` | Resolve and validate target path in sibling repo checkout | Full Juniper ecosystem local validation |
+
+#### Validation Rules (Current Behavior)
+
+- External URLs are skipped (`http`, `https`, `mailto`, `ftp`)
+- Links inside fenced code blocks are ignored
+- Links inside inline code spans are ignored
+- Same-file anchors (for example `#section-name`) must match extracted heading anchors
+- Relative file links must resolve to an existing path within repository bounds
+
+#### Path-Safety Constraints
+
+- Absolute paths are rejected
+- Null bytes in link targets are rejected
+- Excessive traversal depth (`..`) is rejected
+- Paths that resolve outside repository boundaries are rejected
+- Cross-repo links are structurally checked to prevent escaping target repo boundaries
+
+#### Cross-Repo Check-Mode Fallback
+
+In `check` mode, the script tries to discover a Juniper ecosystem root (containing sibling repos).  
+If not found, it emits a warning and falls back to `skip` mode.
+
+#### Regression Coverage
+
+Behavioral regression tests for this script live in:
+
+- `src/tests/unit/test_doc_link_checker.py`
+
+Coverage includes code-fence/inline-code parsing, anchor normalization checks, cross-repo mode behavior, and path-safety rejection cases.
 
 ---
 
@@ -1113,7 +1078,7 @@ grep "coverage" workflow.log | grep -i "low\|fail"
 
 ---
 
-**Last Updated:** 2026-01-29  
-**Version:** 0.25.0  
-**Maintained By:** Development Team  
+**Last Updated:** 2026-04-05
+**Version:** 0.25.1
+**Maintained By:** Development Team
 **Status:** ✅ Current

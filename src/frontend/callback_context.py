@@ -4,13 +4,13 @@
 # Prototype:     Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
 # File Name:     callback_context.py
 # Author:        Paul Calnon
-# Version:       0.0.1
+# Version:       0.0.2
 #
 # Date:          2025-12-12
-# Last Modified: 2025-12-12
+# Last Modified: 2026-04-05
 #
 # License:       MIT License
-# Copyright:     Copyright (c) 2024-2025 Paul Calnon
+# Copyright:     Copyright (c) 2024-2026 Paul Calnon
 #
 # Description:   Callback Context Adapter for Juniper Canopy Dash Application
 #
@@ -28,6 +28,9 @@
 #     - Easy mocking for unit tests
 #     - Future extensibility for different callback context providers
 #
+#     Thread safety: _test_mode and _test_trigger use contextvars.ContextVar
+#     so concurrent callbacks in different threads/async tasks are isolated.
+#
 #####################################################################################################################################################################################################
 # References:
 #
@@ -38,10 +41,13 @@
 # COMPLETED:
 #
 #####################################################################################################################################################################################################
+import contextvars
 import threading
-
-# from typing import Any, Optional
 from typing import Optional
+
+# Context-local test state for thread/async safety
+_test_mode_var: contextvars.ContextVar[bool] = contextvars.ContextVar("_test_mode_var", default=False)
+_test_trigger_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("_test_trigger_var", default=None)
 
 
 class CallbackContextAdapter:
@@ -67,8 +73,6 @@ class CallbackContextAdapter:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
-                    cls._instance._test_trigger = None
-                    cls._instance._test_mode = False
         return cls._instance
 
     def get_triggered_id(self) -> Optional[str]:
@@ -79,8 +83,8 @@ class CallbackContextAdapter:
             The ID of the component that triggered the callback,
             or None if no trigger is available.
         """
-        if self._test_mode:
-            return self._test_trigger
+        if _test_mode_var.get():
+            return _test_trigger_var.get()
 
         try:
             import dash
@@ -97,17 +101,17 @@ class CallbackContextAdapter:
         Args:
             trigger_id: The component ID to simulate as the trigger
         """
-        self._test_mode = True
-        self._test_trigger = trigger_id
+        _test_mode_var.set(True)
+        _test_trigger_var.set(trigger_id)
 
     def clear_test_trigger(self) -> None:
         """Clear the test trigger and return to production mode."""
-        self._test_mode = False
-        self._test_trigger = None
+        _test_mode_var.set(False)
+        _test_trigger_var.set(None)
 
     def is_test_mode(self) -> bool:
         """Check if adapter is in test mode."""
-        return self._test_mode
+        return _test_mode_var.get()
 
     def get_triggered_prop_ids(self) -> dict:
         """
@@ -116,8 +120,9 @@ class CallbackContextAdapter:
         Returns:
             Dict of triggered property IDs, or empty dict if unavailable.
         """
-        if self._test_mode:
-            return {f"{self._test_trigger}.n_clicks": 1} if self._test_trigger else {}
+        if _test_mode_var.get():
+            trigger = _test_trigger_var.get()
+            return {f"{trigger}.n_clicks": 1} if trigger else {}
         try:
             import dash
 
@@ -132,7 +137,7 @@ class CallbackContextAdapter:
         Returns:
             List of callback inputs, or empty list if unavailable.
         """
-        if self._test_mode:
+        if _test_mode_var.get():
             return []
 
         try:
