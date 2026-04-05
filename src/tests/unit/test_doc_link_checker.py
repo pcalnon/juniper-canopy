@@ -3,6 +3,7 @@
 
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -134,3 +135,96 @@ def test_validate_file_cross_repo_check_resolves_existing_target(tmp_path):
 
     assert errors == []
     assert skipped == 0
+
+
+@pytest.mark.unit
+def test_discover_ecosystem_root_uses_git_common_dir(monkeypatch, tmp_path):
+    """Git common-dir discovery should resolve ecosystem root from repo path."""
+    ecosystem_root = tmp_path / "ecosystem"
+    repo_root = ecosystem_root / "juniper-canopy"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    (ecosystem_root / "juniper-cascor").mkdir(parents=True, exist_ok=True)
+    (ecosystem_root / "juniper-data").mkdir(parents=True, exist_ok=True)
+
+    def _fake_run(*_args, **_kwargs):
+        return SimpleNamespace(returncode=0, stdout=".git\n")
+
+    monkeypatch.setattr(check_doc_links.subprocess, "run", _fake_run)
+
+    found = check_doc_links._discover_ecosystem_root(repo_root)
+
+    assert found == ecosystem_root
+
+
+@pytest.mark.unit
+def test_validate_file_anchor_checks_ignore_external_and_data_urls(tmp_path):
+    """Anchor validation should still skip external and data URI links."""
+    repo_root = tmp_path
+    md_file = repo_root / "docs" / "anchors.md"
+    md_file.parent.mkdir(parents=True, exist_ok=True)
+    md_file.write_text(
+        "\n".join(
+            [
+                "# Valid Heading",
+                "[ok](#valid-heading)",
+                "[broken](#missing-heading)",
+                "[external](https://example.com/docs)",
+                "[badge](data:image/png;base64,abc123)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    errors, skipped = check_doc_links._validate_file(md_file, repo_root, cross_repo_mode="skip")
+
+    assert skipped == 0
+    assert len(errors) == 1
+    assert "broken anchor #missing-heading" in errors[0]
+
+
+@pytest.mark.unit
+def test_validate_file_cross_repo_warn_reports_without_error(tmp_path, capsys):
+    """Warn mode should classify cross-repo links and print warning only."""
+    repo_root = tmp_path
+    md_file = repo_root / "docs" / "cross_repo_warn.md"
+    md_file.parent.mkdir(parents=True, exist_ok=True)
+    md_file.write_text("[cross](../juniper-data/docs/README.md)\n", encoding="utf-8")
+
+    errors, skipped = check_doc_links._validate_file(md_file, repo_root, cross_repo_mode="warn")
+    captured = capsys.readouterr()
+
+    assert errors == []
+    assert skipped == 1
+    assert "WARN (cross-repo)" in captured.out
+
+
+@pytest.mark.unit
+def test_main_rejects_invalid_cross_repo_mode(monkeypatch, capsys):
+    """CLI should fail fast for unsupported --cross-repo values."""
+    monkeypatch.setattr(check_doc_links.sys, "argv", ["check_doc_links.py", "--cross-repo", "invalid-mode"])
+
+    result = check_doc_links.main()
+    captured = capsys.readouterr()
+
+    assert result == 1
+    assert "--cross-repo must be one of" in captured.out
+
+
+@pytest.mark.unit
+def test_main_falls_back_to_skip_when_ecosystem_not_found(monkeypatch, capsys, tmp_path):
+    """CLI should degrade from check to skip mode when ecosystem root is unavailable."""
+    monkeypatch.setattr(check_doc_links.sys, "argv", ["check_doc_links.py"])
+    monkeypatch.setattr(check_doc_links, "_discover_ecosystem_root", lambda _repo_root: None)
+    monkeypatch.setattr(check_doc_links, "_find_markdown_files", lambda *_args, **_kwargs: [])
+
+    script_path = tmp_path / "scripts" / "check_doc_links.py"
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    script_path.write_text("# test script path\n", encoding="utf-8")
+    monkeypatch.setattr(check_doc_links, "__file__", str(script_path))
+
+    result = check_doc_links.main()
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "Ecosystem root not found" in captured.out
+    assert "Cross-repo links: skip" in captured.out
