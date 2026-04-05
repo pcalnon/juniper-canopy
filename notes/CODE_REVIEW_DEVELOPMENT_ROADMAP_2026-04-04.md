@@ -255,26 +255,58 @@ Phase 5 ─── Housekeeping & Low Priority ───────── [LOW: 
 
 ---
 
+## Phase 0 Addendum: Backend Concurrency (From Supplementary Review)
+
+- [ ] **0.3.1** Add `threading.Lock` to `TrainingStateMachine` (HIGH-015, `src/backend/training_state_machine.py`)
+
+## Phase 1 Addendum: Backend Fixes (From Supplementary Review)
+
+- [ ] **1.4.1** Guard `get_dataset` against KeyError on partial data (MED-036, `src/backend/service_backend.py`)
+- [ ] **1.4.2** Fix `prepare_dataset_for_visualization` None crash (MED-038, `src/backend/data_adapter.py`)
+- [ ] **1.4.3** Add thread-safe locking to Cassandra singleton (MED-039, `src/backend/cassandra_client.py`)
+- [ ] **1.4.4** Add thread-safe locking to Redis singleton (MED-041, `src/backend/redis_client.py`)
+- [ ] **1.4.5** Fix Redis exception aliases to use sentinel class (MED-042, `src/backend/redis_client.py`)
+- [ ] **1.4.6** Fix Redis `force_new=True` connection leak (MED-043, `src/backend/redis_client.py`)
+
+## Phase 3 Addendum: Backend Quality (From Supplementary Review)
+
+- [ ] **3.5.1** Cache `network` property or wrap in circuit breaker (MED-034, `src/backend/cascor_service_adapter.py`)
+- [ ] **3.5.2** Narrow relay loop exception handling (MED-035, `src/backend/cascor_service_adapter.py`)
+- [ ] **3.5.3** Lazy-import torch in data_adapter.py (MED-037, `src/backend/data_adapter.py`)
+- [ ] **3.5.4** Expose public API on CascorServiceAdapter (MED-046, `src/backend/service_backend.py`)
+- [ ] **3.5.5** Don't store Cassandra credentials as plain attributes (MED-040, `src/backend/cassandra_client.py`)
+
+## Phase 4 Addendum: Test Quality Fixes (From Supplementary Review)
+
+- [ ] **4.3.1** Remove `contextlib.suppress(Exception)` from test assertions (HIGH-016)
+- [ ] **4.3.2** Add `pytest.fail()` guards to WebSocket schema tests (HIGH-017)
+- [ ] **4.3.3** Remove `hasattr` guards from unit tests (HIGH-018)
+- [ ] **4.3.4** Rewrite performance test without exception suppression (HIGH-019)
+- [ ] **4.3.5** Add dedicated tests for `parameters_panel.py` (55.3% coverage gap)
+- [ ] **4.3.6** Expand `candidate_metrics_panel.py` callback tests (65.6% coverage gap)
+
+---
+
 ## Summary Statistics
 
 | Phase | Tasks | Priority | Status |
 |-------|-------|----------|--------|
-| Phase 0 | 6 | IMMEDIATE | Not Started |
-| Phase 1 | 15 | HIGH | Not Started |
+| Phase 0 | 7 | IMMEDIATE | Not Started |
+| Phase 1 | 21 | HIGH | Not Started |
 | Phase 2 | 12 | HIGH | Not Started |
-| Phase 3 | 18 | MEDIUM | Not Started |
-| Phase 4 | 8 | MEDIUM | Not Started |
+| Phase 3 | 23 | MEDIUM | Not Started |
+| Phase 4 | 14 | MEDIUM | Not Started |
 | Phase 5 | 19 | LOW | Not Started |
-| **Total** | **78** | | |
+| **Total** | **96** | | |
 
 ### Issue Severity Distribution
 
 | Severity | Issues | Resolution Phase(s) |
 |----------|--------|---------------------|
 | Critical | 3 | Phases 0, 2 |
-| High | 14 | Phases 0, 1, 2, 3 |
-| Medium | 33 | Phases 1, 2, 3, 4, 5 |
-| Low | 20 | Phases 3, 5 |
+| High | 19 | Phases 0, 1, 2, 3, 4 |
+| Medium | 47 | Phases 1, 2, 3, 4, 5 |
+| Low | 30+ | Phases 3, 5 |
 
 ### Files Most Affected
 

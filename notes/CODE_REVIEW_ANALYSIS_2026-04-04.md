@@ -16,10 +16,10 @@ A comprehensive code review of the juniper-canopy application (v0.4.0) was perfo
 | Severity | Count | Distribution |
 |----------|-------|--------------|
 | **Critical** | 3 | Security (1), Concurrency (1), CI/CD (1) |
-| **High** | 14 | Architecture (4), Security (3), Logic (3), Performance (2), Config (2) |
-| **Medium** | 33 | Mixed across all categories |
-| **Low** | 20 | Code smells, minor improvements |
-| **Total** | **70+** | Across all modules |
+| **High** | 19 | Architecture (4), Security (3), Logic (4), Performance (2), Config (2), Test Quality (4) |
+| **Medium** | 47 | Mixed across all categories |
+| **Low** | 30+ | Code smells, minor improvements |
+| **Total** | **99+** | Across all modules |
 
 ### Test Suite Status
 
@@ -1153,5 +1153,251 @@ See issues CRIT-003, HIGH-008, HIGH-009, HIGH-012, MED-014, MED-015, MED-016, ME
 
 ---
 
-*Document generated: 2026-04-04*
+## 9. Backend Services Issues (Supplementary)
+
+These findings are from the dedicated backend services deep-dive review.
+
+### HIGH-015: TrainingStateMachine Has No Thread Safety
+
+- **File**: `src/backend/training_state_machine.py:84-329`
+- **Category**: Concurrency
+- **Severity**: High
+- **Likelihood**: Possible
+- **Scope**: System-wide
+
+**Description**: `TrainingStateMachine` has no locking mechanism. Multiple threads (training thread calling `set_phase`/`mark_completed`, REST handler calling `handle_command`) can concurrently mutate `_status`, `_phase`, and `_paused_phase`, leading to race conditions and inconsistent state.
+
+**Remediation**: Add `threading.Lock` and wrap all state mutations. This is the highest-priority backend issue.
+
+---
+
+### MED-034: CascorServiceAdapter `network` Property Makes HTTP Call on Every Access
+
+- **File**: `src/backend/cascor_service_adapter.py:335-344`
+- **Category**: Performance
+- **Severity**: Medium
+
+**Description**: Property calls `self._client.get_network()` every access without caching or circuit breaker.
+
+**Remediation**: Cache with short TTL or wrap in circuit breaker.
+
+---
+
+### MED-035: Relay Loop Swallows All Exceptions Including Programming Errors
+
+- **File**: `src/backend/cascor_service_adapter.py:310-317`
+- **Category**: Best Practice
+- **Severity**: Medium
+
+**Description**: Any exception during stream processing triggers reconnect rather than propagating. Logic bugs are silently retried.
+
+**Remediation**: Catch specific network exceptions; let unexpected exceptions propagate.
+
+---
+
+### MED-036: ServiceBackend `get_dataset` May Raise KeyError on Partial Data
+
+- **File**: `src/backend/service_backend.py:185-188`
+- **Category**: Logical
+- **Severity**: Medium
+
+**Description**: Unconditionally accesses `data["inputs"]` and `data["targets"]` after `get_dataset_data()` which may return partial dict.
+
+**Remediation**: Add `"inputs" in data` guard before access.
+
+---
+
+### MED-037: data_adapter.py Hard torch Import Forces ~2GB Library Load
+
+- **File**: `src/backend/data_adapter.py:43`
+- **Category**: Architecture / Performance
+- **Severity**: Medium
+
+**Description**: Top-level `import torch` loads PyTorch even for the service backend path which never uses it.
+
+**Remediation**: Guard with `try/except ImportError` and lazy import.
+
+---
+
+### MED-038: `prepare_dataset_for_visualization` Crashes on None Inputs
+
+- **File**: `src/backend/data_adapter.py:330-337`
+- **Category**: Logical
+- **Severity**: Medium
+
+**Description**: `len(inputs)` raises `TypeError` when both `inputs` and `features` are None.
+
+**Remediation**: Add None guard returning empty result.
+
+---
+
+### MED-039: Cassandra Singleton Not Thread-Safe
+
+- **File**: `src/backend/cassandra_client.py:481-499`
+- **Category**: Concurrency
+- **Severity**: Medium
+
+**Description**: `get_cassandra_client()` uses global variable without locking. Concurrent calls can create duplicate instances.
+
+**Remediation**: Add double-checked locking pattern.
+
+---
+
+### MED-040: Cassandra Credentials Stored as Plain Instance Attributes
+
+- **File**: `src/backend/cassandra_client.py:110-111`
+- **Category**: Security
+- **Severity**: Medium
+
+**Description**: `self._username` and `self._password` accessible via instance attributes. Visible in serialization/logging/memory dumps.
+
+**Remediation**: Read credentials only when needed for connection; don't persist.
+
+---
+
+### MED-041: Redis Singleton Not Thread-Safe
+
+- **File**: `src/backend/redis_client.py:521-541`
+- **Category**: Concurrency
+- **Severity**: Medium
+
+**Description**: Same pattern as Cassandra singleton (MED-039).
+
+---
+
+### MED-042: Redis Exception Aliases Catch All Exceptions When redis-py Missing
+
+- **File**: `src/backend/redis_client.py:68-69`
+- **Category**: Logical
+- **Severity**: Medium
+
+**Description**: `RedisConnectionError = Exception` means `except (RedisConnectionError, ...)` catches all exceptions including programming errors.
+
+**Remediation**: Use custom sentinel exception class.
+
+---
+
+### MED-043: Redis `force_new=True` Leaks Old Connection Pool
+
+- **File**: `src/backend/redis_client.py:538-539`
+- **Category**: Resource Leak
+- **Severity**: Medium
+
+**Description**: Old instance overwritten without `close()`. Connection pool leaked.
+
+**Remediation**: Call `close()` on old instance before replacement.
+
+---
+
+### MED-044: TrainingMonitor `apply_params` Is a No-Op Stub
+
+- **File**: `src/backend/training_monitor.py:621-645`
+- **Category**: Logical
+- **Severity**: Medium
+
+**Description**: Logs and returns parameters but never modifies any internal state. Parameter changes silently discarded.
+
+---
+
+### MED-045: DemoBackend.initialize() Always Starts Training
+
+- **File**: `src/backend/demo_backend.py:302-305`
+- **Category**: Logical
+- **Severity**: Medium
+
+**Description**: Calls `self._demo.start()` in `initialize()`, always beginning training. ServiceBackend only connects. Behavioral asymmetry.
+
+---
+
+### MED-046: ServiceBackend Accesses Private CascorServiceAdapter Attributes
+
+- **File**: `src/backend/service_backend.py:103, 211-218`
+- **Category**: Architecture
+- **Severity**: Medium
+
+**Description**: Accesses `_is_cascor_nested`, `_client`, `_service_url` directly, violating encapsulation.
+
+---
+
+### MED-047: TrainingState.update_state Uses Fragile Name-Mangling Introspection
+
+- **File**: `src/backend/training_monitor.py:354-369`
+- **Category**: Logical / Fragility
+- **Severity**: Medium
+
+**Description**: Constructs mangled attribute names via `f"_{cls_name}__{key}"` and modifies `self.__dict__` directly. Breaks silently on class rename or subclass.
+
+---
+
+## 10. Test Quality Issues (Supplementary)
+
+These findings are from the dedicated test infrastructure review. Overall coverage is **91.8%** per the most recent coverage report.
+
+### HIGH-016: False Positive Tests Using `contextlib.suppress(Exception)` Around Assertions
+
+- **Files**: `src/tests/unit/test_dataset_plotter.py:209-233`, `src/tests/unit/test_network_visualizer.py:238`, `src/tests/unit/test_decision_boundary.py:265,273`, `src/tests/performance/test_button_responsiveness.py:63-85`
+- **Category**: Test Quality -- False Positive Risk
+- **Severity**: High
+
+**Description**: Multiple tests wrap both function calls AND assertions in `contextlib.suppress(Exception)`. If the code under test throws, assertions never run and tests pass vacuously. The performance test is effectively a no-op that always passes.
+
+**Remediation**: Remove `contextlib.suppress(Exception)` wrappers. If exception tolerance is needed, catch specific expected exceptions only, and ensure assertions always execute.
+
+---
+
+### HIGH-017: WebSocket Schema Tests Pass Without Finding Target Messages
+
+- **File**: `src/tests/integration/test_websocket_message_schema.py:85-128`
+- **Category**: Test Quality -- False Positive Risk
+- **Severity**: High
+
+**Description**: Tests loop up to 15/20 times looking for specific message types. If the target type never arrives, the loop exits without hitting any assertion, and the test passes. No `pytest.fail()` guard after the loop.
+
+**Remediation**: Add `pytest.fail("Expected message type not received")` after loop exhaustion.
+
+---
+
+### HIGH-018: `hasattr` Guards Silently Skip Test Logic
+
+- **Files**: `src/tests/unit/test_dataset_plotter.py:114-139`, `src/tests/unit/test_network_visualizer.py:141-243`
+- **Category**: Test Quality -- False Positive Risk
+- **Severity**: High
+
+**Description**: ~12 tests guard their body with `if hasattr(...)` checks. If a method is renamed during refactoring, the test becomes a no-op rather than failing, masking regressions.
+
+**Remediation**: Remove `hasattr` guards; let tests fail loudly on missing methods.
+
+---
+
+### HIGH-019: Performance Test Is Effectively a No-Op
+
+- **File**: `src/tests/performance/test_button_responsiveness.py:33-85`
+- **Category**: Test Quality
+- **Severity**: High
+
+**Description**: Combines `hasattr` guard with `contextlib.suppress(Exception)`. If callback structure changes, the test does nothing. Combined with exception suppression, always passes.
+
+**Remediation**: Rewrite without exception suppression; make callback resolution explicit.
+
+---
+
+### Coverage Gaps Identified
+
+| Module | Coverage | Gap |
+|--------|----------|-----|
+| `parameters_panel.py` | 55.3% | **Lowest covered production module** -- no dedicated test file |
+| `candidate_metrics_panel.py` | 65.6% | Callback handlers untested |
+| `demo_backend.py` | 83.7% | Error paths, edge cases |
+| `main.py` | 86.8% | Service-mode startup, shutdown edge cases |
+
+### Test Infrastructure Concerns
+
+- **MED-048**: Session-scoped `mock_juniper_data_client` has mutable `_created` dict that persists across all tests (latent isolation risk)
+- **MED-049**: `reset_singletons` fixture uses `hasattr` checks that won't detect new singleton patterns
+- **LOW-021**: `event_loop` fixture uses deprecated pattern for pytest-asyncio >= 0.21
+- **LOW-022**: Regression test `test_mode_flag_consistency` tests a local reproduction of logic rather than actual `main.py` code
+
+---
+
+*Document generated: 2026-04-04 (updated with backend and test quality supplementary findings)*
 *Review methodology: Parallel deep-dive analysis using specialized sub-agents across backend, frontend, core, test, and CI/CD domains*
