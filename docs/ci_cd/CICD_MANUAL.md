@@ -1351,6 +1351,67 @@ python scripts/check_doc_links.py --verbose --cross-repo warn docs/ notes/
 
 **Tip:** Use `--cross-repo check` only when sibling Juniper repositories are available locally.
 
+#### Pattern 5: Lockfile Freshness Failure
+
+**Symptom:**
+
+```bash
+::error::requirements.lock is stale — run: uv pip compile pyproject.toml --extra juniper-data --extra juniper-cascor --extra observability -o requirements.lock
+```
+
+**Causes:**
+
+1. `pyproject.toml` dependencies changed without regenerating `requirements.lock`
+2. Optional dependency extras differ between local regeneration and CI
+3. The lockfile was generated with a command that omitted `--extra observability`
+
+**Fix:**
+
+```bash
+# Regenerate with the same extras CI uses
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
+
+# Verify no additional lockfile delta remains
+git diff -- requirements.lock
+```
+
+**Why this can fail even when versions look unchanged:**
+
+- CI compares the lockfile body after stripping the auto-generated uv header comment.
+- This avoids false failures caused only by different output paths (`-o requirements.lock` vs CI `/tmp/...`).
+
+#### Pattern 6: Dependabot PR Missing Lockfile Updates
+
+**Symptom:**
+
+```bash
+CI passes on dependency files, but requirements.lock does not include new extras
+```
+
+**Cause:**
+
+1. The Dependabot branch did not run the lockfile-update workflow path you expected
+2. Workflow logic changed and docs/commands used locally drifted from `.github/workflows/lockfile-update.yml`
+
+**Fix:**
+
+```bash
+# Manually regenerate to match workflow behavior
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
+
+git add requirements.lock
+git commit -m "fix(ci): refresh lockfile with observability extra"
+git push
+```
+
 ---
 
 ## Performance Optimization
