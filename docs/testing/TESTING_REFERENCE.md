@@ -1,7 +1,7 @@
 # Testing Reference - Technical Documentation
 
-**Last Updated:** March 30, 2026  
-**Version:** v0.26.0
+**Last Updated:** April 5, 2026  
+**Version:** v0.26.1
 
 Complete technical reference for the Juniper Canopy testing infrastructure.
 
@@ -890,6 +890,27 @@ cd src
 pytest tests/unit/test_response_normalization.py -k "Fix1 or Fix2 or Fix3 or Fix4 or Fix13 or DashboardMetricsContract or TopologyTransformation or DatasetTargetConversion" -v
 pytest tests/unit/test_service_backend.py -k "get_status or get_dataset" -v
 pytest tests/unit/frontend/test_metrics_panel_handlers.py -k "validation_overlay or replay or progress_detail or training_progress or hidden_units" -v
+```
+
+### Documentation Link Validation Regression Matrix
+
+Use this matrix when documentation tooling or markdown link policy changes.
+
+| Test File | Contract Focus | Key Behavior |
+| ------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------ |
+| `tests/unit/test_doc_link_checker.py` | Documentation link checker regression coverage | ignores fenced/inline-code links, validates same-file anchors, rejects absolute/deep traversal paths, enforces cross-repo escape protections, verifies cross-repo skip/check modes |
+
+Recommended command subset:
+
+```bash
+cd src
+pytest tests/unit/test_doc_link_checker.py -v
+python ../scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
 ```
 
 ### Testing WebSocket Endpoints

@@ -116,6 +116,17 @@ ptw tests/ -- -v
 pre-commit run --all-files
 ```
 
+**Run documentation link validation (matches CI docs job):**
+
+```bash
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
+
 **Fix any formatting issues:**
 
 ```bash
@@ -213,11 +224,12 @@ Add pause/resume functionality to demo mode
 
 1. Go to "Checks" tab on your PR
 2. Watch jobs complete:
-   - ✓ Lint (~2 min)
-   - ✓ Test Suite Python 3.11 (~8 min)
-   - ✓ Test Suite Python 3.12 (~8 min)
-   - ✓ Test Suite Python 3.13 (~8 min)
+   - ✓ Pre-commit (~2 min)
+   - ✓ Unit Tests Python 3.12/3.13/3.14 (~8 min each)
+   - ✓ Integration Tests (~5 min, PR/main/develop)
    - ✓ Build (~2 min)
+   - ✓ Lockfile Freshness (~1 min)
+   - ✓ Documentation Links (~1 min)
    - ✓ Quality Gate (~30 sec)
 
 **If CI fails:**
@@ -1016,6 +1028,33 @@ python-version: ["3.11", "3.12", "3.13"]
 
 - Integration test failures
 
+### Documentation Links Stage
+
+**Purpose:** Validate internal markdown links and heading anchors.
+
+**Command executed in CI (`docs` job):**
+
+```bash
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
+
+**Why CI uses `--cross-repo skip`:**
+
+- GitHub runners do not guarantee sibling Juniper repositories are present on disk.
+- Cross-repo links are still structurally validated; only on-disk existence checks are skipped.
+
+**Failure conditions:**
+
+- Broken relative markdown links
+- Broken same-file heading anchors
+- Absolute paths in documentation links
+- Link traversal outside repository boundaries
+
 ### Quality Gate Stage
 
 **Purpose:** Aggregate results and enforce standards
@@ -1027,6 +1066,8 @@ if test_result == "failure":
     fail("Tests failed")
 elif build_result == "failure":
     fail("Build failed")
+elif docs_result == "failure":
+    fail("Documentation link validation failed")
 elif lint_result == "failure":
     warn("Linting failed")
 else:
@@ -1289,6 +1330,34 @@ open ../reports/coverage/index.html
 
 # Add tests for uncovered code
 vim tests/unit/test_new_feature.py
+```
+
+#### Pattern 5: Documentation Link Validation Failure
+
+**Symptom:**
+
+```bash
+FAILED: Documentation link validation
+FOUND <N> broken link(s) in <M> file(s)
+```
+
+**Common causes:**
+
+1. Moved/renamed markdown files with stale links
+2. Heading text changed, but anchor links were not updated
+3. Absolute paths in markdown links (`/path/to/file`)
+4. Link paths that escape repository boundaries
+
+**Fix:**
+
+```bash
+# Reproduce CI docs job locally
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
 ```
 
 ---
@@ -1684,6 +1753,6 @@ Fix by: 2025-11-12
 
 ---
 
-**Last Updated:** 2026-03-30  
-**Version:** 0.25.1  
+**Last Updated:** 2026-04-05  
+**Version:** 0.25.2  
 **Status:** ✅ Complete

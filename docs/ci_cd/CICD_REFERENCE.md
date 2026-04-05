@@ -10,10 +10,11 @@
 2. [Workflow Specification](#workflow-specification)
 3. [Configuration Files](#configuration-files)
 4. [Tool Configurations](#tool-configurations)
-5. [Environment Variables](#environment-variables)
-6. [Artifact Specifications](#artifact-specifications)
-7. [API Reference](#api-reference)
-8. [Troubleshooting Reference](#troubleshooting-reference)
+5. [Documentation Link Validation](#documentation-link-validation)
+6. [Environment Variables](#environment-variables)
+7. [Artifact Specifications](#artifact-specifications)
+8. [API Reference](#api-reference)
+9. [Troubleshooting Reference](#troubleshooting-reference)
 
 ---
 
@@ -287,6 +288,79 @@ test:
         fi
       continue-on-error: true
 ```
+
+#### Documentation Links Job
+
+```yaml
+docs:
+  name: Documentation Links
+  runs-on: ubuntu-latest
+
+  steps:
+    - name: Checkout Code
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+    - name: Set up Python
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+      with:
+        python-version: "3.14"
+
+    - name: Validate Documentation Links
+      run: |
+        python scripts/check_doc_links.py \
+          --exclude templates --exclude history \
+          --exclude pull_requests --exclude releases \
+          --exclude analysis --exclude fixes --exclude development \
+          --exclude CHANGELOG.md \
+          --cross-repo skip
+```
+
+This job validates internal documentation links and same-file anchors before the quality gate passes. CI uses `--cross-repo skip` because sibling Juniper repositories are not guaranteed to exist on the runner filesystem.
+
+---
+
+## Documentation Link Validation
+
+### Purpose
+
+The documentation link checker validates:
+
+- Relative markdown links resolve to existing files
+- Same-file anchor links resolve to real headings
+- Links remain within repository boundaries
+- Unsafe patterns (absolute paths, excessive traversal, invalid cross-repo escapes) are rejected
+
+### Script
+
+- Path: `scripts/check_doc_links.py`
+- Unit tests: `src/tests/unit/test_doc_link_checker.py`
+- CI invocation: `.github/workflows/ci.yml` (`docs` job)
+
+### Local Commands
+
+```bash
+# Match CI behavior
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+
+# Validate cross-repo links when sibling repos exist locally
+python scripts/check_doc_links.py --cross-repo check
+
+# Print every checked/skipped link
+python scripts/check_doc_links.py --verbose --cross-repo skip
+```
+
+### Cross-Repo Modes
+
+| Mode | Behavior | Typical Use |
+| ---- | -------- | ----------- |
+| `skip` | Skip cross-repo file existence checks (still validates structure) | CI and isolated clones |
+| `warn` | Emit warnings for cross-repo links without failing | Local cleanup passes |
+| `check` | Validate cross-repo targets on disk | Full local Juniper ecosystem checkout |
 
 ---
 
@@ -991,6 +1065,39 @@ grep "FAILED" workflow.log
 grep "coverage" workflow.log | grep -i "low\|fail"
 ```
 
+### Documentation Link Validation Failures
+
+**Symptom:**
+
+```bash
+FAILED: Documentation link validation
+FOUND <N> broken link(s) in <M> file(s)
+```
+
+**Local reproduction (CI-equivalent):**
+
+```bash
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
+
+**Common causes:**
+
+- Moved/renamed markdown files without updating references
+- Heading text changed but same-file anchor remained unchanged
+- Absolute paths in markdown links
+- Directory traversal links that resolve outside repository boundaries
+
+**Fix approach:**
+
+1. Update links to repository-relative paths.
+2. Regenerate heading anchors from the current markdown heading text.
+3. Re-run the command above before pushing.
+
 ---
 
 ## Performance Metrics
@@ -1053,7 +1160,7 @@ grep "coverage" workflow.log | grep -i "low\|fail"
 
 ---
 
-**Last Updated:** 2026-01-29  
-**Version:** 0.25.0  
+**Last Updated:** 2026-04-05  
+**Version:** 0.25.1  
 **Maintained By:** Development Team  
 **Status:** ✅ Current

@@ -1,7 +1,7 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** March 30, 2026  
-**Version:** v0.26.0
+**Last Updated:** 2026-04-05  
+**Version:** v0.26.1
 
 Complete guide to testing the Juniper Canopy application.
 
@@ -130,6 +130,9 @@ pytest tests/unit/test_service_backend.py -k "get_status or get_dataset" -v
 
 # Metrics panel handler edge-case tests (replay/progress/validation overlays)
 pytest tests/unit/frontend/test_metrics_panel_handlers.py -k "validation_overlay or replay or progress_detail or training_progress or hidden_units" -v
+
+# Documentation link checker regression tests
+pytest tests/unit/test_doc_link_checker.py -v
 ```
 
 ### Advanced Options
@@ -937,6 +940,26 @@ pytest tests/unit/test_response_normalization.py -k "epoch_zero_preserved or hid
 ```
 
 Avoid `or` fallbacks when zero is valid. Prefer explicit `None` checks or first-defined helper logic.
+
+#### 8. Documentation Link Validation Fails in CI
+
+```bash
+# Symptom: "FAILED: Documentation link validation"
+# Reproduce CI docs job locally from repo root
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
+
+If checker behavior appears to regress, run the dedicated test module:
+
+```bash
+cd src
+pytest tests/unit/test_doc_link_checker.py -v
+```
 
 ### Debug Tests
 
