@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated dependency and CI runbook documentation to match current lockfile automation behavior and observability dependency handling:
+  - `README.md`
+  - `docs/ci_cd/CICD_MANUAL.md`
+  - `docs/ci_cd/CICD_REFERENCE.md`
+  - Added explicit lockfile regeneration command including `--extra observability`
+  - Documented lockfile freshness check behavior that strips uv header comment lines before diffing lockfile bodies
+  - Documented Dependabot lockfile-update workflow behavior and troubleshooting path for stale lockfiles
+
 - Extracted candidate pool section, history tracking, and pool display from `MetricsPanel` to `CandidateMetricsPanel`. Training Metrics tab retains candidate training trace in loss plot and candidate epoch progress bar for context
 - Component count increased from 11 to 12; updated test assertions accordingly
 
