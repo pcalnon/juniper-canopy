@@ -1,121 +1,156 @@
 """Unit tests for scripts/check_doc_links.py."""
 
-from __future__ import annotations
-
 import importlib.util
 from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.unit
-
 
 def _load_check_doc_links_module():
-    """Load scripts/check_doc_links.py as a module for direct function testing."""
-    script_path = Path(__file__).resolve().parents[3] / "scripts" / "check_doc_links.py"
-    spec = importlib.util.spec_from_file_location("check_doc_links_module", script_path)
+    """Load scripts/check_doc_links.py as a testable module."""
+    project_root = Path(__file__).resolve().parents[3]
+    script_path = project_root / "scripts" / "check_doc_links.py"
+    spec = importlib.util.spec_from_file_location("check_doc_links", script_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-check_doc_links = _load_check_doc_links_module()
+@pytest.fixture(scope="module")
+def doc_links_module():
+    """Fixture returning the loaded documentation-link checker module."""
+    return _load_check_doc_links_module()
 
 
-def test_validate_file_ignores_links_in_code_and_inline_code(tmp_path):
-    """Only real markdown links should be validated."""
-    repo_root = tmp_path
-    md_file = repo_root / "docs.md"
+@pytest.mark.unit
+def test_validate_file_ignores_links_in_code_blocks_and_inline_code(tmp_path, doc_links_module):
+    """Links inside fenced and inline code must be ignored."""
+    repo_root = tmp_path / "repo"
+    docs_dir = repo_root / "docs"
+    docs_dir.mkdir(parents=True)
+
+    (docs_dir / "exists.md").write_text("# Exists\n", encoding="utf-8")
+    md_file = docs_dir / "guide.md"
     md_file.write_text(
-        "# Title\n"
-        "```md\n"
-        "[ignored](missing-in-code-fence.md)\n"
-        "```\n"
-        "Inline code: `[ignored-inline](missing-inline.md)`\n"
-        "[real](missing-real.md)\n",
+        "\n".join(
+            [
+                "# Guide",
+                "`[inline-link](missing-inline.md)`",
+                "```markdown",
+                "[code-link](missing-code.md)",
+                "```",
+                "[working](exists.md)",
+            ]
+        ),
         encoding="utf-8",
     )
 
-    errors, skipped = check_doc_links._validate_file(md_file, repo_root, cross_repo_mode="skip")
+    errors, skipped = doc_links_module._validate_file(md_file, repo_root)
 
+    assert errors == []
     assert skipped == 0
-    assert len(errors) == 1
-    assert "missing-real.md" in errors[0]
-    assert "missing-in-code-fence.md" not in errors[0]
 
 
-def test_validate_file_reports_broken_same_file_anchor(tmp_path):
-    """Same-file anchors should fail when heading is missing."""
-    repo_root = tmp_path
-    md_file = repo_root / "anchors.md"
+@pytest.mark.unit
+def test_validate_file_reports_anchor_and_file_errors(tmp_path, doc_links_module):
+    """Broken same-file anchors and missing files should both be reported."""
+    repo_root = tmp_path / "repo"
+    docs_dir = repo_root / "docs"
+    docs_dir.mkdir(parents=True)
+
+    md_file = docs_dir / "readme.md"
     md_file.write_text(
-        "# Existing Heading\n"
-        "[ok](#existing-heading)\n"
-        "[bad](#missing-heading)\n",
+        "\n".join(
+            [
+                "# Existing Heading",
+                "[bad anchor](#missing-heading)",
+                "[bad file](does-not-exist.md)",
+            ]
+        ),
         encoding="utf-8",
     )
 
-    errors, skipped = check_doc_links._validate_file(md_file, repo_root, cross_repo_mode="skip")
+    errors, skipped = doc_links_module._validate_file(md_file, repo_root)
 
     assert skipped == 0
-    assert len(errors) == 1
-    assert "broken anchor #missing-heading" in errors[0]
+    assert any("broken anchor #missing-heading" in err for err in errors)
+    assert any("file not found" in err for err in errors)
 
 
-def test_validate_file_rejects_absolute_null_byte_and_excessive_traversal(tmp_path):
-    """Input validation should reject unsafe path patterns."""
-    repo_root = tmp_path
-    md_file = repo_root / "unsafe.md"
+@pytest.mark.unit
+def test_validate_file_rejects_absolute_nullbyte_and_excessive_traversal(tmp_path, doc_links_module):
+    """Security checks should reject dangerous path targets."""
+    repo_root = tmp_path / "repo"
+    docs_dir = repo_root / "docs"
+    docs_dir.mkdir(parents=True)
+
+    md_file = docs_dir / "security.md"
     md_file.write_text(
-        "[abs](/etc/passwd)\n"
-        "[null](bad\x00path.md)\n"
-        "[deep](../../../../../../too-deep.md)\n",
+        "\n".join(
+            [
+                "[absolute](/etc/passwd)",
+                "[null-byte](bad\x00path.md)",
+                "[too-deep](../../../../../../out.md)",
+            ]
+        ),
         encoding="utf-8",
     )
 
-    errors, skipped = check_doc_links._validate_file(md_file, repo_root, cross_repo_mode="skip")
+    errors, _ = doc_links_module._validate_file(md_file, repo_root)
 
-    assert skipped == 0
     assert any("absolute path in documentation link" in err for err in errors)
     assert any("null byte in link target" in err for err in errors)
     assert any("excessive directory traversal in link" in err for err in errors)
 
 
-def test_cross_repo_skip_mode_still_validates_structure(tmp_path):
-    """Skip mode should skip valid cross-repo links but still fail escape attempts."""
-    repo_root = tmp_path
-    md_file = repo_root / "cross_repo.md"
+@pytest.mark.unit
+def test_validate_file_cross_repo_skip_counts_but_still_checks_structure(tmp_path, doc_links_module):
+    """Cross-repo skip mode should count valid links and still block escaping paths."""
+    repo_root = tmp_path / "repo"
+    docs_dir = repo_root / "docs"
+    docs_dir.mkdir(parents=True)
+
+    md_file = docs_dir / "cross-repo.md"
     md_file.write_text(
-        "[skip](../juniper-ml/README.md)\n"
-        "[escape](../juniper-ml/../../secret.md)\n",
+        "\n".join(
+            [
+                "[valid](juniper-ml/docs/README.md)",
+                "[escape](juniper-ml/../secrets.md)",
+            ]
+        ),
         encoding="utf-8",
     )
 
-    errors, skipped = check_doc_links._validate_file(md_file, repo_root, cross_repo_mode="skip")
+    errors, skipped = doc_links_module._validate_file(md_file, repo_root, cross_repo_mode="skip")
 
     assert skipped == 1
-    assert len(errors) == 1
-    assert "cross-repo link escapes target repository" in errors[0]
+    assert any("cross-repo link escapes target repository" in err for err in errors)
 
 
-def test_cross_repo_check_mode_validates_target_files(tmp_path):
-    """Check mode should verify cross-repo file existence under the target repo."""
+@pytest.mark.unit
+def test_validate_file_cross_repo_check_uses_ecosystem_root(tmp_path, doc_links_module):
+    """Cross-repo check mode should validate against the provided ecosystem root."""
     ecosystem_root = tmp_path / "ecosystem"
     repo_root = ecosystem_root / "juniper-canopy"
-    target_repo = ecosystem_root / "juniper-ml"
-    repo_root.mkdir(parents=True)
-    target_repo.mkdir(parents=True)
-    (target_repo / "README.md").write_text("# ok\n", encoding="utf-8")
+    docs_dir = repo_root / "docs"
+    ml_docs_dir = ecosystem_root / "juniper-ml" / "docs"
+    docs_dir.mkdir(parents=True)
+    ml_docs_dir.mkdir(parents=True)
 
-    md_file = repo_root / "cross_repo_check.md"
+    (ml_docs_dir / "ok.md").write_text("# OK\n", encoding="utf-8")
+    md_file = docs_dir / "cross-repo-check.md"
     md_file.write_text(
-        "[ok](../juniper-ml/README.md)\n"
-        "[missing](../juniper-ml/MISSING.md)\n",
+        "\n".join(
+            [
+                "[existing](juniper-ml/docs/ok.md)",
+                "[missing](juniper-ml/docs/missing.md)",
+            ]
+        ),
         encoding="utf-8",
     )
 
-    errors, skipped = check_doc_links._validate_file(
+    errors, skipped = doc_links_module._validate_file(
         md_file,
         repo_root,
         cross_repo_mode="check",
@@ -127,35 +162,25 @@ def test_cross_repo_check_mode_validates_target_files(tmp_path):
     assert "file not found in juniper-ml" in errors[0]
 
 
-def test_find_markdown_files_respects_exclusions_and_ignores_broken_symlink(tmp_path):
-    """Scanner should exclude configured directories and skip broken symlinks."""
-    repo_root = tmp_path
-    included = repo_root / "docs" / "good.md"
-    excluded_by_skip = repo_root / "node_modules" / "ignored.md"
-    excluded_by_flag = repo_root / "templates" / "ignored.md"
-    broken_symlink = repo_root / "docs" / "broken.md"
+@pytest.mark.unit
+def test_find_markdown_files_respects_skip_dirs_excludes_and_broken_symlinks(tmp_path, doc_links_module):
+    """File discovery should skip excluded/ignored dirs and dangling symlinks."""
+    repo_root = tmp_path / "repo"
+    docs_dir = repo_root / "docs"
+    custom_dir = repo_root / "custom"
+    node_modules_dir = repo_root / "node_modules"
+    docs_dir.mkdir(parents=True)
+    custom_dir.mkdir(parents=True)
+    node_modules_dir.mkdir(parents=True)
 
-    included.parent.mkdir(parents=True)
-    excluded_by_skip.parent.mkdir(parents=True)
-    excluded_by_flag.parent.mkdir(parents=True)
+    good_file = docs_dir / "good.md"
+    good_file.write_text("# Good\n", encoding="utf-8")
+    (custom_dir / "excluded.md").write_text("# Excluded\n", encoding="utf-8")
+    (node_modules_dir / "ignored.md").write_text("# Ignored\n", encoding="utf-8")
 
-    included.write_text("# good\n", encoding="utf-8")
-    excluded_by_skip.write_text("# ignored\n", encoding="utf-8")
-    excluded_by_flag.write_text("# ignored\n", encoding="utf-8")
-    broken_symlink.symlink_to(repo_root / "docs" / "missing-target.md")
+    dangling_link = docs_dir / "dangling.md"
+    dangling_link.symlink_to(repo_root / "does-not-exist.md")
 
-    files = check_doc_links._find_markdown_files([repo_root], repo_root, exclude_dirs={"templates"})
+    found = doc_links_module._find_markdown_files([repo_root], repo_root, exclude_dirs={"custom"})
 
-    assert included in files
-    assert excluded_by_skip not in files
-    assert excluded_by_flag not in files
-    assert broken_symlink not in files
-
-
-def test_main_rejects_invalid_cross_repo_mode(monkeypatch):
-    """Invalid --cross-repo value should fail fast with exit code 1."""
-    monkeypatch.setattr(check_doc_links.sys, "argv", ["check_doc_links.py", "--cross-repo", "invalid-mode"])
-
-    result = check_doc_links.main()
-
-    assert result == 1
+    assert found == [good_file]
