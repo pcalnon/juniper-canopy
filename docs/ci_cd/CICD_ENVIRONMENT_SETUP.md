@@ -1,139 +1,98 @@
-# CI/CD Environment Setup Guide
+# CI/CD Environment Setup
 
 **Last Updated:** 2026-04-04  
 **Version:** 0.26.0  
 **Status:** Current
 
-Environment setup for reproducing current CI behavior from `.github/workflows/ci.yml`.
+Complete setup and verification guide for the GitHub Actions CI environment used by JuniperCanopy.
 
 ---
 
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Local Baseline Environment](#local-baseline-environment)
-3. [CI Dependency Model](#ci-dependency-model)
-4. [Test And Coverage Setup](#test-and-coverage-setup)
-5. [Lockfile And Docs Gates](#lockfile-and-docs-gates)
-6. [Workflow Triggers And Job Graph](#workflow-triggers-and-job-graph)
-7. [Troubleshooting](#troubleshooting)
+2. [Runner and Python Configuration](#runner-and-python-configuration)
+3. [Dependency Installation Model](#dependency-installation-model)
+4. [Optional Extras and Lockfile Policy](#optional-extras-and-lockfile-policy)
+5. [Documentation Link Validation](#documentation-link-validation)
+6. [Required Secrets and Tokens](#required-secrets-and-tokens)
+7. [Local Reproduction Checklist](#local-reproduction-checklist)
+8. [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Overview
 
-The main CI pipeline uses:
+The CI pipeline is defined in `.github/workflows/ci.yml` and runs on `ubuntu-latest` with pip-based environments.
 
-- `ubuntu-latest` GitHub-hosted runners
-- Python matrix: `3.12`, `3.13`, `3.14` for `pre-commit` and `unit-tests`
-- Python `3.14` for integration/security/build/docs/lockfile jobs
-- `pip` installs from `conf/requirements_ci.txt` plus editable install `pip install -e .`
-- CPU-only PyTorch via `https://download.pytorch.org/whl/cpu`
+Core environment characteristics:
 
-The pipeline is intentionally pip-first for portability.
+- Base OS: `ubuntu-latest`
+- Python matrix (quality and tests): `3.12`, `3.13`, `3.14`
+- Primary single-version jobs: Python `3.14`
+- Dependency source for CI jobs: `conf/requirements_ci.txt`
+- Test paths in CI: `src/tests/...` (not `tests/...`)
 
 ---
 
-## Local Baseline Environment
+## Runner and Python Configuration
 
-Use this local setup to approximate CI:
+Use `actions/setup-python` for each job. In this repository, the matrix and default values are:
+
+```yaml
+env:
+  PYTHON_TEST_VERSION: "3.14"
+
+strategy:
+  matrix:
+    python-version: ["3.12", "3.13", "3.14"]
+```
+
+Jobs that run a matrix:
+
+- `pre-commit`
+- `unit-tests`
+
+Jobs pinned to a single Python version (`3.14`):
+
+- `integration-tests`
+- `build`
+- `security`
+- `dependency-docs`
+- `lockfile-check`
+- `docs`
+
+---
+
+## Dependency Installation Model
+
+CI currently uses pip installation, not conda environment activation, for workflow execution.
+
+Canonical install sequence used in test jobs:
 
 ```bash
 python -m pip install --upgrade pip
-pip install pre-commit uv
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -r conf/requirements_ci.txt
 pip install -e .
 ```
 
-Create output directories used by CI jobs:
+Notes:
 
-```bash
-mkdir -p logs src/logs reports/junit reports/coverage reports/htmlcov reports/security
-```
-
----
-
-## CI Dependency Model
-
-### `requirements_ci.txt`
-
-CI installs from `conf/requirements_ci.txt` rather than `conf/requirements.txt`.
-This file includes:
-
-- testing tooling (`pytest`, `pytest-cov`, `pytest-timeout`, `pytest-asyncio`, `pytest-html`, `pytest-mock`)
-- linting and pre-commit dependencies
-- runtime dependencies used in app startup/import paths
-
-PyTorch is installed separately with CPU-only wheels before installing `requirements_ci.txt`.
-
-### Editable install
-
-CI runs:
-
-```bash
-pip install -e .
-```
-
-This ensures package-style imports and source-tree path behavior match runtime expectations.
+- CPU-only PyTorch is intentional for runner compatibility.
+- Editable install (`pip install -e .`) ensures package resolution matches source checkout behavior.
 
 ---
 
-## Test And Coverage Setup
+## Optional Extras and Lockfile Policy
 
-### Unit + regression fast subset
+`pyproject.toml` defines optional extras that are included in lockfile generation:
 
-Equivalent to CI `unit-tests`:
+- `juniper-data`
+- `juniper-cascor`
+- `observability` (`prometheus-client`, `sentry-sdk`)
 
-```bash
-cd src
-python -m pytest \
-  -m "not requires_cascor and not requires_server and not slow" \
-  tests/unit/ tests/regression/ \
-  --verbose \
-  --timeout=60 \
-  --maxfail=5 \
-  --junitxml=../reports/junit/junit-unit.xml \
-  --cov=. \
-  --cov-report=term-missing \
-  --cov-report=xml:../reports/coverage.xml \
-  --cov-report=html:../reports/htmlcov \
-  --cov-fail-under=80
-```
-
-### Integration fast subset
-
-Equivalent to CI `integration-tests`:
-
-```bash
-cd src
-python -m pytest \
-  -m "integration and not requires_cascor and not requires_server and not slow" \
-  tests/integration \
-  --verbose \
-  --timeout=120 \
-  --maxfail=3 \
-  --junitxml=../reports/junit/junit-integration.xml
-```
-
----
-
-## Lockfile And Docs Gates
-
-### Lockfile freshness
-
-CI compares `requirements.lock` to a fresh compile that includes project extras:
-
-```bash
-uv pip compile pyproject.toml \
-  --extra juniper-data \
-  --extra juniper-cascor \
-  --extra observability \
-  -o /tmp/requirements.lock.check
-diff -u requirements.lock /tmp/requirements.lock.check
-```
-
-If diff is non-empty, regenerate:
+Canonical compile command:
 
 ```bash
 uv pip compile pyproject.toml \
@@ -143,9 +102,23 @@ uv pip compile pyproject.toml \
   -o requirements.lock
 ```
 
-### Documentation links
+CI lockfile freshness behavior:
 
-CI validates markdown links through `scripts/check_doc_links.py` with targeted exclusions:
+- Compiles to `/tmp/requirements.lock.check`
+- Compares the file body from line 3 onward to ignore uv header path differences
+- Fails if content differs
+
+Dependabot lockfile update workflow:
+
+- Regenerates via `/tmp/requirements.lock.check`
+- Moves output to `requirements.lock`
+- Commits only when diff exists
+
+---
+
+## Documentation Link Validation
+
+CI includes a dedicated docs job that runs link checks:
 
 ```bash
 python scripts/check_doc_links.py \
@@ -156,56 +129,43 @@ python scripts/check_doc_links.py \
   --cross-repo skip
 ```
 
-Use `--cross-repo warn` locally when you want visibility into skipped cross-repo references without failing.
+When reproducing locally, use the same exclusion list to match CI behavior.
 
 ---
 
-## Workflow Triggers And Job Graph
+## Required Secrets and Tokens
 
-### Main pipeline trigger summary
+Required for specific workflows:
 
-`ci.yml` runs on:
+- `CROSS_REPO_DISPATCH_TOKEN`: used by lockfile update workflow for pushing lockfile commits from Dependabot branches
 
-- push to `main`, `develop`, `feature/**`, `fix/**`
-- pull requests targeting `main` and `develop`
-- `repository_dispatch` types `data-client-updated`, `cascor-client-updated`
-- manual dispatch
+May be required depending on project policy:
 
-### Job dependency notes
+- `CODECOV_TOKEN`: only if coverage upload to Codecov is enabled in your workflows
 
-- `unit-tests` depends on `pre-commit`
-- `integration-tests` depends on `unit-tests`
-- `build` depends on `unit-tests`
-- `dependency-docs` depends on `build`
-- `required-checks` aggregates all required jobs and enforces final gate
+---
+
+## Local Reproduction Checklist
+
+Use this checklist when validating CI-affecting changes before pushing:
+
+1. Install CI deps: `pip install -r conf/requirements_ci.txt`
+2. Run unit/regression subset:
+   `python -m pytest -m "not requires_cascor and not requires_server and not slow" src/tests/unit/ src/tests/regression/ --cov=src --cov-fail-under=80`
+3. Run integration subset:
+   `python -m pytest -m "integration and not requires_cascor and not requires_server and not slow" src/tests/integration`
+4. Validate lockfile freshness using the canonical uv compile command.
+5. Validate docs links with `scripts/check_doc_links.py` CI flags.
 
 ---
 
 ## Troubleshooting
 
-### Dependency mismatch
+### `requirements.lock` freshness check fails
 
-Symptom: import failures in CI but not local.
+Cause:
 
-Checks:
-
-```bash
-python --version
-pip freeze | rg "pytest|fastapi|dash|uvicorn|torch"
-```
-
-Then reinstall exactly like CI:
-
-```bash
-python -m pip install --upgrade pip
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install -r conf/requirements_ci.txt
-pip install -e .
-```
-
-### Lockfile check failure
-
-Symptom: CI reports stale `requirements.lock`.
+- `pyproject.toml` extras changed but lockfile not regenerated with all required extras.
 
 Fix:
 
@@ -217,20 +177,23 @@ uv pip compile pyproject.toml \
   -o requirements.lock
 ```
 
-### Docs job failure
+### Documentation link validation fails in CI only
 
-Symptom: broken markdown link(s) reported.
+Cause:
 
-Fix workflow:
+- Local run used different exclusion/cross-repo flags than CI.
 
-1. Run `python scripts/check_doc_links.py --cross-repo skip`.
-2. Resolve path or anchor issues in reported file.
-3. Re-run link checker before pushing.
+Fix:
 
----
+- Re-run `scripts/check_doc_links.py` with the exact CI argument set.
 
-## Related Docs
+### Tests pass locally but fail in CI path resolution
 
-- [CI/CD Quick Start](CICD_QUICK_START.md)
-- [CI/CD Manual](CICD_MANUAL.md)
-- [CI/CD Reference](CICD_REFERENCE.md)
+Cause:
+
+- Running `pytest` from `src/` with old path assumptions (`tests/...`) instead of repository-root paths (`src/tests/...`).
+
+Fix:
+
+- Run commands from repository root using CI-equivalent test paths.
+

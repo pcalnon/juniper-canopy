@@ -1,23 +1,24 @@
 # CI/CD Quick Start Guide
 
 **Last Updated:** 2026-04-04  
-**Time to Complete:** ~5-10 minutes  
+**Time to Complete:** ~5 minutes  
 **Version:** 0.26.0
 
 ---
 
 ## Prerequisites
 
-- Python 3.12+ available locally
-- Project dependencies installable from `conf/requirements_ci.txt`
-- `uv` installed for lockfile checks
-- Repository root as current working directory
+- ✅ Python 3.12+ available
+- ✅ Virtual environment or conda environment activated
+- ✅ Dependencies installed (`pip install -r conf/requirements_ci.txt`)
+- ✅ Git repository initialized
+
+**Verify:**
 
 ```bash
-python --version
-python -m pip --version
-pytest --version
-uv --version
+python --version      # Should be 3.12+
+pytest --version      # Should be 7.0+
+pip --version
 ```
 
 ---
@@ -41,7 +42,10 @@ Run these from repo root (not `src/`). Running from root keeps coverage omit pat
 ### Pre-commit
 
 ```bash
-pre-commit run --all-files
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/ \
+  --verbose
 ```
 
 ### Unit + Regression (coverage gate)
@@ -50,11 +54,7 @@ pre-commit run --all-files
 python -m pytest \
   -m "not requires_cascor and not requires_server and not slow" \
   src/tests/unit/ src/tests/regression/ \
-  --verbose \
-  --timeout=60 \
-  --maxfail=5 \
-  --cov=src \
-  --cov-report=term-missing \
+  --cov=src --cov-report=term-missing \
   --cov-fail-under=80
 ```
 
@@ -102,12 +102,19 @@ uv pip compile pyproject.toml \
 ## 4. Validate Documentation Links
 
 ```bash
-python scripts/check_doc_links.py \
-  --exclude templates --exclude history \
-  --exclude pull_requests --exclude releases \
-  --exclude analysis --exclude fixes --exclude development \
-  --exclude CHANGELOG.md \
-  --cross-repo skip
+CI/CD Pipeline
+├── ✓ Pre-commit (Python 3.12/3.13/3.14)
+├── ✓ Unit Tests + Coverage (Python 3.12/3.13/3.14)
+├── ✓ Integration Tests
+├── ✓ Security Scans
+├── ✓ Build Distribution
+├── ✓ Dependency Documentation
+├── ✓ Lockfile Freshness
+├── ✓ Documentation Links
+├── ✓ Docker Build & Smoke Test
+└── ✓ Quality Gate
+
+Total: ~10-15 minutes (parallel jobs)
 ```
 
 This matches the `docs` job in `.github/workflows/ci.yml`.
@@ -118,17 +125,35 @@ This matches the `docs` job in `.github/workflows/ci.yml`.
 
 Current `CI/CD Pipeline` jobs:
 
-- `pre-commit`
-- `unit-tests` (Python 3.12/3.13/3.14)
-- `integration-tests`
-- `build`
-- `security`
-- `dependency-docs`
-- `lockfile-check`
-- `docs`
-- `docker-build`
-- `required-checks`
-- `notify`
+```markdown
+[![codecov](https://codecov.io/gh/USERNAME/REPO/branch/main/graph/badge.svg)](https://codecov.io/gh/USERNAME/REPO)
+```
+
+### Enable Branch Protection
+
+- Settings → Branches → Add rule
+- ☑ Require pull request reviews
+- ☑ Require status checks (Quality Gate)
+- ☑ Require branches up to date
+
+### Validate Docs and Lockfile Locally
+
+```bash
+# Check documentation links (same exclusions as CI)
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+
+# Regenerate lockfile after dependency changes
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
+```
 
 ---
 
@@ -144,11 +169,24 @@ pip install -r conf/requirements_ci.txt
 
 ### Coverage unexpectedly includes test files
 
-Run pytest from repository root and target `src/tests/...` paths as shown above.
+```bash
+python -m venv .venv-ci
+# activate .venv-ci for your shell, then:
+pip install -r conf/requirements_ci.txt
+python -m pytest src/tests/unit/test_demo_mode.py::test_name -vv
+```
 
 ### Lockfile check fails even after compile
 
-Ensure `--extra observability` is included in the compile command.
+```bash
+# Test with CI Python versions
+for ver in 3.12 3.13 3.14; do
+  python -m venv ".venv-$ver"
+  # activate env per shell, then:
+  pip install -r conf/requirements_ci.txt
+  python -m pytest -m "not requires_cascor and not requires_server and not slow" src/tests/unit/ src/tests/regression/
+done
+```
 
 ### Docs job fails locally
 
