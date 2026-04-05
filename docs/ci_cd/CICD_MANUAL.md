@@ -4,179 +4,235 @@
 **Version:** 0.26.0  
 **Status:** Current
 
+Practical user guide for working with the active GitHub Actions workflows in this repository.
+
+---
+
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Current Pipeline Architecture](#current-pipeline-architecture)
-3. [Job-by-Job Behavior](#job-by-job-behavior)
-4. [Developer Workflow](#developer-workflow)
-5. [Failure Triage Runbook](#failure-triage-runbook)
-6. [Common Pitfalls](#common-pitfalls)
-7. [References](#references)
+2. [Developer Workflow](#developer-workflow)
+3. [Understanding CI Results](#understanding-ci-results)
+4. [Required Checks and Merge Gate](#required-checks-and-merge-gate)
+5. [Working with Lockfiles and Dependencies](#working-with-lockfiles-and-dependencies)
+6. [Documentation Validation Workflow](#documentation-validation-workflow)
+7. [Troubleshooting Common Failures](#troubleshooting-common-failures)
+8. [Maintainer Operations](#maintainer-operations)
+
+---
 
 ## Overview
 
-This manual describes the **current** GitHub Actions pipeline implemented in `.github/workflows/ci.yml`.
+The main CI workflow is `.github/workflows/ci.yml` and includes:
 
-The pipeline is designed for:
+- pre-commit validation across Python `3.12`, `3.13`, `3.14`
+- unit tests + coverage gate (80%)
+- fast integration test subset
+- security scanning
+- build verification
+- dependency documentation generation
+- lockfile freshness verification
+- documentation link validation
+- Docker build + smoke checks
+- final quality gate aggregation
 
-- Fast feedback on PRs
-- Deterministic test selection and coverage gating
-- Security and dependency hygiene
-- Documentation link integrity
-- Container build smoke validation
+Pipeline philosophy:
 
-## Current Pipeline Architecture
+- fail fast for broken contracts
+- keep lockfile and docs enforceable in CI
+- avoid requiring external services for default test path
 
-### Trigger Scope
-
-The workflow runs on:
-
-- `push` to `main`, `develop`, `feature/**`, `fix/**`
-- `pull_request` into `main` or `develop`
-- `repository_dispatch` (`data-client-updated`, `cascor-client-updated`)
-- `workflow_dispatch`
-
-### High-Level Job Graph
-
-`pre-commit` and `unit-tests` are core gates. Other jobs fan out and are aggregated by `required-checks`.
-
-```text
-pre-commit
-   └── unit-tests
-       ├── integration-tests
-       ├── build
-       │   ├── dependency-docs
-       │   └── docker-build (PR/main/develop only)
-       └── ...
-
-security (depends on pre-commit)
-lockfile-check (independent)
-docs (independent)
-
-required-checks waits on:
-pre-commit, unit-tests, integration-tests, security, build,
-dependency-docs, lockfile-check, docs, docker-build
-```
-
-## Job-by-Job Behavior
-
-### `pre-commit`
-
-- Runs on Python `3.12`, `3.13`, `3.14`
-- Installs and executes hooks from `.pre-commit-config.yaml`
-- Caches hook environments
-- Fails on any hook failure
-
-### `unit-tests`
-
-- Runs on Python `3.12`, `3.13`, `3.14`
-- Installs CPU-only PyTorch and `conf/requirements_ci.txt`
-- Runs:
-  - `src/tests/unit/`
-  - `src/tests/regression/`
-- Marker filter:
-  - `not requires_cascor and not requires_server and not slow`
-- Enforces coverage gate:
-  - `--cov-fail-under=80`
-- Uploads JUnit and coverage artifacts
-- Includes a targeted workaround for Python 3.12 cleanup-time SIGABRT (`exit 134`) by checking JUnit failures/errors before failing the job
-
-### `integration-tests`
-
-- Depends on `unit-tests`
-- Runs on PRs and `main`/`develop` pushes
-- Executes:
-  - `src/tests/integration`
-- Marker filter:
-  - `integration and not requires_cascor and not requires_server and not slow`
-
-### `build`
-
-- Depends on `unit-tests`
-- Builds sdist/wheel via `python -m build`
-- Verifies build artifacts are present in `dist/`
-
-### `security`
-
-- Depends on `pre-commit`
-- Runs:
-  - Gitleaks (secrets)
-  - Bandit (SARIF + text output)
-  - pip-audit (dependency vulnerabilities)
-
-### `dependency-docs`
-
-- Depends on `build`
-- Generates dependency documentation via `scripts/generate_dep_docs.sh`
-- Validates generated YAML structure
-
-### `lockfile-check`
-
-- Recompiles lock candidate with `uv pip compile`
-- Compares body of generated lock against `requirements.lock` (header stripped to avoid path-noise diffs)
-- Fails if stale
-
-### `docs`
-
-- Runs markdown link validation via `scripts/check_doc_links.py`
-- CI mode uses `--cross-repo skip`
-- Excludes high-churn/archive directories intentionally
-
-### `docker-build`
-
-- Depends on `build`
-- Runs on PRs and `main`/`develop`
-- Builds image, starts container, validates:
-  - package import
-  - health endpoint
-
-### `required-checks`
-
-- Aggregates all required job results
-- Converts individual failures into one branch protection gate
+---
 
 ## Developer Workflow
 
-### Recommended Pre-Push Sequence
+### 1. Before coding
+
+Install local tooling:
+
+```bash
+pip install pre-commit uv
+pre-commit install
+```
+
+### 2. During coding
+
+Run targeted tests often:
+
+```bash
+python -m pytest src/tests/unit/ -v
+```
+
+### 3. Before pushing
+
+Run CI-parity checks locally:
 
 ```bash
 pre-commit run --all-files
 
-mkdir -p logs src/logs reports/junit reports/htmlcov
-python -m pytest -m "not requires_cascor and not requires_server and not slow" \
-  src/tests/unit/ src/tests/regression/ --cov=src --cov-fail-under=80
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/ \
+  --verbose \
+  --timeout=60 \
+  --maxfail=5 \
+  --cov=src \
+  --cov-report=term-missing \
+  --cov-fail-under=80
 
-python -m pytest -m "integration and not requires_cascor and not requires_server and not slow" \
-  src/tests/integration
-
-python scripts/check_doc_links.py --cross-repo skip
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
 ```
 
-### Optional Test Extras
-
-Some tests rely on optional test helper modules and will skip if extras are not installed.
+Push branch:
 
 ```bash
-pip install "juniper-cascor-client[testing]"
-pip install "juniper-data-client[testing]"
+git push -u origin <branch-name>
 ```
 
-## Failure Triage Runbook
+### 4. Optional service-mode test extras
 
-### If `unit-tests` fails at collection
+Some tests intentionally skip unless client testing extras are installed:
 
-1. Check missing modules in traceback.
-2. Install missing extras (`[testing]`) when failure references testing fixtures/clients.
-3. Re-run only failing file locally with `-vv`.
+```bash
+pip install "juniper-cascor-client[testing]" "juniper-data-client[testing]"
+```
 
-### If `docs` fails
+Tests now gate on:
 
-1. Run `python scripts/check_doc_links.py --cross-repo skip`.
-2. Fix reported file paths or heading anchors.
-3. Re-run validator before pushing.
+- `juniper_cascor_client.testing`
+- `juniper_data_client.testing`
 
-### If `lockfile-check` fails
+This prevents false collection failures when only base client packages are installed.
+
+---
+
+## Understanding CI Results
+
+In a PR, CI jobs appear under Checks.
+
+Typical order:
+
+1. `pre-commit`
+2. `unit-tests`
+3. `integration-tests` (PR/main/develop)
+4. `build`
+5. `security`
+6. `dependency-docs`
+7. `lockfile-check`
+8. `docs`
+9. `docker-build` (PR/main/develop)
+10. `required-checks`
+11. `notify`
+
+Interpretation:
+
+- `success`: job passed
+- `failure`: blocking issue (except where explicitly non-blocking)
+- `skipped`: acceptable for conditionally-run jobs (for example, Docker on non-PR feature pushes)
+
+---
+
+## Required Checks and Merge Gate
+
+`required-checks` in `ci.yml` is the authoritative gate.
+
+Blocking failures include:
+
+- `pre-commit`, `unit-tests`, `security`, `integration-tests`
+- `lockfile-check`
+- `docs`
+- `docker-build` when job ran and failed
+
+`dependency-docs`:
+
+- `failure` blocks
+- `skipped` is accepted
+
+This gate consolidates status so reviewers can trust one final signal.
+
+---
+
+## Working with Lockfiles and Dependencies
+
+### Lockfile freshness model
+
+CI compares `requirements.lock` against fresh `uv pip compile` output using extras:
+
+- `juniper-data`
+- `juniper-cascor`
+- `observability`
+
+The comparison strips two autogenerated header lines before `diff -u` to avoid path-based header mismatches.
+
+### Dependabot integration
+
+Workflow: `.github/workflows/lockfile-update.yml`
+
+- triggers on `dependabot/pip/**`
+- regenerates `requirements.lock`
+- commits and pushes lockfile updates when needed
+
+Why this matters:
+
+- keeps Docker/CI dependency resolution aligned
+- reduces stale-lockfile failures in normal PRs
+
+### CI dependency baseline
+
+`conf/requirements_ci.txt` includes observability dependencies:
+
+- `prometheus-client`
+- `sentry-sdk`
+
+`pyproject.toml` mirrors these in optional dependency group `observability`.
+
+---
+
+## Documentation Validation Workflow
+
+CI `docs` job runs `scripts/check_doc_links.py` with `--cross-repo skip`.
+
+What is validated:
+
+- in-repo relative links
+- same-file anchors
+- repository boundary safety for link traversal
+
+Why cross-repo is skipped in CI:
+
+- sibling Juniper repositories are not guaranteed on runners
+- in-repo doc integrity is still strictly enforced
+
+Local options:
+
+- `--cross-repo check`: validate sibling-repo links when working in a polyrepo workspace
+- `--cross-repo warn`: report but do not fail
+
+---
+
+## Troubleshooting Common Failures
+
+### 1. Unit tests fail with missing client testing modules
+
+Symptom examples:
+
+- `ModuleNotFoundError: No module named 'juniper_cascor_client.testing'`
+- tests skipped unexpectedly for service-mode coverage
+
+Fix:
+
+```bash
+pip install "juniper-cascor-client[testing]" "juniper-data-client[testing]"
+```
+
+### 2. Lockfile freshness fails
+
+Fix:
 
 ```bash
 uv pip compile pyproject.toml \
@@ -186,17 +242,55 @@ uv pip compile pyproject.toml \
   -o requirements.lock
 ```
 
-## Common Pitfalls
+Commit updated `requirements.lock`.
 
-- Assuming CI installs optional testing extras automatically for all contexts.
-- Treating `requires_cascor`/`requires_server` tests as part of default CI pass criteria.
-- Editing docs without running link validation.
-- Updating dependencies but forgetting to regenerate `requirements.lock`.
+### 3. Docs job fails
 
-## References
+Reproduce:
+
+```bash
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
+
+Fix broken paths/anchors exactly as reported.
+
+### 4. Pre-commit markdownlint fails on templates
+
+Template header files under `notes/*_HEADER.md` are excluded from markdownlint by config. If failures appear there, verify `.pre-commit-config.yaml` is up-to-date on your branch.
+
+---
+
+## Maintainer Operations
+
+### Weekly checks
+
+- review failed workflow runs for repeated patterns
+- confirm lockfile-update automation is committing when Dependabot changes dependencies
+- review `security-scan.yml` output artifacts
+
+### When adjusting CI behavior
+
+Keep these docs in sync:
+
+- `docs/ci_cd/CICD_QUICK_START.md`
+- `docs/ci_cd/CICD_REFERENCE.md`
+- `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
+- `docs/testing/TESTING_MANUAL.md` / `TESTING_REFERENCE.md` for test dependency gates
+
+### Useful links
 
 - [CI/CD Quick Start](CICD_QUICK_START.md)
 - [CI/CD Reference](CICD_REFERENCE.md)
 - [CI/CD Environment Setup](CICD_ENVIRONMENT_SETUP.md)
-- [Testing Manual](../testing/TESTING_MANUAL.md)
-- [Testing Reference](../testing/TESTING_REFERENCE.md)
+
+---
+
+**Last Updated:** 2026-04-04  
+**Version:** 0.26.0  
+**Status:** Current
+
