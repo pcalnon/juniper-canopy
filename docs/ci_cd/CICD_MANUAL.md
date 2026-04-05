@@ -13,11 +13,11 @@
 3. [For Code Reviewers](#for-code-reviewers)
 4. [For Maintainers](#for-maintainers)
 5. [Workflow Deep Dive](#workflow-deep-dive)
-6. [Quality Gates and Metrics](#quality-gates-and-metrics)
-7. [Debugging Failed Builds](#debugging-failed-builds)
-8. [Performance Optimization](#performance-optimization)
-9. [Security Considerations](#security-considerations)
-10. [Emergency Procedures](#emergency-procedures)
+6. [Failure Triage Runbook](#failure-triage-runbook)
+7. [Performance Optimization](#performance-optimization)
+8. [Artifacts and Diagnostics](#artifacts-and-diagnostics)
+9. [Security and Release Workflows](#security-and-release-workflows)
+10. [References](#references)
 
 ---
 
@@ -1059,7 +1059,7 @@ python scripts/check_doc_links.py \
 
 ### Quality Gate Stage
 
-1. [Overview](#overview)
+1. [Introduction](#introduction)
 2. [Pipeline Behavior](#pipeline-behavior)
 3. [Developer Workflow](#developer-workflow)
 4. [Reviewer Workflow](#reviewer-workflow)
