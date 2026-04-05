@@ -53,5 +53,6 @@ class TestUnhandledExceptionHandler:
         assert response.status_code == 500
         body = response.json()
         assert body["error"] == "Internal server error"
-        assert "kaboom" in body["detail"]
+        assert body["detail"] == "An unexpected error occurred."
+        assert "kaboom" not in body["detail"]
         assert body["status_code"] == 500

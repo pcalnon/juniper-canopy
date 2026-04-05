@@ -39,6 +39,7 @@
 import asyncio
 import json
 import os
+import re
 
 # import sys
 import time
@@ -271,8 +272,8 @@ if settings.metrics_enabled:
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Catch-all handler returning a consistent JSON error shape."""
-    system_logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}")
-    body = ErrorResponse(error="Internal server error", detail=str(exc), status_code=500)
+    system_logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}", exc_info=True)
+    body = ErrorResponse(error="Internal server error", detail="An unexpected error occurred.", status_code=500)
     return JSONResponse(body.model_dump(), status_code=500)
 
 
@@ -863,6 +864,35 @@ async def get_statistics():
 SNAPSHOT_EXTENSIONS = (".h5", ".hdf5")
 _snapshots_dir = os.getenv("CASCOR_SNAPSHOT_DIR", "./snapshots")
 
+# Snapshot name validation pattern: alphanumeric, hyphens, underscores, dots (no path separators)
+_SNAPSHOT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+
+
+def _sanitize_snapshot_name(name: str) -> str:
+    """Validate and sanitize a snapshot name to prevent path traversal.
+
+    Args:
+        name: The snapshot name or ID to validate.
+
+    Returns:
+        The validated name.
+
+    Raises:
+        HTTPException: 400 if the name contains invalid characters or path traversal sequences.
+    """
+    from fastapi import HTTPException
+
+    if not name or not _SNAPSHOT_NAME_PATTERN.match(name):
+        raise HTTPException(status_code=400, detail="Invalid snapshot name. Use only alphanumeric characters, hyphens, underscores, and dots.")
+
+    # Path confinement: resolve and verify the resulting path stays inside _snapshots_dir
+    base = Path(_snapshots_dir).resolve()
+    candidate = (base / name).resolve()
+    if not str(candidate).startswith(str(base) + os.sep) and candidate != base:
+        raise HTTPException(status_code=400, detail="Invalid snapshot name.")
+
+    return name
+
 
 def _generate_mock_snapshots():
     """Generate mock snapshot metadata for demo mode or missing backend."""
@@ -1019,6 +1049,8 @@ async def get_snapshot_detail(snapshot_id: str):
 
     from fastapi import HTTPException
 
+    snapshot_id = _sanitize_snapshot_name(snapshot_id)
+
     # Demo mode: return synthetic details
     if backend.backend_type == "demo":
         # Check session-created demo snapshots first
@@ -1166,6 +1198,7 @@ async def create_snapshot(
 
     # Generate snapshot ID and name
     snapshot_id = name or f"snapshot_{timestamp_str}"
+    snapshot_id = _sanitize_snapshot_name(snapshot_id)
     snapshot_name = f"{snapshot_id}.h5"
 
     # Demo mode: create mock snapshot entry
@@ -1312,6 +1345,8 @@ async def restore_snapshot(snapshot_id: str):
     from pathlib import Path
 
     from fastapi import HTTPException
+
+    snapshot_id = _sanitize_snapshot_name(snapshot_id)
 
     global training_state
 
