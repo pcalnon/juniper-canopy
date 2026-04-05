@@ -92,6 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **DOCKER-001: .dockerignore excluded README.md** — Removed `README.md` from `.dockerignore` exclusion list. The Dockerfile `COPY pyproject.toml README.md ./` step requires README.md in the build context, but the .dockerignore was excluding it, causing Docker builds to fail.
+- **DOCKER-REGRESSION: Forced demo mode removed from Docker runtime defaults** — Removed `JUNIPER_CANOPY_DEMO_MODE=1` from both `Dockerfile` and `conf/Dockerfile`. Forcing demo mode silently routes deployments to `DemoBackend`, which can ignore configured `CASCOR_SERVICE_URL` and serve synthetic training data instead of real backend data.
 
 ---
 
