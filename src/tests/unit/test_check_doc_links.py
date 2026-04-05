@@ -1,9 +1,32 @@
+#!/usr/bin/env python
+#####################################################################################################################################################################################################
+# Project:       Juniper
+# Sub-Project:   JuniperCanopy
+# Application:   juniper_canopy
+# File Name:     test_check_doc_links.py
+# Author:        Paul Calnon
+# Version:       0.1.0
+#
+# Date Created:  2026-04-04
+# Last Modified: 2026-04-04
+#
+# License:       MIT License
+# Copyright:     Copyright (c) 2024-2026 Paul Calnon
+#
+# Description:
+#    Unit tests for scripts/check_doc_links.py.
+#    Focuses on security-sensitive link validation paths and parser edge cases
+#    added in CI hardening changes.
+#
+#####################################################################################################################################################################################################
+"""Unit tests for documentation link checker script."""
 """Regression tests for documentation link checker script."""
+
+import importlib.util
+import pytest
 
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
-
-import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
