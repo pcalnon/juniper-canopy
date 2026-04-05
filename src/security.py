@@ -7,6 +7,7 @@ Configuration is read from environment variables:
     CANOPY_RATE_LIMIT_REQUESTS_PER_MINUTE: Rate limit (default: 60).
 """
 
+import hmac
 import os
 import time
 from collections import defaultdict
@@ -54,7 +55,7 @@ class APIKeyAuth:
             return True
         if api_key is None:
             return False
-        return api_key in self._api_keys
+        return any(hmac.compare_digest(api_key, k) for k in self._api_keys)
 
     async def __call__(self, request: Request) -> str | None:
         """FastAPI dependency for API key validation.
@@ -113,6 +114,8 @@ class RateLimiter:
         self._enabled = enabled
         self._counters: dict[str, tuple[int, float]] = defaultdict(lambda: (0, 0.0))
         self._lock = Lock()
+        self._max_entries = 10_000
+        self._last_eviction = 0.0
 
     @property
     def enabled(self) -> bool:
@@ -146,6 +149,13 @@ class RateLimiter:
         client_ip = request.client.host if request.client else "unknown"
         return f"ip:{client_ip}"
 
+    def _evict_expired(self, now: float) -> None:
+        """Remove expired entries from counters. Must be called with _lock held."""
+        expired = [k for k, (_, ws) in self._counters.items() if now - ws >= self._window]
+        for k in expired:
+            del self._counters[k]
+        self._last_eviction = now
+
     def check(self, key: str) -> tuple[bool, int, int]:
         """Check if a request is allowed under rate limit.
 
@@ -161,6 +171,14 @@ class RateLimiter:
         now = time.time()
 
         with self._lock:
+            # Periodic eviction: run at most once per window period
+            if now - self._last_eviction >= self._window:
+                self._evict_expired(now)
+
+            # Emergency cap: evict if too many entries
+            if len(self._counters) >= self._max_entries:
+                self._evict_expired(now)
+
             count, window_start = self._counters[key]
 
             if now - window_start >= self._window:

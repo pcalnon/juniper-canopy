@@ -34,13 +34,13 @@ JuniperCanopy is the **monitoring dashboard** of the Juniper ecosystem. It depen
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Modes**: *Service mode* (live CasCor backend via `CASCOR_SERVICE_URL`) or *Demo mode* (`CASCOR_DEMO_MODE=1`, no backend required).
+**Modes**: *Service mode* (live CasCor backend via `JUNIPER_CANOPY_CASCOR_SERVICE_URL` or legacy `CASCOR_SERVICE_URL`) or *Demo mode* (`JUNIPER_CANOPY_DEMO_MODE=1`, no backend required).
 
 ## Related Services
 
 | Service | Relationship | Notes |
 |---------|-------------|-------|
-| [juniper-cascor](https://github.com/pcalnon/juniper-cascor) | Canopy monitors CasCor training | Set `CASCOR_SERVICE_URL` to activate service mode |
+| [juniper-cascor](https://github.com/pcalnon/juniper-cascor) | Canopy monitors CasCor training | Set `JUNIPER_CANOPY_CASCOR_SERVICE_URL` (or legacy `CASCOR_SERVICE_URL`) to activate service mode |
 | [juniper-data](https://github.com/pcalnon/juniper-data) | Canopy fetches datasets for visualization | Set `JUNIPER_DATA_URL` |
 | [juniper-cascor-client](https://github.com/pcalnon/juniper-cascor-client) | REST+WS client used internally by Canopy | `pip install juniper-cascor-client` |
 
@@ -48,11 +48,13 @@ JuniperCanopy is the **monitoring dashboard** of the Juniper ecosystem. It depen
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `CASCOR_SERVICE_URL` | Yes\* | — | JuniperCascor URL — activates service mode |
-| `JUNIPER_DATA_URL` | No | `http://localhost:8100` | JuniperData URL |
-| `CASCOR_DEMO_MODE` | No | — | Set to `1` to run without a backend |
-| `CASCOR_SERVER_HOST` | No | `127.0.0.1` | Server bind address |
-| `CASCOR_SERVER_PORT` | No | `8050` | Server port |
+| `JUNIPER_CANOPY_CASCOR_SERVICE_URL` | Yes\* | — | JuniperCascor URL — activates service mode |
+| `JUNIPER_DATA_URL` | No | `http://localhost:8100` | JuniperData URL (optional in demo mode due to local fallback) |
+| `JUNIPER_CANOPY_DEMO_MODE` | No | `false` (`1` in Docker image) | Set to `1` to run without a backend |
+| `JUNIPER_CANOPY_SERVER__HOST` | No | `127.0.0.1` | Server bind address |
+| `JUNIPER_CANOPY_SERVER__PORT` | No | `8050` | Server port |
+| `CASCOR_SERVICE_URL` | No | — | Legacy fallback for `JUNIPER_CANOPY_CASCOR_SERVICE_URL` |
+| `CASCOR_DEMO_MODE` | No | — | Legacy fallback for `JUNIPER_CANOPY_DEMO_MODE` |
 
 \* Required for service mode. Omit to fall back to demo mode.
 
@@ -63,13 +65,20 @@ JuniperCanopy is the **monitoring dashboard** of the Juniper ecosystem. It depen
 git clone https://github.com/pcalnon/juniper-deploy.git  # (private repository)
 cd juniper-deploy && docker compose up --build
 
-# Standalone (service mode):
+# Standalone (demo mode by default in Dockerfile):
 docker build -t juniper-canopy:latest .
-docker run -p 8050:8050 \
-  -e CASCOR_SERVICE_URL=http://host.docker.internal:8200 \
+docker run --rm -p 8050:8050 \
+  juniper-canopy:latest
+
+# Standalone (service mode with external CasCor):
+docker run --rm -p 8050:8050 \
+  -e JUNIPER_CANOPY_DEMO_MODE=0 \
+  -e JUNIPER_CANOPY_CASCOR_SERVICE_URL=http://host.docker.internal:8200 \
   -e JUNIPER_DATA_URL=http://host.docker.internal:8100 \
   juniper-canopy:latest
 ```
+
+In demo mode, dataset generation first attempts JuniperData and falls back to local spiral generation if JuniperData is unavailable (warning logged in `demo_mode`).
 
 ## Dependency Lockfile
 
@@ -78,9 +87,14 @@ The `requirements.lock` file pins exact dependency versions for reproducible Doc
 **Regenerate after changing dependencies in `pyproject.toml`:**
 
 ```bash
-uv pip compile pyproject.toml --extra juniper-data --extra juniper-cascor -o requirements.lock
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
 ```
 
+The `observability` extra includes optional runtime integrations used by `src/observability.py` (`prometheus-client`, `sentry-sdk`).
 All dependencies including `juniper-data-client` and `juniper-cascor-client` are resolved from PyPI.
 
 ## Active Research Components
@@ -213,6 +227,8 @@ For complete setup instructions, see [docs/QUICK_START.md](docs/QUICK_START.md).
 - [CI/CD Manual](docs/ci_cd/CICD_MANUAL.md) - Comprehensive CI/CD usage guide
 - [CI/CD Reference](docs/ci_cd/CICD_REFERENCE.md) - CI/CD technical reference
 
+The CI/CD docs include operational guidance for `scripts/check_doc_links.py`, including cross-repo validation modes (`skip`, `warn`, `check`) and documentation-link gate troubleshooting.
+
 ### Demo Mode Documentation
 
 - [Demo Mode Quick Start](docs/demo/DEMO_MODE_QUICK_START.md) - Start demo mode in 5 minutes
@@ -240,5 +256,5 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 ---
 
-**Last Updated:** January 29, 2026  
+**Last Updated:** April 5, 2026  
 **Version:** 0.3.0

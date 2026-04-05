@@ -1,71 +1,57 @@
-# CI/CD Quick Start Guide
+# CI/CD Quick Start
 
 **Last Updated:** 2026-04-05  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.26.0  
+**Version:** 0.26.1  
 **Status:** Current
 
-This guide mirrors the current GitHub Actions workflows in `.github/workflows/`.
+Quick path to validate changes locally and understand what GitHub Actions will run in CI.
 
 ---
 
 ## Prerequisites
 
-- Python 3.14 available locally
-- `pip` and `git` installed
-- Repository cloned and dependencies installable
+- Python `3.12+` available locally
+- `pip` and `pre-commit` installed
+- Repository cloned and dependencies installed
 
 ```bash
 python --version
 pip --version
-git --version
+pre-commit --version
 ```
 
 ---
 
-## 1. Run The Same Fast Checks As CI
-
-Install local tooling:
+## 1. Install Local Quality Hooks
 
 ```bash
-python -m pip install --upgrade pip
-pip install pre-commit uv
+pip install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
+
+CI runs `pre-commit` across Python `3.12`, `3.13`, and `3.14`, so hook failures locally will fail CI.
+
+---
+
+## 2. Run Fast Local Test Pass
+
+```bash
 pip install -r conf/requirements_ci.txt
 pip install -e .
-```
 
-Run pre-commit:
-
-```bash
-pre-commit run --all-files --show-diff-on-failure
-```
-
-Run CI-equivalent fast tests:
-
-```bash
-cd src
 python -m pytest \
   -m "not requires_cascor and not requires_server and not slow" \
-  tests/unit/ tests/regression/ \
-  --verbose --timeout=60 --maxfail=5 \
-  --cov=. --cov-report=term-missing
+  src/tests/unit/ src/tests/regression/ \
+  --cov=src --cov-report=term-missing --cov-fail-under=80
 ```
 
-Run CI-equivalent fast integration tests:
-
-```bash
-cd src
-python -m pytest \
-  -m "integration and not requires_cascor and not requires_server and not slow" \
-  tests/integration \
-  --verbose --timeout=120 --maxfail=3
-```
+This mirrors the CI unit/regression gate behavior and coverage threshold.
 
 ---
 
-## 2. Validate Lockfile And Docs Locally
-
-Lockfile freshness (same extras as `ci.yml` lockfile check):
+## 3. Trigger CI
 
 ```bash
 uv pip compile pyproject.toml \
@@ -78,60 +64,49 @@ tail -n +3 /tmp/requirements.lock.check > /tmp/check_body
 diff -u /tmp/lock_body /tmp/check_body
 ```
 
-Documentation link validation:
-
-```bash
-python scripts/check_doc_links.py \
-  --exclude templates --exclude history \
-  --exclude pull_requests --exclude releases \
-  --exclude analysis --exclude fixes --exclude development \
-  --exclude CHANGELOG.md \
-  --cross-repo skip
-```
+`CI/CD Pipeline` runs automatically on push and PR events.
 
 ---
 
-## 3. Push And Watch CI
+## 4. CI Jobs You Should Expect
 
-Push your branch:
+Core jobs from `.github/workflows/ci.yml`:
 
-```bash
-git push origin <branch-name>
-```
-
-The `CI/CD Pipeline` workflow runs these jobs:
-
-```text
-pre-commit
-unit-tests (Python 3.12, 3.13, 3.14)
-integration-tests
-build
-security
-dependency-docs
-lockfile-check
-docs
-docker-build
-required-checks
-notify
-```
-
-`required-checks` is the branch gate: if it fails, merging should be blocked.
+- `Pre-commit (Python 3.12/3.13/3.14)`
+- `Unit Tests + Coverage (Python 3.12/3.13/3.14)`
+- `Integration Tests` (Python `3.14`)
+- `Security Scans` (`gitleaks`, `bandit`, `pip-audit`)
+- `Build Distribution`
+- `Dependency Documentation`
+- `Lockfile Freshness`
+- `Documentation Links`
+- `Docker Build & Smoke Test` (PR/main/develop)
+- `Quality Gate`
 
 ---
 
-## 4. Quick Troubleshooting
+## 5. Troubleshooting Fast
 
-If `unit-tests` fail only in CI, retest with Python 3.14 locally:
+`pre-commit` fails:
 
 ```bash
-python -m pip install -r conf/requirements_ci.txt
-pip install -e .
-cd src && python -m pytest -m "not slow and not requires_server and not requires_cascor" tests/unit tests/regression -vv
+pre-commit run --all-files
+git add .
 ```
 
-If `lockfile-check` fails:
+Coverage gate fails:
 
 ```bash
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/ \
+  --cov=src --cov-report=term-missing --cov-fail-under=80
+```
+
+Lockfile freshness fails:
+
+```bash
+pip install uv
 uv pip compile pyproject.toml \
   --extra juniper-data \
   --extra juniper-cascor \
@@ -145,9 +120,15 @@ If `docs` job fails:
 python scripts/check_doc_links.py --cross-repo skip
 ```
 
+If failures mention cross-repo links and you want visibility without failing:
+
+```bash
+python scripts/check_doc_links.py --cross-repo warn
+```
+
 ---
 
-## Next Docs
+## References
 
 - [CI/CD Manual](CICD_MANUAL.md)
 - [CI/CD Environment Setup](CICD_ENVIRONMENT_SETUP.md)

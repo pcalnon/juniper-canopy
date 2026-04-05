@@ -163,25 +163,15 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml:reports/coverage.xml \
             --cov-report=html:reports/htmlcov \
-            --cov-fail-under=${COVERAGE_FAIL_UNDER}
-          PYTEST_EXIT=$?
-          set -e
+            --cov-fail-under=${COVERAGE_FAIL_UNDER} \
+            2>&1 | tee reports/junit/pytest-unit.log
+          PYTEST_EXIT=${PIPESTATUS[0]}
 
           # Python 3.12 may SIGABRT (exit 134) during interpreter cleanup after
-          # all tests pass. Work around by checking JUnit XML for actual results.
-          if [ $PYTEST_EXIT -eq 134 ] && [ -f reports/junit/junit-unit.xml ]; then
-            FAILURES=$(python -c "
-          import xml.etree.ElementTree as ET
-          root = ET.parse('reports/junit/junit-unit.xml').getroot()
-          print(root.attrib.get('failures', '0'))
-          ")
-            ERRORS=$(python -c "
-          import xml.etree.ElementTree as ET
-          root = ET.parse('reports/junit/junit-unit.xml').getroot()
-          print(root.attrib.get('errors', '0'))
-          ")
-            if [ "$FAILURES" = "0" ] && [ "$ERRORS" = "0" ]; then
-              echo "::warning::pytest exited with SIGABRT (134) during cleanup but all tests passed — treating as success (Python 3.12 runtime bug)"
+          # all tests pass. Check the JUnit XML for actual test results.
+          if [ "$PYTEST_EXIT" -eq 134 ] && [ -f reports/junit/junit-unit.xml ]; then
+            if grep -q 'failures="0"' reports/junit/junit-unit.xml && grep -q 'errors="0"' reports/junit/junit-unit.xml; then
+              echo "::warning::pytest exited with SIGABRT (134) during cleanup but JUnit XML shows 0 failures/errors — treating as success (Python 3.12 runtime bug)"
               exit 0
             fi
           fi
