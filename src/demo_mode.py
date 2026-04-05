@@ -1571,7 +1571,7 @@ class DemoMode:
     def _perform_reset(self):
         with self._lock:
             self.is_running = False
-        self._stop = threading.Event()
+        self._stop.clear()
         self._pause.clear()
 
     def _broadcast_status(self, status: str):
