@@ -579,6 +579,7 @@ async def get_state():
         # ── Neural Network meta-parameters ──
         state["nn_max_iterations"] = getattr(demo, "nn_max_iterations", TrainingConstants.DEFAULT_MAX_GROWTH_ITERATIONS)
         state["nn_max_total_epochs"] = getattr(demo, "nn_max_total_epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS)
+        state["nn_init_output_weights"] = getattr(demo, "nn_init_output_weights", TrainingConstants.DEFAULT_INIT_OUTPUT_WEIGHTS)
         state["nn_learning_rate"] = getattr(demo, "nn_learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE)
         state["nn_max_hidden_units"] = getattr(demo, "nn_max_hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)
         state["nn_multi_node_layers"] = getattr(demo, "nn_multi_node_layers", TrainingConstants.DEFAULT_MULTI_NODE_LAYERS)
@@ -614,6 +615,7 @@ async def get_state():
         # Populate all nn_*/cn_* keys with defaults first (dashboard reads all 22)
         state.setdefault("nn_max_iterations", TrainingConstants.DEFAULT_MAX_GROWTH_ITERATIONS)
         state.setdefault("nn_max_total_epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS)
+        state.setdefault("nn_init_output_weights", TrainingConstants.DEFAULT_INIT_OUTPUT_WEIGHTS)
         state.setdefault("nn_learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE)
         state.setdefault("nn_max_hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)
         state.setdefault("nn_multi_node_layers", TrainingConstants.DEFAULT_MULTI_NODE_LAYERS)
@@ -2074,6 +2076,7 @@ async def api_set_params(body: SetParamsRequest):
         nn_keys = [
             "nn_max_iterations",
             "nn_max_total_epochs",
+            "nn_init_output_weights",
             "nn_learning_rate",
             "nn_max_hidden_units",
             "nn_multi_node_layers",
@@ -2122,6 +2125,10 @@ async def api_set_params(body: SetParamsRequest):
             ts_updates["max_hidden_units"] = int(backend_updates["nn_max_hidden_units"])
         if "nn_max_total_epochs" in backend_updates:
             ts_updates["max_epochs"] = int(backend_updates["nn_max_total_epochs"])
+        if "nn_max_iterations" in backend_updates:
+            ts_updates["max_iterations"] = int(backend_updates["nn_max_iterations"])
+        if "nn_init_output_weights" in backend_updates:
+            ts_updates["init_output_weights"] = str(backend_updates["nn_init_output_weights"])
         if "cn_pool_size" in backend_updates:
             ts_updates["candidate_pool_size"] = int(backend_updates["cn_pool_size"])
         if "nn_growth_convergence_threshold" in backend_updates:
