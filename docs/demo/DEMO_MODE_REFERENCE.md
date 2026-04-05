@@ -4,7 +4,7 @@
 
 **Version:** 0.25.0
 **Status:** Active
-**Last Updated:** March 3, 2026
+**Last Updated:** April 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -98,6 +98,9 @@ def __init__(self):
 - `self.__metrics_history` - `deque(maxlen=1000)` bounded buffer
 - `self.__hidden_units` - Current cascade unit count
 - Dataset and configuration
+- Dataset bootstrap path:
+  - Try JuniperData via `_generate_spiral_dataset()`
+  - Fall back to `_generate_spiral_dataset_local()` when JuniperData request fails
 
 #### Public Methods
 
@@ -353,6 +356,32 @@ with self._lock:
         'timestamp': time.time()
     })
 ```
+
+##### _generate_spiral_dataset()
+
+```python
+def _generate_spiral_dataset(
+    self,
+    n_samples: int = 200,
+    algorithm: Optional[str] = None,
+    n_rotations: Optional[float] = None
+) -> Dict[str, Any]:
+    """Fetch spiral dataset from JuniperData service."""
+```
+
+**Behavior:**
+
+- Reads URL from `Settings.juniper_data_url` (supports `JUNIPER_DATA_URL` shared env var).
+- Calls JuniperData create/download APIs and validates NPZ payload (`X_full`, `y_full`, dtype/shape checks).
+- Raises JuniperData client exceptions on upstream failures.
+
+**Fallback call sites:**
+
+- `DemoMode.__init__()`
+- `DemoMode.regenerate_dataset()`
+- `DemoMode.apply_params()` when `spiral_rotations` changes
+
+At these call sites, dataset generation catches exceptions, logs a warning, then falls back to `_generate_spiral_dataset_local()` so demo mode can continue in standalone environments (for example, Docker smoke tests without a reachable JuniperData service).
 
 ##### _broadcast_metrics()
 

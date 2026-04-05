@@ -125,7 +125,7 @@ Pipeline configuration, hooks, and workflow reference.
 
 **Pre-commit hooks:** black, isort, flake8, mypy, bandit, yamllint
 
-**CI pipeline:** GitHub Actions with multi-version Python testing (3.11-3.14)
+**CI pipeline:** GitHub Actions with multi-version Python testing (3.12-3.14)
 
 ---
 
