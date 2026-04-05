@@ -4,101 +4,140 @@
 **Version:** 0.26.0  
 **Status:** Current
 
-Technical reference aligned with active workflows:
-
-- `.github/workflows/ci.yml`
-- `.github/workflows/security-scan.yml`
-- `.github/workflows/publish.yml`
-- `.github/workflows/lockfile-update.yml`
-
 ---
 
 ## Table of Contents
 
-1. [Workflow Inventory](#workflow-inventory)
-2. [Main Pipeline (`ci.yml`)](#main-pipeline-ciyml)
-3. [Security Workflow (`security-scan.yml`)](#security-workflow-security-scanyml)
-4. [Publish Workflow (`publish.yml`)](#publish-workflow-publishyml)
-5. [Dependabot Lockfile Workflow (`lockfile-update.yml`)](#dependabot-lockfile-workflow-lockfile-updateyml)
-6. [CI Scripts And Inputs](#ci-scripts-and-inputs)
-7. [Branch Protection And Required Checks](#branch-protection-and-required-checks)
+- [Workflow Files](#workflow-files)
+- [Primary Pipeline (`ci.yml`)](#primary-pipeline-ciyml)
+- [Local CI-Parity Commands](#local-ci-parity-commands)
+- [Dependency and Lockfile Contracts](#dependency-and-lockfile-contracts)
+- [Documentation Link Validation Contract](#documentation-link-validation-contract)
+- [Artifacts](#artifacts)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
-## Workflow Inventory
+## Workflow Files
 
-| Workflow File | Primary Purpose | Trigger |
-| ------------- | --------------- | ------- |
-| `ci.yml` | Main quality gate for pushes/PRs | push, pull_request, repository_dispatch, workflow_dispatch |
-| `security-scan.yml` | Scheduled and on-demand security scanning | schedule (weekly), workflow_dispatch |
-| `publish.yml` | Release publishing to TestPyPI and PyPI | release published |
-| `lockfile-update.yml` | Dependabot lockfile regeneration | push to `dependabot/pip/**` by Dependabot |
+| Workflow | File | Purpose |
+| --- | --- | --- |
+| Main CI pipeline | `.github/workflows/ci.yml` | Pre-commit, tests, security, build, lockfile/docs checks, Docker smoke test, quality gate |
+| Dependabot lock sync | `.github/workflows/lockfile-update.yml` | Regenerates `requirements.lock` for `dependabot/pip/**` branches |
+| Scheduled security scan | `.github/workflows/security-scan.yml` | Weekly/manual Bandit + pip-audit |
+| Publish pipeline | `.github/workflows/publish.yml` | Release-triggered build, TestPyPI publish/verify, then PyPI publish |
 
 ---
 
-## Main Pipeline `ci.yml`
+## Primary Pipeline (`ci.yml`)
 
-### Global Settings
+### Trigger Summary
 
-- Concurrency group: `ci-${{ github.ref }}`
-- Coverage gate env: `COVERAGE_FAIL_UNDER=80`
-- Default high-use Python in non-matrix jobs: `PYTHON_TEST_VERSION=3.14`
+- `push`: `main`, `develop`, `feature/**`, `fix/**`
+- `pull_request`: `main`, `develop`
+- `repository_dispatch`: `data-client-updated`, `cascor-client-updated`
+- `workflow_dispatch`
 
-### Job Matrix
+### Job Graph
 
-`pre-commit` and `unit-tests` run matrix Python:
+| Job | Depends On | Core Command/Action | Notes |
+| --- | --- | --- | --- |
+| `pre-commit` | - | `pre-commit run --all-files` | Python matrix `3.12`, `3.13`, `3.14` |
+| `unit-tests` | `pre-commit` | `python -m pytest ... src/tests/unit/ src/tests/regression/` | Coverage gate at `80` |
+| `integration-tests` | `unit-tests` | `python -m pytest ... src/tests/integration` | PR + main/develop only |
+| `build` | `unit-tests` | `python -m build --sdist --wheel` | Uploads `dist/` |
+| `security` | `pre-commit` | gitleaks + bandit + pip-audit | Fails on pip-audit vulns |
+| `dependency-docs` | `build` | `bash scripts/generate_dep_docs.sh` | Uploads generated dependency docs |
+| `lockfile-check` | - | `uv pip compile ... -o /tmp/requirements.lock.check` + diff | Enforces lock freshness |
+| `docs` | - | `python scripts/check_doc_links.py ... --cross-repo skip` | Enforces in-repo doc links |
+| `docker-build` | `build` | `docker build` + container health smoke test | PR + main/develop only |
+| `required-checks` | all quality jobs | Shell assertions over `needs.*.result` | Blocking quality gate |
+| `notify` | `required-checks` | Summary output | Final workflow summary |
 
-- `3.12`
-- `3.13`
-- `3.14`
+### Test Execution Contract
 
-Other jobs use `3.14` unless otherwise noted.
+Run from repository root. CI intentionally targets `src/tests/...` paths from root to keep coverage omit patterns stable.
 
-### Job List
-
-1. `pre-commit`
-2. `unit-tests`
-3. `integration-tests`
-4. `build`
-5. `security`
-6. `dependency-docs`
-7. `lockfile-check`
-8. `docs`
-9. `docker-build`
-10. `required-checks`
-11. `notify`
-
-### Test Selection Rules
-
-Unit/regression fast subset:
+Unit/regression command shape:
 
 ```bash
 python -m pytest \
   -m "not requires_cascor and not requires_server and not slow" \
-  tests/unit/ tests/regression/
+  src/tests/unit/ src/tests/regression/ \
+  --verbose --timeout=60 --maxfail=5 \
+  --cov=src --cov-report=term-missing \
+  --cov-report=xml:reports/coverage.xml \
+  --cov-report=html:reports/htmlcov \
+  --cov-fail-under=80
 ```
 
-Integration fast subset:
+Integration command shape:
 
 ```bash
 python -m pytest \
   -m "integration and not requires_cascor and not requires_server and not slow" \
-  tests/integration
+  src/tests/integration \
+  --verbose --timeout=120 --maxfail=3
 ```
 
-### Lockfile Freshness Check
+---
 
-`lockfile-check` compiles to `/tmp/requirements.lock.check` with extras:
+## Local CI-Parity Commands
 
-- `juniper-data`
-- `juniper-cascor`
-- `observability`
+```bash
+# 1) Install CI dependency set + editable package
+python -m pip install --upgrade pip
+pip install -r conf/requirements_ci.txt
+pip install -e .
 
-and then diffs against `requirements.lock`.
+# 2) Run local quality checks
+pre-commit run --all-files
 
-### Documentation Link Check
+# 3) Run unit/regression fast subset with coverage gate
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/ \
+  --verbose --timeout=60 --maxfail=5 \
+  --cov=src --cov-report=term-missing --cov-fail-under=80
 
-`docs` job runs:
+# 4) Run integration fast subset
+python -m pytest \
+  -m "integration and not requires_cascor and not requires_server and not slow" \
+  src/tests/integration \
+  --verbose --timeout=120 --maxfail=3
+```
+
+---
+
+## Dependency and Lockfile Contracts
+
+### CI Dependency Source of Truth
+
+- CI installs `conf/requirements_ci.txt` plus `pip install -e .`.
+- `conf/requirements_ci.txt` must include dependencies required for test collection/runtime paths used in CI jobs.
+- `pyproject.toml` optional dependency group `observability` includes:
+  - `prometheus-client>=0.20.0`
+  - `sentry-sdk>=2.0.0`
+
+### Lockfile Freshness Contract
+
+`requirements.lock` must be reproducible from `pyproject.toml` with all current extras used by CI:
+
+```bash
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
+```
+
+CI compares lockfile body only (header comment stripped) because `uv` embeds output path in header comments.
+
+---
+
+## Documentation Link Validation Contract
+
+CI docs validation command:
 
 ```bash
 python scripts/check_doc_links.py \
@@ -109,124 +148,56 @@ python scripts/check_doc_links.py \
   --cross-repo skip
 ```
 
-### Required Checks Semantics
+Key behavior:
 
-`required-checks` is the gatekeeper and fails when:
-
-- `pre-commit` is not `success`
-- `unit-tests` is not `success`
-- `integration-tests` is `failure`
-- `security` is `failure`
-- `dependency-docs` is `failure`
-- `docs` is `failure`
-- `lockfile-check` is not `success`
-- `docker-build` is `failure`
+- Internal relative links are validated and fail CI on breakage.
+- Cross-repo links are intentionally skipped in CI mode.
+- Supports `--cross-repo warn` and `--cross-repo check` for local audits.
 
 ---
 
-## Security Workflow `security-scan.yml`
+## Artifacts
 
-### Trigger
+`ci.yml` publishes these artifact groups:
 
-- Weekly cron: Monday 06:00 UTC
-- Manual dispatch
-
-### Steps
-
-1. Checkout
-2. Setup Python `3.14`
-3. Install `bandit[sarif]`, `pip-audit`, project dev extras
-4. Run Bandit SARIF + medium confidence/severity scan
-5. Run strict `pip-audit`
-6. Upload `reports/security/` artifacts
-
-### Operational Note
-
-This is complementary to the `security` job in `ci.yml`; it is not a replacement.
+- `coverage-report-py<version>`: coverage XML + HTML outputs
+- `unit-test-results-py<version>`: unit/regression junit XML
+- `integration-test-results`: integration junit XML
+- `dist-packages`: build outputs from `python -m build`
+- `security-reports`: Bandit/pip-audit outputs
+- `dependency-docs`: generated dependency documentation files
 
 ---
 
-## Publish Workflow `publish.yml`
+## Troubleshooting
 
-### Trigger
+### `ModuleNotFoundError: sentry_sdk` or `prometheus_client` in CI/local parity runs
 
-- GitHub release published
-
-### Jobs
-
-1. `build`
-2. `testpypi`
-3. `pypi`
-
-### Flow
-
-1. Build sdist/wheel and run `twine check`
-2. Publish artifacts to TestPyPI via trusted publishing
-3. Verify install from TestPyPI
-4. Publish to PyPI via trusted publishing
-
-### Auth Model
-
-- OIDC trusted publishing
-- `permissions: id-token: write`
-
-No long-lived PyPI API token should be required for this workflow.
-
----
-
-## Dependabot Lockfile Workflow `lockfile-update.yml`
-
-### Trigger Condition
-
-- Branch: `dependabot/pip/**`
-- Actor: `dependabot[bot]`
-
-### Core Behavior
-
-1. Checkout with `CROSS_REPO_DISPATCH_TOKEN`
-2. Setup Python `3.14`
-3. Install `uv`
-4. Compile lockfile candidate to `/tmp/requirements.lock.check`
-5. Move candidate to `requirements.lock`
-6. Commit and push only if changed
-
-### Compile Command
+Install CI requirements:
 
 ```bash
-uv pip compile pyproject.toml \
-  --extra juniper-data \
-  --extra juniper-cascor \
-  -o /tmp/requirements.lock.check
-mv /tmp/requirements.lock.check requirements.lock
+pip install -r conf/requirements_ci.txt
 ```
 
----
+### Coverage unexpectedly includes tests
 
-## CI Scripts And Inputs
+Run pytest from repository root using `src/tests/...` paths (CI behavior).
 
-### `scripts/check_doc_links.py`
+### Lockfile check fails despite compile
 
-Purpose:
+Verify compile command includes `--extra observability` and compare file body (not header).
 
-- validates internal markdown file links and heading anchors
-- supports cross-repo policies: `skip`, `warn`, `check`
+### Docs validation fails on cross-repo links
 
-CI uses `--cross-repo skip` for deterministic execution in isolated runners.
-
-### `scripts/generate_dep_docs.sh`
-
-Used by `dependency-docs` job to regenerate:
-
-- `conf/requirements_ci_*.txt`
-- `conf/conda_environment_ci*.yaml` artifacts
+Use CI mode locally: `--cross-repo skip`.
 
 ---
-
-## Branch Protection And Required Checks
 
 For branch protection, prefer requiring at least:
 
-1. `Quality Gate` (the `required-checks` job)
-2. `Documentation Links` (if exposed separately in your repo settings view)
-
-If only one check is required, use `Quality Gate` because it aggregates all critical jobs.
+- [Main CI Workflow](../../.github/workflows/ci.yml)
+- [Dependabot Lockfile Update](../../.github/workflows/lockfile-update.yml)
+- [Scheduled Security Scan](../../.github/workflows/security-scan.yml)
+- [Publish Workflow](../../.github/workflows/publish.yml)
+- [Doc Link Validator](../../scripts/check_doc_links.py)
+- [Project Config](../../pyproject.toml)
