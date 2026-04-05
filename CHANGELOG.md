@@ -68,16 +68,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
   - `docs/ci_cd/CICD_MANUAL.md`
   - `notes/juniper-canopy_OTHER_DEPENDENCIES.md`
-- Updated CI/CD runbook accuracy to match current workflows:
+- Updated CI/testing documentation for the new markdown link validation workflow and regression coverage:
   - `docs/ci_cd/CICD_MANUAL.md`
   - `docs/ci_cd/CICD_REFERENCE.md`
-  - `Bandit` command examples now use `.bandit.yml` instead of `pyproject.toml`
-  - Added explicit lockfile regeneration command with all required extras (`juniper-data`, `juniper-cascor`, `observability`)
-  - Added lockfile/dependency-audit operational notes aligned with `.github/workflows/ci.yml`, `.github/workflows/lockfile-update.yml`, and `.github/workflows/security-scan.yml`
-- Updated testing runbook guidance in `docs/testing/TESTING_MANUAL.md`:
-  - Refreshed marker table with currently used infra markers (`requires_server`, `requires_redis`, `requires_cassandra`, `requires_display`, `api`, `generators`, `e2e`)
-  - Added a release-readiness "coverage gap watchlist" for `discovery.py`, `observability.py`, and `secrets_util.py` with concrete verification commands
-  - Added troubleshooting entry for running `requires_server` tests via `RUN_SERVER_TESTS=1`
+  - `docs/testing/TESTING_MANUAL.md`
+  - `docs/testing/TESTING_REFERENCE.md`
+  - Added CI-equivalent local runbook for `scripts/check_doc_links.py` (`--cross-repo skip`)
+  - Documented cross-repo modes (`skip`, `warn`, `check`) and troubleshooting for link/anchor failures
+  - Added targeted regression command for `src/tests/unit/test_doc_link_checker.py`
 
 - Renamed HTTP metrics: `http_requests_total` → `juniper_canopy_http_requests_total`, `http_request_duration_seconds` → `juniper_canopy_http_request_duration_seconds`
 - Updated CasCor backend documentation to cover service-mode behavior (`CascorServiceAdapter`, `ServiceBackend`, `CascorStateSync`), including startup attach/sync workflow, response normalization contracts, and service-mode troubleshooting:

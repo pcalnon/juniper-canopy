@@ -10,10 +10,11 @@
 2. [Workflow Specification](#workflow-specification)
 3. [Configuration Files](#configuration-files)
 4. [Tool Configurations](#tool-configurations)
-5. [Environment Variables Used in CI](#environment-variables-used-in-ci)
-6. [Dependency Reference](#dependency-reference)
-7. [Documentation Link Checker Reference](#documentation-link-checker-reference)
-8. [Common Failure Classes](#common-failure-classes)
+5. [Documentation Link Validation](#documentation-link-validation)
+6. [Environment Variables](#environment-variables)
+7. [Artifact Specifications](#artifact-specifications)
+8. [API Reference](#api-reference)
+9. [Troubleshooting Reference](#troubleshooting-reference)
 
 ---
 
@@ -260,6 +261,79 @@ test:
     # Coverage threshold enforcement should be configured in pytest invocation
     # (for example: --cov-fail-under=80)
 ```
+
+#### Documentation Links Job
+
+```yaml
+docs:
+  name: Documentation Links
+  runs-on: ubuntu-latest
+
+  steps:
+    - name: Checkout Code
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+    - name: Set up Python
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+      with:
+        python-version: "3.14"
+
+    - name: Validate Documentation Links
+      run: |
+        python scripts/check_doc_links.py \
+          --exclude templates --exclude history \
+          --exclude pull_requests --exclude releases \
+          --exclude analysis --exclude fixes --exclude development \
+          --exclude CHANGELOG.md \
+          --cross-repo skip
+```
+
+This job validates internal documentation links and same-file anchors before the quality gate passes. CI uses `--cross-repo skip` because sibling Juniper repositories are not guaranteed to exist on the runner filesystem.
+
+---
+
+## Documentation Link Validation
+
+### Purpose
+
+The documentation link checker validates:
+
+- Relative markdown links resolve to existing files
+- Same-file anchor links resolve to real headings
+- Links remain within repository boundaries
+- Unsafe patterns (absolute paths, excessive traversal, invalid cross-repo escapes) are rejected
+
+### Script
+
+- Path: `scripts/check_doc_links.py`
+- Unit tests: `src/tests/unit/test_doc_link_checker.py`
+- CI invocation: `.github/workflows/ci.yml` (`docs` job)
+
+### Local Commands
+
+```bash
+# Match CI behavior
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+
+# Validate cross-repo links when sibling repos exist locally
+python scripts/check_doc_links.py --cross-repo check
+
+# Print every checked/skipped link
+python scripts/check_doc_links.py --verbose --cross-repo skip
+```
+
+### Cross-Repo Modes
+
+| Mode | Behavior | Typical Use |
+| ---- | -------- | ----------- |
+| `skip` | Skip cross-repo file existence checks (still validates structure) | CI and isolated clones |
+| `warn` | Emit warnings for cross-repo links without failing | Local cleanup passes |
+| `check` | Validate cross-repo targets on disk | Full local Juniper ecosystem checkout |
 
 ---
 
@@ -651,7 +725,188 @@ pip install "juniper-cascor-client[testing]"
 pip install "juniper-data-client[testing]"
 ```
 
-## Related Docs
+#### Artifacts
+
+**List artifacts:**
+
+```bash
+GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts
+```
+
+**Download artifact:**
+
+```bash
+GET /repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip
+```
+
+**Delete artifact:**
+
+```bash
+DELETE /repos/{owner}/{repo}/actions/artifacts/{artifact_id}
+```
+
+### Codecov API
+
+#### Upload Coverage
+
+```bash
+curl -X POST \
+  --data-binary @coverage.xml \
+  -H "Authorization: token $CODECOV_TOKEN" \
+  https://codecov.io/upload/v4
+```
+
+#### Get Coverage Report
+
+```bash
+curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
+```
+
+---
+
+## Troubleshooting Reference
+
+### Common Error Codes
+
+| Error | Cause                    | Solution                         |
+| ----- | ------------------------ | -------------------------------- |
+| E001  | Workflow syntax error    | Validate YAML syntax             |
+| E002  | Missing required field   | Add required field to workflow   |
+| E003  | Invalid expression       | Fix workflow expression syntax   |
+| E101  | Job timeout              | Increase timeout or optimize job |
+| E102  | Job cancelled            | Check concurrency settings       |
+| E201  | Step failed              | Check step logs for details      |
+| E202  | Command not found        | Install required tool            |
+| E203  | Permission denied        | Check file permissions           |
+| E301  | Artifact upload failed   | Check size and path              |
+| E302  | Artifact download failed | Verify artifact exists           |
+
+### Exit Codes
+
+| Code | Meaning                 |
+| ---- | ----------------------- |
+| 0    | Success                 |
+| 1    | General error           |
+| 2    | Misuse of shell command |
+| 126  | Command cannot execute  |
+| 127  | Command not found       |
+| 128  | Invalid exit argument   |
+| 130  | Terminated by Ctrl+C    |
+| 137  | Killed (out of memory)  |
+| 139  | Segmentation fault      |
+
+### Log Analysis
+
+**Search patterns:**
+
+```bash
+# Errors
+grep -i "error" workflow.log
+
+# Warnings
+grep -i "warning" workflow.log
+
+# Failed tests
+grep "FAILED" workflow.log
+
+# Coverage issues
+grep "coverage" workflow.log | grep -i "low\|fail"
+```
+
+### Documentation Link Validation Failures
+
+**Symptom:**
+
+```bash
+FAILED: Documentation link validation
+FOUND <N> broken link(s) in <M> file(s)
+```
+
+**Local reproduction (CI-equivalent):**
+
+```bash
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
+
+**Common causes:**
+
+- Moved/renamed markdown files without updating references
+- Heading text changed but same-file anchor remained unchanged
+- Absolute paths in markdown links
+- Directory traversal links that resolve outside repository boundaries
+
+**Fix approach:**
+
+1. Update links to repository-relative paths.
+2. Regenerate heading anchors from the current markdown heading text.
+3. Re-run the command above before pushing.
+
+---
+
+## Performance Metrics
+
+### Baseline Performance
+
+| Stage            | Duration | CPU     | Memory |
+| ---------------- | -------- | ------- | ------ |
+| Lint             | 2 min    | 1 core  | 512 MB |
+| Test (each)      | 8 min    | 2 cores | 2 GB   |
+| Build            | 2 min    | 1 core  | 512 MB |
+| Integration      | 5 min    | 2 cores | 1 GB   |
+| Quality Gate     | 30 sec   | 1 core  | 256 MB |
+| Total (parallel) | ~15 min  | -       | -      |
+
+### Optimization Targets
+
+| Metric            | Current | Target | Stretch |
+| ----------------- | ------- | ------ | ------- |
+| Total build time  | 15 min  | 10 min | 7 min   |
+| Test suite        | 8 min   | 5 min  | 3 min   |
+| Lint              | 2 min   | 1 min  | 30 sec  |
+| Coverage overhead | 20%     | 10%    | 5%      |
+
+---
+
+## Version History
+
+### Version 1.0.0 (2025-11-05)
+
+**Initial release:**
+
+- Complete CI/CD pipeline
+- Multi-version Python testing
+- Coverage reporting
+- Pre-commit hooks
+- Quality gates
+- Comprehensive documentation
+
+---
+
+## References
+
+### Official Documentation
+
+- [GitHub Actions Docs](https://docs.github.com/en/actions)
+- [Workflow Syntax](https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions)
+- [Pytest Docs](https://docs.pytest.org/)
+- [Coverage.py Docs](https://coverage.readthedocs.io/)
+- [Pre-commit Docs](https://pre-commit.com/)
+- [Codecov Docs](https://docs.codecov.com/)
+
+### Project Documentation
+
+- [CICD_QUICK_START.md](CICD_QUICK_START.md)
+- [CICD_ENVIRONMENT_SETUP.md](CICD_ENVIRONMENT_SETUP.md)
+- [CICD_MANUAL.md](CICD_MANUAL.md)
+- [AGENTS.md](../../AGENTS.md)
+- [README.md](../../README.md)
+
+---
 
 **Last Updated:** 2026-04-05  
 **Version:** 0.25.1  

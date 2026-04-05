@@ -1,8 +1,7 @@
 # Testing Reference
 
-**Last Updated:** 2026-04-05  
-**Version:** 0.26.1  
-**Status:** Current
+**Last Updated:** April 5, 2026  
+**Version:** v0.26.1
 
 Technical reference for the active pytest configuration, markers, fixtures, and CI-equivalent commands.
 
@@ -226,8 +225,150 @@ Collection issues:
 - inspect discovery and markers:
 
 ```bash
-pytest --collect-only
-pytest --markers
+cd src
+pytest tests/unit/test_response_normalization.py -k "Fix1 or Fix2 or Fix3 or Fix4 or Fix13 or DashboardMetricsContract or TopologyTransformation or DatasetTargetConversion" -v
+pytest tests/unit/test_service_backend.py -k "get_status or get_dataset" -v
+pytest tests/unit/frontend/test_metrics_panel_handlers.py -k "validation_overlay or replay or progress_detail or training_progress or hidden_units" -v
+```
+
+### Documentation Link Validation Regression Matrix
+
+Use this matrix when documentation tooling or markdown link policy changes.
+
+| Test File | Contract Focus | Key Behavior |
+| ------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------ |
+| `tests/unit/test_doc_link_checker.py` | Documentation link checker regression coverage | ignores fenced/inline-code links, validates same-file anchors, rejects absolute/deep traversal paths, enforces cross-repo escape protections, verifies cross-repo skip/check modes |
+
+Recommended command subset:
+
+```bash
+cd src
+pytest tests/unit/test_doc_link_checker.py -v
+python ../scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
+
+### Testing WebSocket Endpoints
+
+```python
+from fastapi.testclient import TestClient
+
+def test_websocket():
+    """Test WebSocket connection."""
+    with client.websocket_connect("/ws/training") as websocket:
+        websocket.send_json({"type": "subscribe"})
+        data = websocket.receive_json()
+        assert data["type"] == "metrics"
+```
+
+## Performance Testing
+
+### Timing Tests
+
+```python
+import time
+import pytest
+
+def test_performance():
+    """Test execution time."""
+    start = time.time()
+
+    # Operation to test
+    result = expensive_operation()
+
+    duration = time.time() - start
+    assert duration < 1.0  # Must complete in under 1 second
+```
+
+### Memory Testing
+
+```python
+import tracemalloc
+
+def test_memory_usage():
+    """Test memory consumption."""
+    tracemalloc.start()
+
+    # Operation to test
+    result = memory_intensive_operation()
+
+    current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    assert peak < 10 * 1024 * 1024  # Less than 10 MB
+```
+
+### Benchmark Plugin (pytest-benchmark)
+
+```python
+# Installation
+pip install pytest-benchmark
+
+# Usage
+def test_benchmark(benchmark):
+    result = benchmark(function_to_test, arg1, arg2)
+    assert result == expected
+```
+
+## Advanced Topics
+
+### Custom Markers
+
+```python
+# Register in pytest.ini
+[pytest]
+markers =
+    smoke: Smoke tests for basic functionality
+    security: Security-related tests
+
+# Use in tests
+@pytest.mark.smoke
+def test_basic_functionality():
+    pass
+```
+
+### Custom Fixtures
+
+```python
+# In conftest.py
+@pytest.fixture
+def custom_fixture():
+    # Setup
+    resource = create_resource()
+
+    yield resource
+
+    # Teardown
+    cleanup_resource(resource)
+```
+
+### Fixture Factories
+
+```python
+@pytest.fixture
+def make_user():
+    """Factory fixture for creating users."""
+    created_users = []
+
+    def _make_user(name, email):
+        user = User(name=name, email=email)
+        created_users.append(user)
+        return user
+
+    yield _make_user
+
+    # Cleanup all created users
+    for user in created_users:
+        user.delete()
+
+def test_with_factory(make_user):
+    user1 = make_user("Alice", "alice@example.com")
+    user2 = make_user("Bob", "bob@example.com")
+    # Test with multiple users
 ```
 
 Coverage below threshold:
