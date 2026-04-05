@@ -23,31 +23,23 @@ pip --version
 
 ---
 
-## Install Pre-commit Hooks
-
-**1. Install pre-commit:**
+## 1. Install CI-Parity Dependencies
 
 ```bash
-pip install pre-commit
+python -m pip install --upgrade pip
+pip install -r conf/requirements_ci.txt
+pip install -e .
 ```
 
-**2. Install hooks:**
-
-```bash
-pre-commit install
-```
-
-**3. Verify:**
-
-```bash
-pre-commit --version  # Output: pre-commit 3.x.x
-```
+Why: CI jobs run with `conf/requirements_ci.txt` plus editable install. This includes observability packages such as `sentry-sdk` and `prometheus-client`, which are required for test collection.
 
 ---
 
-## Run Tests Locally
+## 2. Run Local Checks Matching CI
 
-**Quick test:**
+Run these from repo root (not `src/`). Running from root keeps coverage omit patterns aligned with `pyproject.toml`.
+
+### Pre-commit
 
 ```bash
 python -m pytest \
@@ -56,7 +48,7 @@ python -m pytest \
   --verbose
 ```
 
-**With coverage:**
+### Unit + Regression (coverage gate)
 
 ```bash
 python -m pytest \
@@ -66,81 +58,48 @@ python -m pytest \
   --cov-fail-under=80
 ```
 
-**Expected output:**
+### Integration (fast subset)
 
 ```bash
-============================= test session starts =============================
-...
-============================== 320 passed in XXs ==============================
-...
-TOTAL                                         ...                        80%+
-```
-
-**View HTML report:**
-<file:///home/pcalnon/Development/python/Juniper/juniper-canopy/src/tests/reports/coverage/index.html>
-
----
-
-## Set Up GitHub Secrets
-
-**1. Generate Codecov token:**
-
-- Go to [codecov.io](https://codecov.io)
-- Sign in with GitHub
-- Add repository
-- Copy upload token
-
-**2. Add to GitHub:**
-
-- Repository → **Settings** → **Secrets and variables** → **Actions**
-- Click **New repository secret**
-- Name: `CODECOV_TOKEN`
-- Value: Paste token
-- Click **Add secret**
-
----
-
-## Make Your First Commit
-
-**1. Stage changes:**
-
-```bash
-git add src/config_manager.py
-```
-
-**2. Commit (hooks run automatically):**
-
-```bash
-git commit -m "Update configuration handling"
-```
-
-**Pre-commit runs:**
-
-```bash
-Trim Trailing Whitespace.............................Passed
-Fix End of Files.....................................Passed
-Check Yaml...........................................Passed
-black................................................Passed
-isort................................................Passed
-flake8...............................................Passed
-```
-
-**3. Push:**
-
-```bash
-git push origin feature/your-branch
+python -m pytest \
+  -m "integration and not requires_cascor and not requires_server and not slow" \
+  src/tests/integration \
+  --verbose \
+  --timeout=120 \
+  --maxfail=3
 ```
 
 ---
 
-## View CI Results
+## 3. Validate Lockfile Freshness
 
-**1. Go to GitHub:**
+`CI` validates `requirements.lock` using all extras, including observability:
 
-- Actions tab
-- See "CI/CD Pipeline" running
+```bash
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o /tmp/requirements.lock.check
 
-**2. Jobs:**
+tail -n +3 requirements.lock > /tmp/lock_body
+tail -n +3 /tmp/requirements.lock.check > /tmp/check_body
+diff -u /tmp/lock_body /tmp/check_body
+```
+
+If stale, regenerate:
+
+```bash
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
+```
+
+---
+
+## 4. Validate Documentation Links
 
 ```bash
 CI/CD Pipeline
@@ -158,16 +117,13 @@ CI/CD Pipeline
 Total: ~10-15 minutes (parallel jobs)
 ```
 
-**3. Download artifacts:**
-
-- Scroll to bottom
-- Download test results and coverage reports
+This matches the `docs` job in `.github/workflows/ci.yml`.
 
 ---
 
-## Next Steps
+## 5. Confirm Workflow Jobs
 
-### Add Coverage Badge
+Current `CI/CD Pipeline` jobs:
 
 ```markdown
 [![codecov](https://codecov.io/gh/USERNAME/REPO/branch/main/graph/badge.svg)](https://codecov.io/gh/USERNAME/REPO)
@@ -201,38 +157,17 @@ uv pip compile pyproject.toml \
 
 ---
 
-## Common Commands
+## Common Pitfalls
+
+### `ModuleNotFoundError: sentry_sdk` or `prometheus_client`
+
+Install CI requirements (not just runtime requirements):
 
 ```bash
-# Pre-commit
-pre-commit run --all-files
-
-# Tests
-pytest tests/unit/test_demo_mode.py -v
-
-# Coverage
-cd src && pytest tests/ --cov=. --cov-report=html
-open ../reports/coverage/index.html
-
-# Formatting
-black src/ --line-length=120
-isort src/ --profile=black
+pip install -r conf/requirements_ci.txt
 ```
 
----
-
-## Troubleshooting
-
-### Pre-commit fails
-
-```bash
-black src/ --line-length=120
-isort src/ --profile=black
-git add .
-git commit -m "Apply formatting"
-```
-
-### Tests fail locally
+### Coverage unexpectedly includes test files
 
 ```bash
 python -m venv .venv-ci
@@ -241,7 +176,7 @@ pip install -r conf/requirements_ci.txt
 python -m pytest src/tests/unit/test_demo_mode.py::test_name -vv
 ```
 
-### CI fails but local passes
+### Lockfile check fails even after compile
 
 ```bash
 # Test with CI Python versions
@@ -253,28 +188,16 @@ for ver in 3.12 3.13 3.14; do
 done
 ```
 
+### Docs job fails locally
+
+Use the same exclusions and `--cross-repo skip` mode as CI.
+
 ---
 
 ## Resources
 
-- [CI/CD Manual](CICD_MANUAL.md) - Complete guide
-- [Environment Setup](CICD_ENVIRONMENT_SETUP.md) - Configuration
-- [Reference](CICD_REFERENCE.md) - Technical specs
-- [AGENTS.md](../../AGENTS.md) - Project development guide
-- [README.md](../../README.md) - Project overview
-
----
-
-**You've completed:**
-
-✅ Installed pre-commit hooks  
-✅ Ran tests with coverage  
-✅ Set up Codecov  
-✅ Made first CI/CD commit  
-✅ Viewed CI results
-
-**CI/CD is active!** Every push triggers quality checks, tests, and coverage reporting.
-
----
-
-**Status:** ✅ Ready to use
+- [CI/CD Manual](CICD_MANUAL.md)
+- [CI/CD Technical Reference](CICD_REFERENCE.md)
+- [CI/CD Environment Setup](CICD_ENVIRONMENT_SETUP.md)
+- [Workflow Source](../../.github/workflows/ci.yml)
+- [Link Checker Script](../../scripts/check_doc_links.py)
