@@ -25,18 +25,12 @@ class TestCandidateParameterMappingRegression:
     def test_forward_map_contains_candidate_parameter_keys(self):
         """Canopy candidate keys must be present in forward map."""
         assert CascorServiceAdapter._CANOPY_TO_CASCOR_PARAM_MAP["cn_patience"] == "candidate_patience"
-        assert (
-            CascorServiceAdapter._CANOPY_TO_CASCOR_PARAM_MAP["cn_training_convergence_threshold"]
-            == "candidate_convergence_threshold"
-        )
+        assert CascorServiceAdapter._CANOPY_TO_CASCOR_PARAM_MAP["cn_training_convergence_threshold"] == "candidate_convergence_threshold"
 
     def test_reverse_map_contains_candidate_parameter_keys(self):
         """Cascor candidate keys must map back to canopy keys."""
         assert CascorServiceAdapter._CASCOR_TO_CANOPY_PARAM_MAP["candidate_patience"] == "cn_patience"
-        assert (
-            CascorServiceAdapter._CASCOR_TO_CANOPY_PARAM_MAP["candidate_convergence_threshold"]
-            == "cn_training_convergence_threshold"
-        )
+        assert CascorServiceAdapter._CASCOR_TO_CANOPY_PARAM_MAP["candidate_convergence_threshold"] == "cn_training_convergence_threshold"
 
     def test_apply_params_forwards_candidate_parameters(self):
         """apply_params() should forward candidate controls to cascor names."""
