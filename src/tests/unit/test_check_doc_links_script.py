@@ -52,14 +52,7 @@ def test_validate_file_ignores_links_in_code_and_inline_code(tmp_path):
 
     md_file = docs_dir / "index.md"
     md_file.write_text(
-        (
-            "# Title\n"
-            "`[inline](missing.md)`\n\n"
-            "```markdown\n"
-            "[fenced](missing.md)\n"
-            "```\n\n"
-            "[ok](existing.md)\n"
-        ),
+        ("# Title\n" "`[inline](missing.md)`\n\n" "```markdown\n" "[fenced](missing.md)\n" "```\n\n" "[ok](existing.md)\n"),
         encoding="utf-8",
     )
 
