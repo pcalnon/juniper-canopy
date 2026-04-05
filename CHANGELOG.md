@@ -28,26 +28,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `README.md`
   - `docs/ci_cd/CICD_MANUAL.md`
   - `docs/ci_cd/CICD_REFERENCE.md`
-  - Added explicit lockfile regeneration command including `--extra observability`
-  - Documented lockfile freshness check behavior that strips uv header comment lines before diffing lockfile bodies
-  - Documented Dependabot lockfile-update workflow behavior and troubleshooting path for stale lockfiles
-
-- Extracted candidate pool section, history tracking, and pool display from `MetricsPanel` to `CandidateMetricsPanel`. Training Metrics tab retains candidate training trace in loss plot and candidate epoch progress bar for context
-- Component count increased from 11 to 12; updated test assertions accordingly
-- Expanded CI/CD documentation for documentation-link validation workflow and constraints:
-  - Updated `docs/ci_cd/CICD_REFERENCE.md` with `scripts/check_doc_links.py` contract details (cross-repo mode semantics, parser behavior, and path-safety constraints)
-  - Updated `docs/ci_cd/CICD_MANUAL.md` and `docs/ci_cd/CICD_QUICK_START.md` with practical docs-gate troubleshooting (`skip`, `warn`, `check` usage)
-  - Updated `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md` with full local validation mode guidance for ecosystem checkouts
-  - Changes are aligned with regression-tested behavior in `src/tests/unit/test_doc_link_checker.py`
-- Refreshed CI/CD documentation to match current workflow behavior and quality gates:
-  - Updated `docs/ci_cd/CICD_QUICK_START.md` with current local parity commands (`requirements_ci.txt`, lockfile check, docs-link check)
-  - Updated `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md` for pip-first CI setup, Python 3.12-3.14 matrix, and lockfile/docs gates
-  - Updated `docs/ci_cd/CICD_REFERENCE.md` to document active workflows (`ci.yml`, `security-scan.yml`, `publish.yml`, `lockfile-update.yml`)
-  - Updated `docs/ci_cd/CICD_MANUAL.md` with role-based runbooks aligned to `required-checks` gating semantics
-- Updated testing/reference docs to remove stale CI examples and align with active pipeline behavior:
-  - Updated `docs/testing/TESTING_MANUAL.md` CI section to reference current `ci.yml` matrix/jobs and `requirements_ci.txt` usage
-  - Updated `docs/testing/TESTING_ENVIRONMENT_SETUP.md` to use current `JuniperCanopy` environment naming, current CI Python matrix (`3.12`-`3.14`), and `JUNIPER_CANOPY_*` test env var examples
-  - Updated `docs/REFERENCE.md` CI summary from `3.11-3.14` to `3.12-3.14`
+  - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
+  - `docs/ci_cd/CICD_QUICK_START.md`
+  - `docs/testing/TESTING_MANUAL.md`
+  - Coverage includes:
+    - Active Python CI matrix (`3.12`, `3.13`, `3.14`) and default `3.14` job pinning
+    - New `Documentation Links` quality gate (`scripts/check_doc_links.py`, `--cross-repo skip`)
+    - Lockfile freshness behavior (`uv pip compile` with `--extra observability`, header-agnostic comparison)
+    - Optional test-extras guidance (`juniper-data-client[testing]`, `juniper-cascor-client[testing]`) and `pytest.importorskip`/`skipif` patterns to prevent collection failures
+- Corrected CI/CD docs to remove stale Conda/Codecov-era instructions and align with current workflow gates and job graph:
+  - replaced outdated workflow snippets with source-verified jobs from `.github/workflows/ci.yml`
+  - documented actual matrix and pinning strategy (matrix `3.12/3.13/3.14`, single-version `3.14` jobs)
+  - documented current dependency install path (`conf/requirements_ci.txt`, CPU torch index, editable install)
+  - aligned scheduled security scan documentation with `security-scan.yml` commands
 
 - Namespaced Prometheus metrics (`juniper_canopy_` prefix) with WebSocket and demo mode metrics
 - `juniper_canopy_websocket_connections_active` Gauge (by channel)

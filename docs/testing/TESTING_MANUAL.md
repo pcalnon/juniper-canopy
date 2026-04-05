@@ -1,6 +1,6 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** 2026-04-05  
+**Last Updated:** April 5, 2026  
 **Version:** v0.26.1
 
 Complete guide to testing the Juniper Canopy application.
@@ -850,21 +850,70 @@ def test_with_fixture(resource):
 
 ### GitHub Actions Workflow
 
-Current CI test behavior is defined in `.github/workflows/ci.yml`:
+```yaml
+# .github/workflows/ci.yml
+name: CI/CD Pipeline
 
-- `pre-commit` and `unit-tests` run on Python `3.12`, `3.13`, and `3.14`
-- integration tests run as a separate `integration-tests` job on Python `3.14`
-- fast-test marker filtering is enforced:
-  - unit/regression: `not requires_cascor and not requires_server and not slow`
-  - integration: `integration and not requires_cascor and not requires_server and not slow`
-- dependencies come from `conf/requirements_ci.txt` plus editable install:
-  - `pip install -r conf/requirements_ci.txt`
-  - `pip install -e .`
+on:
+  push:
+    branches: [main, develop, feature/**, fix/**]
+  pull_request:
+    branches: [main, develop]
 
-For full CI runbook and gate semantics, see:
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
 
-- [CI/CD Manual](../ci_cd/CICD_MANUAL.md)
-- [CI/CD Reference](../ci_cd/CICD_REFERENCE.md)
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pre-commit
+
+      - name: Run pre-commit hooks
+        run: pre-commit run --all-files
+```
+
+Key testing jobs currently used in CI:
+
+- `unit-tests` (matrix `3.12/3.13/3.14`) with:
+  - marker gate: `not requires_cascor and not requires_server and not slow`
+  - paths: `tests/unit/ tests/regression/`
+  - coverage enforcement: `--cov-fail-under=80`
+- `integration-tests` (Python `3.14`) with:
+  - marker gate: `integration and not requires_cascor and not requires_server and not slow`
+- `docs` link gate via `scripts/check_doc_links.py`
+- `lockfile-check` via `uv pip compile ... --extra observability`
+- aggregated `Quality Gate` (`required-checks`) to block merge on failures
+
+Local reproduction for test-related CI gates:
+
+```bash
+cd src
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  tests/unit/ tests/regression/ \
+  --verbose \
+  --cov=. \
+  --cov-report=term-missing \
+  --cov-fail-under=80
+
+python -m pytest \
+  -m "integration and not requires_cascor and not requires_server and not slow" \
+  tests/integration \
+  --verbose
+```
 
 ### Pre-commit Hooks
 
@@ -876,16 +925,8 @@ pre-commit install
 # Run manually
 pre-commit run --all-files
 
-# Configuration in .pre-commit-config.yaml
-repos:
-  - repo: local
-    hooks:
-      - id: pytest
-        name: pytest
-        entry: pytest
-        language: system
-        pass_filenames: false
-        always_run: true
+# CI uses pre-commit as its own matrix job
+# See .github/workflows/ci.yml job: pre-commit
 ```
 
 ## Troubleshooting
