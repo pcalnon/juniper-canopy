@@ -1,104 +1,543 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-04-04  
-**Version:** 0.26.0  
-**Status:** Current
-
-Technical reference aligned with active workflows:
-
-- `.github/workflows/ci.yml`
-- `.github/workflows/security-scan.yml`
-- `.github/workflows/publish.yml`
-- `.github/workflows/lockfile-update.yml`
+## Complete technical reference for the CI/CD pipeline
 
 ---
 
 ## Table of Contents
 
-1. [Workflow Inventory](#workflow-inventory)
-2. [Main Pipeline (`ci.yml`)](#main-pipeline-ciyml)
-3. [Security Workflow (`security-scan.yml`)](#security-workflow-security-scanyml)
-4. [Publish Workflow (`publish.yml`)](#publish-workflow-publishyml)
-5. [Dependabot Lockfile Workflow (`lockfile-update.yml`)](#dependabot-lockfile-workflow-lockfile-updateyml)
-6. [CI Scripts And Inputs](#ci-scripts-and-inputs)
-7. [Branch Protection And Required Checks](#branch-protection-and-required-checks)
+1. [Pipeline Architecture](#pipeline-architecture)
+2. [Workflow Specification](#workflow-specification)
+3. [Configuration Files](#configuration-files)
+4. [Tool Configurations](#tool-configurations)
+5. [Environment Variables Used in CI](#environment-variables-used-in-ci)
+6. [Dependency Reference](#dependency-reference)
+7. [Documentation Link Checker Reference](#documentation-link-checker-reference)
+8. [Common Failure Classes](#common-failure-classes)
 
 ---
 
-## Workflow Inventory
+## Pipeline Architecture
 
-| Workflow File | Primary Purpose | Trigger |
-| ------------- | --------------- | ------- |
-| `ci.yml` | Main quality gate for pushes/PRs | push, pull_request, repository_dispatch, workflow_dispatch |
-| `security-scan.yml` | Scheduled and on-demand security scanning | schedule (weekly), workflow_dispatch |
-| `publish.yml` | Release publishing to TestPyPI and PyPI | release published |
-| `lockfile-update.yml` | Dependabot lockfile regeneration | push to `dependabot/pip/**` by Dependabot |
+### System Diagram
+
+```mermaid
+graph TB
+    subgraph "Developer Workstation"
+        A[Git Commit]
+        B[Pre-commit Hooks]
+        A --> B
+    end
+
+    subgraph "GitHub"
+        C[Git Push]
+        D[Workflow Trigger]
+        B --> C
+        C --> D
+    end
+
+    subgraph "GitHub Actions Runners"
+        E[Lint Job]
+        F[Test Matrix]
+        G[Build Job]
+        H[Integration Job]
+        I[Quality Gate]
+        J[Notify]
+
+        D --> E
+        D --> F
+        E --> G
+        F --> G
+        F --> H
+        G --> I
+        H --> I
+        I --> J
+    end
+
+    subgraph "External Services"
+        K[Codecov]
+        L[GitHub Checks API]
+        F --> K
+        J --> L
+    end
+```
+
+### Job Dependencies
+
+```yaml
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: github.event_name == 'pull_request'
+
+  quality-gate:
+    runs-on: ubuntu-latest
+    needs: [lint, test, build]
+    if: always()
+
+  notify:
+    runs-on: ubuntu-latest
+    needs: [quality-gate]
+    if: always()
+```
 
 ---
 
-## Main Pipeline `ci.yml`
+## Workflow Specification
 
-### Global Settings
+### Trigger Specification
 
-- Concurrency group: `ci-${{ github.ref }}`
-- Coverage gate env: `COVERAGE_FAIL_UNDER=80`
-- Default high-use Python in non-matrix jobs: `PYTHON_TEST_VERSION=3.14`
+```yaml
+on:
+  # Push triggers
+  push:
+    branches:
+      - main                # Production branch
+      - develop             # Development branch
+      - 'feature/**'        # Feature branches
+      - 'fix/**'            # Bugfix branches
+    paths-ignore:
+      - '**.md'             # Skip docs-only changes
+      - 'docs/**'
+      - 'notes/**'
 
-### Job Matrix
+  # Pull request triggers
+  pull_request:
+    branches:
+      - main
+      - develop
+    types:
+      - opened              # PR created
+      - synchronize         # New commits pushed
+      - reopened            # PR reopened
+      - ready_for_review    # Draft → Ready
 
-`pre-commit` and `unit-tests` run matrix Python:
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      python-version:
+        description: 'Python version to test'
+        required: false
+        default: '3.13'
+        type: choice
+        options:
+          - '3.11'
+          - '3.12'
+          - '3.13'
+      skip-slow-tests:
+        description: 'Skip slow tests'
+        required: false
+        default: true
+        type: boolean
+```
 
-- `3.12`
-- `3.13`
-- `3.14`
+### Job Specification
 
-Other jobs use `3.14` unless otherwise noted.
+#### Lint Job
 
-### Job List
+```yaml
+lint:
+  name: Code Quality Checks
+  runs-on: ubuntu-latest
+  timeout-minutes: 10
 
-1. `pre-commit`
-2. `unit-tests`
-3. `integration-tests`
-4. `build`
-5. `security`
-6. `dependency-docs`
-7. `lockfile-check`
-8. `docs`
-9. `docker-build`
-10. `required-checks`
-11. `notify`
+  steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for better analysis
 
-### Test Selection Rules
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+        cache: 'pip'
 
-Unit/regression fast subset:
+    - name: Install Linting Tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install black isort flake8 mypy bandit
+
+    - name: Run Black
+      run: black --check --diff src/
+      continue-on-error: true
+
+    - name: Run isort
+      run: isort --check-only --diff src/
+      continue-on-error: true
+
+    - name: Run Flake8
+      run: |
+        flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 src/ --count --max-line-length=120 --statistics --exit-zero
+      continue-on-error: true
+
+    - name: Run MyPy
+      run: mypy src/ --ignore-missing-imports --no-strict-optional
+      continue-on-error: true
+
+    - name: Run Bandit
+      run: bandit -r src -c .bandit.yml
+      continue-on-error: true
+```
+
+#### Test Job
+
+```yaml
+test:
+  name: Unit Tests + Coverage (Python ${{ matrix.python-version }})
+  runs-on: ubuntu-latest
+  timeout-minutes: 30
+
+  strategy:
+    fail-fast: false
+    matrix:
+      python-version: ["3.12", "3.13", "3.14"]
+
+  steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Conda
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        python-version: ${{ matrix.python-version }}
+        channels: conda-forge,pytorch,plotly,defaults
+        channel-priority: flexible
+        activate-environment: JuniperPython-CI
+        environment-file: conf/conda_environment.yaml
+        auto-activate-base: false
+
+    - name: Verify Environment
+      shell: bash -el {0}
+      run: |
+        conda info
+        conda list
+        which python
+        python --version
+
+    - name: Install Dependencies
+      shell: bash -el {0}
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r conf/requirements.txt
+
+    - name: Run Unit Tests
+      shell: bash -el {0}
+      run: |
+        python -m pytest \
+          src/tests \
+          --verbose \
+          --cov=src \
+          --cov-report=xml:reports/coverage.xml \
+          --cov-report=term-missing \
+          --junit-xml=reports/junit/unit-tests.xml
+
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results-${{ matrix.python-version }}
+        path: |
+          reports/junit/unit-tests.xml
+          reports/coverage.xml
+        retention-days: 30
+
+    # Coverage threshold enforcement should be configured in pytest invocation
+    # (for example: --cov-fail-under=80)
+```
+
+---
+
+## Configuration Files
+
+### .github/workflows/ci.yml
+
+**Last Updated:** 2026-04-04  
+**Version:** 0.26.0  
+**Status:** Current
+
+## Scope
+
+This reference documents the current CI behavior implemented in:
+
+- `.github/workflows/ci.yml`
+- `scripts/check_doc_links.py`
+- `conf/requirements_ci.txt`
+- `pyproject.toml`
+
+## Workflow Summary
+
+Workflow name: `CI/CD Pipeline`
+
+Trigger events:
+
+- `push` (`main`, `develop`, `feature/**`, `fix/**`)
+- `pull_request` (`main`, `develop`)
+- `repository_dispatch` (`data-client-updated`, `cascor-client-updated`)
+- `workflow_dispatch`
+
+Concurrency:
+
+```yaml
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+**Ignore Patterns:**
+
+```yaml
+ignore:
+  - src/tests/**           # Test files
+  - utils/**               # Utility scripts
+  - docs/**                # Documentation
+  - "**/__pycache__/**"    # Cache files
+```
+
+### pyproject.toml
+
+**Location:** `pyproject.toml`
+
+**Purpose:** Python project and tool configuration
+
+**Sections:**
+
+1. **Project metadata**
+
+   ```toml
+   [project]
+   name = "juniper-canopy"
+   version = "0.4.0"
+   requires-python = ">=3.11"
+   ```
+
+2. **Black configuration**
+
+   ```toml
+   [tool.black]
+   line-length = 120
+   target-version = ['py311', 'py312', 'py313']
+   ```
+
+3. **isort configuration**
+
+### `pre-commit`
+
+- Python matrix: `3.12`, `3.13`, `3.14`
+- Installs `pre-commit`
+- Runs `pre-commit run --all-files --show-diff-on-failure`
+- Caches pre-commit hooks (`~/.cache/pre-commit`)
+
+   ```yaml
+   # .bandit.yml
+   exclude_dirs:
+     - src/tests
+     - util/verification
+   skips:
+     - B311
+   confidence: MEDIUM
+   severity: MEDIUM
+   ```
+
+5. **MyPy configuration**
+
+   ```toml
+   [tool.mypy]
+   python_version = "3.14"
+   ignore_missing_imports = true
+   ```
+
+6. **Pytest configuration**
+
+   ```toml
+   [tool.pytest.ini_options]
+   minversion = "7.0"
+   testpaths = ["src/tests"]
+   addopts = ["--verbose", "--cov=src"]
+   ```
+
+7. **Coverage configuration**
+
+   ```toml
+   [tool.coverage.report]
+   show_missing = true
+   fail_under = 80
+   precision = 2
+   ```
+
+---
+
+## Tool Configurations
+
+### Black
+
+**Purpose:** Code formatting
+
+**Configuration:**
+
+```toml
+[tool.black]
+line-length = 120
+target-version = ['py311', 'py312', 'py313']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+    \.eggs
+    | \.git
+    | \.venv
+    | logs
+    | reports
+)/
+'''
+```
+
+**Usage:**
 
 ```bash
 python -m pytest \
   -m "not requires_cascor and not requires_server and not slow" \
-  tests/unit/ tests/regression/
+  src/tests/unit/ src/tests/regression/ \
+  --timeout=60 \
+  --maxfail=5 \
+  --junitxml=reports/junit/junit-unit.xml \
+  --cov=src \
+  --cov-report=term-missing \
+  --cov-report=xml:reports/coverage.xml \
+  --cov-report=html:reports/htmlcov \
+  --cov-fail-under=80
 ```
 
-Integration fast subset:
+Special behavior:
+
+- Handles Python 3.12 `pytest` cleanup SIGABRT (`exit 134`) by checking JUnit `failures/errors` before deciding failure.
+
+Artifacts:
+
+- `coverage-report-py<version>`
+- `unit-test-results-py<version>`
+
+### `integration-tests`
+
+- Python: `3.14`
+- Runs only on PRs and pushes to `main`/`develop`
+- Marker filter:
 
 ```bash
-python -m pytest \
-  -m "integration and not requires_cascor and not requires_server and not slow" \
-  tests/integration
+integration and not requires_cascor and not requires_server and not slow
 ```
 
-### Lockfile Freshness Check
+Artifact:
 
-`lockfile-check` compiles to `/tmp/requirements.lock.check` with extras:
+- `integration-test-results`
 
-- `juniper-data`
-- `juniper-cascor`
-- `observability`
+### `build`
 
-and then diffs against `requirements.lock`.
+- Python: `3.14`
+- Uses `python -m build --sdist --wheel`
+- Verifies both `.tar.gz` and `.whl`
+- Uploads `dist-packages`
 
-### Documentation Link Check
+### `security`
 
-`docs` job runs:
+- Python: `3.14`
+- Tools: `gitleaks`, `bandit`, `pip-audit`
+- Uploads SARIF and security report artifacts
+
+### `dependency-docs`
+
+```yaml
+# .bandit.yml
+exclude_dirs:
+  - src/tests
+  - util/verification
+skips:
+  - B311
+confidence: MEDIUM
+severity: MEDIUM
+```
+
+Artifact:
+
+```bash
+# Security scan
+bandit -r src
+
+# With config
+bandit -r src -c .bandit.yml
+
+# Specific severity
+bandit -r src -ll  # Low severity and up
+```
+
+### Lockfile and Dependency Audit
+
+**Purpose:** Keep `requirements.lock` synchronized with `pyproject.toml` extras and audit installed dependencies.
+
+**Usage:**
+
+```bash
+# Regenerate lockfile with the same extras used in CI lockfile check
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
+
+# Mimic CI security job's dependency audit input
+pip install dash fastapi uvicorn plotly numpy scipy
+pip freeze > reports/security/pip-freeze.txt
+pip-audit -r reports/security/pip-freeze.txt --output reports/security/pip-audit.txt
+```
+
+**Authoritative workflow files:**
+
+- `.github/workflows/ci.yml`
+- `.github/workflows/lockfile-update.yml`
+- `.github/workflows/security-scan.yml`
+
+### Pytest
+
+**Purpose:** Testing framework
+
+**Configuration:**
+
+```toml
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["src/tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--verbose",
+    "--color=yes",
+    "--cov=src",
+    "--cov-report=term-missing"
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow-running tests"
+]
+```
+
+- Python: `3.14`
+- Runs doc link validator with excluded directories/files:
 
 ```bash
 python scripts/check_doc_links.py \
@@ -109,124 +548,112 @@ python scripts/check_doc_links.py \
   --cross-repo skip
 ```
 
-### Required Checks Semantics
+### `docker-build`
 
-`required-checks` is the gatekeeper and fails when:
+- Builds image from root `Dockerfile`
+- Starts container and waits for healthy state
+- Verifies:
+  - package import
+  - `/v1/health` response
 
-- `pre-commit` is not `success`
-- `unit-tests` is not `success`
-- `integration-tests` is `failure`
-- `security` is `failure`
-- `dependency-docs` is `failure`
-- `docs` is `failure`
-- `lockfile-check` is not `success`
-- `docker-build` is `failure`
+### `required-checks`
 
----
+Aggregates job results and enforces final pass/fail semantics used by branch protection.
 
-## Security Workflow `security-scan.yml`
+## Environment Variables Used in CI
 
-### Trigger
+Top-level workflow env:
 
-- Weekly cron: Monday 06:00 UTC
-- Manual dispatch
+```yaml
+env:
+  ENV_NAME: juniper-canopy
+  PYTHON_TEST_VERSION: "3.14"
+  COVERAGE_FAIL_UNDER: "80"
+```
 
-### Steps
+Test gating envs in unit/integration jobs:
 
-1. Checkout
-2. Setup Python `3.14`
-3. Install `bandit[sarif]`, `pip-audit`, project dev extras
-4. Run Bandit SARIF + medium confidence/severity scan
-5. Run strict `pip-audit`
-6. Upload `reports/security/` artifacts
+```yaml
+CASCOR_BACKEND_AVAILABLE: 0
+RUN_SERVER_TESTS: 0
+ENABLE_SLOW_TESTS: 0
+```
 
-### Operational Note
+## Dependency Reference
 
-This is complementary to the `security` job in `ci.yml`; it is not a replacement.
+Primary CI dependency file:
 
----
+- `conf/requirements_ci.txt`
 
-## Publish Workflow `publish.yml`
+Notable required entries:
 
-### Trigger
+- `prometheus-client>=0.20.0`
+- `sentry-sdk>=2.0.0`
 
-- GitHub release published
+These support observability-import paths used during tests and runtime checks.
 
-### Jobs
+## Documentation Link Checker Reference
 
-1. `build`
-2. `testpypi`
-3. `pypi`
+Script: `scripts/check_doc_links.py`
 
-### Flow
+Core capabilities:
 
-1. Build sdist/wheel and run `twine check`
-2. Publish artifacts to TestPyPI via trusted publishing
-3. Verify install from TestPyPI
-4. Publish to PyPI via trusted publishing
+- Validates relative file links and same-file anchors.
+- Skips fenced code blocks and inline code spans.
+- Supports cross-repo handling modes:
+  - `skip` (CI default)
+  - `warn`
+  - `check`
 
-### Auth Model
+Exit codes:
 
-- OIDC trusted publishing
-- `permissions: id-token: write`
+- `0`: all valid
+- `1`: broken links or invalid arguments
 
-No long-lived PyPI API token should be required for this workflow.
+## Common Failure Classes
 
----
+### Stale lockfile
 
-## Dependabot Lockfile Workflow `lockfile-update.yml`
+Symptom:
 
-### Trigger Condition
+- `lockfile-check` fails diff
 
-- Branch: `dependabot/pip/**`
-- Actor: `dependabot[bot]`
-
-### Core Behavior
-
-1. Checkout with `CROSS_REPO_DISPATCH_TOKEN`
-2. Setup Python `3.14`
-3. Install `uv`
-4. Compile lockfile candidate to `/tmp/requirements.lock.check`
-5. Move candidate to `requirements.lock`
-6. Commit and push only if changed
-
-### Compile Command
+Fix:
 
 ```bash
 uv pip compile pyproject.toml \
   --extra juniper-data \
   --extra juniper-cascor \
-  -o /tmp/requirements.lock.check
-mv /tmp/requirements.lock.check requirements.lock
+  --extra observability \
+  -o requirements.lock
 ```
 
----
+### Broken docs links
 
-## CI Scripts And Inputs
+Symptom:
 
-### `scripts/check_doc_links.py`
+- `docs` job reports missing files/anchors
 
-Purpose:
+Fix:
 
-- validates internal markdown file links and heading anchors
-- supports cross-repo policies: `skip`, `warn`, `check`
+- run checker locally with the CI command and repair relative paths or heading anchors
 
-CI uses `--cross-repo skip` for deterministic execution in isolated runners.
+### Optional testing modules skipped
 
-### `scripts/generate_dep_docs.sh`
+Symptom:
 
-Used by `dependency-docs` job to regenerate:
+- Service/e2e tests skipped via `importorskip`
 
-- `conf/requirements_ci_*.txt`
-- `conf/conda_environment_ci*.yaml` artifacts
+Fix (local full-run only):
 
----
+```bash
+pip install "juniper-cascor-client[testing]"
+pip install "juniper-data-client[testing]"
+```
 
-## Branch Protection And Required Checks
+## Related Docs
 
-For branch protection, prefer requiring at least:
-
-1. `Quality Gate` (the `required-checks` job)
-2. `Documentation Links` (if exposed separately in your repo settings view)
-
-If only one check is required, use `Quality Gate` because it aggregates all critical jobs.
+**Last Updated:** 2026-04-05  
+**Version:** 0.25.1  
+**Maintained By:** Development Team  
+**Status:** ✅ Current
