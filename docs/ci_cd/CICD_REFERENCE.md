@@ -10,11 +10,11 @@
 
 1. [Pipeline Architecture](#pipeline-architecture)
 2. [Workflow Specification](#workflow-specification)
-3. [Configuration Files](#configuration-files)
-4. [Documentation Link Validation](#documentation-link-validation)
+3. [Documentation Link Validation](#documentation-link-validation)
+4. [Configuration Files](#configuration-files)
 5. [Tool Configurations](#tool-configurations)
-6. [Dependency Reference](#dependency-reference)
-7. [Documentation Link Checker Reference](#documentation-link-checker-reference)
+6. [Environment Variables Used in CI](#environment-variables-used-in-ci)
+7. [Dependency Reference](#dependency-reference)
 8. [Common Failure Classes](#common-failure-classes)
 9. [Troubleshooting Reference](#troubleshooting-reference)
 
