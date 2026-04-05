@@ -98,12 +98,178 @@ These are guarded with `pytest.importorskip(...)`, so collection succeeds and te
 The `docs` job runs:
 
 ```bash
-python scripts/check_doc_links.py \
-  --exclude templates --exclude history \
-  --exclude pull_requests --exclude releases \
-  --exclude analysis --exclude fixes --exclude development \
-  --exclude CHANGELOG.md \
-  --cross-repo skip
+# Install pytest-xdist
+pip install pytest-xdist
+
+# Run tests in parallel
+pytest tests/ -n auto  # Auto-detect CPU count
+pytest tests/ -n 4     # Use 4 workers
+```
+
+**Savings:** 30-50% reduction in test time
+
+#### 4. Skip Slow Tests
+
+**Mark slow tests:**
+
+```python
+@pytest.mark.slow
+def test_long_running_operation():
+    # Takes 30+ seconds
+    pass
+```
+
+**Skip in CI:**
+
+```yaml
+- name: Run Tests (skip slow)
+  run: pytest tests/ -m "not slow"
+```
+
+**Savings:** Variable, depends on slow tests
+
+#### 5. Optimize Matrix
+
+**Before:** Test all versions
+
+```yaml
+matrix:
+  python-version: ["3.11", "3.12", "3.13"]
+```
+
+**After:** Primary version + periodic full matrix
+
+```yaml
+matrix:
+  python-version: ["3.13"]  # Fast feedback
+
+# Full matrix on:
+# - Pull requests to main
+# - Nightly builds
+# - Release tags
+```
+
+**Savings:** ~16 min (2 fewer versions)
+
+### Recommended Optimizations
+
+#### Phase 1: Quick wins
+
+1. Add pip caching
+2. Add pytest caching
+3. Skip slow tests on non-main branches
+
+**Expected improvement:** 15 min → 10 min
+
+#### Phase 2: Medium effort
+
+1. Use pytest-xdist for parallel tests
+2. Optimize test fixtures
+3. Conditional matrix (single version for PRs)
+
+**Expected improvement:** 10 min → 7 min
+
+#### Phase 3: Advanced
+
+1. Split test suite into shards
+2. Use self-hosted runners
+3. Implement test impact analysis
+
+**Expected improvement:** 7 min → 5 min
+
+---
+
+## Security Considerations
+
+### Secrets Management
+
+**Never commit:**
+
+- API keys
+- Passwords
+- Private keys
+- Tokens
+- Certificates
+
+**Always use GitHub Secrets:**
+
+```yaml
+- name: Use Secret
+  env:
+    TOKEN: ${{ secrets.API_TOKEN }}
+  run: |
+    # Secret available as $TOKEN
+    # Never echo the value!
+```
+
+### Security Scanning
+
+**Bandit security scanner:**
+
+```yaml
+- name: Security Scan
+  run: bandit -r src -c .bandit.yml
+```
+
+**Common issues caught:**
+
+- Hardcoded passwords
+- SQL injection
+- Use of `eval()`/`exec()`
+- Insecure random
+
+### Dependency Security
+
+**Dependabot alerts:**
+
+1. Enable Dependabot in repository settings
+2. Review alerts weekly
+3. Update vulnerable dependencies promptly
+
+**Example:**
+
+```yaml
+# .github/dependabot.yml
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+```
+
+### Lockfile Freshness and Dependabot
+
+`requirements.lock` freshness is enforced in CI and regenerated for Dependabot branches.
+Use the same extras list as CI to avoid lockfile drift:
+
+```bash
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
+```
+
+**Reference workflows:**
+
+- `.github/workflows/ci.yml` (`lockfile-check` job)
+- `.github/workflows/lockfile-update.yml` (Dependabot lockfile regeneration)
+
+### Code Scanning
+
+**GitHub Advanced Security:**
+
+1. Enable code scanning
+2. Run CodeQL analysis
+3. Review and fix findings
+
+```yaml
+# .github/workflows/codeql.yml
+- name: Initialize CodeQL
+  uses: github/codeql-action/init@v2
+  with:
+    languages: python
 ```
 
 This checks local docs links/anchors while skipping cross-repo validation in CI.
@@ -198,6 +364,6 @@ python scripts/check_doc_links.py \
 
 ## Related Documentation
 
-- [CI/CD Quick Start](CICD_QUICK_START.md)
-- [CI/CD Environment Setup](CICD_ENVIRONMENT_SETUP.md)
-- [CI/CD Reference](CICD_REFERENCE.md)
+**Last Updated:** 2026-04-05  
+**Version:** 0.25.2  
+**Status:** ✅ Complete

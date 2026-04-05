@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Collapsible contextual section wrappers (`ctx-growth-triggers-*`, `ctx-multi-node-*`, `ctx-spiral-dataset-*`, `ctx-pool-training-*`) with toggle callbacks, defaulting to `is_open=True`
 - Sidebar decomposition: 15 addressable wrapper div IDs (`sidebar-nn-*`, `sidebar-cn-*`, `sidebar-network-info-section`, `sidebar-meta-params-card`, `sidebar-apply-section`)
 - Unit tests for sidebar visibility configuration and CandidateMetricsPanel layout/helpers
+- Added release-readiness navigation in `docs/DOCUMENTATION_OVERVIEW.md` for:
+  - `notes/CODE_REVIEW_ANALYSIS_2026-04-04.md`
+  - `notes/CODE_REVIEW_PLAN_2026-04-04.md`
+  - `notes/CODE_REVIEW_DEVELOPMENT_ROADMAP_2026-04-04.md`
 
 ### Changed
 
@@ -64,18 +68,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
   - `docs/ci_cd/CICD_MANUAL.md`
   - `notes/juniper-canopy_OTHER_DEPENDENCIES.md`
-- Realigned CI/testing documentation with the current workflow implementation in `.github/workflows/ci.yml`:
-  - Rewrote `docs/ci_cd/CICD_QUICK_START.md`, `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`, `docs/ci_cd/CICD_MANUAL.md`, and `docs/ci_cd/CICD_REFERENCE.md` to document:
-    - Python matrix `3.12/3.13/3.14` and `3.14` default job versioning
-    - pip-based CI dependency installation via `conf/requirements_ci.txt` and editable install
-    - documentation-link validation job (`scripts/check_doc_links.py --cross-repo skip`)
-    - lockfile freshness behavior (`uv pip compile ...` with header-stripped diff)
-    - Docker build/smoke-test and quality-gate aggregation
-  - Updated testing docs for optional testing modules and skip semantics:
-    - `docs/testing/SELECTIVE_TEST_GUIDE.md`
-    - `docs/testing/TESTING_MANUAL.md`
-    - `docs/testing/TESTING_REFERENCE.md`
-    - Added explicit guidance for `pytest.importorskip(...)` use with `juniper_cascor_client.testing` and `juniper_data_client.testing`.
+- Updated CI/CD runbook accuracy to match current workflows:
+  - `docs/ci_cd/CICD_MANUAL.md`
+  - `docs/ci_cd/CICD_REFERENCE.md`
+  - `Bandit` command examples now use `.bandit.yml` instead of `pyproject.toml`
+  - Added explicit lockfile regeneration command with all required extras (`juniper-data`, `juniper-cascor`, `observability`)
+  - Added lockfile/dependency-audit operational notes aligned with `.github/workflows/ci.yml`, `.github/workflows/lockfile-update.yml`, and `.github/workflows/security-scan.yml`
+- Updated testing runbook guidance in `docs/testing/TESTING_MANUAL.md`:
+  - Refreshed marker table with currently used infra markers (`requires_server`, `requires_redis`, `requires_cassandra`, `requires_display`, `api`, `generators`, `e2e`)
+  - Added a release-readiness "coverage gap watchlist" for `discovery.py`, `observability.py`, and `secrets_util.py` with concrete verification commands
+  - Added troubleshooting entry for running `requires_server` tests via `RUN_SERVER_TESTS=1`
 
 - Renamed HTTP metrics: `http_requests_total` → `juniper_canopy_http_requests_total`, `http_request_duration_seconds` → `juniper_canopy_http_request_duration_seconds`
 - Updated CasCor backend documentation to cover service-mode behavior (`CascorServiceAdapter`, `ServiceBackend`, `CascorStateSync`), including startup attach/sync workflow, response normalization contracts, and service-mode troubleshooting:

@@ -1,6 +1,6 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** April 04, 2026  
+**Last Updated:** April 5, 2026  
 **Version:** v0.26.1
 
 Complete guide to testing the Juniper Canopy application.
@@ -24,10 +24,10 @@ Complete guide to testing the Juniper Canopy application.
 
 The Juniper Canopy uses **pytest** as the testing framework with:
 
-- **272+ tests** across unit, integration, and performance categories
-- **100% pass rate** (all tests passing)
-- **73% code coverage** (target: 80%)
-- **Automated CI/CD** via GitHub Actions
+- A large multi-suite test corpus across unit, integration, regression, performance, and API categories
+- Marker-gated infrastructure tests (`requires_server`, `requires_cascor`, `requires_redis`, `requires_cassandra`, `requires_display`)
+- Coverage enforcement in CI (`fail_under = 80`)
+- Automated execution through GitHub Actions
 
 ### Testing Philosophy
 
@@ -83,37 +83,7 @@ pytest -m performance
 pytest -m "not slow"
 
 # Skip tests requiring external services
-pytest -m "not requires_cascor"
-
-# CI-fast parity (used in workflow)
-pytest -m "not requires_cascor and not requires_server and not slow" src/tests/unit/ src/tests/regression/
-pytest -m "integration and not requires_cascor and not requires_server and not slow" src/tests/integration/
-```
-
-### Optional Testing Extras
-
-Some tests rely on helper modules shipped as extras from sibling client packages.
-When extras are unavailable, those tests intentionally skip via `pytest.importorskip(...)`.
-
-```bash
-pip install "juniper-cascor-client[testing]"
-pip install "juniper-data-client[testing]"
-```
-
-### Optional Client Testing Extras
-
-Some integration/e2e files use testing helpers from optional client packages and now guard import-time availability with `pytest.importorskip(...)`.
-
-Current guarded modules:
-
-- `juniper_cascor_client.testing` (for `FakeCascorClient` scenarios)
-- `juniper_data_client.testing` (for `FakeDataClient` e2e scenarios)
-
-Install these extras when you want those tests to execute locally instead of being skipped:
-
-```bash
-pip install "juniper-cascor-client[testing]"
-pip install "juniper-data-client[testing]"
+pytest -m "not requires_cascor and not requires_server and not requires_redis and not requires_cassandra and not requires_display"
 ```
 
 ### Running by Pattern
@@ -599,15 +569,22 @@ def test_with_cascor_backend():
 
 ### Available Markers
 
-| Marker                         | Description       | Usage                       |
-| ------------------------------ | ----------------- | --------------------------- |
-| `@pytest.mark.unit`            | Unit tests        | Isolated component tests    |
-| `@pytest.mark.integration`     | Integration tests | Component interaction tests |
-| `@pytest.mark.performance`     | Performance tests | Speed/resource tests        |
-| `@pytest.mark.regression`      | Regression tests  | Bug fix verification        |
-| `@pytest.mark.slow`            | Slow tests        | Long-running tests          |
-| `@pytest.mark.requires_cascor` | Requires backend  | External dependency         |
-| `@pytest.mark.asyncio`         | Async tests       | Async/await tests           |
+| Marker                            | Description                        | Usage                                 |
+| --------------------------------- | ---------------------------------- | ------------------------------------- |
+| `@pytest.mark.unit`               | Unit tests                         | Isolated component tests              |
+| `@pytest.mark.integration`        | Integration tests                  | Component interaction tests           |
+| `@pytest.mark.performance`        | Performance tests                  | Speed/resource tests                  |
+| `@pytest.mark.regression`         | Regression tests                   | Bug fix verification                  |
+| `@pytest.mark.e2e`                | End-to-end tests                   | Full-system scenarios                 |
+| `@pytest.mark.slow`               | Slow tests                         | Long-running tests                    |
+| `@pytest.mark.requires_cascor`    | Requires CasCor backend            | External dependency                   |
+| `@pytest.mark.requires_server`    | Requires running server            | Live endpoint/WebSocket validation    |
+| `@pytest.mark.requires_redis`     | Requires Redis                     | Redis integration tests               |
+| `@pytest.mark.requires_cassandra` | Requires Cassandra                 | Cassandra integration tests           |
+| `@pytest.mark.requires_display`   | Requires display                   | GUI/visual tests                      |
+| `@pytest.mark.api`                | API endpoint tests                 | HTTP contract testing                 |
+| `@pytest.mark.generators`         | Generator/data tests               | Data generation and helper coverage   |
+| `@pytest.mark.asyncio`            | Async tests                        | Async/await tests                     |
 
 ### Running by Marker
 
@@ -674,6 +651,23 @@ xdg-open reports/coverage/index.html
 - `config_manager.py` - Configuration management
 - `demo_mode.py` - Demo mode core
 - `websocket_manager.py` - WebSocket communication
+
+### Known Coverage Gap Watchlist (Release Readiness)
+
+The release-readiness review identified these modules as historically under-covered and worth tracking in regression suites:
+
+- `discovery.py` - service discovery probing behavior
+- `observability.py` - metrics labeling and Sentry/telemetry setup
+- `secrets_util.py` - secret-loading and decryption utility paths
+
+Quick verification commands:
+
+```bash
+cd src
+pytest tests/unit/test_cascor_discovery.py -v
+pytest tests/unit/test_observability.py -v
+pytest tests/unit/test_secrets_util.py -v
+```
 
 ### Excluding Lines from Coverage
 
@@ -994,12 +988,14 @@ Use `pytest --collect-only -q` after dependency changes to catch import-time fai
 pytest --cov=src --cov-report=term-missing
 ```
 
-#### 6. Tests unexpectedly skipped due to optional extras
+#### 6. `requires_server` Tests Are Skipped in CI
 
 ```bash
-# Symptom: SKIPPED with message "...[testing] not installed"
-# Fix: install optional testing extras used by importorskip
-pip install "juniper-cascor-client[testing]" "juniper-data-client[testing]"
+# Problem: tests marked requires_server are skipped in default CI profile
+# Solution: run with an active app server and opt-in variable
+export RUN_SERVER_TESTS=1
+cd src
+pytest tests/ -m requires_server -v
 ```
 
 #### 7. Service Metrics Shape Mismatch in Dashboard Tests
