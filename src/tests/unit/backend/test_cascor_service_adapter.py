@@ -211,6 +211,39 @@ class TestCanopyParamsMapping:
             "nn_max_total_epochs": 100,
         }
 
+    def test_apply_params_maps_candidate_namespace_keys(self, adapter, mock_client):
+        """cn_* candidate params should map to candidate_* cascor keys."""
+        mock_client.update_params.return_value = {"updated": True}
+
+        result = adapter.apply_params(
+            cn_patience=13,
+            cn_training_convergence_threshold=0.0005,
+        )
+
+        assert result["ok"] is True
+        mock_client.update_params.assert_called_once_with(
+            {
+                "candidate_patience": 13,
+                "candidate_convergence_threshold": 0.0005,
+            }
+        )
+
+    def test_get_canopy_params_maps_candidate_namespace_keys(self, adapter, mock_client):
+        """Reverse mapping should expose candidate_* params as canopy cn_* keys."""
+        mock_client.get_training_params.return_value = {
+            "data": {
+                "params": {
+                    "candidate_patience": 21,
+                    "candidate_convergence_threshold": 0.00025,
+                }
+            }
+        }
+
+        result = adapter.get_canopy_params()
+
+        assert result["cn_patience"] == 21
+        assert result["cn_training_convergence_threshold"] == 0.00025
+
     def test_get_canopy_params_returns_empty_dict_on_client_error(self, adapter, mock_client):
         from juniper_cascor_client.exceptions import JuniperCascorConnectionError
 

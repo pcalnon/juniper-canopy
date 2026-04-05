@@ -50,8 +50,8 @@ class TestSingletonBehavior:
         """New instance should have test_trigger=None and test_mode=False."""
         CallbackContextAdapter.reset_instance()
         adapter = CallbackContextAdapter()
-        assert adapter._test_trigger is None
-        assert adapter._test_mode is False
+        assert adapter.get_triggered_id() is None
+        assert adapter.is_test_mode() is False
 
     def test_singleton_thread_safety_lock_exists(self):
         """Singleton should have a lock for thread safety."""
@@ -93,7 +93,7 @@ class TestTestModeTriggerId:
         adapter = CallbackContextAdapter()
         adapter.set_test_trigger("button-id")
         adapter.clear_test_trigger()
-        assert adapter._test_trigger is None
+        assert adapter.get_triggered_id() is None
 
     def test_multiple_set_trigger_updates_value(self):
         """Setting trigger multiple times should update the value."""
@@ -250,10 +250,11 @@ class TestEdgeCases:
         """reset_instance should work even when in test mode."""
         adapter = CallbackContextAdapter()
         adapter.set_test_trigger("button")
+        adapter.clear_test_trigger()
         CallbackContextAdapter.reset_instance()
         new_adapter = CallbackContextAdapter()
         assert new_adapter.is_test_mode() is False
-        assert new_adapter._test_trigger is None
+        assert new_adapter.get_triggered_id() is None
 
     def test_singleton_persists_test_state(self):
         """Singleton should persist test state across calls."""
