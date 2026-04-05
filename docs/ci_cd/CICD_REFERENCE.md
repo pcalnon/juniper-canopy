@@ -10,10 +10,10 @@
 2. [Workflow Specification](#workflow-specification)
 3. [Configuration Files](#configuration-files)
 4. [Tool Configurations](#tool-configurations)
-5. [Environment Variables](#environment-variables)
-6. [Artifact Specifications](#artifact-specifications)
-7. [API Reference](#api-reference)
-8. [Troubleshooting Reference](#troubleshooting-reference)
+5. [Environment Variables Used in CI](#environment-variables-used-in-ci)
+6. [Dependency Reference](#dependency-reference)
+7. [Documentation Link Checker Reference](#documentation-link-checker-reference)
+8. [Common Failure Classes](#common-failure-classes)
 
 ---
 
