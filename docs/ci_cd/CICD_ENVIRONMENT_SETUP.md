@@ -116,6 +116,7 @@ python scripts/check_doc_links.py \
 Regenerate locally with the same extras:
 
 ```bash
+pip install uv
 uv pip compile pyproject.toml \
   --extra juniper-data \
   --extra juniper-cascor \
