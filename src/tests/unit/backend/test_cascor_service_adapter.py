@@ -211,12 +211,86 @@ class TestCanopyParamsMapping:
             "nn_max_total_epochs": 100,
         }
 
+    def test_apply_params_maps_candidate_namespace_keys(self, adapter, mock_client):
+        """cn_* candidate params should map to candidate_* cascor keys."""
+        mock_client.update_params.return_value = {"updated": True}
+
+        result = adapter.apply_params(
+            cn_patience=13,
+            cn_training_convergence_threshold=0.0005,
+        )
+
+        assert result["ok"] is True
+        mock_client.update_params.assert_called_once_with(
+            {
+                "candidate_patience": 13,
+                "candidate_convergence_threshold": 0.0005,
+            }
+        )
+
+    def test_get_canopy_params_maps_candidate_namespace_keys(self, adapter, mock_client):
+        """Reverse mapping should expose candidate_* params as canopy cn_* keys."""
+        mock_client.get_training_params.return_value = {
+            "data": {
+                "params": {
+                    "candidate_patience": 21,
+                    "candidate_convergence_threshold": 0.00025,
+                }
+            }
+        }
+
+        result = adapter.get_canopy_params()
+
+        assert result["cn_patience"] == 21
+        assert result["cn_training_convergence_threshold"] == 0.00025
+
     def test_get_canopy_params_returns_empty_dict_on_client_error(self, adapter, mock_client):
         from juniper_cascor_client.exceptions import JuniperCascorConnectionError
 
         mock_client.get_training_params.side_effect = JuniperCascorConnectionError("connection down")
 
         assert adapter.get_canopy_params() == {}
+
+    def test_get_canopy_params_maps_candidate_specific_keys(self, adapter, mock_client):
+        """Candidate-training keys should map back to canopy cn_* names."""
+        mock_client.get_training_params.return_value = {
+            "data": {
+                "params": {
+                    "candidate_patience": 12,
+                    "candidate_convergence_threshold": 0.0005,
+                    "candidate_epochs": 150,
+                }
+            }
+        }
+
+        result = adapter.get_canopy_params()
+
+        assert result["cn_patience"] == 12
+        assert result["cn_training_convergence_threshold"] == 0.0005
+        assert result["cn_training_iterations"] == 150
+
+
+class TestApplyParamsMapping:
+    """Verify apply_params() forwards canopy keys using cascor API names."""
+
+    def test_apply_params_maps_candidate_specific_keys(self, adapter, mock_client):
+        """cn_patience/cn_training_convergence_threshold must map to candidate_* keys."""
+        mock_client.update_params.return_value = {"ok": True}
+
+        result = adapter.apply_params(
+            cn_patience=25,
+            cn_training_convergence_threshold=0.0001,
+            cn_training_iterations=300,
+        )
+
+        assert result["ok"] is True
+        mock_client.update_params.assert_called_once_with(
+            {
+                "candidate_patience": 25,
+                "candidate_convergence_threshold": 0.0001,
+                "candidate_epochs": 300,
+            }
+        )
 
 
 # =========================================================================

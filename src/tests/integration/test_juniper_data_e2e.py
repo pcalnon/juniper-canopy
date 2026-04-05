@@ -126,6 +126,7 @@ def _run_training_step(arrays):
 @pytest.fixture()
 def fake_client():
     """Create a FakeDataClient for offline testing."""
+    pytest.importorskip("juniper_data_client.testing", reason="juniper-data-client[testing] not installed")
     from juniper_data_client.testing import FakeDataClient
 
     with FakeDataClient() as client:
