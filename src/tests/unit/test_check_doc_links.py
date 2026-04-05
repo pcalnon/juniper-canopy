@@ -23,11 +23,10 @@
 """Regression tests for documentation link checker script."""
 
 import importlib.util
-import pytest
-
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "check_doc_links.py"
@@ -69,11 +68,7 @@ def test_validate_file_ignores_links_inside_code_fences_and_inline_code(tmp_path
     target.write_text("# Existing\n", encoding="utf-8")
     md_file = repo_root / "docs.md"
     md_file.write_text(
-        "```\n"
-        "[ignored](missing-in-fence.md)\n"
-        "```\n"
-        "`[ignored](missing-inline.md)`\n"
-        "[ok](existing.md)\n",
+        "```\n" "[ignored](missing-in-fence.md)\n" "```\n" "`[ignored](missing-inline.md)`\n" "[ok](existing.md)\n",
         encoding="utf-8",
     )
 
@@ -125,8 +120,7 @@ def test_cross_repo_check_mode_validates_target_existence(tmp_path):
     repo_root.mkdir()
     md_file = repo_root / "docs.md"
     md_file.write_text(
-        "[ok](../juniper-ml/docs/existing.md)\n"
-        "[missing](../juniper-ml/docs/missing.md)\n",
+        "[ok](../juniper-ml/docs/existing.md)\n" "[missing](../juniper-ml/docs/missing.md)\n",
         encoding="utf-8",
     )
 
