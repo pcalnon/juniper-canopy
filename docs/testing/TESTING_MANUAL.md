@@ -118,6 +118,22 @@ pytest --cov=src --cov-report=html
 pytest --cov=src --cov-report=html --cov-report=term-missing --cov-report=xml
 ```
 
+### Optional Testing Extras for Service-Mode Suites
+
+Some backend/service tests rely on testing helpers from optional client extras.
+
+Install when needed:
+
+```bash
+pip install "juniper-cascor-client[testing]" "juniper-data-client[testing]"
+```
+
+Why this matters:
+
+- Service-mode tests now gate on `pytest.importorskip("juniper_cascor_client.testing", ...)`.
+- Dataset versioning tests using `FakeDataClient` gate on `juniper_data_client.testing`.
+- Without these extras, tests are skipped by design instead of failing collection.
+
 ### High-Signal Regression Commands
 
 ```bash
@@ -837,37 +853,58 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, feature/**, fix/**]
   pull_request:
     branches: [main, develop]
 
 jobs:
-  test:
+  pre-commit:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Run pre-commit hooks
+        run: pre-commit run --all-files
+
+  unit-tests:
+    needs: [pre-commit]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install dependencies
         run: |
-          pip install -r conf/requirements.txt
-          pip install pytest pytest-cov
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r conf/requirements_ci.txt
+          pip install -e .
 
       - name: Run tests
-        run: pytest --cov=src --cov-report=xml
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-        with:
-          file: ./coverage.xml
+        run: |
+          python -m pytest \
+            -m "not requires_cascor and not requires_server and not slow" \
+            src/tests/unit/ src/tests/regression/ \
+            --cov=src \
+            --cov-fail-under=80
 ```
 
 ### Pre-commit Hooks
@@ -928,7 +965,22 @@ pytest --fixtures  # List all available fixtures
 pip install pytest-asyncio
 ```
 
-#### 5. Coverage Not Working
+#### 5. Optional Testing Extras Missing (Collection or Import Skips)
+
+```bash
+# Symptom: ModuleNotFoundError for juniper_*_client.testing or skipped tests
+# Fix: install testing extras used by service-integration unit tests
+pip install "juniper-data-client[testing]" "juniper-cascor-client[testing]"
+```
+
+Collection-safe patterns used in the suite:
+
+- `pytest.importorskip("juniper_cascor_client.testing", reason="requires juniper-cascor-client[testing]")`
+- `@pytest.mark.skipif(not _has_jdc_testing, reason="requires juniper-data-client[testing]")`
+
+Use `pytest --collect-only -q` after dependency changes to catch import-time failures early.
+
+#### 6. Coverage Not Working
 
 ```bash
 # Problem: Coverage 0%
@@ -962,7 +1014,7 @@ Expected per-entry shape:
 
 If only flat keys (`train_loss`, `train_accuracy`) are present at top-level, normalize through service adapter helpers before UI consumption.
 
-#### 7. Zero Values Dropped During Status/Metrics Assertions
+#### 8. Zero Values Dropped During Status/Metrics Assertions
 
 ```bash
 # Symptom: epoch=0 or hidden_units=0 treated as missing

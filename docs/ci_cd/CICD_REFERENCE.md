@@ -267,94 +267,36 @@ test:
 
 ### .github/workflows/ci.yml
 
-**Location:** `.github/workflows/ci.yml`
+**Last Updated:** 2026-04-04  
+**Version:** 0.26.0  
+**Status:** Current
 
-**Purpose:** Main CI/CD pipeline definition
+## Scope
 
-**Key Sections:**
+This reference documents the current CI behavior implemented in:
 
-1. **Workflow metadata**
-   - Name: `CI/CD Pipeline`
-   - Version: Tracked in file header
+- `.github/workflows/ci.yml`
+- `scripts/check_doc_links.py`
+- `conf/requirements_ci.txt`
+- `pyproject.toml`
 
-2. **Trigger configuration**
-   - Push events
-   - Pull request events
-   - Manual dispatch
+## Workflow Summary
 
-3. **Job definitions**
-   - Lint
-   - Test (matrix)
-   - Build
-   - Integration
-   - Quality gate
-   - Notify
+Workflow name: `CI/CD Pipeline`
 
-4. **Environment variables**
-   - Python settings
-   - Application settings
-   - Test settings
+Trigger events:
 
-### .pre-commit-config.yaml
+- `push` (`main`, `develop`, `feature/**`, `fix/**`)
+- `pull_request` (`main`, `develop`)
+- `repository_dispatch` (`data-client-updated`, `cascor-client-updated`)
+- `workflow_dispatch`
 
-**Location:** `.pre-commit-config.yaml`
-
-**Purpose:** Pre-commit hook configuration
-
-**Hook Categories:**
-
-1. **Standard hooks** (trailing-whitespace, end-of-file-fixer, etc.)
-2. **Black** (code formatting)
-3. **isort** (import sorting)
-4. **Flake8** (linting)
-5. **MyPy** (type checking - manual stage)
-6. **Bandit** (security scanning)
-7. **YAML lint**
-8. **Python syntax check**
-
-**Configuration:**
+Concurrency:
 
 ```yaml
-repos:
-  - repo: https://github.com/psf/black
-    rev: 24.1.1
-    hooks:
-      - id: black
-        language_version: python3.13
-        args: [--line-length=120]
-
-  - repo: https://github.com/PyCQA/isort
-    rev: 5.13.2
-    hooks:
-      - id: isort
-        args: [--profile=black, --line-length=120]
-```
-
-### .codecov.yml
-
-**Location:** `.codecov.yml`
-
-**Purpose:** Codecov configuration
-
-**Key Settings:**
-
-```yaml
-coverage:
-  precision: 2              # Decimal places
-  round: down               # Rounding method
-  range: 70..100            # Color range
-
-  status:
-    project:
-      default:
-        target: 80%         # Project-wide target
-        threshold: 5%       # Allowed drop
-        base: auto          # Compare to parent
-
-    patch:
-      default:
-        target: 60%         # New code target
-        threshold: 10%      # More lenient
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 ```
 
 **Ignore Patterns:**
@@ -394,13 +336,12 @@ ignore:
 
 3. **isort configuration**
 
-   ```toml
-   [tool.isort]
-   profile = "black"
-   line_length = 120
-   ```
+### `pre-commit`
 
-4. **Bandit configuration**
+- Python matrix: `3.12`, `3.13`, `3.14`
+- Installs `pre-commit`
+- Runs `pre-commit run --all-files --show-diff-on-failure`
+- Caches pre-commit hooks (`~/.cache/pre-commit`)
 
    ```yaml
    # .bandit.yml
@@ -468,107 +409,56 @@ extend-exclude = '''
 **Usage:**
 
 ```bash
-# Check formatting
-black --check --diff src/
-
-# Apply formatting
-black src/
-
-# Specific line length
-black --line-length=100 src/
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/ \
+  --timeout=60 \
+  --maxfail=5 \
+  --junitxml=reports/junit/junit-unit.xml \
+  --cov=src \
+  --cov-report=term-missing \
+  --cov-report=xml:reports/coverage.xml \
+  --cov-report=html:reports/htmlcov \
+  --cov-fail-under=80
 ```
 
-### isort
+Special behavior:
 
-**Purpose:** Import sorting
+- Handles Python 3.12 `pytest` cleanup SIGABRT (`exit 134`) by checking JUnit `failures/errors` before deciding failure.
 
-**Configuration:**
+Artifacts:
 
-```toml
-[tool.isort]
-profile = "black"
-line_length = 120
-multi_line_output = 3
-include_trailing_comma = true
-force_grid_wrap = 0
-use_parentheses = true
-```
+- `coverage-report-py<version>`
+- `unit-test-results-py<version>`
 
-**Usage:**
+### `integration-tests`
+
+- Python: `3.14`
+- Runs only on PRs and pushes to `main`/`develop`
+- Marker filter:
 
 ```bash
-# Check imports
-isort --check-only --diff src/
-
-# Sort imports
-isort src/
-
-# Specific profile
-isort --profile=black src/
+integration and not requires_cascor and not requires_server and not slow
 ```
 
-### Flake8
+Artifact:
 
-**Purpose:** Linting
+- `integration-test-results`
 
-**Configuration:**
+### `build`
 
-```ini
-# .flake8 or setup.cfg
-[flake8]
-max-line-length = 120
-extend-ignore = E203, E266, E501, W503
-max-complexity = 15
-select = B,C,E,F,W,T4,B9
-```
+- Python: `3.14`
+- Uses `python -m build --sdist --wheel`
+- Verifies both `.tar.gz` and `.whl`
+- Uploads `dist-packages`
 
-**Usage:**
+### `security`
 
-```bash
-# Lint code
-flake8 src/
+- Python: `3.14`
+- Tools: `gitleaks`, `bandit`, `pip-audit`
+- Uploads SARIF and security report artifacts
 
-# With specific options
-flake8 src/ --max-line-length=120 --statistics
-
-# Ignore specific errors
-flake8 src/ --extend-ignore=E501,W503
-```
-
-### MyPy
-
-**Purpose:** Type checking
-
-**Configuration:**
-
-```toml
-[tool.mypy]
-python_version = "3.11"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = false
-ignore_missing_imports = true
-show_error_codes = true
-```
-
-**Usage:**
-
-```bash
-# Type check
-mypy src/
-
-# With options
-mypy src/ --ignore-missing-imports --no-strict-optional
-
-# Check specific file
-mypy src/config_manager.py
-```
-
-### Bandit
-
-**Purpose:** Security scanning
-
-**Configuration:**
+### `dependency-docs`
 
 ```yaml
 # .bandit.yml
@@ -581,7 +471,7 @@ confidence: MEDIUM
 severity: MEDIUM
 ```
 
-**Usage:**
+Artifact:
 
 ```bash
 # Security scan
@@ -646,419 +536,122 @@ markers = [
 ]
 ```
 
-**Usage:**
+- Python: `3.14`
+- Runs doc link validator with excluded directories/files:
 
 ```bash
-# Run all tests
-pytest tests/
-
-# Run with coverage
-pytest tests/ --cov=src --cov-report=html
-
-# Run specific marker
-pytest -m unit
-
-# Verbose output
-pytest tests/ -vv
-
-# Stop on first failure
-pytest tests/ -x
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
 ```
 
-### Coverage.py
+### `docker-build`
 
-**Purpose:** Code coverage tracking
+- Builds image from root `Dockerfile`
+- Starts container and waits for healthy state
+- Verifies:
+  - package import
+  - `/v1/health` response
 
-**Configuration:**
+### `required-checks`
 
-```toml
-[tool.coverage.run]
-source = ["src"]
-omit = [
-    "*/tests/*",
-    "*/__pycache__/*"
-]
-branch = true
+Aggregates job results and enforces final pass/fail semantics used by branch protection.
 
-[tool.coverage.report]
-show_missing = true
-skip_covered = false
-fail_under = 60
-precision = 2
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise NotImplementedError"
-]
-```
+## Environment Variables Used in CI
 
-**Usage:**
-
-```bash
-# Run tests with coverage
-coverage run -m pytest tests/
-
-# Generate report
-coverage report
-
-# Generate HTML report
-coverage html
-
-# Combine coverage data
-coverage combine
-
-# Erase coverage data
-coverage erase
-```
-
----
-
-## Environment Variables
-
-### GitHub Actions Default Variables
-
-```bash
-# Workflow context
-GITHUB_WORKFLOW="CI/CD Pipeline"
-GITHUB_RUN_ID="1234567890"
-GITHUB_RUN_NUMBER="42"
-GITHUB_ACTION="run-tests"
-
-# Repository context
-GITHUB_REPOSITORY="owner/repo"
-GITHUB_REPOSITORY_OWNER="owner"
-GITHUB_SHA="abc123..."
-GITHUB_REF="refs/heads/main"
-GITHUB_REF_NAME="main"
-
-# Event context
-GITHUB_EVENT_NAME="push"
-GITHUB_EVENT_PATH="/github/workflow/event.json"
-GITHUB_ACTOR="username"
-
-# Runner context
-RUNNER_OS="Linux"
-RUNNER_ARCH="X64"
-RUNNER_NAME="GitHub Actions 1"
-RUNNER_TEMP="/tmp"
-RUNNER_WORKSPACE="/home/runner/work/repo/repo"
-
-# Other
-CI="true"
-GITHUB_ACTIONS="true"
-GITHUB_WORKSPACE="/home/runner/work/repo/repo"
-GITHUB_SERVER_URL="https://github.com"
-GITHUB_API_URL="https://api.github.com"
-```
-
-### Custom Environment Variables
+Top-level workflow env:
 
 ```yaml
 env:
-  # Python
-  PYTHONUNBUFFERED: 1
-  PYTHONDONTWRITEBYTECODE: 1
-
-  # Application
-  CASCOR_DEBUG: 0
-  CASCOR_DEMO_MODE: 1
-  CASCOR_DEMO_INTERVAL: 0.1
-
-  # Testing
-  PYTEST_ADDOPTS: "--verbose --color=yes"
-  COVERAGE_CORE: sysmon
-
-  # Conda
-  CONDA_ENV_NAME: JuniperPython-CI
+  ENV_NAME: juniper-canopy
+  PYTHON_TEST_VERSION: "3.14"
+  COVERAGE_FAIL_UNDER: "80"
 ```
 
-### Accessing Environment Variables
-
-**In workflow:**
+Test gating envs in unit/integration jobs:
 
 ```yaml
-- name: Use Environment Variable
-  run: |
-    echo "Workflow: ${{ github.workflow }}"
-    echo "Python: ${{ env.PYTHON_VERSION }}"
-    echo "Custom: ${{ env.CASCOR_DEBUG }}"
+CASCOR_BACKEND_AVAILABLE: 0
+RUN_SERVER_TESTS: 0
+ENABLE_SLOW_TESTS: 0
 ```
 
-**In Python:**
+## Dependency Reference
 
-```python
-import os
+Primary CI dependency file:
 
-# GitHub Actions variables
-is_ci = os.getenv('CI') == 'true'
-workflow = os.getenv('GITHUB_WORKFLOW')
-run_id = os.getenv('GITHUB_RUN_ID')
+- `conf/requirements_ci.txt`
 
-# Custom variables
-debug = os.getenv('CASCOR_DEBUG', '0') == '1'
-demo_mode = os.getenv('CASCOR_DEMO_MODE', '0') == '1'
-```
+Notable required entries:
 
----
+- `prometheus-client>=0.20.0`
+- `sentry-sdk>=2.0.0`
 
-## Artifact Specifications
+These support observability-import paths used during tests and runtime checks.
 
-### Test Results Artifact
+## Documentation Link Checker Reference
 
-**Name:** `test-results-{python-version}`
+Script: `scripts/check_doc_links.py`
 
-**Contents:**
+Core capabilities:
+
+- Validates relative file links and same-file anchors.
+- Skips fenced code blocks and inline code spans.
+- Supports cross-repo handling modes:
+  - `skip` (CI default)
+  - `warn`
+  - `check`
+
+Exit codes:
+
+- `0`: all valid
+- `1`: broken links or invalid arguments
+
+## Common Failure Classes
+
+### Stale lockfile
+
+Symptom:
+
+- `lockfile-check` fails diff
+
+Fix:
 
 ```bash
-reports/
-├── junit/
-│   └── results.xml          # JUnit XML report
-├── test_report.html         # HTML test report
-└── coverage/
-    └── index.html           # Coverage HTML report
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
 ```
 
-**Metadata:**
+### Broken docs links
 
-```yaml
-name: test-results-3.13
-retention-days: 30
-size: ~2-5 MB
-format: ZIP archive
-```
+Symptom:
 
-### Coverage Report Artifact
+- `docs` job reports missing files/anchors
 
-**Name:** `coverage-report-{python-version}`
+Fix:
 
-**Contents:**
+- run checker locally with the CI command and repair relative paths or heading anchors
+
+### Optional testing modules skipped
+
+Symptom:
+
+- Service/e2e tests skipped via `importorskip`
+
+Fix (local full-run only):
 
 ```bash
-reports/coverage/
-├── index.html               # Main coverage page
-├── *.html                   # Per-file coverage
-├── style.css                # Styling
-└── coverage.xml             # XML report
+pip install "juniper-cascor-client[testing]"
+pip install "juniper-data-client[testing]"
 ```
 
-**Metadata:**
-
-```yaml
-name: coverage-report-3.13
-retention-days: 30
-size: ~1-3 MB
-format: ZIP archive
-```
-
-### Accessing Artifacts
-
-**Via GitHub UI:**
-
-1. Go to workflow run page
-2. Scroll to "Artifacts" section
-3. Click artifact name to download
-
-**Via GitHub CLI:**
-
-```bash
-# List artifacts for run
-gh run view RUN_ID --log-failed
-
-# Download specific artifact
-gh run download RUN_ID -n test-results-3.13
-
-# Download all artifacts
-gh run download RUN_ID
-```
-
-**Via REST API:**
-
-```bash
-# List artifacts
-curl -H "Authorization: token $TOKEN" \
-  https://api.github.com/repos/OWNER/REPO/actions/runs/RUN_ID/artifacts
-
-# Download artifact
-curl -L -H "Authorization: token $TOKEN" \
-  https://api.github.com/repos/OWNER/REPO/actions/artifacts/ARTIFACT_ID/zip \
-  -o artifact.zip
-```
-
----
-
-## API Reference
-
-### GitHub Actions API
-
-#### Workflow Runs
-
-**List workflow runs:**
-
-```bash
-GET /repos/{owner}/{repo}/actions/runs
-```
-
-**Get workflow run:**
-
-```bash
-GET /repos/{owner}/{repo}/actions/runs/{run_id}
-```
-
-**Re-run workflow:**
-
-```bash
-POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun
-```
-
-#### Artifacts
-
-**List artifacts:**
-
-```bash
-GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts
-```
-
-**Download artifact:**
-
-```bash
-GET /repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip
-```
-
-**Delete artifact:**
-
-```bash
-DELETE /repos/{owner}/{repo}/actions/artifacts/{artifact_id}
-```
-
-### Codecov API
-
-#### Upload Coverage
-
-```bash
-curl -X POST \
-  --data-binary @coverage.xml \
-  -H "Authorization: token $CODECOV_TOKEN" \
-  https://codecov.io/upload/v4
-```
-
-#### Get Coverage Report
-
-```bash
-curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
-```
-
----
-
-## Troubleshooting Reference
-
-### Common Error Codes
-
-| Error | Cause                    | Solution                         |
-| ----- | ------------------------ | -------------------------------- |
-| E001  | Workflow syntax error    | Validate YAML syntax             |
-| E002  | Missing required field   | Add required field to workflow   |
-| E003  | Invalid expression       | Fix workflow expression syntax   |
-| E101  | Job timeout              | Increase timeout or optimize job |
-| E102  | Job cancelled            | Check concurrency settings       |
-| E201  | Step failed              | Check step logs for details      |
-| E202  | Command not found        | Install required tool            |
-| E203  | Permission denied        | Check file permissions           |
-| E301  | Artifact upload failed   | Check size and path              |
-| E302  | Artifact download failed | Verify artifact exists           |
-
-### Exit Codes
-
-| Code | Meaning                 |
-| ---- | ----------------------- |
-| 0    | Success                 |
-| 1    | General error           |
-| 2    | Misuse of shell command |
-| 126  | Command cannot execute  |
-| 127  | Command not found       |
-| 128  | Invalid exit argument   |
-| 130  | Terminated by Ctrl+C    |
-| 137  | Killed (out of memory)  |
-| 139  | Segmentation fault      |
-
-### Log Analysis
-
-**Search patterns:**
-
-```bash
-# Errors
-grep -i "error" workflow.log
-
-# Warnings
-grep -i "warning" workflow.log
-
-# Failed tests
-grep "FAILED" workflow.log
-
-# Coverage issues
-grep "coverage" workflow.log | grep -i "low\|fail"
-```
-
----
-
-## Performance Metrics
-
-### Baseline Performance
-
-| Stage            | Duration | CPU     | Memory |
-| ---------------- | -------- | ------- | ------ |
-| Lint             | 2 min    | 1 core  | 512 MB |
-| Test (each)      | 8 min    | 2 cores | 2 GB   |
-| Build            | 2 min    | 1 core  | 512 MB |
-| Integration      | 5 min    | 2 cores | 1 GB   |
-| Quality Gate     | 30 sec   | 1 core  | 256 MB |
-| Total (parallel) | ~15 min  | -       | -      |
-
-### Optimization Targets
-
-| Metric            | Current | Target | Stretch |
-| ----------------- | ------- | ------ | ------- |
-| Total build time  | 15 min  | 10 min | 7 min   |
-| Test suite        | 8 min   | 5 min  | 3 min   |
-| Lint              | 2 min   | 1 min  | 30 sec  |
-| Coverage overhead | 20%     | 10%    | 5%      |
-
----
-
-## Version History
-
-### Version 1.0.0 (2025-11-05)
-
-**Initial release:**
-
-- Complete CI/CD pipeline
-- Multi-version Python testing
-- Coverage reporting
-- Pre-commit hooks
-- Quality gates
-- Comprehensive documentation
-
----
-
-## References
-
-### Official Documentation
-
-- [GitHub Actions Docs](https://docs.github.com/en/actions)
-- [Workflow Syntax](https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions)
-- [Pytest Docs](https://docs.pytest.org/)
-- [Coverage.py Docs](https://coverage.readthedocs.io/)
-- [Pre-commit Docs](https://pre-commit.com/)
-- [Codecov Docs](https://docs.codecov.com/)
-
-### Project Documentation
-
-- [CICD_QUICK_START.md](CICD_QUICK_START.md)
-- [CICD_ENVIRONMENT_SETUP.md](CICD_ENVIRONMENT_SETUP.md)
-- [CICD_MANUAL.md](CICD_MANUAL.md)
-- [AGENTS.md](../../AGENTS.md)
-- [README.md](../../README.md)
-
----
+## Related Docs
 
 **Last Updated:** 2026-04-05  
 **Version:** 0.25.1  
