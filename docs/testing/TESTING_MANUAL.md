@@ -850,65 +850,21 @@ def test_with_fixture(resource):
 
 ### GitHub Actions Workflow
 
-```yaml
-# .github/workflows/ci.yml
-name: CI/CD Pipeline
+Current CI test behavior is defined in `.github/workflows/ci.yml`:
 
-on:
-  push:
-    branches: [main, develop, feature/**, fix/**]
-  pull_request:
-    branches: [main, develop]
+- `pre-commit` and `unit-tests` run on Python `3.12`, `3.13`, and `3.14`
+- integration tests run as a separate `integration-tests` job on Python `3.14`
+- fast-test marker filtering is enforced:
+  - unit/regression: `not requires_cascor and not requires_server and not slow`
+  - integration: `integration and not requires_cascor and not requires_server and not slow`
+- dependencies come from `conf/requirements_ci.txt` plus editable install:
+  - `pip install -r conf/requirements_ci.txt`
+  - `pip install -e .`
 
-jobs:
-  pre-commit:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+For full CI runbook and gate semantics, see:
 
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-
-      - name: Run pre-commit hooks
-        run: pre-commit run --all-files
-
-  unit-tests:
-    needs: [pre-commit]
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13", "3.14"]
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-
-      - name: Install dependencies
-        run: |
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -r conf/requirements_ci.txt
-          pip install -e .
-
-      - name: Run tests
-        run: |
-          python -m pytest \
-            -m "not requires_cascor and not requires_server and not slow" \
-            src/tests/unit/ src/tests/regression/ \
-            --cov=src \
-            --cov-fail-under=80
-```
+- [CI/CD Manual](../ci_cd/CICD_MANUAL.md)
+- [CI/CD Reference](../ci_cd/CICD_REFERENCE.md)
 
 ### Pre-commit Hooks
 
@@ -941,7 +897,7 @@ repos:
 ```bash
 # Problem: ModuleNotFoundError
 # Solution: Activate conda environment
-conda activate JuniperPython
+conda activate JuniperCanopy
 ```
 
 #### 2. Test Discovery Fails
