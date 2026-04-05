@@ -1,25 +1,30 @@
 # CI/CD Technical Reference
 
-## Complete technical reference for the CI/CD pipeline
+## Verified reference for GitHub workflows
 
----
+**Last Updated:** 2026-04-04  
+**Version:** 0.26.0  
+**Status:** Current
 
 ## Table of Contents
 
-1. [Pipeline Architecture](#pipeline-architecture)
-2. [Workflow Specification](#workflow-specification)
-3. [Configuration Files](#configuration-files)
-4. [Tool Configurations](#tool-configurations)
-5. [Environment Variables](#environment-variables)
-6. [Artifact Specifications](#artifact-specifications)
-7. [API Reference](#api-reference)
-8. [Troubleshooting Reference](#troubleshooting-reference)
+1. [Workflow Files](#workflow-files)
+2. [Primary Pipeline (`ci.yml`)](#primary-pipeline-ciyml)
+3. [Job Contracts](#job-contracts)
+4. [Lockfile and Dependency Policy](#lockfile-and-dependency-policy)
+5. [Documentation Link Validation](#documentation-link-validation)
+6. [Security Workflows](#security-workflows)
+7. [Publish Workflow](#publish-workflow)
+8. [Dependabot Lockfile Workflow](#dependabot-lockfile-workflow)
 
----
+## Workflow Files
 
-## Pipeline Architecture
+- `.github/workflows/ci.yml`: main CI pipeline used on push/PR.
+- `.github/workflows/security-scan.yml`: scheduled weekly scan.
+- `.github/workflows/publish.yml`: release publishing pipeline.
+- `.github/workflows/lockfile-update.yml`: Dependabot lockfile update automation.
 
-### System Diagram
+## Primary Pipeline `ci.yml`
 
 ```mermaid
 graph TB
@@ -762,7 +767,7 @@ reports/htmlcov/
 reports/coverage.xml         # XML report
 ```
 
-**Metadata:**
+### Execution Order
 
 ```yaml
 name: coverage-report-py3.14
@@ -771,84 +776,82 @@ size: ~1-3 MB
 format: ZIP archive
 ```
 
-### Accessing Artifacts
+## Job Contracts
 
-**Via GitHub UI:**
-
-1. Go to workflow run page
-2. Scroll to "Artifacts" section
-3. Click artifact name to download
-
-**Via GitHub CLI:**
-
-```bash
-# List artifacts for run
-gh run view RUN_ID --log-failed
+### `pre-commit`
 
 # Download specific artifact
 gh run download RUN_ID -n unit-test-results-py3.14
 
-# Download all artifacts
-gh run download RUN_ID
-```
+### `unit-tests`
 
-**Via REST API:**
-
-```bash
-# List artifacts
-curl -H "Authorization: token $TOKEN" \
-  https://api.github.com/repos/OWNER/REPO/actions/runs/RUN_ID/artifacts
-
-# Download artifact
-curl -L -H "Authorization: token $TOKEN" \
-  https://api.github.com/repos/OWNER/REPO/actions/artifacts/ARTIFACT_ID/zip \
-  -o artifact.zip
-```
-
----
-
-## API Reference
-
-### GitHub Actions API
-
-#### Workflow Runs
-
-**List workflow runs:**
+- Python matrix: `3.12`, `3.13`, `3.14`
+- Installs:
+  - `torch` (CPU index)
+  - `conf/requirements_ci.txt`
+  - editable package (`pip install -e .`)
+- Test command:
 
 ```bash
-GET /repos/{owner}/{repo}/actions/runs
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/ \
+  --verbose \
+  --timeout=60 \
+  --maxfail=5 \
+  --junitxml=reports/junit/junit-unit.xml \
+  --cov=src \
+  --cov-report=term-missing \
+  --cov-report=xml:reports/coverage.xml \
+  --cov-report=html:reports/htmlcov \
+  --cov-fail-under=80
 ```
 
-**Get workflow run:**
+- Special behavior: Python 3.12 SIGABRT (`exit 134`) is treated as success only when JUnit XML reports `0` failures and `0` errors.
+
+### `integration-tests`
+
+- Runs when event is PR or branch is `main`/`develop`
+- Uses Python `3.14`
+- Marker filter:
 
 ```bash
-GET /repos/{owner}/{repo}/actions/runs/{run_id}
+-m "integration and not requires_cascor and not requires_server and not slow"
 ```
 
-**Re-run workflow:**
+### `build`
+
+- Uses Python `3.14`
+- Builds wheel/sdist via `python -m build`
+- Verifies artifacts in `dist/`
+
+### `security`
+
+- Runs gitleaks, bandit (SARIF + text), and pip-audit
+- Uploads SARIF with `github/codeql-action/upload-sarif`
+- Fails pipeline on pip-audit vulnerabilities
+
+### `dependency-docs`
+
+- Uses Miniforge setup
+- Installs CI dependencies and runs:
 
 ```bash
-POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun
+bash scripts/generate_dep_docs.sh
 ```
 
-#### Artifacts
+- Validates generated `conf/conda_environment_ci.yaml`
 
-**List artifacts:**
+### `lockfile-check`
 
-```bash
-GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts
-```
-
-**Download artifact:**
+- Verifies `requirements.lock` freshness by recompiling with `uv`:
 
 ```bash
-GET /repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip
-```
-
-**Delete artifact:**
-
-```bash
-DELETE /repos/{owner}/{repo}/actions/artifacts/{artifact_id}
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o /tmp/requirements.lock.check
 ```
 
 ### Coverage Artifact Retrieval
@@ -859,84 +862,36 @@ DELETE /repos/{owner}/{repo}/actions/artifacts/{artifact_id}
 gh run download RUN_ID -n coverage-report-py3.14
 ```
 
----
+### `docker-build`
 
-## Troubleshooting Reference
+- Runs on PR/main/develop only
+- Builds root Docker image
+- Starts container and checks health endpoint `/v1/health`
 
-### Common Error Codes
+### `required-checks`
 
-| Error | Cause                    | Solution                         |
-| ----- | ------------------------ | -------------------------------- |
-| E001  | Workflow syntax error    | Validate YAML syntax             |
-| E002  | Missing required field   | Add required field to workflow   |
-| E003  | Invalid expression       | Fix workflow expression syntax   |
-| E101  | Job timeout              | Increase timeout or optimize job |
-| E102  | Job cancelled            | Check concurrency settings       |
-| E201  | Step failed              | Check step logs for details      |
-| E202  | Command not found        | Install required tool            |
-| E203  | Permission denied        | Check file permissions           |
-| E301  | Artifact upload failed   | Check size and path              |
-| E302  | Artifact download failed | Verify artifact exists           |
+- Final quality gate.
+- Fails if any required upstream jobs fail (including lockfile or docs checks).
 
-### Exit Codes
+## Lockfile and Dependency Policy
 
-| Code | Meaning                 |
-| ---- | ----------------------- |
-| 0    | Success                 |
-| 1    | General error           |
-| 2    | Misuse of shell command |
-| 126  | Command cannot execute  |
-| 127  | Command not found       |
-| 128  | Invalid exit argument   |
-| 130  | Terminated by Ctrl+C    |
-| 137  | Killed (out of memory)  |
-| 139  | Segmentation fault      |
+- `requirements.lock` is the canonical compiled lock for CI parity.
+- Compile command must include `juniper-data`, `juniper-cascor`, and `observability` extras.
+- `conf/requirements_ci.txt` remains the direct CI install list for fast, deterministic setup.
 
-### Log Analysis
+## Documentation Link Validation
 
-**Search patterns:**
+`scripts/check_doc_links.py` validates:
 
-```bash
-# Errors
-grep -i "error" workflow.log
+- Relative file links resolve inside repo boundaries.
+- Same-file anchors map to existing headings.
+- Cross-repo links are policy-controlled (`skip`, `warn`, `check`).
 
-# Warnings
-grep -i "warning" workflow.log
+CI currently uses `--cross-repo skip` for portability.
 
-# Failed tests
-grep "FAILED" workflow.log
+## Security Workflows
 
-# Coverage issues
-grep "coverage" workflow.log | grep -i "low\|fail"
-```
-
----
-
-## Performance Metrics
-
-### Baseline Performance
-
-| Stage            | Duration | CPU     | Memory |
-| ---------------- | -------- | ------- | ------ |
-| Lint             | 2 min    | 1 core  | 512 MB |
-| Test (each)      | 8 min    | 2 cores | 2 GB   |
-| Build            | 2 min    | 1 core  | 512 MB |
-| Integration      | 5 min    | 2 cores | 1 GB   |
-| Quality Gate     | 30 sec   | 1 core  | 256 MB |
-| Total (parallel) | ~15 min  | -       | -      |
-
-### Optimization Targets
-
-| Metric            | Current | Target | Stretch |
-| ----------------- | ------- | ------ | ------- |
-| Total build time  | 15 min  | 10 min | 7 min   |
-| Test suite        | 8 min   | 5 min  | 3 min   |
-| Lint              | 2 min   | 1 min  | 30 sec  |
-| Coverage overhead | 20%     | 10%    | 5%      |
-
----
-
-## Version History
+### `ci.yml` `security` job
 
 ### Version 1.1.0 (2026-04-04)
 
@@ -951,11 +906,13 @@ grep "coverage" workflow.log | grep -i "low\|fail"
 
 **Initial release.**
 
----
+## Publish Workflow
 
-## References
+`publish.yml` triggers on release publish and has three jobs:
 
-### Official Documentation
+1. `build` (`python -m build`, `twine check`)
+2. `testpypi` (OIDC publish + install verification)
+3. `pypi` (OIDC publish after TestPyPI success)
 
 - [GitHub Actions Docs](https://docs.github.com/en/actions)
 - [Workflow Syntax](https://docs.github.com/en/actions/reference/workflow-syntax-for-github-actions)
@@ -963,15 +920,14 @@ grep "coverage" workflow.log | grep -i "low\|fail"
 - [Coverage.py Docs](https://coverage.readthedocs.io/)
 - [Pre-commit Docs](https://pre-commit.com/)
 
-### Project Documentation
+## Dependabot Lockfile Workflow
 
-- [CICD_QUICK_START.md](CICD_QUICK_START.md)
-- [CICD_ENVIRONMENT_SETUP.md](CICD_ENVIRONMENT_SETUP.md)
-- [CICD_MANUAL.md](CICD_MANUAL.md)
-- [AGENTS.md](../../AGENTS.md)
-- [README.md](../../README.md)
+`lockfile-update.yml`:
 
----
+- Trigger: push to `dependabot/pip/**`
+- Guard: `if: github.actor == 'dependabot[bot]'`
+- Regenerates `requirements.lock` using `uv pip compile`
+- Commits and pushes with bot identity when lockfile changes
 
 **Last Updated:** 2026-04-04  
 **Version:** 0.26.0  

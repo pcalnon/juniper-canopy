@@ -1,41 +1,41 @@
-# CI/CD Complete User Manual
+# CI/CD Manual
 
-## Comprehensive guide for developers, reviewers, and maintainers
+**Last Updated:** 2026-04-04
+**Version:** 0.26.0
+**Status:** Current
+
+Comprehensive operational guide for developers, reviewers, and maintainers working with JuniperCanopy CI workflows.
 
 ---
 
 ## Table of Contents
 
-1. [Introduction](#introduction)
+1. [Overview](#overview)
 2. [For Developers](#for-developers)
-3. [For Code Reviewers](#for-code-reviewers)
+3. [For Reviewers](#for-reviewers)
 4. [For Maintainers](#for-maintainers)
 5. [Workflow Deep Dive](#workflow-deep-dive)
-6. [Quality Gates and Metrics](#quality-gates-and-metrics)
-7. [Debugging Failed Builds](#debugging-failed-builds)
-8. [Performance Optimization](#performance-optimization)
-9. [Security Considerations](#security-considerations)
-10. [Emergency Procedures](#emergency-procedures)
+6. [Lockfile and Dependency Workflow](#lockfile-and-dependency-workflow)
+7. [Documentation Link Validation Workflow](#documentation-link-validation-workflow)
+8. [Troubleshooting Playbook](#troubleshooting-playbook)
 
 ---
 
-## Introduction
+## Overview
 
-### What is CI/CD?
+JuniperCanopy CI is implemented with GitHub Actions and enforces a multi-stage quality gate:
 
-**Continuous Integration (CI):**
+- pre-commit checks on Python `3.12`, `3.13`, `3.14`
+- unit/regression tests with coverage gate on Python `3.12`, `3.13`, `3.14`
+- integration subset tests
+- security scans
+- build verification
+- lockfile freshness verification
+- documentation link verification
+- Docker build and smoke test
+- final aggregate quality gate
 
-- Automatically test code on every commit
-- Catch bugs early before they reach production
-- Ensure code quality through automated checks
-
-**Continuous Deployment (CD):**
-
-- Automatically deploy passing code
-- Reduce manual deployment errors
-- Enable rapid iteration
-
-### Our CI/CD Stack
+Primary workflow files:
 
 ```bash
 GitHub Actions     # CI/CD platform
@@ -385,65 +385,53 @@ start reports/htmlcov/index.html
 
 **In coverage report:**
 
-1. Click on file name
-2. Red lines = not covered
-3. Yellow lines = partially covered (branches)
-4. Green lines = covered
+1. Install/refresh development tooling.
 
-**Focus on:**
+    ```bash
+    python -m pip install --upgrade pip
+    pip install pre-commit uv
+    pre-commit install
 
-- Error handling paths
-- Edge cases
-- Branch conditions
-- Uncovered functions
 
-#### Write Tests for Gaps
+2. Run the same fast unit/regression subset used by CI:
 
-```python
-# Coverage shows line 45 uncovered:
-def process_data(data):
-    if not data:
-        return None  # Line 45 - RED
-    return transform(data)
+    ```bash
+    python -m pytest \
+      -m "not requires_cascor and not requires_server and not slow" \
+      src/tests/unit/ src/tests/regression/ \
+      --verbose \
+      --cov=src \
+      --cov-report=term-missing \
+      --cov-fail-under=80
+    ```
 
-# Add test:
-def test_process_data_empty():
-    """Test process_data with empty input."""
-    assert process_data(None) is None
-    assert process_data([]) is None
-    assert process_data({}) is None
-```
-
-### Common Development Scenarios
-
-#### Scenario 1: Quick Fix
-
-```bash
-# 1. Create branch
-git checkout -b fix/quick-fix
-
-# 2. Make change
-vim src/config_manager.py
+3. Run the same fast integration subset used by CI:
 
 # 3. Test
 python -m pytest src/tests/unit/test_config_manager.py -v
 
-# 4. Commit
-git add src/config_manager.py
-git commit -m "fix: Handle None in config validation"
+4. Run docs-link validation with CI-equivalent flags:
 
-# 5. Push
-git push origin fix/quick-fix
+    ```bash
+    python scripts/check_doc_links.py \
+      --exclude templates --exclude history \
+      --exclude pull_requests --exclude releases \
+      --exclude analysis --exclude fixes --exclude development \
+      --exclude CHANGELOG.md \
+      --cross-repo skip
+    ```
 
-# 6. Create PR
-# GitHub UI → Create pull request
+5. If dependencies changed, regenerate lockfile before push:
 
-# 7. Wait for CI (should be fast for small fix)
+    ```bash
+    uv pip compile pyproject.toml \
+      --extra juniper-data \
+      --extra juniper-cascor \
+      --extra observability \
+      -o requirements.lock
+    ```
 
-# 8. Merge when approved and CI passes
-```
-
-#### Scenario 2: Large Feature
+### Monitoring CI on PRs
 
 ```bash
 # 1. Create feature branch
@@ -467,7 +455,16 @@ python -m pytest src/tests/ --cov=src --cov-report=term
 # 7. Merge when approved
 ```
 
-#### Scenario 3: Debugging Test Failure
+- `Pre-commit (Python 3.12/3.13/3.14)`
+- `Unit Tests + Coverage (Python 3.12/3.13/3.14)`
+- `Integration Tests`
+- `Security Scans`
+- `Build Distribution`
+- `Dependency Documentation`
+- `Lockfile Freshness`
+- `Documentation Links`
+- `Docker Build & Smoke Test`
+- `Quality Gate`
 
 ```bash
 # 1. Test fails in CI but passes locally
@@ -498,150 +495,25 @@ git push
 
 ---
 
-## For Code Reviewers
+## For Reviewers
 
 ### Review Checklist
 
-#### Before Looking at Code
+1. Confirm CI reached `Quality Gate` success.
+2. Confirm test-related changes include corresponding test updates.
+3. Confirm dependency changes include:
+   - `pyproject.toml` updates
+   - `requirements.lock` regeneration
+   - CI lockfile-check compatibility
+4. Confirm documentation changes do not break internal links.
+5. Confirm no workflow drift was introduced unintentionally.
 
-**Check CI status:**
+### High-Signal Failure Patterns
 
-- [ ] All jobs passed (green checkmarks)
-- [ ] Coverage maintained or increased
-- [ ] No security warnings
-- [ ] Artifacts generated successfully
-
-**If CI failed:**
-
-1. Don't review code yet
-2. Comment: "Please fix CI failures before review"
-3. Wait for green build
-
-#### Code Quality Review
-
-**Check for:**
-
-- [ ] Code follows project style (Black/isort formatted)
-- [ ] No unused imports or variables
-- [ ] Proper error handling
-- [ ] No hardcoded credentials or secrets
-- [ ] Thread safety (locks for shared state)
-- [ ] Bounded collections (no memory leaks)
-- [ ] Docstrings for public methods
-- [ ] Type hints where appropriate
-
-#### Test Coverage Review
-
-**Check coverage report:**
-
-1. Go to PR → Checks → Test job → Coverage
-2. Look for coverage percentage
-3. Expand coverage details
-
-**Verify:**
-
-- [ ] New code has tests
-- [ ] Coverage hasn't decreased
-- [ ] Critical paths 100% covered
-- [ ] Edge cases tested
-- [ ] Error paths tested
-
-**Example feedback:**
-
-```markdown
-The `validate_config` function looks good, but I don't see tests for:
-- Invalid config format
-- Missing required fields
-- Type validation
-
-Could you add tests for these error cases?
-```
-
-#### Documentation Review
-
-**Check:**
-
-- [ ] README updated if API changed
-- [ ] CHANGELOG.md has entry
-- [ ] Docstrings added/updated
-- [ ] Code comments only where needed
-- [ ] AGENTS.md updated if dev process changed
-
-#### Functional Review
-
-**Questions to ask:**
-
-1. Does this solve the stated problem?
-2. Is the approach appropriate?
-3. Are there edge cases not handled?
-4. Is it performant?
-5. Is it maintainable?
-6. Does it follow existing patterns?
-
-### Requesting Changes
-
-**Be specific and constructive:**
-
-❌ **Bad:**
-
-```markdown
-This code is messy.
-```
-
-✅ **Good:**
-
-```markdown
-This function is doing multiple things. Consider splitting it:
-- `load_config()` - Load from file
-- `validate_config()` - Validate structure
-- `apply_config()` - Apply to application
-
-This would improve testability and maintainability.
-```
-
-**Prioritize feedback:**
-
-**P0 (Must fix):**
-
-- Security issues
-- Correctness bugs
-- Test failures
-- Breaking changes
-
-**P1 (Should fix):**
-
-- Code quality issues
-- Missing tests
-- Documentation gaps
-- Performance concerns
-
-**P2 (Nice to have):**
-
-- Style preferences
-- Refactoring suggestions
-- Future improvements
-
-### Approving Changes
-
-**Before approving:**
-
-- [ ] All CI checks passed
-- [ ] Code reviewed thoroughly
-- [ ] All concerns addressed
-- [ ] Coverage acceptable
-- [ ] Documentation updated
-
-**Approval message template:**
-
-```markdown
-LGTM! 👍
-
-Nice work on the pause/resume functionality. The tests are comprehensive and coverage looks good.
-
-One minor suggestion for future: Consider extracting the state management to a separate class. But that can be a future refactor.
-
-Approved pending green CI.
-```
+- `Lockfile Freshness` failed: lockfile is stale vs `pyproject.toml`.
+- `Documentation Links` failed: broken markdown link or heading anchor.
+- `Unit Tests + Coverage` failed at 80% threshold or test failures.
+- `Docker Build & Smoke Test` failed: packaging/runtime mismatch.
 
 ---
 
@@ -696,15 +568,21 @@ pre-commit autoupdate
 - Any modules losing coverage?
 - Critical modules at target?
 
-**3. Audit secrets:**
+- Keep matrix and pinned runtime versions aligned across workflows.
+- Keep lockfile-generation command consistent between:
+  - local contributor guidance
+  - CI lockfile-check job
+  - lockfile-update workflow
+- Ensure docs-link exclusions remain intentional and minimal.
+- Periodically review artifact retention and workflow runtime cost.
 
 - Rotate any CI service/API secrets in use
 - Check secret access logs
 - Remove unused secrets
 
-#### Quarterly Tasks
+Require at minimum:
 
-**1. Review quality gates:**
+- `Quality Gate`
 
 ```yaml
 # Are thresholds appropriate?
@@ -715,55 +593,50 @@ coverage:
 
 **2. Optimize build performance:**
 
-- Add/update caching
-- Parallelize jobs
-- Remove slow tests
+---
 
-**3. Security audit:**
+## Workflow Deep Dive
 
-- Review Dependabot alerts
-- Update vulnerable dependencies
-- Check for exposed secrets
+### CI Trigger Model
 
-### Managing Quality Gates
+`ci.yml` triggers on:
 
-#### Current Thresholds
+- `push` to `main`, `develop`, `feature/**`, `fix/**`
+- `pull_request` to `main`, `develop`
+- `repository_dispatch` for client update events
+- manual `workflow_dispatch`
 
 ```yaml
 Coverage:
   Warning: <80%
   Failure: <80%
 
-Test Pass Rate:
-  Requirement: 100%
+1. `pre-commit` matrix runs first.
+2. `unit-tests` matrix depends on `pre-commit`.
+3. `integration-tests` and `build` depend on `unit-tests`.
+4. `dependency-docs` and `docker-build` depend on `build`.
+5. `security`, `lockfile-check`, and `docs` run independently.
+6. `required-checks` aggregates all critical outcomes.
+7. `notify` runs after `required-checks`.
 
-Lint:
-  Errors: Block merge
-  Warnings: Allow merge
+### Unit Tests Special Case: Python 3.12 Exit 134
 
-Build:
-  Syntax errors: Block merge
-```
+CI includes a deliberate workaround for rare Python 3.12 `SIGABRT` (`exit 134`) after pytest completion:
 
-#### Adjusting Thresholds
+- If JUnit XML reports `failures=0` and `errors=0`, job exits success.
+- Otherwise, CI preserves failure.
 
-**When to increase:**
+This behavior is specific to CI robustness and is implemented directly in `.github/workflows/ci.yml`.
 
-- Coverage consistently >target for 2+ weeks
-- Team agrees higher standards achievable
-- Critical bugs traced to untested code
+---
 
-**When to decrease:**
+## Lockfile and Dependency Workflow
 
-- Coverage consistently <target despite effort
-- Blocking legitimate work
-- Not achievable for legacy code
+### Why this exists
 
-**How to change:**
+`requirements.lock` is the reproducibility contract for container and CI dependency resolution.
 
-````markdown
-1. Discuss with team
-2. Update in multiple places:
+### Canonical regeneration command
 
 ```bash
 # .github/workflows/ci.yml
@@ -782,82 +655,46 @@ Build:
 fail_under = 80
 ```
 
-3. Announce change to team
-4. Monitor impact
-````
+### CI freshness check behavior
 
-### Handling CI Failures
+CI compiles to `/tmp/requirements.lock.check`, strips first two header lines from both files, then diffs remaining content to avoid false positives caused by output-path metadata in uv headers.
 
-#### Systematic Approach
-
-**1. Triage:**
-
-```bash
-# Classify failure
-- Test failure (logic bug)
-- Flaky test (timing/race condition)
-- Environment issue (dependency/config)
-- Infrastructure issue (GitHub Actions)
-```
-
-**2. Quick fixes:**
-
-```bash
-# Flaky test → Disable temporarily
-@pytest.mark.skip(reason="Flaky test - under investigation #123")
+### Dependabot lockfile update behavior
 
 # Known issue → Document
 # Known Issues:
 # - Test X fails on Python 3.12 (Issue #456)
 ```
 
-**3. Long-term fixes:**
+- runs only for `dependabot[bot]` pushes to `dependabot/pip/**`
+- compiles via `/tmp/requirements.lock.check`
+- moves generated file to `requirements.lock`
+- commits only when changed
+
+---
+
+## Documentation Link Validation Workflow
+
+### CI command
 
 ```bash
-# Fix root cause
-# Add regression test
-# Update documentation
-# Close related issues
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
 ```
 
-#### Flaky Test Management
+### What is validated
 
-**Identify flaky tests:**
+- relative markdown file links
+- same-file heading anchors
+- repository boundary safety for resolved paths
 
-```bash
-# Run test multiple times
-for i in {1..10}; do
-    pytest tests/unit/test_suspected_flaky.py -v || echo "FAIL $i"
-done
-```
+### Why `--cross-repo skip` in CI
 
-**Common causes:**
-
-1. **Timing/race conditions:**
-
-   ```python
-   # Bad
-   time.sleep(0.1)
-   assert condition
-
-   # Good
-   for i in range(50):  # 5 seconds total
-       if condition:
-           break
-       time.sleep(0.1)
-   else:
-       assert False, "Timeout waiting for condition"
-   ```
-
-2. **Shared state:**
-
-   ```python
-   # Bad: Tests depend on execution order
-
-   # Good: Each test independent
-   def test_feature(reset_singleton):
-       # Fixture resets state
-   ```
+CI runners do not guarantee sibling Juniper repositories on disk; cross-repo validation is skipped to avoid false negatives from absent checkouts.
 
 3. **External dependencies:**
 
@@ -873,7 +710,7 @@ done
 
 ### Managing Coverage Artifacts
 
-#### Setup and Configuration
+## Troubleshooting Playbook
 
 Coverage is enforced directly by pytest in CI (`--cov-fail-under=80`) and stored as build artifacts.
 
@@ -888,14 +725,9 @@ Coverage: 73.45% (+0.23%)
 Files Changed: 3
 Lines Changed: +45 / -12
 
-| File                 | Coverage | Δ     |
-| -------------------- | -------- | ----- |
-| config_manager.py    | 93.2%    | +2.1% |
-| demo_mode.py         | 84.5%    | -1.2% |
-| websocket_manager.py | 78.3%    | +0.5% |
-```
+### `Documentation Links` failed
 
-**Interpreting:**
+Run exact CI command locally (same excludes and cross-repo policy), fix broken links/anchors, and re-run until clean.
 
 - **Overall coverage:** reported in job logs and coverage artifact
 - **Δ** (delta): compare to base branch manually or with repository tooling
@@ -915,7 +747,7 @@ Lines Changed: +45 / -12
     path: reports/htmlcov/
 ```
 
-**Coverage report missing files:**
+Verify:
 
 ```yaml
 # Verify coverage include/omit patterns in pyproject.toml

@@ -1,4 +1,4 @@
-# CI/CD Quick Start Guide
+# CI/CD Quick Start
 
 **Last Updated:** 2026-04-04  
 **Time to Complete:** ~5 minutes  
@@ -21,20 +21,12 @@ pytest --version      # Should be 7.0+
 conda env list | grep JuniperCanopy  # Should show active
 ```
 
----
-
-## Install Pre-commit Hooks
-
-**1. Install pre-commit:**
+## 1. Install Local Quality Hooks
 
 ```bash
 pip install pre-commit
-```
-
-**2. Install hooks:**
-
-```bash
 pre-commit install
+pre-commit run --all-files
 ```
 
 **3. Verify:**
@@ -62,79 +54,35 @@ python -m pytest src/tests/ --cov=src --cov-report=term-missing
 **Expected output:**
 
 ```bash
-===================== test session starts ======================
-collected 170 items
 
-tests/unit/test_config_manager.py::test_load_config PASSED  [ 1%]
-tests/unit/test_demo_mode.py::test_start_stop PASSED        [ 2%]
-...
-================== 170 passed in 5.23s =======================
+## 2. Run the Same Fast Tests as CI
 
-------------- coverage: platform linux, python 3.14.x --------------
-Name                          Stmts   Miss  Cover   Missing
-------------------------------------------------------------
-config_manager.py               120      8    93%   45-52
-demo_mode.py                    156     25    84%   120-145
-...
-TOTAL                          2341    622    73%
-```
-
-**View HTML report:**
+From repository root:
 
 ```bash
-python -m pytest src/tests/ --cov=src --cov-report=html:reports/htmlcov
-xdg-open reports/htmlcov/index.html  # Linux
+python -m pip install --upgrade pip
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install -r conf/requirements_ci.txt
+pip install -e .
+mkdir -p logs src/logs reports/junit reports/coverage reports/htmlcov
 ```
 
----
-
-## Set Up GitHub Secrets
-
-The current CI workflow does not require a `CODECOV_TOKEN`. Coverage is enforced in pytest (`--cov-fail-under=80`) and uploaded as GitHub artifacts.
-
----
-
-## Make Your First Commit
-
-**1. Stage changes:**
+Run CI-equivalent unit and regression tests:
 
 ```bash
-git add src/config_manager.py
+CASCOR_BACKEND_AVAILABLE=0 RUN_SERVER_TESTS=0 ENABLE_SLOW_TESTS=0 \
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/ \
+  --verbose --timeout=60 --maxfail=5 \
+  --cov=src --cov-report=term-missing
 ```
 
-**2. Commit (hooks run automatically):**
+Coverage gate in CI is `80%` (`COVERAGE_FAIL_UNDER` in `ci.yml`).
 
-```bash
-git commit -m "Update configuration handling"
-```
+## 3. Validate Lockfile Freshness
 
-**Pre-commit runs:**
-
-```bash
-Trim Trailing Whitespace.............................Passed
-Fix End of Files.....................................Passed
-Check Yaml...........................................Passed
-black................................................Passed
-isort................................................Passed
-flake8...............................................Passed
-```
-
-**3. Push:**
-
-```bash
-git push origin feature/your-branch
-```
-
----
-
-## View CI Results
-
-**1. Go to GitHub:**
-
-- Actions tab
-- See "CI/CD Pipeline" running
-
-**2. Jobs:**
+CI fails when `requirements.lock` does not match `pyproject.toml` (+ extras).
 
 ```bash
 CI/CD Pipeline
@@ -164,16 +112,14 @@ CI/CD Pipeline
 
 Use a project-supported coverage source (for example, a generated static badge or a GitHub artifact summary) if you want a badge in `README.md`.
 
-### Enable Branch Protection
+Commit `requirements.lock` when it changes.
 
 - Settings → Branches → Add rule
 - ☑ Require pull request reviews
 - ☑ Require status checks (`Quality Gate`)
 - ☑ Require branches up to date
 
----
-
-## Common Commands
+CI runs `scripts/check_doc_links.py` and fails on broken internal links.
 
 ```bash
 # Pre-commit
@@ -197,11 +143,9 @@ black src/ --line-length=120
 isort src/ --profile=black
 ```
 
----
+## 5. Understand CI Job Flow
 
-## Troubleshooting
-
-### Pre-commit fails
+Current `CI/CD Pipeline` jobs:
 
 ```bash
 black src/ --line-length=120
@@ -218,7 +162,7 @@ pip install -r conf/requirements.txt
 python -m pytest src/tests/unit/test_demo_mode.py::test_name -vv
 ```
 
-### CI fails but local passes
+## 6. Troubleshooting Fast
 
 ```bash
 # Test with CI Python version
@@ -228,19 +172,15 @@ pip install -r conf/requirements.txt
 python -m pytest src/tests/ -v
 ```
 
----
+Install exactly from `conf/requirements_ci.txt` and `pip install -e .`.
 
-## Resources
+### Lockfile check fails
 
-- [CI/CD Manual](CICD_MANUAL.md) - Complete guide
-- [Environment Setup](CICD_ENVIRONMENT_SETUP.md) - Configuration
-- [Reference](CICD_REFERENCE.md) - Technical specs
-- [AGENTS.md](../../AGENTS.md) - Project development guide
-- [README.md](../../README.md) - Project overview
+Regenerate `requirements.lock` using the exact compile command shown above.
 
----
+### Docs check fails
 
-**You've completed:**
+Run `scripts/check_doc_links.py` locally and fix the broken path/anchor.
 
 ✅ Installed pre-commit hooks  
 ✅ Ran tests with coverage  
@@ -249,6 +189,8 @@ python -m pytest src/tests/ -v
 
 **CI/CD is active!** Every push triggers quality checks, tests, and artifact publication.
 
----
+## Next Reads
 
-**Status:** ✅ Ready to use
+- [CI/CD Manual](CICD_MANUAL.md)
+- [CI/CD Environment Setup](CICD_ENVIRONMENT_SETUP.md)
+- [CI/CD Technical Reference](CICD_REFERENCE.md)

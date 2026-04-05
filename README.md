@@ -85,6 +85,7 @@ uv pip compile pyproject.toml \
   -o requirements.lock
 ```
 
+The `observability` extra includes optional runtime integrations used by `src/observability.py` (`prometheus-client`, `sentry-sdk`).
 All dependencies including `juniper-data-client` and `juniper-cascor-client` are resolved from PyPI.
 
 ## Active Research Components
