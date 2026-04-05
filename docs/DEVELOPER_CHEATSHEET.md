@@ -30,6 +30,7 @@
 | Run with coverage           | `cd src && pytest tests/ --cov=. --cov-report=html --cov-report=term-missing`                        |
 | Coverage threshold check    | `cd src && pytest tests/ --cov=. --cov-fail-under=80`                                                |
 | Pre-commit (all hooks)      | `pre-commit run --all-files`                                                                         |
+| Validate documentation links (CI mode) | `python scripts/check_doc_links.py --exclude templates --exclude history --exclude pull_requests --exclude releases --exclude analysis --exclude fixes --exclude development --exclude CHANGELOG.md --cross-repo skip` |
 | Format code                 | `black src/ && isort src/`                                                                           |
 | Lint                        | `flake8 src/ --max-line-length=512 --statistics`                                                     |
 | Type check                  | `mypy src/ --ignore-missing-imports`                                                                 |
@@ -173,6 +174,7 @@ Extended log levels: `TRACE (5)`, `VERBOSE (7)`, `DEBUG`, `INFO`, `WARNING`, `ER
 | Demo shows stale data                            | Singleton not reset        | Restart app; check `reset_singletons` fixture covers new singletons                                             |
 | WebSocket not connecting                         | Wrong port or path         | Verify `ws://localhost:8050/ws/training`; check `CASCOR_WEBSOCKET_*` vars                                       |
 | Tests fail with backend errors                   | Demo mode not forced       | Ensure `conftest.py` sets `CASCOR_DEMO_MODE=1`; do not set `CASCOR_BACKEND_AVAILABLE` unless backend is running |
+| Docs job fails in CI (`Documentation Links`)     | Broken links/anchors or unsafe doc path | Re-run `python scripts/check_doc_links.py --cross-repo skip --exclude templates --exclude history --exclude pull_requests --exclude releases --exclude analysis --exclude fixes --exclude development --exclude CHANGELOG.md` and fix reported markdown targets |
 | Prometheus metrics missing                       | Feature not enabled        | Set `JUNIPER_CANOPY_METRICS_ENABLED=true`; verify `/metrics` endpoint returns data                              |
 
 ---
@@ -202,6 +204,6 @@ Extended log levels: `TRACE (5)`, `VERBOSE (7)`, `DEBUG`, `INFO`, `WARNING`, `ER
 
 ---
 
-**Last Updated:** 2026-03-15
-**Version:** 1.0.0
+**Last Updated:** 2026-04-05
+**Version:** 1.0.1
 **Maintainer:** Paul Calnon

@@ -24,11 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Updated CI/testing operational documentation to match current source-of-truth workflows and fixtures:
-  - `docs/ci_cd/CICD_QUICK_START.md`
-  - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
-  - `docs/testing/TESTING_ENVIRONMENT_SETUP.md`
-  - Coverage includes current `.github/workflows/ci.yml` job topology, Python `3.12/3.13/3.14` matrix expectations, pip-based CI dependency model, lockfile freshness behavior, and `src/tests/conftest.py` marker-gating/runtime defaults.
+- Updated CI/CD documentation and developer runbooks to cover the documentation link validation gate now enforced in CI:
+  - `docs/ci_cd/CICD_MANUAL.md`
+  - `docs/ci_cd/CICD_REFERENCE.md`
+  - `docs/DEVELOPER_CHEATSHEET.md`
+  - Added `scripts/check_doc_links.py` usage, `--cross-repo` modes (`skip`/`warn`/`check`), safety constraints (absolute/null-byte/traversal/repo-boundary checks), and local troubleshooting commands for the `Documentation Links` CI job.
 
 - Extracted candidate pool section, history tracking, and pool display from `MetricsPanel` to `CandidateMetricsPanel`. Training Metrics tab retains candidate training trace in loss plot and candidate epoch progress bar for context
 - Component count increased from 11 to 12; updated test assertions accordingly

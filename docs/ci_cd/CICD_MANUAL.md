@@ -1032,9 +1032,9 @@ python-version: ["3.11", "3.12", "3.13"]
 
 ### Documentation Links Stage
 
-**Purpose:** Validate internal markdown links and heading anchors.
+**Purpose:** Validate internal markdown links and anchors before merge.
 
-**Command executed in CI (`docs` job):**
+**What runs in CI (`docs` job):**
 
 ```bash
 python scripts/check_doc_links.py \
@@ -1045,17 +1045,22 @@ python scripts/check_doc_links.py \
   --cross-repo skip
 ```
 
-**Why CI uses `--cross-repo skip`:**
+**Behavior and constraints:**
 
-- GitHub runners do not guarantee sibling Juniper repositories are present on disk.
-- Cross-repo links are still structurally validated; only on-disk existence checks are skipped.
+1. Validates relative file links and same-file heading anchors in markdown files.
+2. Skips external URLs (`http`, `https`, `mailto`, `ftp`) and links inside inline/fenced code blocks.
+3. Rejects unsafe link targets:
+   - Absolute paths
+   - Null-byte targets
+   - Excessive traversal (`..` depth > 5)
+   - Paths escaping repository boundaries
+4. Classifies Juniper ecosystem cross-repo links. CI uses `--cross-repo skip` because sibling repositories are not guaranteed on runners.
 
 **Failure conditions:**
 
-- Broken relative markdown links
-- Broken same-file heading anchors
-- Absolute paths in documentation links
-- Link traversal outside repository boundaries
+- Broken internal file links
+- Broken same-file anchors
+- Unsafe link-target validation errors
 
 ### Quality Gate Stage
 
@@ -1294,6 +1299,40 @@ python scripts/check_doc_links.py \
   --exclude CHANGELOG.md \
   --cross-repo skip
 ```
+
+#### Pattern 5: Documentation Links Job Fails
+
+**Symptom:**
+
+```bash
+FAILED: Documentation link validation
+... broken link [label](docs/missing.md) -> file not found
+... broken anchor #missing-heading (heading not found)
+```
+
+**Causes:**
+
+1. Renamed or moved markdown files without updating links
+2. Anchor target no longer exists after heading edits
+3. Unsafe path forms in docs links (absolute paths, null bytes, deep traversal)
+4. Cross-repo references checked in local `check` mode without sibling repos present
+
+**Fix:**
+
+```bash
+# Reproduce CI behavior locally
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+
+# Optional deep debugging
+python scripts/check_doc_links.py --verbose --cross-repo warn docs/ notes/
+```
+
+**Tip:** Use `--cross-repo check` only when sibling Juniper repositories are available locally.
 
 ---
 

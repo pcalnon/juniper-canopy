@@ -9,11 +9,11 @@
 1. [Pipeline Architecture](#pipeline-architecture)
 2. [Workflow Specification](#workflow-specification)
 3. [Configuration Files](#configuration-files)
-4. [Tool Configurations](#tool-configurations)
-5. [Documentation Link Validation](#documentation-link-validation)
-6. [Environment Variables Used in CI](#environment-variables-used-in-ci)
-7. [Dependency Reference](#dependency-reference)
-8. [Documentation Link Checker Reference](#documentation-link-checker-reference)
+4. [Documentation Link Validation](#documentation-link-validation)
+5. [Tool Configurations](#tool-configurations)
+6. [Environment Variables](#environment-variables)
+7. [Artifact Specifications](#artifact-specifications)
+8. [API Reference](#api-reference)
 9. [Troubleshooting Reference](#troubleshooting-reference)
 
 ---
@@ -323,9 +323,68 @@ python scripts/check_doc_links.py \
 # Validate cross-repo links when sibling repos exist locally
 python scripts/check_doc_links.py --cross-repo check
 
-# Print every checked/skipped link
-python scripts/check_doc_links.py --verbose --cross-repo skip
+### scripts/check_doc_links.py
+
+**Location:** `scripts/check_doc_links.py`
+
+**Purpose:** Validate internal markdown links and anchor references, and enforce path-safety constraints for documentation links.
+
+**Core behaviors:**
+
+1. Validates relative file links and same-file heading anchors.
+2. Skips external URL targets (`http`, `https`, `mailto`, `ftp`) and data/host-relative targets (`data:`, `//`).
+3. Ignores links inside inline code and fenced code blocks.
+4. Rejects unsafe inputs:
+   - Absolute paths
+   - Null bytes in targets
+   - Excessive traversal (`..` count > 5)
+   - Paths escaping repository boundaries
+5. Classifies Juniper cross-repo links and applies policy:
+   - `skip`: skip cross-repo checks, count skipped links
+   - `warn`: emit warnings without failing
+   - `check`: validate links against a discovered ecosystem root
+
+---
+
+## Documentation Link Validation
+
+### CI Invocation
+
+The `docs` job in `.github/workflows/ci.yml` runs:
+
+```bash
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
 ```
+
+### CLI Modes
+
+```bash
+# Default mode: validate current repo docs (cross-repo policy defaults to check)
+python scripts/check_doc_links.py
+
+# CI-equivalent mode
+python scripts/check_doc_links.py --cross-repo skip \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md
+
+# Warn for cross-repo links without failing
+python scripts/check_doc_links.py --cross-repo warn --verbose docs/ notes/
+```
+
+### Cross-Repo Policy Notes
+
+- `check` mode tries to discover an ecosystem root containing multiple sibling repositories.
+- If discovery fails in `check` mode, behavior falls back to `skip` with a warning.
+- CI intentionally uses `skip` to avoid false failures when sibling repositories are absent on runners.
+
+### .pre-commit-config.yaml
 
 ### Cross-Repo Modes
 
@@ -780,6 +839,9 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 | E203  | Permission denied        | Check file permissions           |
 | E301  | Artifact upload failed   | Check size and path              |
 | E302  | Artifact download failed | Verify artifact exists           |
+| D401  | Broken markdown link     | Update link target path          |
+| D402  | Broken heading anchor    | Update anchor or heading         |
+| D403  | Unsafe link path         | Remove absolute/null/deep traversal |
 
 ### Exit Codes
 
