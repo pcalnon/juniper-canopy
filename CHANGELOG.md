@@ -28,6 +28,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Updated `docs/ci_cd/CICD_REFERENCE.md` to document active workflows (`ci.yml`, `security-scan.yml`, `publish.yml`, `lockfile-update.yml`)
   - Updated `docs/ci_cd/CICD_MANUAL.md` with role-based runbooks aligned to `required-checks` gating semantics
 
+- Updated CI/testing documentation to reflect current CI workflow behavior and recent collection-failure remediations:
+  - `docs/ci_cd/CICD_MANUAL.md`
+  - `docs/ci_cd/CICD_REFERENCE.md`
+  - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
+  - `docs/ci_cd/CICD_QUICK_START.md`
+  - `docs/testing/TESTING_MANUAL.md`
+  - Coverage includes:
+    - Active Python CI matrix (`3.12`, `3.13`, `3.14`) and default `3.14` job pinning
+    - New `Documentation Links` quality gate (`scripts/check_doc_links.py`, `--cross-repo skip`)
+    - Lockfile freshness behavior (`uv pip compile` with `--extra observability`, header-agnostic comparison)
+    - Optional test-extras guidance (`juniper-data-client[testing]`, `juniper-cascor-client[testing]`) and `pytest.importorskip`/`skipif` patterns to prevent collection failures
+
 - Namespaced Prometheus metrics (`juniper_canopy_` prefix) with WebSocket and demo mode metrics
 - `juniper_canopy_websocket_connections_active` Gauge (by channel)
 - `juniper_canopy_websocket_messages_total` Counter (by channel, type)
