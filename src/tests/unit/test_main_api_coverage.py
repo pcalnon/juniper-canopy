@@ -26,7 +26,7 @@ instead of the removed `main.demo_mode_instance` / `main.demo_mode_active`.
 """
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -1120,3 +1120,136 @@ class TestSetParamsEndpoint:
             assert result.status_code == 400
         finally:
             main.backend = original_backend
+
+    @pytest.mark.asyncio
+    async def test_set_params_backend_rejection_returns_502_and_skips_state_updates(self):
+        """Backend validation failure should return 502 without mutating state."""
+        from fastapi.responses import JSONResponse
+
+        import main
+
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+
+        mock_training_state = MagicMock()
+        mock_training_state.get_state.return_value = {"status": "idle"}
+
+        mock_ws_manager = MagicMock()
+        mock_ws_manager.broadcast = AsyncMock()
+
+        original_backend = main.backend
+        original_training_state = main.training_state
+        original_ws_manager = main.websocket_manager
+        try:
+            main.backend = mock_backend
+            main.training_state = mock_training_state
+            main.websocket_manager = mock_ws_manager
+
+            with patch(
+                "main.asyncio.to_thread",
+                new=AsyncMock(return_value={"ok": False, "error": "invalid threshold"}),
+            ) as mock_to_thread:
+                result = await main.api_set_params({"learning_rate": 0.03, "nn_patience": 5})
+
+            assert isinstance(result, JSONResponse)
+            assert result.status_code == 502
+            assert b"Backend rejected parameters: invalid threshold" in result.body
+            mock_to_thread.assert_awaited_once()
+            call = mock_to_thread.await_args
+            assert call.args[0] == mock_backend.apply_params
+            assert call.kwargs["nn_learning_rate"] == 0.03
+            assert call.kwargs["nn_patience"] == 5
+            mock_training_state.update_state.assert_not_called()
+            mock_ws_manager.broadcast.assert_not_awaited()
+        finally:
+            main.backend = original_backend
+            main.training_state = original_training_state
+            main.websocket_manager = original_ws_manager
+
+    @pytest.mark.asyncio
+    async def test_set_params_success_broadcasts_params_updated_payload(self):
+        """Successful updates should emit params_updated with applied_params."""
+        import main
+
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+
+        mock_training_state = MagicMock()
+        mock_training_state.get_state.return_value = {"status": "running", "current_epoch": 12}
+
+        mock_ws_manager = MagicMock()
+        mock_ws_manager.broadcast = AsyncMock()
+
+        original_backend = main.backend
+        original_training_state = main.training_state
+        original_ws_manager = main.websocket_manager
+        try:
+            main.backend = mock_backend
+            main.training_state = mock_training_state
+            main.websocket_manager = mock_ws_manager
+
+            with patch("main.asyncio.to_thread", new=AsyncMock(return_value={"ok": True})) as mock_to_thread:
+                result = await main.api_set_params(
+                    {
+                        "learning_rate": 0.04,  # legacy key (mapped)
+                        "patience": 7,  # legacy key (mapped)
+                        "cn_candidate_learning_rate": 0.15,
+                    }
+                )
+
+            assert result["status"] == "success"
+            mock_to_thread.assert_awaited_once()
+            call = mock_to_thread.await_args
+            assert call.kwargs["nn_learning_rate"] == 0.04
+            assert call.kwargs["nn_patience"] == 7
+            assert call.kwargs["cn_candidate_learning_rate"] == 0.15
+
+            mock_training_state.update_state.assert_called_once_with(
+                learning_rate=0.04,
+                patience=7,
+                candidate_learning_rate=0.15,
+            )
+            mock_ws_manager.broadcast.assert_awaited_once()
+            broadcast_msg = mock_ws_manager.broadcast.await_args.args[0]
+            assert broadcast_msg["type"] == "params_updated"
+            assert broadcast_msg["data"]["applied_params"]["nn_learning_rate"] == 0.04
+            assert broadcast_msg["data"]["applied_params"]["nn_patience"] == 7
+            assert broadcast_msg["data"]["applied_params"]["cn_candidate_learning_rate"] == 0.15
+        finally:
+            main.backend = original_backend
+            main.training_state = original_training_state
+            main.websocket_manager = original_ws_manager
+
+    @pytest.mark.asyncio
+    async def test_set_params_prefixed_keys_take_precedence_over_legacy_aliases(self):
+        """When both legacy and prefixed keys are present, prefixed value wins."""
+        import main
+
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+
+        mock_training_state = MagicMock()
+        mock_training_state.get_state.return_value = {"status": "idle"}
+
+        mock_ws_manager = MagicMock()
+        mock_ws_manager.broadcast = AsyncMock()
+
+        original_backend = main.backend
+        original_training_state = main.training_state
+        original_ws_manager = main.websocket_manager
+        try:
+            main.backend = mock_backend
+            main.training_state = mock_training_state
+            main.websocket_manager = mock_ws_manager
+
+            with patch("main.asyncio.to_thread", new=AsyncMock(return_value={"ok": True})) as mock_to_thread:
+                await main.api_set_params({"patience": 5, "nn_patience": 9})
+
+            call = mock_to_thread.await_args
+            assert "patience" not in call.kwargs
+            assert call.kwargs["nn_patience"] == 9
+            mock_training_state.update_state.assert_called_once_with(patience=9)
+        finally:
+            main.backend = original_backend
+            main.training_state = original_training_state
+            main.websocket_manager = original_ws_manager
