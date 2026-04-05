@@ -1,65 +1,132 @@
-"""
-Regression tests for CascorServiceAdapter parameter mappings.
+"""Regression tests for CascorServiceAdapter parameter mapping integrity.
 
-These tests protect candidate-training parameter round-trips:
-- canopy `cn_*` keys forwarded via apply_params()
-- cascor `candidate_*` keys mapped back via get_canopy_params()
+These tests guard against silent mapping regressions with high blast radius:
+- duplicate keys in mapping literals (Python silently overwrites duplicates)
+- broken canopy<->cascor mapping for candidate-training parameters
 """
 
+from __future__ import annotations
+
+import ast
+from collections import Counter
+from pathlib import Path
+from typing import Any, Dict
 from unittest.mock import MagicMock
 
 import pytest
 
-from backend.cascor_service_adapter import CascorServiceAdapter
+try:
+    from backend.cascor_service_adapter import CascorServiceAdapter
+except Exception as exc:  # pragma: no cover - exercised only when dependency import fails
+    CascorServiceAdapter = None
+    _ADAPTER_IMPORT_ERROR = exc
+else:
+    _ADAPTER_IMPORT_ERROR = None
+
+
+def _adapter_source_path() -> Path:
+    return Path(__file__).resolve().parents[3] / "backend" / "cascor_service_adapter.py"
+
+
+def _extract_mapping_literal_keys(mapping_name: str) -> list[str]:
+    source = _adapter_source_path().read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == "CascorServiceAdapter":
+            for stmt in node.body:
+                if not isinstance(stmt, ast.Assign):
+                    continue
+                for target in stmt.targets:
+                    if isinstance(target, ast.Name) and target.id == mapping_name and isinstance(stmt.value, ast.Dict):
+                        keys = []
+                        for key_node in stmt.value.keys:
+                            if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
+                                keys.append(key_node.value)
+                        return keys
+    raise AssertionError(f"Could not find mapping literal '{mapping_name}' in CascorServiceAdapter source")
+
+
+def _make_adapter_with_mock_client():
+    if CascorServiceAdapter is None:
+        pytest.skip(f"Could not import CascorServiceAdapter: {_ADAPTER_IMPORT_ERROR!r}")
+    adapter = CascorServiceAdapter.__new__(CascorServiceAdapter)
+    adapter._client = MagicMock()
+    return adapter
 
 
 @pytest.mark.unit
-class TestCandidateParameterMappingRegression:
-    """Guard critical candidate parameter mapping behavior."""
+def test_canopy_to_cascor_mapping_literal_has_no_duplicate_keys():
+    """Prevent silent key overwrite regressions in dict literals."""
+    keys = _extract_mapping_literal_keys("_CANOPY_TO_CASCOR_PARAM_MAP")
+    duplicates = [key for key, count in Counter(keys).items() if count > 1]
+    assert duplicates == [], f"Duplicate mapping keys found: {duplicates}"
 
-    def _make_adapter(self) -> CascorServiceAdapter:
-        adapter = CascorServiceAdapter.__new__(CascorServiceAdapter)
-        adapter._client = MagicMock()
-        return adapter
 
-    def test_forward_map_contains_candidate_parameter_keys(self):
-        """Canopy candidate keys must be present in forward map."""
-        assert CascorServiceAdapter._CANOPY_TO_CASCOR_PARAM_MAP["cn_patience"] == "candidate_patience"
-        assert CascorServiceAdapter._CANOPY_TO_CASCOR_PARAM_MAP["cn_training_convergence_threshold"] == "candidate_convergence_threshold"
+@pytest.mark.unit
+def test_canopy_to_cascor_mapping_values_are_unique_for_roundtrip():
+    """Ensure reverse-map construction cannot silently drop canopy keys."""
+    if CascorServiceAdapter is None:
+        pytest.skip(f"Could not import CascorServiceAdapter: {_ADAPTER_IMPORT_ERROR!r}")
 
-    def test_reverse_map_contains_candidate_parameter_keys(self):
-        """Cascor candidate keys must map back to canopy keys."""
-        assert CascorServiceAdapter._CASCOR_TO_CANOPY_PARAM_MAP["candidate_patience"] == "cn_patience"
-        assert CascorServiceAdapter._CASCOR_TO_CANOPY_PARAM_MAP["candidate_convergence_threshold"] == "cn_training_convergence_threshold"
+    values = list(CascorServiceAdapter._CANOPY_TO_CASCOR_PARAM_MAP.values())
+    assert len(values) == len(set(values)), "Duplicate cascor keys in mapping break deterministic reverse mapping"
 
-    def test_apply_params_forwards_candidate_parameters(self):
-        """apply_params() should forward candidate controls to cascor names."""
-        adapter = self._make_adapter()
-        adapter._client.update_params.return_value = {"ok": True}
 
-        result = adapter.apply_params(cn_patience=33, cn_training_convergence_threshold=0.0005)
+@pytest.mark.unit
+def test_apply_params_maps_candidate_convergence_and_patience():
+    """High-risk candidate params must be forwarded with correct cascor names."""
+    adapter = _make_adapter_with_mock_client()
+    adapter._client.update_params.return_value = {"updated": True}
 
-        adapter._client.update_params.assert_called_once_with(
-            {
+    result = adapter.apply_params(
+        cn_patience=12,
+        cn_training_convergence_threshold=0.015,
+    )
+
+    adapter._client.update_params.assert_called_once_with(
+        {
+            "candidate_patience": 12,
+            "candidate_convergence_threshold": 0.015,
+        }
+    )
+    assert result["ok"] is True
+    assert result["data"] == {"updated": True}
+
+
+@pytest.mark.unit
+def test_get_canopy_params_maps_candidate_fields_from_nested_payload():
+    """Reverse mapping should preserve candidate fields from nested params."""
+    adapter = _make_adapter_with_mock_client()
+    adapter._client.get_training_params.return_value = {
+        "data": {
+            "params": {
                 "candidate_patience": 33,
-                "candidate_convergence_threshold": 0.0005,
-            }
-        )
-        assert result["ok"] is True
-
-    def test_get_canopy_params_maps_candidate_parameters_from_nested_payload(self):
-        """get_canopy_params() should return canopy candidate keys from nested payload."""
-        adapter = self._make_adapter()
-        adapter._client.get_training_params.return_value = {
-            "data": {
-                "params": {
-                    "candidate_patience": 25,
-                    "candidate_convergence_threshold": 0.0012,
-                }
+                "candidate_convergence_threshold": 0.002,
             }
         }
+    }
 
-        result = adapter.get_canopy_params()
+    params: Dict[str, Any] = adapter.get_canopy_params()
 
-        assert result["cn_patience"] == 25
-        assert result["cn_training_convergence_threshold"] == 0.0012
+    assert params["cn_patience"] == 33
+    assert params["cn_training_convergence_threshold"] == 0.002
+
+
+@pytest.mark.unit
+def test_get_canopy_params_maps_candidate_fields_from_flat_payload():
+    """Reverse mapping should also work for flat data payload variants."""
+    adapter = _make_adapter_with_mock_client()
+    adapter._client.get_training_params.return_value = {
+        "data": {
+            "candidate_patience": 21,
+            "candidate_convergence_threshold": 0.05,
+            "status": "started",
+            "meta": {"source": "test"},
+        }
+    }
+
+    params: Dict[str, Any] = adapter.get_canopy_params()
+
+    assert params["cn_patience"] == 21
+    assert params["cn_training_convergence_threshold"] == 0.05
