@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-04-04  
-**Version:** 0.26.0  
+**Last Updated:** 2026-04-05  
+**Version:** 0.26.1  
 **Status:** Current
 
 Practical runbook for developers, reviewers, and maintainers based on the active workflows in `.github/workflows/`.
@@ -221,6 +221,23 @@ python scripts/check_doc_links.py --cross-repo skip
 ```
 
 Then repair the exact path/anchor indicated by the script.
+
+Useful local variants:
+
+```bash
+# See cross-repo references without failing
+python scripts/check_doc_links.py --cross-repo warn
+
+# Validate cross-repo links when sibling repos are checked out
+python scripts/check_doc_links.py --cross-repo check
+```
+
+Common causes and how to resolve:
+
+1. **Broken same-file anchor**: normalize heading anchors to GitHub style (lowercase, punctuation stripped, spaces -> `-`).
+2. **False positives from example markdown in docs**: move link examples into fenced code blocks or inline code spans so they are intentionally ignored.
+3. **Rejected unsafe path target**: replace absolute paths, null-byte targets, or excessive `..` traversal with valid repository-relative links.
+4. **Cross-repo structure violation**: ensure cross-repo links do not traverse back out of the target repo (no `../` after repo segment).
 
 ### 3. Test collection or marker mismatch
 

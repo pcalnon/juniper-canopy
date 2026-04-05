@@ -1,7 +1,7 @@
 # CI/CD Environment Setup Guide
 
-**Last Updated:** 2026-04-04  
-**Version:** 0.26.0  
+**Last Updated:** 2026-04-05  
+**Version:** 0.26.1  
 **Status:** Current
 
 Environment setup for reproducing current CI behavior from `.github/workflows/ci.yml`.
@@ -157,6 +157,8 @@ python scripts/check_doc_links.py \
 ```
 
 Use `--cross-repo warn` locally when you want visibility into skipped cross-repo references without failing.
+
+Use `--cross-repo check` locally when sibling Juniper repositories are checked out and you want full ecosystem link validation.
 
 ---
 

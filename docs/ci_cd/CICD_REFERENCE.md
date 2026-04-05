@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-04-04  
-**Version:** 0.26.0  
+**Last Updated:** 2026-04-05  
+**Version:** 0.26.1  
 **Status:** Current
 
 Technical reference aligned with active workflows:
@@ -208,10 +208,57 @@ mv /tmp/requirements.lock.check requirements.lock
 
 Purpose:
 
-- validates internal markdown file links and heading anchors
+- validates internal documentation links and same-file anchors
+- enforces path-safety constraints for link targets
 - supports cross-repo policies: `skip`, `warn`, `check`
 
-CI uses `--cross-repo skip` for deterministic execution in isolated runners.
+Primary invocation in CI:
+
+```bash
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
+
+#### Supported `--cross-repo` Modes
+
+| Mode | Behavior | Typical Use |
+| ---- | -------- | ----------- |
+| `skip` | Skip cross-repo links, report skipped count | CI default for deterministic isolated runners |
+| `warn` | Print warnings for each cross-repo link, do not fail | Local visibility during documentation review |
+| `check` | Resolve and validate target path in sibling repo checkout | Full Juniper ecosystem local validation |
+
+#### Validation Rules (Current Behavior)
+
+- External URLs are skipped (`http`, `https`, `mailto`, `ftp`)
+- Links inside fenced code blocks are ignored
+- Links inside inline code spans are ignored
+- Same-file anchors (for example `#section-name`) must match extracted heading anchors
+- Relative file links must resolve to an existing path within repository bounds
+
+#### Path-Safety Constraints
+
+- Absolute paths are rejected
+- Null bytes in link targets are rejected
+- Excessive traversal depth (`..`) is rejected
+- Paths that resolve outside repository boundaries are rejected
+- Cross-repo links are structurally checked to prevent escaping target repo boundaries
+
+#### Cross-Repo Check-Mode Fallback
+
+In `check` mode, the script tries to discover a Juniper ecosystem root (containing sibling repos).  
+If not found, it emits a warning and falls back to `skip` mode.
+
+#### Regression Coverage
+
+Behavioral regression tests for this script live in:
+
+- `src/tests/unit/test_doc_link_checker.py`
+
+Coverage includes code-fence/inline-code parsing, anchor normalization checks, cross-repo mode behavior, and path-safety rejection cases.
 
 ### `scripts/generate_dep_docs.sh`
 

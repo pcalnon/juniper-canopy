@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Extracted candidate pool section, history tracking, and pool display from `MetricsPanel` to `CandidateMetricsPanel`. Training Metrics tab retains candidate training trace in loss plot and candidate epoch progress bar for context
 - Component count increased from 11 to 12; updated test assertions accordingly
+- Expanded CI/CD documentation for documentation-link validation workflow and constraints:
+  - Updated `docs/ci_cd/CICD_REFERENCE.md` with `scripts/check_doc_links.py` contract details (cross-repo mode semantics, parser behavior, and path-safety constraints)
+  - Updated `docs/ci_cd/CICD_MANUAL.md` and `docs/ci_cd/CICD_QUICK_START.md` with practical docs-gate troubleshooting (`skip`, `warn`, `check` usage)
+  - Updated `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md` with full local validation mode guidance for ecosystem checkouts
+  - Changes are aligned with regression-tested behavior in `src/tests/unit/test_doc_link_checker.py`
 - Refreshed CI/CD documentation to match current workflow behavior and quality gates:
   - Updated `docs/ci_cd/CICD_QUICK_START.md` with current local parity commands (`requirements_ci.txt`, lockfile check, docs-link check)
   - Updated `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md` for pip-first CI setup, Python 3.12-3.14 matrix, and lockfile/docs gates
