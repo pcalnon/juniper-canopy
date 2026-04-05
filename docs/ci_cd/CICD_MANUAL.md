@@ -1291,6 +1291,37 @@ open ../reports/coverage/index.html
 vim tests/unit/test_new_feature.py
 ```
 
+#### Pattern 5: Documentation Link Validation Failure
+
+**Symptom:**
+
+```bash
+FOUND 1 broken link(s) in 1 file(s):
+docs/xyz.md:42: broken anchor #missing-heading (heading not found)
+```
+
+**Causes:**
+
+1. Heading anchor does not match markdown heading slug generation
+2. Link target points to a moved/deleted file
+3. Link uses absolute paths or unsafe traversal patterns
+4. CI runner uses `--cross-repo skip`, masking sibling-repo checks you expected
+
+**Fix:**
+
+```bash
+# Run exactly what CI runs
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+
+# Optional strict mode for local ecosystem checkouts
+python scripts/check_doc_links.py --cross-repo check
+```
+
 ---
 
 ## Performance Optimization

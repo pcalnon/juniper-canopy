@@ -288,6 +288,60 @@ test:
       continue-on-error: true
 ```
 
+#### Documentation Links Job
+
+**Purpose:** Validate internal documentation links and heading anchors in markdown files.
+
+**Workflow step (from `.github/workflows/ci.yml`):**
+
+```yaml
+docs:
+  name: Documentation Links
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@...
+    - uses: actions/setup-python@...
+      with:
+        python-version: "3.14"
+    - name: Validate Documentation Links
+      run: |
+        python scripts/check_doc_links.py \
+          --exclude templates --exclude history \
+          --exclude pull_requests --exclude releases \
+          --exclude analysis --exclude fixes --exclude development \
+          --exclude CHANGELOG.md \
+          --cross-repo skip
+```
+
+**Validated code paths (`scripts/check_doc_links.py`):**
+
+1. Relative documentation links resolve to existing files.
+2. Same-file anchors (for example, `#heading`) map to real markdown headings.
+3. Links inside fenced code blocks and inline code spans are ignored by design.
+4. External URLs (`http`, `https`, `mailto`, `ftp`) are skipped.
+5. Security checks reject absolute paths, null-byte targets, and excessive traversal depth.
+
+**Cross-repo policy modes:**
+
+- `skip`: Ignore ecosystem sibling links (CI default, deterministic in isolated runners).
+- `warn`: Print warnings for sibling links without failing.
+- `check`: Validate sibling links against a discovered local Juniper ecosystem root.
+
+**Local reproduction commands:**
+
+```bash
+# Match CI behavior
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+
+# Strict local validation (requires sibling repos checked out)
+python scripts/check_doc_links.py --cross-repo check
+```
+
 ---
 
 ## Configuration Files
@@ -959,6 +1013,16 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 | E301  | Artifact upload failed   | Check size and path              |
 | E302  | Artifact download failed | Verify artifact exists           |
 
+### Documentation Link Validation Failures
+
+| Symptom | Likely Cause | Resolution |
+| ----- | ----- | ----- |
+| `broken anchor #... (heading not found)` | Anchor does not match generated heading slug | Rename anchor to match markdown heading text normalization |
+| `absolute path in documentation link` | Link target starts with `/` | Replace absolute target with a repository-relative path |
+| `excessive directory traversal in link` | Link contains too many `..` segments | Rewrite link to a shorter, repo-bounded relative path |
+| `null byte in link target` | Invalid link target string | Remove malformed target and re-add a valid path |
+| `Cross-repo links: skip` in CI output | CI is intentionally skipping sibling-repo checks | Run locally with `--cross-repo check` only when sibling repos are available |
+
 ### Exit Codes
 
 | Code | Meaning                 |
@@ -1053,7 +1117,7 @@ grep "coverage" workflow.log | grep -i "low\|fail"
 
 ---
 
-**Last Updated:** 2026-01-29  
-**Version:** 0.25.0  
+**Last Updated:** 2026-04-05  
+**Version:** 0.25.1  
 **Maintained By:** Development Team  
 **Status:** ✅ Current

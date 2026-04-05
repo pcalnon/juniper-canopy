@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Documented documentation-link validation workflow and troubleshooting for CI and local developer runs:
+  - Added `Documentation Links` CI job reference with command parity and cross-repo policy modes in `docs/ci_cd/CICD_REFERENCE.md`
+  - Added a dedicated documentation-link failure pattern runbook in `docs/ci_cd/CICD_MANUAL.md`
+  - Added local `check_doc_links.py` commands and failure causes to `docs/DEVELOPER_CHEATSHEET.md`
+
 - **Contextual Left Menu**: Sidebar sections dynamically show/hide based on the active visualization tab. Training Controls always visible; Meta Parameters card, Network Information, and subsections toggle per tab via `TAB_SIDEBAR_CONFIG`. Card header text updates dynamically (e.g., "Network Parameters", "Candidate Parameters", "Dataset Parameters")
 - **Candidate Metrics Tab**: New top-level tab (`tab_id="candidates"`) for dedicated candidate pool monitoring, placed immediately after Training Metrics. Features pool status badge, epoch progress bar, top-2 candidates table, pool training metrics, candidate loss plot (orange trace), and collapsible pool history (max 20 entries, memory storage)
 - New `CandidateMetricsPanel` component (`src/frontend/components/candidate_metrics_panel.py`) extending `BaseComponent` with own data fetch callback gated on `active_tab == "candidates"`
@@ -22,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Extracted candidate pool section, history tracking, and pool display from `MetricsPanel` to `CandidateMetricsPanel`. Training Metrics tab retains candidate training trace in loss plot and candidate epoch progress bar for context
 - Component count increased from 11 to 12; updated test assertions accordingly
+- Updated CI and developer documentation for markdown link validation to reflect current `docs` workflow behavior and local reproduction commands:
+  - `docs/ci_cd/CICD_REFERENCE.md`
+  - `docs/DEVELOPER_CHEATSHEET.md`
+  - Added explicit coverage of `scripts/check_doc_links.py` policies, including code-fence/inline-code skip behavior, anchor validation, cross-repo modes, and path-safety constraints.
 
 - Namespaced Prometheus metrics (`juniper_canopy_` prefix) with WebSocket and demo mode metrics
 - `juniper_canopy_websocket_connections_active` Gauge (by channel)
