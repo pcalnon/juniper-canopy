@@ -31,6 +31,7 @@
 #####################################################################################################################################################################################################
 # import json
 import logging
+import threading
 from enum import Enum, auto
 from typing import Optional
 
@@ -84,6 +85,7 @@ class TrainingStateMachine:
     def __init__(self) -> None:
         """Initialize state machine in Stopped state."""
         self.logger = logging.getLogger(__name__)
+        self._lock = threading.Lock()
         self._status = TrainingStatus.STOPPED
         self._phase = TrainingPhase.IDLE
         self._paused_phase: Optional[TrainingPhase] = None
@@ -133,19 +135,20 @@ class TrainingStateMachine:
         Returns:
             True if transition successful, False if invalid
         """
-        if command == Command.START:
-            return self._handle_start()
-        elif command == Command.STOP:
-            return self._handle_stop()
-        elif command == Command.PAUSE:
-            return self._handle_pause()
-        elif command == Command.RESUME:
-            return self._handle_resume()
-        elif command == Command.RESET:
-            return self._handle_reset()
-        else:
-            self.logger.error(f"Unknown command: {command}")
-            return False
+        with self._lock:
+            if command == Command.START:
+                return self._handle_start()
+            elif command == Command.STOP:
+                return self._handle_stop()
+            elif command == Command.PAUSE:
+                return self._handle_pause()
+            elif command == Command.RESUME:
+                return self._handle_resume()
+            elif command == Command.RESET:
+                return self._handle_reset()
+            else:
+                self.logger.error(f"Unknown command: {command}")
+                return False
 
     def _handle_start(self) -> bool:
         """Handle START command."""
