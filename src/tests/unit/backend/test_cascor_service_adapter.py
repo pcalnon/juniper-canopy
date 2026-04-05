@@ -218,6 +218,47 @@ class TestCanopyParamsMapping:
 
         assert adapter.get_canopy_params() == {}
 
+    def test_get_canopy_params_maps_candidate_specific_keys(self, adapter, mock_client):
+        """Candidate-training keys should map back to canopy cn_* names."""
+        mock_client.get_training_params.return_value = {
+            "data": {
+                "params": {
+                    "candidate_patience": 12,
+                    "candidate_convergence_threshold": 0.0005,
+                    "candidate_epochs": 150,
+                }
+            }
+        }
+
+        result = adapter.get_canopy_params()
+
+        assert result["cn_patience"] == 12
+        assert result["cn_training_convergence_threshold"] == 0.0005
+        assert result["cn_training_iterations"] == 150
+
+
+class TestApplyParamsMapping:
+    """Verify apply_params() forwards canopy keys using cascor API names."""
+
+    def test_apply_params_maps_candidate_specific_keys(self, adapter, mock_client):
+        """cn_patience/cn_training_convergence_threshold must map to candidate_* keys."""
+        mock_client.update_params.return_value = {"ok": True}
+
+        result = adapter.apply_params(
+            cn_patience=25,
+            cn_training_convergence_threshold=0.0001,
+            cn_training_iterations=300,
+        )
+
+        assert result["ok"] is True
+        mock_client.update_params.assert_called_once_with(
+            {
+                "candidate_patience": 25,
+                "candidate_convergence_threshold": 0.0001,
+                "candidate_epochs": 300,
+            }
+        )
+
 
 # =========================================================================
 # Network property
