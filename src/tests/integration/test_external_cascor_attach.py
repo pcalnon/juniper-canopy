@@ -6,7 +6,7 @@ syncs state from cascor, and does NOT create/reset networks.
 
 import pytest
 
-pytest.importorskip("juniper_cascor_client", reason="juniper-cascor-client not installed")
+pytest.importorskip("juniper_cascor_client.testing", reason="juniper-cascor-client[testing] not installed")
 
 from unittest.mock import AsyncMock, patch
 

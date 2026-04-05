@@ -163,13 +163,14 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml:reports/coverage.xml \
             --cov-report=html:reports/htmlcov \
-            --cov-fail-under=${COVERAGE_FAIL_UNDER}
-          PYTEST_EXIT=$?
+            --cov-fail-under=${COVERAGE_FAIL_UNDER} 2>&1 | tee reports/junit/pytest-unit.log
+          PYTEST_EXIT=${PIPESTATUS[0]}
           set -e
 
           # Python 3.12 may SIGABRT (exit 134) during interpreter cleanup after
-          # all tests pass. Work around by checking JUnit XML for actual results.
-          if [ $PYTEST_EXIT -eq 134 ] && [ -f reports/junit/junit-unit.xml ]; then
+          # all tests pass. Work around only when pytest clearly reached a normal
+          # test-session summary (prevents masking real mid-run crashes).
+          if [ $PYTEST_EXIT -eq 134 ] && [ -f reports/junit/junit-unit.xml ] && [ -f reports/junit/pytest-unit.log ]; then
             FAILURES=$(python -c "
           import xml.etree.ElementTree as ET
           root = ET.parse('reports/junit/junit-unit.xml').getroot()
@@ -180,7 +181,13 @@ jobs:
           root = ET.parse('reports/junit/junit-unit.xml').getroot()
           print(root.attrib.get('errors', '0'))
           ")
-            if [ "$FAILURES" = "0" ] && [ "$ERRORS" = "0" ]; then
+            TESTS=$(python -c "
+          import xml.etree.ElementTree as ET
+          root = ET.parse('reports/junit/junit-unit.xml').getroot()
+          print(root.attrib.get('tests', '0'))
+          ")
+            if [ "$FAILURES" = "0" ] && [ "$ERRORS" = "0" ] && [ "$TESTS" != "0" ] && \
+               grep -Eq "={2,} .* in [0-9.]+s ={2,}" reports/junit/pytest-unit.log; then
               echo "::warning::pytest exited with SIGABRT (134) during cleanup but all tests passed — treating as success (Python 3.12 runtime bug)"
               exit 0
             fi
