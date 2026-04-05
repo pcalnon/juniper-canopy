@@ -1,4 +1,4 @@
-# CI/CD Technical Reference
+# CI/CD Reference
 
 **Last Updated:** 2026-04-04  
 **Version:** 0.26.0  

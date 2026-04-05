@@ -1,4 +1,4 @@
-# CI/CD Quick Start Guide
+# CI/CD Quick Start
 
 **Last Updated:** 2026-04-04  
 **Time to Complete:** ~5 minutes  
@@ -25,6 +25,8 @@ git --version
 ## 1. Install Local Quality Tooling
 
 ```bash
+# From repo root
+python -m pip install --upgrade pip
 pip install pre-commit
 pre-commit install
 ```
