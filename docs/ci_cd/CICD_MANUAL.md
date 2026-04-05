@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-04-04  
-**Version:** 0.26.0  
+**Last Updated:** 2026-04-04
+**Version:** 0.26.0
 **Status:** Current
 
 Comprehensive operational guide for developers, reviewers, and maintainers working with JuniperCanopy CI workflows.
@@ -42,59 +42,59 @@ Primary workflow files:
 
 ---
 
-## Developer Workflow
+## For Developers
 
-### Daily Local Workflow
+### Developer's Daily Local Workflow
 
 1. Install/refresh development tooling.
 
-```bash
-python -m pip install --upgrade pip
-pip install pre-commit uv
-pre-commit install
-```
+    ```bash
+    python -m pip install --upgrade pip
+    pip install pre-commit uv
+    pre-commit install
+
 
 2. Run the same fast unit/regression subset used by CI:
 
-```bash
-python -m pytest \
-  -m "not requires_cascor and not requires_server and not slow" \
-  src/tests/unit/ src/tests/regression/ \
-  --verbose \
-  --cov=src \
-  --cov-report=term-missing \
-  --cov-fail-under=80
-```
+    ```bash
+    python -m pytest \
+      -m "not requires_cascor and not requires_server and not slow" \
+      src/tests/unit/ src/tests/regression/ \
+      --verbose \
+      --cov=src \
+      --cov-report=term-missing \
+      --cov-fail-under=80
+    ```
 
 3. Run the same fast integration subset used by CI:
 
-```bash
-python -m pytest \
-  -m "integration and not requires_cascor and not requires_server and not slow" \
-  src/tests/integration \
-  --verbose
-```
+    ```bash
+    python -m pytest \
+      -m "integration and not requires_cascor and not requires_server and not slow" \
+      src/tests/integration \
+      --verbose
+    ```
 
 4. Run docs-link validation with CI-equivalent flags:
 
-```bash
-python scripts/check_doc_links.py \
-  --exclude templates --exclude history \
-  --exclude pull_requests --exclude releases \
-  --exclude analysis --exclude fixes --exclude development \
-  --exclude CHANGELOG.md \
-  --cross-repo skip
-```
+    ```bash
+    python scripts/check_doc_links.py \
+      --exclude templates --exclude history \
+      --exclude pull_requests --exclude releases \
+      --exclude analysis --exclude fixes --exclude development \
+      --exclude CHANGELOG.md \
+      --cross-repo skip
+    ```
 
 5. If dependencies changed, regenerate lockfile before push:
 
-```bash
-uv pip compile pyproject.toml \
-  --extra juniper-data \
-  --extra juniper-cascor \
-  --extra observability \
-  -o requirements.lock
-```
+    ```bash
+    uv pip compile pyproject.toml \
+      --extra juniper-data \
+      --extra juniper-cascor \
+      --extra observability \
+      -o requirements.lock
+    ```
 
 ### Monitoring CI on PRs
 

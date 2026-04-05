@@ -1,95 +1,63 @@
-# CI/CD Quick Start Guide
+# CI/CD Quick Start
 
 **Last Updated:** 2026-04-04  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.26.0
-
----
+**Version:** 0.26.0  
+**Status:** Current
 
 ## Prerequisites
 
-- ✅ Python 3.12+ available
-- ✅ Virtual environment or conda environment activated
-- ✅ Dependencies installed (`pip install -r conf/requirements_ci.txt`)
-- ✅ Git repository initialized
-
-**Verify:**
+- Python 3.12+ available locally
+- `pip` and `git` installed
+- Repository cloned
 
 ```bash
-python --version      # Should be 3.12+
-pytest --version      # Should be 7.0+
+python --version
 pip --version
+git --version
 ```
 
----
+## 1. Install Local Quality Hooks
 
-## 1. Install CI-Parity Dependencies
+```bash
+pip install pre-commit
+pre-commit install
+pre-commit run --all-files
+```
+
+This mirrors the `pre-commit` job in `.github/workflows/ci.yml`.
+
+## 2. Run the Same Fast Tests as CI
+
+From repository root:
 
 ```bash
 python -m pip install --upgrade pip
+pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -r conf/requirements_ci.txt
 pip install -e .
+mkdir -p logs src/logs reports/junit reports/coverage reports/htmlcov
 ```
 
-Why: CI jobs run with `conf/requirements_ci.txt` plus editable install. This includes observability packages such as `sentry-sdk` and `prometheus-client`, which are required for test collection.
-
----
-
-## 2. Run Local Checks Matching CI
-
-Run these from repo root (not `src/`). Running from root keeps coverage omit patterns aligned with `pyproject.toml`.
-
-### Pre-commit
+Run CI-equivalent unit and regression tests:
 
 ```bash
+CASCOR_BACKEND_AVAILABLE=0 RUN_SERVER_TESTS=0 ENABLE_SLOW_TESTS=0 \
 python -m pytest \
   -m "not requires_cascor and not requires_server and not slow" \
   src/tests/unit/ src/tests/regression/ \
-  --verbose
+  --verbose --timeout=60 --maxfail=5 \
+  --cov=src --cov-report=term-missing
 ```
 
-### Unit + Regression (coverage gate)
-
-```bash
-python -m pytest \
-  -m "not requires_cascor and not requires_server and not slow" \
-  src/tests/unit/ src/tests/regression/ \
-  --cov=src --cov-report=term-missing \
-  --cov-fail-under=80
-```
-
-### Integration (fast subset)
-
-```bash
-python -m pytest \
-  -m "integration and not requires_cascor and not requires_server and not slow" \
-  src/tests/integration \
-  --verbose \
-  --timeout=120 \
-  --maxfail=3
-```
-
----
+Coverage gate in CI is `80%` (`COVERAGE_FAIL_UNDER` in `ci.yml`).
 
 ## 3. Validate Lockfile Freshness
 
-`CI` validates `requirements.lock` using all extras, including observability:
+CI fails when `requirements.lock` does not match `pyproject.toml` (+ extras).
 
 ```bash
-uv pip compile pyproject.toml \
-  --extra juniper-data \
-  --extra juniper-cascor \
-  --extra observability \
-  -o /tmp/requirements.lock.check
-
-tail -n +3 requirements.lock > /tmp/lock_body
-tail -n +3 /tmp/requirements.lock.check > /tmp/check_body
-diff -u /tmp/lock_body /tmp/check_body
-```
-
-If stale, regenerate:
-
-```bash
+pip install uv
 uv pip compile pyproject.toml \
   --extra juniper-data \
   --extra juniper-cascor \
@@ -97,107 +65,57 @@ uv pip compile pyproject.toml \
   -o requirements.lock
 ```
 
----
+Commit `requirements.lock` when it changes.
 
 ## 4. Validate Documentation Links
 
-```bash
-CI/CD Pipeline
-├── ✓ Pre-commit (Python 3.12/3.13/3.14)
-├── ✓ Unit Tests + Coverage (Python 3.12/3.13/3.14)
-├── ✓ Integration Tests
-├── ✓ Security Scans
-├── ✓ Build Distribution
-├── ✓ Dependency Documentation
-├── ✓ Lockfile Freshness
-├── ✓ Documentation Links
-├── ✓ Docker Build & Smoke Test
-└── ✓ Quality Gate
-
-Total: ~10-15 minutes (parallel jobs)
-```
-
-This matches the `docs` job in `.github/workflows/ci.yml`.
-
----
-
-## 5. Confirm Workflow Jobs
-
-Current `CI/CD Pipeline` jobs:
-
-```markdown
-[![codecov](https://codecov.io/gh/USERNAME/REPO/branch/main/graph/badge.svg)](https://codecov.io/gh/USERNAME/REPO)
-```
-
-### Enable Branch Protection
-
-- Settings → Branches → Add rule
-- ☑ Require pull request reviews
-- ☑ Require status checks (Quality Gate)
-- ☑ Require branches up to date
-
-### Validate Docs and Lockfile Locally
+CI runs `scripts/check_doc_links.py` and fails on broken internal links.
 
 ```bash
-# Check documentation links (same exclusions as CI)
 python scripts/check_doc_links.py \
   --exclude templates --exclude history \
   --exclude pull_requests --exclude releases \
   --exclude analysis --exclude fixes --exclude development \
   --exclude CHANGELOG.md \
   --cross-repo skip
-
-# Regenerate lockfile after dependency changes
-uv pip compile pyproject.toml \
-  --extra juniper-data \
-  --extra juniper-cascor \
-  --extra observability \
-  -o requirements.lock
 ```
 
----
+## 5. Understand CI Job Flow
 
-## Common Pitfalls
+Current `CI/CD Pipeline` jobs:
 
-### `ModuleNotFoundError: sentry_sdk` or `prometheus_client`
+1. `pre-commit` (Python 3.12, 3.13, 3.14)
+2. `unit-tests` (Python matrix + coverage gate)
+3. `integration-tests` (PR/main/develop only)
+4. `build`
+5. `security`
+6. `dependency-docs`
+7. `lockfile-check`
+8. `docs` (link validation)
+9. `docker-build` (PR/main/develop only)
+10. `required-checks`
+11. `notify`
 
-Install CI requirements (not just runtime requirements):
+## 6. Troubleshooting Fast
 
-```bash
-pip install -r conf/requirements_ci.txt
-```
+### Collection/import failures in CI
 
-### Coverage unexpectedly includes test files
+Install exactly from `conf/requirements_ci.txt` and `pip install -e .`.
 
-```bash
-python -m venv .venv-ci
-# activate .venv-ci for your shell, then:
-pip install -r conf/requirements_ci.txt
-python -m pytest src/tests/unit/test_demo_mode.py::test_name -vv
-```
+### Lockfile check fails
 
-### Lockfile check fails even after compile
+Regenerate `requirements.lock` using the exact compile command shown above.
 
-```bash
-# Test with CI Python versions
-for ver in 3.12 3.13 3.14; do
-  python -m venv ".venv-$ver"
-  # activate env per shell, then:
-  pip install -r conf/requirements_ci.txt
-  python -m pytest -m "not requires_cascor and not requires_server and not slow" src/tests/unit/ src/tests/regression/
-done
-```
+### Docs check fails
 
-### Docs job fails locally
+Run `scripts/check_doc_links.py` locally and fix the broken path/anchor.
 
-Use the same exclusions and `--cross-repo skip` mode as CI.
+### Python version mismatch issues
 
----
+Reproduce with Python 3.14 locally (primary CI runtime for non-matrix jobs).
 
-## Resources
+## Next Reads
 
 - [CI/CD Manual](CICD_MANUAL.md)
-- [CI/CD Technical Reference](CICD_REFERENCE.md)
 - [CI/CD Environment Setup](CICD_ENVIRONMENT_SETUP.md)
-- [Workflow Source](../../.github/workflows/ci.yml)
-- [Link Checker Script](../../scripts/check_doc_links.py)
+- [CI/CD Technical Reference](CICD_REFERENCE.md)
