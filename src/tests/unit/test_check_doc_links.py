@@ -26,7 +26,6 @@ from pathlib import Path
 
 import pytest
 
-
 _SCRIPT_PATH = Path(__file__).resolve().parents[3] / "scripts" / "check_doc_links.py"
 _SPEC = importlib.util.spec_from_file_location("check_doc_links", _SCRIPT_PATH)
 check_doc_links = importlib.util.module_from_spec(_SPEC)
