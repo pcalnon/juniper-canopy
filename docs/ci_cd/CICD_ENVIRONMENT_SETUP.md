@@ -1,4 +1,4 @@
-# CI/CD Environment Setup Guide
+# CI/CD Environment Setup
 
 **Last Updated:** 2026-04-04  
 **Version:** 0.26.0

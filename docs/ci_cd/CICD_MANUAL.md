@@ -1,4 +1,4 @@
-# CI/CD Complete User Manual
+# CI/CD Manual
 
 **Last Updated:** 2026-04-04  
 **Version:** 0.26.0  
