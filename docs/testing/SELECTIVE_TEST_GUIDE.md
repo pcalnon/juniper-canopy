@@ -1,7 +1,7 @@
 # Selective Test Enablement Guide
 
-**Last Updated:** January 29, 2026  
-**Version:** v0.25.0
+**Last Updated:** April 04, 2026  
+**Version:** v0.26.0
 
 ## Overview
 
@@ -21,6 +21,23 @@ Tests are organized using pytest markers:
 | `requires_server`  | Requires live server running              | ✗ No               |
 | `requires_display` | Requires display for visualization        | ✗ No               |
 | `requires_redis`   | Requires Redis connection                 | ✗ No               |
+
+## Optional Client Testing Extras
+
+Some integration/e2e tests rely on testing helpers from external client packages.
+These tests now use `pytest.importorskip(...)` so collection stays healthy when extras are absent.
+
+Skipped-unless-installed modules:
+
+- `juniper_cascor_client.testing`
+- `juniper_data_client.testing`
+
+Install locally when you want full coverage of those scenarios:
+
+```bash
+pip install "juniper-cascor-client[testing]"
+pip install "juniper-data-client[testing]"
+```
 
 ## Environment Variables
 
@@ -150,7 +167,7 @@ Slow Tests: DISABLED (set ENABLE_SLOW_TESTS=1)
 
 ### GitHub Actions
 
-The CI pipeline automatically configures test environments:
+The CI pipeline automatically configures a fast subset:
 
 ```yaml
 # Standard PR/commit tests (fast tests only)
@@ -159,26 +176,27 @@ env:
   CASCOR_BACKEND_AVAILABLE: 0
   ENABLE_SLOW_TESTS: 0
 
-# Run most tests, exclude CasCor and server
-jobs:
-  test:
-    steps:
-      - name: Run Tests
-        run: |
-          cd src
-          pytest tests/ -m "not requires_cascor and not requires_server"
+# Unit/regression subset
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/
+
+# Integration subset
+python -m pytest \
+  -m "integration and not requires_cascor and not requires_server and not slow" \
+  src/tests/integration
 ```
 
 ### Nightly Builds
 
-For comprehensive testing in nightly builds:
+For comprehensive testing in a dedicated job/environment:
 
 ```yaml
 # Nightly comprehensive tests
 env:
-  CASCOR_BACKEND_AVAILABLE: 1  # Install CasCor in setup
-  RUN_SERVER_TESTS: 1          # Start server in background
-  ENABLE_SLOW_TESTS: 1         # Run all tests
+  CASCOR_BACKEND_AVAILABLE: 1
+  RUN_SERVER_TESTS: 1
+  ENABLE_SLOW_TESTS: 1
 ```
 
 ## Troubleshooting

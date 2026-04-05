@@ -254,6 +254,8 @@ filterwarnings = [
 [tool.coverage.run]
 source = ["src"]
 omit = [
+  "tests/*",
+  "tests/**/*",
   "*/tests/*",
   "**/tests/*",
   "**/test_*.py",
@@ -263,6 +265,7 @@ omit = [
   "*/site-packages/*",
   "**/conftest.py",
   "*/conftest.py",
+  "conftest.py",
   "**/venv/*",
   "*/venv/*",
   "**/.venv/*",
