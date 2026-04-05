@@ -20,8 +20,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated CI/CD documentation to match current workflow behavior in `.github/workflows/ci.yml` and `.github/workflows/lockfile-update.yml`:
+  - `docs/ci_cd/CICD_QUICK_START.md`
+  - `docs/ci_cd/CICD_MANUAL.md`
+  - `docs/ci_cd/CICD_REFERENCE.md`
+  - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
+  - Coverage includes:
+    - Python matrix and job topology updates (`3.12`/`3.13`/`3.14`)
+    - Pip-based CI installation model and `src/tests/...` test-path conventions
+    - lockfile freshness command and header-insensitive diff behavior
+    - documentation-link validation runbook using `scripts/check_doc_links.py`
+- Updated `README.md` lockfile guidance to include `--extra observability` and documented observability optional dependencies (`prometheus-client`, `sentry-sdk`) used by `src/observability.py`.
+
 - Extracted candidate pool section, history tracking, and pool display from `MetricsPanel` to `CandidateMetricsPanel`. Training Metrics tab retains candidate training trace in loss plot and candidate epoch progress bar for context
 - Component count increased from 11 to 12; updated test assertions accordingly
+- Refreshed CI/CD documentation to match current workflow behavior and quality gates:
+  - Updated `docs/ci_cd/CICD_QUICK_START.md` with current local parity commands (`requirements_ci.txt`, lockfile check, docs-link check)
+  - Updated `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md` for pip-first CI setup, Python 3.12-3.14 matrix, and lockfile/docs gates
+  - Updated `docs/ci_cd/CICD_REFERENCE.md` to document active workflows (`ci.yml`, `security-scan.yml`, `publish.yml`, `lockfile-update.yml`)
+  - Updated `docs/ci_cd/CICD_MANUAL.md` with role-based runbooks aligned to `required-checks` gating semantics
+
+- Updated CI/testing documentation to reflect current CI workflow behavior and recent collection-failure remediations:
+  - `docs/ci_cd/CICD_MANUAL.md`
+  - `docs/ci_cd/CICD_REFERENCE.md`
+  - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
+  - `docs/ci_cd/CICD_QUICK_START.md`
+  - `docs/testing/TESTING_MANUAL.md`
+  - Coverage includes:
+    - Active Python CI matrix (`3.12`, `3.13`, `3.14`) and default `3.14` job pinning
+    - New `Documentation Links` quality gate (`scripts/check_doc_links.py`, `--cross-repo skip`)
+    - Lockfile freshness behavior (`uv pip compile` with `--extra observability`, header-agnostic comparison)
+    - Optional test-extras guidance (`juniper-data-client[testing]`, `juniper-cascor-client[testing]`) and `pytest.importorskip`/`skipif` patterns to prevent collection failures
 
 - Namespaced Prometheus metrics (`juniper_canopy_` prefix) with WebSocket and demo mode metrics
 - `juniper_canopy_websocket_connections_active` Gauge (by channel)
@@ -51,6 +80,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
   - `docs/ci_cd/CICD_MANUAL.md`
   - `notes/juniper-canopy_OTHER_DEPENDENCIES.md`
+- Updated CI/CD documentation to reflect current workflow behavior introduced in PR #79:
+  - `docs/ci_cd/CICD_QUICK_START.md`
+  - `docs/ci_cd/CICD_MANUAL.md`
+  - `docs/ci_cd/CICD_REFERENCE.md`
+  - `README.md`
+  - Coverage includes:
+    - New `Documentation Links` CI job and `scripts/check_doc_links.py` local usage (`--cross-repo skip`)
+    - Current Python matrix (`3.12`, `3.13`, `3.14`) and pytest invocation paths (`src/tests`, `--cov=src`)
+    - Updated lockfile regeneration command including `--extra observability`
+    - Quality gate semantics requiring `docs` and `lockfile-check` success
 
 - Renamed HTTP metrics: `http_requests_total` → `juniper_canopy_http_requests_total`, `http_request_duration_seconds` → `juniper_canopy_http_request_duration_seconds`
 - Updated CasCor backend documentation to cover service-mode behavior (`CascorServiceAdapter`, `ServiceBackend`, `CascorStateSync`), including startup attach/sync workflow, response normalization contracts, and service-mode troubleshooting:
