@@ -34,10 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Extracted candidate pool section, history tracking, and pool display from `MetricsPanel` to `CandidateMetricsPanel`. Training Metrics tab retains candidate training trace in loss plot and candidate epoch progress bar for context
 - Component count increased from 11 to 12; updated test assertions accordingly
-- Refreshed CI/CD and testing documentation to align with current workflow behavior after CI stabilization work:
-  - Updated `docs/ci_cd/CICD_QUICK_START.md`, `docs/ci_cd/CICD_MANUAL.md`, `docs/ci_cd/CICD_REFERENCE.md`, and `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
-  - Updated `docs/testing/TESTING_MANUAL.md` and `docs/testing/TESTING_REFERENCE.md`
-  - Documented current Python matrix (`3.12`/`3.13`/`3.14`), lockfile freshness policy with `uv`, docs link-check CI mode, and optional `juniper-cascor-client[testing]` / `juniper-data-client[testing]` test extras gating
+- Updated Docker/demo-mode documentation to match current startup behavior and environment variable contracts:
+  - `README.md`: switched primary runtime configuration examples to `JUNIPER_CANOPY_*` settings, clarified demo-mode-by-default container behavior, and documented service-mode override (`JUNIPER_CANOPY_DEMO_MODE=0`).
+  - `docs/demo/DEMO_MODE_REFERENCE.md`: documented JuniperData-first dataset generation with local spiral fallback call sites used by demo startup and dataset regeneration paths.
 
 - Namespaced Prometheus metrics (`juniper_canopy_` prefix) with WebSocket and demo mode metrics
 - `juniper_canopy_websocket_connections_active` Gauge (by channel)

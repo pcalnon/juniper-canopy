@@ -29,9 +29,9 @@ COPY requirements.lock ./
 RUN pip install --no-cache-dir -r requirements.lock
 
 # Copy project files and install without deps (already installed above)
-# COPY pyproject.toml README.md ./
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
 COPY src/ ./src/
+COPY juniper_canopy/ ./juniper_canopy/
 RUN pip install --no-cache-dir --no-deps .
 
 # -----------------------------------------------------------------------------
@@ -68,11 +68,15 @@ USER juniper
 # PYTHONPATH so imports from src/ resolve correctly
 ENV PYTHONPATH=/app/src
 
-# Service configuration
-ENV CANOPY_HOST=0.0.0.0
-ENV CANOPY_PORT=8050
+# Service configuration — uses JUNIPER_CANOPY_ prefix for pydantic-settings.
+# Nested settings use double-underscore delimiter (SERVER__HOST, SERVER__PORT).
+ENV JUNIPER_CANOPY_SERVER__HOST=0.0.0.0
+ENV JUNIPER_CANOPY_SERVER__PORT=8050
 ENV JUNIPER_DATA_URL=http://localhost:8100
 ENV CASCOR_SERVICE_URL=http://localhost:8200
+# Default to demo mode for standalone deployment. Override with
+# JUNIPER_CANOPY_DEMO_MODE=0 when running with the full stack.
+ENV JUNIPER_CANOPY_DEMO_MODE=1
 
 EXPOSE 8050
 

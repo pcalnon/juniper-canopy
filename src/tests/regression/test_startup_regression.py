@@ -60,8 +60,8 @@ class TestStartupRegression:
         assert "inputs_tensor" in demo.dataset
         assert "targets_tensor" in demo.dataset
 
-    def test_demo_mode_init_without_juniper_data_url_raises(self, monkeypatch):
-        """ST-2: DemoMode raises JuniperDataConfigurationError when URL is missing."""
+    def test_demo_mode_init_without_juniper_data_url_falls_back_to_local(self, monkeypatch):
+        """ST-2: DemoMode falls back to local dataset generation when JUNIPER_DATA_URL is missing."""
         monkeypatch.delenv("JUNIPER_DATA_URL", raising=False)
 
         mock_settings = MagicMock()
@@ -71,8 +71,11 @@ class TestStartupRegression:
         mock_settings.get_training_defaults.return_value = {}
 
         with patch("demo_mode.get_settings", return_value=mock_settings):
-            with pytest.raises(JuniperDataConfigurationError, match="JUNIPER_DATA_URL"):
-                DemoMode(update_interval=1.0)
+            demo = DemoMode(update_interval=1.0)
+            # Should succeed via local fallback instead of raising
+            assert demo.dataset is not None
+            assert "inputs_tensor" in demo.dataset
+            assert "targets_tensor" in demo.dataset
 
     def test_demo_mode_init_with_settings_default(self, monkeypatch):
         """ST-3: DemoMode uses Settings default juniper_data_url when env var is absent."""
