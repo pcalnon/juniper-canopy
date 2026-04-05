@@ -147,6 +147,13 @@ class RateLimiter:
         client_ip = request.client.host if request.client else "unknown"
         return f"ip:{client_ip}"
 
+    def _evict_expired(self, now: float) -> None:
+        """Remove expired entries from counters. Must be called with _lock held."""
+        expired = [k for k, (_, ws) in self._counters.items() if now - ws >= self._window]
+        for k in expired:
+            del self._counters[k]
+        self._last_eviction = now
+
     def check(self, key: str) -> tuple[bool, int, int]:
         """Check if a request is allowed under rate limit.
 
@@ -162,6 +169,14 @@ class RateLimiter:
         now = time.time()
 
         with self._lock:
+            # Periodic eviction: run at most once per window period
+            if now - self._last_eviction >= self._window:
+                self._evict_expired(now)
+
+            # Emergency cap: evict if too many entries
+            if len(self._counters) >= self._max_entries:
+                self._evict_expired(now)
+
             count, window_start = self._counters[key]
 
             if now - window_start >= self._window:
