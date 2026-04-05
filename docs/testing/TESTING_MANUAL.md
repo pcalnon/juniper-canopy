@@ -1,7 +1,7 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** March 30, 2026  
-**Version:** v0.26.0
+**Last Updated:** April 5, 2026  
+**Version:** v0.26.1
 
 Complete guide to testing the Juniper Canopy application.
 
@@ -813,37 +813,63 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, feature/**, fix/**]
   pull_request:
     branches: [main, develop]
 
 jobs:
-  test:
+  pre-commit:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install dependencies
         run: |
-          pip install -r conf/requirements.txt
-          pip install pytest pytest-cov
+          python -m pip install --upgrade pip
+          pip install pre-commit
 
-      - name: Run tests
-        run: pytest --cov=src --cov-report=xml
+      - name: Run pre-commit hooks
+        run: pre-commit run --all-files
+```
 
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-        with:
-          file: ./coverage.xml
+Key testing jobs currently used in CI:
+
+- `unit-tests` (matrix `3.12/3.13/3.14`) with:
+  - marker gate: `not requires_cascor and not requires_server and not slow`
+  - paths: `tests/unit/ tests/regression/`
+  - coverage enforcement: `--cov-fail-under=80`
+- `integration-tests` (Python `3.14`) with:
+  - marker gate: `integration and not requires_cascor and not requires_server and not slow`
+- `docs` link gate via `scripts/check_doc_links.py`
+- `lockfile-check` via `uv pip compile ... --extra observability`
+- aggregated `Quality Gate` (`required-checks`) to block merge on failures
+
+Local reproduction for test-related CI gates:
+
+```bash
+cd src
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  tests/unit/ tests/regression/ \
+  --verbose \
+  --cov=. \
+  --cov-report=term-missing \
+  --cov-fail-under=80
+
+python -m pytest \
+  -m "integration and not requires_cascor and not requires_server and not slow" \
+  tests/integration \
+  --verbose
 ```
 
 ### Pre-commit Hooks
@@ -856,16 +882,8 @@ pre-commit install
 # Run manually
 pre-commit run --all-files
 
-# Configuration in .pre-commit-config.yaml
-repos:
-  - repo: local
-    hooks:
-      - id: pytest
-        name: pytest
-        entry: pytest
-        language: system
-        pass_filenames: false
-        always_run: true
+# CI uses pre-commit as its own matrix job
+# See .github/workflows/ci.yml job: pre-commit
 ```
 
 ## Troubleshooting
@@ -877,7 +895,7 @@ repos:
 ```bash
 # Problem: ModuleNotFoundError
 # Solution: Activate conda environment
-conda activate JuniperPython
+conda activate JuniperCanopy
 ```
 
 #### 2. Test Discovery Fails

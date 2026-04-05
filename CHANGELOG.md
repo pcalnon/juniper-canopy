@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - New `Documentation Links` quality gate (`scripts/check_doc_links.py`, `--cross-repo skip`)
     - Lockfile freshness behavior (`uv pip compile` with `--extra observability`, header-agnostic comparison)
     - Optional test-extras guidance (`juniper-data-client[testing]`, `juniper-cascor-client[testing]`) and `pytest.importorskip`/`skipif` patterns to prevent collection failures
+- Corrected CI/CD docs to remove stale Conda/Codecov-era instructions and align with current workflow gates and job graph:
+  - replaced outdated workflow snippets with source-verified jobs from `.github/workflows/ci.yml`
+  - documented actual matrix and pinning strategy (matrix `3.12/3.13/3.14`, single-version `3.14` jobs)
+  - documented current dependency install path (`conf/requirements_ci.txt`, CPU torch index, editable install)
+  - aligned scheduled security scan documentation with `security-scan.yml` commands
 
 - Namespaced Prometheus metrics (`juniper_canopy_` prefix) with WebSocket and demo mode metrics
 - `juniper_canopy_websocket_connections_active` Gauge (by channel)

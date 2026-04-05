@@ -78,7 +78,7 @@ The `requirements.lock` file pins exact dependency versions for reproducible Doc
 **Regenerate after changing dependencies in `pyproject.toml`:**
 
 ```bash
-uv pip compile pyproject.toml --extra juniper-data --extra juniper-cascor -o requirements.lock
+uv pip compile pyproject.toml --extra juniper-data --extra juniper-cascor --extra observability -o requirements.lock
 ```
 
 All dependencies including `juniper-data-client` and `juniper-cascor-client` are resolved from PyPI.
