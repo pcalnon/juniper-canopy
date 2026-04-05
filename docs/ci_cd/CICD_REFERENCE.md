@@ -15,7 +15,6 @@
 - [Documentation Link Validation Contract](#documentation-link-validation-contract)
 - [Artifacts](#artifacts)
 - [Troubleshooting](#troubleshooting)
-- [References](#references)
 
 ---
 
