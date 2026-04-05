@@ -10,7 +10,7 @@ by the DecisionBoundary frontend component.
 import numpy as np
 import pytest
 
-pytest.importorskip("juniper_cascor_client", reason="juniper-cascor-client not installed")
+pytest.importorskip("juniper_cascor_client.testing", reason="juniper-cascor-client[testing] not installed")
 
 from juniper_cascor_client.testing import FakeCascorClient
 

@@ -2,262 +2,151 @@
 
 **Last Updated:** 2026-04-04  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.25.2
+**Version:** 0.26.0  
+**Status:** Current
+
+This guide mirrors the current GitHub Actions workflows in `.github/workflows/`.
 
 ---
 
 ## Prerequisites
 
-- ✅ Conda environment activated (`JuniperPython`)
-- ✅ Dependencies installed (`pip install -r conf/requirements.txt`)
-- ✅ Git repository initialized
-- ✅ Python 3.12+ installed
-
-**Verify:**
+- Python 3.14 available locally
+- `pip` and `git` installed
+- Repository cloned and dependencies installable
 
 ```bash
-python --version      # Should be 3.12+
-pytest --version      # Should be 7.0+
-conda env list | grep JuniperPython  # Should show active
+python --version
+pip --version
+git --version
 ```
 
 ---
 
-## Install Pre-commit Hooks
+## 1. Run The Same Fast Checks As CI
 
-**1. Install pre-commit:**
-
-```bash
-pip install pre-commit
-```
-
-**2. Install hooks:**
+Install local tooling:
 
 ```bash
-pre-commit install
+python -m pip install --upgrade pip
+pip install pre-commit uv
+pip install -r conf/requirements_ci.txt
+pip install -e .
 ```
 
-**3. Verify:**
+Run pre-commit:
 
 ```bash
-pre-commit --version  # Output: pre-commit 3.x.x
+pre-commit run --all-files --show-diff-on-failure
 ```
 
----
-
-## Run Tests Locally
-
-**Quick test:**
+Run CI-equivalent fast tests:
 
 ```bash
 cd src
-pytest tests/ -v
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  tests/unit/ tests/regression/ \
+  --verbose --timeout=60 --maxfail=5 \
+  --cov=. --cov-report=term-missing
 ```
 
-**With coverage:**
+Run CI-equivalent fast integration tests:
 
 ```bash
 cd src
-pytest tests/ --cov=. --cov-report=term-missing
-```
-
-**Expected output:**
-
-```bash
-===================== test session starts ======================
-collected 170 items
-
-tests/unit/test_config_manager.py::test_load_config PASSED  [ 1%]
-tests/unit/test_demo_mode.py::test_start_stop PASSED        [ 2%]
-...
-================== 170 passed in 5.23s =======================
-
-------------- coverage: platform linux, python 3.13.x --------------
-Name                          Stmts   Miss  Cover   Missing
-------------------------------------------------------------
-config_manager.py               120      8    93%   45-52
-demo_mode.py                    156     25    84%   120-145
-...
-TOTAL                          2341    622    73%
-```
-
-**View HTML report:**
-<file:///home/pcalnon/Development/python/Juniper/juniper-canopy/src/tests/reports/coverage/index.html>
-
----
-
-## Set Up GitHub Secrets
-
-**1. Generate Codecov token:**
-
-- Go to [codecov.io](https://codecov.io)
-- Sign in with GitHub
-- Add repository
-- Copy upload token
-
-**2. Add to GitHub:**
-
-- Repository → **Settings** → **Secrets and variables** → **Actions**
-- Click **New repository secret**
-- Name: `CODECOV_TOKEN`
-- Value: Paste token
-- Click **Add secret**
-
----
-
-## Make Your First Commit
-
-**1. Stage changes:**
-
-```bash
-git add src/config_manager.py
-```
-
-**2. Commit (hooks run automatically):**
-
-```bash
-git commit -m "Update configuration handling"
-```
-
-**Pre-commit runs:**
-
-```bash
-Trim Trailing Whitespace.............................Passed
-Fix End of Files.....................................Passed
-Check Yaml...........................................Passed
-black................................................Passed
-isort................................................Passed
-flake8...............................................Passed
-```
-
-**3. Push:**
-
-```bash
-git push origin feature/your-branch
+python -m pytest \
+  -m "integration and not requires_cascor and not requires_server and not slow" \
+  tests/integration \
+  --verbose --timeout=120 --maxfail=3
 ```
 
 ---
 
-## View CI Results
+## 2. Validate Lockfile And Docs Locally
 
-**1. Go to GitHub:**
-
-- Actions tab
-- See "CI/CD Pipeline" running
-
-**2. Jobs:**
+Lockfile freshness (same extras as `ci.yml` lockfile check):
 
 ```bash
-CI/CD Pipeline
-├── ✓ Pre-commit (Python 3.12/3.13/3.14)  ~2-3 min
-├── ✓ Unit Tests + Coverage (3.12/3.13/3.14) ~8 min
-├── ✓ Integration Tests                   ~5 min
-├── ✓ Security Scans                      ~3-5 min
-├── ✓ Lockfile Freshness                  ~1 min
-├── ✓ Documentation Links                 ~1 min
-├── ✓ Docker Build & Smoke Test           ~3-6 min
-├── ✓ Build Distribution                  ~2 min
-├── ✓ Quality Gate                        ~30 sec
-└── ✓ Notify                           ~10 sec
-
-Total: ~10 minutes
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o /tmp/requirements.lock.check
+diff -u requirements.lock /tmp/requirements.lock.check
 ```
 
-**3. Download artifacts:**
-
-- Scroll to bottom
-- Download test results and coverage reports
-
----
-
-## Next Steps
-
-### Add Coverage Badge
-
-```markdown
-[![codecov](https://codecov.io/gh/USERNAME/REPO/branch/main/graph/badge.svg)](https://codecov.io/gh/USERNAME/REPO)
-```
-
-### Enable Branch Protection
-
-- Settings → Branches → Add rule
-- ☑ Require pull request reviews
-- ☑ Require status checks (`Quality Gate` and other required jobs)
-- ☑ Require branches up to date
-
----
-
-## Common Commands
+Documentation link validation:
 
 ```bash
-# Pre-commit
-pre-commit run --all-files
-
-# Tests
-pytest tests/unit/test_demo_mode.py -v
-
-# Coverage
-cd src && pytest tests/ --cov=. --cov-report=html
-open ../reports/coverage/index.html
-
-# Formatting
-black src/ --line-length=120
-isort src/ --profile=black
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
 ```
 
 ---
 
-## Troubleshooting
+## 3. Push And Watch CI
 
-### Pre-commit fails
+Push your branch:
 
 ```bash
-black src/ --line-length=120
-isort src/ --profile=black
-git add .
-git commit -m "Apply formatting"
+git push origin <branch-name>
 ```
 
-### Tests fail locally
+The `CI/CD Pipeline` workflow runs these jobs:
+
+```text
+pre-commit
+unit-tests (Python 3.12, 3.13, 3.14)
+integration-tests
+build
+security
+dependency-docs
+lockfile-check
+docs
+docker-build
+required-checks
+notify
+```
+
+`required-checks` is the branch gate: if it fails, merging should be blocked.
+
+---
+
+## 4. Quick Troubleshooting
+
+If `unit-tests` fail only in CI, retest with Python 3.14 locally:
 
 ```bash
-conda activate JuniperPython
-pip install -r conf/requirements.txt
-pytest tests/unit/test_demo_mode.py::test_name -vv
+python -m pip install -r conf/requirements_ci.txt
+pip install -e .
+cd src && python -m pytest -m "not slow and not requires_server and not requires_cascor" tests/unit tests/regression -vv
 ```
 
-### CI fails but local passes
+If `lockfile-check` fails:
 
 ```bash
-# Test with CI Python version
-conda create -n test-py312 python=3.12
-conda activate test-py312
-pip install -r conf/requirements.txt
-cd src && pytest tests/ -v
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
+```
+
+If `docs` job fails:
+
+```bash
+python scripts/check_doc_links.py --cross-repo skip
 ```
 
 ---
 
-## Resources
+## Next Docs
 
-- [CI/CD Manual](CICD_MANUAL.md) - Complete guide
-- [Environment Setup](CICD_ENVIRONMENT_SETUP.md) - Configuration
-- [Reference](CICD_REFERENCE.md) - Technical specs
-- [AGENTS.md](../../AGENTS.md) - Project development guide
-- [README.md](../../README.md) - Project overview
-
----
-
-**You've completed:**
-
-✅ Installed pre-commit hooks  
-✅ Ran tests with coverage  
-✅ Set up Codecov  
-✅ Made first CI/CD commit  
-✅ Viewed CI results
-
-**CI/CD is active!** Every push triggers quality checks, tests, and coverage reporting.
-
----
-
-**Status:** ✅ Ready to use
+- [CI/CD Manual](CICD_MANUAL.md)
+- [CI/CD Environment Setup](CICD_ENVIRONMENT_SETUP.md)
+- [CI/CD Reference](CICD_REFERENCE.md)
