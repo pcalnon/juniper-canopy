@@ -1901,12 +1901,11 @@ async def ws_endpoint(websocket: WebSocket):
     await websocket_manager.connect(websocket)
     try:
         while True:
-            try:
-                await websocket.receive_text()
-            except Exception:
-                # Ignore non-text frames (pings, pongs, binary)
-                await asyncio.sleep(10)
+            await websocket.receive_text()
     except WebSocketDisconnect:
+        websocket_manager.disconnect(websocket)
+    except Exception:
+        system_logger.error("Unexpected error on /ws endpoint", exc_info=True)
         websocket_manager.disconnect(websocket)
 
 
@@ -1993,17 +1992,63 @@ async def api_train_status():
     return {"backend": backend.backend_type, **backend.get_status()}
 
 
+from pydantic import BaseModel
+
+
+class SetParamsRequest(BaseModel):
+    """Validated request body for the set_params endpoint."""
+
+    # Neural network parameters
+    nn_max_iterations: int | None = None
+    nn_max_total_epochs: int | None = None
+    nn_learning_rate: float | None = None
+    nn_max_hidden_units: int | None = None
+    nn_multi_node_layers: bool | None = None
+    nn_growth_trigger: str | None = None
+    nn_growth_preset_epochs: int | None = None
+    nn_growth_convergence_threshold: float | None = None
+    nn_patience: int | None = None
+    nn_spiral_rotations: float | None = None
+    nn_spiral_number: int | None = None
+    nn_dataset_elements: int | None = None
+    nn_dataset_noise: float | None = None
+
+    # Candidate parameters
+    cn_pool_size: int | None = None
+    cn_correlation_threshold: float | None = None
+    cn_candidate_learning_rate: float | None = None
+    cn_patience: int | None = None
+    cn_selected_candidates: int | None = None
+    cn_training_complete: bool | None = None
+    cn_training_iterations: int | None = None
+    cn_training_convergence_threshold: float | None = None
+    cn_multi_candidate: bool | None = None
+    cn_candidate_selection: str | None = None
+    cn_top_candidates: int | None = None
+    cn_random_candidates: int | None = None
+
+    # Backward-compatible keys
+    learning_rate: float | None = None
+    max_hidden_units: int | None = None
+    max_epochs: int | None = None
+    convergence_enabled: bool | None = None
+    convergence_threshold: float | None = None
+    patience: int | None = None
+    spiral_rotations: float | None = None
+
+
 @app.post("/api/set_params")
-async def api_set_params(params: dict):
+async def api_set_params(body: SetParamsRequest):
     """
     Set training parameters with nn_* and cn_* prefixed keys.
     Also accepts old-style keys for backward compatibility.
     Args:
-        params: Dictionary containing parameters to update
+        body: Validated SetParamsRequest containing parameters to update
     Returns:
         Updated training state
     """
     try:
+        params = body.model_dump(exclude_none=True)
         # Backward-compatible mapping: old-style keys -> new prefixed keys
         compat_map = {
             "learning_rate": "nn_learning_rate",
@@ -2041,7 +2086,6 @@ async def api_set_params(params: dict):
             "cn_candidate_learning_rate",
             "cn_patience",
             "cn_selected_candidates",
-            "cn_patience",
             "cn_training_complete",
             "cn_training_iterations",
             "cn_training_convergence_threshold",
