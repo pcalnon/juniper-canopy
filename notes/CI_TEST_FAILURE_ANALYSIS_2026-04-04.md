@@ -145,3 +145,32 @@ package content.
 - **Full test suite**: 4169 passed, 56 skipped (all skips are expected external service deps)
 - **Coverage**: 88.76% (source only, properly excluding test files)
 - **No test functionality removed or disabled**
+
+## Pre-existing Issue: Docker Smoke Test
+
+The Docker Build & Smoke Test job fails because the container starts, passes the
+health check (`/v1/health`), then crashes within ~6 seconds before the package
+import verification (`docker exec ... python -c "import juniper_canopy"`) can run.
+
+This is a **pre-existing runtime/deployment issue**, not a test failure. The
+container was never tested in CI before because unit test failures always prevented
+the Docker job from running (it depends on Build Distribution which depends on
+unit tests).
+
+**Root cause**: The application starts and serves the health endpoint, but then
+encounters a fatal error during continuous operation (likely in a lifespan
+background task or demo mode initialization). This needs separate investigation
+focused on the Docker runtime environment and application startup sequence.
+
+## Issue 5: Integration Test Collection Errors (importorskip)
+
+**Root Cause**: 6 integration test files used `pytest.importorskip("juniper_cascor_client")`
+which was defeated by the conftest.py stub module injection. The stub makes the
+top-level package importable but deliberately does NOT stub the `.testing` submodule.
+Additionally, 1 integration test fixture imported `juniper_data_client.testing`
+which similarly fails with the data client stub.
+
+**Fix**: Changed importorskip targets from `juniper_cascor_client` to
+`juniper_cascor_client.testing` in all 6 affected integration test files.
+Added `importorskip("juniper_data_client.testing")` in the `fake_client`
+fixture of `test_juniper_data_e2e.py`.

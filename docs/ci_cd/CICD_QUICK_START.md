@@ -1,260 +1,121 @@
-# CI/CD Quick Start Guide
+# CI/CD Quick Start
 
-**Last Updated:** 2026-01-29  
+**Last Updated:** 2026-04-04  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.25.0
-
----
+**Version:** 0.26.0  
+**Status:** Current
 
 ## Prerequisites
 
-- ✅ Conda environment activated (`JuniperPython`)
-- ✅ Dependencies installed (`pip install -r conf/requirements.txt`)
-- ✅ Git repository initialized
-- ✅ Python 3.11+ installed
-
-**Verify:**
+- Python 3.12+ available locally
+- `pip` and `git` installed
+- Repository cloned
 
 ```bash
-python --version      # Should be 3.11+
-pytest --version      # Should be 7.0+
-conda env list | grep JuniperPython  # Should show active
+python --version
+pip --version
+git --version
 ```
 
----
-
-## Install Pre-commit Hooks
-
-**1. Install pre-commit:**
+## 1. Install Local Quality Hooks
 
 ```bash
 pip install pre-commit
-```
-
-**2. Install hooks:**
-
-```bash
 pre-commit install
-```
-
-**3. Verify:**
-
-```bash
-pre-commit --version  # Output: pre-commit 3.x.x
-```
-
----
-
-## Run Tests Locally
-
-**Quick test:**
-
-```bash
-cd src
-pytest tests/ -v
-```
-
-**With coverage:**
-
-```bash
-cd src
-pytest tests/ --cov=. --cov-report=term-missing
-```
-
-**Expected output:**
-
-```bash
-===================== test session starts ======================
-collected 170 items
-
-tests/unit/test_config_manager.py::test_load_config PASSED  [ 1%]
-tests/unit/test_demo_mode.py::test_start_stop PASSED        [ 2%]
-...
-================== 170 passed in 5.23s =======================
-
-------------- coverage: platform linux, python 3.13.x --------------
-Name                          Stmts   Miss  Cover   Missing
-------------------------------------------------------------
-config_manager.py               120      8    93%   45-52
-demo_mode.py                    156     25    84%   120-145
-...
-TOTAL                          2341    622    73%
-```
-
-**View HTML report:**
-<file:///home/pcalnon/Development/python/Juniper/juniper-canopy/src/tests/reports/coverage/index.html>
-
----
-
-## Set Up GitHub Secrets
-
-**1. Generate Codecov token:**
-
-- Go to [codecov.io](https://codecov.io)
-- Sign in with GitHub
-- Add repository
-- Copy upload token
-
-**2. Add to GitHub:**
-
-- Repository → **Settings** → **Secrets and variables** → **Actions**
-- Click **New repository secret**
-- Name: `CODECOV_TOKEN`
-- Value: Paste token
-- Click **Add secret**
-
----
-
-## Make Your First Commit
-
-**1. Stage changes:**
-
-```bash
-git add src/config_manager.py
-```
-
-**2. Commit (hooks run automatically):**
-
-```bash
-git commit -m "Update configuration handling"
-```
-
-**Pre-commit runs:**
-
-```bash
-Trim Trailing Whitespace.............................Passed
-Fix End of Files.....................................Passed
-Check Yaml...........................................Passed
-black................................................Passed
-isort................................................Passed
-flake8...............................................Passed
-```
-
-**3. Push:**
-
-```bash
-git push origin feature/your-branch
-```
-
----
-
-## View CI Results
-
-**1. Go to GitHub:**
-
-- Actions tab
-- See "CI/CD Pipeline" running
-
-**2. Jobs:**
-
-```bash
-CI/CD Pipeline
-├── ✓ Lint (Code Quality)              ~2 min
-├── ✓ Test Suite (Python 3.11)         ~8 min
-├── ✓ Test Suite (Python 3.12)         ~8 min
-├── ✓ Test Suite (Python 3.13)         ~8 min
-├── ✓ Build                            ~2 min
-├── ✓ Quality Gate                     ~30 sec
-└── ✓ Notify                           ~10 sec
-
-Total: ~10 minutes
-```
-
-**3. Download artifacts:**
-
-- Scroll to bottom
-- Download test results and coverage reports
-
----
-
-## Next Steps
-
-### Add Coverage Badge
-
-```markdown
-[![codecov](https://codecov.io/gh/USERNAME/REPO/branch/main/graph/badge.svg)](https://codecov.io/gh/USERNAME/REPO)
-```
-
-### Enable Branch Protection
-
-- Settings → Branches → Add rule
-- ☑ Require pull request reviews
-- ☑ Require status checks (Test Suite Python 3.13, Quality Gate)
-- ☑ Require branches up to date
-
----
-
-## Common Commands
-
-```bash
-# Pre-commit
 pre-commit run --all-files
-
-# Tests
-pytest tests/unit/test_demo_mode.py -v
-
-# Coverage
-cd src && pytest tests/ --cov=. --cov-report=html
-open ../reports/coverage/index.html
-
-# Formatting
-black src/ --line-length=120
-isort src/ --profile=black
 ```
 
----
+This mirrors the `pre-commit` job in `.github/workflows/ci.yml`.
 
-## Troubleshooting
+## 2. Run the Same Fast Tests as CI
 
-### Pre-commit fails
+From repository root:
 
 ```bash
-black src/ --line-length=120
-isort src/ --profile=black
-git add .
-git commit -m "Apply formatting"
+python -m pip install --upgrade pip
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install -r conf/requirements_ci.txt
+pip install -e .
+mkdir -p logs src/logs reports/junit reports/coverage reports/htmlcov
 ```
 
-### Tests fail locally
+Run CI-equivalent unit and regression tests:
 
 ```bash
-conda activate JuniperPython
-pip install -r conf/requirements.txt
-pytest tests/unit/test_demo_mode.py::test_name -vv
+CASCOR_BACKEND_AVAILABLE=0 RUN_SERVER_TESTS=0 ENABLE_SLOW_TESTS=0 \
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  src/tests/unit/ src/tests/regression/ \
+  --verbose --timeout=60 --maxfail=5 \
+  --cov=src --cov-report=term-missing
 ```
 
-### CI fails but local passes
+Coverage gate in CI is `80%` (`COVERAGE_FAIL_UNDER` in `ci.yml`).
+
+## 3. Validate Lockfile Freshness
+
+CI fails when `requirements.lock` does not match `pyproject.toml` (+ extras).
 
 ```bash
-# Test with CI Python version
-conda create -n test-py311 python=3.11
-conda activate test-py311
-pip install -r conf/requirements.txt
-cd src && pytest tests/ -v
+pip install uv
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
 ```
 
----
+Commit `requirements.lock` when it changes.
 
-## Resources
+## 4. Validate Documentation Links
 
-- [CI/CD Manual](CICD_MANUAL.md) - Complete guide
-- [Environment Setup](CICD_ENVIRONMENT_SETUP.md) - Configuration
-- [Reference](CICD_REFERENCE.md) - Technical specs
-- [AGENTS.md](../../AGENTS.md) - Project development guide
-- [README.md](../../README.md) - Project overview
+CI runs `scripts/check_doc_links.py` and fails on broken internal links.
 
----
+```bash
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
 
-**You've completed:**
+## 5. Understand CI Job Flow
 
-✅ Installed pre-commit hooks  
-✅ Ran tests with coverage  
-✅ Set up Codecov  
-✅ Made first CI/CD commit  
-✅ Viewed CI results
+Current `CI/CD Pipeline` jobs:
 
-**CI/CD is active!** Every push triggers quality checks, tests, and coverage reporting.
+1. `pre-commit` (Python 3.12, 3.13, 3.14)
+2. `unit-tests` (Python matrix + coverage gate)
+3. `integration-tests` (PR/main/develop only)
+4. `build`
+5. `security`
+6. `dependency-docs`
+7. `lockfile-check`
+8. `docs` (link validation)
+9. `docker-build` (PR/main/develop only)
+10. `required-checks`
+11. `notify`
 
----
+## 6. Troubleshooting Fast
 
-**Status:** ✅ Ready to use
+### Collection/import failures in CI
+
+Install exactly from `conf/requirements_ci.txt` and `pip install -e .`.
+
+### Lockfile check fails
+
+Regenerate `requirements.lock` using the exact compile command shown above.
+
+### Docs check fails
+
+Run `scripts/check_doc_links.py` locally and fix the broken path/anchor.
+
+### Python version mismatch issues
+
+Reproduce with Python 3.14 locally (primary CI runtime for non-matrix jobs).
+
+## Next Reads
+
+- [CI/CD Manual](CICD_MANUAL.md)
+- [CI/CD Environment Setup](CICD_ENVIRONMENT_SETUP.md)
+- [CI/CD Technical Reference](CICD_REFERENCE.md)
