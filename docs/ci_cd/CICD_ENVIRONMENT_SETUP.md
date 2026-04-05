@@ -105,7 +105,9 @@ Notes:
 
 `dependency-docs` is the exception: it initializes Miniforge to generate dependency docs artifacts, but test/build correctness still relies on pip installations.
 
----
+- CI installs CPU-only torch explicitly.
+- `conf/requirements_ci.txt` now includes `prometheus-client` and `sentry-sdk` used by observability paths.
+- Editable install (`-e .`) ensures imports resolve from the source tree.
 
 ## CI Environment Variables
 
@@ -132,7 +134,8 @@ Why these matter:
 - Keeps CI focused on deterministic fast suites.
 - Matches marker behavior in `src/tests/conftest.py`.
 
----
+- CI remains green without `*[testing]` extras.
+- These tests are skipped instead of failing collection.
 
 ## Artifacts and Retention
 
@@ -146,7 +149,7 @@ Common uploaded artifacts:
 
 Artifact publishing uses `if: always()` where post-failure diagnostics are needed.
 
----
+This validates internal links/anchors while skipping cross-repo link checks in CI.
 
 ## Security and Permissions
 
@@ -178,7 +181,7 @@ Lockfile correctness:
   - `juniper-cascor`
   - `observability`
 
----
+Default retention is 30 days (90 for dependency docs).
 
 ## Troubleshooting
 
