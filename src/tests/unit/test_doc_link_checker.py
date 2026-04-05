@@ -139,3 +139,66 @@ def test_cross_repo_check_mode_validates_existing_target(tmp_path: Path):
 
     assert skipped == 0
     assert errors == []
+
+
+def test_validate_file_rejects_null_byte_targets(tmp_path: Path):
+    """Null bytes in link targets should be rejected for safety."""
+    checker = _load_doc_link_checker_module()
+    repo_root = tmp_path / "repo"
+    md_file = repo_root / "docs" / "null-byte.md"
+
+    _write_text(md_file, "# Security\n[bad](safe.md\x00evil)\n")
+
+    errors, skipped = checker._validate_file(md_file, repo_root, cross_repo_mode="skip")
+
+    assert skipped == 0
+    assert len(errors) == 1
+    assert "null byte in link target" in errors[0]
+
+
+def test_cross_repo_warn_mode_warns_and_counts_without_failing(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    """Warn mode should emit warning output and keep run non-failing."""
+    checker = _load_doc_link_checker_module()
+    repo_root = tmp_path / "repo"
+    md_file = repo_root / "docs" / "cross-warn.md"
+
+    _write_text(md_file, "# Cross\n[remote](../juniper-ml/docs/README.md)\n")
+
+    errors, skipped = checker._validate_file(md_file, repo_root, cross_repo_mode="warn")
+    captured = capsys.readouterr()
+
+    assert errors == []
+    assert skipped == 1
+    assert "WARN (cross-repo):" in captured.out
+
+
+def test_validate_file_accepts_repo_root_relative_resolution(tmp_path: Path):
+    """A link may resolve from repo root when file-local resolution misses."""
+    checker = _load_doc_link_checker_module()
+    repo_root = tmp_path / "repo"
+    md_file = repo_root / "docs" / "nested" / "guide.md"
+    root_target = repo_root / "README.md"
+
+    _write_text(md_file, "# Guide\n[repo-readme](README.md)\n")
+    _write_text(root_target, "# Root README")
+
+    errors, skipped = checker._validate_file(md_file, repo_root, cross_repo_mode="skip")
+
+    assert skipped == 0
+    assert errors == []
+
+
+def test_validate_file_reports_repository_boundary_escape_without_depth_overflow(tmp_path: Path):
+    """Escapes outside repo should fail even when traversal depth limit is not exceeded."""
+    checker = _load_doc_link_checker_module()
+    repo_root = tmp_path / "repo"
+    md_file = repo_root / "docs" / "boundary.md"
+
+    # Exactly five traversal segments avoids the depth gate (> 5) and exercises boundary checks.
+    _write_text(md_file, "# Boundary\n[escape](../../../../../outside.md)\n")
+
+    errors, skipped = checker._validate_file(md_file, repo_root, cross_repo_mode="skip")
+
+    assert skipped == 0
+    assert len(errors) == 1
+    assert "link resolves outside repository boundary" in errors[0]
