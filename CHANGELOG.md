@@ -39,6 +39,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - New `Documentation Links` quality gate (`scripts/check_doc_links.py`, `--cross-repo skip`)
     - Lockfile freshness behavior (`uv pip compile` with `--extra observability`, header-agnostic comparison)
     - Optional test-extras guidance (`juniper-data-client[testing]`, `juniper-cascor-client[testing]`) and `pytest.importorskip`/`skipif` patterns to prevent collection failures
+- Follow-up CI/testing doc drift fixes aligned with active workflow commands:
+  - Updated lockfile freshness parity commands in:
+    - `docs/ci_cd/CICD_MANUAL.md`
+    - `docs/ci_cd/CICD_QUICK_START.md`
+    - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
+    - These now mirror `ci.yml` header-agnostic lock comparison (`tail -n +3` + body diff), instead of full-file `diff` commands.
+  - Updated `docs/ci_cd/CICD_REFERENCE.md` Dependabot compile example to include `--extra observability`, matching `.github/workflows/lockfile-update.yml`.
+  - Replaced stale CI YAML snippet in `docs/testing/TESTING_MANUAL.md` with current testing-relevant workflow behavior/commands (Python `3.12/3.13/3.14` matrix, `requirements_ci.txt`, fast unit/regression and integration selectors), and corrected conda environment name to `JuniperCanopy`.
 
 - Namespaced Prometheus metrics (`juniper_canopy_` prefix) with WebSocket and demo mode metrics
 - `juniper_canopy_websocket_connections_active` Gauge (by channel)

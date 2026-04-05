@@ -1,6 +1,6 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** March 30, 2026  
+**Last Updated:** 2026-04-05  
 **Version:** v0.26.0
 
 Complete guide to testing the Juniper Canopy application.
@@ -807,43 +807,36 @@ def test_with_fixture(resource):
 
 ### GitHub Actions Workflow
 
-```yaml
-# .github/workflows/ci.yml
-name: CI/CD Pipeline
+The active CI pipeline is split across multiple jobs in `.github/workflows/ci.yml`.
+For testing-relevant behavior, CI currently uses:
 
-on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main, develop]
+- Python matrix `3.12`, `3.13`, `3.14` for `pre-commit` and `unit-tests`
+- Python `3.14` for non-matrix jobs (integration/security/build/docs/lockfile)
+- `conf/requirements_ci.txt` plus editable install (`pip install -e .`)
+- Unit/regression fast subset:
+  `-m "not requires_cascor and not requires_server and not slow"`
+- Integration fast subset:
+  `-m "integration and not requires_cascor and not requires_server and not slow"`
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+Reference commands (mirrors CI):
 
-    steps:
-      - uses: actions/checkout@v4
+```bash
+python -m pip install --upgrade pip
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install -r conf/requirements_ci.txt
+pip install -e .
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
+cd src
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  tests/unit/ tests/regression/ \
+  --verbose --timeout=60 --maxfail=5 \
+  --cov=. --cov-report=term-missing --cov-fail-under=80
 
-      - name: Install dependencies
-        run: |
-          pip install -r conf/requirements.txt
-          pip install pytest pytest-cov
-
-      - name: Run tests
-        run: pytest --cov=src --cov-report=xml
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-        with:
-          file: ./coverage.xml
+python -m pytest \
+  -m "integration and not requires_cascor and not requires_server and not slow" \
+  tests/integration \
+  --verbose --timeout=120 --maxfail=3
 ```
 
 ### Pre-commit Hooks
@@ -877,7 +870,7 @@ repos:
 ```bash
 # Problem: ModuleNotFoundError
 # Solution: Activate conda environment
-conda activate JuniperPython
+conda activate JuniperCanopy
 ```
 
 #### 2. Test Discovery Fails

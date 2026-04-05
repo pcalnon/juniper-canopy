@@ -1,6 +1,6 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-04-04  
+**Last Updated:** 2026-04-05  
 **Version:** 0.26.0  
 **Status:** Current
 
@@ -196,6 +196,7 @@ No long-lived PyPI API token should be required for this workflow.
 uv pip compile pyproject.toml \
   --extra juniper-data \
   --extra juniper-cascor \
+  --extra observability \
   -o /tmp/requirements.lock.check
 mv /tmp/requirements.lock.check requirements.lock
 ```

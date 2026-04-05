@@ -1,6 +1,6 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-04-04  
+**Last Updated:** 2026-04-05  
 **Version:** 0.26.0  
 **Status:** Current
 
@@ -85,7 +85,9 @@ uv pip compile pyproject.toml \
   --extra juniper-cascor \
   --extra observability \
   -o /tmp/requirements.lock.check
-diff -u requirements.lock /tmp/requirements.lock.check
+tail -n +3 requirements.lock > /tmp/lock_body
+tail -n +3 /tmp/requirements.lock.check > /tmp/check_body
+diff -u /tmp/lock_body /tmp/check_body
 ```
 
 ```bash
