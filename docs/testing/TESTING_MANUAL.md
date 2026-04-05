@@ -84,7 +84,26 @@ pytest -m "not slow"
 
 # Skip tests requiring external services
 pytest -m "not requires_cascor"
+
+# CI-fast parity (used in workflow)
+pytest -m "not requires_cascor and not requires_server and not slow" src/tests/unit/ src/tests/regression/
+pytest -m "integration and not requires_cascor and not requires_server and not slow" src/tests/integration/
 ```
+
+### Optional Testing Extras
+
+Some tests rely on helper modules shipped as extras from sibling client packages.
+When extras are unavailable, those tests intentionally skip via `pytest.importorskip(...)`.
+
+```bash
+pip install "juniper-cascor-client[testing]"
+pip install "juniper-data-client[testing]"
+```
+
+Typical examples:
+
+- CasCor fake-client tests: `juniper_cascor_client.testing`
+- JuniperData fake-client tests: `juniper_data_client.testing`
 
 ### Running by Pattern
 
@@ -925,6 +944,14 @@ Use `pytest --collect-only -q` after dependency changes to catch import-time fai
 # Problem: Coverage 0%
 # Solution: Ensure source path is correct
 pytest --cov=src --cov-report=term-missing
+```
+
+#### 6. Tests unexpectedly skipped due to optional extras
+
+```bash
+# Symptom: SKIPPED with message "...[testing] not installed"
+# Fix: install optional testing extras used by importorskip
+pip install "juniper-cascor-client[testing]" "juniper-data-client[testing]"
 ```
 
 #### 7. Service Metrics Shape Mismatch in Dashboard Tests

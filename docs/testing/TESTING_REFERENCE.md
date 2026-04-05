@@ -480,11 +480,30 @@ def test_long_operation():
 def test_with_cascor_backend():
     pass
 
+# Live server dependency
+@pytest.mark.requires_server
+def test_with_live_server():
+    pass
+
 # Async tests
 @pytest.mark.asyncio
 async def test_async_operation():
     await async_function()
 ```
+
+### CI Marker Contract
+
+Default CI does **not** run every marker. The `ci.yml` workflow currently enforces:
+
+- Unit/regression gate:
+  - `-m "not requires_cascor and not requires_server and not slow"`
+- Integration gate:
+  - `-m "integration and not requires_cascor and not requires_server and not slow"`
+
+Implication:
+
+- `requires_cascor`, `requires_server`, and `slow` tests are opt-in for local or dedicated environments.
+- Marker selection is part of the public test workflow contract and should be preserved unless CI policy changes.
 
 ### Skip Markers
 
@@ -577,6 +596,8 @@ pytest path/to/test.py::TestClass::test_method
 pytest -m unit
 pytest -m "unit or integration"
 pytest -m "not slow"
+pytest -m "integration and not requires_cascor and not requires_server and not slow"
+pytest -m "not requires_cascor and not requires_server and not slow"
 
 # By keyword
 pytest -k "demo_mode"
@@ -586,6 +607,22 @@ pytest -k "demo_mode and not advanced"
 # By node ID
 pytest src/tests/unit/test_demo_mode.py::test_initialization
 ```
+
+### Optional Extras and `importorskip`
+
+Some tests use `pytest.importorskip(...)` for optional helper modules. If these packages are not installed, tests skip cleanly.
+
+Install optional testing extras:
+
+```bash
+pip install "juniper-cascor-client[testing]"
+pip install "juniper-data-client[testing]"
+```
+
+Common skip-trigger modules:
+
+- `juniper_cascor_client.testing`
+- `juniper_data_client.testing`
 
 ### Output Commands
 
