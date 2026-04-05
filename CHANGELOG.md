@@ -24,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Updated CI/CD documentation and developer runbooks to cover the documentation link validation gate now enforced in CI:
+- Updated dependency and CI runbook documentation to match current lockfile automation behavior and observability dependency handling:
+  - `README.md`
   - `docs/ci_cd/CICD_MANUAL.md`
   - `docs/ci_cd/CICD_REFERENCE.md`
   - `docs/DEVELOPER_CHEATSHEET.md`
