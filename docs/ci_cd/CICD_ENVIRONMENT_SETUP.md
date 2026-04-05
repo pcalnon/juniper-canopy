@@ -1,7 +1,7 @@
 # CI/CD Environment Setup
 
 **Last Updated:** 2026-04-05  
-**Version:** 0.26.0  
+**Version:** 0.26.1  
 **Status:** Current
 
 Source-aligned configuration guide for the active GitHub Actions CI pipeline.
@@ -139,7 +139,9 @@ Why these matter:
 
 ## Artifacts and Retention
 
-Common uploaded artifacts:
+Use `--cross-repo check` locally when sibling Juniper repositories are checked out and you want full ecosystem link validation.
+
+---
 
 - Coverage XML + HTML: `coverage-report-py<version>` (30 days)
 - JUnit XML: `unit-test-results-py<version>` and `integration-test-results` (30 days)

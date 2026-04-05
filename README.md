@@ -227,6 +227,8 @@ For complete setup instructions, see [docs/QUICK_START.md](docs/QUICK_START.md).
 - [CI/CD Manual](docs/ci_cd/CICD_MANUAL.md) - Comprehensive CI/CD usage guide
 - [CI/CD Reference](docs/ci_cd/CICD_REFERENCE.md) - CI/CD technical reference
 
+The CI/CD docs include operational guidance for `scripts/check_doc_links.py`, including cross-repo validation modes (`skip`, `warn`, `check`) and documentation-link gate troubleshooting.
+
 ### Demo Mode Documentation
 
 - [Demo Mode Quick Start](docs/demo/DEMO_MODE_QUICK_START.md) - Start demo mode in 5 minutes
@@ -254,5 +256,5 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 ---
 
-**Last Updated:** April 4, 2026  
+**Last Updated:** April 5, 2026  
 **Version:** 0.3.0

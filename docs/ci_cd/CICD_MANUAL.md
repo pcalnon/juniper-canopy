@@ -1262,7 +1262,24 @@ pre-commit run --all-files --show-diff-on-failure
 
 ### `unit-tests` Failure
 
-Run CI-equivalent command:
+Useful local variants:
+
+```bash
+# See cross-repo references without failing
+python scripts/check_doc_links.py --cross-repo warn
+
+# Validate cross-repo links when sibling repos are checked out
+python scripts/check_doc_links.py --cross-repo check
+```
+
+Common causes and how to resolve:
+
+1. **Broken same-file anchor**: normalize heading anchors to GitHub style (lowercase, punctuation stripped, spaces -> `-`).
+2. **False positives from example markdown in docs**: move link examples into fenced code blocks or inline code spans so they are intentionally ignored.
+3. **Rejected unsafe path target**: replace absolute paths, null-byte targets, or excessive `..` traversal with valid repository-relative links.
+4. **Cross-repo structure violation**: ensure cross-repo links do not traverse back out of the target repo (no `../` after repo segment).
+
+### 3. Test collection or marker mismatch
 
 ```bash
 python -m pytest \

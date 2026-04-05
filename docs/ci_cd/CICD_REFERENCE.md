@@ -1,6 +1,8 @@
 # CI/CD Technical Reference
 
-## Complete technical reference for the CI/CD pipeline
+**Last Updated:** 2026-04-05  
+**Version:** 0.26.1  
+**Status:** Current
 
 ---
 
@@ -926,14 +928,57 @@ python scripts/check_doc_links.py \
 | Quality Gate     | 30 sec   | 1 core  | 256 MB |
 | Total (parallel) | ~15 min  | -       | -      |
 
-### Optimization Targets
+- validates internal documentation links and same-file anchors
+- enforces path-safety constraints for link targets
+- supports cross-repo policies: `skip`, `warn`, `check`
 
-| Metric            | Current | Target | Stretch |
-| ----------------- | ------- | ------ | ------- |
-| Total build time  | 15 min  | 10 min | 7 min   |
-| Test suite        | 8 min   | 5 min  | 3 min   |
-| Lint              | 2 min   | 1 min  | 30 sec  |
-| Coverage overhead | 20%     | 10%    | 5%      |
+Primary invocation in CI:
+
+```bash
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
+
+#### Supported `--cross-repo` Modes
+
+| Mode | Behavior | Typical Use |
+| ---- | -------- | ----------- |
+| `skip` | Skip cross-repo links, report skipped count | CI default for deterministic isolated runners |
+| `warn` | Print warnings for each cross-repo link, do not fail | Local visibility during documentation review |
+| `check` | Resolve and validate target path in sibling repo checkout | Full Juniper ecosystem local validation |
+
+#### Validation Rules (Current Behavior)
+
+- External URLs are skipped (`http`, `https`, `mailto`, `ftp`)
+- Links inside fenced code blocks are ignored
+- Links inside inline code spans are ignored
+- Same-file anchors (for example `#section-name`) must match extracted heading anchors
+- Relative file links must resolve to an existing path within repository bounds
+
+#### Path-Safety Constraints
+
+- Absolute paths are rejected
+- Null bytes in link targets are rejected
+- Excessive traversal depth (`..`) is rejected
+- Paths that resolve outside repository boundaries are rejected
+- Cross-repo links are structurally checked to prevent escaping target repo boundaries
+
+#### Cross-Repo Check-Mode Fallback
+
+In `check` mode, the script tries to discover a Juniper ecosystem root (containing sibling repos).  
+If not found, it emits a warning and falls back to `skip` mode.
+
+#### Regression Coverage
+
+Behavioral regression tests for this script live in:
+
+- `src/tests/unit/test_doc_link_checker.py`
+
+Coverage includes code-fence/inline-code parsing, anchor normalization checks, cross-repo mode behavior, and path-safety rejection cases.
 
 ---
 

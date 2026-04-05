@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-04-05  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.26.0  
+**Version:** 0.26.1  
 **Status:** Current
 
 Quick path to validate changes locally and understand what GitHub Actions will run in CI.
@@ -107,6 +107,18 @@ uv pip compile pyproject.toml \
   --extra juniper-cascor \
   --extra observability \
   -o requirements.lock
+```
+
+If `docs` job fails:
+
+```bash
+python scripts/check_doc_links.py --cross-repo skip
+```
+
+If failures mention cross-repo links and you want visibility without failing:
+
+```bash
+python scripts/check_doc_links.py --cross-repo warn
 ```
 
 ---
