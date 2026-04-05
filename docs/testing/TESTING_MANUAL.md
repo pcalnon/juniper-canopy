@@ -923,7 +923,22 @@ pytest --fixtures  # List all available fixtures
 pip install pytest-asyncio
 ```
 
-#### 5. Coverage Not Working
+#### 5. Optional Testing Extras Missing (Collection or Import Skips)
+
+```bash
+# Symptom: ModuleNotFoundError for juniper_*_client.testing or skipped tests
+# Fix: install testing extras used by service-integration unit tests
+pip install "juniper-data-client[testing]" "juniper-cascor-client[testing]"
+```
+
+Collection-safe patterns used in the suite:
+
+- `pytest.importorskip("juniper_cascor_client.testing", reason="requires juniper-cascor-client[testing]")`
+- `@pytest.mark.skipif(not _has_jdc_testing, reason="requires juniper-data-client[testing]")`
+
+Use `pytest --collect-only -q` after dependency changes to catch import-time failures early.
+
+#### 6. Coverage Not Working
 
 ```bash
 # Problem: Coverage 0%
