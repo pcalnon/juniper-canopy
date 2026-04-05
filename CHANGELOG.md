@@ -20,6 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated CI/CD documentation to match current workflow behavior in `.github/workflows/ci.yml` and `.github/workflows/lockfile-update.yml`:
+  - `docs/ci_cd/CICD_QUICK_START.md`
+  - `docs/ci_cd/CICD_MANUAL.md`
+  - `docs/ci_cd/CICD_REFERENCE.md`
+  - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
+  - Coverage includes:
+    - Python matrix and job topology updates (`3.12`/`3.13`/`3.14`)
+    - Pip-based CI installation model and `src/tests/...` test-path conventions
+    - lockfile freshness command and header-insensitive diff behavior
+    - documentation-link validation runbook using `scripts/check_doc_links.py`
+- Updated `README.md` lockfile guidance to include `--extra observability` and documented observability optional dependencies (`prometheus-client`, `sentry-sdk`) used by `src/observability.py`.
+
 - Extracted candidate pool section, history tracking, and pool display from `MetricsPanel` to `CandidateMetricsPanel`. Training Metrics tab retains candidate training trace in loss plot and candidate epoch progress bar for context
 - Component count increased from 11 to 12; updated test assertions accordingly
 - Updated Docker/demo-mode documentation to match current startup behavior and environment variable contracts:
@@ -40,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/testing/TESTING_MANUAL.md`
   - `docs/testing/TESTING_REFERENCE.md`
   - Added explicit coverage for envelope unwrapping precedence, zero-value preservation (`0`/`0.0`), topology transformation constraints, dataset target conversion, and metrics panel replay/progress/validation-overlay behaviors.
+- Refreshed CI/testing operations documentation to match the current workflow and marker gating behavior:
+  - Rewrote `docs/ci_cd/CICD_QUICK_START.md`, `docs/ci_cd/CICD_MANUAL.md`, `docs/ci_cd/CICD_REFERENCE.md`, and `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md` to reflect the active `.github/workflows/ci.yml` jobs (`pre-commit`, `unit-tests`, `integration-tests`, `security`, `dependency-docs`, `lockfile-check`, `docs`, `docker-build`).
+  - Updated `docs/testing/TESTING_ENVIRONMENT_SETUP.md`, `docs/testing/TESTING_MANUAL.md`, and `docs/testing/TESTING_REFERENCE.md` with CI marker contracts and optional extras guidance for `juniper-cascor-client[testing]` and `juniper-data-client[testing]`.
+  - Added explicit docs runbook coverage for `scripts/check_doc_links.py` (`--cross-repo skip`) and lockfile freshness checks using `uv pip compile`.
 
 - Refreshed API documentation to match current runtime contracts for service-mode CasCor normalization and backend parity. Updated `docs/api/API_REFERENCE.md` and `docs/api/API_SCHEMAS.md` for `/api/status`, `/api/metrics`, `/api/metrics/history`, `/api/topology`, `/api/dataset`, `/api/decision_boundary`, training-control endpoints, and WebSocket message types.
 - Updated dashboard and backend integration documentation for dashboard augmentation Phase 1-2:
@@ -54,6 +70,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
   - `docs/ci_cd/CICD_MANUAL.md`
   - `notes/juniper-canopy_OTHER_DEPENDENCIES.md`
+- Realigned CI/testing documentation with the current workflow implementation in `.github/workflows/ci.yml`:
+  - Rewrote `docs/ci_cd/CICD_QUICK_START.md`, `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`, `docs/ci_cd/CICD_MANUAL.md`, and `docs/ci_cd/CICD_REFERENCE.md` to document:
+    - Python matrix `3.12/3.13/3.14` and `3.14` default job versioning
+    - pip-based CI dependency installation via `conf/requirements_ci.txt` and editable install
+    - documentation-link validation job (`scripts/check_doc_links.py --cross-repo skip`)
+    - lockfile freshness behavior (`uv pip compile ...` with header-stripped diff)
+    - Docker build/smoke-test and quality-gate aggregation
+  - Updated testing docs for optional testing modules and skip semantics:
+    - `docs/testing/SELECTIVE_TEST_GUIDE.md`
+    - `docs/testing/TESTING_MANUAL.md`
+    - `docs/testing/TESTING_REFERENCE.md`
+    - Added explicit guidance for `pytest.importorskip(...)` use with `juniper_cascor_client.testing` and `juniper_data_client.testing`.
 
 - Renamed HTTP metrics: `http_requests_total` → `juniper_canopy_http_requests_total`, `http_request_duration_seconds` → `juniper_canopy_http_request_duration_seconds`
 - Updated CasCor backend documentation to cover service-mode behavior (`CascorServiceAdapter`, `ServiceBackend`, `CascorStateSync`), including startup attach/sync workflow, response normalization contracts, and service-mode troubleshooting:

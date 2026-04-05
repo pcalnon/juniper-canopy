@@ -5,6 +5,7 @@
 **Last Updated**: 2026-04-04
 **Author**: Paul Calnon
 **Status**: SUPERSEDED — Execution tracked in juniper-ml/notes/CANOPY_DEFERRED_AND_BACKLOG_PLAN.md (all sprints complete as of 2026-04-01). This document retained as historical audit reference.
+**Maintenance Note (2026-04-04)**: CI/CD documentation synchronization completed in `docs/ci_cd/` to reflect current workflows (`ci.yml`, `security-scan.yml`, `publish.yml`, `lockfile-update.yml`), including lockfile and docs-link quality gates.
 **Source**: Full codebase audit of all notes/ files with validation against source code (2026-02-17); polyrepo migration impact analysis (2026-02-25)
 
 ---
