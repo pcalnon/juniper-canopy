@@ -1,7 +1,7 @@
 # Testing Environment Setup
 
-**Last Updated:** January 29, 2026  
-**Version:** v0.25.0
+**Last Updated:** April 5, 2026  
+**Version:** v0.26.0
 
 Complete guide to setting up the testing environment for Juniper Canopy.
 
@@ -20,24 +20,24 @@ Complete guide to setting up the testing environment for Juniper Canopy.
 
 ### Required Software
 
-- **Python**: 3.11, 3.12, or 3.13
+- **Python**: 3.11 or newer (CI parity targets 3.12, 3.13, and 3.14)
 - **Conda/Miniforge**: For environment management
 - **Git**: For version control
 
 ### Conda Environment
 
-The project uses the `JuniperPython` conda environment:
+The project uses the `JuniperCanopy` conda environment:
 
 ```bash
 # Location
-/opt/miniforge3/envs/JuniperPython
+/opt/miniforge3/envs/JuniperCanopy
 
 # Activate
-conda activate JuniperPython
+conda activate JuniperCanopy
 
 # Verify activation
 which python
-# Should output: /opt/miniforge3/envs/JuniperPython/bin/python
+# Should output: /opt/miniforge3/envs/JuniperCanopy/bin/python
 ```
 
 ## Environment Configuration
@@ -53,24 +53,25 @@ cd juniper_canopy
 ### 2. Activate Environment
 
 ```bash
-conda activate JuniperPython
+conda activate JuniperCanopy
 ```
 
 ### 3. Set Environment Variables (Optional)
 
 ```bash
 # Enable debug mode
-export CASCOR_DEBUG=1
+export JUNIPER_CANOPY_LOG_LEVEL=DEBUG
 
 # Enable demo mode
-export CASCOR_DEMO_MODE=1
+export JUNIPER_CANOPY_DEMO_MODE=1
 
 # Custom configuration path
-export CASCOR_CONFIG_PATH=/path/to/config.yaml
+export JUNIPER_CANOPY_SERVER__PORT=8051
 
 # Test-specific variables
-export CASCOR_TEST_MODE=1
-export CASCOR_TEST_DB_PATH=/tmp/test_db
+export CASCOR_BACKEND_AVAILABLE=0
+export RUN_SERVER_TESTS=0
+export ENABLE_SLOW_TESTS=0
 ```
 
 ## Installing Test Dependencies
@@ -78,8 +79,9 @@ export CASCOR_TEST_DB_PATH=/tmp/test_db
 ### Core Dependencies
 
 ```bash
-# Install from requirements file
-pip install -r conf/requirements.txt
+# Install CI-aligned requirements
+pip install -r conf/requirements_ci.txt
+pip install -e .
 ```
 
 ### Test-Specific Dependencies
@@ -131,7 +133,7 @@ pip list | grep pytest
    ```json
    // .vscode/settings.json
    {
-     "python.defaultInterpreterPath": "/opt/miniforge3/envs/JuniperPython/bin/python",
+     "python.defaultInterpreterPath": "/opt/miniforge3/envs/JuniperCanopy/bin/python",
      "python.testing.pytestEnabled": true,
      "python.testing.pytestArgs": [
        "src/tests",
@@ -188,7 +190,7 @@ pip list | grep pytest
 1. **Configure Project Interpreter**
    - File → Settings → Project → Python Interpreter
    - Add → Conda Environment → Existing
-   - Select: `/opt/miniforge3/envs/JuniperPython/bin/python`
+   - Select: `/opt/miniforge3/envs/JuniperCanopy/bin/python`
 
 2. **Configure Pytest**
    - File → Settings → Tools → Python Integrated Tools
@@ -378,14 +380,14 @@ pre-commit run --all-files
 ```bash
 # Check Python version
 python --version
-# Should be: Python 3.11.x, 3.12.x, or 3.13.x
+# Should be: Python 3.11+ (CI parity: 3.12/3.13/3.14)
 
 # Check Python path
 which python
-# Should be: /opt/miniforge3/envs/JuniperPython/bin/python
+# Should be: /opt/miniforge3/envs/JuniperCanopy/bin/python
 
 # Check conda environment
-conda info --envs | grep JuniperPython
+conda info --envs | grep JuniperCanopy
 ```
 
 ### 2. Verify Test Dependencies
@@ -454,7 +456,8 @@ ls -la reports/junit/
 pip install pytest
 
 # Or reinstall all dependencies
-pip install -r conf/requirements.txt
+pip install -r conf/requirements_ci.txt
+pip install -e .
 ```
 
 ### Issue: Module not found errors
@@ -464,10 +467,10 @@ pip install -r conf/requirements.txt
 echo $PYTHONPATH
 
 # Add src directory to path
-export PYTHONPATH="${PYTHONPATH}:/home/pcalnon/Development/python/Juniper/juniper-canopy/src"
+export PYTHONPATH="${PYTHONPATH}:$(pwd)/src"
 
 # Or activate conda environment
-conda activate JuniperPython
+conda activate JuniperCanopy
 ```
 
 ### Issue: Test discovery fails
@@ -530,14 +533,14 @@ find . -type f -name "*.pyc" -delete
 
 ## Environment Variables Reference
 
-| Variable             | Default                | Description          |
-| -------------------- | ---------------------- | -------------------- |
-| `CASCOR_DEBUG`       | `0`                    | Enable debug logging |
-| `CASCOR_DEMO_MODE`   | `0`                    | Run in demo mode     |
-| `CASCOR_CONFIG_PATH` | `conf/app_config.yaml` | Config file path     |
-| `CASCOR_TEST_MODE`   | `0`                    | Enable test mode     |
-| `CASCOR_LOG_LEVEL`   | `INFO`                 | Logging level        |
-| `CASCOR_SERVER_PORT` | `8050`                 | Server port          |
+| Variable                              | Default     | Description                           |
+| ------------------------------------- | ----------- | ------------------------------------- |
+| `JUNIPER_CANOPY_DEMO_MODE`            | `0`         | Run in demo mode                      |
+| `JUNIPER_CANOPY_LOG_LEVEL`            | `INFO`      | Application log level                 |
+| `JUNIPER_CANOPY_SERVER__PORT`         | `8050`      | Server port                           |
+| `CASCOR_BACKEND_AVAILABLE`            | unset/`0`   | Enable tests requiring real backend   |
+| `RUN_SERVER_TESTS`                    | unset/`0`   | Enable tests requiring running server |
+| `ENABLE_SLOW_TESTS`                   | unset/`0`   | Enable tests marked `slow`            |
 
 ## Next Steps
 

@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Updated `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md` for pip-first CI setup, Python 3.12-3.14 matrix, and lockfile/docs gates
   - Updated `docs/ci_cd/CICD_REFERENCE.md` to document active workflows (`ci.yml`, `security-scan.yml`, `publish.yml`, `lockfile-update.yml`)
   - Updated `docs/ci_cd/CICD_MANUAL.md` with role-based runbooks aligned to `required-checks` gating semantics
+- Updated testing/reference docs to remove stale CI examples and align with active pipeline behavior:
+  - Updated `docs/testing/TESTING_MANUAL.md` CI section to reference current `ci.yml` matrix/jobs and `requirements_ci.txt` usage
+  - Updated `docs/testing/TESTING_ENVIRONMENT_SETUP.md` to use current `JuniperCanopy` environment naming, current CI Python matrix (`3.12`-`3.14`), and `JUNIPER_CANOPY_*` test env var examples
+  - Updated `docs/REFERENCE.md` CI summary from `3.11-3.14` to `3.12-3.14`
 
 - Namespaced Prometheus metrics (`juniper_canopy_` prefix) with WebSocket and demo mode metrics
 - `juniper_canopy_websocket_connections_active` Gauge (by channel)
