@@ -1,6 +1,6 @@
 # Testing Environment Setup
 
-**Last Updated:** April 5, 2026  
+**Last Updated:** April 5, 2026
 **Version:** v0.26.0
 
 Operational setup guide for running the Juniper Canopy test suite with the same assumptions used by CI and `src/tests/conftest.py`.
@@ -14,9 +14,12 @@ Operational setup guide for running the Juniper Canopy test suite with the same 
 3. [Installing Test Dependencies](#installing-test-dependencies)
 4. [IDE Configuration](#ide-configuration)
 5. [Directory Structure](#directory-structure)
-6. [Configuration Files](#configuration-files)
-7. [Verification](#verification)
-8. [Troubleshooting](#troubleshooting)
+6. [Verification](#verification)
+7. [Test Selection Controls](#test-selection-controls)
+8. [Run Commands](#run-commands)
+9. [Verification Checklist](#verification-checklist)
+10. [Troubleshooting](#troubleshooting)
+11. [References](#references)
 
 ## Prerequisites
 
@@ -96,8 +99,6 @@ pip --version
 ```
 
 ---
-
-## Install Dependencies
 
 ## IDE Configuration
 

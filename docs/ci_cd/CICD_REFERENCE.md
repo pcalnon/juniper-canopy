@@ -11,9 +11,9 @@
 3. [Configuration Files](#configuration-files)
 4. [Documentation Link Validation](#documentation-link-validation)
 5. [Tool Configurations](#tool-configurations)
-6. [Environment Variables](#environment-variables)
-7. [Artifact Specifications](#artifact-specifications)
-8. [API Reference](#api-reference)
+6. [Dependency Reference](#dependency-reference)
+7. [Documentation Link Checker Reference](#documentation-link-checker-reference)
+8. [Common Failure Classes](#common-failure-classes)
 9. [Troubleshooting Reference](#troubleshooting-reference)
 
 ---
@@ -388,11 +388,11 @@ python scripts/check_doc_links.py --cross-repo warn --verbose docs/ notes/
 
 ### Cross-Repo Modes
 
-| Mode | Behavior | Typical Use |
-| ---- | -------- | ----------- |
-| `skip` | Skip cross-repo file existence checks (still validates structure) | CI and isolated clones |
-| `warn` | Emit warnings for cross-repo links without failing | Local cleanup passes |
-| `check` | Validate cross-repo targets on disk | Full local Juniper ecosystem checkout |
+| Mode    | Behavior                                                          | Typical Use                           |
+|---------|-------------------------------------------------------------------|---------------------------------------|
+| `skip`  | Skip cross-repo file existence checks (still validates structure) | CI and isolated clones                |
+| `warn`  | Emit warnings for cross-repo links without failing                | Local cleanup passes                  |
+| `check` | Validate cross-repo targets on disk                               | Full local Juniper ecosystem checkout |
 
 ---
 
@@ -400,8 +400,8 @@ python scripts/check_doc_links.py --cross-repo warn --verbose docs/ notes/
 
 ### .github/workflows/ci.yml
 
-**Last Updated:** 2026-04-04  
-**Version:** 0.26.0  
+**Last Updated:** 2026-04-04
+**Version:** 0.26.0
 **Status:** Current
 
 ## Scope
@@ -469,12 +469,15 @@ ignore:
 
 3. **isort configuration**
 
-### `pre-commit`
+    ```yaml
+    # `pre-commit`
+    - Python matrix: `3.12`, `3.13`, `3.14`
+    - Installs `pre-commit`
+    - Runs `pre-commit run --all-files --show-diff-on-failure`
+    - Caches pre-commit hooks (`~/.cache/pre-commit`)
+    ```
 
-- Python matrix: `3.12`, `3.13`, `3.14`
-- Installs `pre-commit`
-- Runs `pre-commit run --all-files --show-diff-on-failure`
-- Caches pre-commit hooks (`~/.cache/pre-commit`)
+4. **Bandit configuration**
 
    ```yaml
    # .bandit.yml
@@ -827,20 +830,20 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ### Common Error Codes
 
-| Error | Cause                    | Solution                         |
-| ----- | ------------------------ | -------------------------------- |
-| E001  | Workflow syntax error    | Validate YAML syntax             |
-| E002  | Missing required field   | Add required field to workflow   |
-| E003  | Invalid expression       | Fix workflow expression syntax   |
-| E101  | Job timeout              | Increase timeout or optimize job |
-| E102  | Job cancelled            | Check concurrency settings       |
-| E201  | Step failed              | Check step logs for details      |
-| E202  | Command not found        | Install required tool            |
-| E203  | Permission denied        | Check file permissions           |
-| E301  | Artifact upload failed   | Check size and path              |
-| E302  | Artifact download failed | Verify artifact exists           |
-| D401  | Broken markdown link     | Update link target path          |
-| D402  | Broken heading anchor    | Update anchor or heading         |
+| Error | Cause                    | Solution                            |
+|-------|--------------------------|-------------------------------------|
+| E001  | Workflow syntax error    | Validate YAML syntax                |
+| E002  | Missing required field   | Add required field to workflow      |
+| E003  | Invalid expression       | Fix workflow expression syntax      |
+| E101  | Job timeout              | Increase timeout or optimize job    |
+| E102  | Job cancelled            | Check concurrency settings          |
+| E201  | Step failed              | Check step logs for details         |
+| E202  | Command not found        | Install required tool               |
+| E203  | Permission denied        | Check file permissions              |
+| E301  | Artifact upload failed   | Check size and path                 |
+| E302  | Artifact download failed | Verify artifact exists              |
+| D401  | Broken markdown link     | Update link target path             |
+| D402  | Broken heading anchor    | Update anchor or heading            |
 | D403  | Unsafe link path         | Remove absolute/null/deep traversal |
 
 ### Exit Codes
@@ -970,7 +973,7 @@ python scripts/check_doc_links.py \
 
 ---
 
-**Last Updated:** 2026-04-05  
-**Version:** 0.25.1  
-**Maintained By:** Development Team  
+**Last Updated:** 2026-04-05
+**Version:** 0.25.1
+**Maintained By:** Development Team
 **Status:** ✅ Current
