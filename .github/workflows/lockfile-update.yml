@@ -68,6 +68,7 @@ jobs:
           uv pip compile pyproject.toml \
             --extra juniper-data \
             --extra juniper-cascor \
+            --extra observability \
             -o /tmp/requirements.lock.check
 
           mv /tmp/requirements.lock.check requirements.lock
