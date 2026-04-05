@@ -194,7 +194,7 @@ Use CI mode locally: `--cross-repo skip`.
 
 ---
 
-## References
+For branch protection, prefer requiring at least:
 
 - [Main CI Workflow](../../.github/workflows/ci.yml)
 - [Dependabot Lockfile Update](../../.github/workflows/lockfile-update.yml)
