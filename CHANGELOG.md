@@ -17,11 +17,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Collapsible contextual section wrappers (`ctx-growth-triggers-*`, `ctx-multi-node-*`, `ctx-spiral-dataset-*`, `ctx-pool-training-*`) with toggle callbacks, defaulting to `is_open=True`
 - Sidebar decomposition: 15 addressable wrapper div IDs (`sidebar-nn-*`, `sidebar-cn-*`, `sidebar-network-info-section`, `sidebar-meta-params-card`, `sidebar-apply-section`)
 - Unit tests for sidebar visibility configuration and CandidateMetricsPanel layout/helpers
+- Added release-readiness navigation in `docs/DOCUMENTATION_OVERVIEW.md` for:
+  - `notes/CODE_REVIEW_ANALYSIS_2026-04-04.md`
+  - `notes/CODE_REVIEW_PLAN_2026-04-04.md`
+  - `notes/CODE_REVIEW_DEVELOPMENT_ROADMAP_2026-04-04.md`
 
 ### Changed
 
-- Extracted candidate pool section, history tracking, and pool display from `MetricsPanel` to `CandidateMetricsPanel`. Training Metrics tab retains candidate training trace in loss plot and candidate epoch progress bar for context
-- Component count increased from 11 to 12; updated test assertions accordingly
+- Updated dependency and CI runbook documentation to match current lockfile automation behavior and observability dependency handling:
+  - `README.md`
+  - `docs/ci_cd/CICD_MANUAL.md`
+  - `docs/ci_cd/CICD_REFERENCE.md`
+  - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
+  - `docs/ci_cd/CICD_QUICK_START.md`
+  - `docs/testing/TESTING_MANUAL.md`
+  - Coverage includes:
+    - Active Python CI matrix (`3.12`, `3.13`, `3.14`) and default `3.14` job pinning
+    - New `Documentation Links` quality gate (`scripts/check_doc_links.py`, `--cross-repo skip`)
+    - Lockfile freshness behavior (`uv pip compile` with `--extra observability`, header-agnostic comparison)
+    - Optional test-extras guidance (`juniper-data-client[testing]`, `juniper-cascor-client[testing]`) and `pytest.importorskip`/`skipif` patterns to prevent collection failures
+- Corrected CI/CD docs to remove stale Conda/Codecov-era instructions and align with current workflow gates and job graph:
+  - replaced outdated workflow snippets with source-verified jobs from `.github/workflows/ci.yml`
+  - documented actual matrix and pinning strategy (matrix `3.12/3.13/3.14`, single-version `3.14` jobs)
+  - documented current dependency install path (`conf/requirements_ci.txt`, CPU torch index, editable install)
+  - aligned scheduled security scan documentation with `security-scan.yml` commands
 
 - Namespaced Prometheus metrics (`juniper_canopy_` prefix) with WebSocket and demo mode metrics
 - `juniper_canopy_websocket_connections_active` Gauge (by channel)
@@ -37,6 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/testing/TESTING_MANUAL.md`
   - `docs/testing/TESTING_REFERENCE.md`
   - Added explicit coverage for envelope unwrapping precedence, zero-value preservation (`0`/`0.0`), topology transformation constraints, dataset target conversion, and metrics panel replay/progress/validation-overlay behaviors.
+- Refreshed CI/testing operations documentation to match the current workflow and marker gating behavior:
+  - Rewrote `docs/ci_cd/CICD_QUICK_START.md`, `docs/ci_cd/CICD_MANUAL.md`, `docs/ci_cd/CICD_REFERENCE.md`, and `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md` to reflect the active `.github/workflows/ci.yml` jobs (`pre-commit`, `unit-tests`, `integration-tests`, `security`, `dependency-docs`, `lockfile-check`, `docs`, `docker-build`).
+  - Updated `docs/testing/TESTING_ENVIRONMENT_SETUP.md`, `docs/testing/TESTING_MANUAL.md`, and `docs/testing/TESTING_REFERENCE.md` with CI marker contracts and optional extras guidance for `juniper-cascor-client[testing]` and `juniper-data-client[testing]`.
+  - Added explicit docs runbook coverage for `scripts/check_doc_links.py` (`--cross-repo skip`) and lockfile freshness checks using `uv pip compile`.
 
 - Refreshed API documentation to match current runtime contracts for service-mode CasCor normalization and backend parity. Updated `docs/api/API_REFERENCE.md` and `docs/api/API_SCHEMAS.md` for `/api/status`, `/api/metrics`, `/api/metrics/history`, `/api/topology`, `/api/dataset`, `/api/decision_boundary`, training-control endpoints, and WebSocket message types.
 - Updated dashboard and backend integration documentation for dashboard augmentation Phase 1-2:
@@ -67,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **DOCKER-001: .dockerignore excluded README.md** — Removed `README.md` from `.dockerignore` exclusion list. The Dockerfile `COPY pyproject.toml README.md ./` step requires README.md in the build context, but the .dockerignore was excluding it, causing Docker builds to fail.
+- **DOCKER-REGRESSION: Forced demo mode removed from Docker runtime defaults** — Removed `JUNIPER_CANOPY_DEMO_MODE=1` from both `Dockerfile` and `conf/Dockerfile`. Forcing demo mode silently routes deployments to `DemoBackend`, which can ignore configured `CASCOR_SERVICE_URL` and serve synthetic training data instead of real backend data.
 
 ---
 
