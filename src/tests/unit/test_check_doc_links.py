@@ -54,12 +54,7 @@ def test_validate_file_detects_missing_same_file_anchor(tmp_path: Path) -> None:
 
 
 def test_validate_file_ignores_links_in_code_fences_and_inline_code(tmp_path: Path) -> None:
-    content = (
-        "Inline code should be ignored: `[inline](missing.md)`\n\n"
-        "```markdown\n"
-        "[code-fence](also-missing.md)\n"
-        "```\n"
-    )
+    content = "Inline code should be ignored: `[inline](missing.md)`\n\n" "```markdown\n" "[code-fence](also-missing.md)\n" "```\n"
     repo_root, md_file = _make_repo_with_doc(tmp_path, content)
 
     errors, skipped = check_doc_links._validate_file(md_file, repo_root)
