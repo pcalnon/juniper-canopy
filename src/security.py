@@ -114,6 +114,8 @@ class RateLimiter:
         self._enabled = enabled
         self._counters: dict[str, tuple[int, float]] = defaultdict(lambda: (0, 0.0))
         self._lock = Lock()
+        self._max_entries = 10_000
+        self._last_eviction = 0.0
 
     @property
     def enabled(self) -> bool:
