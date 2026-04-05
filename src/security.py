@@ -7,6 +7,7 @@ Configuration is read from environment variables:
     CANOPY_RATE_LIMIT_REQUESTS_PER_MINUTE: Rate limit (default: 60).
 """
 
+import hmac
 import os
 import time
 from collections import defaultdict
@@ -54,7 +55,7 @@ class APIKeyAuth:
             return True
         if api_key is None:
             return False
-        return api_key in self._api_keys
+        return any(hmac.compare_digest(api_key, k) for k in self._api_keys)
 
     async def __call__(self, request: Request) -> str | None:
         """FastAPI dependency for API key validation.
