@@ -13,7 +13,8 @@
 5. [Environment Variables](#environment-variables)
 6. [Artifact Specifications](#artifact-specifications)
 7. [API Reference](#api-reference)
-8. [Troubleshooting Reference](#troubleshooting-reference)
+8. [Documentation Link Validation](#documentation-link-validation)
+9. [Troubleshooting Reference](#troubleshooting-reference)
 
 ---
 
@@ -942,6 +943,43 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
+## Documentation Link Validation
+
+The CI workflow includes a dedicated documentation validation job (`docs`) that runs the internal link checker script:
+
+```bash
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
+
+### Purpose
+
+- Verify that internal relative documentation links resolve to existing files.
+- Verify same-file heading anchors resolve to existing headings.
+- Catch security-sensitive link inputs (absolute paths, null bytes, and excessive traversal).
+- Enforce deterministic behavior for cross-repo links in CI (`--cross-repo skip`).
+
+### Behavioral Constraints
+
+- External links (`http://`, `https://`, `mailto:`, `ftp://`) are ignored.
+- Links inside fenced code blocks and inline code spans are ignored.
+- Cross-repo links are classified against known Juniper ecosystem repo names.
+- Cross-repo structural escapes (for example traversing out of the target repo path) fail validation.
+
+### Operational Notes
+
+- CI uses `--cross-repo skip` so sibling repositories do not need to be checked out.
+- Local maintainers can use `--cross-repo check` when working in a full ecosystem checkout.
+- Script exit codes:
+  - `0`: all links valid
+  - `1`: broken links found or invalid arguments
+
+---
+
 ## Troubleshooting Reference
 
 ### Common Error Codes
@@ -1053,7 +1091,7 @@ grep "coverage" workflow.log | grep -i "low\|fail"
 
 ---
 
-**Last Updated:** 2026-01-29  
-**Version:** 0.25.0  
+**Last Updated:** 2026-04-05  
+**Version:** 0.25.1  
 **Maintained By:** Development Team  
 **Status:** ✅ Current

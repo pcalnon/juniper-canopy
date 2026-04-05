@@ -1,7 +1,7 @@
 # Testing Reference - Technical Documentation
 
-**Last Updated:** March 30, 2026  
-**Version:** v0.26.0
+**Last Updated:** April 5, 2026  
+**Version:** v0.26.1
 
 Complete technical reference for the Juniper Canopy testing infrastructure.
 
@@ -647,6 +647,43 @@ pytest --cov=src/demo_mode --cov-report=term-missing
 
 # Append coverage data
 pytest --cov-append
+```
+
+### Documentation Validation Commands
+
+```bash
+# Run the documentation link checker (CI-equivalent mode)
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+
+# Run link checker with cross-repo warnings (local triage)
+python scripts/check_doc_links.py --cross-repo warn
+
+# Run full cross-repo validation (requires sibling repos checked out)
+python scripts/check_doc_links.py --cross-repo check
+
+# Run focused unit tests for link-checker hardening
+pytest src/tests/unit/test_check_doc_links.py -v
+```
+
+### Documentation Link Checker Edge-Case Matrix
+
+| Test File | Focus Area | Behaviors Covered |
+| ----------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `src/tests/unit/test_check_doc_links.py` | Parser correctness around markdown syntax boundaries | ignores fenced-code links, ignores inline-code links, reports missing anchors |
+| `src/tests/unit/test_check_doc_links.py` | Security validation of link targets | rejects absolute paths, excessive traversal depth, null bytes |
+| `src/tests/unit/test_check_doc_links.py` | Cross-repo policy and fallback behavior | skip-mode counting, check-mode resolution, target-repo escape rejection, invalid mode handling, fallback-to-skip when ecosystem root missing |
+
+Recommended targeted invocations:
+
+```bash
+pytest src/tests/unit/test_check_doc_links.py -k "code_fences or inline_code or anchor" -v
+pytest src/tests/unit/test_check_doc_links.py -k "dangerous_link_inputs or rejects_escape" -v
+pytest src/tests/unit/test_check_doc_links.py -k "cross_repo or invalid_cross_repo_mode or falls_back_to_skip" -v
 ```
 
 ### Debugging Commands
