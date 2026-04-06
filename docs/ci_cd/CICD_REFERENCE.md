@@ -6,23 +6,181 @@
 
 ## Table of Contents
 
-- [Workflow Inventory](#workflow-inventory)
-- [Main CI Workflow (`ci.yml`)](#main-ci-workflow-ciyml)
-- [Auxiliary Workflows](#auxiliary-workflows)
-- [Tooling and Configuration Sources](#tooling-and-configuration-sources)
-- [Artifacts Produced by CI](#artifacts-produced-by-ci)
-- [Troubleshooting Reference](#troubleshooting-reference)
-- [Version History](#version-history)
-- [References](#references)
+1. [Pipeline Architecture](#pipeline-architecture)
+2. [Workflow Specification](#workflow-specification)
+3. [Auxiliary Workflows](#auxiliary-workflows)
+4. [Tooling and Configuration Sources](#tooling-and-configuration-sources)
+5. [Documentation Link Validation](#documentation-link-validation)
+6. [Troubleshooting Reference](#troubleshooting-reference)
+7. [Troubleshooting Reference, Updated](#troubleshooting-reference-updated)
+8. [Version History](#version-history)
+9. [References](#references)
+
+---
+
+## Pipeline Architecture
+
+### System Diagram
+
+```mermaid
+graph TB
+    subgraph "Developer Workstation"
+        A[Git Commit]
+        B[Pre-commit Hooks]
+        A --> B
+    end
+
+    subgraph "GitHub"
+        C[Git Push]
+        D[Workflow Trigger]
+        B --> C
+        C --> D
+    end
+
+    subgraph "GitHub Actions Runners"
+        E[Lint Job]
+        F[Test Matrix]
+        G[Build Job]
+        H[Integration Job]
+        I[Quality Gate]
+        J[Notify]
+
+        D --> E
+        D --> F
+        E --> G
+        F --> G
+        F --> H
+        G --> I
+        H --> I
+        I --> J
+    end
+
+    subgraph "External Services"
+        K[Codecov]
+        L[GitHub Checks API]
+        F --> K
+        J --> L
+    end
+```
+
+### Job Dependencies
+
+```yaml
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: github.event_name == 'pull_request'
+
+  quality-gate:
+    runs-on: ubuntu-latest
+    needs: [lint, test, build]
+    if: always()
+
+  notify:
+    runs-on: ubuntu-latest
+    needs: [quality-gate]
+    if: always()
+```
+
+---
+
+## Workflow Specification
+
+### Trigger Specification
+
+```yaml
+on:
+  # Push triggers
+  push:
+    branches:
+      - main                # Production branch
+      - develop             # Development branch
+      - 'feature/**'        # Feature branches
+      - 'fix/**'            # Bugfix branches
+    paths-ignore:
+      - '**.md'             # Skip docs-only changes
+      - 'docs/**'
+      - 'notes/**'
+
+  # Pull request triggers
+  pull_request:
+    branches:
+      - main
+      - develop
+    types:
+      - opened              # PR created
+      - synchronize         # New commits pushed
+      - reopened            # PR reopened
+      - ready_for_review    # Draft → Ready
+
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      python-version:
+        description: 'Python version to test'
+        required: false
+        default: '3.13'
+        type: choice
+        options:
+          - '3.11'
+          - '3.12'
+          - '3.13'
+      skip-slow-tests:
+        description: 'Skip slow tests'
+        required: false
+        default: true
+        type: boolean
+```
+
+### Job Specification
+
+#### Lint Job
+
+```yaml
+lint:
+  name: Code Quality Checks
+  runs-on: ubuntu-latest
+  timeout-minutes: 10
+
+  steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for better analysis
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+        cache: 'pip'
+
+    - name: Install Linting Tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install black isort flake8 mypy bandit
 
 ## Workflow Inventory
 
-| Workflow File | Trigger | Primary Purpose |
-| --- | --- | --- |
-| `.github/workflows/ci.yml` | `push`, `pull_request`, `repository_dispatch`, `workflow_dispatch` | Full quality pipeline and merge gate |
-| `.github/workflows/security-scan.yml` | weekly cron + manual | Scheduled security posture scan |
-| `.github/workflows/lockfile-update.yml` | Dependabot push branches | Auto-refresh `requirements.lock` |
-| `.github/workflows/publish.yml` | release published | Build + TestPyPI + PyPI publish |
+| Workflow File                           | Trigger                                                            | Primary Purpose                      |
+|-----------------------------------------|--------------------------------------------------------------------|--------------------------------------|
+| `.github/workflows/ci.yml`              | `push`, `pull_request`, `repository_dispatch`, `workflow_dispatch` | Full quality pipeline and merge gate |
+| `.github/workflows/security-scan.yml`   | weekly cron + manual                                               | Scheduled security posture scan      |
+| `.github/workflows/lockfile-update.yml` | Dependabot push branches                                           | Auto-refresh `requirements.lock`     |
+| `.github/workflows/publish.yml`         | release published                                                  | Build + TestPyPI + PyPI publish      |
 
 ## Main CI Workflow (`ci.yml`)
 
@@ -195,19 +353,19 @@ env:
 
 ### Jobs and dependencies
 
-| Job | Needs | Python | Notes |
-| --- | --- | --- | --- |
-| `pre-commit` | — | matrix `3.12/3.13/3.14` | Runs `pre-commit --all-files` |
-| `unit-tests` | `pre-commit` | matrix `3.12/3.13/3.14` | Runs unit + regression markers with coverage gate |
-| `integration-tests` | `unit-tests` | `3.14` | Runs fast integration subset |
-| `build` | `unit-tests` | `3.14` | Builds sdist and wheel |
-| `security` | `pre-commit` | `3.14` | Gitleaks + Bandit + pip-audit |
-| `dependency-docs` | `build` | `3.14` | Generates dependency docs via script |
-| `lockfile-check` | — | `3.14` | Recompiles lockfile and diffs body |
-| `docs` | — | `3.14` | Runs doc-link validation script |
-| `docker-build` | `build` | docker engine | Builds image + health smoke test |
-| `required-checks` | all core jobs | n/a | Aggregated merge gate |
-| `notify` | `required-checks` | n/a | Run summary |
+| Job                 | Needs             | Python                  | Notes                                             |
+|---------------------|-------------------|-------------------------|---------------------------------------------------|
+| `pre-commit`        | —                 | matrix `3.12/3.13/3.14` | Runs `pre-commit --all-files`                     |
+| `unit-tests`        | `pre-commit`      | matrix `3.12/3.13/3.14` | Runs unit + regression markers with coverage gate |
+| `integration-tests` | `unit-tests`      | `3.14`                  | Runs fast integration subset                      |
+| `build`             | `unit-tests`      | `3.14`                  | Builds sdist and wheel                            |
+| `security`          | `pre-commit`      | `3.14`                  | Gitleaks + Bandit + pip-audit                     |
+| `dependency-docs`   | `build`           | `3.14`                  | Generates dependency docs via script              |
+| `lockfile-check`    | —                 | `3.14`                  | Recompiles lockfile and diffs body                |
+| `docs`              | —                 | `3.14`                  | Runs doc-link validation script                   |
+| `docker-build`      | `build`           | docker engine           | Builds image + health smoke test                  |
+| `required-checks`   | all core jobs     | n/a                     | Aggregated merge gate                             |
+| `notify`            | `required-checks` | n/a                     | Run summary                                       |
 
 ### Test marker expressions in CI
 
@@ -295,24 +453,61 @@ This catches broken internal file and heading links without requiring sibling re
 
 ## Tooling and Configuration Sources
 
-| Concern | Source of Truth |
-| --- | --- |
+| Concern                     | Source of Truth                                |
+|-----------------------------|------------------------------------------------|
 | Pytest markers and defaults | `pyproject.toml` (`[tool.pytest.ini_options]`) |
-| Coverage thresholds | `pyproject.toml` and `ci.yml` job args |
-| CI dependencies | `conf/requirements_ci.txt` |
-| Security scan excludes | `.bandit.yml` + workflow commands |
-| Doc-link validation rules | `scripts/check_doc_links.py` |
+| Coverage thresholds         | `pyproject.toml` and `ci.yml` job args         |
+| CI dependencies             | `conf/requirements_ci.txt`                     |
+| Security scan excludes      | `.bandit.yml` + workflow commands              |
+| Doc-link validation rules   | `scripts/check_doc_links.py`                   |
 
-## Artifacts Produced by CI
+## Documentation Link Validation
 
-| Job | Artifact | Typical Contents |
-| --- | --- | --- |
-| `unit-tests` | `coverage-report-py*` | XML + HTML coverage outputs |
-| `unit-tests` | `unit-test-results-py*` | JUnit XML test outputs |
-| `integration-tests` | `integration-test-results` | Integration JUnit XML |
-| `build` | `dist-packages` | Wheel and sdist |
-| `security` | `security-reports` | Bandit + pip-audit reports |
-| `dependency-docs` | `dependency-docs` | Generated requirements/conda docs |
+The CI workflow includes a dedicated documentation validation job (`docs`) that runs the internal link checker script:
+
+```bash
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
+
+### Purpose
+
+- Verify that internal relative documentation links resolve to existing files.
+- Verify same-file heading anchors resolve to existing headings.
+- Catch security-sensitive link inputs (absolute paths, null bytes, and excessive traversal).
+- Enforce deterministic behavior for cross-repo links in CI (`--cross-repo skip`).
+
+### Behavioral Constraints
+
+- External links (`http://`, `https://`, `mailto:`, `ftp://`) are ignored.
+- Links inside fenced code blocks and inline code spans are ignored.
+- Cross-repo links are classified against known Juniper ecosystem repo names.
+- Cross-repo structural escapes (for example traversing out of the target repo path) fail validation.
+
+### Operational Notes
+
+- CI uses `--cross-repo skip` so sibling repositories do not need to be checked out.
+- Local maintainers can use `--cross-repo check` when working in a full ecosystem checkout.
+- Script exit codes:
+  - `0`: all links valid
+  - `1`: broken links found or invalid arguments
+
+---
+
+## Troubleshooting Reference
+
+| Job                 | Artifact                   | Typical Contents                  |
+|---------------------|----------------------------|-----------------------------------|
+| `unit-tests`        | `coverage-report-py*`      | XML + HTML coverage outputs       |
+| `unit-tests`        | `unit-test-results-py*`    | JUnit XML test outputs            |
+| `integration-tests` | `integration-test-results` | Integration JUnit XML             |
+| `build`             | `dist-packages`            | Wheel and sdist                   |
+| `security`          | `security-reports`         | Bandit + pip-audit reports        |
+| `dependency-docs`   | `dependency-docs`          | Generated requirements/conda docs |
 
 | Error | Cause                    | Solution                         |
 | ----- | ------------------------ | -------------------------------- |
@@ -402,7 +597,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-## Troubleshooting Reference
+## Troubleshooting Reference, Updated
 
 ### Common Error Codes
 
@@ -422,7 +617,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 | D402  | Broken heading anchor    | Update anchor or heading            |
 | D403  | Unsafe link path         | Remove absolute/null/deep traversal |
 
-### Exit Codes
+### Exit Codes, Updated
 
 | Code | Meaning                 |
 | ---- | ----------------------- |
@@ -436,62 +631,9 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 | 137  | Killed (out of memory)  |
 | 139  | Segmentation fault      |
 
-### Log Analysis
+### Log Analysis, Updated
 
 **Search patterns:**
-
-```bash
-# Errors
-grep -i "error" workflow.log
-
-# Warnings
-grep -i "warning" workflow.log
-
-# Failed tests
-grep "FAILED" workflow.log
-
-# Coverage issues
-grep "coverage" workflow.log | grep -i "low\|fail"
-```
-
-### Documentation Link Validation Failures
-
-**Symptom:**
-
-```bash
-uv pip compile pyproject.toml \
-  --extra juniper-data \
-  --extra juniper-cascor \
-  --extra observability \
-  -o /tmp/requirements.lock.check
-mv /tmp/requirements.lock.check requirements.lock
-```
-
-**Local reproduction (CI-equivalent):**
-
-```bash
-python scripts/check_doc_links.py \
-  --exclude templates --exclude history \
-  --exclude pull_requests --exclude releases \
-  --exclude analysis --exclude fixes --exclude development \
-  --exclude CHANGELOG.md \
-  --cross-repo skip
-```
-
-**Common causes:**
-
-- Moved/renamed markdown files without updating references
-- Heading text changed but same-file anchor remained unchanged
-- Absolute paths in markdown links
-- Directory traversal links that resolve outside repository boundaries
-
-**Fix approach:**
-
-1. Update links to repository-relative paths.
-2. Regenerate heading anchors from the current markdown heading text.
-3. Re-run the command above before pushing.
-
----
 
 | Stage            | Duration | CPU     | Memory |
 | ---------------- | -------- | ------- | ------ |

@@ -48,6 +48,10 @@ class TrainingConstants:
     MIN_MAX_GROWTH_ITERATIONS: Final[int] = 1
     MAX_MAX_GROWTH_ITERATIONS: Final[int] = 100000
 
+    # ── Neural Network: Output weight initialization method ──
+    DEFAULT_INIT_OUTPUT_WEIGHTS: Final[str] = "zero"
+    INIT_OUTPUT_WEIGHTS_OPTIONS: Final[list] = ["zero", "random"]
+
     # ── Neural Network: Learning rate ──
     DEFAULT_LEARNING_RATE: Final[float] = 0.01
     MIN_LEARNING_RATE: Final[float] = 0.0001
