@@ -3,6 +3,7 @@
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -22,6 +23,13 @@ def _make_repo_with_doc(tmp_path: Path, content: str) -> tuple[Path, Path]:
     md_file.parent.mkdir(parents=True, exist_ok=True)
     md_file.write_text(content, encoding="utf-8")
     return repo_root, md_file
+
+
+def _write_file(path: Path, content: str) -> Path:
+    """Create a file with the given content, creating parent dirs as needed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return path
 
 
 def test_validate_file_rejects_absolute_link_target(tmp_path: Path) -> None:
@@ -123,12 +131,13 @@ def test_main_rejects_invalid_cross_repo_mode(monkeypatch: pytest.MonkeyPatch) -
     assert result == 1
 
 
-def test_main_uses_skip_mode_when_ecosystem_root_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_uses_skip_mode_when_ecosystem_root_not_found(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     monkeypatch.setattr(check_doc_links.sys, "argv", ["check_doc_links.py"])
     monkeypatch.setattr(check_doc_links, "_discover_ecosystem_root", lambda _root: None)
     monkeypatch.setattr(check_doc_links, "_find_markdown_files", lambda *_args, **_kwargs: [])
 
     result = check_doc_links.main()
+    output = capsys.readouterr().out
 
     assert result == 0
     assert "Ecosystem root not found" in output
@@ -217,14 +226,7 @@ def test_validate_file_verbose_skips_external_data_and_cross_repo_links(tmp_path
     repo_root = tmp_path / "repo"
     md_file = _write_file(
         repo_root / "docs" / "verbose.md",
-        (
-            "# Title\n\n"
-            "[external](https://example.com)\n"
-            "[data](data:image/png;base64,abc)\n"
-            "[protocol-relative](//cdn.example.com/a)\n"
-            "[anchor](#title)\n"
-            "[cross](../juniper-cascor/README.md)\n"
-        ),
+        ("# Title\n\n" "[external](https://example.com)\n" "[data](data:image/png;base64,abc)\n" "[protocol-relative](//cdn.example.com/a)\n" "[anchor](#title)\n" "[cross](../juniper-cascor/README.md)\n"),
     )
 
     errors, skipped = check_doc_links._validate_file(md_file, repo_root, verbose=True, cross_repo_mode="skip")
