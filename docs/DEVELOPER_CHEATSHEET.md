@@ -37,6 +37,8 @@
 | Lint                        | `flake8 src/ --max-line-length=512 --statistics`                                                     |
 | Type check                  | `mypy src/ --ignore-missing-imports`                                                                 |
 | Security scan               | `bandit -r src/`                                                                                     |
+| Check doc links (CI parity) | `python scripts/check_doc_links.py --exclude templates --exclude history --exclude pull_requests --exclude releases --exclude analysis --exclude fixes --exclude development --exclude CHANGELOG.md --cross-repo skip` |
+| Check doc links (strict)    | `python scripts/check_doc_links.py --cross-repo check`                                               |
 | Install pre-commit hooks    | `pip install pre-commit && pre-commit install`                                                       |
 
 > See: [AGENTS.md](../AGENTS.md) for full command reference
@@ -95,6 +97,33 @@ Existing components: `training_metrics`, `metrics_panel`, `network_visualizer`, 
 3. Update `conf/Dockerfile` if needed for Docker builds
 
 > See: [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)
+
+### 5. Validate Documentation Links
+
+Use the same command as CI when validating markdown links locally:
+
+```bash
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
+
+Cross-repo policy modes:
+
+- `--cross-repo skip`: ignore Juniper sibling-repo links (default CI mode)
+- `--cross-repo warn`: print warnings for sibling-repo links but do not fail
+- `--cross-repo check`: validate sibling-repo links against a local ecosystem checkout
+
+Common failure causes:
+
+- Absolute path links (for example, `/tmp/file.md`) are rejected
+- Overly deep traversal links (`../../../../../../file.md`) are rejected
+- Null-byte targets are rejected
+- Same-file anchors fail if no matching heading exists
+- Links inside fenced code blocks and inline code are intentionally ignored
 
 ---
 

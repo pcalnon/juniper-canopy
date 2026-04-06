@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Documented documentation-link validation workflow and troubleshooting for CI and local developer runs:
+  - Added `Documentation Links` CI job reference with command parity and cross-repo policy modes in `docs/ci_cd/CICD_REFERENCE.md`
+  - Added a dedicated documentation-link failure pattern runbook in `docs/ci_cd/CICD_MANUAL.md`
+  - Added local `check_doc_links.py` commands and failure causes to `docs/DEVELOPER_CHEATSHEET.md`
+
 - **Contextual Left Menu**: Sidebar sections dynamically show/hide based on the active visualization tab. Training Controls always visible; Meta Parameters card, Network Information, and subsections toggle per tab via `TAB_SIDEBAR_CONFIG`. Card header text updates dynamically (e.g., "Network Parameters", "Candidate Parameters", "Dataset Parameters")
 - **Candidate Metrics Tab**: New top-level tab (`tab_id="candidates"`) for dedicated candidate pool monitoring, placed immediately after Training Metrics. Features pool status badge, epoch progress bar, top-2 candidates table, pool training metrics, candidate loss plot (orange trace), and collapsible pool history (max 20 entries, memory storage)
 - New `CandidateMetricsPanel` component (`src/frontend/components/candidate_metrics_panel.py`) extending `BaseComponent` with own data fetch callback gated on `active_tab == "candidates"`
@@ -24,23 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Updated dependency and CI runbook documentation to match current lockfile automation behavior and observability dependency handling:
-  - `README.md`
-  - `docs/ci_cd/CICD_MANUAL.md`
+- Extracted candidate pool section, history tracking, and pool display from `MetricsPanel` to `CandidateMetricsPanel`. Training Metrics tab retains candidate training trace in loss plot and candidate epoch progress bar for context
+- Component count increased from 11 to 12; updated test assertions accordingly
+- Updated CI and developer documentation for markdown link validation to reflect current `docs` workflow behavior and local reproduction commands:
   - `docs/ci_cd/CICD_REFERENCE.md`
-  - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
-  - `docs/ci_cd/CICD_QUICK_START.md`
-  - `docs/testing/TESTING_MANUAL.md`
-  - Coverage includes:
-    - Active Python CI matrix (`3.12`, `3.13`, `3.14`) and default `3.14` job pinning
-    - New `Documentation Links` quality gate (`scripts/check_doc_links.py`, `--cross-repo skip`)
-    - Lockfile freshness behavior (`uv pip compile` with `--extra observability`, header-agnostic comparison)
-    - Optional test-extras guidance (`juniper-data-client[testing]`, `juniper-cascor-client[testing]`) and `pytest.importorskip`/`skipif` patterns to prevent collection failures
-- Corrected CI/CD docs to remove stale Conda/Codecov-era instructions and align with current workflow gates and job graph:
-  - replaced outdated workflow snippets with source-verified jobs from `.github/workflows/ci.yml`
-  - documented actual matrix and pinning strategy (matrix `3.12/3.13/3.14`, single-version `3.14` jobs)
-  - documented current dependency install path (`conf/requirements_ci.txt`, CPU torch index, editable install)
-  - aligned scheduled security scan documentation with `security-scan.yml` commands
+  - `docs/DEVELOPER_CHEATSHEET.md`
+  - Added explicit coverage of `scripts/check_doc_links.py` policies, including code-fence/inline-code skip behavior, anchor validation, cross-repo modes, and path-safety constraints.
 
 - Namespaced Prometheus metrics (`juniper_canopy_` prefix) with WebSocket and demo mode metrics
 - `juniper_canopy_websocket_connections_active` Gauge (by channel)

@@ -50,6 +50,7 @@ class TestSingletonBehavior:
         """New instance should have test_trigger=None and test_mode=False."""
         CallbackContextAdapter.reset_instance()
         adapter = CallbackContextAdapter()
+        adapter.clear_test_trigger()
         assert adapter.get_triggered_id() is None
         assert adapter.is_test_mode() is False
 
