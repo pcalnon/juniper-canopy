@@ -1,7 +1,7 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** April 5, 2026  
-**Version:** v0.26.1
+**Last Updated:** 2026-04-05  
+**Version:** v0.26.0
 
 Complete guide to testing the Juniper Canopy application.
 
@@ -850,69 +850,36 @@ def test_with_fixture(resource):
 
 ### GitHub Actions Workflow
 
-```yaml
-# .github/workflows/ci.yml
-name: CI/CD Pipeline
+The active CI pipeline is split across multiple jobs in `.github/workflows/ci.yml`.
+For testing-relevant behavior, CI currently uses:
 
-on:
-  push:
-    branches: [main, develop, feature/**, fix/**]
-  pull_request:
-    branches: [main, develop]
+- Python matrix `3.12`, `3.13`, `3.14` for `pre-commit` and `unit-tests`
+- Python `3.14` for non-matrix jobs (integration/security/build/docs/lockfile)
+- `conf/requirements_ci.txt` plus editable install (`pip install -e .`)
+- Unit/regression fast subset:
+  `-m "not requires_cascor and not requires_server and not slow"`
+- Integration fast subset:
+  `-m "integration and not requires_cascor and not requires_server and not slow"`
 
-jobs:
-  pre-commit:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13", "3.14"]
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pre-commit
-
-      - name: Run pre-commit hooks
-        run: pre-commit run --all-files
-```
-
-Key testing jobs currently used in CI:
-
-- `unit-tests` (matrix `3.12/3.13/3.14`) with:
-  - marker gate: `not requires_cascor and not requires_server and not slow`
-  - paths: `tests/unit/ tests/regression/`
-  - coverage enforcement: `--cov-fail-under=80`
-- `integration-tests` (Python `3.14`) with:
-  - marker gate: `integration and not requires_cascor and not requires_server and not slow`
-- `docs` link gate via `scripts/check_doc_links.py`
-- `lockfile-check` via `uv pip compile ... --extra observability`
-- aggregated `Quality Gate` (`required-checks`) to block merge on failures
-
-Local reproduction for test-related CI gates:
+Reference commands (mirrors CI):
 
 ```bash
+python -m pip install --upgrade pip
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install -r conf/requirements_ci.txt
+pip install -e .
+
 cd src
 python -m pytest \
   -m "not requires_cascor and not requires_server and not slow" \
   tests/unit/ tests/regression/ \
-  --verbose \
-  --cov=. \
-  --cov-report=term-missing \
-  --cov-fail-under=80
+  --verbose --timeout=60 --maxfail=5 \
+  --cov=. --cov-report=term-missing --cov-fail-under=80
 
 python -m pytest \
   -m "integration and not requires_cascor and not requires_server and not slow" \
   tests/integration \
-  --verbose
+  --verbose --timeout=120 --maxfail=3
 ```
 
 ### Pre-commit Hooks
