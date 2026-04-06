@@ -189,6 +189,7 @@ uv pip compile pyproject.toml \
   --extra juniper-cascor \
   --extra observability \
   -o requirements.lock
+```
 
 ### Codecov API
 
