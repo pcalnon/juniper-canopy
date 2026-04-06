@@ -892,16 +892,8 @@ pre-commit install
 # Run manually
 pre-commit run --all-files
 
-# Configuration in .pre-commit-config.yaml
-repos:
-  - repo: local
-    hooks:
-      - id: pytest
-        name: pytest
-        entry: pytest
-        language: system
-        pass_filenames: false
-        always_run: true
+# CI uses pre-commit as its own matrix job
+# See .github/workflows/ci.yml job: pre-commit
 ```
 
 ## Troubleshooting

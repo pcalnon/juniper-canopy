@@ -251,46 +251,48 @@ class TestCanopyParamsMapping:
 
         assert adapter.get_canopy_params() == {}
 
-    def test_get_canopy_params_maps_candidate_specific_keys(self, adapter, mock_client):
-        """Candidate-training keys should map back to canopy cn_* names."""
+    def test_get_canopy_params_maps_candidate_fields(self, adapter, mock_client):
+        """Candidate parameters should map from cascor names to canopy cn_* names."""
         mock_client.get_training_params.return_value = {
             "data": {
                 "params": {
-                    "candidate_patience": 12,
-                    "candidate_convergence_threshold": 0.0005,
-                    "candidate_epochs": 150,
+                    "candidate_patience": 31,
+                    "candidate_convergence_threshold": 0.0002,
+                    "candidate_pool_size": 12,
                 }
             }
         }
 
         result = adapter.get_canopy_params()
 
-        assert result["cn_patience"] == 12
-        assert result["cn_training_convergence_threshold"] == 0.0005
-        assert result["cn_training_iterations"] == 150
+        assert result["cn_patience"] == 31
+        assert result["cn_training_convergence_threshold"] == 0.0002
+        assert result["cn_pool_size"] == 12
 
-
-class TestApplyParamsMapping:
-    """Verify apply_params() forwards canopy keys using cascor API names."""
-
-    def test_apply_params_maps_candidate_specific_keys(self, adapter, mock_client):
-        """cn_patience/cn_training_convergence_threshold must map to candidate_* keys."""
+    def test_apply_params_maps_candidate_fields_and_skips_unmapped(self, adapter, mock_client):
+        """apply_params() should forward mapped candidate fields only."""
         mock_client.update_params.return_value = {"ok": True}
 
         result = adapter.apply_params(
             cn_patience=25,
-            cn_training_convergence_threshold=0.0001,
-            cn_training_iterations=300,
+            cn_training_convergence_threshold=0.001,
+            cn_pool_size=9,
+            canopy_only_param=True,
         )
 
-        assert result["ok"] is True
         mock_client.update_params.assert_called_once_with(
             {
                 "candidate_patience": 25,
-                "candidate_convergence_threshold": 0.0001,
-                "candidate_epochs": 300,
+                "candidate_convergence_threshold": 0.001,
+                "candidate_pool_size": 9,
             }
         )
+        assert result == {"ok": True, "data": {"ok": True}}
+
+    def test_param_map_values_are_unique(self):
+        """Forward map values must be unique to avoid reverse-map collisions."""
+        cascor_param_names = list(CascorServiceAdapter._CANOPY_TO_CASCOR_PARAM_MAP.values())
+        assert len(cascor_param_names) == len(set(cascor_param_names))
 
 
 # =========================================================================
