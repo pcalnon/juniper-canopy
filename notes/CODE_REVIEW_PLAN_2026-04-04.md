@@ -205,82 +205,84 @@ This plan outlines the phased approach to remediating all issues identified in t
 
 ---
 
-## Phase 4: Test Coverage Expansion
+## Phase 4: Test Coverage Expansion -- COMPLETE
 
 **Priority**: MEDIUM -- Parallel with Phase 3
-**Estimated Scope**: 8 new test files
-**Branch**: `test/coverage-expansion`
+**Estimated Scope**: 8 new test files (180 new tests)
+**Branch**: `fix/release-critical-quality` (consolidated)
+**Completed**: 2026-04-06
 
 ### Step 4.1: Fill Coverage Gaps
 
-| Task  | Module             | Description                                                 |
-|-------|--------------------|-------------------------------------------------------------|
-| 4.1.1 | `discovery.py`     | Write unit tests for service discovery probing              |
-| 4.1.2 | `observability.py` | Write tests for Prometheus middleware and Sentry config     |
-| 4.1.3 | `secrets_util.py`  | Write tests for SOPS decryption paths                       |
-| 4.1.4 | `middleware.py`    | Write edge case tests (malformed headers, oversized bodies) |
+| Task  | Module             | Description                                                 | Status |
+|-------|--------------------|-------------------------------------------------------------|--------|
+| 4.1.1 | `discovery.py`     | Write unit tests for service discovery probing              | DONE   |
+| 4.1.2 | `observability.py` | Write tests for Prometheus middleware and Sentry config     | DONE   |
+| 4.1.3 | `secrets_util.py`  | Write tests for SOPS decryption paths                       | DONE   |
+| 4.1.4 | `middleware.py`    | Write edge case tests (malformed headers, oversized bodies) | DONE   |
 
 ### Step 4.2: Add Missing Test Types
 
-| Task  | Type       | Description                                             |
-|-------|------------|---------------------------------------------------------|
-| 4.2.1 | Security   | Write auth bypass, injection, and CORS validation tests |
-| 4.2.2 | Load       | Write concurrent WebSocket connection tests             |
-| 4.2.3 | Resilience | Write circuit breaker failure scenario tests            |
-| 4.2.4 | Contract   | Expand API schema validation tests                      |
+| Task  | Type       | Description                                             | Status |
+|-------|------------|---------------------------------------------------------|--------|
+| 4.2.1 | Security   | Write auth bypass, injection, and CORS validation tests | DONE   |
+| 4.2.2 | Load       | Write concurrent WebSocket connection tests             | DONE   |
+| 4.2.3 | Resilience | Write circuit breaker failure scenario tests            | DONE   |
+| 4.2.4 | Contract   | Expand API schema validation tests                      | DONE   |
 
 **Verification**:
 
-- [ ] Coverage report shows improvement in gap areas
-- [ ] All new tests pass
-- [ ] Run full test suite -- 0 failures
+- [x] Coverage report shows improvement in gap areas
+- [x] All new tests pass (180/180)
+- [x] Run full test suite -- 0 failures (4,412 passed)
 
 ---
 
-## Phase 5: Low Priority and Housekeeping
+## Phase 5: Low Priority and Housekeeping -- COMPLETE
 
 **Priority**: LOW -- Address in regular maintenance
 **Estimated Scope**: 19 tasks across minor fixes
-**Branch**: `chore/housekeeping`
+**Branch**: `fix/release-critical-quality` (consolidated)
+**Completed**: 2026-04-06
 
 ### Step 5.1: Configuration Cleanup
 
-| Task  | Issue   | Description                                                     |
-|-------|---------|-----------------------------------------------------------------|
-| 5.1.1 | LOW-001 | Add deprecation warnings to remaining legacy env var validators |
-| 5.1.2 | LOW-002 | Fix `_convert_type` boolean/integer precedence                  |
-| 5.1.3 | LOW-009 | Migrate `CASCOR_SNAPSHOT_DIR` to `JUNIPER_CANOPY_SNAPSHOT_DIR`  |
-| 5.1.4 | LOW-014 | Add `py314` to Black target-version when available              |
-| 5.1.5 | MED-033 | Create CPU-only conda environment for canopy                    |
+| Task  | Issue   | Description                                                     | Status |
+|-------|---------|-----------------------------------------------------------------|--------|
+| 5.1.1 | LOW-001 | Add deprecation warnings to remaining legacy env var validators | DONE   |
+| 5.1.2 | LOW-002 | Fix `_convert_type` boolean/integer precedence                  | DONE   |
+| 5.1.3 | LOW-009 | Migrate `CASCOR_SNAPSHOT_DIR` to `JUNIPER_CANOPY_SNAPSHOT_DIR`  | DONE   |
+| 5.1.4 | LOW-014 | Add `py314` to Black target-version when available              | DONE   |
+| 5.1.5 | MED-033 | Create CPU-only conda environment for canopy                    | DONE   |
 
 ### Step 5.2: Logging Cleanup
 
-| Task  | Issue   | Description                                       |
-|-------|---------|---------------------------------------------------|
-| 5.2.1 | LOW-004 | Fix `_log_with_context` to capture real call site |
-| 5.2.2 | LOW-005 | Use timezone-aware timestamps in JsonFormatter    |
-| 5.2.3 | LOW-006 | Replace print() with logger.debug()               |
-| 5.2.4 | LOW-007 | Resolve FATAL_LEVEL 60 vs standard 50 conflict    |
+| Task  | Issue   | Description                                       | Status |
+|-------|---------|---------------------------------------------------|--------|
+| 5.2.1 | LOW-004 | Fix `_log_with_context` to capture real call site | DONE   |
+| 5.2.2 | LOW-005 | Use timezone-aware timestamps in JsonFormatter    | DONE   |
+| 5.2.3 | LOW-006 | Replace print() with logger.debug()               | DONE   |
+| 5.2.4 | LOW-007 | Resolve FATAL_LEVEL 60 vs standard 50 conflict    | DONE   |
 
 ### Step 5.3: Minor Code Fixes
 
-| Task  | Issue   | Description                                      |
-|-------|---------|--------------------------------------------------|
-| 5.3.1 | LOW-003 | Fix `config.key` AttributeError in error handler |
-| 5.3.2 | LOW-008 | Add message size check to training WebSocket     |
-| 5.3.3 | LOW-015 | Narrow exception types in callback_context       |
-| 5.3.4 | LOW-018 | Forward parameters in `_layout_type_sprint`      |
-| 5.3.5 | LOW-019 | Verify `_format_hit_rate` percentage contract    |
-| 5.3.6 | LOW-020 | Make header title color theme-aware              |
+| Task  | Issue   | Description                                      | Status |
+|-------|---------|--------------------------------------------------|--------|
+| 5.3.1 | LOW-003 | Fix `config.key` AttributeError in error handler | DONE   |
+| 5.3.2 | LOW-008 | Add message size check to training WebSocket     | DONE   |
+| 5.3.3 | LOW-015 | Narrow exception types in callback_context       | DONE   |
+| 5.3.4 | LOW-018 | Forward parameters in `_layout_type_sprint`      | DONE   |
+| 5.3.5 | LOW-019 | Verify `_format_hit_rate` percentage contract    | DONE   |
+| 5.3.6 | LOW-020 | Make header title color theme-aware              | DONE   |
 
 ### Step 5.4: CI/CD Housekeeping
 
-| Task  | Issue   | Description                                       |
-|-------|---------|---------------------------------------------------|
-| 5.4.1 | LOW-010 | Consider curl-based Docker health check           |
-| 5.4.2 | LOW-011 | Align shellcheck severity to ecosystem convention |
-| 5.4.3 | LOW-012 | Run `pre-commit autoupdate`                       |
-| 5.4.4 | LOW-013 | Add comment documenting codecov build count       |
+| Task  | Issue   | Description                                       | Status |
+|-------|---------|---------------------------------------------------|--------|
+| 5.4.1 | LOW-010 | Consider curl-based Docker health check           | DONE   |
+| 5.4.2 | LOW-011 | Align shellcheck severity to ecosystem convention | DONE   |
+| 5.4.3 | LOW-012 | Run `pre-commit autoupdate`                       | DONE   |
+| 5.4.4 | LOW-013 | Add comment documenting codecov build count       | DONE   |
 
 ---
 
@@ -307,12 +309,28 @@ Phase 5 ──no dependencies──> (anytime)
 
 Every phase must end with:
 
-1. Full test suite passes (4,169+ tests, 0 failures)
+1. Full test suite passes (4,412+ tests, 0 failures)
 2. No new warnings introduced
 3. Pre-commit hooks pass
 4. CI pipeline green
 
 ---
 
+## Completion Status
+
+| Phase | Status | Commit | Tests After |
+|-------|--------|--------|-------------|
+| Phase 0 | COMPLETE | Pre-existing (prior PRs) | 4,215 |
+| Phase 1 | COMPLETE | Pre-existing (prior PRs) | 4,215 |
+| Phase 2 | COMPLETE | Pre-existing (prior PRs) | 4,215 |
+| Phase 3 | COMPLETE | `9439b1d` | 4,215 |
+| Phase 4 | COMPLETE | `6a680a3` | 4,412 |
+| Phase 5 | COMPLETE | `850879b` | 4,412 |
+
+All 5 phases complete. Branch `fix/release-critical-quality` contains Phases 1-5 consolidated.
+
+---
+
 *Document generated: 2026-04-04*
+*Last updated: 2026-04-06 (all phases complete)*
 *Companion: [CODE_REVIEW_ANALYSIS_2026-04-04.md](CODE_REVIEW_ANALYSIS_2026-04-04.md)*
