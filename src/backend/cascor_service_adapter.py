@@ -427,6 +427,8 @@ class CascorServiceAdapter:
         "nn_learning_rate": "learning_rate",
         "nn_max_hidden_units": "max_hidden_units",
         "nn_max_total_epochs": "epochs_max",
+        "nn_max_iterations": "max_iterations",
+        "nn_init_output_weights": "init_output_weights",
         "nn_growth_convergence_threshold": "convergence_threshold",
         "nn_patience": "patience",
         "cn_patience": "candidate_patience",

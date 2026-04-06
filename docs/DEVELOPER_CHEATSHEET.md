@@ -29,6 +29,8 @@
 | Run integration tests       | `cd src && pytest tests/integration/ -v`                                                             |
 | Run with coverage           | `cd src && pytest tests/ --cov=. --cov-report=html --cov-report=term-missing`                        |
 | Coverage threshold check    | `cd src && pytest tests/ --cov=. --cov-fail-under=80`                                                |
+| Validate documentation links (CI mode) | `python scripts/check_doc_links.py --exclude templates --exclude history --exclude pull_requests --exclude releases --exclude analysis --exclude fixes --exclude development --exclude CHANGELOG.md --cross-repo skip` |
+| Validate documentation links (cross-repo local) | `python scripts/check_doc_links.py --cross-repo check` |
 | Pre-commit (all hooks)      | `pre-commit run --all-files`                                                                         |
 | Validate documentation links (CI mode) | `python scripts/check_doc_links.py --exclude templates --exclude history --exclude pull_requests --exclude releases --exclude analysis --exclude fixes --exclude development --exclude CHANGELOG.md --cross-repo skip` |
 | Format code                 | `black src/ && isort src/`                                                                           |
@@ -189,6 +191,21 @@ Extended log levels: `TRACE (5)`, `VERBOSE (7)`, `DEBUG`, `INFO`, `WARNING`, `ER
 
 > Note: `conftest.py` forces `JUNIPER_CANOPY_DEMO_MODE=1` by default so tests do not require a real backend.
 > See: [Testing Reference](testing/TESTING_REFERENCE.md) | [Test Enablement Quick Reference](testing/TEST_ENABLEMENT_QUICK_REFERENCE.md)
+
+### Documentation Link Checker Test Coverage
+
+Run focused tests for documentation link validation hardening:
+
+```bash
+pytest src/tests/unit/test_check_doc_links.py -v
+```
+
+Coverage includes:
+
+- Link parsing boundaries (ignores fenced-code and inline-code link literals).
+- Anchor integrity checks for same-file heading targets.
+- Security validation for path inputs (absolute paths, null bytes, excessive traversal).
+- Cross-repo policy behavior (`skip`, `warn`, `check`) and fallback when ecosystem root discovery fails.
 
 ---
 

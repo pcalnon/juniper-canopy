@@ -68,14 +68,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
   - `docs/ci_cd/CICD_MANUAL.md`
   - `notes/juniper-canopy_OTHER_DEPENDENCIES.md`
-- Updated CI/testing documentation for the new markdown link validation workflow and regression coverage:
-  - `docs/ci_cd/CICD_MANUAL.md`
+- Updated documentation validation references to match the current `scripts/check_doc_links.py` behavior and test coverage:
   - `docs/ci_cd/CICD_REFERENCE.md`
-  - `docs/testing/TESTING_MANUAL.md`
   - `docs/testing/TESTING_REFERENCE.md`
-  - Added CI-equivalent local runbook for `scripts/check_doc_links.py` (`--cross-repo skip`)
-  - Documented cross-repo modes (`skip`, `warn`, `check`) and troubleshooting for link/anchor failures
-  - Added targeted regression command for `src/tests/unit/test_doc_link_checker.py`
+  - `docs/DEVELOPER_CHEATSHEET.md`
+  - Added command examples for CI-equivalent `--cross-repo skip` execution.
+  - Documented parser/security/cross-repo edge-case coverage enforced by `src/tests/unit/test_check_doc_links.py`.
 
 - Renamed HTTP metrics: `http_requests_total` → `juniper_canopy_http_requests_total`, `http_request_duration_seconds` → `juniper_canopy_http_request_duration_seconds`
 - Updated CasCor backend documentation to cover service-mode behavior (`CascorServiceAdapter`, `ServiceBackend`, `CascorStateSync`), including startup attach/sync workflow, response normalization contracts, and service-mode troubleshooting:
