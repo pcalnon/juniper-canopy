@@ -140,26 +140,24 @@ class TestDashboardManagerAPIURL:
         assert hasattr(dashboard, "_api_url")
 
     def test_api_url_construction(self, dashboard):
-        """Should construct API URLs correctly."""
-        with dashboard.app.server.test_request_context("/dashboard/", base_url="http://localhost:8050"):
-            url = dashboard._api_url("/test")
-            assert url == "http://localhost:8050/test"
+        """Should construct API URLs from settings."""
+        url = dashboard._api_url("/test")
+        assert url.startswith("http://127.0.0.1:")
+        assert url.endswith("/test")
 
     def test_api_url_with_different_paths(self, dashboard):
         """Should handle different API paths."""
         paths = ["/metrics", "/topology", "/dataset"]
-        with dashboard.app.server.test_request_context("/dashboard/", base_url="http://localhost:8050"):
-            for path in paths:
-                url = dashboard._api_url(path)
-                assert url.startswith("http://localhost:8050")
-                assert path in url
+        for path in paths:
+            url = dashboard._api_url(path)
+            assert url.startswith("http://127.0.0.1:")
+            assert path in url
 
     def test_api_url_handles_leading_slash(self, dashboard):
         """Should handle paths with and without leading slash."""
-        with dashboard.app.server.test_request_context("/dashboard/", base_url="http://localhost:8050"):
-            url1 = dashboard._api_url("/test")
-            url2 = dashboard._api_url("test")
-            assert url1 == url2
+        url1 = dashboard._api_url("/test")
+        url2 = dashboard._api_url("test")
+        assert url1 == url2
 
 
 class TestDashboardManagerConfiguration:

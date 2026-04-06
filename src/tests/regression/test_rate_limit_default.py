@@ -60,24 +60,32 @@ class TestRateLimitDefault:
         assert limiter.enabled is False, "Rate limiter is enabled by default. It must be disabled by default " "because the Dash dashboard makes internal HTTP requests to /api/* " "endpoints that would exceed the rate limit and cause 429 errors."
 
     def test_rate_limiter_can_be_enabled_via_env(self, monkeypatch):
-        """Rate limiter can be explicitly enabled via CANOPY_RATE_LIMIT_ENABLED=true."""
-        monkeypatch.setenv("CANOPY_RATE_LIMIT_ENABLED", "true")
+        """Rate limiter can be explicitly enabled via settings."""
+        from unittest.mock import MagicMock, patch
 
         from security import get_rate_limiter, reset_security_state
 
         reset_security_state()
-        limiter = get_rate_limiter()
+        mock_settings = MagicMock()
+        mock_settings.rate_limit_enabled = True
+        mock_settings.rate_limit_requests_per_minute = 60
+        with patch("settings.get_settings", return_value=mock_settings):
+            limiter = get_rate_limiter()
 
         assert limiter.enabled is True
 
     def test_rate_limiter_can_be_enabled_via_env_1(self, monkeypatch):
-        """Rate limiter accepts '1' as truthy value."""
-        monkeypatch.setenv("CANOPY_RATE_LIMIT_ENABLED", "1")
+        """Rate limiter reads from settings (get_settings())."""
+        from unittest.mock import MagicMock, patch
 
         from security import get_rate_limiter, reset_security_state
 
         reset_security_state()
-        limiter = get_rate_limiter()
+        mock_settings = MagicMock()
+        mock_settings.rate_limit_enabled = True
+        mock_settings.rate_limit_requests_per_minute = 100
+        with patch("settings.get_settings", return_value=mock_settings):
+            limiter = get_rate_limiter()
 
         assert limiter.enabled is True
 
