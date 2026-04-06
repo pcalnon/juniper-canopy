@@ -37,6 +37,7 @@
 #
 #####################################################################################################################################################################################################
 import asyncio
+import importlib.metadata
 import json
 import os
 import re
@@ -83,6 +84,11 @@ from observability import (
 )
 from secrets_util import get_secret
 from settings import get_settings
+
+try:
+    APP_VERSION = importlib.metadata.version("juniper-canopy")
+except importlib.metadata.PackageNotFoundError:
+    APP_VERSION = "0.4.0"
 
 # import logging
 
@@ -229,7 +235,7 @@ _docs_enabled = not get_secret("CANOPY_API_KEY")
 # Initialize FastAPI
 app = FastAPI(
     title="Juniper Canopy",
-    version="0.3.0",
+    version=APP_VERSION,
     description="Real-time monitoring for CasCor networks",
     lifespan=lifespan,
     docs_url="/docs" if _docs_enabled else None,
@@ -244,8 +250,8 @@ if settings.cors_origins:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=allow_credentials,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["X-API-Key", "Content-Type", "Accept"],
     )
 
 # Security headers (outermost — runs on every response)
@@ -540,7 +546,7 @@ async def readiness_probe() -> ReadinessResponse:
 
     return ReadinessResponse(
         status=overall,
-        version="0.3.0",
+        version=APP_VERSION,
         service="juniper-canopy",
         dependencies=dependencies,
         details={
@@ -2019,7 +2025,7 @@ class SetParamsRequest(BaseModel):
     cn_candidate_learning_rate: float | None = None
     cn_patience: int | None = None
     cn_selected_candidates: int | None = None
-    cn_training_complete: bool | None = None
+    cn_training_complete: str | None = None
     cn_training_iterations: int | None = None
     cn_training_convergence_threshold: float | None = None
     cn_multi_candidate: bool | None = None

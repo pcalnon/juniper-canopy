@@ -1093,7 +1093,7 @@ class TestSetParamsEndpoint:
         try:
             main.backend = mock_backend
 
-            result = await main.api_set_params({"learning_rate": 0.02})
+            result = await main.api_set_params(main.SetParamsRequest(learning_rate=0.02))
 
             mock_backend.apply_params.assert_called_once_with(nn_learning_rate=0.02)
             assert result["status"] == "success"
@@ -1114,7 +1114,7 @@ class TestSetParamsEndpoint:
         try:
             main.backend = mock_backend
 
-            result = await main.api_set_params({})
+            result = await main.api_set_params(main.SetParamsRequest())
 
             assert isinstance(result, JSONResponse)
             assert result.status_code == 400
@@ -1149,7 +1149,7 @@ class TestSetParamsEndpoint:
                 "main.asyncio.to_thread",
                 new=AsyncMock(return_value={"ok": False, "error": "invalid threshold"}),
             ) as mock_to_thread:
-                result = await main.api_set_params({"learning_rate": 0.03, "nn_patience": 5})
+                result = await main.api_set_params(main.SetParamsRequest(learning_rate=0.03, nn_patience=5))
 
             assert isinstance(result, JSONResponse)
             assert result.status_code == 502
@@ -1190,11 +1190,11 @@ class TestSetParamsEndpoint:
 
             with patch("main.asyncio.to_thread", new=AsyncMock(return_value={"ok": True})) as mock_to_thread:
                 result = await main.api_set_params(
-                    {
-                        "learning_rate": 0.04,  # legacy key (mapped)
-                        "patience": 7,  # legacy key (mapped)
-                        "cn_candidate_learning_rate": 0.15,
-                    }
+                    main.SetParamsRequest(
+                        learning_rate=0.04,
+                        patience=7,
+                        cn_candidate_learning_rate=0.15,
+                    )
                 )
 
             assert result["status"] == "success"
@@ -1243,7 +1243,7 @@ class TestSetParamsEndpoint:
             main.websocket_manager = mock_ws_manager
 
             with patch("main.asyncio.to_thread", new=AsyncMock(return_value={"ok": True})) as mock_to_thread:
-                await main.api_set_params({"patience": 5, "nn_patience": 9})
+                await main.api_set_params(main.SetParamsRequest(patience=5, nn_patience=9))
 
             call = mock_to_thread.await_args
             assert "patience" not in call.kwargs
