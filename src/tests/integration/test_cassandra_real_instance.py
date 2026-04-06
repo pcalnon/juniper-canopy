@@ -11,6 +11,7 @@ Run:
     CASSANDRA_INTEGRATION_TEST=1 CASSANDRA_CONTACT_POINTS=127.0.0.1 \
         pytest tests/integration/test_cassandra_real_instance.py -v
 """
+
 import os
 import sys
 from pathlib import Path

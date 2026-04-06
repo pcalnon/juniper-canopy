@@ -10,6 +10,7 @@ Tests cover:
 - Error handling for failed API calls
 - Formatting helper functions
 """
+
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
@@ -299,8 +300,8 @@ class TestFormattingHelpers:
         assert redis_panel._format_memory(None) == "--"
 
     def test_format_hit_rate(self, redis_panel):
-        """Format hit rate correctly."""
-        assert redis_panel._format_hit_rate(0.85) == "85.0%"
+        """Format hit rate correctly (input is already a percentage)."""
+        assert redis_panel._format_hit_rate(85.0) == "85.0%"
 
     def test_format_hit_rate_none(self, redis_panel):
         """Handle None hit rate value."""

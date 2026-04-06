@@ -356,8 +356,8 @@ class DashboardManager:
                             [
                                 html.H1(
                                     "Juniper Canopy Dashboard",
-                                    className="text-center",
-                                    style={"color": "#2c3e50", "marginTop": "20px"},
+                                    className="text-center text-body",
+                                    style={"marginTop": "20px"},
                                 ),
                                 html.P(
                                     "Real-time monitoring for Cascade Correlation Neural Networks",

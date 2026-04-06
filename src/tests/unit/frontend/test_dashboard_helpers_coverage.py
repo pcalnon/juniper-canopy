@@ -10,6 +10,7 @@ Target coverage improvement for:
 - _update_unified_status_bar_handler
 - _handle_training_buttons_handler (via CallbackContextAdapter)
 """
+
 import os
 from unittest.mock import Mock, patch
 

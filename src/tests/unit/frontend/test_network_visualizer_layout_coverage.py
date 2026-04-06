@@ -14,7 +14,6 @@
 #####################################################################
 """Unit tests for NetworkVisualizer layout calculation methods."""
 
-
 import itertools
 import sys
 from pathlib import Path

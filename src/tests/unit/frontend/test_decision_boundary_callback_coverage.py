@@ -5,6 +5,7 @@ Target: Lines 189-211, 252
 
 Tests the update_boundary_plot callback function with various input combinations.
 """
+
 from unittest.mock import MagicMock, patch
 
 import numpy as np

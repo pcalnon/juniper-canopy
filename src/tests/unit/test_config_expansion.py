@@ -113,4 +113,5 @@ class TestEnvironmentOverrides:
         monkeypatch.setenv("CASCOR_DEMO_MODE", "1")
         config_path = _write_yaml_config(tmp_path, {"placeholder": True})
         config = ConfigManager(config_path=config_path)
-        assert config.config.get("demo", {}).get("mode") is True
+        # "1" is now parsed as integer 1 (not boolean True) after _convert_type fix
+        assert config.config.get("demo", {}).get("mode") == 1

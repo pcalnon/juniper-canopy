@@ -7,6 +7,7 @@ Tests that candidate pool data is correctly:
 - Updated during candidate phase
 - Stabilized when pool inactive
 """
+
 import time
 
 import pytest

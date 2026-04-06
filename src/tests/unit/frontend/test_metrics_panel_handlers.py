@@ -12,6 +12,7 @@
 # Description:   Unit tests for MetricsPanel callback handler methods
 #####################################################################
 """Unit tests for MetricsPanel callback handlers to improve coverage from 67% to 90%."""
+
 import sys
 import time
 from pathlib import Path

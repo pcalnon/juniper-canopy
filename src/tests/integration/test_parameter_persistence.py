@@ -8,6 +8,7 @@ Tests verify that learning rate and max hidden units parameters:
 3. Are respected by the training system
 4. Don't cause echo loops or oscillation
 """
+
 import asyncio
 import time
 

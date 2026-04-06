@@ -16,6 +16,7 @@ Unit tests for create_backend() factory — verify correct backend type for each
 
 Task 5.9 of the Microservices Architecture Development Roadmap.
 """
+
 from unittest.mock import MagicMock, patch
 
 import pytest

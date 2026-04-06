@@ -12,6 +12,7 @@
 # Description:   Unit tests for WorkerPanel component and worker API endpoints
 #####################################################################
 """Unit tests for WorkerPanel component and /api/v1/workers/* endpoints (CAN-HIGH-005)."""
+
 import os
 import sys
 from pathlib import Path

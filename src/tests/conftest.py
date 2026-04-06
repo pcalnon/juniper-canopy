@@ -731,8 +731,7 @@ def fake_backend_root(tmp_path):
 
     # Create fake cascade_correlation.py
     cc_py = cc_module / "cascade_correlation.py"
-    cc_py.write_text(
-        """
+    cc_py.write_text("""
 class CascadeCorrelationNetwork:
     '''Fake CasCor network for testing'''
     def __init__(self, config=None):
@@ -743,21 +742,18 @@ class TrainingResults:
     '''Fake training results for testing'''
     def __init__(self):
         self.metrics = []
-"""
-    )
+""")
 
     # Create fake config module
     config_module = cc_module / "cascade_correlation_config"
     # config_module.mkdir(exist_ok=True)
     (config_module / "__init__.py").write_text("# Fake config module\n")
-    (config_module / "cascade_correlation_config.py").write_text(
-        """
+    (config_module / "cascade_correlation_config.py").write_text("""
 class CascadeCorrelationConfig:
     '''Fake CasCor config for testing'''
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
-"""
-    )
+""")
 
     return backend_root
 

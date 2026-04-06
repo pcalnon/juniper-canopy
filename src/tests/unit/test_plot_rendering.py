@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """Test if plots are being created correctly."""
+
 import sys
 
 sys.path.insert(0, "src")

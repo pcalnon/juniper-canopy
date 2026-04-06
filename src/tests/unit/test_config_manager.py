@@ -151,28 +151,44 @@ class TestConfigManager:
         assert config.get("new.setting.value") == "new_value"  # trunk-ignore(bandit/B101)
 
     def test_type_conversion_boolean_true(self, mock_config_file, monkeypatch):
-        """Test boolean type conversion for true values."""
-        test_cases = ["true", "True", "TRUE", "yes", "Yes", "1"]
+        """Test boolean type conversion for true values.
 
-        for i, value in enumerate(test_cases):  # sourcery skip: no-loop-in-tests
+        Note: "1" is parsed as integer 1, not boolean True. Only text keywords
+        (true/yes/false/no) map to booleans to avoid "0" -> False port confusion.
+        """
+        text_cases = ["true", "True", "TRUE", "yes", "Yes"]
+        for i, value in enumerate(text_cases):  # sourcery skip: no-loop-in-tests
             monkeypatch.setenv(f"CASCOR_TEST_BOOL_{i}", value)
 
         config = ConfigManager(config_path=str(mock_config_file))
 
-        for i in range(len(test_cases)):  # sourcery skip: no-loop-in-tests
+        for i in range(len(text_cases)):  # sourcery skip: no-loop-in-tests
             assert config.get(f"test.bool.{i}") is True  # trunk-ignore(bandit/B101)
 
-    def test_type_conversion_boolean_false(self, mock_config_file, monkeypatch):
-        """Test boolean type conversion for false values."""
-        test_cases = ["false", "False", "FALSE", "no", "No", "0"]
+        # "1" should be integer 1, not boolean True
+        monkeypatch.setenv("CASCOR_TEST_BOOL_NUMERIC", "1")
+        config2 = ConfigManager(config_path=str(mock_config_file))
+        assert config2.get("test.bool.numeric") == 1  # trunk-ignore(bandit/B101)
 
-        for i, value in enumerate(test_cases):  # sourcery skip: no-loop-in-tests
+    def test_type_conversion_boolean_false(self, mock_config_file, monkeypatch):
+        """Test boolean type conversion for false values.
+
+        Note: "0" is parsed as integer 0, not boolean False. Only text keywords
+        (true/yes/false/no) map to booleans to avoid port "0" confusion.
+        """
+        text_cases = ["false", "False", "FALSE", "no", "No"]
+        for i, value in enumerate(text_cases):  # sourcery skip: no-loop-in-tests
             monkeypatch.setenv(f"CASCOR_TEST_FALSE_{i}", value)
 
         config = ConfigManager(config_path=str(mock_config_file))
 
-        for i in range(len(test_cases)):  # sourcery skip: no-loop-in-tests
+        for i in range(len(text_cases)):  # sourcery skip: no-loop-in-tests
             assert config.get(f"test.false.{i}") is False  # trunk-ignore(bandit/B101)
+
+        # "0" should be integer 0, not boolean False
+        monkeypatch.setenv("CASCOR_TEST_FALSE_NUMERIC", "0")
+        config2 = ConfigManager(config_path=str(mock_config_file))
+        assert config2.get("test.false.numeric") == 0  # trunk-ignore(bandit/B101)
 
     def test_type_conversion_integer(self, mock_config_file, monkeypatch):
         """Test integer type conversion."""

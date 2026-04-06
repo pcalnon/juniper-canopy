@@ -91,7 +91,13 @@ class CallbackContextAdapter:
 
             triggered_id: str | None = dash.callback_context.triggered_id
             return triggered_id
-        except Exception:
+        except (RuntimeError, AttributeError, ImportError, LookupError):
+            return None
+        except Exception as exc:
+            # Dash raises MissingCallbackContextException when accessed outside
+            # a callback — allow it through, but re-raise truly unexpected errors.
+            if "Callback" not in type(exc).__name__ and "Dash" not in type(exc).__name__:
+                raise
             return None
 
     def set_test_trigger(self, trigger_id: Optional[str]) -> None:

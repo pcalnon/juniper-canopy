@@ -13,6 +13,7 @@ Tests all WebSocketManager methods:
 - connect/disconnect
 - ping functionality
 """
+
 import asyncio
 import sys
 import threading

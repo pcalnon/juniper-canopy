@@ -4,6 +4,7 @@ Dark mode integration tests for Juniper Canopy Dashboard.
 
 Tests dark mode toggle functionality, theme persistence, and chart theming.
 """
+
 import os
 
 os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"

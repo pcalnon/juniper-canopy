@@ -12,6 +12,7 @@
 # Description:   Comprehensive coverage tests for CallbackContextAdapter singleton
 #####################################################################
 """Comprehensive coverage tests for CallbackContextAdapter (target: ~100%)."""
+
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch

@@ -96,7 +96,7 @@ codecov:
 
   # Notify configuration
   notify:
-    after_n_builds: 3  # Wait for all Python version builds
+    after_n_builds: 3  # Must match CI matrix size (py3.12 + py3.13 + py3.14 = 3 builds)
     wait_for_ci: true
 
 # GitHub Checks integration

@@ -15,6 +15,7 @@
 Integration tests for main.py REST API endpoints.
 Tests all HTTP endpoints with realistic data and error handling.
 """
+
 import os
 import sys
 from pathlib import Path

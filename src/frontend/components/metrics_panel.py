@@ -1320,13 +1320,13 @@ class MetricsPanel(BaseComponent):
         Returns:
             Plotly figure object
         """
-        (epochs, losses, phases) = self._parse_metrics(metrics_data=metrics_data)
+        epochs, losses, phases = self._parse_metrics(metrics_data=metrics_data)
 
         # Create figure with phase-colored scatter
         fig = self._create_phase_colored_scatter(fig=go.Figure(), epochs=epochs, losses=losses, phases=phases)
         self._add_validation_overlay(fig, metrics_data, "val_loss", "Validation Loss", "#ff6b6b")
         fig = self._add_phase_bg_bands(fig=fig, epochs=epochs, phases=phases)
-        (fig, epoch) = self._add_hidden_unit_markers(metrics_data=metrics_data, fig=fig, theme=theme, epochs=epochs)
+        fig, epoch = self._add_hidden_unit_markers(metrics_data=metrics_data, fig=fig, theme=theme, epochs=epochs)
 
         return fig
 
@@ -1439,8 +1439,8 @@ class MetricsPanel(BaseComponent):
         # Add phase background bands
         current_phase = None
         phase_start = None
-        (fig, current_phase, phase_start) = self._end_prev_phase_band(fig=fig, epochs=epochs, phases=phases, current_phase=current_phase, phase_start=phase_start)
-        (fig, current_phase, phase_start) = self._candidate_final_band(fig=fig, epochs=epochs, current_phase=current_phase, phase_start=phase_start)
+        fig, current_phase, phase_start = self._end_prev_phase_band(fig=fig, epochs=epochs, phases=phases, current_phase=current_phase, phase_start=phase_start)
+        fig, current_phase, phase_start = self._candidate_final_band(fig=fig, epochs=epochs, current_phase=current_phase, phase_start=phase_start)
         return fig
 
     def _end_prev_phase_band(
@@ -1489,7 +1489,7 @@ class MetricsPanel(BaseComponent):
         return (fig, current_phase, phase_start)
 
     def _add_hidden_unit_markers(self, metrics_data: List[Dict[str, Any]], fig: go.Figure = None, theme: str = "light", epochs: list = None) -> Tuple[go.Figure, list]:
-        (fig) = self._hidden_unit_addition_markers(metrics_data=metrics_data, fig=fig, theme=theme)
+        fig = self._hidden_unit_addition_markers(metrics_data=metrics_data, fig=fig, theme=theme)
         fig = self._training_loss_per_time(fig=fig, theme=theme)
         return (fig, epochs)
 

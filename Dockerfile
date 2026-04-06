@@ -42,6 +42,9 @@ LABEL org.opencontainers.image.authors="Paul Calnon"
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.source="https://github.com/pcalnon/juniper-canopy"
 
+# Install curl for lightweight health checks (avoids spawning Python interpreter)
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
 # Create non-root user
 RUN groupadd --gid 1000 juniper && \
     useradd --uid 1000 --gid juniper --shell /bin/bash --create-home juniper
@@ -76,6 +79,6 @@ ENV CASCOR_SERVICE_URL=http://juniper-cascor:8200
 EXPOSE 8050
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8050/v1/health', timeout=5)" || exit 1
+    CMD curl --fail --silent --max-time 5 http://localhost:8050/v1/health || exit 1
 
 CMD ["python", "src/main.py"]

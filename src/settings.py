@@ -188,6 +188,11 @@ class Settings(BaseSettings):
             return v
         legacy = os.getenv("CASCOR_SERVICE_URL")
         if legacy is not None:
+            warnings.warn(
+                "CASCOR_SERVICE_URL is deprecated. Use JUNIPER_CANOPY_CASCOR_SERVICE_URL instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             return legacy
         return v
 
@@ -274,6 +279,11 @@ class Settings(BaseSettings):
             return v
         legacy = os.getenv("CANOPY_LOG_FORMAT")
         if legacy is not None:
+            warnings.warn(
+                "CANOPY_LOG_FORMAT is deprecated. Use JUNIPER_CANOPY_LOG_FORMAT instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             return legacy
         return v
 
@@ -284,6 +294,11 @@ class Settings(BaseSettings):
             return v
         legacy = os.getenv("CANOPY_SENTRY_DSN")
         if legacy is not None:
+            warnings.warn(
+                "CANOPY_SENTRY_DSN is deprecated. Use JUNIPER_CANOPY_SENTRY_DSN instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             return legacy
         return v
 

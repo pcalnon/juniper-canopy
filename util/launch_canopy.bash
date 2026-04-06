@@ -8,5 +8,5 @@ SOURCE_DIR="${APPLICATION_DIR}/src"
 # export CASCOR_SERVICE_URL="http://0.0.0.0:8200"
 #
 export CASCOR_SERVICE_URL="http://localhost:8201"
-cd "${SOURCE_DIR}"
+cd "${SOURCE_DIR}" || exit 1
 uvicorn main:app --port 8050

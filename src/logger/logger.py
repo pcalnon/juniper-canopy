@@ -70,7 +70,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 # from datetime import datetime, timedelta
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # from typing import Dict, Any, List, Optional, Callable, Tuple
@@ -145,7 +145,7 @@ class JsonFormatter(logging.Formatter):
     def format(self, record):
         """Format log record as JSON."""
         log_entry = {
-            "timestamp": datetime.fromtimestamp(record.created).isoformat(),
+            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
             "level": record.levelname,
             "logger_name": record.name,
             "function_name": record.funcName,
@@ -245,7 +245,7 @@ class CascorLogger:
         resolved_path.mkdir(parents=True, exist_ok=True)
 
         # Create rotating file handler
-        print(f"Configuring file handler for {self.name}, at log dir: {self.log_dir}")
+        logging.getLogger(__name__).debug("Configuring file handler for %s, at log dir: %s", self.name, self.log_dir)
         log_filename = os.path.join(self.log_dir, f"{self.name}.log")
         max_bytes = self.config.get("global", {}).get("max_file_size_mb", 100) * 1024 * 1024
         backup_count = self.config.get("global", {}).get("backup_count", 5)
@@ -269,8 +269,17 @@ class CascorLogger:
 
     def _log_with_context(self, level: int, message: str, **kwargs):
         """Internal method to log with context data."""
+        # Capture the real caller's filename and line number (skip 2 frames:
+        # _log_with_context -> public method -> actual caller)
+        import inspect
+
+        frame = inspect.currentframe()
+        caller = frame.f_back.f_back if frame and frame.f_back else None
+        fn = caller.f_code.co_filename if caller else ""
+        lno = caller.f_lineno if caller else 0
+
         # Create log record
-        record = self.logger.makeRecord(name=self.logger.name, level=level, fn="", lno=0, msg=message, args=(), exc_info=None)
+        record = self.logger.makeRecord(name=self.logger.name, level=level, fn=fn, lno=lno, msg=message, args=(), exc_info=None)
 
         # Add context data
         record.context_data = kwargs
@@ -280,7 +289,7 @@ class CascorLogger:
 
     def fatal(self, message: str, **kwargs):
         """Log fatal errors causing immediate termination."""
-        self._log_with_context(logging.FATAL, message, **kwargs)
+        self._log_with_context(self.FATAL_LEVEL, message, **kwargs)
 
     def critical(self, message: str, **kwargs):
         """Log critical system failures."""

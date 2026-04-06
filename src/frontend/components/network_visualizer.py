@@ -778,7 +778,7 @@ class NetworkVisualizer(BaseComponent):
         return pos
 
     def _layout_type_sprint(self, G: nx.DiGraph, k: float, iterations: int, seed: int):
-        pos = nx.spring_layout(G, k=2, iterations=50, seed=42)
+        pos = nx.spring_layout(G, k=k, iterations=iterations, seed=seed)
         # Scale positions
         for node in pos:
             pos[node] = (pos[node][0] * 10, pos[node][1] * 10)

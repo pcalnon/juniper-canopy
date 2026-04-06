@@ -4,6 +4,7 @@ Integration tests for end-to-end configuration flow across juniper_canopy.
 
 Tests configuration propagation through entire application stack.
 """
+
 import os
 from unittest.mock import patch
 

@@ -12,6 +12,7 @@
 # Description:   Comprehensive coverage tests for MetricsPanel component
 #####################################################################
 """Comprehensive coverage tests for MetricsPanel (56% -> 80%+)."""
+
 import sys
 from pathlib import Path
 

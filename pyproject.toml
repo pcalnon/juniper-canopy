@@ -113,7 +113,7 @@ include = ["juniper_canopy*", "backend*", "communication*", "frontend*", "logger
 # ==========================================
 [tool.black]
 line-length = 512
-target-version = ['py312', 'py313']
+target-version = ['py312', 'py313', 'py314']
 include = '\.pyi?$'
 extend-exclude = '''
 /(

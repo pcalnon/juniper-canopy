@@ -2,6 +2,7 @@
 """
 Integration tests for WebSocket control endpoint and demo mode integration.
 """
+
 import pytest
 
 # import asyncio

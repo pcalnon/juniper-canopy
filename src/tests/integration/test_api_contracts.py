@@ -13,6 +13,7 @@
 #####################################################################
 
 """API contract tests - ensure API responses match UI expectations."""
+
 import os
 
 import pytest

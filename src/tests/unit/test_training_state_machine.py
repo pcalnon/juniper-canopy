@@ -4,6 +4,7 @@ Unit tests for TrainingStateMachine.
 
 Tests all valid and invalid state transitions using table-driven approach.
 """
+
 import pytest
 
 from backend.training_state_machine import Command, TrainingPhase, TrainingStateMachine, TrainingStatus

@@ -11,6 +11,7 @@ Targets uncovered areas:
 - General WebSocket endpoint
 - No-backend paths (mocked)
 """
+
 import os
 import sys
 from pathlib import Path

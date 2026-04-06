@@ -3,6 +3,7 @@
 
 This test requires a running server (./demo) and is marked appropriately.
 """
+
 import os
 import time
 

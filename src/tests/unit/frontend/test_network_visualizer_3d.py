@@ -12,6 +12,7 @@
 # Description:   Unit tests for NetworkVisualizer 3D view functionality (P3-5)
 #####################################################################
 """Unit tests for NetworkVisualizer 3D visualization functionality."""
+
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch

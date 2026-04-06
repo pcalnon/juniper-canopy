@@ -17,6 +17,7 @@ Tests cover:
 - Unknown split filter edge case (line 249)
 - Empty unique classes edge case (line 404)
 """
+
 from unittest.mock import MagicMock, patch
 
 import numpy as np

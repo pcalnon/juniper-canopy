@@ -4,6 +4,7 @@ Comprehensive coverage tests for main.py to achieve 95% coverage.
 
 These tests focus on covering code paths reachable in demo mode.
 """
+
 import os
 import sys
 from pathlib import Path

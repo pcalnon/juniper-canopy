@@ -12,6 +12,7 @@ Tests cover:
 - Edge cases: empty datasets, degenerate data
 - Color mapping and legend generation
 """
+
 from unittest.mock import Mock
 
 import numpy as np

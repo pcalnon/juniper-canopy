@@ -9,6 +9,7 @@ Targets specific uncovered lines to reach 95% coverage:
 - Line 219: _handle_resume returning False from COMPLETED/FAILED state
 - Lines 227-228: _check_for_paused_state with no paused_phase
 """
+
 from unittest.mock import MagicMock, patch
 
 import pytest

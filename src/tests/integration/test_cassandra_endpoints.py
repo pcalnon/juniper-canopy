@@ -8,6 +8,7 @@ Tests:
 - Response structure contains required fields
 - Demo mode returns synthetic cluster/metrics data
 """
+
 import os
 import sys
 from pathlib import Path

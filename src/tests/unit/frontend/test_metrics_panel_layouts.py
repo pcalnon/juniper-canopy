@@ -12,6 +12,7 @@
 # Description:   Unit tests for MetricsPanel layout save/load handlers (P3-4)
 #####################################################################
 """Unit tests for MetricsPanel layout save/load functionality."""
+
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch

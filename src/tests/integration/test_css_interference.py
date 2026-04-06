@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """Test to verify CSS changes don't break plot rendering."""
+
 from pathlib import Path
 
 

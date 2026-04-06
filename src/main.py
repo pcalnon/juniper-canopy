@@ -389,6 +389,11 @@ async def websocket_training_endpoint(websocket: WebSocket):
             try:
                 # Receive message from client
                 data = await websocket.receive_text()
+
+                if len(data) > _WS_MAX_MESSAGE_SIZE:
+                    await websocket_manager.send_personal_message({"ok": False, "error": "Message too large"}, websocket)
+                    continue
+
                 message = json.loads(data) if isinstance(data, str) else data
 
                 # Handle ping/pong
@@ -877,7 +882,20 @@ async def get_statistics():
 
 # Snapshot configuration
 SNAPSHOT_EXTENSIONS = (".h5", ".hdf5")
-_snapshots_dir = os.getenv("CASCOR_SNAPSHOT_DIR", "./snapshots")
+_snapshots_dir = os.getenv("JUNIPER_CANOPY_SNAPSHOT_DIR")
+if _snapshots_dir is None:
+    _legacy_snapshot_dir = os.getenv("CASCOR_SNAPSHOT_DIR")
+    if _legacy_snapshot_dir is not None:
+        import warnings as _snapshot_warnings
+
+        _snapshot_warnings.warn(
+            "CASCOR_SNAPSHOT_DIR is deprecated. Use JUNIPER_CANOPY_SNAPSHOT_DIR instead.",
+            DeprecationWarning,
+            stacklevel=1,
+        )
+        _snapshots_dir = _legacy_snapshot_dir
+    else:
+        _snapshots_dir = "./snapshots"
 
 # Snapshot name validation pattern: alphanumeric, hyphens, underscores, dots (no path separators)
 _SNAPSHOT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")

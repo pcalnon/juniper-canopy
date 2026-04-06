@@ -3,7 +3,7 @@
 for f in /home/pcalnon/Development/python/Juniper/JuniperCascor/juniper_cascor/src/tests/unit/test_*.py; do
     name=$(basename "$f")
     start=$(date +%s%N)
-    timeout 12 /opt/miniforge3/envs/JuniperCanopyCascor/bin/python -m pytest "$f" --no-cov -q --timeout=10 2>&1 > /tmp/test_out.txt
+    timeout 12 /opt/miniforge3/envs/JuniperCanopyCascor/bin/python -m pytest "$f" --no-cov -q --timeout=10 > /tmp/test_out.txt 2>&1
     exit_code=$?
     end=$(date +%s%N)
     elapsed=$(( (end - start) / 1000000 ))

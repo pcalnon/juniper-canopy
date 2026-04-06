@@ -10,6 +10,7 @@ Tests:
 - Status badge colors match status values
 - Error handling for failed API calls
 """
+
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch

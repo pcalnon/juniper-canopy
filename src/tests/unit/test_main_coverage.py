@@ -12,6 +12,7 @@
 # Description:   Comprehensive coverage tests for main.py application
 #####################################################################
 """Comprehensive coverage tests for main.py (63% -> 80%+)."""
+
 import os
 import sys
 from pathlib import Path

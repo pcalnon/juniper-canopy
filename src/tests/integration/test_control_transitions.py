@@ -4,6 +4,7 @@ Integration tests for control command transitions with DemoMode.
 
 Tests the full integration of FSM with demo mode training control.
 """
+
 import time
 
 import pytest
