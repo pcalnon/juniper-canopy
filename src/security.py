@@ -8,8 +8,6 @@ Configuration is read from environment variables:
 """
 
 import hmac
-
-# import os
 import time
 from collections import defaultdict
 from threading import Lock
