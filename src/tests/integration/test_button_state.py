@@ -28,7 +28,7 @@ class TestButtonStateIntegration:
 
     def test_button_click_disables_button(self):
         """Test: Click Start → verify button disabled."""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         from frontend.dashboard_manager import DashboardManager
 
@@ -44,27 +44,22 @@ class TestButtonStateIntegration:
         with patch("frontend.dashboard_manager.requests.post") as mock_post:
             mock_post.return_value.status_code = 200
 
-            mock_request = MagicMock()
-            mock_request.scheme = "http"
-            mock_request.host = "localhost:8050"
-
-            with patch("frontend.dashboard_manager.request", mock_request):
-                _, button_states = dashboard._handle_training_buttons_handler(
-                    start_clicks=1,
-                    pause_clicks=0,
-                    stop_clicks=0,
-                    resume_clicks=0,
-                    reset_clicks=0,
-                    last_click={"button": None, "timestamp": 0},
-                    button_states={
-                        "start": {"disabled": False, "loading": False},
-                        "pause": {"disabled": False, "loading": False},
-                        "stop": {"disabled": False, "loading": False},
-                        "resume": {"disabled": False, "loading": False},
-                        "reset": {"disabled": False, "loading": False},
-                    },
-                    trigger="start-button",
-                )
+            _, button_states = dashboard._handle_training_buttons_handler(
+                start_clicks=1,
+                pause_clicks=0,
+                stop_clicks=0,
+                resume_clicks=0,
+                reset_clicks=0,
+                last_click={"button": None, "timestamp": 0},
+                button_states={
+                    "start": {"disabled": False, "loading": False},
+                    "pause": {"disabled": False, "loading": False},
+                    "stop": {"disabled": False, "loading": False},
+                    "resume": {"disabled": False, "loading": False},
+                    "reset": {"disabled": False, "loading": False},
+                },
+                trigger="start-button",
+            )
 
             # Verify button is disabled after click
             assert button_states["start"]["disabled"] is True, "Button should be disabled after click"
@@ -106,34 +101,29 @@ class TestButtonStateIntegration:
         with patch("frontend.dashboard_manager.requests.post") as mock_post:
             mock_post.return_value.status_code = 200
 
-            mock_request = MagicMock()
-            mock_request.scheme = "http"
-            mock_request.host = "localhost:8050"
+            action, button_states = dashboard._handle_training_buttons_handler(
+                start_clicks=1,
+                pause_clicks=0,
+                stop_clicks=0,
+                resume_clicks=0,
+                reset_clicks=0,
+                last_click={"button": None, "timestamp": 0},
+                button_states={
+                    "start": {"disabled": False, "loading": False},
+                    "pause": {"disabled": False, "loading": False},
+                    "stop": {"disabled": False, "loading": False},
+                    "resume": {"disabled": False, "loading": False},
+                    "reset": {"disabled": False, "loading": False},
+                },
+                trigger="start-button",
+            )
 
-            with patch("frontend.dashboard_manager.request", mock_request):
-                action, button_states = dashboard._handle_training_buttons_handler(
-                    start_clicks=1,
-                    pause_clicks=0,
-                    stop_clicks=0,
-                    resume_clicks=0,
-                    reset_clicks=0,
-                    last_click={"button": None, "timestamp": 0},
-                    button_states={
-                        "start": {"disabled": False, "loading": False},
-                        "pause": {"disabled": False, "loading": False},
-                        "stop": {"disabled": False, "loading": False},
-                        "resume": {"disabled": False, "loading": False},
-                        "reset": {"disabled": False, "loading": False},
-                    },
-                    trigger="start-button",
-                )
+            # Verify single API call
+            assert mock_post.call_count == 1
 
-                # Verify single API call
-                assert mock_post.call_count == 1
-
-                # Verify correct endpoint
-                call_args = mock_post.call_args
-                assert "/api/train/start" in str(call_args)
+            # Verify correct endpoint
+            call_args = mock_post.call_args
+            assert "/api/train/start" in str(call_args)
 
     def test_button_re_enables_after_acknowledgment(self):
         """Test: Click → disable → ack received → button re-enabled."""
@@ -153,27 +143,22 @@ class TestButtonStateIntegration:
         with patch("frontend.dashboard_manager.requests.post") as mock_post:
             mock_post.return_value.status_code = 200
 
-            mock_request = MagicMock()
-            mock_request.scheme = "http"
-            mock_request.host = "localhost:8050"
-
-            with patch("frontend.dashboard_manager.request", mock_request):
-                action, button_states = dashboard._handle_training_buttons_handler(
-                    start_clicks=1,
-                    pause_clicks=0,
-                    stop_clicks=0,
-                    resume_clicks=0,
-                    reset_clicks=0,
-                    last_click={"button": None, "timestamp": 0},
-                    button_states={
-                        "start": {"disabled": False, "loading": False, "timestamp": 0},
-                        "pause": {"disabled": False, "loading": False, "timestamp": 0},
-                        "stop": {"disabled": False, "loading": False, "timestamp": 0},
-                        "resume": {"disabled": False, "loading": False, "timestamp": 0},
-                        "reset": {"disabled": False, "loading": False, "timestamp": 0},
-                    },
-                    trigger="start-button",
-                )
+            action, button_states = dashboard._handle_training_buttons_handler(
+                start_clicks=1,
+                pause_clicks=0,
+                stop_clicks=0,
+                resume_clicks=0,
+                reset_clicks=0,
+                last_click={"button": None, "timestamp": 0},
+                button_states={
+                    "start": {"disabled": False, "loading": False, "timestamp": 0},
+                    "pause": {"disabled": False, "loading": False, "timestamp": 0},
+                    "stop": {"disabled": False, "loading": False, "timestamp": 0},
+                    "resume": {"disabled": False, "loading": False, "timestamp": 0},
+                    "reset": {"disabled": False, "loading": False, "timestamp": 0},
+                },
+                trigger="start-button",
+            )
 
             # Verify disabled
             assert button_states["start"]["disabled"] is True
@@ -217,43 +202,38 @@ class TestButtonStateIntegration:
         with patch("frontend.dashboard_manager.requests.post") as mock_post:
             mock_post.return_value.status_code = 200
 
-            mock_request = MagicMock()
-            mock_request.scheme = "http"
-            mock_request.host = "localhost:8050"
+            current_time = time.time()
+            action1, states1 = dashboard._handle_training_buttons_handler(
+                start_clicks=1,
+                pause_clicks=0,
+                stop_clicks=0,
+                resume_clicks=0,
+                reset_clicks=0,
+                last_click={"button": None, "timestamp": 0},
+                button_states={
+                    "start": {"disabled": False, "loading": False},
+                    "pause": {"disabled": False, "loading": False},
+                    "stop": {"disabled": False, "loading": False},
+                    "resume": {"disabled": False, "loading": False},
+                    "reset": {"disabled": False, "loading": False},
+                },
+                trigger="start-button",
+            )
 
-            with patch("frontend.dashboard_manager.request", mock_request):
-                current_time = time.time()
-                action1, states1 = dashboard._handle_training_buttons_handler(
-                    start_clicks=1,
-                    pause_clicks=0,
-                    stop_clicks=0,
-                    resume_clicks=0,
-                    reset_clicks=0,
-                    last_click={"button": None, "timestamp": 0},
-                    button_states={
-                        "start": {"disabled": False, "loading": False},
-                        "pause": {"disabled": False, "loading": False},
-                        "stop": {"disabled": False, "loading": False},
-                        "resume": {"disabled": False, "loading": False},
-                        "reset": {"disabled": False, "loading": False},
-                    },
-                    trigger="start-button",
-                )
+            # Second click within debounce window (< 500ms)
+            dashboard._handle_training_buttons_handler(
+                start_clicks=2,
+                pause_clicks=0,
+                stop_clicks=0,
+                resume_clicks=0,
+                reset_clicks=0,
+                last_click={"button": "start-button", "timestamp": current_time},
+                button_states=states1,
+                trigger="start-button",
+            )
 
-                # Second click within debounce window (< 500ms)
-                dashboard._handle_training_buttons_handler(
-                    start_clicks=2,
-                    pause_clicks=0,
-                    stop_clicks=0,
-                    resume_clicks=0,
-                    reset_clicks=0,
-                    last_click={"button": "start-button", "timestamp": current_time},
-                    button_states=states1,
-                    trigger="start-button",
-                )
-
-                # Only one API call should have been made
-                assert mock_post.call_count == 1
+            # Only one API call should have been made
+            assert mock_post.call_count == 1
 
     def test_loading_indicator_visible(self):
         """Test: Button shows loading indicator when clicked."""
@@ -273,27 +253,22 @@ class TestButtonStateIntegration:
         with patch("frontend.dashboard_manager.requests.post") as mock_post:
             mock_post.return_value.status_code = 200
 
-            mock_request = MagicMock()
-            mock_request.scheme = "http"
-            mock_request.host = "localhost:8050"
-
-            with patch("frontend.dashboard_manager.request", mock_request):
-                action, button_states = dashboard._handle_training_buttons_handler(
-                    start_clicks=1,
-                    pause_clicks=0,
-                    stop_clicks=0,
-                    resume_clicks=0,
-                    reset_clicks=0,
-                    last_click={"button": None, "timestamp": 0},
-                    button_states={
-                        "start": {"disabled": False, "loading": False},
-                        "pause": {"disabled": False, "loading": False},
-                        "stop": {"disabled": False, "loading": False},
-                        "resume": {"disabled": False, "loading": False},
-                        "reset": {"disabled": False, "loading": False},
-                    },
-                    trigger="start-button",
-                )
+            action, button_states = dashboard._handle_training_buttons_handler(
+                start_clicks=1,
+                pause_clicks=0,
+                stop_clicks=0,
+                resume_clicks=0,
+                reset_clicks=0,
+                last_click={"button": None, "timestamp": 0},
+                button_states={
+                    "start": {"disabled": False, "loading": False},
+                    "pause": {"disabled": False, "loading": False},
+                    "stop": {"disabled": False, "loading": False},
+                    "resume": {"disabled": False, "loading": False},
+                    "reset": {"disabled": False, "loading": False},
+                },
+                trigger="start-button",
+            )
 
             result = dashboard._update_button_appearance_handler(button_states=button_states)
 

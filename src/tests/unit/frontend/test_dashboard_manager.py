@@ -99,33 +99,32 @@ class TestDashboardManagerRegistration:
 
 
 class TestDashboardManagerAPIURL:
-    """Test _api_url method with Flask request context."""
+    """Test _api_url method constructs URLs from settings (no Flask request context)."""
 
     def test_api_url_construction(self, dashboard_manager):
-        """Test _api_url constructs URLs correctly in Flask context."""
-        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050", path="/dashboard/"):
-            url = dashboard_manager._api_url("/api/health")
-            assert url == "http://localhost:8050/api/health"
+        """Test _api_url constructs URLs correctly."""
+        url = dashboard_manager._api_url("/api/health")
+        assert "api/health" in url
+        assert url.startswith("http://127.0.0.1:")
 
     def test_api_url_strips_leading_slash(self, dashboard_manager):
         """Test _api_url handles paths with and without leading slash."""
-        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050", path="/dashboard/"):
-            url1 = dashboard_manager._api_url("/api/metrics")
-            url2 = dashboard_manager._api_url("api/metrics")
-            assert url1 == url2
-            assert url1 == "http://localhost:8050/api/metrics"
+        url1 = dashboard_manager._api_url("/api/metrics")
+        url2 = dashboard_manager._api_url("api/metrics")
+        assert url1 == url2
+        assert url1.startswith("http://127.0.0.1:")
 
     def test_api_url_preserves_query_params(self, dashboard_manager):
         """Test _api_url preserves query parameters."""
-        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050", path="/dashboard/"):
-            url = dashboard_manager._api_url("/api/metrics?limit=100")
-            assert url == "http://localhost:8050/api/metrics?limit=100"
+        url = dashboard_manager._api_url("/api/metrics?limit=100")
+        assert "api/metrics?limit=100" in url
+        assert url.startswith("http://127.0.0.1:")
 
-    def test_api_url_different_hosts(self, dashboard_manager):
-        """Test _api_url works with different host configurations."""
-        with dashboard_manager.app.server.test_request_context(base_url="http://127.0.0.1:9000", path="/dashboard/"):
-            url = dashboard_manager._api_url("/api/status")
-            assert url == "http://127.0.0.1:9000/api/status"
+    def test_api_url_different_paths(self, dashboard_manager):
+        """Test _api_url works with different API paths."""
+        url = dashboard_manager._api_url("/api/status")
+        assert "api/status" in url
+        assert url.startswith("http://127.0.0.1:")
 
 
 class TestDashboardManagerInitialization:

@@ -37,9 +37,8 @@
 #
 #####################################################################################################################################################################################################
 import asyncio
-
-# import importlib.metadata
 import importlib
+import importlib.metadata
 import json
 import os
 import re
@@ -60,8 +59,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import BaseModel
 
-# from pydantic import BaseModel
 # from dash import html, dcc
 # Add src directory to Python path
 # src_dir = Path(__file__).parent
@@ -2001,17 +2000,60 @@ async def api_train_status():
     return {"backend": backend.backend_type, **backend.get_status()}
 
 
+class SetParamsRequest(BaseModel):
+    """Pydantic model for /api/set_params request body."""
+
+    # Backward-compatible keys
+    learning_rate: float | None = None
+    max_hidden_units: int | None = None
+    max_epochs: int | None = None
+    convergence_enabled: bool | None = None
+    convergence_threshold: float | None = None
+    patience: int | None = None
+    spiral_rotations: float | None = None
+
+    # nn_* prefixed keys
+    nn_max_iterations: int | None = None
+    nn_max_total_epochs: int | None = None
+    nn_learning_rate: float | None = None
+    nn_max_hidden_units: int | None = None
+    nn_multi_node_layers: int | None = None
+    nn_growth_trigger: str | None = None
+    nn_growth_preset_epochs: int | None = None
+    nn_growth_convergence_threshold: float | None = None
+    nn_patience: int | None = None
+    nn_spiral_rotations: float | None = None
+    nn_spiral_number: int | None = None
+    nn_dataset_elements: int | None = None
+    nn_dataset_noise: float | None = None
+
+    # cn_* prefixed keys
+    cn_pool_size: int | None = None
+    cn_correlation_threshold: float | None = None
+    cn_candidate_learning_rate: float | None = None
+    cn_patience: int | None = None
+    cn_selected_candidates: int | None = None
+    cn_training_complete: str | None = None
+    cn_training_iterations: int | None = None
+    cn_training_convergence_threshold: float | None = None
+    cn_multi_candidate: bool | None = None
+    cn_candidate_selection: str | None = None
+    cn_top_candidates: int | None = None
+    cn_random_candidates: int | None = None
+
+
 @app.post("/api/set_params")
-async def api_set_params(params: dict):
+async def api_set_params(body: SetParamsRequest):
     """
     Set training parameters with nn_* and cn_* prefixed keys.
     Also accepts old-style keys for backward compatibility.
     Args:
-        params: Dictionary containing parameters to update
+        body: SetParamsRequest containing parameters to update
     Returns:
         Updated training state
     """
     try:
+        params = body.model_dump(exclude_none=True)
         # Backward-compatible mapping: old-style keys -> new prefixed keys
         compat_map = {
             "learning_rate": "nn_learning_rate",
