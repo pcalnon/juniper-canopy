@@ -22,6 +22,8 @@ click==8.3.2
     # via
     #   flask
     #   uvicorn
+colorama==0.4.6
+    # via juniper-canopy (pyproject.toml)
 dash==4.1.0
     # via
     #   juniper-canopy (pyproject.toml)
@@ -61,6 +63,8 @@ nest-asyncio==1.6.0
     # via
     #   juniper-canopy (pyproject.toml)
     #   dash
+networkx==3.6.1
+    # via juniper-canopy (pyproject.toml)
 numpy==2.4.4
     # via
     #   juniper-canopy (pyproject.toml)
@@ -73,6 +77,8 @@ plotly==6.6.0
     #   juniper-canopy (pyproject.toml)
     #   dash
 prometheus-client==0.24.1
+    # via juniper-canopy (pyproject.toml)
+psutil==7.2.2
     # via juniper-canopy (pyproject.toml)
 pydantic==2.12.5
     # via
@@ -88,6 +94,8 @@ python-dotenv==1.2.2
     #   juniper-canopy (pyproject.toml)
     #   pydantic-settings
     #   uvicorn
+python-multipart==0.0.24
+    # via juniper-canopy (pyproject.toml)
 pyyaml==6.0.3
     # via
     #   juniper-canopy (pyproject.toml)
