@@ -92,9 +92,6 @@ class TestRateLimitDefault:
         mock_settings.rate_limit_requests_per_minute = 200
 
         reset_security_state()
-        mock_settings = MagicMock()
-        mock_settings.rate_limit_enabled = True
-        mock_settings.rate_limit_requests_per_minute = 100
         with patch("settings.get_settings", return_value=mock_settings):
             limiter = get_rate_limiter()
 
