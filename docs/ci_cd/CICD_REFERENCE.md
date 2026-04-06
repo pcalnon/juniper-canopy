@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-04-05  
-**Version:** 0.26.0  
+**Last Updated:** 2026-04-05
+**Version:** 0.26.0
 **Status:** Current
 
 ## Table of Contents
@@ -11,7 +11,9 @@
 - [Auxiliary Workflows](#auxiliary-workflows)
 - [Tooling and Configuration Sources](#tooling-and-configuration-sources)
 - [Artifacts Produced by CI](#artifacts-produced-by-ci)
-- [Command Equivalents for Local Reproduction](#command-equivalents-for-local-reproduction)
+- [Troubleshooting Reference](#troubleshooting-reference)
+- [Version History](#version-history)
+- [References](#references)
 
 ## Workflow Inventory
 
@@ -26,9 +28,11 @@
 
 ### Trigger and concurrency
 
+```text
     - name: Run Bandit
       run: bandit -r src/ -c pyproject.toml
       continue-on-error: true
+
 ```
 
 #### Test Job
@@ -545,7 +549,7 @@ python scripts/check_doc_links.py \
 
 ---
 
-**Last Updated:** 2026-04-05  
-**Version:** 0.25.1  
-**Maintained By:** Development Team  
+**Last Updated:** 2026-04-05
+**Version:** 0.25.1
+**Maintained By:** Development Team
 **Status:** ✅ Current
