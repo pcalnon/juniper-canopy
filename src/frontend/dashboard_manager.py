@@ -44,7 +44,6 @@ import dash_bootstrap_components as dbc
 import requests
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
-from flask import request
 
 from canopy_constants import DashboardConstants, TrainingConstants
 from settings import get_settings
@@ -209,6 +208,9 @@ class DashboardManager:
 
         # Initialize settings for training defaults
         self._settings = get_settings()
+
+        # Base URL for API calls (avoids dependency on Flask request context)
+        self._api_base_url = f"http://127.0.0.1:{self._settings.server.port}"
 
         # Get training defaults with environment variable support
         self.training_defaults = self._get_training_defaults_with_env()
@@ -1255,19 +1257,15 @@ class DashboardManager:
 
     def _api_url(self, path: str) -> str:
         """
-        Build API URL from Flask request context.
-
-        Handles WSGI mount at /dashboard/ correctly by using origin (scheme + host)
-        instead of host_url which includes the mount path.
+        Build API URL using the configured server port.
 
         Args:
             path: API path (e.g., "/api/health")
 
         Returns:
-            Full API URL (e.g., "http://localhost:8050/api/health")
+            Full API URL (e.g., "http://127.0.0.1:8050/api/health")
         """
-        origin = f"{request.scheme}://{request.host}"
-        return urljoin(f"{origin}/", path.lstrip("/"))
+        return urljoin(f"{self._api_base_url}/", path.lstrip("/"))
 
     def _setup_callbacks(self):
         """Set up dashboard callbacks."""

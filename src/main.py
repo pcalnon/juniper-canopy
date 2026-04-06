@@ -37,6 +37,9 @@
 #
 #####################################################################################################################################################################################################
 import asyncio
+
+# import importlib.metadata
+import importlib
 import json
 import os
 import re
@@ -58,6 +61,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
+# from pydantic import BaseModel
 # from dash import html, dcc
 # Add src directory to Python path
 # src_dir = Path(__file__).parent
@@ -97,6 +101,12 @@ from settings import get_settings
 
 # Initialize configuration
 settings = get_settings()
+
+# Application version from package metadata
+try:
+    APP_VERSION = importlib.metadata.version("juniper-canopy")
+except importlib.metadata.PackageNotFoundError:
+    APP_VERSION = "0.4.0"
 
 # Initialize loggers
 system_logger = get_system_logger()
@@ -229,7 +239,7 @@ _docs_enabled = not get_secret("CANOPY_API_KEY")
 # Initialize FastAPI
 app = FastAPI(
     title="Juniper Canopy",
-    version="0.3.0",
+    version=APP_VERSION,
     description="Real-time monitoring for CasCor networks",
     lifespan=lifespan,
     docs_url="/docs" if _docs_enabled else None,
@@ -244,8 +254,8 @@ if settings.cors_origins:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=allow_credentials,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["X-API-Key", "Content-Type", "Accept"],
     )
 
 # Security headers (outermost — runs on every response)
@@ -540,7 +550,7 @@ async def readiness_probe() -> ReadinessResponse:
 
     return ReadinessResponse(
         status=overall,
-        version="0.3.0",
+        version=APP_VERSION,
         service="juniper-canopy",
         dependencies=dependencies,
         details={
@@ -1901,12 +1911,10 @@ async def ws_endpoint(websocket: WebSocket):
     await websocket_manager.connect(websocket)
     try:
         while True:
-            try:
-                await websocket.receive_text()
-            except Exception:
-                # Ignore non-text frames (pings, pongs, binary)
-                await asyncio.sleep(10)
+            await websocket.receive_text()
     except WebSocketDisconnect:
+        websocket_manager.disconnect(websocket)
+    except Exception:
         websocket_manager.disconnect(websocket)
 
 
@@ -2041,7 +2049,6 @@ async def api_set_params(params: dict):
             "cn_candidate_learning_rate",
             "cn_patience",
             "cn_selected_candidates",
-            "cn_patience",
             "cn_training_complete",
             "cn_training_iterations",
             "cn_training_convergence_threshold",

@@ -1093,7 +1093,7 @@ class TestSetParamsEndpoint:
         try:
             main.backend = mock_backend
 
-            result = await main.api_set_params({"learning_rate": 0.02})
+            result = await main.api_set_params(main.SetParamsRequest(learning_rate=0.02))
 
             mock_backend.apply_params.assert_called_once_with(nn_learning_rate=0.02)
             assert result["status"] == "success"
@@ -1114,7 +1114,7 @@ class TestSetParamsEndpoint:
         try:
             main.backend = mock_backend
 
-            result = await main.api_set_params({})
+            result = await main.api_set_params(main.SetParamsRequest())
 
             assert isinstance(result, JSONResponse)
             assert result.status_code == 400

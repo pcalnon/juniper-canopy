@@ -38,7 +38,8 @@
 import hashlib
 import json
 import math
-from datetime import datetime
+
+# from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import networkx as nx
@@ -219,7 +220,6 @@ class NetworkVisualizer(BaseComponent):
                         "displaylogo": False,
                         "modeBarButtonsToAdd": ["select2d", "lasso2d"],
                         "toImageButtonOptions": {
-                            "filename": f"juniper_topology_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
                             "format": "png",
                             "scale": 2,
                         },

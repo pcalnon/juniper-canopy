@@ -14,8 +14,9 @@ import os
 from unittest.mock import Mock, patch
 
 import dash
-import pytest
-from werkzeug.test import EnvironBuilder
+from flask import EnvironBuilder
+
+# import pytest
 
 
 class TestGetTrainingDefaultsWithEnv:
@@ -135,100 +136,47 @@ class TestApiUrl:
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
-
-        builder = EnvironBuilder(
-            method="GET",
-            base_url="http://localhost:8050/dashboard/",
-            path="/dashboard/",
-        )
-        env = builder.get_environ()
-
-        with manager.app.server.request_context(env):
-            url = manager._api_url("/api/health")
-            assert "api/health" in url
-            assert url.startswith("http://")
+        url = manager._api_url("/api/health")
+        assert "api/health" in url
+        assert url.startswith("http://127.0.0.1:")
 
     def test_api_url_without_leading_slash(self, reset_singletons):
         """Test _api_url without leading slash in path."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
+        url = manager._api_url("api/metrics")
+        assert "api/metrics" in url
 
-        builder = EnvironBuilder(
-            method="GET",
-            base_url="http://localhost:8050/dashboard/",
-            path="/dashboard/",
-        )
-        env = builder.get_environ()
-
-        with manager.app.server.request_context(env):
-            url = manager._api_url("api/metrics")
-            assert "api/metrics" in url
-
-    def test_api_url_https_scheme(self, reset_singletons):
-        """Test _api_url preserves HTTPS scheme."""
+    def test_api_url_uses_configured_port(self, reset_singletons):
+        """Test _api_url uses the configured server port."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
-
-        builder = EnvironBuilder(
-            method="GET",
-            base_url="https://secure.example.com:443/dashboard/",
-            path="/dashboard/",
-        )
-        env = builder.get_environ()
-
-        with manager.app.server.request_context(env):
-            url = manager._api_url("/api/status")
-            assert url.startswith("https://")
+        url = manager._api_url("/api/status")
+        assert f":{manager._settings.server.port}" in url
 
     def test_api_url_http_scheme(self, reset_singletons):
         """Test _api_url uses HTTP scheme correctly."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
+        url = manager._api_url("/api/train/start")
+        assert url.startswith("http://")
 
-        builder = EnvironBuilder(
-            method="GET",
-            base_url="http://localhost:8050/dashboard/",
-            path="/dashboard/",
-        )
-        env = builder.get_environ()
-
-        with manager.app.server.request_context(env):
-            url = manager._api_url("/api/train/start")
-            assert url.startswith("http://")
-            assert "localhost" in url
-
-    def test_api_url_preserves_host(self, reset_singletons):
-        """Test _api_url preserves the request host."""
+    def test_api_url_uses_base_url(self, reset_singletons):
+        """Test _api_url uses the base URL from settings."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
-
-        builder = EnvironBuilder(
-            method="GET",
-            base_url="http://myhost.local:9000/dashboard/",
-            path="/dashboard/",
-        )
-        env = builder.get_environ()
-
-        with manager.app.server.request_context(env):
-            url = manager._api_url("/api/topology")
-            assert "myhost.local:9000" in url
+        url = manager._api_url("/api/topology")
+        assert url.startswith(manager._api_base_url)
 
     def test_api_url_different_paths(self, reset_singletons):
         """Test _api_url with various API paths."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
-
-        builder = EnvironBuilder(
-            method="GET",
-            base_url="http://localhost:8050/dashboard/",
-            path="/dashboard/",
-        )
-        env = builder.get_environ()
 
         paths = [
             "/api/health",
@@ -238,10 +186,9 @@ class TestApiUrl:
             "/api/decision_boundary",
         ]
 
-        with manager.app.server.request_context(env):
-            for path in paths:
-                url = manager._api_url(path)
-                assert path.lstrip("/") in url
+        for path in paths:
+            url = manager._api_url(path)
+            assert path.lstrip("/") in url
 
 
 class TestThemeHandlers:

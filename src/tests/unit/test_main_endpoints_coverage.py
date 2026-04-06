@@ -328,7 +328,9 @@ class TestReadinessProbe:
         data = response.json()
         assert data["status"] == "ready"
         assert data["service"] == "juniper-canopy"
-        assert data["version"] == "0.3.0"
+        import main
+
+        assert data["version"] == main.APP_VERSION
         assert "dependencies" in data
         assert "details" in data
 

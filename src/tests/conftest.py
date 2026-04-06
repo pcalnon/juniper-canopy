@@ -25,7 +25,7 @@ os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"
 # CRITICAL: Set JuniperData URL BEFORE any imports (CAN-INT-002: mandatory)
 os.environ["JUNIPER_DATA_URL"] = "http://localhost:8100"
 # Disable rate limiting in tests to prevent 429 responses during rapid test execution
-os.environ["CANOPY_RATE_LIMIT_ENABLED"] = "false"
+os.environ["JUNIPER_CANOPY_RATE_LIMIT_ENABLED"] = "false"
 # CRITICAL: Set new-prefix env vars to prevent DeprecationWarnings from
 # legacy CASCOR_* variables that may be present in conda activation environment.
 os.environ.setdefault("JUNIPER_CANOPY_LOG_LEVEL", os.environ.get("CASCOR_LOG_LEVEL", "DEBUG"))

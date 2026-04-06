@@ -1707,42 +1707,7 @@ class MetricsPanel(BaseComponent):
 
         self._add_validation_overlay(fig, metrics_data, "val_accuracy", "Validation Accuracy", "#82e0aa")
 
-        # Add phase background bands
-        current_phase = None
-        phase_start = None
-
-        for i, (epoch, phase) in enumerate(zip(epochs, phases, strict=True)):
-            if phase != current_phase:
-                fillcolor = self._phase_band_color(current_phase)
-                if fillcolor is not None and phase_start is not None:
-                    fig.add_shape(
-                        type="rect",
-                        x0=phase_start,
-                        x1=epochs[i - 1] if i > 0 else phase_start,
-                        y0=0,
-                        y1=1,
-                        yref="paper",
-                        fillcolor=fillcolor,
-                        line_width=0,
-                        layer="below",
-                    )
-                current_phase = phase
-                phase_start = epoch
-
-        # Final band if ended in a phase with a background color
-        fillcolor = self._phase_band_color(current_phase)
-        if fillcolor is not None and phase_start is not None:
-            fig.add_shape(
-                type="rect",
-                x0=phase_start,
-                x1=epochs[-1],
-                y0=0,
-                y1=1,
-                yref="paper",
-                fillcolor=fillcolor,
-                line_width=0,
-                layer="below",
-            )
+        fig = self._add_phase_bg_bands(fig=fig, epochs=epochs, phases=phases)
 
         # Add hidden unit addition markers
         for i in range(1, len(metrics_data)):

@@ -233,6 +233,11 @@ class WebSocketManager:
         Example:
             await websocket_manager.connect(websocket, client_id='dashboard-1')
         """
+        if len(self.active_connections) >= self.max_connections:
+            await websocket.close(code=1013, reason="Maximum connections reached")
+            self.logger.warning(f"Connection rejected: max_connections={self.max_connections} reached")
+            return
+
         await websocket.accept()
 
         # Add to active connections
@@ -328,9 +333,9 @@ class WebSocketManager:
             self.logger.debug("No active connections for broadcast")
             return
 
-        # Add timestamp if not present
+        # Copy to avoid mutating caller's dict
         if "timestamp" not in message:
-            message["timestamp"] = datetime.now().isoformat()
+            message = {**message, "timestamp": datetime.now().isoformat()}
 
         # Track message
         self.message_count += 1

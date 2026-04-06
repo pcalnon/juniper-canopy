@@ -26,8 +26,8 @@
 #
 #####################################################################################################################################################################################################
 # Notes:
-#     The conftest.py sets CANOPY_RATE_LIMIT_ENABLED=false globally, so these
-#     tests must use monkeypatch.delenv to unset it before testing the default.
+#     The conftest.py sets JUNIPER_CANOPY_RATE_LIMIT_ENABLED=false globally, so these
+#     tests must use monkeypatch to override settings before testing the default.
 #     The reset_singletons fixture (autouse) calls reset_security_state() which
 #     clears the cached _rate_limiter singleton.
 #
@@ -43,60 +43,69 @@ class TestRateLimitDefault:
     """Regression tests: rate limiting must be disabled by default."""
 
     def test_rate_limiter_disabled_by_default(self, monkeypatch):
-        """Rate limiter must be disabled when CANOPY_RATE_LIMIT_ENABLED is unset.
+        """Rate limiter must be disabled when settings.rate_limit_enabled is False.
 
         The dashboard makes high-frequency internal HTTP requests to its own
         API endpoints. Rate limiting these self-to-self calls is counterproductive.
-        The rate limiter should be opt-in (explicitly enabled via env var).
+        The rate limiter should be opt-in (explicitly enabled via settings).
         """
-        # Remove the conftest-forced env var
-        monkeypatch.delenv("CANOPY_RATE_LIMIT_ENABLED", raising=False)
+        from unittest.mock import MagicMock
 
         from security import get_rate_limiter, reset_security_state
+
+        mock_settings = MagicMock()
+        mock_settings.rate_limit_enabled = False
+        mock_settings.rate_limit_requests_per_minute = 60
+        monkeypatch.setattr("security.get_settings", lambda: mock_settings)
 
         reset_security_state()
         limiter = get_rate_limiter()
 
         assert limiter.enabled is False, "Rate limiter is enabled by default. It must be disabled by default " "because the Dash dashboard makes internal HTTP requests to /api/* " "endpoints that would exceed the rate limit and cause 429 errors."
 
-    def test_rate_limiter_can_be_enabled_via_env(self, monkeypatch):
-        """Rate limiter can be explicitly enabled via CANOPY_RATE_LIMIT_ENABLED=true."""
-        monkeypatch.setenv("CANOPY_RATE_LIMIT_ENABLED", "true")
+    def test_rate_limiter_can_be_enabled_via_settings(self, monkeypatch):
+        """Rate limiter can be explicitly enabled via settings."""
+        from unittest.mock import MagicMock
 
         from security import get_rate_limiter, reset_security_state
+
+        mock_settings = MagicMock()
+        mock_settings.rate_limit_enabled = True
+        mock_settings.rate_limit_requests_per_minute = 60
+        monkeypatch.setattr("security.get_settings", lambda: mock_settings)
 
         reset_security_state()
         limiter = get_rate_limiter()
 
         assert limiter.enabled is True
 
-    def test_rate_limiter_can_be_enabled_via_env_1(self, monkeypatch):
-        """Rate limiter accepts '1' as truthy value."""
-        monkeypatch.setenv("CANOPY_RATE_LIMIT_ENABLED", "1")
+    def test_rate_limiter_custom_requests_per_minute(self, monkeypatch):
+        """Rate limiter uses requests_per_minute from settings."""
+        from unittest.mock import MagicMock
 
         from security import get_rate_limiter, reset_security_state
+
+        mock_settings = MagicMock()
+        mock_settings.rate_limit_enabled = True
+        mock_settings.rate_limit_requests_per_minute = 200
+        monkeypatch.setattr("security.get_settings", lambda: mock_settings)
 
         reset_security_state()
         limiter = get_rate_limiter()
 
         assert limiter.enabled is True
+        assert limiter.limit == 200
 
-    def test_rate_limiter_disabled_with_empty_string(self, monkeypatch):
-        """Rate limiter is disabled when env var is set to empty string."""
-        monkeypatch.setenv("CANOPY_RATE_LIMIT_ENABLED", "")
-
-        from security import get_rate_limiter, reset_security_state
-
-        reset_security_state()
-        limiter = get_rate_limiter()
-
-        assert limiter.enabled is False
-
-    def test_rate_limiter_disabled_with_false(self, monkeypatch):
-        """Rate limiter is disabled when env var is set to 'false'."""
-        monkeypatch.setenv("CANOPY_RATE_LIMIT_ENABLED", "false")
+    def test_rate_limiter_disabled_with_settings_false(self, monkeypatch):
+        """Rate limiter is disabled when settings.rate_limit_enabled is False."""
+        from unittest.mock import MagicMock
 
         from security import get_rate_limiter, reset_security_state
+
+        mock_settings = MagicMock()
+        mock_settings.rate_limit_enabled = False
+        mock_settings.rate_limit_requests_per_minute = 60
+        monkeypatch.setattr("security.get_settings", lambda: mock_settings)
 
         reset_security_state()
         limiter = get_rate_limiter()
