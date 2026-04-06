@@ -139,6 +139,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_format: str = "text"
     sentry_dsn: Optional[str] = None
+    sentry_traces_sample_rate: float = 0.1
 
     # Metrics / observability
     metrics_enabled: bool = False

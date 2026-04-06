@@ -54,26 +54,29 @@ class TestReadinessResponseModel:
 class TestProbeDependency:
     """Test the probe_dependency utility function."""
 
-    def test_probe_healthy(self):
+    @pytest.mark.asyncio
+    async def test_probe_healthy(self):
         with patch("health.urllib.request.urlopen") as mock:
             mock.return_value.__enter__ = lambda s: s
             mock.return_value.__exit__ = lambda s, *a: None
-            result = probe_dependency("Test", "http://localhost:8100/v1/health/live")
+            result = await probe_dependency("Test", "http://localhost:8100/v1/health/live")
             assert result.status == "healthy"
             assert result.latency_ms >= 0
             assert result.name == "Test"
 
-    def test_probe_unhealthy(self):
+    @pytest.mark.asyncio
+    async def test_probe_unhealthy(self):
         with patch("health.urllib.request.urlopen", side_effect=ConnectionRefusedError("refused")):
-            result = probe_dependency("Test", "http://localhost:9999/v1/health/live")
+            result = await probe_dependency("Test", "http://localhost:9999/v1/health/live")
             assert result.status == "unhealthy"
             assert "ConnectionRefusedError" in result.message
 
-    def test_probe_timeout(self):
+    @pytest.mark.asyncio
+    async def test_probe_timeout(self):
         from urllib.error import URLError
 
         with patch("health.urllib.request.urlopen", side_effect=URLError("timeout")):
-            result = probe_dependency("Slow", "http://localhost:8100/v1/health/live", timeout=0.1)
+            result = await probe_dependency("Slow", "http://localhost:8100/v1/health/live", timeout=0.1)
             assert result.status == "unhealthy"
             assert result.latency_ms is not None
 

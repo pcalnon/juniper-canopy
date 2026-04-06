@@ -275,11 +275,7 @@ class TestUnifiedStatusBarHandler:
         """Test unified status bar update with healthy API response."""
         from frontend.dashboard_manager import DashboardManager
 
-        # Create mock responses for both health and status endpoints
-        mock_health_response = Mock()
-        mock_health_response.status_code = 200
-        mock_health_response.json.return_value = {"status": "healthy"}
-
+        # Create mock response for status endpoint (single request)
         mock_status_response = Mock()
         mock_status_response.status_code = 200
         mock_status_response.json.return_value = {
@@ -290,7 +286,7 @@ class TestUnifiedStatusBarHandler:
             "is_paused": False,
         }
 
-        mock_get.side_effect = [mock_health_response, mock_status_response]
+        mock_get.return_value = mock_status_response
 
         manager = DashboardManager({})
 
@@ -635,56 +631,6 @@ class TestTrainingButtonHandlers:
             ctx.clear_test_trigger()
 
 
-class TestNetworkInfoToggleHandlers:
-    """Tests for network info collapse toggle handlers."""
-
-    def test_toggle_network_info_first_click(self, reset_singletons):
-        """Test first click on network info header."""
-        from frontend.dashboard_manager import DashboardManager
-
-        manager = DashboardManager({})
-
-        # n=1 means first click, should collapse (return True -> n%2==1)
-        result = manager._toggle_network_info_handler(n=1)
-        assert result is True
-
-    def test_toggle_network_info_second_click(self, reset_singletons):
-        """Test second click expands again."""
-        from frontend.dashboard_manager import DashboardManager
-
-        manager = DashboardManager({})
-
-        result = manager._toggle_network_info_handler(n=2)
-        assert result is False
-
-    def test_toggle_network_info_no_clicks(self, reset_singletons):
-        """Test default state with no clicks."""
-        from frontend.dashboard_manager import DashboardManager
-
-        manager = DashboardManager({})
-
-        result = manager._toggle_network_info_handler(n=None)
-        assert result is True  # Default expanded
-
-    def test_toggle_network_info_details_first_click(self, reset_singletons):
-        """Test first click on details section."""
-        from frontend.dashboard_manager import DashboardManager
-
-        manager = DashboardManager({})
-
-        result = manager._toggle_network_info_details_handler(n=1)
-        assert result is True  # Opens details
-
-    def test_toggle_network_info_details_no_clicks(self, reset_singletons):
-        """Test default state for details (collapsed)."""
-        from frontend.dashboard_manager import DashboardManager
-
-        manager = DashboardManager({})
-
-        result = manager._toggle_network_info_details_handler(n=None)
-        assert result is False  # Default collapsed
-
-
 class TestTopStatusPhaseHandler:
     """Tests for top status/phase display via unified handler."""
 
@@ -692,10 +638,6 @@ class TestTopStatusPhaseHandler:
     def test_running_status_display(self, mock_get, reset_singletons):
         """Test running status displays correctly in unified bar."""
         from frontend.dashboard_manager import DashboardManager
-
-        # Create mock responses for both health and status endpoints
-        mock_health_response = Mock()
-        mock_health_response.status_code = 200
 
         mock_status_response = Mock()
         mock_status_response.status_code = 200
@@ -706,7 +648,7 @@ class TestTopStatusPhaseHandler:
             "current_epoch": 5,
             "hidden_units": 2,
         }
-        mock_get.side_effect = [mock_health_response, mock_status_response]
+        mock_get.return_value = mock_status_response
 
         manager = DashboardManager({})
 
@@ -733,9 +675,6 @@ class TestTopStatusPhaseHandler:
         """Test paused status displays with orange color in unified bar."""
         from frontend.dashboard_manager import DashboardManager
 
-        mock_health_response = Mock()
-        mock_health_response.status_code = 200
-
         mock_status_response = Mock()
         mock_status_response.status_code = 200
         mock_status_response.json.return_value = {
@@ -745,7 +684,7 @@ class TestTopStatusPhaseHandler:
             "current_epoch": 10,
             "hidden_units": 3,
         }
-        mock_get.side_effect = [mock_health_response, mock_status_response]
+        mock_get.return_value = mock_status_response
 
         manager = DashboardManager({})
 
@@ -797,9 +736,6 @@ class TestTopStatusPhaseHandler:
         """Test stopped status displays with gray color in unified bar."""
         from frontend.dashboard_manager import DashboardManager
 
-        mock_health_response = Mock()
-        mock_health_response.status_code = 200
-
         mock_status_response = Mock()
         mock_status_response.status_code = 200
         mock_status_response.json.return_value = {
@@ -809,7 +745,7 @@ class TestTopStatusPhaseHandler:
             "current_epoch": 0,
             "hidden_units": 0,
         }
-        mock_get.side_effect = [mock_health_response, mock_status_response]
+        mock_get.return_value = mock_status_response
 
         manager = DashboardManager({})
 

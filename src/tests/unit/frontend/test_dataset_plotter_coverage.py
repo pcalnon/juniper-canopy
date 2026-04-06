@@ -24,6 +24,8 @@ import plotly.graph_objects as go
 import pytest
 from dash import html
 
+from frontend.base_component import create_empty_plot
+
 
 @pytest.mark.unit
 class TestDatasetPlotterInit:
@@ -513,36 +515,21 @@ class TestDatasetPlotterEmptyPlot:
 
     def test_create_empty_plot_light_theme(self):
         """Test empty plot with light theme."""
-        from frontend.components.dataset_plotter import DatasetPlotter
-
-        config = {}
-        component = DatasetPlotter(config)
-
-        fig = component._create_empty_plot("No data", theme="light")
+        fig = create_empty_plot("No data", theme="light")
 
         assert isinstance(fig, go.Figure)
         assert len(fig.layout.annotations) > 0
 
     def test_create_empty_plot_dark_theme(self):
         """Test empty plot with dark theme."""
-        from frontend.components.dataset_plotter import DatasetPlotter
-
-        config = {}
-        component = DatasetPlotter(config)
-
-        fig = component._create_empty_plot("No data", theme="dark")
+        fig = create_empty_plot("No data", theme="dark")
 
         assert isinstance(fig, go.Figure)  # Dark theme applied
 
     def test_create_empty_plot_custom_message(self):
         """Test empty plot with custom message."""
-        from frontend.components.dataset_plotter import DatasetPlotter
-
-        config = {}
-        component = DatasetPlotter(config)
-
         custom_msg = "Custom message here"
-        fig = component._create_empty_plot(custom_msg, theme="light")
+        fig = create_empty_plot(custom_msg, theme="light")
 
         assert isinstance(fig, go.Figure)
 
@@ -660,11 +647,8 @@ class TestUpdateDatasetPlotsCallback:
         """Test callback output types when no dataset provided."""
         from frontend.components.dataset_plotter import DatasetPlotter
 
-        config = {}
-        component = DatasetPlotter(config)
-
         # Simulate what the callback does with no dataset
-        empty_fig = component._create_empty_plot("No dataset loaded", "light")
+        empty_fig = create_empty_plot("No dataset loaded", "light")
 
         assert isinstance(empty_fig, go.Figure)
 
@@ -1048,14 +1032,8 @@ class TestCallbackDirectInvocation:
         """Test callback creates dark theme plots (line 204, 211, 212)."""
         from frontend.components.dataset_plotter import DatasetPlotter
 
-        config = {}
-        component = DatasetPlotter(config)
-
-        dataset = None
         theme = "dark"
-
-        if not dataset:
-            empty_fig = component._create_empty_plot("No dataset loaded", theme)
+        empty_fig = create_empty_plot("No dataset loaded", theme)
 
         # Verify dark theme is applied
         assert empty_fig.layout.plot_bgcolor == "#242424"

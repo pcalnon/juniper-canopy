@@ -360,6 +360,18 @@ class NetworkVisualizer(BaseComponent):
             Returns:
                 Tuple of updated components including new highlight state
             """
+            import dash
+
+            # Short-circuit: if only the fast-update-interval fired and there's no
+            # active highlight animation, skip the full graph rebuild.
+            try:
+                ctx = dash.callback_context
+                if ctx.triggered and len(ctx.triggered) == 1:
+                    trigger_id = ctx.triggered[0]["prop_id"]
+                    if "fast-update-interval" in trigger_id and not current_highlight:
+                        return (dash.no_update,) * 7
+            except Exception:  # nosec B110 — callback_context unavailable outside Dash request
+                pass
 
             def compute_hash(topo):
                 key = {

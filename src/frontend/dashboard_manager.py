@@ -1435,11 +1435,12 @@ class DashboardManager:
         @self.app.callback(
             Output("network-info-collapse", "is_open"),
             Input("network-info-header", "n_clicks"),
+            State("network-info-collapse", "is_open"),
             prevent_initial_call=True,
         )
-        def toggle_network_info(n):
+        def toggle_network_info(n, is_open):
             """Toggle Network Information section collapse state."""
-            return self._toggle_network_info_handler(n=n)
+            return not is_open
 
         @self.app.callback(
             [
@@ -1447,13 +1448,14 @@ class DashboardManager:
                 Output("network-info-details-icon", "children"),
             ],
             Input("network-info-details-header", "n_clicks"),
+            State("network-info-details-collapse", "is_open"),
             prevent_initial_call=True,
         )
-        def toggle_network_info_details(n):
+        def toggle_network_info_details(n, is_open):
             """Toggle Network Information: Details section collapse state."""
-            is_open = self._toggle_network_info_details_handler(n=n)
-            icon = "▼" if is_open else "▶"
-            return is_open, icon
+            new_state = not is_open
+            icon = "▼" if new_state else "▶"
+            return new_state, icon
 
         @self.app.callback(
             Output("network-info-details-panel", "children"),
@@ -2147,15 +2149,13 @@ class DashboardManager:
         error_style = {"fontWeight": "bold", "color": "#dc3545"}
 
         try:
-            # Measure latency
+            # Single request: /api/status provides all needed info and doubles as health check.
+            # Use fast timeout since this fires every tick.
             start_time = time.time()
-            health_response = requests.get(self._api_url("/api/health"), timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            status_response = requests.get(self._api_url("/api/status"), timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS)
             latency_ms = (time.time() - start_time) * 1000
 
-            # Get current status (now includes FSM-based status and phase)
-            status_response = requests.get(self._api_url("/api/status"), timeout=DashboardConstants.API_TIMEOUT_SECONDS)
-
-            if health_response.status_code == 200 and status_response.status_code == 200:
+            if status_response.status_code == 200:
                 return self._build_unified_status_bar_content(status_response, latency_ms)
             else:
                 return (
@@ -2346,14 +2346,6 @@ class DashboardManager:
                     html.P([html.Small(f"Error: {str(e)}")], style={"color": "gray"}),
                 ]
             )
-
-    def _toggle_network_info_handler(self, n=None):
-        """Toggle Network Information section collapse state."""
-        return n % 2 == 1 if n else True
-
-    def _toggle_network_info_details_handler(self, n=None):
-        """Toggle Network Information: Details section collapse state."""
-        return n % 2 == 1 if n else False
 
     def _update_network_info_details_handler(self, n=None):
         """Update detailed network information panel from API."""
@@ -2841,12 +2833,8 @@ class DashboardManager:
                     self.logger.info(f"Parameters applied (attempt {attempt + 1}): {params}")
                     return params, "Parameters applied"
                 elif response.status_code == 429:
-                    last_error = "Rate limited (429)"
-                    self.logger.warning(f"Rate limited on attempt {attempt + 1}, retrying...")
-                    import time as _time
-
-                    _time.sleep(0.5 * (attempt + 1))
-                    continue
+                    self.logger.warning("Rate limited (429) — returning error to client")
+                    return dash.no_update, "Rate limited — please try again in a few seconds"
                 else:
                     self.logger.warning(f"Failed to apply: {response.status_code} {response.text}")
                     return dash.no_update, f"Failed to apply ({response.status_code})"

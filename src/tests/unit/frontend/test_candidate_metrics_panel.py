@@ -166,18 +166,22 @@ class TestStatusStyle:
 
 
 class TestEmptyPlot:
-    """Test _create_empty_plot method."""
+    """Test create_empty_plot shared utility."""
 
     def test_creates_figure(self, panel):
         """Should return a Plotly figure."""
         import plotly.graph_objects as go
 
-        fig = panel._create_empty_plot()
+        from frontend.base_component import create_empty_plot
+
+        fig = create_empty_plot("No candidate data available")
         assert isinstance(fig, go.Figure)
 
     def test_has_annotation(self, panel):
         """Should have 'No candidate data available' annotation."""
-        fig = panel._create_empty_plot()
+        from frontend.base_component import create_empty_plot
+
+        fig = create_empty_plot("No candidate data available")
         assert len(fig.layout.annotations) == 1
         assert "No candidate data" in fig.layout.annotations[0].text
 

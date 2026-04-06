@@ -32,6 +32,8 @@
 # COMPLETED:
 #
 #####################################################################################################################################################################################################
+import warnings
+
 import plotly.graph_objects as go
 from dash import html
 
@@ -40,7 +42,14 @@ from logger.logger import get_ui_logger
 
 
 class TrainingMetricsComponent(BaseComponent):
+    """Legacy component — superseded by MetricsPanel. Will be removed in a future release."""
+
     def __init__(self, config, component_id="training-metrics"):
+        warnings.warn(
+            "TrainingMetricsComponent is deprecated and will be removed in a future release. " "Use MetricsPanel instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         super().__init__(config, component_id)
         self.metrics_buffer = []
         self.logger = get_ui_logger()

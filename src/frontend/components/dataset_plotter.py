@@ -43,7 +43,7 @@ from dash import dcc, html
 from dash.dependencies import Input, Output
 from plotly.subplots import make_subplots
 
-from ..base_component import BaseComponent
+from ..base_component import BaseComponent, create_empty_plot
 
 
 class DatasetPlotter(BaseComponent):
@@ -350,7 +350,7 @@ class DatasetPlotter(BaseComponent):
             Tuple of (scatter_fig, dist_fig, sample_count, feature_count, class_count, balance_info)
         """
         if not dataset:
-            empty_fig = self._create_empty_plot("No dataset loaded", theme)
+            empty_fig = create_empty_plot("No dataset loaded", theme)
             return empty_fig, empty_fig, "0", "0", "0", "N/A"
 
         # Filter data by split
@@ -359,8 +359,8 @@ class DatasetPlotter(BaseComponent):
         # Check for metadata-only dataset (service mode without data arrays)
         inputs = filtered_data.get("inputs", [])
         if not inputs and (dataset.get("num_samples") or dataset.get("num_features")):
-            scatter_fig = self._create_empty_plot("Dataset loaded (metadata only)", theme)
-            dist_fig = self._create_empty_plot("Distribution unavailable", theme)
+            scatter_fig = create_empty_plot("Dataset loaded (metadata only)", theme)
+            dist_fig = create_empty_plot("Distribution unavailable", theme)
             return (
                 scatter_fig,
                 dist_fig,
@@ -433,7 +433,7 @@ class DatasetPlotter(BaseComponent):
         targets = dataset.get("targets", [])
 
         if len(inputs) == 0:
-            return self._create_empty_plot("No data available", theme)
+            return create_empty_plot("No data available", theme)
 
         # Convert to numpy arrays
         X = np.array(inputs)
@@ -509,7 +509,7 @@ class DatasetPlotter(BaseComponent):
         inputs = dataset.get("inputs", [])
 
         if len(inputs) == 0:
-            return self._create_empty_plot("No data for distribution", theme)
+            return create_empty_plot("No data for distribution", theme)
 
         X = np.array(inputs)
         n_features = X.shape[1] if len(X.shape) > 1 else 1
@@ -571,43 +571,6 @@ class DatasetPlotter(BaseComponent):
             return "Balanced"
         else:
             return f"Moderate ({balance_pct:.0f}%)"
-
-    def _create_empty_plot(self, message: str = "No data", theme: str = "light") -> go.Figure:
-        """
-        Create empty placeholder plot.
-
-        Args:
-            message: Message to display
-            theme: Current theme ("light" or "dark")
-
-        Returns:
-            Empty Plotly figure
-        """
-        fig = go.Figure()
-
-        is_dark = theme == "dark"
-        text_color = "#adb5bd" if is_dark else "#6c757d"
-
-        fig.add_annotation(
-            text=message,
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font={"size": 16, "color": text_color},
-        )
-
-        fig.update_layout(
-            xaxis={"showgrid": False, "showticklabels": False, "zeroline": False},
-            yaxis={"showgrid": False, "showticklabels": False, "zeroline": False},
-            template="plotly_dark" if is_dark else "plotly",
-            plot_bgcolor="#242424" if is_dark else "#f8f9fa",
-            paper_bgcolor="#242424" if is_dark else "#ffffff",
-            margin={"l": 20, "r": 20, "t": 20, "b": 20},
-        )
-
-        return fig
 
     def load_dataset(self, dataset: Dict[str, Any]):
         """

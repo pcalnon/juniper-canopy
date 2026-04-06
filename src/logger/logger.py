@@ -130,10 +130,13 @@ class ColoredFormatter(logging.Formatter):
         color = self.COLORS.get(record.levelname, "")
         reset = Style.RESET_ALL
 
-        # Create colored version of the record
+        # Save and restore levelname to avoid corrupting output for other handlers
+        original_levelname = record.levelname
         record.levelname = f"{color}{record.levelname}{reset}"
-
-        return super().format(record)
+        try:
+            return super().format(record)
+        finally:
+            record.levelname = original_levelname
 
 
 class JsonFormatter(logging.Formatter):
@@ -601,23 +604,34 @@ class LoggerFactory:
 # Global logger factory instance
 logger_factory = LoggerFactory(config_path="conf/logging_config.yaml")
 
+# Cached logger wrapper instances — avoids creating new wrappers on every call
+_cached_loggers: Dict[str, CascorLogger] = {}
+
 
 # Convenience functions for getting common loggers
 def get_training_logger() -> TrainingLogger:
-    """Get the training logger instance."""
-    return logger_factory.get_training_logger()
+    """Get the training logger instance (cached)."""
+    if "training" not in _cached_loggers:
+        _cached_loggers["training"] = logger_factory.get_training_logger()
+    return _cached_loggers["training"]
 
 
 def get_ui_logger() -> UILogger:
-    """Get the UI logger instance."""
-    return logger_factory.get_ui_logger()
+    """Get the UI logger instance (cached)."""
+    if "ui" not in _cached_loggers:
+        _cached_loggers["ui"] = logger_factory.get_ui_logger()
+    return _cached_loggers["ui"]
 
 
 def get_system_logger() -> SystemLogger:
-    """Get the system logger instance."""
-    return logger_factory.get_system_logger()
+    """Get the system logger instance (cached)."""
+    if "system" not in _cached_loggers:
+        _cached_loggers["system"] = logger_factory.get_system_logger()
+    return _cached_loggers["system"]
 
 
 def get_logger(name: str, **kwargs) -> CascorLogger:
-    """Get a custom logger instance."""
-    return logger_factory.get_custom_logger(name, **kwargs)
+    """Get a custom logger instance (cached by name)."""
+    if name not in _cached_loggers:
+        _cached_loggers[name] = logger_factory.get_custom_logger(name, **kwargs)
+    return _cached_loggers[name]

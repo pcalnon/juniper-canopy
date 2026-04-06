@@ -125,7 +125,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Startup — observability
     configure_logging(settings.log_level, settings.log_format, "juniper-canopy")
-    configure_sentry(settings.sentry_dsn, "juniper-canopy", APP_VERSION)
+    configure_sentry(settings.sentry_dsn, "juniper-canopy", APP_VERSION, settings.sentry_traces_sample_rate)
     if settings.metrics_enabled:
         set_build_info("juniper_canopy", APP_VERSION)
 
@@ -167,7 +167,7 @@ async def lifespan(app: FastAPI):
 
     # CAN-HIGH-001: Probe upstream services at startup using standardized probe.
     global juniper_data_available
-    data_probe = probe_dependency("JuniperData", f"{juniper_data_url.rstrip('/')}/v1/health/live")
+    data_probe = await probe_dependency("JuniperData", f"{juniper_data_url.rstrip('/')}/v1/health/live")
     if data_probe.status == "healthy":
         juniper_data_available = True
         system_logger.info(f"JuniperData reachable at {juniper_data_url} ({data_probe.latency_ms:.1f}ms)")
@@ -178,7 +178,7 @@ async def lifespan(app: FastAPI):
     backend_initialized = False
     cascor_url = settings.cascor_service_url
     if cascor_url and backend.backend_type == "service":
-        cascor_probe = probe_dependency("JuniperCascor", f"{cascor_url.rstrip('/')}/v1/health/live")
+        cascor_probe = await probe_dependency("JuniperCascor", f"{cascor_url.rstrip('/')}/v1/health/live")
         if cascor_probe.status == "healthy":
             system_logger.info(f"JuniperCascor reachable at {cascor_url} ({cascor_probe.latency_ms:.1f}ms)")
         else:
@@ -526,12 +526,12 @@ async def readiness_probe() -> ReadinessResponse:
     """
     # Probe JuniperData
     data_url = settings.juniper_data_url
-    data_dep = probe_dependency("JuniperData Service", f"{data_url.rstrip('/')}/v1/health/live")
+    data_dep = await probe_dependency("JuniperData Service", f"{data_url.rstrip('/')}/v1/health/live")
 
     # Probe JuniperCascor
     ready_cascor_url = settings.cascor_service_url
     if ready_cascor_url:
-        cascor_dep = probe_dependency("JuniperCascor Service", f"{ready_cascor_url.rstrip('/')}/v1/health/live")
+        cascor_dep = await probe_dependency("JuniperCascor Service", f"{ready_cascor_url.rstrip('/')}/v1/health/live")
     else:
         cascor_dep = DependencyStatus(
             name="JuniperCascor Service",

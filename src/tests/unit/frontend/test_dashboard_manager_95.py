@@ -351,22 +351,6 @@ class TestCallbackHandlerReturns:
             result = dashboard_manager._update_network_info_handler(n=1)
             assert isinstance(result, html.Div)
 
-    def test_toggle_network_info_handler_returns_bool(self, dashboard_manager):
-        """Test toggle network info handler returns bool."""
-        result = dashboard_manager._toggle_network_info_handler(n=3)
-        assert result is True
-
-        result = dashboard_manager._toggle_network_info_handler(n=4)
-        assert result is False
-
-    def test_toggle_network_info_details_handler_returns_bool(self, dashboard_manager):
-        """Test toggle network info details handler returns bool."""
-        result = dashboard_manager._toggle_network_info_details_handler(n=5)
-        assert result is True
-
-        result = dashboard_manager._toggle_network_info_details_handler(n=6)
-        assert result is False
-
     def test_update_network_info_details_handler_returns_value(self, dashboard_manager, mocker):
         """Test network info details handler returns value."""
         mock_response = MagicMock()

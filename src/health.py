@@ -4,6 +4,7 @@ Provides standardized health response models shared across all Juniper
 services, and a dependency probe utility for readiness checks.
 """
 
+import asyncio
 import time
 import urllib.request
 from datetime import datetime
@@ -40,17 +41,8 @@ class ReadinessResponse(BaseModel):
     details: dict[str, object] = {}
 
 
-def probe_dependency(name: str, url: str, timeout: float = 5.0) -> DependencyStatus:
-    """Probe a dependency health endpoint. Returns status with latency.
-
-    Args:
-        name: Human-readable name of the dependency.
-        url: Health endpoint URL to probe.
-        timeout: Connection timeout in seconds.
-
-    Returns:
-        DependencyStatus with probe results.
-    """
+def _probe_dependency_sync(name: str, url: str, timeout: float) -> DependencyStatus:
+    """Synchronous probe implementation (runs in a thread via async wrapper)."""
     start = time.monotonic()
     try:
         urllib.request.urlopen(url, timeout=timeout)  # nosec B310 — internal health probe
@@ -64,3 +56,17 @@ def probe_dependency(name: str, url: str, timeout: float = 5.0) -> DependencySta
             latency_ms=round(latency, 1),
             message=f"{url} — {type(e).__name__}: {e}",
         )
+
+
+async def probe_dependency(name: str, url: str, timeout: float = 5.0) -> DependencyStatus:
+    """Probe a dependency health endpoint without blocking the event loop.
+
+    Args:
+        name: Human-readable name of the dependency.
+        url: Health endpoint URL to probe.
+        timeout: Connection timeout in seconds.
+
+    Returns:
+        DependencyStatus with probe results.
+    """
+    return await asyncio.to_thread(_probe_dependency_sync, name, url, timeout)

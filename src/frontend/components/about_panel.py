@@ -196,7 +196,7 @@ class AboutPanel(BaseComponent):
                                         html.Li(
                                             html.A(
                                                 "📖 User Manual",
-                                                href="/docs/USER_MANUAL.md",
+                                                href="https://github.com/pcalnon/juniper-canopy/blob/main/docs/USER_MANUAL.md",
                                                 target="_blank",
                                                 style={"textDecoration": "none"},
                                             )
@@ -204,7 +204,7 @@ class AboutPanel(BaseComponent):
                                         html.Li(
                                             html.A(
                                                 "🚀 Quick Start Guide",
-                                                href="/docs/QUICK_START.md",
+                                                href="https://github.com/pcalnon/juniper-canopy/blob/main/docs/QUICK_START.md",
                                                 target="_blank",
                                                 style={"textDecoration": "none"},
                                             )
@@ -212,7 +212,7 @@ class AboutPanel(BaseComponent):
                                         html.Li(
                                             html.A(
                                                 "📚 API Documentation",
-                                                href="/docs/api/",
+                                                href="https://github.com/pcalnon/juniper-canopy/blob/main/docs/API.md",
                                                 target="_blank",
                                                 style={"textDecoration": "none"},
                                             )
@@ -220,7 +220,7 @@ class AboutPanel(BaseComponent):
                                         html.Li(
                                             html.A(
                                                 "⚙️ Environment Setup",
-                                                href="/docs/ENVIRONMENT_SETUP.md",
+                                                href="https://github.com/pcalnon/juniper-canopy/blob/main/docs/ENVIRONMENT_SETUP.md",
                                                 target="_blank",
                                                 style={"textDecoration": "none"},
                                             )

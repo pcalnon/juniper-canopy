@@ -155,6 +155,7 @@ class DashboardConstants:
 
     # API timeouts (seconds)
     API_TIMEOUT_SECONDS: Final[int] = 2
+    FAST_API_TIMEOUT_SECONDS: Final[float] = 1.0  # For fast-interval polling callbacks
 
     # Data limits
     MAX_METRICS_HISTORY: Final[int] = 100

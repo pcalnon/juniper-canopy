@@ -11,6 +11,7 @@ os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+from frontend.base_component import create_empty_plot  # noqa: E402
 from main import app  # noqa: E402
 
 
@@ -132,22 +133,19 @@ class TestDarkMode:
         from src.frontend.components.network_visualizer import NetworkVisualizer
 
         # Create component instances
-        metrics = MetricsPanel({}, "test-metrics")
         network = NetworkVisualizer({}, "test-network")
-        dataset = DatasetPlotter({}, "test-dataset")
-        boundary = DecisionBoundary({}, "test-boundary")
 
         # Test that figure methods accept theme parameter
-        empty_fig = metrics._create_empty_plot("dark")
+        empty_fig = create_empty_plot(theme="dark")
         assert empty_fig is not None
 
         empty_fig = network._create_empty_graph("dark")
         assert empty_fig is not None
 
-        empty_fig = dataset._create_empty_plot("dark")
+        empty_fig = create_empty_plot(theme="dark")
         assert empty_fig is not None
 
-        empty_fig = boundary._create_empty_plot("dark")
+        empty_fig = create_empty_plot(theme="dark")
         assert empty_fig is not None
 
     def test_dark_mode_theme_colors_applied(self, client):
