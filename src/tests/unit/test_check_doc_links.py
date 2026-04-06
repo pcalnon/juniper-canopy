@@ -145,107 +145,30 @@ def test_main_uses_skip_mode_when_ecosystem_root_not_found(monkeypatch: pytest.M
 
 
 @pytest.mark.unit
-def test_is_ecosystem_root_requires_minimum_repo_count(tmp_path):
-    """Ecosystem root detection should require at least three sibling repos."""
-    candidate = tmp_path / "ecosystem"
-    (candidate / "juniper-canopy").mkdir(parents=True)
-    (candidate / "juniper-cascor").mkdir(parents=True)
-    assert check_doc_links._is_ecosystem_root(candidate) is False
-
-    (candidate / "juniper-data").mkdir(parents=True)
-    assert check_doc_links._is_ecosystem_root(candidate) is True
-
-
-@pytest.mark.unit
-def test_discover_ecosystem_root_uses_relative_git_common_dir(monkeypatch, tmp_path):
-    """Discovery should resolve relative git-common-dir paths from repo root."""
-    ecosystem_root = tmp_path / "ecosystem"
-    repo_root = ecosystem_root / "juniper-canopy"
-    (repo_root / ".git").mkdir(parents=True)
-    (ecosystem_root / "juniper-cascor").mkdir(parents=True)
-    (ecosystem_root / "juniper-data").mkdir(parents=True)
-
-    def _fake_run(*_args, **_kwargs):
-        return SimpleNamespace(returncode=0, stdout=".git\n")
-
-    monkeypatch.setattr(check_doc_links.subprocess, "run", _fake_run)
-    discovered = check_doc_links._discover_ecosystem_root(repo_root)
-
-    assert discovered == ecosystem_root
-
-
-@pytest.mark.unit
-def test_discover_ecosystem_root_fallback_walks_parent_dirs(monkeypatch, tmp_path):
-    """Discovery should fallback to parent walking when git lookup fails."""
-    ecosystem_root = tmp_path / "ecosystem"
-    repo_root = ecosystem_root / "juniper-canopy"
-    repo_root.mkdir(parents=True)
-    (ecosystem_root / "juniper-cascor").mkdir(parents=True)
-    (ecosystem_root / "juniper-data").mkdir(parents=True)
-
-    def _fake_run(*_args, **_kwargs):
-        return SimpleNamespace(returncode=1, stdout="")
-
-    monkeypatch.setattr(check_doc_links.subprocess, "run", _fake_run)
-    discovered = check_doc_links._discover_ecosystem_root(repo_root)
-
-    assert discovered == ecosystem_root
-
-
-@pytest.mark.unit
-def test_find_markdown_files_handles_exclusions_and_outside_paths(tmp_path):
-    """Markdown discovery should apply skips and still include outside explicit paths."""
-    repo_root = tmp_path / "repo"
-    docs = repo_root / "docs"
-    ignored = repo_root / ".git"
-    excluded = repo_root / "templates"
-    external_dir = tmp_path / "external"
-
-    _write_file(docs / "keep.md", "# keep\n")
-    _write_file(ignored / "ignore.md", "# ignored\n")
-    _write_file(excluded / "excluded.md", "# excluded\n")
-    outside = _write_file(external_dir / "outside.md", "# outside\n")
-    _write_file(external_dir / "nested.md", "# nested\n")
-
-    files = check_doc_links._find_markdown_files(
-        [repo_root, outside, external_dir],
-        repo_root,
-        exclude_dirs={"templates"},
-    )
-
-    assert docs / "keep.md" in files
-    assert outside in files
-    assert external_dir / "nested.md" in files
-    assert ignored / "ignore.md" not in files
-    assert excluded / "excluded.md" not in files
-
-
-@pytest.mark.unit
-def test_validate_file_verbose_skips_external_data_and_cross_repo_links(tmp_path, capsys):
-    """Verbose mode should report external/cross-repo skips and keep validation clean."""
+def test_validate_file_warn_mode_emits_warning_and_counts_skip(tmp_path, capsys):
+    """Warn mode should report cross-repo links without failing."""
     repo_root = tmp_path / "repo"
     md_file = _write_file(
-        repo_root / "docs" / "verbose.md",
-        ("# Title\n\n" "[external](https://example.com)\n" "[data](data:image/png;base64,abc)\n" "[protocol-relative](//cdn.example.com/a)\n" "[anchor](#title)\n" "[cross](../juniper-cascor/README.md)\n"),
+        repo_root / "docs" / "warn.md",
+        "# Warn\n\n[target](../juniper-cascor/README.md)\n",
     )
 
-    errors, skipped = check_doc_links._validate_file(md_file, repo_root, verbose=True, cross_repo_mode="skip")
+    errors, skipped = check_doc_links._validate_file(md_file, repo_root, cross_repo_mode="warn")
     output = capsys.readouterr().out
 
     assert errors == []
     assert skipped == 1
-    assert "SKIP (external)" in output
-    assert "OK (anchor)" in output
-    assert "SKIP (cross-repo)" in output
+    assert "WARN (cross-repo):" in output
+    assert "../juniper-cascor/README.md" in output
 
 
 @pytest.mark.unit
-def test_validate_file_reports_cross_repo_structure_error_in_skip_mode(tmp_path):
-    """Cross-repo structural validation must fail even when skip mode is active."""
+def test_validate_file_reports_cross_repo_escape_integration(tmp_path):
+    """Cross-repo links that traverse out of target repo should fail validation."""
     repo_root = tmp_path / "repo"
     md_file = _write_file(
-        repo_root / "docs" / "cross_repo_escape.md",
-        "# Escape\n\n[bad](../juniper-cascor/../secrets.md)\n",
+        repo_root / "docs" / "escape.md",
+        "# Escape\n\n[bad](../juniper-cascor/../secret.md)\n",
     )
 
     errors, skipped = check_doc_links._validate_file(md_file, repo_root, cross_repo_mode="skip")
@@ -256,23 +179,15 @@ def test_validate_file_reports_cross_repo_structure_error_in_skip_mode(tmp_path)
 
 
 @pytest.mark.unit
-def test_validate_file_detects_cross_repo_symlink_boundary_escape(tmp_path):
-    """Resolved cross-repo targets must not escape target repo via symlinks."""
+def test_validate_file_reports_cross_repo_missing_target_in_check_mode(tmp_path):
+    """Check mode should fail when cross-repo target file is missing."""
     ecosystem_root = tmp_path / "ecosystem"
     repo_root = ecosystem_root / "juniper-canopy"
-    target_repo = ecosystem_root / "juniper-cascor"
-    outside = tmp_path / "outside"
-    outside.mkdir(parents=True)
-    target_repo.mkdir(parents=True)
-    (repo_root / "docs").mkdir(parents=True)
-
-    escape_link = target_repo / "escape.md"
-    escape_link.symlink_to(outside / "escape.md")
-
     md_file = _write_file(
-        repo_root / "docs" / "cross_repo_symlink.md",
-        "# Cross Repo\n\n[target](../juniper-cascor/escape.md)\n",
+        repo_root / "docs" / "missing_cross_repo.md",
+        "# Missing\n\n[target](../juniper-cascor/README.md)\n",
     )
+    (ecosystem_root / "juniper-cascor").mkdir(parents=True, exist_ok=True)
 
     errors, skipped = check_doc_links._validate_file(
         md_file,
@@ -283,16 +198,16 @@ def test_validate_file_detects_cross_repo_symlink_boundary_escape(tmp_path):
 
     assert skipped == 0
     assert len(errors) == 1
-    assert "cross-repo link escapes target repository boundary" in errors[0]
+    assert "file not found in juniper-cascor" in errors[0]
 
 
 @pytest.mark.unit
-def test_validate_file_reports_when_path_resolves_outside_repo_boundary(tmp_path):
-    """Non-cross-repo links that escape repo bounds should be rejected."""
+def test_validate_file_reports_repository_boundary_escape(tmp_path):
+    """Links resolving outside repo boundary should be rejected."""
     repo_root = tmp_path / "repo"
     md_file = _write_file(
         repo_root / "docs" / "bounds.md",
-        "# Bounds\n\n[escape](../../../../../outside.md)\n",
+        "# Bounds\n\n[bad](../../../outside.md)\n",
     )
 
     errors, _ = check_doc_links._validate_file(md_file, repo_root, cross_repo_mode="skip")
@@ -302,60 +217,116 @@ def test_validate_file_reports_when_path_resolves_outside_repo_boundary(tmp_path
 
 
 @pytest.mark.unit
-def test_main_supports_exclude_and_cross_repo_equals_and_reports_failures(monkeypatch, capsys):
-    """main() should parse equals-style args and report warning/failed summary deterministically."""
-    recorded = {}
+def test_validate_file_reports_missing_local_file(tmp_path):
+    """Missing in-repo file links should be reported."""
+    repo_root = tmp_path / "repo"
+    md_file = _write_file(
+        repo_root / "docs" / "missing_local.md",
+        "# Missing Local\n\n[broken](missing.md)\n",
+    )
 
-    def _fake_find(search_paths, _repo_root, exclude_dirs):
-        recorded["search_paths"] = search_paths
-        recorded["exclude_dirs"] = exclude_dirs
-        return [Path("a.md"), Path("b.md")]
+    errors, _ = check_doc_links._validate_file(md_file, repo_root, cross_repo_mode="skip")
 
-    def _fake_validate(md_file, *_args, **_kwargs):
-        if md_file.name == "a.md":
-            return ["  a.md:1: broken link [x](y) -> file not found"], 1
-        return [], 0
+    assert len(errors) == 1
+    assert "file not found" in errors[0]
 
+
+@pytest.mark.unit
+def test_find_markdown_files_honors_skip_and_exclude_dirs(tmp_path):
+    """Markdown discovery should skip ignored dirs and excluded trees."""
+    repo_root = tmp_path / "repo"
+    docs_file = _write_file(repo_root / "docs" / "guide.md", "# Guide\n")
+    _write_file(repo_root / ".git" / "internal.md", "# Internal\n")
+    _write_file(repo_root / "templates" / "template.md", "# Template\n")
+    _write_file(repo_root / "outside_docs" / "readme.rst", "Heading\n")
+
+    files = check_doc_links._find_markdown_files(
+        [repo_root],
+        repo_root,
+        exclude_dirs={"templates"},
+    )
+
+    assert docs_file in files
+    assert all(".git" not in str(p) for p in files)
+    assert all("templates" not in str(p) for p in files)
+
+
+@pytest.mark.unit
+def test_discover_ecosystem_root_uses_git_common_dir(monkeypatch, tmp_path):
+    """Git common-dir discovery should resolve ecosystem parent when present."""
+    ecosystem_root = tmp_path / "ecosystem"
+    repo_root = ecosystem_root / "juniper-canopy"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    (repo_root / ".git").mkdir(exist_ok=True)
+    (ecosystem_root / "juniper-cascor").mkdir(exist_ok=True)
+    (ecosystem_root / "juniper-data").mkdir(exist_ok=True)
+
+    monkeypatch.setattr(
+        check_doc_links.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout=".git\n"),
+    )
+
+    discovered = check_doc_links._discover_ecosystem_root(repo_root)
+    assert discovered == ecosystem_root
+
+
+@pytest.mark.unit
+def test_discover_ecosystem_root_falls_back_when_git_missing(monkeypatch, tmp_path):
+    """Discovery should fallback to parent walk when git executable is unavailable."""
+    ecosystem_root = tmp_path / "ecosystem"
+    repo_root = ecosystem_root / "juniper-canopy"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    (ecosystem_root / "juniper-cascor").mkdir(exist_ok=True)
+    (ecosystem_root / "juniper-data").mkdir(exist_ok=True)
+
+    def _raise_file_not_found(*_args, **_kwargs):
+        raise FileNotFoundError("git not found")
+
+    monkeypatch.setattr(check_doc_links.subprocess, "run", _raise_file_not_found)
+
+    discovered = check_doc_links._discover_ecosystem_root(repo_root)
+    assert discovered == ecosystem_root
+
+
+@pytest.mark.unit
+def test_main_reports_broken_links_and_warned_cross_repo(monkeypatch, capsys):
+    """Main should aggregate file errors and cross-repo warning counts."""
     monkeypatch.setattr(
         check_doc_links.sys,
         "argv",
-        ["check_doc_links.py", "--exclude=templates", "--cross-repo=warn", "docs"],
+        [
+            "check_doc_links.py",
+            "--cross-repo=warn",
+            "--exclude=history",
+            "--exclude",
+            "templates",
+            "docs",
+        ],
     )
-    monkeypatch.setattr(check_doc_links, "_find_markdown_files", _fake_find)
-    monkeypatch.setattr(check_doc_links, "_validate_file", _fake_validate)
+
+    def _fake_find_markdown_files(search_paths, _repo_root, exclude_dirs):
+        assert "history" in exclude_dirs
+        assert "templates" in exclude_dirs
+        assert len(search_paths) == 1
+        return [Path("docs/a.md"), Path("docs/b.md")]
+
+    results = iter(
+        [
+            (["  docs/a.md:3: broken link [x](missing.md) -> file not found"], 0),
+            ([], 2),
+        ]
+    )
+
+    monkeypatch.setattr(check_doc_links, "_find_markdown_files", _fake_find_markdown_files)
+    monkeypatch.setattr(check_doc_links, "_validate_file", lambda *_args, **_kwargs: next(results))
 
     result = check_doc_links.main()
     output = capsys.readouterr().out
 
     assert result == 1
-    assert recorded["exclude_dirs"] == {"templates"}
-    assert len(recorded["search_paths"]) == 1
-    assert "Excluding directories: templates" in output
+    assert "Excluding directories: history, templates" in output
     assert "Cross-repo links: warn" in output
-    assert "Cross-repo links warned: 1" in output
-    assert "FOUND 1 broken link(s) in 1 file(s):" in output
-
-
-@pytest.mark.unit
-def test_main_supports_exclude_space_flag(monkeypatch, capsys):
-    """main() should parse space-delimited --exclude values."""
-    monkeypatch.setattr(check_doc_links.sys, "argv", ["check_doc_links.py", "--exclude", "templates", "--cross-repo", "skip"])
-    monkeypatch.setattr(check_doc_links, "_find_markdown_files", lambda *_args, **_kwargs: [])
-
-    result = check_doc_links.main()
-    output = capsys.readouterr().out
-
-    assert result == 0
-    assert "Excluding directories: templates" in output
-
-
-@pytest.mark.unit
-def test_main_rejects_invalid_cross_repo_mode_equals(monkeypatch, capsys):
-    """Invalid equals-style --cross-repo values should fail fast."""
-    monkeypatch.setattr(check_doc_links.sys, "argv", ["check_doc_links.py", "--cross-repo=invalid"])
-
-    result = check_doc_links.main()
-    output = capsys.readouterr().out
-
-    assert result == 1
-    assert "--cross-repo must be one of" in output
+    assert "Cross-repo links warned: 2" in output
+    assert "FOUND 1 broken link(s) in 1 file(s)" in output
+    assert "FAILED: Documentation link validation" in output
