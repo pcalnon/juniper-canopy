@@ -189,7 +189,7 @@ jobs:
           retention-days: 30
 
       - name: Upload Coverage to Codecov
-        uses: codecov/codecov-action@ad3126e916f78f00edff4ed0317a4104a2a5796b  # v5.4.2
+        uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe  # v5.5.4
         if: always()
         with:
           files: reports/coverage.xml
