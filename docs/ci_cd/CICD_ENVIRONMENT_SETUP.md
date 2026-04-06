@@ -56,7 +56,24 @@ Why this matters:
 - `pip install -e .` ensures imports resolve the current source tree.
 - `conf/requirements_ci.txt` is the CI baseline, not `requirements.txt`.
 
-### Scheduled security scan (`security-scan.yml`)
+- CI installs CPU-only torch explicitly.
+- `conf/requirements_ci.txt` now includes `prometheus-client` and `sentry-sdk` used by observability paths.
+- Editable install (`-e .`) ensures imports resolve from the source tree.
+
+## CI Environment Variables
+
+Top-level env values in `ci.yml`:
+
+```bash
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o /tmp/requirements.lock.check
+tail -n +3 requirements.lock > /tmp/lock_body
+tail -n +3 /tmp/requirements.lock.check > /tmp/check_body
+diff -u /tmp/lock_body /tmp/check_body
+```
 
 Security workflow installs scanning tools and project dependencies with:
 

@@ -28,6 +28,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `README.md`
   - `docs/ci_cd/CICD_MANUAL.md`
   - `docs/ci_cd/CICD_REFERENCE.md`
+  - `docs/DEVELOPER_CHEATSHEET.md`
+  - Added `scripts/check_doc_links.py` usage, `--cross-repo` modes (`skip`/`warn`/`check`), safety constraints (absolute/null-byte/traversal/repo-boundary checks), and local troubleshooting commands for the `Documentation Links` CI job.
+
+- Extracted candidate pool section, history tracking, and pool display from `MetricsPanel` to `CandidateMetricsPanel`. Training Metrics tab retains candidate training trace in loss plot and candidate epoch progress bar for context
+- Component count increased from 11 to 12; updated test assertions accordingly
+- Expanded CI/CD documentation for documentation-link validation workflow and constraints:
+  - Updated `docs/ci_cd/CICD_REFERENCE.md` with `scripts/check_doc_links.py` contract details (cross-repo mode semantics, parser behavior, and path-safety constraints)
+  - Updated `docs/ci_cd/CICD_MANUAL.md` and `docs/ci_cd/CICD_QUICK_START.md` with practical docs-gate troubleshooting (`skip`, `warn`, `check` usage)
+  - Updated `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md` with full local validation mode guidance for ecosystem checkouts
+  - Changes are aligned with regression-tested behavior in `src/tests/unit/test_doc_link_checker.py`
+- Refreshed CI/CD documentation to match current workflow behavior and quality gates:
+  - Updated `docs/ci_cd/CICD_QUICK_START.md` with current local parity commands (`requirements_ci.txt`, lockfile check, docs-link check)
+  - Updated `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md` for pip-first CI setup, Python 3.12-3.14 matrix, and lockfile/docs gates
+  - Updated `docs/ci_cd/CICD_REFERENCE.md` to document active workflows (`ci.yml`, `security-scan.yml`, `publish.yml`, `lockfile-update.yml`)
+  - Updated `docs/ci_cd/CICD_MANUAL.md` with role-based runbooks aligned to `required-checks` gating semantics
+
+- Updated CI/testing documentation to reflect current CI workflow behavior and recent collection-failure remediations:
+  - `docs/ci_cd/CICD_MANUAL.md`
+  - `docs/ci_cd/CICD_REFERENCE.md`
   - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
   - `docs/ci_cd/CICD_QUICK_START.md`
   - `docs/testing/TESTING_MANUAL.md`
@@ -36,11 +55,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - New `Documentation Links` quality gate (`scripts/check_doc_links.py`, `--cross-repo skip`)
     - Lockfile freshness behavior (`uv pip compile` with `--extra observability`, header-agnostic comparison)
     - Optional test-extras guidance (`juniper-data-client[testing]`, `juniper-cascor-client[testing]`) and `pytest.importorskip`/`skipif` patterns to prevent collection failures
-- Corrected CI/CD docs to remove stale Conda/Codecov-era instructions and align with current workflow gates and job graph:
-  - replaced outdated workflow snippets with source-verified jobs from `.github/workflows/ci.yml`
-  - documented actual matrix and pinning strategy (matrix `3.12/3.13/3.14`, single-version `3.14` jobs)
-  - documented current dependency install path (`conf/requirements_ci.txt`, CPU torch index, editable install)
-  - aligned scheduled security scan documentation with `security-scan.yml` commands
+- Follow-up CI/testing doc drift fixes aligned with active workflow commands:
+  - Updated lockfile freshness parity commands in:
+    - `docs/ci_cd/CICD_MANUAL.md`
+    - `docs/ci_cd/CICD_QUICK_START.md`
+    - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
+    - These now mirror `ci.yml` header-agnostic lock comparison (`tail -n +3` + body diff), instead of full-file `diff` commands.
+  - Updated `docs/ci_cd/CICD_REFERENCE.md` Dependabot compile example to include `--extra observability`, matching `.github/workflows/lockfile-update.yml`.
+  - Replaced stale CI YAML snippet in `docs/testing/TESTING_MANUAL.md` with current testing-relevant workflow behavior/commands (Python `3.12/3.13/3.14` matrix, `requirements_ci.txt`, fast unit/regression and integration selectors), and corrected conda environment name to `JuniperCanopy`.
 
 - Namespaced Prometheus metrics (`juniper_canopy_` prefix) with WebSocket and demo mode metrics
 - `juniper_canopy_websocket_connections_active` Gauge (by channel)
