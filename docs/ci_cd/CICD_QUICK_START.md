@@ -40,11 +40,19 @@ python -m pytest \
   --cov=. \
   --cov-report=term-missing
 
-# Integration gate (fast-only subset)
-python -m pytest \
-  -m "integration and not requires_cascor and not requires_server and not slow" \
-  tests/integration \
-  --verbose
+---
+
+## 3. Trigger CI
+
+```bash
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o /tmp/requirements.lock.check
+tail -n +3 requirements.lock > /tmp/lock_body
+tail -n +3 /tmp/requirements.lock.check > /tmp/check_body
+diff -u /tmp/lock_body /tmp/check_body
 ```
 
 ## 3. Validate Documentation Links

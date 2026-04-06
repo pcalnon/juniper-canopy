@@ -41,7 +41,7 @@
 
 application:
   name: Juniper Canopy
-  version: 0.1.0
+  version: 0.4.0
   description: Real-time monitoring frontend for CasCor neural networks
 
   # Server configuration
@@ -357,9 +357,9 @@ security:
   # CORS settings
   cors:
     enabled: true
-    allowed_origins: >
-      - http://localhost:*
-      - http://127.0.0.1:*
+    allowed_origins:
+      - "http://localhost:*"
+      - "http://127.0.0.1:*"
     allowed_methods: [GET, POST, PUT, DELETE]
     allowed_headers: [Content-Type, Authorization]
 

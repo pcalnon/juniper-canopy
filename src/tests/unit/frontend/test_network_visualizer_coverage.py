@@ -714,21 +714,16 @@ class TestImageDownloadFilename:
         assert graph is not None, "Graph component not found in layout"
         assert "toImageButtonOptions" in graph.config
 
-    def test_image_filename_has_timestamp_format(self, visualizer):
-        """Image filename should contain timestamp in expected format."""
+    def test_image_filename_not_hardcoded(self, visualizer):
+        """Image config should not have a static filename (uses Plotly default)."""
         layout = visualizer.get_layout()
         graph = next(
             (child for child in layout.children if hasattr(child, "id") and "graph" in str(child.id)),
             None,
         )
 
-        filename = graph.config["toImageButtonOptions"]["filename"]
-        assert filename.startswith("juniper_topology_")
-        # Filename format: juniper_topology_YYYYMMDD_HHMMSS
-        # Extract the timestamp part and validate format
-        timestamp_part = filename.replace("juniper_topology_", "")
-        assert len(timestamp_part) == 15  # YYYYMMDD_HHMMSS
-        assert timestamp_part[8] == "_"  # Separator between date and time
+        # filename key should not be present (removed to avoid frozen timestamps)
+        assert "filename" not in graph.config["toImageButtonOptions"]
 
     def test_image_format_is_png(self, visualizer):
         """Image format should be PNG."""
