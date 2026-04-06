@@ -786,7 +786,7 @@ PRs are merge-safe when `Quality Gate` succeeds.
   - `dependency-docs` (skipped acceptable, failure not)
   - `docker-build` (skipped acceptable, failure not)
 
-#### Flaky Test Management
+### Flaky Test Management
 
 **Identify flaky tests:**
 
