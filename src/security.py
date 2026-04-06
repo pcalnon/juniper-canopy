@@ -8,7 +8,8 @@ Configuration is read from environment variables:
 """
 
 import hmac
-import os
+
+# import os
 import time
 from collections import defaultdict
 from threading import Lock
@@ -247,11 +248,12 @@ def get_rate_limiter() -> RateLimiter:
     """Get the global rate limiter, creating if needed."""
     global _rate_limiter
     if _rate_limiter is None:
-        enabled = os.environ.get("CANOPY_RATE_LIMIT_ENABLED", "").lower() in ("1", "true", "yes")
-        requests_per_minute = int(os.environ.get("CANOPY_RATE_LIMIT_REQUESTS_PER_MINUTE", "60"))
+        from settings import get_settings
+
+        _settings = get_settings()
         _rate_limiter = RateLimiter(
-            requests_per_minute=requests_per_minute,
-            enabled=enabled,
+            requests_per_minute=_settings.rate_limit_requests_per_minute,
+            enabled=_settings.rate_limit_enabled,
         )
     return _rate_limiter
 

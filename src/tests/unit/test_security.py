@@ -201,9 +201,13 @@ class TestSecurityModuleFunctions:
         assert auth.enabled is True
         assert auth.validate("test-key") is True
 
-    def test_get_rate_limiter_reads_env(self, monkeypatch):
-        monkeypatch.setenv("CANOPY_RATE_LIMIT_ENABLED", "true")
-        monkeypatch.setenv("CANOPY_RATE_LIMIT_REQUESTS_PER_MINUTE", "100")
-        limiter = get_rate_limiter()
+    def test_get_rate_limiter_reads_settings(self):
+        from unittest.mock import MagicMock, patch
+
+        mock_settings = MagicMock()
+        mock_settings.rate_limit_enabled = True
+        mock_settings.rate_limit_requests_per_minute = 100
+        with patch("settings.get_settings", return_value=mock_settings):
+            limiter = get_rate_limiter()
         assert limiter.enabled is True
         assert limiter.limit == 100

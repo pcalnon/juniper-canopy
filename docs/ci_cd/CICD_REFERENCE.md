@@ -377,6 +377,117 @@ uv pip compile pyproject.toml \
   --extra juniper-cascor \
   --extra observability \
   -o requirements.lock
+```
+
+### Codecov API
+
+#### Upload Coverage
+
+```bash
+curl -X POST \
+  --data-binary @coverage.xml \
+  -H "Authorization: token $CODECOV_TOKEN" \
+  https://codecov.io/upload/v4
+```
+
+#### Get Coverage Report
+
+```bash
+curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
+```
+
+---
+
+## Troubleshooting Reference
+
+### Common Error Codes
+
+| Error | Cause                    | Solution                            |
+|-------|--------------------------|-------------------------------------|
+| E001  | Workflow syntax error    | Validate YAML syntax                |
+| E002  | Missing required field   | Add required field to workflow      |
+| E003  | Invalid expression       | Fix workflow expression syntax      |
+| E101  | Job timeout              | Increase timeout or optimize job    |
+| E102  | Job cancelled            | Check concurrency settings          |
+| E201  | Step failed              | Check step logs for details         |
+| E202  | Command not found        | Install required tool               |
+| E203  | Permission denied        | Check file permissions              |
+| E301  | Artifact upload failed   | Check size and path                 |
+| E302  | Artifact download failed | Verify artifact exists              |
+| D401  | Broken markdown link     | Update link target path             |
+| D402  | Broken heading anchor    | Update anchor or heading            |
+| D403  | Unsafe link path         | Remove absolute/null/deep traversal |
+
+### Exit Codes
+
+| Code | Meaning                 |
+| ---- | ----------------------- |
+| 0    | Success                 |
+| 1    | General error           |
+| 2    | Misuse of shell command |
+| 126  | Command cannot execute  |
+| 127  | Command not found       |
+| 128  | Invalid exit argument   |
+| 130  | Terminated by Ctrl+C    |
+| 137  | Killed (out of memory)  |
+| 139  | Segmentation fault      |
+
+### Log Analysis
+
+**Search patterns:**
+
+```bash
+# Errors
+grep -i "error" workflow.log
+
+# Warnings
+grep -i "warning" workflow.log
+
+# Failed tests
+grep "FAILED" workflow.log
+
+# Coverage issues
+grep "coverage" workflow.log | grep -i "low\|fail"
+```
+
+### Documentation Link Validation Failures
+
+**Symptom:**
+
+```bash
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o /tmp/requirements.lock.check
+mv /tmp/requirements.lock.check requirements.lock
+```
+
+**Local reproduction (CI-equivalent):**
+
+```bash
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
+```
+
+**Common causes:**
+
+- Moved/renamed markdown files without updating references
+- Heading text changed but same-file anchor remained unchanged
+- Absolute paths in markdown links
+- Directory traversal links that resolve outside repository boundaries
+
+**Fix approach:**
+
+1. Update links to repository-relative paths.
+2. Regenerate heading anchors from the current markdown heading text.
+3. Re-run the command above before pushing.
+
+---
 
 | Stage            | Duration | CPU     | Memory |
 | ---------------- | -------- | ------- | ------ |

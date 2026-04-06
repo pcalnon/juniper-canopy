@@ -166,56 +166,31 @@ class TestApiUrl:
             assert "api/metrics" in url
 
     def test_api_url_https_scheme(self, reset_singletons):
-        """Test _api_url preserves HTTPS scheme."""
+        """Test _api_url uses settings-based URL (always http to local server)."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
-
-        builder = EnvironBuilder(
-            method="GET",
-            base_url="https://secure.example.com:443/dashboard/",
-            path="/dashboard/",
-        )
-        env = builder.get_environ()
-
-        with manager.app.server.request_context(env):
-            url = manager._api_url("/api/status")
-            assert url.startswith("https://")
+        url = manager._api_url("/api/status")
+        assert url.startswith("http://127.0.0.1:")
+        assert "/api/status" in url
 
     def test_api_url_http_scheme(self, reset_singletons):
-        """Test _api_url uses HTTP scheme correctly."""
+        """Test _api_url constructs correct URL from settings."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
-
-        builder = EnvironBuilder(
-            method="GET",
-            base_url="http://localhost:8050/dashboard/",
-            path="/dashboard/",
-        )
-        env = builder.get_environ()
-
-        with manager.app.server.request_context(env):
-            url = manager._api_url("/api/train/start")
-            assert url.startswith("http://")
-            assert "localhost" in url
+        url = manager._api_url("/api/train/start")
+        assert url.startswith("http://")
+        assert "/api/train/start" in url
 
     def test_api_url_preserves_host(self, reset_singletons):
-        """Test _api_url preserves the request host."""
+        """Test _api_url uses configured server port."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
-
-        builder = EnvironBuilder(
-            method="GET",
-            base_url="http://myhost.local:9000/dashboard/",
-            path="/dashboard/",
-        )
-        env = builder.get_environ()
-
-        with manager.app.server.request_context(env):
-            url = manager._api_url("/api/topology")
-            assert "myhost.local:9000" in url
+        url = manager._api_url("/api/topology")
+        assert "127.0.0.1" in url
+        assert "/api/topology" in url
 
     def test_api_url_different_paths(self, reset_singletons):
         """Test _api_url with various API paths."""
