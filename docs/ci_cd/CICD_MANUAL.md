@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-04-05  
-**Version:** 0.26.0  
+**Last Updated:** 2026-04-05
+**Version:** 0.26.0
 **Status:** Current
 
 ## Table of Contents
@@ -10,12 +10,11 @@
 2. [For Developers](#for-developers)
 3. [For Code Reviewers](#for-code-reviewers)
 4. [For Maintainers](#for-maintainers)
-5. [Workflow Deep Dive](#workflow-deep-dive)
-6. [Failure Triage Runbook](#failure-triage-runbook)
-7. [Performance Optimization](#performance-optimization)
-8. [Artifacts and Diagnostics](#artifacts-and-diagnostics)
-9. [Security and Release Workflows](#security-and-release-workflows)
-10. [References](#references)
+5. [Developer Workflow](#developer-workflow)
+6. [Maintainer Runbooks](#maintainer-runbooks)
+7. [Quality Gates and Merge Criteria](#quality-gates-and-merge-criteria)
+8. [Troubleshooting by Failing Job](#troubleshooting-by-failing-job)
+9. [References](#references)
 
 ---
 
@@ -646,7 +645,7 @@ Approved pending green CI.
 
 ## For Maintainers
 
-## Overview
+### Overview
 
 This manual describes how the current GitHub Actions pipeline works and how to operate it safely.
 It is source-verified against:
@@ -658,7 +657,7 @@ It is source-verified against:
 - `pyproject.toml`
 - `scripts/check_doc_links.py`
 
-## Pipeline Intent and Architecture
+### Pipeline Intent and Architecture
 
 The pipeline enforces three outcomes:
 
