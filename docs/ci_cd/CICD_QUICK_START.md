@@ -5,23 +5,17 @@
 **Version:** 0.26.0  
 **Status:** Current
 
-Quick path to validate changes locally and understand what GitHub Actions will run in CI.
-
----
-
 ## Prerequisites
 
-- Python `3.12+` available locally
-- `pip` and `pre-commit` installed
-- Repository cloned and dependencies installed
+- Repository cloned locally
+- Python 3.12+ available (`3.14` recommended to mirror default non-matrix jobs)
+- `uv` and `pre-commit` installed
 
 ```bash
 python --version
-pip --version
+uv --version
 pre-commit --version
 ```
-
----
 
 ## 1. Install Local Quality Hooks
 
@@ -31,77 +25,52 @@ pre-commit install
 pre-commit run --all-files
 ```
 
-CI runs `pre-commit` across Python `3.12`, `3.13`, and `3.14`, so hook failures locally will fail CI.
+## 2. Run the Fast CI-Equivalent Test Gates
 
----
-
-## 2. Run Fast Local Test Pass
+Run the same marker filters used by `.github/workflows/ci.yml`:
 
 ```bash
-pip install -r conf/requirements_ci.txt
-pip install -e .
+cd src
 
+# Unit + regression gate (coverage enforced in CI)
 python -m pytest \
   -m "not requires_cascor and not requires_server and not slow" \
-  src/tests/unit/ src/tests/regression/ \
-  --cov=src --cov-report=term-missing --cov-fail-under=80
-```
-
-This mirrors the CI unit/regression gate behavior and coverage threshold.
+  tests/unit/ tests/regression/ \
+  --verbose \
+  --cov=. \
+  --cov-report=term-missing
 
 ---
 
 ## 3. Trigger CI
 
 ```bash
-git add .
-git commit -m "docs: update <topic>"
-git push origin <your-branch>
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o /tmp/requirements.lock.check
+tail -n +3 requirements.lock > /tmp/lock_body
+tail -n +3 /tmp/requirements.lock.check > /tmp/check_body
+diff -u /tmp/lock_body /tmp/check_body
 ```
 
-`CI/CD Pipeline` runs automatically on push and PR events.
-
----
-
-## 4. CI Jobs You Should Expect
-
-Core jobs from `.github/workflows/ci.yml`:
-
-- `Pre-commit (Python 3.12/3.13/3.14)`
-- `Unit Tests + Coverage (Python 3.12/3.13/3.14)`
-- `Integration Tests` (Python `3.14`)
-- `Security Scans` (`gitleaks`, `bandit`, `pip-audit`)
-- `Build Distribution`
-- `Dependency Documentation`
-- `Lockfile Freshness`
-- `Documentation Links`
-- `Docker Build & Smoke Test` (PR/main/develop)
-- `Quality Gate`
-
----
-
-## 5. Troubleshooting Fast
-
-`pre-commit` fails:
+## 3. Validate Documentation Links
 
 ```bash
-pre-commit run --all-files
-git add .
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
 ```
 
-Coverage gate fails:
+## 4. If You Changed Dependencies, Refresh the Lockfile
+
+The lockfile freshness gate recompiles with three extras:
 
 ```bash
-python -m pytest \
-  -m "not requires_cascor and not requires_server and not slow" \
-  src/tests/unit/ src/tests/regression/ \
-  --cov=src --cov-report=term-missing --cov-fail-under=80
-```
-
-Lockfile freshness fails:
-
-```bash
-pip install uv
 uv pip compile pyproject.toml \
   --extra juniper-data \
   --extra juniper-cascor \
@@ -109,10 +78,36 @@ uv pip compile pyproject.toml \
   -o requirements.lock
 ```
 
----
+## 5. Push and Watch CI
 
-## References
+```bash
+git push origin <your-branch>
+```
 
-- [CI/CD Manual](CICD_MANUAL.md)
-- [CI/CD Environment Setup](CICD_ENVIRONMENT_SETUP.md)
-- [CI/CD Reference](CICD_REFERENCE.md)
+Open the PR checks and confirm these gates complete:
+
+- `Pre-commit (Python 3.12/3.13/3.14)`
+- `Unit Tests + Coverage (Python 3.12/3.13/3.14)`
+- `Integration Tests`
+- `Security Scans`
+- `Build Distribution`
+- `Dependency Documentation`
+- `Lockfile Freshness`
+- `Documentation Links`
+- `Docker Build & Smoke Test`
+- `Quality Gate`
+
+## Common Pitfalls
+
+- Dependency update PR passes lockfile-update automation but fails `Lockfile Freshness`:
+  Run the lockfile compile command above with `--extra observability`, then commit the result.
+- Docs-only change fails CI:
+  Run `scripts/check_doc_links.py` locally with the same excludes used in CI.
+- Local tests pass but CI fails:
+  Re-run on Python `3.14` and use the same marker filters as the workflow.
+
+## Next Steps
+
+- [CI/CD Manual](CICD_MANUAL.md) for end-to-end operator workflows
+- [CI/CD Environment Setup](CICD_ENVIRONMENT_SETUP.md) for runner/secrets configuration
+- [CI/CD Reference](CICD_REFERENCE.md) for job-level technical details

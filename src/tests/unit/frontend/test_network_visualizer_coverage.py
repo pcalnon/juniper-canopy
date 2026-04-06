@@ -714,14 +714,15 @@ class TestImageDownloadFilename:
         assert graph is not None, "Graph component not found in layout"
         assert "toImageButtonOptions" in graph.config
 
-    def test_image_config_no_filename(self, visualizer):
-        """Image config should not include a filename (browser default is used)."""
+    def test_image_filename_not_hardcoded(self, visualizer):
+        """Image config should not have a static filename (uses Plotly default)."""
         layout = visualizer.get_layout()
         graph = next(
             (child for child in layout.children if hasattr(child, "id") and "graph" in str(child.id)),
             None,
         )
 
+        # filename key should not be present (removed to avoid frozen timestamps)
         assert "filename" not in graph.config["toImageButtonOptions"]
 
     def test_image_format_is_png(self, visualizer):

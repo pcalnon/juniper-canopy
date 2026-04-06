@@ -148,29 +148,43 @@ class TestApiUrl:
         url = manager._api_url("api/metrics")
         assert "api/metrics" in url
 
-    def test_api_url_uses_configured_port(self, reset_singletons):
-        """Test _api_url uses the configured server port."""
+        builder = EnvironBuilder(
+            method="GET",
+            base_url="http://localhost:8050/dashboard/",
+            path="/dashboard/",
+        )
+        env = builder.get_environ()
+
+        with manager.app.server.request_context(env):
+            url = manager._api_url("api/metrics")
+            assert "api/metrics" in url
+
+    def test_api_url_https_scheme(self, reset_singletons):
+        """Test _api_url uses settings-based URL (always http to local server)."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
         url = manager._api_url("/api/status")
-        assert f":{manager._settings.server.port}" in url
+        assert url.startswith("http://127.0.0.1:")
+        assert "/api/status" in url
 
     def test_api_url_http_scheme(self, reset_singletons):
-        """Test _api_url uses HTTP scheme correctly."""
+        """Test _api_url constructs correct URL from settings."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
         url = manager._api_url("/api/train/start")
         assert url.startswith("http://")
+        assert "/api/train/start" in url
 
-    def test_api_url_uses_base_url(self, reset_singletons):
-        """Test _api_url uses the base URL from settings."""
+    def test_api_url_preserves_host(self, reset_singletons):
+        """Test _api_url uses configured server port."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
         url = manager._api_url("/api/topology")
-        assert url.startswith(manager._api_base_url)
+        assert "127.0.0.1" in url
+        assert "/api/topology" in url
 
     def test_api_url_different_paths(self, reset_singletons):
         """Test _api_url with various API paths."""

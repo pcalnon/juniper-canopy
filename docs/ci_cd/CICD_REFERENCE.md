@@ -1,213 +1,52 @@
 # CI/CD Technical Reference
 
-## Complete technical reference for the CI/CD pipeline
-
----
+**Last Updated:** 2026-04-05
+**Version:** 0.26.0
+**Status:** Current
 
 ## Table of Contents
 
-1. [Pipeline Architecture](#pipeline-architecture)
-2. [Workflow Specification](#workflow-specification)
-3. [Configuration Files](#configuration-files)
-4. [Tool Configurations](#tool-configurations)
-5. [Documentation Link Validation](#documentation-link-validation)
-6. [Environment Variables](#environment-variables)
-7. [Artifact Specifications](#artifact-specifications)
-8. [API Reference](#api-reference)
-9. [Troubleshooting Reference](#troubleshooting-reference)
+- [Workflow Inventory](#workflow-inventory)
+- [Main CI Workflow (`ci.yml`)](#main-ci-workflow-ciyml)
+- [Auxiliary Workflows](#auxiliary-workflows)
+- [Tooling and Configuration Sources](#tooling-and-configuration-sources)
+- [Artifacts Produced by CI](#artifacts-produced-by-ci)
+- [Troubleshooting Reference](#troubleshooting-reference)
+- [Version History](#version-history)
+- [References](#references)
 
----
+## Workflow Inventory
 
-## Pipeline Architecture
+| Workflow File | Trigger | Primary Purpose |
+| --- | --- | --- |
+| `.github/workflows/ci.yml` | `push`, `pull_request`, `repository_dispatch`, `workflow_dispatch` | Full quality pipeline and merge gate |
+| `.github/workflows/security-scan.yml` | weekly cron + manual | Scheduled security posture scan |
+| `.github/workflows/lockfile-update.yml` | Dependabot push branches | Auto-refresh `requirements.lock` |
+| `.github/workflows/publish.yml` | release published | Build + TestPyPI + PyPI publish |
 
-### System Diagram
+## Main CI Workflow (`ci.yml`)
 
-```mermaid
-graph TB
-    subgraph "Developer Workstation"
-        A[Git Commit]
-        B[Pre-commit Hooks]
-        A --> B
-    end
+### Trigger and concurrency
 
-    subgraph "GitHub"
-        C[Git Push]
-        D[Workflow Trigger]
-        B --> C
-        C --> D
-    end
-
-    subgraph "GitHub Actions Runners"
-        E[Lint Job]
-        F[Test Matrix]
-        G[Build Job]
-        H[Integration Job]
-        I[Quality Gate]
-        J[Notify]
-
-        D --> E
-        D --> F
-        E --> G
-        F --> G
-        F --> H
-        G --> I
-        H --> I
-        I --> J
-    end
-
-    subgraph "External Services"
-        K[Codecov]
-        L[GitHub Checks API]
-        F --> K
-        J --> L
-    end
-```
-
-### Job Dependencies
-
-```yaml
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
-
-  build:
-    runs-on: ubuntu-latest
-    needs: [lint, test]
-
-  integration:
-    runs-on: ubuntu-latest
-    needs: [test]
-    if: github.event_name == 'pull_request'
-
-  quality-gate:
-    runs-on: ubuntu-latest
-    needs: [lint, test, build]
-    if: always()
-
-  notify:
-    runs-on: ubuntu-latest
-    needs: [quality-gate]
-    if: always()
-```
-
----
-
-## Workflow Specification
-
-### Trigger Specification
-
-```yaml
-on:
-  # Push triggers
-  push:
-    branches:
-      - main                # Production branch
-      - develop             # Development branch
-      - 'feature/**'        # Feature branches
-      - 'fix/**'            # Bugfix branches
-    paths-ignore:
-      - '**.md'             # Skip docs-only changes
-      - 'docs/**'
-      - 'notes/**'
-
-  # Pull request triggers
-  pull_request:
-    branches:
-      - main
-      - develop
-    types:
-      - opened              # PR created
-      - synchronize         # New commits pushed
-      - reopened            # PR reopened
-      - ready_for_review    # Draft → Ready
-
-  # Manual trigger
-  workflow_dispatch:
-    inputs:
-      python-version:
-        description: 'Python version to test'
-        required: false
-        default: '3.13'
-        type: choice
-        options:
-          - '3.11'
-          - '3.12'
-          - '3.13'
-      skip-slow-tests:
-        description: 'Skip slow tests'
-        required: false
-        default: true
-        type: boolean
-```
-
-### Job Specification
-
-#### Lint Job
-
-```yaml
-lint:
-  name: Code Quality Checks
-  runs-on: ubuntu-latest
-  timeout-minutes: 10
-
-  steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0  # Full history for better analysis
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.13'
-        cache: 'pip'
-
-    - name: Install Linting Tools
-      run: |
-        python -m pip install --upgrade pip
-        pip install black isort flake8 mypy bandit
-
-    - name: Run Black
-      run: black --check --diff src/
-      continue-on-error: true
-
-    - name: Run isort
-      run: isort --check-only --diff src/
-      continue-on-error: true
-
-    - name: Run Flake8
-      run: |
-        flake8 src/ --count --select=E9,F63,F7,F82 --show-source --statistics
-        flake8 src/ --count --max-line-length=120 --statistics --exit-zero
-      continue-on-error: true
-
-    - name: Run MyPy
-      run: mypy src/ --ignore-missing-imports --no-strict-optional
-      continue-on-error: true
-
+```text
     - name: Run Bandit
-      run: bandit -r src -c .bandit.yml
+      run: bandit -r src/ -c pyproject.toml
       continue-on-error: true
+
 ```
 
 #### Test Job
 
 ```yaml
 test:
-  name: Unit Tests + Coverage (Python ${{ matrix.python-version }})
+  name: Test Suite (Python ${{ matrix.python-version }})
   runs-on: ubuntu-latest
   timeout-minutes: 30
 
   strategy:
     fail-fast: false
     matrix:
-      python-version: ["3.12", "3.13", "3.14"]
+      python-version: ["3.11", "3.12", "3.13"]
 
   steps:
     - name: Checkout Code
@@ -237,16 +76,29 @@ test:
         python -m pip install --upgrade pip
         pip install -r conf/requirements.txt
 
-    - name: Run Unit Tests
+    - name: Run Tests
       shell: bash -el {0}
       run: |
-        python -m pytest \
-          src/tests \
+        cd src
+        pytest tests/ \
           --verbose \
-          --cov=src \
-          --cov-report=xml:reports/coverage.xml \
+          --cov=. \
+          --cov-report=xml:../coverage.xml \
           --cov-report=term-missing \
-          --junit-xml=reports/junit/unit-tests.xml
+          --cov-report=html:../reports/coverage \
+          --junit-xml=../reports/junit/results.xml \
+          --html=../reports/test_report.html \
+          --self-contained-html
+
+    - name: Upload Coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: false
+      continue-on-error: true
 
     - name: Upload Test Results
       uses: actions/upload-artifact@v4
@@ -254,30 +106,43 @@ test:
       with:
         name: test-results-${{ matrix.python-version }}
         path: |
-          reports/junit/unit-tests.xml
-          reports/coverage.xml
+          reports/
+          coverage.xml
         retention-days: 30
 
-    # Coverage threshold enforcement should be configured in pytest invocation
-    # (for example: --cov-fail-under=80)
+    - name: Check Coverage Threshold
+      shell: bash -el {0}
+      run: |
+        cd src
+        COVERAGE=$(pytest tests/ --cov=. --cov-report=term-missing | grep "TOTAL" | awk '{print $NF}' | sed 's/%//')
+        echo "Current coverage: ${COVERAGE}%"
+
+        if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+          echo "::warning::Coverage below 80%: ${COVERAGE}%"
+        fi
+
+        if (( $(echo "$COVERAGE < 60" | bc -l) )); then
+          echo "::error::Coverage critically low: ${COVERAGE}%"
+          exit 1
+        fi
+      continue-on-error: true
 ```
 
 #### Documentation Links Job
+
+**Purpose:** Validate internal documentation links and heading anchors in markdown files.
+
+**Workflow step (from `.github/workflows/ci.yml`):**
 
 ```yaml
 docs:
   name: Documentation Links
   runs-on: ubuntu-latest
-
   steps:
-    - name: Checkout Code
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-
-    - name: Set up Python
-      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+    - uses: actions/checkout@...
+    - uses: actions/setup-python@...
       with:
         python-version: "3.14"
-
     - name: Validate Documentation Links
       run: |
         python scripts/check_doc_links.py \
@@ -288,28 +153,21 @@ docs:
           --cross-repo skip
 ```
 
-This job validates internal documentation links and same-file anchors before the quality gate passes. CI uses `--cross-repo skip` because sibling Juniper repositories are not guaranteed to exist on the runner filesystem.
+**Validated code paths (`scripts/check_doc_links.py`):**
 
----
+1. Relative documentation links resolve to existing files.
+2. Same-file anchors (for example, `#heading`) map to real markdown headings.
+3. Links inside fenced code blocks and inline code spans are ignored by design.
+4. External URLs (`http`, `https`, `mailto`, `ftp`) are skipped.
+5. Security checks reject absolute paths, null-byte targets, and excessive traversal depth.
 
-## Documentation Link Validation
+**Cross-repo policy modes:**
 
-### Purpose
+- `skip`: Ignore ecosystem sibling links (CI default, deterministic in isolated runners).
+- `warn`: Print warnings for sibling links without failing.
+- `check`: Validate sibling links against a discovered local Juniper ecosystem root.
 
-The documentation link checker validates:
-
-- Relative markdown links resolve to existing files
-- Same-file anchor links resolve to real headings
-- Links remain within repository boundaries
-- Unsafe patterns (absolute paths, excessive traversal, invalid cross-repo escapes) are rejected
-
-### Script
-
-- Path: `scripts/check_doc_links.py`
-- Unit tests: `src/tests/unit/test_doc_link_checker.py`
-- CI invocation: `.github/workflows/ci.yml` (`docs` job)
-
-### Local Commands
+**Local reproduction commands:**
 
 ```bash
 # Match CI behavior
@@ -320,298 +178,78 @@ python scripts/check_doc_links.py \
   --exclude CHANGELOG.md \
   --cross-repo skip
 
-# Validate cross-repo links when sibling repos exist locally
+# Strict local validation (requires sibling repos checked out)
 python scripts/check_doc_links.py --cross-repo check
-
-# Print every checked/skipped link
-python scripts/check_doc_links.py --verbose --cross-repo skip
 ```
-
-### Cross-Repo Modes
-
-| Mode | Behavior | Typical Use |
-| ---- | -------- | ----------- |
-| `skip` | Skip cross-repo file existence checks (still validates structure) | CI and isolated clones |
-| `warn` | Emit warnings for cross-repo links without failing | Local cleanup passes |
-| `check` | Validate cross-repo targets on disk | Full local Juniper ecosystem checkout |
 
 ---
 
-## Configuration Files
-
-### .github/workflows/ci.yml
-
-**Last Updated:** 2026-04-04  
-**Version:** 0.26.0  
-**Status:** Current
-
-## Scope
-
-This reference documents the current CI behavior implemented in:
-
-- `.github/workflows/ci.yml`
-- `scripts/check_doc_links.py`
-- `conf/requirements_ci.txt`
-- `pyproject.toml`
-
-## Workflow Summary
-
-Workflow name: `CI/CD Pipeline`
-
-Trigger events:
-
-- `push` (`main`, `develop`, `feature/**`, `fix/**`)
-- `pull_request` (`main`, `develop`)
-- `repository_dispatch` (`data-client-updated`, `cascor-client-updated`)
-- `workflow_dispatch`
-
-Concurrency:
+### Global environment
 
 ```yaml
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+env:
+  ENV_NAME: juniper-canopy
+  PYTHON_TEST_VERSION: "3.14"
+  COVERAGE_FAIL_UNDER: "80"
 ```
 
-**Ignore Patterns:**
+### Jobs and dependencies
 
-```yaml
-ignore:
-  - src/tests/**           # Test files
-  - utils/**               # Utility scripts
-  - docs/**                # Documentation
-  - "**/__pycache__/**"    # Cache files
-```
+| Job | Needs | Python | Notes |
+| --- | --- | --- | --- |
+| `pre-commit` | — | matrix `3.12/3.13/3.14` | Runs `pre-commit --all-files` |
+| `unit-tests` | `pre-commit` | matrix `3.12/3.13/3.14` | Runs unit + regression markers with coverage gate |
+| `integration-tests` | `unit-tests` | `3.14` | Runs fast integration subset |
+| `build` | `unit-tests` | `3.14` | Builds sdist and wheel |
+| `security` | `pre-commit` | `3.14` | Gitleaks + Bandit + pip-audit |
+| `dependency-docs` | `build` | `3.14` | Generates dependency docs via script |
+| `lockfile-check` | — | `3.14` | Recompiles lockfile and diffs body |
+| `docs` | — | `3.14` | Runs doc-link validation script |
+| `docker-build` | `build` | docker engine | Builds image + health smoke test |
+| `required-checks` | all core jobs | n/a | Aggregated merge gate |
+| `notify` | `required-checks` | n/a | Run summary |
 
-### pyproject.toml
+### Test marker expressions in CI
 
-**Location:** `pyproject.toml`
-
-**Purpose:** Python project and tool configuration
-
-**Sections:**
-
-1. **Project metadata**
-
-   ```toml
-   [project]
-   name = "juniper-canopy"
-   version = "0.4.0"
-   requires-python = ">=3.11"
-   ```
-
-2. **Black configuration**
-
-   ```toml
-   [tool.black]
-   line-length = 120
-   target-version = ['py311', 'py312', 'py313']
-   ```
-
-3. **isort configuration**
-
-### `pre-commit`
-
-- Python matrix: `3.12`, `3.13`, `3.14`
-- Installs `pre-commit`
-- Runs `pre-commit run --all-files --show-diff-on-failure`
-- Caches pre-commit hooks (`~/.cache/pre-commit`)
-
-   ```yaml
-   # .bandit.yml
-   exclude_dirs:
-     - src/tests
-     - util/verification
-   skips:
-     - B311
-   confidence: MEDIUM
-   severity: MEDIUM
-   ```
-
-5. **MyPy configuration**
-
-   ```toml
-   [tool.mypy]
-   python_version = "3.14"
-   ignore_missing_imports = true
-   ```
-
-6. **Pytest configuration**
-
-   ```toml
-   [tool.pytest.ini_options]
-   minversion = "7.0"
-   testpaths = ["src/tests"]
-   addopts = ["--verbose", "--cov=src"]
-   ```
-
-7. **Coverage configuration**
-
-   ```toml
-   [tool.coverage.report]
-   show_missing = true
-   fail_under = 80
-   precision = 2
-   ```
-
----
-
-## Tool Configurations
-
-### Black
-
-**Purpose:** Code formatting
-
-**Configuration:**
-
-```toml
-[tool.black]
-line-length = 120
-target-version = ['py311', 'py312', 'py313']
-include = '\.pyi?$'
-extend-exclude = '''
-/(
-    \.eggs
-    | \.git
-    | \.venv
-    | logs
-    | reports
-)/
-'''
-```
-
-**Usage:**
+Unit/regression gate:
 
 ```bash
-python -m pytest \
-  -m "not requires_cascor and not requires_server and not slow" \
-  src/tests/unit/ src/tests/regression/ \
-  --timeout=60 \
-  --maxfail=5 \
-  --junitxml=reports/junit/junit-unit.xml \
-  --cov=src \
-  --cov-report=term-missing \
-  --cov-report=xml:reports/coverage.xml \
-  --cov-report=html:reports/htmlcov \
-  --cov-fail-under=80
+-m "not requires_cascor and not requires_server and not slow"
 ```
 
-Special behavior:
-
-- Handles Python 3.12 `pytest` cleanup SIGABRT (`exit 134`) by checking JUnit `failures/errors` before deciding failure.
-
-Artifacts:
-
-- `coverage-report-py<version>`
-- `unit-test-results-py<version>`
-
-### `integration-tests`
-
-- Python: `3.14`
-- Runs only on PRs and pushes to `main`/`develop`
-- Marker filter:
+Integration gate:
 
 ```bash
-integration and not requires_cascor and not requires_server and not slow
+-m "integration and not requires_cascor and not requires_server and not slow"
 ```
 
-Artifact:
+### Coverage gate
 
-- `integration-test-results`
-
-### `build`
-
-- Python: `3.14`
-- Uses `python -m build --sdist --wheel`
-- Verifies both `.tar.gz` and `.whl`
-- Uploads `dist-packages`
-
-### `security`
-
-- Python: `3.14`
-- Tools: `gitleaks`, `bandit`, `pip-audit`
-- Uploads SARIF and security report artifacts
-
-### `dependency-docs`
-
-```yaml
-# .bandit.yml
-exclude_dirs:
-  - src/tests
-  - util/verification
-skips:
-  - B311
-confidence: MEDIUM
-severity: MEDIUM
-```
-
-Artifact:
+Unit tests enforce:
 
 ```bash
-# Security scan
-bandit -r src
-
-# With config
-bandit -r src -c .bandit.yml
-
-# Specific severity
-bandit -r src -ll  # Low severity and up
+--cov-fail-under=${COVERAGE_FAIL_UNDER}
 ```
 
-### Lockfile and Dependency Audit
+With current `COVERAGE_FAIL_UNDER=80`.
 
-**Purpose:** Keep `requirements.lock` synchronized with `pyproject.toml` extras and audit installed dependencies.
+### Lockfile freshness behavior
 
-**Usage:**
+CI compiles with:
 
 ```bash
-# Regenerate lockfile with the same extras used in CI lockfile check
 uv pip compile pyproject.toml \
   --extra juniper-data \
   --extra juniper-cascor \
   --extra observability \
-  -o requirements.lock
-
-# Mimic CI security job's dependency audit input
-pip install dash fastapi uvicorn plotly numpy scipy
-pip freeze > reports/security/pip-freeze.txt
-pip-audit -r reports/security/pip-freeze.txt --output reports/security/pip-audit.txt
+  -o /tmp/requirements.lock.check
 ```
 
-**Authoritative workflow files:**
+Then strips first two lines from both lockfiles before diffing to avoid path-only header differences.
 
-- `.github/workflows/ci.yml`
-- `.github/workflows/lockfile-update.yml`
-- `.github/workflows/security-scan.yml`
+### Documentation links behavior
 
-### Pytest
-
-**Purpose:** Testing framework
-
-**Configuration:**
-
-```toml
-[tool.pytest.ini_options]
-minversion = "7.0"
-testpaths = ["src/tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-addopts = [
-    "--verbose",
-    "--color=yes",
-    "--cov=src",
-    "--cov-report=term-missing"
-]
-markers = [
-    "unit: Unit tests",
-    "integration: Integration tests",
-    "slow: Slow-running tests"
-]
-```
-
-- Python: `3.14`
-- Runs doc link validator with excluded directories/files:
+CI validates links with:
 
 ```bash
 python scripts/check_doc_links.py \
@@ -622,127 +260,127 @@ python scripts/check_doc_links.py \
   --cross-repo skip
 ```
 
-### `docker-build`
+This catches broken internal file and heading links without requiring sibling repos.
 
-- Builds image from root `Dockerfile`
-- Starts container and waits for healthy state
-- Verifies:
-  - package import
-  - `/v1/health` response
+## Auxiliary Workflows
 
-### `required-checks`
+### `security-scan.yml`
 
-Aggregates job results and enforces final pass/fail semantics used by branch protection.
+- Scheduled: Mondays at `06:00 UTC`
+- Installs `bandit[sarif]` and `pip-audit`
+- Runs:
+  - `bandit -r src -c .bandit.yml -f sarif ... --exit-zero`
+  - `bandit -r src -c .bandit.yml --confidence-level medium --severity-level medium`
+  - `pip-audit --strict --desc on`
+- Uploads `reports/security/` artifacts
 
-## Environment Variables Used in CI
+### `lockfile-update.yml`
 
-Top-level workflow env:
+- Trigger: push to `dependabot/pip/**`
+- Guard: `if: github.actor == 'dependabot[bot]'`
+- Uses `CROSS_REPO_DISPATCH_TOKEN` for checkout/push
+- Compiles lockfile with:
+  - `--extra juniper-data`
+  - `--extra juniper-cascor`
+- Commits only when diff exists
 
-```yaml
-env:
-  ENV_NAME: juniper-canopy
-  PYTHON_TEST_VERSION: "3.14"
-  COVERAGE_FAIL_UNDER: "80"
-```
+### `publish.yml`
 
-Test gating envs in unit/integration jobs:
+- Trigger: GitHub release published
+- `id-token: write` for trusted publishing
+- Stages:
+  1. Build + `twine check`
+  2. Publish to TestPyPI + install verification
+  3. Publish to PyPI
 
-```yaml
-CASCOR_BACKEND_AVAILABLE: 0
-RUN_SERVER_TESTS: 0
-ENABLE_SLOW_TESTS: 0
-```
+## Tooling and Configuration Sources
 
-## Dependency Reference
+| Concern | Source of Truth |
+| --- | --- |
+| Pytest markers and defaults | `pyproject.toml` (`[tool.pytest.ini_options]`) |
+| Coverage thresholds | `pyproject.toml` and `ci.yml` job args |
+| CI dependencies | `conf/requirements_ci.txt` |
+| Security scan excludes | `.bandit.yml` + workflow commands |
+| Doc-link validation rules | `scripts/check_doc_links.py` |
 
-Primary CI dependency file:
+## Artifacts Produced by CI
 
-- `conf/requirements_ci.txt`
+| Job | Artifact | Typical Contents |
+| --- | --- | --- |
+| `unit-tests` | `coverage-report-py*` | XML + HTML coverage outputs |
+| `unit-tests` | `unit-test-results-py*` | JUnit XML test outputs |
+| `integration-tests` | `integration-test-results` | Integration JUnit XML |
+| `build` | `dist-packages` | Wheel and sdist |
+| `security` | `security-reports` | Bandit + pip-audit reports |
+| `dependency-docs` | `dependency-docs` | Generated requirements/conda docs |
 
-Notable required entries:
+| Error | Cause                    | Solution                         |
+| ----- | ------------------------ | -------------------------------- |
+| E001  | Workflow syntax error    | Validate YAML syntax             |
+| E002  | Missing required field   | Add required field to workflow   |
+| E003  | Invalid expression       | Fix workflow expression syntax   |
+| E101  | Job timeout              | Increase timeout or optimize job |
+| E102  | Job cancelled            | Check concurrency settings       |
+| E201  | Step failed              | Check step logs for details      |
+| E202  | Command not found        | Install required tool            |
+| E203  | Permission denied        | Check file permissions           |
+| E301  | Artifact upload failed   | Check size and path              |
+| E302  | Artifact download failed | Verify artifact exists           |
 
-- `prometheus-client>=0.20.0`
-- `sentry-sdk>=2.0.0`
+### Documentation Link Validation Failures
 
-These support observability-import paths used during tests and runtime checks.
+| Symptom | Likely Cause | Resolution |
+| ----- | ----- | ----- |
+| `broken anchor #... (heading not found)` | Anchor does not match generated heading slug | Rename anchor to match markdown heading text normalization |
+| `absolute path in documentation link` | Link target starts with `/` | Replace absolute target with a repository-relative path |
+| `excessive directory traversal in link` | Link contains too many `..` segments | Rewrite link to a shorter, repo-bounded relative path |
+| `null byte in link target` | Invalid link target string | Remove malformed target and re-add a valid path |
+| `Cross-repo links: skip` in CI output | CI is intentionally skipping sibling-repo checks | Run locally with `--cross-repo check` only when sibling repos are available |
 
-## Documentation Link Checker Reference
+### Exit Codes
 
-Script: `scripts/check_doc_links.py`
+| Code | Meaning                 |
+| ---- | ----------------------- |
+| 0    | Success                 |
+| 1    | General error           |
+| 2    | Misuse of shell command |
+| 126  | Command cannot execute  |
+| 127  | Command not found       |
+| 128  | Invalid exit argument   |
+| 130  | Terminated by Ctrl+C    |
+| 137  | Killed (out of memory)  |
+| 139  | Segmentation fault      |
 
-Core capabilities:
+### Log Analysis
 
-- Validates relative file links and same-file anchors.
-- Skips fenced code blocks and inline code spans.
-- Supports cross-repo handling modes:
-  - `skip` (CI default)
-  - `warn`
-  - `check`
-
-Exit codes:
-
-- `0`: all valid
-- `1`: broken links or invalid arguments
-
-## Common Failure Classes
-
-### Stale lockfile
-
-Symptom:
-
-- `lockfile-check` fails diff
-
-Fix:
+**Search patterns:**
 
 ```bash
+# Pre-commit
+pre-commit run --all-files
+
+# Unit/regression gate
+cd src
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  tests/unit/ tests/regression/ \
+  --verbose \
+  --cov=. \
+  --cov-report=term-missing \
+  --cov-fail-under=80
+
+# Integration gate
+python -m pytest \
+  -m "integration and not requires_cascor and not requires_server and not slow" \
+  tests/integration \
+  --verbose
+
+# Lockfile gate
 uv pip compile pyproject.toml \
   --extra juniper-data \
   --extra juniper-cascor \
   --extra observability \
   -o requirements.lock
-```
-
-### Broken docs links
-
-Symptom:
-
-- `docs` job reports missing files/anchors
-
-Fix:
-
-- run checker locally with the CI command and repair relative paths or heading anchors
-
-### Optional testing modules skipped
-
-Symptom:
-
-- Service/e2e tests skipped via `importorskip`
-
-Fix (local full-run only):
-
-```bash
-pip install "juniper-cascor-client[testing]"
-pip install "juniper-data-client[testing]"
-```
-
-#### Artifacts
-
-**List artifacts:**
-
-```bash
-GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts
-```
-
-**Download artifact:**
-
-```bash
-GET /repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip
-```
-
-**Delete artifact:**
-
-```bash
-DELETE /repos/{owner}/{repo}/actions/artifacts/{artifact_id}
 ```
 
 ### Codecov API
@@ -768,18 +406,21 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ### Common Error Codes
 
-| Error | Cause                    | Solution                         |
-| ----- | ------------------------ | -------------------------------- |
-| E001  | Workflow syntax error    | Validate YAML syntax             |
-| E002  | Missing required field   | Add required field to workflow   |
-| E003  | Invalid expression       | Fix workflow expression syntax   |
-| E101  | Job timeout              | Increase timeout or optimize job |
-| E102  | Job cancelled            | Check concurrency settings       |
-| E201  | Step failed              | Check step logs for details      |
-| E202  | Command not found        | Install required tool            |
-| E203  | Permission denied        | Check file permissions           |
-| E301  | Artifact upload failed   | Check size and path              |
-| E302  | Artifact download failed | Verify artifact exists           |
+| Error | Cause                    | Solution                            |
+|-------|--------------------------|-------------------------------------|
+| E001  | Workflow syntax error    | Validate YAML syntax                |
+| E002  | Missing required field   | Add required field to workflow      |
+| E003  | Invalid expression       | Fix workflow expression syntax      |
+| E101  | Job timeout              | Increase timeout or optimize job    |
+| E102  | Job cancelled            | Check concurrency settings          |
+| E201  | Step failed              | Check step logs for details         |
+| E202  | Command not found        | Install required tool               |
+| E203  | Permission denied        | Check file permissions              |
+| E301  | Artifact upload failed   | Check size and path                 |
+| E302  | Artifact download failed | Verify artifact exists              |
+| D401  | Broken markdown link     | Update link target path             |
+| D402  | Broken heading anchor    | Update anchor or heading            |
+| D403  | Unsafe link path         | Remove absolute/null/deep traversal |
 
 ### Exit Codes
 
@@ -818,8 +459,12 @@ grep "coverage" workflow.log | grep -i "low\|fail"
 **Symptom:**
 
 ```bash
-FAILED: Documentation link validation
-FOUND <N> broken link(s) in <M> file(s)
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o /tmp/requirements.lock.check
+mv /tmp/requirements.lock.check requirements.lock
 ```
 
 **Local reproduction (CI-equivalent):**
@@ -847,10 +492,6 @@ python scripts/check_doc_links.py \
 3. Re-run the command above before pushing.
 
 ---
-
-## Performance Metrics
-
-### Baseline Performance
 
 | Stage            | Duration | CPU     | Memory |
 | ---------------- | -------- | ------- | ------ |
@@ -908,7 +549,7 @@ python scripts/check_doc_links.py \
 
 ---
 
-**Last Updated:** 2026-04-05  
-**Version:** 0.25.1  
-**Maintained By:** Development Team  
+**Last Updated:** 2026-04-05
+**Version:** 0.25.1
+**Maintained By:** Development Team
 **Status:** ✅ Current

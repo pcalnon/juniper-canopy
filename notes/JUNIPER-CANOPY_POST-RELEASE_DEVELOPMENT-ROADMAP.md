@@ -2,10 +2,10 @@
 
 **Project**: JuniperCanopy - Web-based Monitoring Frontend
 **Created**: 2026-02-17
-**Last Updated**: 2026-04-04
+**Last Updated**: 2026-04-05
 **Author**: Paul Calnon
 **Status**: SUPERSEDED — Execution tracked in juniper-ml/notes/CANOPY_DEFERRED_AND_BACKLOG_PLAN.md (all sprints complete as of 2026-04-01). This document retained as historical audit reference.
-**Maintenance Note (2026-04-04)**: CI/CD documentation synchronization completed in `docs/ci_cd/` to reflect current workflows (`ci.yml`, `security-scan.yml`, `publish.yml`, `lockfile-update.yml`), including lockfile and docs-link quality gates.
+**Maintenance Note (2026-04-05)**: CI/CD documentation expanded for `scripts/check_doc_links.py` operational behavior, including cross-repo mode semantics (`skip`, `warn`, `check`), path-safety constraints, and docs-gate troubleshooting runbooks aligned with regression coverage in `src/tests/unit/test_doc_link_checker.py`.
 **Source**: Full codebase audit of all notes/ files with validation against source code (2026-02-17); polyrepo migration impact analysis (2026-02-25)
 
 ---

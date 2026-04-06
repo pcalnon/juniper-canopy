@@ -43,7 +43,7 @@ class TestRateLimitDefault:
     """Regression tests: rate limiting must be disabled by default."""
 
     def test_rate_limiter_disabled_by_default(self, monkeypatch):
-        """Rate limiter must be disabled when settings.rate_limit_enabled is False.
+        """Rate limiter must be disabled when settings.rate_limit_enabled is False (default).
 
         The dashboard makes high-frequency internal HTTP requests to its own
         API endpoints. Rate limiting these self-to-self calls is counterproductive.
@@ -56,14 +56,13 @@ class TestRateLimitDefault:
         mock_settings = MagicMock()
         mock_settings.rate_limit_enabled = False
         mock_settings.rate_limit_requests_per_minute = 60
-
         reset_security_state()
         with patch("settings.get_settings", return_value=mock_settings):
             limiter = get_rate_limiter()
 
         assert limiter.enabled is False, "Rate limiter is enabled by default. It must be disabled by default " "because the Dash dashboard makes internal HTTP requests to /api/* " "endpoints that would exceed the rate limit and cause 429 errors."
 
-    def test_rate_limiter_can_be_enabled_via_settings(self, monkeypatch):
+    def test_rate_limiter_can_be_enabled_via_env(self, monkeypatch):
         """Rate limiter can be explicitly enabled via settings."""
         from unittest.mock import MagicMock, patch
 
@@ -74,13 +73,16 @@ class TestRateLimitDefault:
         mock_settings.rate_limit_requests_per_minute = 60
 
         reset_security_state()
+        mock_settings = MagicMock()
+        mock_settings.rate_limit_enabled = True
+        mock_settings.rate_limit_requests_per_minute = 60
         with patch("settings.get_settings", return_value=mock_settings):
             limiter = get_rate_limiter()
 
         assert limiter.enabled is True
 
-    def test_rate_limiter_custom_requests_per_minute(self, monkeypatch):
-        """Rate limiter uses requests_per_minute from settings."""
+    def test_rate_limiter_can_be_enabled_via_env_1(self, monkeypatch):
+        """Rate limiter reads from settings (get_settings())."""
         from unittest.mock import MagicMock, patch
 
         from security import get_rate_limiter, reset_security_state
@@ -90,13 +92,16 @@ class TestRateLimitDefault:
         mock_settings.rate_limit_requests_per_minute = 200
 
         reset_security_state()
+        mock_settings = MagicMock()
+        mock_settings.rate_limit_enabled = True
+        mock_settings.rate_limit_requests_per_minute = 100
         with patch("settings.get_settings", return_value=mock_settings):
             limiter = get_rate_limiter()
 
         assert limiter.enabled is True
         assert limiter.limit == 200
 
-    def test_rate_limiter_disabled_with_settings_false(self, monkeypatch):
+    def test_rate_limiter_disabled_when_settings_false(self, monkeypatch):
         """Rate limiter is disabled when settings.rate_limit_enabled is False."""
         from unittest.mock import MagicMock, patch
 
@@ -105,12 +110,27 @@ class TestRateLimitDefault:
         mock_settings = MagicMock()
         mock_settings.rate_limit_enabled = False
         mock_settings.rate_limit_requests_per_minute = 60
-
         reset_security_state()
         with patch("settings.get_settings", return_value=mock_settings):
             limiter = get_rate_limiter()
 
         assert limiter.enabled is False
+
+    def test_rate_limiter_custom_rpm(self, monkeypatch):
+        """Rate limiter uses requests_per_minute from settings."""
+        from unittest.mock import MagicMock, patch
+
+        from security import get_rate_limiter, reset_security_state
+
+        mock_settings = MagicMock()
+        mock_settings.rate_limit_enabled = True
+        mock_settings.rate_limit_requests_per_minute = 200
+        reset_security_state()
+        with patch("settings.get_settings", return_value=mock_settings):
+            limiter = get_rate_limiter()
+
+        assert limiter.enabled is True
+        assert limiter.limit == 200
 
     def test_settings_rate_limit_default_false(self, monkeypatch):
         """Settings.rate_limit_enabled must default to False.

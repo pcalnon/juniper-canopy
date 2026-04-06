@@ -37,7 +37,6 @@
 #
 #####################################################################################################################################################################################################
 import asyncio
-import importlib
 import importlib.metadata
 import json
 import os
@@ -86,6 +85,11 @@ from observability import (
 )
 from secrets_util import get_secret
 from settings import get_settings
+
+try:
+    APP_VERSION = importlib.metadata.version("juniper-canopy")
+except importlib.metadata.PackageNotFoundError:
+    APP_VERSION = "0.4.0"
 
 # import logging
 
@@ -1914,6 +1918,7 @@ async def ws_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         websocket_manager.disconnect(websocket)
     except Exception:
+        system_logger.error("Unexpected error on /ws endpoint", exc_info=True)
         websocket_manager.disconnect(websocket)
 
 
@@ -2000,24 +2005,18 @@ async def api_train_status():
     return {"backend": backend.backend_type, **backend.get_status()}
 
 
+# from pydantic import BaseModel
+
+
 class SetParamsRequest(BaseModel):
-    """Pydantic model for /api/set_params request body."""
+    """Validated request body for the set_params endpoint."""
 
-    # Backward-compatible keys
-    learning_rate: float | None = None
-    max_hidden_units: int | None = None
-    max_epochs: int | None = None
-    convergence_enabled: bool | None = None
-    convergence_threshold: float | None = None
-    patience: int | None = None
-    spiral_rotations: float | None = None
-
-    # nn_* prefixed keys
+    # Neural network parameters
     nn_max_iterations: int | None = None
     nn_max_total_epochs: int | None = None
     nn_learning_rate: float | None = None
     nn_max_hidden_units: int | None = None
-    nn_multi_node_layers: int | None = None
+    nn_multi_node_layers: bool | None = None
     nn_growth_trigger: str | None = None
     nn_growth_preset_epochs: int | None = None
     nn_growth_convergence_threshold: float | None = None
@@ -2027,7 +2026,7 @@ class SetParamsRequest(BaseModel):
     nn_dataset_elements: int | None = None
     nn_dataset_noise: float | None = None
 
-    # cn_* prefixed keys
+    # Candidate parameters
     cn_pool_size: int | None = None
     cn_correlation_threshold: float | None = None
     cn_candidate_learning_rate: float | None = None
@@ -2041,6 +2040,15 @@ class SetParamsRequest(BaseModel):
     cn_top_candidates: int | None = None
     cn_random_candidates: int | None = None
 
+    # Backward-compatible keys
+    learning_rate: float | None = None
+    max_hidden_units: int | None = None
+    max_epochs: int | None = None
+    convergence_enabled: bool | None = None
+    convergence_threshold: float | None = None
+    patience: int | None = None
+    spiral_rotations: float | None = None
+
 
 @app.post("/api/set_params")
 async def api_set_params(body: SetParamsRequest):
@@ -2048,7 +2056,7 @@ async def api_set_params(body: SetParamsRequest):
     Set training parameters with nn_* and cn_* prefixed keys.
     Also accepts old-style keys for backward compatibility.
     Args:
-        body: SetParamsRequest containing parameters to update
+        body: Validated SetParamsRequest containing parameters to update
     Returns:
         Updated training state
     """

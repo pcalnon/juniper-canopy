@@ -254,54 +254,39 @@ class TestDashboardManagerLayout:
 
 
 class TestDashboardManagerAPIURL:
-    """Test API URL building."""
+    """Test API URL building uses settings-based construction."""
 
-    def test_api_url_uses_settings_base(self):
-        """Test API URL uses settings-based base URL."""
+    def test_api_url_with_https(self):
+        """Test API URL uses settings-based URL (always local http)."""
         from frontend.dashboard_manager import DashboardManager
 
         config = {}
         manager = DashboardManager(config)
-
         url = manager._api_url("/api/health")
         assert url.startswith("http://127.0.0.1:")
         assert "/api/health" in url
 
     def test_api_url_with_http(self):
-        """Test API URL construction with HTTP."""
-        from werkzeug.test import EnvironBuilder
-
+        """Test API URL construction from settings."""
         from frontend.dashboard_manager import DashboardManager
 
         config = {}
         manager = DashboardManager(config)
-
-        builder = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/")
-        env = builder.get_environ()
-
-        with manager.app.server.request_context(env):
-            url = manager._api_url("/api/metrics")
-            assert url.startswith("http://")
-            assert "/api/metrics" in url
+        url = manager._api_url("/api/metrics")
+        assert url.startswith("http://")
+        assert "/api/metrics" in url
 
     def test_api_url_strips_leading_slash(self):
         """Test API URL construction strips leading slashes."""
-        from werkzeug.test import EnvironBuilder
-
         from frontend.dashboard_manager import DashboardManager
 
         config = {}
         manager = DashboardManager(config)
-
-        builder = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/")
-        env = builder.get_environ()
-
-        with manager.app.server.request_context(env):
-            url1 = manager._api_url("/api/health")
-            url2 = manager._api_url("api/health")
-            # Both should produce same result
-            assert "/api/health" in url1
-            assert "/api/health" in url2
+        url1 = manager._api_url("/api/health")
+        url2 = manager._api_url("api/health")
+        # Both should produce same result
+        assert "/api/health" in url1
+        assert "/api/health" in url2
 
 
 class TestDashboardManagerTrainingControls:

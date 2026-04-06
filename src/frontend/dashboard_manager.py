@@ -37,7 +37,6 @@ import logging
 import os
 import time
 from typing import Any, Dict, List
-from urllib.parse import urljoin
 
 import dash
 import dash_bootstrap_components as dbc
@@ -63,6 +62,12 @@ from .components.redis_panel import RedisPanel
 from .components.tutorial_panel import TutorialPanel
 from .components.worker_panel import WorkerPanel
 from .tooltips import CONTROL_TOOLTIPS
+
+# from urllib.parse import urljoin
+
+
+# from flask import request
+
 
 # ── Sidebar Contextual Visibility Configuration ──
 # Defines which sidebar sections are visible for each tab.
@@ -208,6 +213,7 @@ class DashboardManager:
 
         # Initialize settings for training defaults
         self._settings = get_settings()
+        self._api_base_url = f"http://127.0.0.1:{self._settings.server.port}"
 
         # Base URL for API calls (avoids dependency on Flask request context)
         self._api_base_url = f"http://127.0.0.1:{self._settings.server.port}"
@@ -1257,7 +1263,10 @@ class DashboardManager:
 
     def _api_url(self, path: str) -> str:
         """
-        Build API URL using the configured server port.
+        Build API URL using settings-based server address.
+
+        Uses the configured server port instead of Flask request context,
+        which is unsafe outside of request handling (startup, background tasks).
 
         Args:
             path: API path (e.g., "/api/health")
@@ -1265,7 +1274,7 @@ class DashboardManager:
         Returns:
             Full API URL (e.g., "http://127.0.0.1:8050/api/health")
         """
-        return urljoin(f"{self._api_base_url}/", path.lstrip("/"))
+        return f"{self._api_base_url}/{path.lstrip('/')}"
 
     def _setup_callbacks(self):
         """Set up dashboard callbacks."""

@@ -28,8 +28,6 @@ class TestButtonStateIntegration:
 
     def test_button_click_disables_button(self):
         """Test: Click Start → verify button disabled."""
-        from unittest.mock import patch
-
         from frontend.dashboard_manager import DashboardManager
 
         config = {
@@ -61,9 +59,9 @@ class TestButtonStateIntegration:
                 trigger="start-button",
             )
 
-            # Verify button is disabled after click
-            assert button_states["start"]["disabled"] is True, "Button should be disabled after click"
-            assert button_states["start"]["loading"] is True, "Button should show loading state"
+        # Verify button is disabled after click
+        assert button_states["start"]["disabled"] is True, "Button should be disabled after click"
+        assert button_states["start"]["loading"] is True, "Button should show loading state"
 
     def test_dashboard_has_button_state_stores(self):
         """Test: Dashboard has button state management stores."""
@@ -85,8 +83,6 @@ class TestButtonStateIntegration:
 
     def test_button_click_sends_single_command(self):
         """Test: Click Start → verify single command sent."""
-        from unittest.mock import MagicMock
-
         from frontend.dashboard_manager import DashboardManager
 
         config = {
@@ -127,8 +123,6 @@ class TestButtonStateIntegration:
 
     def test_button_re_enables_after_acknowledgment(self):
         """Test: Click → disable → ack received → button re-enabled."""
-        from unittest.mock import MagicMock
-
         from frontend.dashboard_manager import DashboardManager
 
         config = {
@@ -186,8 +180,6 @@ class TestButtonStateIntegration:
 
     def test_rapid_clicks_only_send_one_command(self):
         """Test: Rapid clicks → verify only one command sent."""
-        from unittest.mock import MagicMock
-
         from frontend.dashboard_manager import DashboardManager
 
         config = {
@@ -237,8 +229,6 @@ class TestButtonStateIntegration:
 
     def test_loading_indicator_visible(self):
         """Test: Button shows loading indicator when clicked."""
-        from unittest.mock import MagicMock
-
         from frontend.dashboard_manager import DashboardManager
 
         config = {
@@ -270,12 +260,12 @@ class TestButtonStateIntegration:
                 trigger="start-button",
             )
 
-            result = dashboard._update_button_appearance_handler(button_states=button_states)
+        result = dashboard._update_button_appearance_handler(button_states=button_states)
 
-            start_disabled, start_text = result[0], result[1]
+        start_disabled, start_text = result[0], result[1]
 
-            assert "⏳" in start_text or "..." in start_text, f"Button should show loading indicator, got: {start_text}"
-            assert start_disabled is True, "Button should be disabled"
+        assert "⏳" in start_text or "..." in start_text, f"Button should show loading indicator, got: {start_text}"
+        assert start_disabled is True, "Button should be disabled"
 
     def test_error_handling_re_enables_button(self):
         """Test: API error → button re-enabled immediately."""

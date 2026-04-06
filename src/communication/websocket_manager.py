@@ -234,8 +234,8 @@ class WebSocketManager:
             await websocket_manager.connect(websocket, client_id='dashboard-1')
         """
         if len(self.active_connections) >= self.max_connections:
-            await websocket.close(code=1013, reason="Maximum connections reached")
-            self.logger.warning(f"Connection rejected: max_connections={self.max_connections} reached")
+            self.logger.warning(f"Max connections ({self.max_connections}) reached, rejecting client")
+            await websocket.close(code=1013, reason="Max connections reached")
             return
 
         await websocket.accept()
@@ -333,7 +333,7 @@ class WebSocketManager:
             self.logger.debug("No active connections for broadcast")
             return
 
-        # Copy to avoid mutating caller's dict
+        # Add timestamp if not present (copy to avoid mutating caller's dict)
         if "timestamp" not in message:
             message = {**message, "timestamp": datetime.now().isoformat()}
 

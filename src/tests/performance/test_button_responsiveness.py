@@ -167,9 +167,9 @@ class TestButtonResponsiveness:
                 trigger="start-button",
             )
 
-            # Verify button is disabled during execution
-            assert button_states["start"]["disabled"] is True, "Button should be disabled"
-            assert button_states["start"]["loading"] is True, "Button should show loading state"
+        # Verify button is disabled during execution
+        assert button_states["start"]["disabled"] is True, "Button should be disabled"
+        assert button_states["start"]["loading"] is True, "Button should show loading state"
 
     def test_button_re_enable_after_timeout(self):
         """Test that button re-enables after timeout."""

@@ -204,7 +204,7 @@ class TestSetParamsEndpoint:
 
     @pytest.mark.integration
     def test_set_params_invalid_value_type(self, client):
-        """POST /api/set_params with invalid value should return 422."""
+        """POST /api/set_params with invalid value should return 422 (Pydantic validation)."""
         response = client.post("/api/set_params", json={"learning_rate": "not_a_number"})
         assert response.status_code == 422
 

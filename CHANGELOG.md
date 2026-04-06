@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Documented documentation-link validation workflow and troubleshooting for CI and local developer runs:
+  - Added `Documentation Links` CI job reference with command parity and cross-repo policy modes in `docs/ci_cd/CICD_REFERENCE.md`
+  - Added a dedicated documentation-link failure pattern runbook in `docs/ci_cd/CICD_MANUAL.md`
+  - Added local `check_doc_links.py` commands and failure causes to `docs/DEVELOPER_CHEATSHEET.md`
+
 - **Contextual Left Menu**: Sidebar sections dynamically show/hide based on the active visualization tab. Training Controls always visible; Meta Parameters card, Network Information, and subsections toggle per tab via `TAB_SIDEBAR_CONFIG`. Card header text updates dynamically (e.g., "Network Parameters", "Candidate Parameters", "Dataset Parameters")
 - **Candidate Metrics Tab**: New top-level tab (`tab_id="candidates"`) for dedicated candidate pool monitoring, placed immediately after Training Metrics. Features pool status badge, epoch progress bar, top-2 candidates table, pool training metrics, candidate loss plot (orange trace), and collapsible pool history (max 20 entries, memory storage)
 - New `CandidateMetricsPanel` component (`src/frontend/components/candidate_metrics_panel.py`) extending `BaseComponent` with own data fetch callback gated on `active_tab == "candidates"`
@@ -24,17 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Updated CI/testing operational documentation to match current source-of-truth workflows and fixtures:
-  - `docs/ci_cd/CICD_QUICK_START.md`
-  - `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`
-  - `docs/testing/TESTING_ENVIRONMENT_SETUP.md`
-  - Coverage includes current `.github/workflows/ci.yml` job topology, Python `3.12/3.13/3.14` matrix expectations, pip-based CI dependency model, lockfile freshness behavior, and `src/tests/conftest.py` marker-gating/runtime defaults.
-
 - Extracted candidate pool section, history tracking, and pool display from `MetricsPanel` to `CandidateMetricsPanel`. Training Metrics tab retains candidate training trace in loss plot and candidate epoch progress bar for context
 - Component count increased from 11 to 12; updated test assertions accordingly
-- Updated Docker/demo-mode documentation to match current startup behavior and environment variable contracts:
-  - `README.md`: switched primary runtime configuration examples to `JUNIPER_CANOPY_*` settings, clarified demo-mode-by-default container behavior, and documented service-mode override (`JUNIPER_CANOPY_DEMO_MODE=0`).
-  - `docs/demo/DEMO_MODE_REFERENCE.md`: documented JuniperData-first dataset generation with local spiral fallback call sites used by demo startup and dataset regeneration paths.
+- Updated CI and developer documentation for markdown link validation to reflect current `docs` workflow behavior and local reproduction commands:
+  - `docs/ci_cd/CICD_REFERENCE.md`
+  - `docs/DEVELOPER_CHEATSHEET.md`
+  - Added explicit coverage of `scripts/check_doc_links.py` policies, including code-fence/inline-code skip behavior, anchor validation, cross-repo modes, and path-safety constraints.
 
 - Namespaced Prometheus metrics (`juniper_canopy_` prefix) with WebSocket and demo mode metrics
 - `juniper_canopy_websocket_connections_active` Gauge (by channel)

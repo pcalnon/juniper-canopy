@@ -163,8 +163,8 @@ class TestDashMounting:
 class TestAPIURLDynamicResolution:
     """Test that API URLs are resolved dynamically from Flask request."""
 
-    def test_callbacks_use_configured_base_url(self):
-        """Test that callbacks use configured base URL instead of hardcoded URLs."""
+    def test_callbacks_use_request_host_url(self):
+        """Test that _api_url uses settings-based URL construction."""
         import inspect
 
         from src.frontend.dashboard_manager import DashboardManager
@@ -172,12 +172,14 @@ class TestAPIURLDynamicResolution:
         config = {}
         manager = DashboardManager(config)
 
-        # Verify _api_url uses _api_base_url from settings
+        # Verify _api_url uses settings-based base URL (not Flask request context)
         api_url_source = inspect.getsource(manager._api_url)
         assert "_api_base_url" in api_url_source  # trunk-ignore(bandit/B101)
 
+        # Verify the base URL was set from settings
+        assert manager._api_base_url.startswith("http://127.0.0.1:")  # trunk-ignore(bandit/B101)
+
         # Verify handler methods use the _api_url helper (check a sample handler)
-        # _update_unified_status_bar_handler uses _api_url for API calls
         handler_source = inspect.getsource(manager._update_unified_status_bar_handler)
         assert "_api_url" in handler_source  # trunk-ignore(bandit/B101)
 

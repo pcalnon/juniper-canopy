@@ -1571,6 +1571,7 @@ class MetricsPanel(BaseComponent):
 
         self._add_validation_overlay(fig, metrics_data, "val_accuracy", "Validation Accuracy", "#82e0aa")
 
+        # Add phase background bands (reuse shared method)
         fig = self._add_phase_bg_bands(fig=fig, epochs=epochs, phases=phases)
 
         # Add hidden unit addition markers

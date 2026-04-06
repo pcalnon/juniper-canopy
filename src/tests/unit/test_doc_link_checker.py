@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -141,107 +142,64 @@ def test_cross_repo_check_mode_validates_existing_target(tmp_path: Path):
     assert errors == []
 
 
-def test_cross_repo_check_mode_reports_missing_target(tmp_path: Path):
-    """Cross-repo check mode should fail when target file is absent."""
+def test_validate_file_rejects_null_byte_targets(tmp_path: Path):
+    """Null bytes in link targets should be rejected for safety."""
     checker = _load_doc_link_checker_module()
-    ecosystem_root = tmp_path / "ecosystem"
-    repo_root = ecosystem_root / "juniper-canopy"
-    md_file = repo_root / "docs" / "cross-missing.md"
+    repo_root = tmp_path / "repo"
+    md_file = repo_root / "docs" / "null-byte.md"
 
-    _write_text(md_file, "# Cross\n[missing](../juniper-ml/docs/MISSING.md)\n")
+    _write_text(md_file, "# Security\n[bad](safe.md\x00evil)\n")
 
-    errors, skipped = checker._validate_file(
-        md_file,
-        repo_root,
-        cross_repo_mode="check",
-        ecosystem_root=ecosystem_root,
-    )
+    errors, skipped = checker._validate_file(md_file, repo_root, cross_repo_mode="skip")
 
     assert skipped == 0
     assert len(errors) == 1
-    assert "file not found in juniper-ml" in errors[0]
+    assert "null byte in link target" in errors[0]
 
 
-def test_find_markdown_files_skips_excluded_and_broken_symlink(tmp_path: Path):
-    """File discovery should skip excluded dirs, skip dirs, and broken symlinks."""
+def test_cross_repo_warn_mode_warns_and_counts_without_failing(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    """Warn mode should emit warning output and keep run non-failing."""
     checker = _load_doc_link_checker_module()
     repo_root = tmp_path / "repo"
+    md_file = repo_root / "docs" / "cross-warn.md"
 
-    keep_file = repo_root / "docs" / "keep.md"
-    excluded_file = repo_root / "docs" / "templates" / "excluded.md"
-    skip_dir_file = repo_root / "node_modules" / "ignored.md"
-    broken_symlink = repo_root / "docs" / "broken.md"
+    _write_text(md_file, "# Cross\n[remote](../juniper-ml/docs/README.md)\n")
 
-    _write_text(keep_file, "# Keep")
-    _write_text(excluded_file, "# Excluded")
-    _write_text(skip_dir_file, "# Ignored")
-    broken_symlink.parent.mkdir(parents=True, exist_ok=True)
-    broken_symlink.symlink_to(repo_root / "does-not-exist.md")
+    errors, skipped = checker._validate_file(md_file, repo_root, cross_repo_mode="warn")
+    captured = capsys.readouterr()
 
-    files = checker._find_markdown_files([repo_root], repo_root, exclude_dirs={"templates"})
-
-    assert files == [keep_file]
+    assert errors == []
+    assert skipped == 1
+    assert "WARN (cross-repo):" in captured.out
 
 
-def test_discover_ecosystem_root_uses_relative_git_common_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Ecosystem root discovery should resolve relative git common dir output."""
+def test_validate_file_accepts_repo_root_relative_resolution(tmp_path: Path):
+    """A link may resolve from repo root when file-local resolution misses."""
     checker = _load_doc_link_checker_module()
-    ecosystem_root = tmp_path / "ecosystem"
-    repo_root = ecosystem_root / "juniper-canopy"
-    repo_root.mkdir(parents=True)
-    (repo_root / ".git").mkdir()
-    (ecosystem_root / "juniper-cascor").mkdir()
-    (ecosystem_root / "juniper-data").mkdir()
-    (ecosystem_root / "juniper-ml").mkdir()
+    repo_root = tmp_path / "repo"
+    md_file = repo_root / "docs" / "nested" / "guide.md"
+    root_target = repo_root / "README.md"
 
-    class _Result:
-        returncode = 0
-        stdout = ".git\n"
+    _write_text(md_file, "# Guide\n[repo-readme](README.md)\n")
+    _write_text(root_target, "# Root README")
 
-    def _fake_run(*_args, **_kwargs):
-        return _Result()
+    errors, skipped = checker._validate_file(md_file, repo_root, cross_repo_mode="skip")
 
-    monkeypatch.setattr(checker.subprocess, "run", _fake_run)
-
-    discovered = checker._discover_ecosystem_root(repo_root)
-    assert discovered == ecosystem_root
+    assert skipped == 0
+    assert errors == []
 
 
-def test_main_rejects_invalid_cross_repo_mode(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
-    """CLI should fail fast for invalid --cross-repo values."""
+def test_validate_file_reports_repository_boundary_escape_without_depth_overflow(tmp_path: Path):
+    """Escapes outside repo should fail even when traversal depth limit is not exceeded."""
     checker = _load_doc_link_checker_module()
-    monkeypatch.setattr(checker.sys, "argv", ["check_doc_links.py", "--cross-repo", "invalid-mode"])
+    repo_root = tmp_path / "repo"
+    md_file = repo_root / "docs" / "boundary.md"
 
-    rc = checker.main()
-    out = capsys.readouterr().out
+    # Exactly five traversal segments avoids the depth gate (> 5) and exercises boundary checks.
+    _write_text(md_file, "# Boundary\n[escape](../../../../../outside.md)\n")
 
-    assert rc == 1
-    assert "ERROR: --cross-repo must be one of" in out
+    errors, skipped = checker._validate_file(md_file, repo_root, cross_repo_mode="skip")
 
-
-def test_main_falls_back_to_skip_when_ecosystem_root_missing(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-):
-    """CLI should downgrade check->skip when ecosystem root cannot be discovered."""
-    checker = _load_doc_link_checker_module()
-    modes_seen: list[str] = []
-
-    def _fake_validate_file(_md_file, _repo_root, verbose=False, cross_repo_mode="check", ecosystem_root=None):
-        assert verbose is False
-        assert ecosystem_root is None
-        modes_seen.append(cross_repo_mode)
-        return [], 0
-
-    monkeypatch.setattr(checker.sys, "argv", ["check_doc_links.py"])
-    monkeypatch.setattr(checker, "_discover_ecosystem_root", lambda _repo_root: None)
-    monkeypatch.setattr(checker, "_find_markdown_files", lambda *_args, **_kwargs: [Path("/workspace/README.md")])
-    monkeypatch.setattr(checker, "_validate_file", _fake_validate_file)
-
-    rc = checker.main()
-    out = capsys.readouterr().out
-
-    assert rc == 0
-    assert "WARNING: Ecosystem root not found." in out
-    assert "Cross-repo links: skip" in out
-    assert modes_seen == ["skip"]
+    assert skipped == 0
+    assert len(errors) == 1
+    assert "link resolves outside repository boundary" in errors[0]

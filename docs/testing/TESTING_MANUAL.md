@@ -1,7 +1,7 @@
 # Testing Manual - Comprehensive User Guide
 
 **Last Updated:** 2026-04-05  
-**Version:** v0.26.1
+**Version:** v0.26.0
 
 Complete guide to testing the Juniper Canopy application.
 
@@ -850,64 +850,36 @@ def test_with_fixture(resource):
 
 ### GitHub Actions Workflow
 
-```yaml
-# .github/workflows/ci.yml
-name: CI/CD Pipeline
+The active CI pipeline is split across multiple jobs in `.github/workflows/ci.yml`.
+For testing-relevant behavior, CI currently uses:
 
-on:
-  push:
-    branches: [main, develop, feature/**, fix/**]
-  pull_request:
-    branches: [main, develop]
+- Python matrix `3.12`, `3.13`, `3.14` for `pre-commit` and `unit-tests`
+- Python `3.14` for non-matrix jobs (integration/security/build/docs/lockfile)
+- `conf/requirements_ci.txt` plus editable install (`pip install -e .`)
+- Unit/regression fast subset:
+  `-m "not requires_cascor and not requires_server and not slow"`
+- Integration fast subset:
+  `-m "integration and not requires_cascor and not requires_server and not slow"`
 
-jobs:
-  pre-commit:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+Reference commands (mirrors CI):
 
-    steps:
-      - uses: actions/checkout@v6
+```bash
+python -m pip install --upgrade pip
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install -r conf/requirements_ci.txt
+pip install -e .
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
+cd src
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  tests/unit/ tests/regression/ \
+  --verbose --timeout=60 --maxfail=5 \
+  --cov=. --cov-report=term-missing --cov-fail-under=80
 
-      - name: Run pre-commit hooks
-        run: pre-commit run --all-files
-
-  unit-tests:
-    needs: [pre-commit]
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13", "3.14"]
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-
-      - name: Install dependencies
-        run: |
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -r conf/requirements_ci.txt
-          pip install -e .
-
-      - name: Run tests
-        run: |
-          python -m pytest \
-            -m "not requires_cascor and not requires_server and not slow" \
-            src/tests/unit/ src/tests/regression/ \
-            --cov=src \
-            --cov-fail-under=80
+python -m pytest \
+  -m "integration and not requires_cascor and not requires_server and not slow" \
+  tests/integration \
+  --verbose --timeout=120 --maxfail=3
 ```
 
 ### Pre-commit Hooks
@@ -920,16 +892,8 @@ pre-commit install
 # Run manually
 pre-commit run --all-files
 
-# Configuration in .pre-commit-config.yaml
-repos:
-  - repo: local
-    hooks:
-      - id: pytest
-        name: pytest
-        entry: pytest
-        language: system
-        pass_filenames: false
-        always_run: true
+# CI uses pre-commit as its own matrix job
+# See .github/workflows/ci.yml job: pre-commit
 ```
 
 ## Troubleshooting
@@ -941,7 +905,7 @@ repos:
 ```bash
 # Problem: ModuleNotFoundError
 # Solution: Activate conda environment
-conda activate JuniperPython
+conda activate JuniperCanopy
 ```
 
 #### 2. Test Discovery Fails

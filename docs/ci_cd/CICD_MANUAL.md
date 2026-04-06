@@ -1,10 +1,8 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-04-05  
-**Version:** 0.26.1  
+**Last Updated:** 2026-04-05
+**Version:** 0.26.0
 **Status:** Current
-
----
 
 ## Table of Contents
 
@@ -12,12 +10,11 @@
 2. [For Developers](#for-developers)
 3. [For Code Reviewers](#for-code-reviewers)
 4. [For Maintainers](#for-maintainers)
-5. [Workflow Deep Dive](#workflow-deep-dive)
-6. [Quality Gates and Metrics](#quality-gates-and-metrics)
-7. [Debugging Failed Builds](#debugging-failed-builds)
-8. [Performance Optimization](#performance-optimization)
-9. [Security Considerations](#security-considerations)
-10. [Emergency Procedures](#emergency-procedures)
+5. [Developer Workflow](#developer-workflow)
+6. [Maintainer Runbooks](#maintainer-runbooks)
+7. [Quality Gates and Merge Criteria](#quality-gates-and-merge-criteria)
+8. [Troubleshooting by Failing Job](#troubleshooting-by-failing-job)
+9. [References](#references)
 
 ---
 
@@ -107,15 +104,14 @@ pytest tests/unit/test_demo_mode.py -v
 **Watch mode (if pytest-watch installed):**
 
 ```bash
-ptw tests/ -- -v
-```
-
-#### 3. Before Committing
-
-**Run pre-commit hooks manually:**
-
-```bash
-pre-commit run --all-files
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o /tmp/requirements.lock.check
+tail -n +3 requirements.lock > /tmp/lock_body
+tail -n +3 /tmp/requirements.lock.check > /tmp/check_body
+diff -u /tmp/lock_body /tmp/check_body
 ```
 
 **Run documentation link validation (matches CI docs job):**
@@ -649,180 +645,148 @@ Approved pending green CI.
 
 ## For Maintainers
 
-### Monitoring CI Health
+### Overview
 
-#### Weekly Tasks
+This manual describes how the current GitHub Actions pipeline works and how to operate it safely.
+It is source-verified against:
 
-**1. Review CI metrics:**
+- `.github/workflows/ci.yml`
+- `.github/workflows/security-scan.yml`
+- `.github/workflows/lockfile-update.yml`
+- `.github/workflows/publish.yml`
+- `pyproject.toml`
+- `scripts/check_doc_links.py`
 
-```bash
-# Average build time
-# Target: <15 minutes
+### Pipeline Intent and Architecture
 
-# Success rate
-# Target: >90%
+The pipeline enforces three outcomes:
 
-# Flaky test rate
-# Target: <5%
-```
+- Code quality and test safety (`pre-commit`, `unit-tests`, `integration-tests`)
+- Supply-chain and security hygiene (`security`, lockfile, scheduled scan)
+- Operational correctness of artifacts and docs (`build`, `docker-build`, `docs`, `dependency-docs`)
 
-**2. Check resource usage:**
+Primary workflow (`ci.yml`) flow:
 
-- GitHub Actions minutes used
-- Artifact storage used
-- Codecov credits used
+1. `pre-commit` runs on Python `3.12/3.13/3.14`
+2. `unit-tests` runs matrix tests with coverage gate (`--cov-fail-under=80`)
+3. `build` runs once on Python `3.14`
+4. Parallel validation jobs run:
+   - `integration-tests`
+   - `security`
+   - `dependency-docs`
+   - `lockfile-check`
+   - `docs`
+   - `docker-build`
+5. `required-checks` aggregates results and blocks on failures
+6. `notify` emits final summary
 
-**3. Review failed builds:**
+## Developer Workflow
 
-- Identify patterns
-- Fix flaky tests
-- Update documentation
-
-#### Monthly Tasks
-
-**1. Update dependencies:**
-
-```bash
-# Update pre-commit hooks
-pre-commit autoupdate
-
-# Update GitHub Actions versions
-# Edit .github/workflows/ci.yml
-# - uses: actions/checkout@v4  # Check for v5
-# - uses: codecov/codecov-action@v4  # Check for v5
-```
-
-**2. Review coverage trends:**
-
-- Overall coverage increasing?
-- Any modules losing coverage?
-- Critical modules at target?
-
-**3. Audit secrets:**
-
-- Rotate Codecov token
-- Check secret access logs
-- Remove unused secrets
-
-#### Quarterly Tasks
-
-**1. Review quality gates:**
-
-```yaml
-# Are thresholds appropriate?
-coverage:
-  target: 80%  # Too high/low?
-  minimum: 60%  # Adjust based on reality
-```
-
-**2. Optimize build performance:**
-
-- Add/update caching
-- Parallelize jobs
-- Remove slow tests
-
-**3. Security audit:**
-
-- Review Dependabot alerts
-- Update vulnerable dependencies
-- Check for exposed secrets
-
-### Managing Quality Gates
-
-#### Current Thresholds
-
-```yaml
-Coverage:
-  Warning: <80%
-  Failure: <60%
-
-Test Pass Rate:
-  Requirement: 100%
-
-Lint:
-  Errors: Block merge
-  Warnings: Allow merge
-
-Build:
-  Syntax errors: Block merge
-```
-
-#### Adjusting Thresholds
-
-**When to increase:**
-
-- Coverage consistently >target for 2+ weeks
-- Team agrees higher standards achievable
-- Critical bugs traced to untested code
-
-**When to decrease:**
-
-- Coverage consistently <target despite effort
-- Blocking legitimate work
-- Not achievable for legacy code
-
-**How to change:**
-
-````markdown
-1. Discuss with team
-2. Update in multiple places:
+### 1. Before pushing a branch
 
 ```bash
-# .github/workflows/ci.yml
-- Check Coverage Threshold
-  if (( $(echo "$COVERAGE < 60" | bc -l) )); then
+pre-commit run --all-files
 
-# .codecov.yml
-coverage:
-  status:
-    project:
-      default:
-        target: 80%
-
-# pyproject.toml
-[tool.coverage.report]
-fail_under = 60
+cd src
+python -m pytest \
+  -m "not requires_cascor and not requires_server and not slow" \
+  tests/unit/ tests/regression/ \
+  --verbose \
+  --cov=. \
+  --cov-report=term-missing
 ```
 
-3. Announce change to team
-4. Monitor impact
-````
-
-### Handling CI Failures
-
-#### Systematic Approach
-
-**1. Triage:**
+For integration-sensitive changes:
 
 ```bash
-# Classify failure
-- Test failure (logic bug)
-- Flaky test (timing/race condition)
-- Environment issue (dependency/config)
-- Infrastructure issue (GitHub Actions)
+cd src
+python -m pytest \
+  -m "integration and not requires_cascor and not requires_server and not slow" \
+  tests/integration \
+  --verbose
 ```
 
-**2. Quick fixes:**
+### 2. If dependencies changed
+
+Regenerate lockfile exactly as CI expects:
 
 ```bash
-# Flaky test → Disable temporarily
-@pytest.mark.skip(reason="Flaky test - under investigation #123")
-
-# Known issue → Document
-# Known Issues:
-# - Test X fails on Python 3.11 (Issue #456)
+uv pip compile pyproject.toml \
+  --extra juniper-data \
+  --extra juniper-cascor \
+  --extra observability \
+  -o requirements.lock
 ```
 
-**3. Long-term fixes:**
+### 3. If docs changed
+
+Validate links with CI-equivalent arguments:
 
 ```bash
-# Fix root cause
-# Add regression test
-# Update documentation
-# Close related issues
+python scripts/check_doc_links.py \
+  --exclude templates --exclude history \
+  --exclude pull_requests --exclude releases \
+  --exclude analysis --exclude fixes --exclude development \
+  --exclude CHANGELOG.md \
+  --cross-repo skip
 ```
 
-#### Flaky Test Management
+## Maintainer Runbooks
+
+### Runbook: Dependabot lockfile automation
+
+When Dependabot pushes to `dependabot/pip/**`, `lockfile-update.yml`:
+
+1. Regenerates `requirements.lock` via `uv pip compile`
+2. Commits `[dependabot skip] Update requirements.lock` if changed
+3. Pushes with `CROSS_REPO_DISPATCH_TOKEN` so downstream CI is triggered
+
+Operational constraints:
+
+- Keep `CROSS_REPO_DISPATCH_TOKEN` valid
+- Keep compile extras aligned with `ci.yml` (`juniper-data`, `juniper-cascor`, `observability`)
+- Keep `requirements.lock` committed in PRs that modify dependency constraints
+
+### Runbook: Scheduled security scan
+
+`security-scan.yml` runs weekly and manually:
+
+1. Installs `bandit[sarif]`, `pip-audit`, and project package (`pip install -e .`)
+2. Runs Bandit with SARIF output and text output
+3. Runs `pip-audit --strict --desc on`
+4. Uploads `reports/security/` artifacts
+
+Use this runbook after dependency updates to confirm no new vulnerabilities are introduced.
+
+### Runbook: Release publishing
+
+`publish.yml` is release-triggered (`release: published`) and uses OIDC:
+
+1. Build and `twine check`
+2. Publish to TestPyPI (`environment: testpypi`)
+3. Verify installation from TestPyPI
+4. Publish to PyPI (`environment: pypi`)
+
+Do not bypass TestPyPI stage; production publish is intentionally downstream.
+
+## Quality Gates and Merge Criteria
+
+PRs are merge-safe when `Quality Gate` succeeds.
+
+`required-checks` enforces:
+
+- Must succeed:
+  - `pre-commit`
+  - `unit-tests`
+  - `lockfile-check`
+- Must not fail:
+  - `integration-tests` (allowed skipped outside configured refs)
+  - `security`
+  - `docs`
+  - `dependency-docs` (skipped acceptable, failure not)
+  - `docker-build` (skipped acceptable, failure not)
+
+### Flaky Test Management
 
 **Identify flaky tests:**
 
@@ -1030,241 +994,279 @@ python-version: ["3.11", "3.12", "3.13"]
 
 - Integration test failures
 
-### Documentation Links Stage
-
-**Purpose:** Validate internal markdown links and heading anchors.
-
-**Command executed in CI (`docs` job):**
-
-```bash
-python scripts/check_doc_links.py \
-  --exclude templates --exclude history \
-  --exclude pull_requests --exclude releases \
-  --exclude analysis --exclude fixes --exclude development \
-  --exclude CHANGELOG.md \
-  --cross-repo skip
-```
-
-**Why CI uses `--cross-repo skip`:**
-
-- GitHub runners do not guarantee sibling Juniper repositories are present on disk.
-- Cross-repo links are still structurally validated; only on-disk existence checks are skipped.
-
-**Failure conditions:**
-
-- Broken relative markdown links
-- Broken same-file heading anchors
-- Absolute paths in documentation links
-- Link traversal outside repository boundaries
-
 ### Quality Gate Stage
 
-1. [Overview](#overview)
-2. [Pipeline Behavior](#pipeline-behavior)
-3. [Developer Workflow](#developer-workflow)
-4. [Reviewer Workflow](#reviewer-workflow)
-5. [Maintainer Workflow](#maintainer-workflow)
-6. [Failure Triage Runbook](#failure-triage-runbook)
-7. [Artifacts and Diagnostics](#artifacts-and-diagnostics)
-8. [Security and Release Workflows](#security-and-release-workflows)
-9. [References](#references)
+**Purpose:** Aggregate results and enforce standards
 
----
+**Checks:**
 
 ```python
 if test_result == "failure":
     fail("Tests failed")
 elif build_result == "failure":
     fail("Build failed")
-elif docs_result == "failure":
-    fail("Documentation link validation failed")
 elif lint_result == "failure":
     warn("Linting failed")
 else:
     pass("Quality gate passed")
 ```
 
-Primary CI source of truth:
+**Duration:** ~30 seconds
 
-- `.github/workflows/ci.yml`
+### Notify Stage
 
-Related workflows:
+**Purpose:** Report final status
 
-- `.github/workflows/security-scan.yml` (scheduled weekly scan)
-- `.github/workflows/publish.yml` (release publishing)
+**Information logged:**
 
-Current CI characteristics:
+- Workflow name
+- Branch
+- Commit SHA
+- Actor (who triggered)
+- Final status
 
-- Runners: `ubuntu-latest`
-- Python matrix: `3.12`, `3.13`, `3.14` for `pre-commit` and `unit-tests`
-- Single Python: `3.14` for integration/security/build/docs/lockfile/dependency-docs
-- Install model: `pip` + `conf/requirements_ci.txt` + editable install (`pip install -e .`)
-- Coverage enforcement: `--cov-fail-under=80`
-- No Codecov upload in current workflow
+**Duration:** ~10 seconds
 
 ---
 
-## Pipeline Behavior
+## Quality Gates and Metrics
 
-### Triggers
+### Coverage Metrics
 
-`CI/CD Pipeline` runs on:
+**Overall coverage:**
 
-- `push` to `main`, `develop`, `feature/**`, `fix/**`
-- `pull_request` targeting `main` or `develop`
-- `repository_dispatch` (`data-client-updated`, `cascor-client-updated`)
-- `workflow_dispatch`
+```bash
+Current:  73%
+Target:   80%
+Minimum:  60%
+```
 
-### Job Graph
+**By module:**
 
-Main jobs in execution order/dependency chains:
+| Module            | Current | Target | Status     |
+| ----------------- | ------- | ------ | ---------- |
+| config_manager    | 93%     | 100%   | ⚠️ Close   |
+| demo_mode         | 84%     | 100%   | ⚠️ Close   |
+| websocket_manager | 78%     | 100%   | ❌ Gap     |
+| dashboard_manager | 84%     | 60%    | ✅ Exceeds |
+| metrics_panel     | 94%     | 60%    | ✅ Exceeds |
 
-1. `pre-commit`
-2. `unit-tests` (needs `pre-commit`)
-3. `integration-tests` (needs `unit-tests`; PR/main/develop only)
-4. `build` (needs `unit-tests`)
-5. `security` (needs `pre-commit`)
-6. `dependency-docs` (needs `build`)
-7. `lockfile-check`
-8. `docs`
-9. `docker-build` (needs `build`; PR/main/develop only)
-10. `required-checks` (aggregates outcomes)
-11. `notify`
+### Test Metrics
 
-### Quality Gate Rules
+**Test counts:**
 
-`required-checks` fails on:
+```bash
+Total:        170 tests
+Unit:         120 tests (71%)
+Integration:   40 tests (23%)
+Performance:   10 tests (6%)
+```
 
-- failed `pre-commit`
-- failed `unit-tests`
-- failed `integration-tests` (if it ran)
-- failed `security`
-- failed `lockfile-check`
-- failed `docs`
-- failed `docker-build` (if it ran)
-- failed `dependency-docs` (skipped is allowed)
+**Pass rate:**
+
+```bash
+Required:     100%
+Current:      100%
+Status:       ✅ Pass
+```
+
+### Performance Metrics
+
+**Build times:**
+
+```bash
+Lint:         2 min
+Test (3.11):  8 min
+Test (3.12):  8 min
+Test (3.13):  8 min
+Build:        2 min
+Integration:  5 min
+Total:        ~15 min (with parallelization)
+```
+
+**Targets:**
+
+- Total build: <20 min
+- Individual job: <10 min
+- Critical path: <15 min
 
 ---
 
-## Developer Workflow
+## Debugging Failed Builds
 
-### Before Pushing
+### Systematic Debugging Process
 
-Run the same core checks locally:
+**1. Identify failure type:**
 
 ```bash
-python -m pip install --upgrade pip
-pip install -r conf/requirements_ci.txt
-pip install -e .
-pip install pre-commit
-
-pre-commit run --all-files
-
-python -m pytest \
-  -m "not requires_cascor and not requires_server and not slow" \
-  src/tests/unit/ src/tests/regression/ \
-  --cov=src --cov-report=term-missing --cov-fail-under=80
+✓ Lint
+✗ Test Suite (Python 3.13)
+✓ Build
+✓ Integration
+✗ Quality Gate
 ```
 
-Optional integration parity check:
+**2. Examine failed job:**
+
+- Click on failed job
+- Expand failed step
+- Read error message
+
+**3. Reproduce locally:**
 
 ```bash
-python -m pytest \
-  -m "integration and not requires_cascor and not requires_server and not slow" \
-  src/tests/integration \
-  --verbose
+# Match CI environment
+conda create -n debug-ci python=3.13
+conda activate debug-ci
+pip install -r conf/requirements.txt
+
+# Run failing test
+cd src
+pytest tests/unit/test_failing.py -vv
 ```
 
-### Push and Validate
+**4. Debug with more verbosity:**
 
 ```bash
-git add .
-git commit -m "docs: <summary>"
-git push origin <branch>
+# Maximum verbosity
+pytest tests/ -vv -s --tb=long
+
+# Drop into debugger on failure
+pytest tests/ --pdb
+
+# Show local variables
+pytest tests/ --showlocals
 ```
 
-After push, confirm CI jobs complete and check:
-
-- matrix failures isolated to one Python version
-- lockfile freshness status
-- docs link validation status
-- Docker smoke test status on PRs
-
----
-
-## Reviewer Workflow
-
-Reviewers should verify:
-
-- `required-checks` is green
-- coverage gate is passing (80 threshold enforced by CI command)
-- no skipped critical jobs unexpectedly (except intentionally conditional jobs)
-- artifacts exist for failing runs when debugging is needed
-
-Reviewer prompts to use on failures:
-
-- "Please rerun local pre-commit and unit/regression coverage command from `docs/ci_cd/CICD_QUICK_START.md`."
-- "Please include lockfile regeneration if `lockfile-check` failed."
-
----
-
-## Maintainer Workflow
-
-### Routine Operations
-
-Keep these aligned with source code:
-
-- Python versions in `ci.yml` and docs
-- install commands (`requirements_ci.txt`, editable install)
-- marker-gating assumptions used by `src/tests/conftest.py`
-- lockfile compile command and extras
-
-### Common Maintenance Tasks
-
-Lockfile refresh:
+**5. Fix and verify:**
 
 ```bash
-pip install uv
-uv pip compile pyproject.toml \
-  --extra juniper-data \
-  --extra juniper-cascor \
-  --extra observability \
-  -o requirements.lock
+# Fix code
+vim src/module.py
+
+# Verify fix
+pytest tests/unit/test_module.py -v
+
+# Run full suite
+pytest tests/ -v
 ```
 
-Docs link check used by CI:
+**6. Push fix:**
 
 ```bash
-python scripts/check_doc_links.py \
-  --exclude templates --exclude history \
-  --exclude pull_requests --exclude releases \
-  --exclude analysis --exclude fixes --exclude development \
-  --exclude CHANGELOG.md \
-  --cross-repo skip
+git add src/module.py
+git commit -m "fix: Resolve test failure in module"
+git push
 ```
 
-## Test Selection Behavior
+### Common Failure Patterns
 
-## Failure Triage Runbook
+#### Pattern 1: Import Error
 
-### `pre-commit` Failure
-
-Run:
+**Symptom:**
 
 ```bash
-pre-commit run --all-files --show-diff-on-failure
+ERROR: ModuleNotFoundError: No module named 'uvicorn'
 ```
 
-### `unit-tests` Failure
+**Causes:**
 
-Run CI-equivalent command:
+1. Missing from `requirements.txt`
+2. Conda environment not activated
+3. Typo in import statement
+
+**Fix:**
 
 ```bash
-python -m pytest \
-  -m "not requires_cascor and not requires_server and not slow" \
-  src/tests/unit/ src/tests/regression/ \
-  --timeout=60 --maxfail=5 \
-  --cov=src --cov-report=term-missing --cov-fail-under=80
+# Add to requirements.txt
+echo "uvicorn>=0.20.0" >> conf/requirements.txt
+
+# Verify locally
+pip install -r conf/requirements.txt
+pytest tests/ -v
+```
+
+#### Pattern 2: Fixture Not Found
+
+**Symptom:**
+
+```bash
+ERROR: fixture 'mock_config_file' not found
+```
+
+**Causes:**
+
+1. `conftest.py` not in correct location
+2. Fixture name typo
+3. Pytest not discovering fixtures
+
+**Fix:**
+
+```bash
+# Ensure conftest.py at tests root
+ls src/tests/conftest.py
+
+# Check fixture definition
+grep "def mock_config_file" src/tests/conftest.py
+```
+
+#### Pattern 3: Assertion Failure
+
+**Symptom:**
+
+```bash
+FAILED tests/unit/test_demo_mode.py::test_metrics
+AssertionError: assert {'epoch': 1} == {'epoch': 0}
+```
+
+**Causes:**
+
+1. Logic bug
+2. Test assumption wrong
+3. Race condition
+4. State not reset
+
+**Fix:**
+
+```python
+# Debug test
+def test_metrics():
+    demo = DemoMode()
+    demo.start()
+
+    # Add debug output
+    state = demo.get_current_state()
+    print(f"State: {state}")  # Use -s flag to see
+
+    assert state['epoch'] == 0
+```
+
+#### Pattern 4: Coverage Too Low
+
+**Symptom:**
+
+```bash
+ERROR: Coverage is critically low: 55% (minimum: 60%)
+```
+
+**Causes:**
+
+1. New code without tests
+2. Tests deleted
+3. Dead code added
+
+**Fix:**
+
+```bash
+# Generate coverage report
+cd src
+pytest tests/ --cov=. --cov-report=html
+
+# View report
+open ../reports/coverage/index.html
+
+# Add tests for uncovered code
+vim tests/unit/test_new_feature.py
 ```
 
 #### Pattern 5: Documentation Link Validation Failure
@@ -1272,27 +1274,30 @@ python -m pytest \
 **Symptom:**
 
 ```bash
-FAILED: Documentation link validation
-FOUND <N> broken link(s) in <M> file(s)
+FOUND 1 broken link(s) in 1 file(s):
+docs/xyz.md:42: broken anchor #missing-heading (heading not found)
 ```
 
-**Common causes:**
+**Causes:**
 
-1. Moved/renamed markdown files with stale links
-2. Heading text changed, but anchor links were not updated
-3. Absolute paths in markdown links (`/path/to/file`)
-4. Link paths that escape repository boundaries
+1. Heading anchor does not match markdown heading slug generation
+2. Link target points to a moved/deleted file
+3. Link uses absolute paths or unsafe traversal patterns
+4. CI runner uses `--cross-repo skip`, masking sibling-repo checks you expected
 
 **Fix:**
 
 ```bash
-# Reproduce CI docs job locally
+# Run exactly what CI runs
 python scripts/check_doc_links.py \
   --exclude templates --exclude history \
   --exclude pull_requests --exclude releases \
   --exclude analysis --exclude fixes --exclude development \
   --exclude CHANGELOG.md \
   --cross-repo skip
+
+# Optional strict mode for local ecosystem checkouts
+python scripts/check_doc_links.py --cross-repo check
 ```
 
 ---
@@ -1301,73 +1306,377 @@ python scripts/check_doc_links.py \
 
 ### Current Performance
 
-Run:
+**Baseline:**
 
 ```bash
-python -m pytest \
-  -m "integration and not requires_cascor and not requires_server and not slow" \
-  src/tests/integration \
-  --timeout=120 --maxfail=3
+Lint:         2 min
+Test Matrix:  24 min (8 min × 3 versions)
+Build:        2 min
+Integration:  5 min
+Total:        33 min sequential
+              15 min parallel (current)
 ```
 
-### `lockfile-check` Failure
+### Optimization Strategies
 
-Regenerate `requirements.lock` using the command in [Maintainer Workflow](#maintainer-workflow), then commit the updated lockfile.
+#### 1. Dependency Caching
 
-### `docs` Failure
+**Before:** Install dependencies every run (~2 min)
 
-Run the docs link command from [Maintainer Workflow](#maintainer-workflow) and fix broken links/anchors.
+**After:** Cache dependencies (~30 sec)
 
-### `docker-build` Failure
+```yaml
+- name: Cache pip packages
+  uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7  # v5.0.4
+  with:
+    path: ~/.cache/pip
+    key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+```
 
-Reproduce locally:
+**Savings:** ~1.5 min per job
+
+#### 2. Pytest Cache
+
+**Before:** Full test discovery every run
+
+**After:** Cache test results
+
+```yaml
+- name: Cache pytest
+  uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7  # v5.0.4
+  with:
+    path: src/.pytest_cache
+    key: ${{ runner.os }}-pytest-${{ hashFiles('**/tests/**') }}
+```
+
+**Savings:** ~10-20 seconds
+
+#### 3. Parallel Test Execution
+
+**Before:** Tests run sequentially
+
+**After:** Tests run in parallel
 
 ```bash
-docker build -t juniper-canopy:test .
-docker run --rm -p 8050:8050 juniper-canopy:test
-curl -sf http://localhost:8050/v1/health
+# Install pytest-xdist
+pip install pytest-xdist
+
+# Run tests in parallel
+pytest tests/ -n auto  # Auto-detect CPU count
+pytest tests/ -n 4     # Use 4 workers
+```
+
+**Savings:** 30-50% reduction in test time
+
+#### 4. Skip Slow Tests
+
+**Mark slow tests:**
+
+```python
+@pytest.mark.slow
+def test_long_running_operation():
+    # Takes 30+ seconds
+    pass
+```
+
+**Skip in CI:**
+
+```yaml
+- name: Run Tests (skip slow)
+  run: pytest tests/ -m "not slow"
+```
+
+**Savings:** Variable, depends on slow tests
+
+#### 5. Optimize Matrix
+
+**Before:** Test all versions
+
+```yaml
+matrix:
+  python-version: ["3.11", "3.12", "3.13"]
+```
+
+**After:** Primary version + periodic full matrix
+
+```yaml
+matrix:
+  python-version: ["3.13"]  # Fast feedback
+
+# Full matrix on:
+# - Pull requests to main
+# - Nightly builds
+# - Release tags
+```
+
+**Savings:** ~16 min (2 fewer versions)
+
+### Recommended Optimizations
+
+#### Phase 1: Quick wins
+
+1. Add pip caching
+2. Add pytest caching
+3. Skip slow tests on non-main branches
+
+**Expected improvement:** 15 min → 10 min
+
+#### Phase 2: Medium effort
+
+1. Use pytest-xdist for parallel tests
+2. Optimize test fixtures
+3. Conditional matrix (single version for PRs)
+
+**Expected improvement:** 10 min → 7 min
+
+#### Phase 3: Advanced
+
+1. Split test suite into shards
+2. Use self-hosted runners
+3. Implement test impact analysis
+
+**Expected improvement:** 7 min → 5 min
+
+---
+
+## Security Considerations
+
+### Secrets Management
+
+**Never commit:**
+
+- API keys
+- Passwords
+- Private keys
+- Tokens
+- Certificates
+
+**Always use GitHub Secrets:**
+
+```yaml
+- name: Use Secret
+  env:
+    TOKEN: ${{ secrets.API_TOKEN }}
+  run: |
+    # Secret available as $TOKEN
+    # Never echo the value!
+```
+
+### Security Scanning
+
+**Bandit security scanner:**
+
+```yaml
+- name: Security Scan
+  run: bandit -r src/ -c pyproject.toml
+```
+
+**Common issues caught:**
+
+- Hardcoded passwords
+- SQL injection
+- Use of `eval()`/`exec()`
+- Insecure random
+
+### Dependency Security
+
+**Dependabot alerts:**
+
+1. Enable Dependabot in repository settings
+2. Review alerts weekly
+3. Update vulnerable dependencies promptly
+
+**Example:**
+
+```yaml
+# .github/dependabot.yml
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+```
+
+### Code Scanning
+
+**GitHub Advanced Security:**
+
+1. Enable code scanning
+2. Run CodeQL analysis
+3. Review and fix findings
+
+```yaml
+# .github/workflows/codeql.yml
+- name: Initialize CodeQL
+  uses: github/codeql-action/init@v2
+  with:
+    languages: python
 ```
 
 ---
 
-## Artifacts and Diagnostics
+## Emergency Procedures
 
-Common artifacts from `ci.yml`:
+### Build System Down
 
-- `coverage-report-py<version>` (coverage XML + HTML, 30 days)
-- `unit-test-results-py<version>` (JUnit XML, 30 days)
-- `integration-test-results` (JUnit XML, 30 days)
-- `security-reports` (bandit/pip-audit outputs, 30 days)
-- `dist-packages` (build artifacts, 30 days)
-- `dependency-docs` (dependency snapshots, 90 days)
+**Symptoms:**
 
-For failures, inspect uploaded artifacts before attempting speculative fixes.
+- All workflows failing
+- GitHub Actions unavailable
+- Runners not available
 
----
+**Actions:**
 
-## Security and Release Workflows
+1. Check [GitHub Status](https://www.githubstatus.com)
+2. If outage, wait for resolution
+3. Communicate to team
+4. Delay merges until restored
 
-### Scheduled Security
+**Workaround:**
 
-`.github/workflows/security-scan.yml`:
+```bash
+# Run tests locally before merge
+pytest tests/ --cov=. -v
 
-- schedule: weekly Monday 06:00 UTC
-- manual trigger: supported
-- tools: `bandit` + `pip-audit`
+# Get manual approval from maintainer
+# Merge with --no-verify if urgent
+```
 
-### Publish Workflow
+### Critical Bug in Production
 
-`.github/workflows/publish.yml`:
+**Scenario:** Need to deploy fix immediately
 
-- trigger: `release.published`
-- stages: `build` -> `testpypi` -> `pypi`
-- auth model: OIDC trusted publishing (`id-token: write`)
-- package verification: TestPyPI install check before PyPI publish
+**Procedure:**
 
----
+```bash
+# 1. Create hotfix branch
+git checkout -b hotfix/critical-fix
+
+# 2. Make minimal fix
+vim src/broken_module.py
+
+# 3. Test locally
+pytest tests/ -v
+
+# 4. Commit
+git commit -am "hotfix: Fix critical bug"
+
+# 5. Push
+git push origin hotfix/critical-fix
+
+# 6. Create PR
+# Title: "[HOTFIX] Fix critical bug"
+
+# 7. Request immediate review
+
+# 8. If CI taking too long and fix is verified:
+# - Get approval from 2+ maintainers
+# - Merge despite CI running
+# - Monitor CI completion
+# - Revert if CI fails
+```
+
+### Coverage Threshold Blocking Valid Work
+
+**Scenario:** Coverage drop due to external factors
+
+**Temporary bypass:**
+
+```yaml
+# .github/workflows/ci.yml
+- name: Check Coverage Threshold
+  run: |
+    # Temporarily disabled due to refactoring
+    echo "Coverage check disabled - Issue #789"
+  continue-on-error: true
+```
+
+**Process:**
+
+1. Create issue documenting reason
+2. Set deadline for re-enabling
+3. Announce to team
+4. Track progress on issue
+5. Re-enable threshold
+6. Close issue
+
+### Flaky Test Epidemic
+
+**Scenario:** Multiple tests failing intermittently
+
+**Immediate action:**
+
+```bash
+# Disable flaky tests temporarily
+# File: tests/unit/test_flaky.py
+
+@pytest.mark.skip(reason="Flaky - Issue #456")
+def test_problematic():
+    pass
+```
+
+**Create issues:**
+
+```markdown
+# Issue: Fix flaky test_websocket_connection
+
+## Symptoms
+- Fails ~30% of time
+- ConnectionRefusedError
+- Only on CI, not local
+
+## Investigation needed
+- [ ] Check timing assumptions
+- [ ] Review WebSocket lifecycle
+- [ ] Add retries
+- [ ] Improve test isolation
+
+## Deadline
+Fix by: 2025-11-12
+
+### Track and fix systematically
+```
+
+- Unit-test matrix uses `--cov-fail-under=80` from workflow env and pytest command line.
+
+## Troubleshooting by Failing Job
+
+### `unit-tests` failing on one Python version only
+
+- Reproduce with that interpreter locally.
+- Confirm dependency compatibility with `conf/requirements_ci.txt`.
+- Re-run marker-filtered command from this manual.
+
+### `lockfile-check` fails with diff
+
+- Recompile `requirements.lock` using all three extras.
+- Ensure no manual edits were made to lockfile body.
+
+### `docs` fails
+
+- Run `scripts/check_doc_links.py` with workflow excludes and `--cross-repo skip`.
+- Fix broken relative paths or heading anchors.
+
+### `dependency-docs` fails
+
+- Re-run `scripts/generate_dep_docs.sh` locally.
+- Validate `conf/conda_environment_ci.yaml` parses and contains dependencies.
+
+### `docker-build` fails
+
+- Build local image from root `Dockerfile`.
+- Start container and verify `/v1/health` response.
+- Check image startup logs for import/config errors.
+
+### `security` fails
+
+- For Bandit: review `reports/security/bandit.txt` and prioritize medium/high findings.
+- For pip-audit: update vulnerable dependencies and regenerate lockfile.
 
 ## References
 
-**Last Updated:** 2026-04-05  
-**Version:** 0.25.2  
-**Status:** ✅ Complete
+- [CI/CD Quick Start](CICD_QUICK_START.md)
+- [CI/CD Environment Setup](CICD_ENVIRONMENT_SETUP.md)
+- [CI/CD Reference](CICD_REFERENCE.md)
+- [Testing Manual](../testing/TESTING_MANUAL.md)
