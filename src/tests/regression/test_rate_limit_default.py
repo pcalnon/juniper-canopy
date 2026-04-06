@@ -49,66 +49,66 @@ class TestRateLimitDefault:
         API endpoints. Rate limiting these self-to-self calls is counterproductive.
         The rate limiter should be opt-in (explicitly enabled via settings).
         """
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
 
         from security import get_rate_limiter, reset_security_state
 
         mock_settings = MagicMock()
         mock_settings.rate_limit_enabled = False
         mock_settings.rate_limit_requests_per_minute = 60
-        monkeypatch.setattr("security.get_settings", lambda: mock_settings)
 
         reset_security_state()
-        limiter = get_rate_limiter()
+        with patch("settings.get_settings", return_value=mock_settings):
+            limiter = get_rate_limiter()
 
         assert limiter.enabled is False, "Rate limiter is enabled by default. It must be disabled by default " "because the Dash dashboard makes internal HTTP requests to /api/* " "endpoints that would exceed the rate limit and cause 429 errors."
 
     def test_rate_limiter_can_be_enabled_via_settings(self, monkeypatch):
         """Rate limiter can be explicitly enabled via settings."""
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
 
         from security import get_rate_limiter, reset_security_state
 
         mock_settings = MagicMock()
         mock_settings.rate_limit_enabled = True
         mock_settings.rate_limit_requests_per_minute = 60
-        monkeypatch.setattr("security.get_settings", lambda: mock_settings)
 
         reset_security_state()
-        limiter = get_rate_limiter()
+        with patch("settings.get_settings", return_value=mock_settings):
+            limiter = get_rate_limiter()
 
         assert limiter.enabled is True
 
     def test_rate_limiter_custom_requests_per_minute(self, monkeypatch):
         """Rate limiter uses requests_per_minute from settings."""
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
 
         from security import get_rate_limiter, reset_security_state
 
         mock_settings = MagicMock()
         mock_settings.rate_limit_enabled = True
         mock_settings.rate_limit_requests_per_minute = 200
-        monkeypatch.setattr("security.get_settings", lambda: mock_settings)
 
         reset_security_state()
-        limiter = get_rate_limiter()
+        with patch("settings.get_settings", return_value=mock_settings):
+            limiter = get_rate_limiter()
 
         assert limiter.enabled is True
         assert limiter.limit == 200
 
     def test_rate_limiter_disabled_with_settings_false(self, monkeypatch):
         """Rate limiter is disabled when settings.rate_limit_enabled is False."""
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
 
         from security import get_rate_limiter, reset_security_state
 
         mock_settings = MagicMock()
         mock_settings.rate_limit_enabled = False
         mock_settings.rate_limit_requests_per_minute = 60
-        monkeypatch.setattr("security.get_settings", lambda: mock_settings)
 
         reset_security_state()
-        limiter = get_rate_limiter()
+        with patch("settings.get_settings", return_value=mock_settings):
+            limiter = get_rate_limiter()
 
         assert limiter.enabled is False
 

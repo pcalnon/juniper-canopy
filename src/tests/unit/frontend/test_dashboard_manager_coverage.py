@@ -256,23 +256,16 @@ class TestDashboardManagerLayout:
 class TestDashboardManagerAPIURL:
     """Test API URL building."""
 
-    def test_api_url_with_https(self):
-        """Test API URL construction with HTTPS."""
-        from werkzeug.test import EnvironBuilder
-
+    def test_api_url_uses_settings_base(self):
+        """Test API URL uses settings-based base URL."""
         from frontend.dashboard_manager import DashboardManager
 
         config = {}
         manager = DashboardManager(config)
 
-        # Create test request context
-        builder = EnvironBuilder(method="GET", base_url="https://localhost:8050/dashboard/", path="/dashboard/")
-        env = builder.get_environ()
-
-        with manager.app.server.request_context(env):
-            url = manager._api_url("/api/health")
-            assert url.startswith("https://")
-            assert "/api/health" in url
+        url = manager._api_url("/api/health")
+        assert url.startswith("http://127.0.0.1:")
+        assert "/api/health" in url
 
     def test_api_url_with_http(self):
         """Test API URL construction with HTTP."""

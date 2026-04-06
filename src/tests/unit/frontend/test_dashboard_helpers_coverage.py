@@ -14,7 +14,7 @@ import os
 from unittest.mock import Mock, patch
 
 import dash
-from flask import EnvironBuilder
+from werkzeug.test import EnvironBuilder
 
 # import pytest
 

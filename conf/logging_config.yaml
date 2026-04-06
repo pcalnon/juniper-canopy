@@ -71,7 +71,7 @@ handlers:
     # level: FATAL
     formatter: formatter_file
     filename: logs/juniper_canopy.log
-    mode: w
+    mode: a
 loggers:
   juniper:
     level: TRACE

@@ -167,7 +167,6 @@ repos:
           # - --install-types
           # - --non-interactive
           - --ignore-missing-imports
-          - --no-strict-optional
           - --python-version=3.14
           # - --python-version=3.12
           # Re-enabled (Epic 4.3): call-arg, override, no-redef, index,
@@ -197,7 +196,8 @@ repos:
         name: Security scan with Bandit
         args:
           - -q
-          - --skip=B101,B113,B311
+          - -c
+          - .bandit.yml
         files: ^src/.*\.py$
         exclude: ^src/tests/
 

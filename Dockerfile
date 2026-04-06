@@ -21,9 +21,6 @@ RUN pip install --no-cache-dir --upgrade pip wheel setuptools
 # Install CPU-only PyTorch first (avoids pulling CUDA which is ~4 GB)
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
-# Install runtime dependencies missing from lockfile
-RUN pip install --no-cache-dir pydantic-settings colorama networkx psutil python-multipart
-
 # Install pinned dependencies from lockfile (best layer caching)
 COPY requirements.lock ./
 RUN pip install --no-cache-dir -r requirements.lock
@@ -72,8 +69,10 @@ ENV PYTHONPATH=/app/src
 # Nested settings use double-underscore delimiter (SERVER__HOST, SERVER__PORT).
 ENV JUNIPER_CANOPY_SERVER__HOST=0.0.0.0
 ENV JUNIPER_CANOPY_SERVER__PORT=8050
-ENV JUNIPER_DATA_URL=http://localhost:8100
-ENV CASCOR_SERVICE_URL=http://localhost:8200
+ENV JUNIPER_CANOPY_DEMO_MODE=false
+ENV JUNIPER_CANOPY_LOG_LEVEL=INFO
+ENV JUNIPER_DATA_URL=http://juniper-data:8100
+ENV CASCOR_SERVICE_URL=http://juniper-cascor:8200
 EXPOSE 8050
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
