@@ -125,9 +125,9 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Startup — observability
     configure_logging(settings.log_level, settings.log_format, "juniper-canopy")
-    configure_sentry(settings.sentry_dsn, "juniper-canopy", "0.3.0")
+    configure_sentry(settings.sentry_dsn, "juniper-canopy", APP_VERSION)
     if settings.metrics_enabled:
-        set_build_info("juniper_canopy", "0.3.0")
+        set_build_info("juniper_canopy", APP_VERSION)
 
     system_logger.info("Starting Juniper Canopy application")
     system_logger.info(f"Settings: server={settings.server.host}:{settings.server.port}, demo={settings.demo_mode}")
@@ -489,7 +489,7 @@ async def health_check_deprecated(request: Request):
     return {
         "status": "healthy",
         "timestamp": time.time(),
-        "version": "0.3.0",
+        "version": APP_VERSION,
         "active_connections": websocket_manager.get_connection_count(),
         "training_active": backend.is_training_active(),
         "demo_mode": backend.backend_type == "demo",
@@ -503,7 +503,7 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": time.time(),
-        "version": "0.3.0",
+        "version": APP_VERSION,
         "active_connections": websocket_manager.get_connection_count(),
         "training_active": backend.is_training_active(),
         "demo_mode": backend.backend_type == "demo",
