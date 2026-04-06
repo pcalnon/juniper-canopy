@@ -12,7 +12,7 @@
 #   journalctl --user -u juniper-canopy -f
 #
 # Prerequisites:
-#   - conda environment "JuniperPython" with all dependencies installed
+#   - conda environment "JuniperCanopy" with all dependencies installed
 #   - .env file configured in the project root (or use .env.prod as template)
 #   - JuniperData service running at JUNIPER_CANOPY_JUNIPER_DATA_URL
 # =============================================================================
@@ -27,7 +27,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=%h/Development/python/Juniper/juniper-canopy/src
 EnvironmentFile=-%h/Development/python/Juniper/juniper-canopy/.env
-ExecStart=/opt/miniforge3/envs/JuniperPython/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8050
+ExecStart=/opt/miniforge3/envs/JuniperCanopy/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8050
 Restart=on-failure
 RestartSec=5
 
