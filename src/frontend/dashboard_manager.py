@@ -602,6 +602,14 @@ class DashboardManager:
                                                                                 className="mb-2",
                                                                                 debounce=True,
                                                                             ),
+                                                                            html.P("Output Weight Init:", className="mb-1 fw-bold"),
+                                                                            dcc.Dropdown(
+                                                                                id="nn-init-output-weights-dropdown",
+                                                                                options=[{"label": v.title(), "value": v} for v in TrainingConstants.INIT_OUTPUT_WEIGHTS_OPTIONS],
+                                                                                value=self.training_defaults.get("init_output_weights", TrainingConstants.DEFAULT_INIT_OUTPUT_WEIGHTS),
+                                                                                clearable=False,
+                                                                                className="mb-2",
+                                                                            ),
                                                                             html.P("Learning Rate:", className="mb-1 fw-bold"),
                                                                             dbc.Input(
                                                                                 id="nn-learning-rate-input",
