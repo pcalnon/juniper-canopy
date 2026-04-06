@@ -8,13 +8,13 @@
 
 1. [Pipeline Architecture](#pipeline-architecture)
 2. [Workflow Specification](#workflow-specification)
-3. [Configuration Files](#configuration-files)
-4. [Tool Configurations](#tool-configurations)
-5. [Environment Variables](#environment-variables)
-6. [Artifact Specifications](#artifact-specifications)
-7. [API Reference](#api-reference)
-8. [Documentation Link Validation](#documentation-link-validation)
-9. [Troubleshooting Reference](#troubleshooting-reference)
+3. [Auxiliary Workflows](#auxiliary-workflows)
+4. [Tooling and Configuration Sources](#tooling-and-configuration-sources)
+5. [Documentation Link Validation](#documentation-link-validation)
+6. [Troubleshooting Reference](#troubleshooting-reference)
+7. [Troubleshooting Reference, Updated](#troubleshooting-reference-updated)
+8. [Version History](#version-history)
+9. [References](#references)
 
 ---
 
@@ -175,12 +175,12 @@ lint:
 
 ## Workflow Inventory
 
-| Workflow File | Trigger | Primary Purpose |
-| --- | --- | --- |
-| `.github/workflows/ci.yml` | `push`, `pull_request`, `repository_dispatch`, `workflow_dispatch` | Full quality pipeline and merge gate |
-| `.github/workflows/security-scan.yml` | weekly cron + manual | Scheduled security posture scan |
-| `.github/workflows/lockfile-update.yml` | Dependabot push branches | Auto-refresh `requirements.lock` |
-| `.github/workflows/publish.yml` | release published | Build + TestPyPI + PyPI publish |
+| Workflow File                           | Trigger                                                            | Primary Purpose                      |
+|-----------------------------------------|--------------------------------------------------------------------|--------------------------------------|
+| `.github/workflows/ci.yml`              | `push`, `pull_request`, `repository_dispatch`, `workflow_dispatch` | Full quality pipeline and merge gate |
+| `.github/workflows/security-scan.yml`   | weekly cron + manual                                               | Scheduled security posture scan      |
+| `.github/workflows/lockfile-update.yml` | Dependabot push branches                                           | Auto-refresh `requirements.lock`     |
+| `.github/workflows/publish.yml`         | release published                                                  | Build + TestPyPI + PyPI publish      |
 
 ## Main CI Workflow (`ci.yml`)
 
@@ -353,19 +353,19 @@ env:
 
 ### Jobs and dependencies
 
-| Job | Needs | Python | Notes |
-| --- | --- | --- | --- |
-| `pre-commit` | — | matrix `3.12/3.13/3.14` | Runs `pre-commit --all-files` |
-| `unit-tests` | `pre-commit` | matrix `3.12/3.13/3.14` | Runs unit + regression markers with coverage gate |
-| `integration-tests` | `unit-tests` | `3.14` | Runs fast integration subset |
-| `build` | `unit-tests` | `3.14` | Builds sdist and wheel |
-| `security` | `pre-commit` | `3.14` | Gitleaks + Bandit + pip-audit |
-| `dependency-docs` | `build` | `3.14` | Generates dependency docs via script |
-| `lockfile-check` | — | `3.14` | Recompiles lockfile and diffs body |
-| `docs` | — | `3.14` | Runs doc-link validation script |
-| `docker-build` | `build` | docker engine | Builds image + health smoke test |
-| `required-checks` | all core jobs | n/a | Aggregated merge gate |
-| `notify` | `required-checks` | n/a | Run summary |
+| Job                 | Needs             | Python                  | Notes                                             |
+|---------------------|-------------------|-------------------------|---------------------------------------------------|
+| `pre-commit`        | —                 | matrix `3.12/3.13/3.14` | Runs `pre-commit --all-files`                     |
+| `unit-tests`        | `pre-commit`      | matrix `3.12/3.13/3.14` | Runs unit + regression markers with coverage gate |
+| `integration-tests` | `unit-tests`      | `3.14`                  | Runs fast integration subset                      |
+| `build`             | `unit-tests`      | `3.14`                  | Builds sdist and wheel                            |
+| `security`          | `pre-commit`      | `3.14`                  | Gitleaks + Bandit + pip-audit                     |
+| `dependency-docs`   | `build`           | `3.14`                  | Generates dependency docs via script              |
+| `lockfile-check`    | —                 | `3.14`                  | Recompiles lockfile and diffs body                |
+| `docs`              | —                 | `3.14`                  | Runs doc-link validation script                   |
+| `docker-build`      | `build`           | docker engine           | Builds image + health smoke test                  |
+| `required-checks`   | all core jobs     | n/a                     | Aggregated merge gate                             |
+| `notify`            | `required-checks` | n/a                     | Run summary                                       |
 
 ### Test marker expressions in CI
 
@@ -453,13 +453,13 @@ This catches broken internal file and heading links without requiring sibling re
 
 ## Tooling and Configuration Sources
 
-| Concern | Source of Truth |
-| --- | --- |
+| Concern                     | Source of Truth                                |
+|-----------------------------|------------------------------------------------|
 | Pytest markers and defaults | `pyproject.toml` (`[tool.pytest.ini_options]`) |
-| Coverage thresholds | `pyproject.toml` and `ci.yml` job args |
-| CI dependencies | `conf/requirements_ci.txt` |
-| Security scan excludes | `.bandit.yml` + workflow commands |
-| Doc-link validation rules | `scripts/check_doc_links.py` |
+| Coverage thresholds         | `pyproject.toml` and `ci.yml` job args         |
+| CI dependencies             | `conf/requirements_ci.txt`                     |
+| Security scan excludes      | `.bandit.yml` + workflow commands              |
+| Doc-link validation rules   | `scripts/check_doc_links.py`                   |
 
 ## Documentation Link Validation
 
@@ -500,14 +500,14 @@ python scripts/check_doc_links.py \
 
 ## Troubleshooting Reference
 
-| Job | Artifact | Typical Contents |
-| --- | --- | --- |
-| `unit-tests` | `coverage-report-py*` | XML + HTML coverage outputs |
-| `unit-tests` | `unit-test-results-py*` | JUnit XML test outputs |
-| `integration-tests` | `integration-test-results` | Integration JUnit XML |
-| `build` | `dist-packages` | Wheel and sdist |
-| `security` | `security-reports` | Bandit + pip-audit reports |
-| `dependency-docs` | `dependency-docs` | Generated requirements/conda docs |
+| Job                 | Artifact                   | Typical Contents                  |
+|---------------------|----------------------------|-----------------------------------|
+| `unit-tests`        | `coverage-report-py*`      | XML + HTML coverage outputs       |
+| `unit-tests`        | `unit-test-results-py*`    | JUnit XML test outputs            |
+| `integration-tests` | `integration-test-results` | Integration JUnit XML             |
+| `build`             | `dist-packages`            | Wheel and sdist                   |
+| `security`          | `security-reports`         | Bandit + pip-audit reports        |
+| `dependency-docs`   | `dependency-docs`          | Generated requirements/conda docs |
 
 | Error | Cause                    | Solution                         |
 | ----- | ------------------------ | -------------------------------- |
@@ -597,7 +597,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-## Troubleshooting Reference
+## Troubleshooting Reference, Updated
 
 ### Common Error Codes
 
@@ -617,7 +617,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 | D402  | Broken heading anchor    | Update anchor or heading            |
 | D403  | Unsafe link path         | Remove absolute/null/deep traversal |
 
-### Exit Codes
+### Exit Codes, Updated
 
 | Code | Meaning                 |
 | ---- | ----------------------- |
@@ -631,7 +631,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 | 137  | Killed (out of memory)  |
 | 139  | Segmentation fault      |
 
-### Log Analysis
+### Log Analysis, Updated
 
 **Search patterns:**
 
@@ -691,7 +691,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-04-05  
-**Version:** 0.25.1  
-**Maintained By:** Development Team  
+**Last Updated:** 2026-04-05
+**Version:** 0.25.1
+**Maintained By:** Development Team
 **Status:** ✅ Current
