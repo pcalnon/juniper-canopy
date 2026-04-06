@@ -84,7 +84,9 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         duration = time.perf_counter() - start
 
-        endpoint = request.url.path
+        # Use route template to avoid unbounded label cardinality from path parameters
+        route = request.scope.get("route")
+        endpoint = route.path if route else request.url.path
         method = request.method
         status = str(response.status_code)
 
@@ -121,13 +123,14 @@ def configure_logging(log_level: str, log_format: str, service_name: str = _SERV
     root.addHandler(handler)
 
 
-def configure_sentry(dsn: str | None, service_name: str, version: str) -> None:
+def configure_sentry(dsn: str | None, service_name: str, version: str, traces_sample_rate: float = 0.1) -> None:
     """Initialize Sentry with FastAPI integration. No-op when dsn is None or empty.
 
     Args:
         dsn: Sentry DSN URL. Pass None or empty string to skip initialization.
         service_name: Service name for Sentry environment tag.
         version: Application version string.
+        traces_sample_rate: Fraction of transactions to send to Sentry (0.0-1.0, default 0.1).
     """
     if not dsn:
         return
@@ -136,9 +139,9 @@ def configure_sentry(dsn: str | None, service_name: str, version: str) -> None:
 
     sentry_sdk.init(
         dsn=dsn,
-        send_default_pii=True,
+        send_default_pii=False,
         enable_logs=True,
-        traces_sample_rate=1.0,
+        traces_sample_rate=traces_sample_rate,
         release=f"{service_name}@{version}",
     )
 

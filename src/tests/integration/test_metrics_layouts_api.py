@@ -12,6 +12,7 @@
 # Description:   Integration tests for metrics layouts API endpoints (P3-4)
 #####################################################################
 """Integration tests for metrics layouts API endpoints."""
+
 import json
 import os
 import sys

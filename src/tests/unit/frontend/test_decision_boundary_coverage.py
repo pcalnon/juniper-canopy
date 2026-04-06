@@ -12,12 +12,15 @@ Tests cover:
 - Edge cases: empty datasets, degenerate data
 - Color mapping and legend generation
 """
+
 from unittest.mock import Mock
 
 import numpy as np
 import plotly.graph_objects as go
 import pytest  # noqa: F401 - needed for pytest fixtures
 from dash import html
+
+from frontend.base_component import create_empty_plot
 
 
 class TestDecisionBoundaryInit:
@@ -280,12 +283,7 @@ class TestDecisionBoundaryPlotting:
 
     def test_create_empty_plot_light_theme(self):
         """Test empty plot with light theme."""
-        from frontend.components.decision_boundary import DecisionBoundary
-
-        config = {}
-        component = DecisionBoundary(config)
-
-        fig = component._create_empty_plot("No data", theme="light")
+        fig = create_empty_plot("No data", theme="light")
 
         assert isinstance(fig, go.Figure)
         # Check for annotation
@@ -293,12 +291,7 @@ class TestDecisionBoundaryPlotting:
 
     def test_create_empty_plot_dark_theme(self):
         """Test empty plot with dark theme."""
-        from frontend.components.decision_boundary import DecisionBoundary
-
-        config = {}
-        component = DecisionBoundary(config)
-
-        fig = component._create_empty_plot("No data", theme="dark")
+        fig = create_empty_plot("No data", theme="dark")
 
         assert isinstance(fig, go.Figure)  # Dark theme applied
 

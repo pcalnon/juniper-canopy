@@ -109,3 +109,7 @@ MD024:
 
 # MD036/no-emphasis-as-heading: allow emphasis used instead of a heading
 MD036: false
+
+# MD060/table-column-style: disable strict table alignment checking
+# (new rule in markdownlint v0.48+; many existing tables use mixed styles)
+MD060: false

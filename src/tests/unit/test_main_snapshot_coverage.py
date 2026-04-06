@@ -12,6 +12,7 @@
 # Description:   Tests for main.py snapshot endpoints in real mode
 #####################################################################
 """Tests for snapshot endpoints in real mode (lines 1146-1208, 1266-1270, 1338-1399)."""
+
 import json
 import os
 import sys

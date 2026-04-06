@@ -42,7 +42,7 @@ import plotly.graph_objects as go
 from dash import dcc, html
 from dash.dependencies import Input, Output
 
-from ..base_component import BaseComponent
+from ..base_component import BaseComponent, create_empty_plot
 
 
 class DecisionBoundary(BaseComponent):
@@ -195,7 +195,7 @@ class DecisionBoundary(BaseComponent):
                 Tuple of (figure, status_text)
             """
             if not boundary_data and not self.predict_fn:
-                empty_fig = self._create_empty_plot("No network loaded", theme)
+                empty_fig = create_empty_plot("No network loaded", theme)
                 return empty_fig, "Status: No network loaded"
 
             # Update resolution
@@ -213,7 +213,7 @@ class DecisionBoundary(BaseComponent):
                     fig = self._create_boundary_plot(computed_boundary, dataset, show_conf, theme)
                     status = "Status: Live boundary computation"
                 else:
-                    fig = self._create_empty_plot("Waiting for network predictions...", theme)
+                    fig = create_empty_plot("Waiting for network predictions...", theme)
                     status = "Status: Waiting for data"
 
             return fig, status
@@ -301,7 +301,7 @@ class DecisionBoundary(BaseComponent):
         Z = np.array(boundary_data.get("Z", []))
 
         if len(xx) == 0 or len(yy) == 0 or len(Z) == 0:
-            return self._create_empty_plot("No boundary data available", theme)
+            return create_empty_plot("No boundary data available", theme)
 
         # Add contour/heatmap for decision regions
         if show_confidence:
@@ -372,43 +372,6 @@ class DecisionBoundary(BaseComponent):
             plot_bgcolor="#242424" if is_dark else "#f8f9fa",
             paper_bgcolor="#242424" if is_dark else "#ffffff",
             font={"color": "#e9ecef" if is_dark else "#212529"},
-        )
-
-        return fig
-
-    def _create_empty_plot(self, message: str = "No data", theme: str = "light") -> go.Figure:
-        """
-        Create empty placeholder plot.
-
-        Args:
-            message: Message to display
-            theme: Current theme ("light" or "dark")
-
-        Returns:
-            Empty Plotly figure
-        """
-        fig = go.Figure()
-
-        is_dark = theme == "dark"
-        text_color = "#adb5bd" if is_dark else "#6c757d"
-
-        fig.add_annotation(
-            text=message,
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font={"size": 16, "color": text_color},
-        )
-
-        fig.update_layout(
-            xaxis={"showgrid": False, "showticklabels": False, "zeroline": False},
-            yaxis={"showgrid": False, "showticklabels": False, "zeroline": False},
-            template="plotly_dark" if is_dark else "plotly",
-            plot_bgcolor="#242424" if is_dark else "#f8f9fa",
-            paper_bgcolor="#242424" if is_dark else "#ffffff",
-            margin={"l": 20, "r": 20, "t": 20, "b": 20},
         )
 
         return fig

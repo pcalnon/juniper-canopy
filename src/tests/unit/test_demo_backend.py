@@ -17,6 +17,7 @@ Unit tests for DemoBackend — all BackendProtocol methods return expected types
 Task 5.7 of the Microservices Architecture Development Roadmap.
 Also covers Task 5.6 (runtime_checkable protocol conformance).
 """
+
 import pytest
 
 from backend.demo_backend import DemoBackend

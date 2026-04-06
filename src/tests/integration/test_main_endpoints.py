@@ -12,6 +12,7 @@ Tests all REST API endpoints including:
 - Error handling and edge cases
 - Startup/shutdown lifecycle
 """
+
 import os
 import sys
 from pathlib import Path

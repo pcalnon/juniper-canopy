@@ -10,6 +10,7 @@ Run:
     REDIS_INTEGRATION_TEST=1 REDIS_URL=redis://localhost:6379/0 \
         pytest tests/integration/test_redis_real_instance.py -v
 """
+
 import os
 import sys
 from pathlib import Path

@@ -33,9 +33,48 @@
 #####################################################################################################################################################################################################
 import logging
 from abc import ABC, abstractmethod
-
-# from typing import Dict, Any, Optional
 from typing import Any, Dict
+
+import plotly.graph_objects as go
+
+from frontend.theme_constants import get_theme_bg
+
+
+def create_empty_plot(message: str = "No data available", theme: str = "light") -> go.Figure:
+    """Create an empty placeholder plot with a centered message.
+
+    Shared utility for all dashboard components.
+
+    Args:
+        message: Message to display in the empty plot.
+        theme: Current theme ("light" or "dark").
+
+    Returns:
+        Empty Plotly figure with centered annotation.
+    """
+    fig = go.Figure()
+    bg = get_theme_bg(theme)
+
+    fig.add_annotation(
+        text=message,
+        xref="paper",
+        yref="paper",
+        x=0.5,
+        y=0.5,
+        showarrow=False,
+        font={"size": 16, "color": bg["text_color"]},
+    )
+
+    fig.update_layout(
+        xaxis={"showgrid": False, "showticklabels": False, "zeroline": False},
+        yaxis={"showgrid": False, "showticklabels": False, "zeroline": False},
+        template="plotly_dark" if theme == "dark" else "plotly",
+        plot_bgcolor=bg["plot_bgcolor"],
+        paper_bgcolor=bg["paper_bgcolor"],
+        margin={"l": 20, "r": 20, "t": 20, "b": 20},
+    )
+
+    return fig
 
 
 class BaseComponent(ABC):

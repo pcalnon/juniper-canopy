@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 """Test if plots are being created correctly."""
+
 import sys
 
 sys.path.insert(0, "src")
 
+from frontend.base_component import create_empty_plot  # noqa: E402
 from frontend.components.dataset_plotter import DatasetPlotter  # noqa: E402
 from frontend.components.decision_boundary import DecisionBoundary  # noqa: E402
 from frontend.components.metrics_panel import MetricsPanel  # noqa: E402
@@ -41,7 +43,7 @@ print(f"  Scatter plot has data: {scatter_fig.data[0].x is not None if scatter_f
 # Test decision boundary
 print("\nTesting DecisionBoundary...")
 db = DecisionBoundary({})
-empty_fig = db._create_empty_plot("Test", "light")
+empty_fig = create_empty_plot("Test", "light")
 print(f"  Empty plot created: {empty_fig is not None}")
 print(f"  Empty plot has annotations: {len(empty_fig.layout.annotations) > 0}")
 

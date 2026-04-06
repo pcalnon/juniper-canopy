@@ -12,28 +12,28 @@
 
 ## Failing Tests
 
-| Test | Error | Missing Module |
-|------|-------|----------------|
-| `TestConfigureSentry::test_initializes_when_dsn_provided` | `ModuleNotFoundError` | `sentry_sdk` |
-| `TestPrometheusMiddleware::test_increments_counter_and_records_histogram` | `ModuleNotFoundError` | `prometheus_client` |
-| `TestPrometheusMiddleware::test_namespace_prefix_applied_to_metric_names` | `ModuleNotFoundError` | `prometheus_client` |
+| Test                                                                       | Error                 | Missing Module      |
+|----------------------------------------------------------------------------|-----------------------|---------------------|
+| `TestConfigureSentry::test_initializes_when_dsn_provided`                  | `ModuleNotFoundError` | `sentry_sdk`        |
+| `TestPrometheusMiddleware::test_increments_counter_and_records_histogram`  | `ModuleNotFoundError` | `prometheus_client` |
+| `TestPrometheusMiddleware::test_namespace_prefix_applied_to_metric_names`  | `ModuleNotFoundError` | `prometheus_client` |
 | `TestPrometheusMiddleware::test_empty_namespace_produces_unprefixed_names` | `ModuleNotFoundError` | `prometheus_client` |
-| `TestGetPrometheusApp::test_returns_asgi_app` | `ModuleNotFoundError` | `prometheus_client` |
+| `TestGetPrometheusApp::test_returns_asgi_app`                              | `ModuleNotFoundError` | `prometheus_client` |
 
 ## CI Job Cascade
 
-| Job | Status | Root Cause |
-|-----|--------|------------|
-| Pre-commit (all versions) | Pass | N/A |
-| Lockfile Freshness | Pass | N/A |
-| Security Scans | Pass | N/A |
-| Documentation Links | Pass | N/A |
+| Job                       | Status   | Root Cause                                 |
+|---------------------------|----------|--------------------------------------------|
+| Pre-commit (all versions) | Pass     | N/A                                        |
+| Lockfile Freshness        | Pass     | N/A                                        |
+| Security Scans            | Pass     | N/A                                        |
+| Documentation Links       | Pass     | N/A                                        |
 | **Unit Tests + Coverage** | **FAIL** | **Missing sentry_sdk & prometheus_client** |
-| Integration Tests | Skipped | Blocked by unit test failure |
-| Build Distribution | Skipped | Blocked by unit test failure |
-| Dependency Documentation | Skipped | Blocked by unit test failure |
-| Docker Build & Smoke Test | Skipped | Blocked by unit test failure |
-| **Quality Gate** | **FAIL** | Unit tests failed |
+| Integration Tests         | Skipped  | Blocked by unit test failure               |
+| Build Distribution        | Skipped  | Blocked by unit test failure               |
+| Dependency Documentation  | Skipped  | Blocked by unit test failure               |
+| Docker Build & Smoke Test | Skipped  | Blocked by unit test failure               |
+| **Quality Gate**          | **FAIL** | Unit tests failed                          |
 
 ## Root Cause Analysis
 
@@ -131,11 +131,11 @@ package content.
 
 ## Files Modified
 
-| File | Change |
-|------|--------|
-| `pyproject.toml` | Added `observability` optional extra; fixed coverage omit patterns |
-| `conf/requirements_ci.txt` | Added `prometheus-client>=0.20.0` and `sentry-sdk>=2.0.0` |
-| `requirements.lock` | Regenerated with `--extra observability` |
+| File                       | Change                                                                 |
+|----------------------------|------------------------------------------------------------------------|
+| `pyproject.toml`           | Added `observability` optional extra; fixed coverage omit patterns     |
+| `conf/requirements_ci.txt` | Added `prometheus-client>=0.20.0` and `sentry-sdk>=2.0.0`              |
+| `requirements.lock`        | Regenerated with `--extra observability`                               |
 | `.github/workflows/ci.yml` | Multiple fixes: lockfile check, coverage scope, Python 3.12 workaround |
 
 ## Verification

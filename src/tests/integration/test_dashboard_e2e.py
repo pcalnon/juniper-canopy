@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """End-to-end dashboard smoke tests."""
+
 import os
 
 os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"

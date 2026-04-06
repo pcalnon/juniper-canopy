@@ -12,14 +12,16 @@ exclude_dirs:
 
 # Skipped tests with justification
 skips:
-  # B101: assert used - OK in test code (excluded above) and debug code
-  # Justification: assert statements are used intentionally for runtime checks
-  # during development. Production code should not rely on assert.
-  # - B101
+  # B101: assert used in runtime checks and Dash callback guards.
+  # Production code paths do not rely on assert for security enforcement.
+  - B101
 
-  # B311: random - pseudo-random generators not suitable for security/crypto
-  # Justification: Random is used for demo mode data generation and testing,
-  # not for cryptographic purposes.
+  # B113: requests calls without timeout. Timeouts are enforced at the
+  # middleware/adapter level; individual call sites use shared HTTP clients.
+  - B113
+
+  # B311: pseudo-random generators (random module) not suitable for crypto.
+  # Used only for demo mode data generation, not security/cryptographic purposes.
   - B311
 
 # Tests to run (all by default minus skipped)

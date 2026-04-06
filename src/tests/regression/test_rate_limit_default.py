@@ -26,8 +26,8 @@
 #
 #####################################################################################################################################################################################################
 # Notes:
-#     The conftest.py sets CANOPY_RATE_LIMIT_ENABLED=false globally, so these
-#     tests must use monkeypatch.delenv to unset it before testing the default.
+#     The conftest.py sets JUNIPER_CANOPY_RATE_LIMIT_ENABLED=false globally, so these
+#     tests must use monkeypatch to override settings before testing the default.
 #     The reset_singletons fixture (autouse) calls reset_security_state() which
 #     clears the cached _rate_limiter singleton.
 #
@@ -68,6 +68,10 @@ class TestRateLimitDefault:
 
         from security import get_rate_limiter, reset_security_state
 
+        mock_settings = MagicMock()
+        mock_settings.rate_limit_enabled = True
+        mock_settings.rate_limit_requests_per_minute = 60
+
         reset_security_state()
         mock_settings = MagicMock()
         mock_settings.rate_limit_enabled = True
@@ -83,14 +87,16 @@ class TestRateLimitDefault:
 
         from security import get_rate_limiter, reset_security_state
 
-        reset_security_state()
         mock_settings = MagicMock()
         mock_settings.rate_limit_enabled = True
-        mock_settings.rate_limit_requests_per_minute = 100
+        mock_settings.rate_limit_requests_per_minute = 200
+
+        reset_security_state()
         with patch("settings.get_settings", return_value=mock_settings):
             limiter = get_rate_limiter()
 
         assert limiter.enabled is True
+        assert limiter.limit == 200
 
     def test_rate_limiter_disabled_when_settings_false(self, monkeypatch):
         """Rate limiter is disabled when settings.rate_limit_enabled is False."""

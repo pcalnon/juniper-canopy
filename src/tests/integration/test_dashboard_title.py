@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """Test dashboard title displays correctly."""
+
 import os
 
 os.environ["JUNIPER_CANOPY_DEMO_MODE"] = "1"

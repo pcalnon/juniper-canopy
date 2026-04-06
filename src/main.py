@@ -58,6 +58,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import BaseModel
 
 # from dash import html, dcc
 # Add src directory to Python path
@@ -104,6 +105,12 @@ except importlib.metadata.PackageNotFoundError:
 # Initialize configuration
 settings = get_settings()
 
+# Application version from package metadata
+try:
+    APP_VERSION = importlib.metadata.version("juniper-canopy")
+except importlib.metadata.PackageNotFoundError:
+    APP_VERSION = "0.4.0"
+
 # Initialize loggers
 system_logger = get_system_logger()
 training_logger = get_training_logger()
@@ -122,9 +129,9 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Startup — observability
     configure_logging(settings.log_level, settings.log_format, "juniper-canopy")
-    configure_sentry(settings.sentry_dsn, "juniper-canopy", "0.3.0")
+    configure_sentry(settings.sentry_dsn, "juniper-canopy", APP_VERSION, settings.sentry_traces_sample_rate)
     if settings.metrics_enabled:
-        set_build_info("juniper_canopy", "0.3.0")
+        set_build_info("juniper_canopy", APP_VERSION)
 
     system_logger.info("Starting Juniper Canopy application")
     system_logger.info(f"Settings: server={settings.server.host}:{settings.server.port}, demo={settings.demo_mode}")
@@ -164,7 +171,7 @@ async def lifespan(app: FastAPI):
 
     # CAN-HIGH-001: Probe upstream services at startup using standardized probe.
     global juniper_data_available
-    data_probe = probe_dependency("JuniperData", f"{juniper_data_url.rstrip('/')}/v1/health/live")
+    data_probe = await probe_dependency("JuniperData", f"{juniper_data_url.rstrip('/')}/v1/health/live")
     if data_probe.status == "healthy":
         juniper_data_available = True
         system_logger.info(f"JuniperData reachable at {juniper_data_url} ({data_probe.latency_ms:.1f}ms)")
@@ -175,7 +182,7 @@ async def lifespan(app: FastAPI):
     backend_initialized = False
     cascor_url = settings.cascor_service_url
     if cascor_url and backend.backend_type == "service":
-        cascor_probe = probe_dependency("JuniperCascor", f"{cascor_url.rstrip('/')}/v1/health/live")
+        cascor_probe = await probe_dependency("JuniperCascor", f"{cascor_url.rstrip('/')}/v1/health/live")
         if cascor_probe.status == "healthy":
             system_logger.info(f"JuniperCascor reachable at {cascor_url} ({cascor_probe.latency_ms:.1f}ms)")
         else:
@@ -382,6 +389,11 @@ async def websocket_training_endpoint(websocket: WebSocket):
             try:
                 # Receive message from client
                 data = await websocket.receive_text()
+
+                if len(data) > _WS_MAX_MESSAGE_SIZE:
+                    await websocket_manager.send_personal_message({"ok": False, "error": "Message too large"}, websocket)
+                    continue
+
                 message = json.loads(data) if isinstance(data, str) else data
 
                 # Handle ping/pong
@@ -486,7 +498,7 @@ async def health_check_deprecated(request: Request):
     return {
         "status": "healthy",
         "timestamp": time.time(),
-        "version": "0.3.0",
+        "version": APP_VERSION,
         "active_connections": websocket_manager.get_connection_count(),
         "training_active": backend.is_training_active(),
         "demo_mode": backend.backend_type == "demo",
@@ -500,7 +512,7 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": time.time(),
-        "version": "0.3.0",
+        "version": APP_VERSION,
         "active_connections": websocket_manager.get_connection_count(),
         "training_active": backend.is_training_active(),
         "demo_mode": backend.backend_type == "demo",
@@ -523,12 +535,12 @@ async def readiness_probe() -> ReadinessResponse:
     """
     # Probe JuniperData
     data_url = settings.juniper_data_url
-    data_dep = probe_dependency("JuniperData Service", f"{data_url.rstrip('/')}/v1/health/live")
+    data_dep = await probe_dependency("JuniperData Service", f"{data_url.rstrip('/')}/v1/health/live")
 
     # Probe JuniperCascor
     ready_cascor_url = settings.cascor_service_url
     if ready_cascor_url:
-        cascor_dep = probe_dependency("JuniperCascor Service", f"{ready_cascor_url.rstrip('/')}/v1/health/live")
+        cascor_dep = await probe_dependency("JuniperCascor Service", f"{ready_cascor_url.rstrip('/')}/v1/health/live")
     else:
         cascor_dep = DependencyStatus(
             name="JuniperCascor Service",
@@ -870,7 +882,20 @@ async def get_statistics():
 
 # Snapshot configuration
 SNAPSHOT_EXTENSIONS = (".h5", ".hdf5")
-_snapshots_dir = os.getenv("CASCOR_SNAPSHOT_DIR", "./snapshots")
+_snapshots_dir = os.getenv("JUNIPER_CANOPY_SNAPSHOT_DIR")
+if _snapshots_dir is None:
+    _legacy_snapshot_dir = os.getenv("CASCOR_SNAPSHOT_DIR")
+    if _legacy_snapshot_dir is not None:
+        import warnings as _snapshot_warnings
+
+        _snapshot_warnings.warn(
+            "CASCOR_SNAPSHOT_DIR is deprecated. Use JUNIPER_CANOPY_SNAPSHOT_DIR instead.",
+            DeprecationWarning,
+            stacklevel=1,
+        )
+        _snapshots_dir = _legacy_snapshot_dir
+    else:
+        _snapshots_dir = "./snapshots"
 
 # Snapshot name validation pattern: alphanumeric, hyphens, underscores, dots (no path separators)
 _SNAPSHOT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
@@ -2000,7 +2025,7 @@ async def api_train_status():
     return {"backend": backend.backend_type, **backend.get_status()}
 
 
-from pydantic import BaseModel
+# from pydantic import BaseModel
 
 
 class SetParamsRequest(BaseModel):

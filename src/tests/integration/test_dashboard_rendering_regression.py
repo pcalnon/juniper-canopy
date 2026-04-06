@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest  # noqa: F401
 
+from frontend.base_component import create_empty_plot
 from frontend.components.dataset_plotter import DatasetPlotter
 from frontend.components.decision_boundary import DecisionBoundary
 from frontend.components.metrics_panel import MetricsPanel
@@ -96,8 +97,7 @@ class TestDashboardPlotRendering:
 
     def test_decision_boundary_empty_plot_renders(self):
         """Test that decision boundary can create empty plot."""
-        db = DecisionBoundary({})
-        empty_fig = db._create_empty_plot("Test message", "light")
+        empty_fig = create_empty_plot("Test message", "light")
 
         assert empty_fig is not None, "Empty plot should be created"
         assert len(empty_fig.layout.annotations) > 0, "Empty plot should have annotation message"
@@ -141,9 +141,8 @@ class TestDashboardPlotRendering:
         scatter_dark = dp._create_scatter_plot(test_dataset, "dark")
         assert str(scatter_dark.layout.template) == "plotly_dark" or scatter_dark.layout.plot_bgcolor == "#242424"
 
-        # Decision boundary
-        db = DecisionBoundary({})
-        empty_dark = db._create_empty_plot("Test", "dark")
+        # Decision boundary (uses shared create_empty_plot)
+        empty_dark = create_empty_plot("Test", "dark")
         assert str(empty_dark.layout.template) == "plotly_dark" or empty_dark.layout.plot_bgcolor == "#242424"
 
         # Network visualizer

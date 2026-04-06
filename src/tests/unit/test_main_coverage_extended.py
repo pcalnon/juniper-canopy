@@ -16,6 +16,7 @@ Covers:
 - set_params exception handling (lines 960-962)
 - main() function (lines 975-1001, 1005)
 """
+
 import asyncio
 import inspect  # CANOPY-P2-001: Use inspect.iscoroutinefunction instead of deprecated asyncio.iscoroutinefunction
 import json

@@ -188,6 +188,14 @@ jobs:
             reports/htmlcov/
           retention-days: 30
 
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe  # v5.5.4
+        if: always()
+        with:
+          files: reports/coverage.xml
+          flags: unittests
+          fail_ci_if_error: false
+
       - name: Upload Test Results
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
         if: always()
@@ -369,9 +377,9 @@ jobs:
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - pip-audit Dependency Scan           ║"
           echo "╚════════════════════════════════════════════════════════════╝"
-          pip install dash fastapi uvicorn plotly numpy scipy
+          pip install -e ".[juniper-data,juniper-cascor,observability]"
           pip freeze > reports/security/pip-freeze.txt
-          pip-audit -r reports/security/pip-freeze.txt --output reports/security/pip-audit.txt 2>&1 || PIP_AUDIT_EXIT=$?
+          pip-audit --output reports/security/pip-audit.txt 2>&1 || PIP_AUDIT_EXIT=$?
           if [ "${PIP_AUDIT_EXIT:-0}" -ne 0 ]; then
             echo "::error::pip-audit found vulnerabilities in dependencies!"
             echo "vulnerabilities_found=true" >> "$GITHUB_OUTPUT"

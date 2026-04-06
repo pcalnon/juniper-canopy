@@ -51,7 +51,7 @@ from dash.dependencies import Input, Output, State
 
 from settings import get_settings
 
-from ..base_component import BaseComponent
+from ..base_component import BaseComponent, create_empty_plot
 
 # Maximum number of historical pool entries to retain in memory
 MAX_POOL_HISTORY_ENTRIES = 20
@@ -544,7 +544,7 @@ class CandidateMetricsPanel(BaseComponent):
         is_dark = theme == "dark"
 
         if not state:
-            return self._create_empty_plot(theme=theme)
+            return create_empty_plot("No candidate data available", theme=theme)
 
         # Extract candidate-phase data from training history
         epochs = state.get("epochs", [])
@@ -552,7 +552,7 @@ class CandidateMetricsPanel(BaseComponent):
         phases = state.get("phases", [])
 
         if not epochs or not losses or not phases:
-            return self._create_empty_plot(theme=theme)
+            return create_empty_plot("No candidate data available", theme=theme)
 
         candidate_epochs = [e for e, p in zip(epochs, phases, strict=False) if "candidate" in p]
         candidate_losses = [lo for lo, p in zip(losses, phases, strict=False) if "candidate" in p]
@@ -582,34 +582,7 @@ class CandidateMetricsPanel(BaseComponent):
                 legend={"x": 0, "y": 1},
             )
         else:
-            return self._create_empty_plot(theme=theme)
-
-        return fig
-
-    def _create_empty_plot(self, theme: str = "light") -> go.Figure:
-        """Create empty placeholder plot."""
-        fig = go.Figure()
-        is_dark = theme == "dark"
-        text_color = "#adb5bd" if is_dark else "#6c757d"
-
-        fig.add_annotation(
-            text="No candidate data available",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font={"size": 16, "color": text_color},
-        )
-
-        fig.update_layout(
-            xaxis={"showgrid": False, "showticklabels": False, "zeroline": False},
-            yaxis={"showgrid": False, "showticklabels": False, "zeroline": False},
-            template="plotly_dark" if is_dark else "plotly",
-            plot_bgcolor="#242424" if is_dark else "#f8f9fa",
-            paper_bgcolor="#242424" if is_dark else "#ffffff",
-            margin={"l": 20, "r": 20, "t": 20, "b": 20},
-        )
+            return create_empty_plot("No candidate data available", theme=theme)
 
         return fig
 

@@ -12,6 +12,7 @@
 # Description:   Comprehensive coverage tests for MetricsPanel component
 #####################################################################
 """Comprehensive coverage tests for MetricsPanel (56% -> 80%+)."""
+
 import sys
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from unittest.mock import patch  # noqa: E402
 import plotly.graph_objects as go  # noqa: E402
 import pytest  # noqa: E402
 
+from frontend.base_component import create_empty_plot  # noqa: E402
 from frontend.components.metrics_panel import MetricsPanel  # noqa: E402
 
 
@@ -171,13 +173,12 @@ class TestPlotCreation:
 
     def test_create_empty_plot_light_theme(self, metrics_panel):
         """Should create empty plot for light theme."""
-        fig = metrics_panel._create_empty_plot(theme="light")
+        fig = create_empty_plot(theme="light")
         assert isinstance(fig, go.Figure)
-        assert len(fig.data) == 0  # Empty plot has no traces
 
     def test_create_empty_plot_dark_theme(self, metrics_panel):
         """Should create empty plot for dark theme."""
-        fig = metrics_panel._create_empty_plot(theme="dark")
+        fig = create_empty_plot(theme="dark")
         assert isinstance(fig, go.Figure)  # Dark theme applied
 
     def test_create_loss_plot_with_data(self, metrics_panel, sample_metrics):

@@ -5,6 +5,7 @@ Unit tests for candidate pool tracking functionality.
 Tests CandidatePool class methods for tracking, sorting, and aggregating
 candidate unit metrics during cascade correlation training.
 """
+
 import pytest
 
 from backend.training_monitor import CandidatePool

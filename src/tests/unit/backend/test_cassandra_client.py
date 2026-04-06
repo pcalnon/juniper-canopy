@@ -12,6 +12,7 @@ Tests:
 - close() cleanup
 - Singleton pattern via get_cassandra_client()
 """
+
 import os
 import sys
 from pathlib import Path

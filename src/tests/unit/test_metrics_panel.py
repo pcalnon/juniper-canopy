@@ -12,6 +12,7 @@
 # Description:   Unit tests for MetricsPanel component
 #####################################################################
 """Unit tests for MetricsPanel component."""
+
 import sys
 from pathlib import Path
 

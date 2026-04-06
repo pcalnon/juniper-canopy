@@ -14,4 +14,4 @@ python -m pytest \
   --cov-report=xml:reports/coverage.xml \
   --cov-report=html:reports/htmlcov \
   --cov-fail-under=${COVERAGE_FAIL_UNDER} \
-  2>&1 | tee ./pytest-unit_$(date +%F_%H%M).log
+  2>&1 | tee "./pytest-unit_$(date +%F_%H%M).log"

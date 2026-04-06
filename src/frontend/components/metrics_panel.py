@@ -39,7 +39,6 @@
 # import logging
 # from typing import Dict, Any, List, Optional
 import os
-import time
 from typing import Any, Dict, List, Tuple
 
 # from plotly.subplots import make_subplots
@@ -53,7 +52,7 @@ from dash.dependencies import Input, Output, State
 from canopy_constants import DashboardConstants
 from settings import get_settings
 
-from ..base_component import BaseComponent
+from ..base_component import BaseComponent, create_empty_plot
 
 
 class MetricsPanel(BaseComponent):
@@ -595,141 +594,6 @@ class MetricsPanel(BaseComponent):
             return self._update_training_progress_handler(state=state)
 
         @app.callback(
-            [
-                Output(f"{self.component_id}-candidate-collapse", "is_open"),
-                Output(f"{self.component_id}-candidate-toggle-icon", "children"),
-            ],
-            Input(f"{self.component_id}-candidate-toggle", "n_clicks"),
-            State(f"{self.component_id}-candidate-collapse", "is_open"),
-            prevent_initial_call=True,
-        )
-        def toggle_candidate_section(n_clicks, is_open):
-            """Toggle candidate pool section visibility."""
-            if n_clicks:
-                new_state = not is_open
-                icon = "▼" if new_state else "▶"
-                return new_state, icon
-            return is_open, "▼"
-
-        @app.callback(
-            Output(f"{self.component_id}-candidate-pools-history", "data"),
-            Input(f"{self.component_id}-training-state-store", "data"),
-            State(f"{self.component_id}-candidate-pools-history", "data"),
-        )
-        def update_candidate_history(state, history):
-            """Update candidate pool history when a pool completes."""
-            if not state:
-                return history or []
-
-            pool_status = state.get("candidate_pool_status", "Inactive")
-            pool_phase = state.get("candidate_pool_phase", "Idle")
-            current_epoch = state.get("current_epoch", 0)
-
-            # Create pool snapshot if we have active pool data
-            if pool_status != "Inactive":
-                pool_snapshot = {
-                    "epoch": current_epoch,
-                    "status": pool_status,
-                    "phase": pool_phase,
-                    "size": state.get("candidate_pool_size", 0),
-                    "top_candidate_id": state.get("top_candidate_id", ""),
-                    "top_candidate_score": state.get("top_candidate_score", 0.0),
-                    "best_correlation": state.get("best_correlation", 0.0),
-                    "second_candidate_id": state.get("second_candidate_id", ""),
-                    "second_candidate_score": state.get("second_candidate_score", 0.0),
-                    "pool_metrics": state.get("pool_metrics", {}),
-                    "timestamp": time.time(),
-                }
-
-                # Check if this pool is already in history (by epoch)
-                current_history = history or []
-                existing = next((p for p in current_history if p.get("epoch") == current_epoch), None)
-
-                if not existing:
-                    # Add new pool to history (max 10 entries)
-                    current_history = [pool_snapshot] + current_history[:19]
-                    return current_history
-
-            return history or []
-
-        @app.callback(
-            Output(f"{self.component_id}-candidate-history-section", "children"),
-            Input(f"{self.component_id}-candidate-pools-history", "data"),
-        )
-        def render_candidate_history(history):
-            """Render historical candidate pools as expandable sections."""
-            if not history:
-                return []
-
-            # Show all historical pools as expandable cards
-            history_items = []
-            for pool in history:
-                epoch = pool.get("epoch", 0)
-                top_id = pool.get("top_candidate_id", "") or "N/A"
-                top_score = pool.get("top_candidate_score") or pool.get("best_correlation", 0.0)
-
-                history_items.append(
-                    dbc.Card(
-                        [
-                            dbc.CardHeader(
-                                html.Div(
-                                    [
-                                        html.Span(f"Pool @ Iteration {epoch}", style={"fontWeight": "600"}),
-                                        html.Span(
-                                            f" - Best: {top_id} ({top_score:.3f})",
-                                            style={"color": "#6c757d", "fontSize": "12px"},
-                                        ),
-                                    ]
-                                ),
-                                style={"padding": "8px 12px", "cursor": "pointer"},
-                                id={"type": "history-pool-header", "index": epoch},
-                            ),
-                            dbc.Collapse(
-                                dbc.CardBody(
-                                    html.Div(
-                                        [
-                                            html.P([html.Strong("Size: "), str(pool.get("size", 0))]),
-                                            html.P([html.Strong("Top Candidate: "), pool.get("top_candidate_id", "N/A")]),
-                                            html.P([html.Strong("Score: "), f"{pool.get('top_candidate_score', 0.0):.4f}"]),
-                                        ]
-                                        + (
-                                            [
-                                                html.P([html.Strong("2nd Candidate: "), pool.get("second_candidate_id", "N/A")]),
-                                                html.P([html.Strong("2nd Score: "), f"{pool.get('second_candidate_score', 0.0):.4f}"]),
-                                            ]
-                                            if pool.get("second_candidate_id")
-                                            else []
-                                        )
-                                        + (
-                                            [
-                                                html.Hr(style={"margin": "8px 0"}),
-                                                html.P([html.Strong("Avg Loss: "), f"{pm.get('avg_loss', 0):.4f}"]),
-                                                html.P([html.Strong("Avg Accuracy: "), f"{pm.get('avg_accuracy', 0):.4f}"]),
-                                            ]
-                                            if (pm := pool.get("pool_metrics", {}))
-                                            else []
-                                        )
-                                    ),
-                                    style={"padding": "10px"},
-                                ),
-                                id={"type": "history-pool-collapse", "index": epoch},
-                                is_open=False,
-                            ),
-                        ],
-                        style={"marginBottom": "5px"},
-                    )
-                )
-
-            if history_items:
-                return html.Div(
-                    [
-                        html.H6("Previous Pools", style={"marginTop": "15px", "marginBottom": "10px", "color": "#6c757d"}),
-                        *history_items,
-                    ]
-                )
-            return []
-
-        @app.callback(
             Output(f"{self.component_id}-view-state", "data"),
             [
                 Input(f"{self.component_id}-loss-plot", "relayoutData"),
@@ -1216,7 +1080,7 @@ class MetricsPanel(BaseComponent):
 
         if not metrics_data:
             # Return empty/default state
-            empty_fig = self._create_empty_plot(theme)
+            empty_fig = create_empty_plot(theme=theme)
             return (empty_fig, empty_fig, "0", "--", "--", "0", "Status: Idle", self._get_status_style("idle"))
 
         # Apply display mode filtering
@@ -1456,13 +1320,13 @@ class MetricsPanel(BaseComponent):
         Returns:
             Plotly figure object
         """
-        (epochs, losses, phases) = self._parse_metrics(metrics_data=metrics_data)
+        epochs, losses, phases = self._parse_metrics(metrics_data=metrics_data)
 
         # Create figure with phase-colored scatter
         fig = self._create_phase_colored_scatter(fig=go.Figure(), epochs=epochs, losses=losses, phases=phases)
         self._add_validation_overlay(fig, metrics_data, "val_loss", "Validation Loss", "#ff6b6b")
         fig = self._add_phase_bg_bands(fig=fig, epochs=epochs, phases=phases)
-        (fig, epoch) = self._add_hidden_unit_markers(metrics_data=metrics_data, fig=fig, theme=theme, epochs=epochs)
+        fig, epoch = self._add_hidden_unit_markers(metrics_data=metrics_data, fig=fig, theme=theme, epochs=epochs)
 
         return fig
 
@@ -1575,8 +1439,8 @@ class MetricsPanel(BaseComponent):
         # Add phase background bands
         current_phase = None
         phase_start = None
-        (fig, current_phase, phase_start) = self._end_prev_phase_band(fig=fig, epochs=epochs, phases=phases, current_phase=current_phase, phase_start=phase_start)
-        (fig, current_phase, phase_start) = self._candidate_final_band(fig=fig, epochs=epochs, current_phase=current_phase, phase_start=phase_start)
+        fig, current_phase, phase_start = self._end_prev_phase_band(fig=fig, epochs=epochs, phases=phases, current_phase=current_phase, phase_start=phase_start)
+        fig, current_phase, phase_start = self._candidate_final_band(fig=fig, epochs=epochs, current_phase=current_phase, phase_start=phase_start)
         return fig
 
     def _end_prev_phase_band(
@@ -1625,7 +1489,7 @@ class MetricsPanel(BaseComponent):
         return (fig, current_phase, phase_start)
 
     def _add_hidden_unit_markers(self, metrics_data: List[Dict[str, Any]], fig: go.Figure = None, theme: str = "light", epochs: list = None) -> Tuple[go.Figure, list]:
-        (fig) = self._hidden_unit_addition_markers(metrics_data=metrics_data, fig=fig, theme=theme)
+        fig = self._hidden_unit_addition_markers(metrics_data=metrics_data, fig=fig, theme=theme)
         fig = self._training_loss_per_time(fig=fig, theme=theme)
         return (fig, epochs)
 
@@ -1743,42 +1607,6 @@ class MetricsPanel(BaseComponent):
 
         return fig
 
-    def _create_empty_plot(self, theme: str = "light") -> go.Figure:
-        """
-        Create empty placeholder plot.
-
-        Args:
-            theme: Current theme ("light" or "dark")
-
-        Returns:
-            Empty Plotly figure
-        """
-        fig = go.Figure()
-
-        is_dark = theme == "dark"
-        text_color = "#adb5bd" if is_dark else "#6c757d"
-
-        fig.add_annotation(
-            text="No data available",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font={"size": 16, "color": text_color},
-        )
-
-        fig.update_layout(
-            xaxis={"showgrid": False, "showticklabels": False, "zeroline": False},
-            yaxis={"showgrid": False, "showticklabels": False, "zeroline": False},
-            template="plotly_dark" if is_dark else "plotly",
-            plot_bgcolor="#242424" if is_dark else "#f8f9fa",
-            paper_bgcolor="#242424" if is_dark else "#ffffff",
-            margin={"l": 20, "r": 20, "t": 20, "b": 20},
-        )
-
-        return fig
-
     def _get_status_style(self, phase: str) -> Dict[str, str]:
         """
         Get status badge style based on training phase.
@@ -1836,179 +1664,6 @@ class MetricsPanel(BaseComponent):
             List of metrics dictionaries
         """
         return self.metrics_history.copy()
-
-    def _create_candidate_pool_display(self, state: Dict[str, Any]) -> html.Div:
-        """
-        Create candidate pool information display.
-
-        Args:
-            state: Training state dictionary with candidate pool data
-
-        Returns:
-            Dash Div with candidate pool information
-        """
-        pool_status = state.get("candidate_pool_status", "Inactive")
-        pool_phase = state.get("candidate_pool_phase", "Idle")
-        pool_size = state.get("candidate_pool_size", 0)
-        top_cand_id = state.get("top_candidate_id", "")
-        top_cand_score = state.get("top_candidate_score", 0.0)
-        second_cand_id = state.get("second_candidate_id", "")
-        second_cand_score = state.get("second_candidate_score", 0.0)
-
-        # Top 2 candidates table
-        candidate_rows = []
-        if top_cand_id:
-            candidate_rows.append(
-                html.Tr(
-                    [
-                        html.Td("1", style={"padding": "6px 10px", "fontWeight": "600"}),
-                        html.Td(top_cand_id, style={"padding": "6px 10px"}),
-                        html.Td(f"{top_cand_score:.4f}", style={"padding": "6px 10px", "textAlign": "right"}),
-                    ]
-                )
-            )
-        if second_cand_id:
-            candidate_rows.append(
-                html.Tr(
-                    [
-                        html.Td("2", style={"padding": "6px 10px", "fontWeight": "600"}),
-                        html.Td(second_cand_id, style={"padding": "6px 10px"}),
-                        html.Td(f"{second_cand_score:.4f}", style={"padding": "6px 10px", "textAlign": "right"}),
-                    ]
-                )
-            )
-
-        candidates_table = html.Table(
-            [
-                html.Thead(
-                    html.Tr(
-                        [
-                            html.Th(
-                                "Rank",
-                                style={"padding": "6px 10px", "textAlign": "left", "borderBottom": "2px solid #dee2e6"},
-                            ),
-                            html.Th(
-                                "Candidate ID",
-                                style={"padding": "6px 10px", "textAlign": "left", "borderBottom": "2px solid #dee2e6"},
-                            ),
-                            html.Th(
-                                "Correlation",
-                                style={
-                                    "padding": "6px 10px",
-                                    "textAlign": "right",
-                                    "borderBottom": "2px solid #dee2e6",
-                                },
-                            ),
-                        ]
-                    )
-                ),
-                (
-                    html.Tbody(candidate_rows)
-                    if candidate_rows
-                    else html.Tbody(
-                        [
-                            html.Tr(
-                                [
-                                    html.Td(
-                                        "No candidates",
-                                        colSpan=3,
-                                        style={"padding": "10px", "textAlign": "center", "color": "#888"},
-                                    )
-                                ]
-                            )
-                        ]
-                    )
-                ),
-            ],
-            style={
-                "width": "100%",
-                "borderCollapse": "collapse",
-                "borderRadius": "4px",
-                "marginBottom": "15px",
-            },
-        )
-
-        # Pool status info
-        pool_info = html.Div(
-            [
-                html.Div(
-                    [
-                        html.Span("Status: ", style={"fontWeight": "600"}),
-                        html.Span(pool_status, style={"color": "#28a745" if pool_status == "Active" else "#6c757d"}),
-                    ],
-                    style={"marginBottom": "5px"},
-                ),
-                html.Div(
-                    [
-                        html.Span("Phase: ", style={"fontWeight": "600"}),
-                        html.Span(pool_phase),
-                    ],
-                    style={"marginBottom": "5px"},
-                ),
-                html.Div(
-                    [
-                        html.Span("Pool Size: ", style={"fontWeight": "600"}),
-                        html.Span(str(pool_size)),
-                    ],
-                    style={"marginBottom": "15px"},
-                ),
-            ]
-        )
-
-        # Pool metrics — correlation statistics (CasCor optimizes correlation, not loss)
-        all_corrs = state.get("all_correlations", [])
-        if all_corrs and len(all_corrs) > 0:
-            import statistics
-
-            avg_corr = statistics.mean(all_corrs)
-            max_corr = max(all_corrs)
-            min_corr = min(all_corrs)
-            std_corr = statistics.stdev(all_corrs) if len(all_corrs) > 1 else 0.0
-            success_count = sum(1 for c in all_corrs if c > 0)
-            pool_metrics_rows = [
-                ("Avg Correlation", f"{avg_corr:.4f}"),
-                ("Max Correlation", f"{max_corr:.4f}"),
-                ("Min Correlation", f"{min_corr:.4f}"),
-                ("Std Deviation", f"{std_corr:.4f}"),
-                ("Success Rate", f"{success_count}/{len(all_corrs)}"),
-            ]
-        else:
-            best_corr = state.get("best_correlation", 0.0)
-            pool_metrics_rows = [
-                ("Best Correlation", f"{best_corr:.4f}"),
-                ("Pool Size", str(state.get("candidate_pool_size", 0))),
-            ]
-
-        pool_metrics_table = html.Table(
-            [
-                html.Tbody(
-                    [
-                        html.Tr(
-                            [
-                                html.Td(label, style={"fontWeight": "600", "padding": "4px 8px", "fontSize": "13px"}),
-                                html.Td(value, style={"padding": "4px 8px", "fontSize": "13px", "textAlign": "right"}),
-                            ]
-                        )
-                        for label, value in pool_metrics_rows
-                    ]
-                ),
-            ],
-            style={
-                "width": "100%",
-                "borderCollapse": "collapse",
-                "borderRadius": "4px",
-            },
-        )
-
-        return html.Div(
-            [
-                html.H5("Top 2 Candidates", style={"marginBottom": "10px"}),
-                candidates_table,
-                pool_info,
-                html.H5("Pool Correlation Metrics", style={"marginTop": "15px", "marginBottom": "10px"}),
-                pool_metrics_table,
-            ]
-        )
 
     def _create_network_info_table(self, stats: Dict[str, Any]) -> html.Div:
         """

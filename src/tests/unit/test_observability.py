@@ -132,6 +132,14 @@ class TestConfigureSentry:
             call_kwargs = mock_init.call_args[1]
             assert call_kwargs["dsn"] == "https://examplePublicKey@o0.ingest.sentry.io/0"
             assert call_kwargs["release"] == "test-service@1.0.0"
+            assert call_kwargs["traces_sample_rate"] == 0.1
+            assert call_kwargs["send_default_pii"] is False
+
+    def test_custom_sample_rate(self):
+        with patch("sentry_sdk.init") as mock_init:
+            configure_sentry("https://examplePublicKey@o0.ingest.sentry.io/0", "test-service", "1.0.0", traces_sample_rate=0.5)
+            call_kwargs = mock_init.call_args[1]
+            assert call_kwargs["traces_sample_rate"] == 0.5
 
 
 @pytest.mark.unit
@@ -197,9 +205,12 @@ class TestPrometheusMiddleware:
             async def mock_call_next(request):
                 return response
 
+            route = MagicMock()
+            route.path = "/v1/test"
             request = MagicMock()
             request.url.path = "/v1/test"
             request.method = "GET"
+            request.scope = {"route": route}
 
             result = await middleware.dispatch(request, mock_call_next)
 
@@ -208,6 +219,34 @@ class TestPrometheusMiddleware:
             mock_histogram.labels.assert_called_once_with(method="GET", endpoint="/v1/test")
             mock_histogram.labels().observe.assert_called_once()
             assert result == response
+
+    @pytest.mark.asyncio
+    async def test_uses_route_template_not_raw_path(self):
+        """Verify route template is used for endpoint label to avoid cardinality explosion."""
+        with patch("prometheus_client.Counter") as MockCounter, patch("prometheus_client.Histogram") as MockHistogram:
+            mock_counter = MagicMock()
+            mock_histogram = MagicMock()
+            MockCounter.return_value = mock_counter
+            MockHistogram.return_value = mock_histogram
+
+            middleware = PrometheusMiddleware(app=MagicMock(), service_name="test", namespace="test")
+
+            response = MagicMock()
+            response.status_code = 200
+
+            async def mock_call_next(request):
+                return response
+
+            route = MagicMock()
+            route.path = "/v1/items/{item_id}"
+            request = MagicMock()
+            request.url.path = "/v1/items/12345"
+            request.method = "GET"
+            request.scope = {"route": route}
+
+            await middleware.dispatch(request, mock_call_next)
+
+            mock_counter.labels.assert_called_once_with(method="GET", endpoint="/v1/items/{item_id}", status="200")
 
     @pytest.mark.asyncio
     async def test_namespace_prefix_applied_to_metric_names(self):

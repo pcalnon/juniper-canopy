@@ -10,6 +10,7 @@ This file tests the handler methods directly (lines 630-1500) which include:
 - Parameter handlers
 - Data store handlers
 """
+
 import time
 from unittest.mock import MagicMock, Mock, patch
 
@@ -85,36 +86,6 @@ class TestThemeToggleHandlers:
 class TestNetworkInfoHandlers:
     """Test network info panel handlers."""
 
-    def test_toggle_network_info_handler_odd(self, dashboard_manager):
-        """Test network info collapse toggle for odd clicks."""
-        result = dashboard_manager._toggle_network_info_handler(n=1)
-        assert result is True
-
-    def test_toggle_network_info_handler_even(self, dashboard_manager):
-        """Test network info collapse toggle for even clicks."""
-        result = dashboard_manager._toggle_network_info_handler(n=2)
-        assert result is False
-
-    def test_toggle_network_info_handler_none(self, dashboard_manager):
-        """Test network info collapse toggle for None."""
-        result = dashboard_manager._toggle_network_info_handler(n=None)
-        assert result is True
-
-    def test_toggle_network_info_details_handler_odd(self, dashboard_manager):
-        """Test network info details collapse toggle for odd clicks."""
-        result = dashboard_manager._toggle_network_info_details_handler(n=1)
-        assert result is True
-
-    def test_toggle_network_info_details_handler_even(self, dashboard_manager):
-        """Test network info details collapse toggle for even clicks."""
-        result = dashboard_manager._toggle_network_info_details_handler(n=2)
-        assert result is False
-
-    def test_toggle_network_info_details_handler_none(self, dashboard_manager):
-        """Test network info details collapse toggle for None."""
-        result = dashboard_manager._toggle_network_info_details_handler(n=None)
-        assert result is False
-
     @patch("requests.get")
     def test_update_network_info_handler_success(self, mock_get, dashboard_manager):
         """Test network info update with successful API response."""
@@ -185,9 +156,6 @@ class TestStatusBarHandlers:
     @patch("requests.get")
     def test_update_unified_status_bar_handler_success(self, mock_get, dashboard_manager):
         """Test unified status bar update with success."""
-        mock_health = Mock()
-        mock_health.status_code = 200
-
         mock_status = Mock()
         mock_status.status_code = 200
         mock_status.json.return_value = {
@@ -198,7 +166,7 @@ class TestStatusBarHandlers:
             "hidden_units": 3,
         }
 
-        mock_get.side_effect = [mock_health, mock_status]
+        mock_get.return_value = mock_status
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_unified_status_bar_handler(n_intervals=1)
@@ -210,9 +178,6 @@ class TestStatusBarHandlers:
     @patch("requests.get")
     def test_update_unified_status_bar_handler_paused(self, mock_get, dashboard_manager):
         """Test unified status bar with paused state."""
-        mock_health = Mock()
-        mock_health.status_code = 200
-
         mock_status = Mock()
         mock_status.status_code = 200
         mock_status.json.return_value = {
@@ -223,7 +188,7 @@ class TestStatusBarHandlers:
             "hidden_units": 5,
         }
 
-        mock_get.side_effect = [mock_health, mock_status]
+        mock_get.return_value = mock_status
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_unified_status_bar_handler(n_intervals=1)
@@ -234,9 +199,6 @@ class TestStatusBarHandlers:
     @patch("requests.get")
     def test_update_unified_status_bar_handler_stopped(self, mock_get, dashboard_manager):
         """Test unified status bar with stopped state."""
-        mock_health = Mock()
-        mock_health.status_code = 200
-
         mock_status = Mock()
         mock_status.status_code = 200
         mock_status.json.return_value = {
@@ -247,7 +209,7 @@ class TestStatusBarHandlers:
             "hidden_units": 0,
         }
 
-        mock_get.side_effect = [mock_health, mock_status]
+        mock_get.return_value = mock_status
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_unified_status_bar_handler(n_intervals=1)
@@ -258,10 +220,10 @@ class TestStatusBarHandlers:
     @patch("requests.get")
     def test_update_unified_status_bar_handler_backend_error(self, mock_get, dashboard_manager):
         """Test unified status bar with backend error."""
-        mock_health = Mock()
-        mock_health.status_code = 500
+        mock_status = Mock()
+        mock_status.status_code = 500
 
-        mock_get.side_effect = [mock_health]
+        mock_get.return_value = mock_status
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_unified_status_bar_handler(n_intervals=1)

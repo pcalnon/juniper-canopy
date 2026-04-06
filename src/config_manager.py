@@ -213,10 +213,10 @@ class ConfigManager:
         Returns:
             Converted value
         """
-        # Try boolean
-        if value.lower() in {"true", "yes", "1"}:
+        # Try boolean (text keywords only — "0"/"1" are handled as integers below)
+        if value.lower() in {"true", "yes"}:
             return True
-        if value.lower() in {"false", "no", "0"}:
+        if value.lower() in {"false", "no"}:
             return False
 
         # Type coercion: try integer, then float, fallback to string
@@ -476,7 +476,7 @@ class ConfigManager:
                     break
 
         except ValueError as e:
-            self.logger.error(f"Unable to perform Constants check for {category} Class {constants_class}: " f"Config obj {config.key} ({config.get(key)}), {const_name} ({const_value}) Raised: {e}")
+            self.logger.error(f"Unable to perform Constants check for {category} Class {constants_class}: " f"Config key {key} ({config.get(key)}), {const_name} ({const_value}) Raised: {e}")
             raise ValueError("Unable to perform Constants check") from e
         return consistent
 

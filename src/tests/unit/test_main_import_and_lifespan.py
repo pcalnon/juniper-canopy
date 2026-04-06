@@ -4,6 +4,7 @@ Tests for main.py import-time branches and endpoint coverage.
 
 These tests focus on covering code paths reachable in demo mode.
 """
+
 import os
 import sys
 from pathlib import Path

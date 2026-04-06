@@ -515,11 +515,15 @@ class RedisPanel(BaseComponent):
             return "--"
 
     def _format_hit_rate(self, rate: Any) -> str:
-        """Format hit rate as percentage."""
+        """Format hit rate as percentage.
+
+        Args:
+            rate: Hit rate already expressed as a percentage (e.g. 85.5 for 85.5%).
+        """
         if rate is None:
             return "--"
         try:
-            return f"{float(rate) * 100:.1f}%"
+            return f"{float(rate):.1f}%"
         except (ValueError, TypeError):
             return "--"
 

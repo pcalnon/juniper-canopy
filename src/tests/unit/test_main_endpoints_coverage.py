@@ -12,6 +12,7 @@
 # Description:   Coverage tests for main.py endpoint handlers
 #####################################################################
 """Tests for main.py endpoint coverage: snapshot history, snapshot detail, readiness probe."""
+
 import json
 import os
 import sys

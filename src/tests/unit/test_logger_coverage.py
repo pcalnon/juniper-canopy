@@ -12,6 +12,7 @@
 # Description:   Comprehensive coverage tests for logger module
 #####################################################################
 """Comprehensive coverage tests for logger.py (73% -> 80%+)."""
+
 import sys
 from pathlib import Path
 

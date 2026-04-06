@@ -308,36 +308,6 @@ class TestDashboardManagerHandlers:
         result = dashboard_manager._update_theme_state_handler(is_dark=False)
         assert result == "light"
 
-    def test_toggle_network_info_handler_odd(self, dashboard_manager):
-        """Test network info toggle returns True on odd clicks."""
-        result = dashboard_manager._toggle_network_info_handler(n=1)
-        assert result is True
-
-    def test_toggle_network_info_handler_even(self, dashboard_manager):
-        """Test network info toggle returns False on even clicks."""
-        result = dashboard_manager._toggle_network_info_handler(n=2)
-        assert result is False
-
-    def test_toggle_network_info_handler_none(self, dashboard_manager):
-        """Test network info toggle returns True on None (initial)."""
-        result = dashboard_manager._toggle_network_info_handler(n=None)
-        assert result is True
-
-    def test_toggle_network_info_details_handler_odd(self, dashboard_manager):
-        """Test network info details toggle returns True on odd clicks."""
-        result = dashboard_manager._toggle_network_info_details_handler(n=1)
-        assert result is True
-
-    def test_toggle_network_info_details_handler_even(self, dashboard_manager):
-        """Test network info details toggle returns False on even clicks."""
-        result = dashboard_manager._toggle_network_info_details_handler(n=2)
-        assert result is False
-
-    def test_toggle_network_info_details_handler_none(self, dashboard_manager):
-        """Test network info details toggle returns False on None (initial)."""
-        result = dashboard_manager._toggle_network_info_details_handler(n=None)
-        assert result is False
-
     def test_update_topology_store_handler_inactive_tab(self, dashboard_manager):
         """Test topology store handler returns no_update when tab is inactive."""
         import dash

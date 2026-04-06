@@ -24,6 +24,7 @@ These tests directly call the endpoint async functions to avoid lifespan
 initialization issues with demo mode.  All tests save/restore `main.backend`
 instead of the removed `main.demo_mode_instance` / `main.demo_mode_active`.
 """
+
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch

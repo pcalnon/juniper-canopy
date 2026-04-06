@@ -21,9 +21,6 @@ RUN pip install --no-cache-dir --upgrade pip wheel setuptools
 # Install CPU-only PyTorch first (avoids pulling CUDA which is ~4 GB)
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
-# Install runtime dependencies missing from lockfile
-RUN pip install --no-cache-dir pydantic-settings colorama networkx psutil python-multipart
-
 # Install pinned dependencies from lockfile (best layer caching)
 COPY requirements.lock ./
 RUN pip install --no-cache-dir -r requirements.lock
@@ -44,6 +41,9 @@ LABEL org.opencontainers.image.description="Real-time monitoring dashboard for j
 LABEL org.opencontainers.image.authors="Paul Calnon"
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.source="https://github.com/pcalnon/juniper-canopy"
+
+# Install curl for lightweight health checks (avoids spawning Python interpreter)
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
 RUN groupadd --gid 1000 juniper && \
@@ -72,11 +72,13 @@ ENV PYTHONPATH=/app/src
 # Nested settings use double-underscore delimiter (SERVER__HOST, SERVER__PORT).
 ENV JUNIPER_CANOPY_SERVER__HOST=0.0.0.0
 ENV JUNIPER_CANOPY_SERVER__PORT=8050
-ENV JUNIPER_DATA_URL=http://localhost:8100
-ENV CASCOR_SERVICE_URL=http://localhost:8200
+ENV JUNIPER_CANOPY_DEMO_MODE=false
+ENV JUNIPER_CANOPY_LOG_LEVEL=INFO
+ENV JUNIPER_DATA_URL=http://juniper-data:8100
+ENV CASCOR_SERVICE_URL=http://juniper-cascor:8200
 EXPOSE 8050
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8050/v1/health', timeout=5)" || exit 1
+    CMD curl --fail --silent --max-time 5 http://localhost:8050/v1/health || exit 1
 
 CMD ["python", "src/main.py"]

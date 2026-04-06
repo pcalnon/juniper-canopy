@@ -12,6 +12,7 @@
 # Description:   Unit tests for DashboardManager
 #####################################################################
 """Unit tests for DashboardManager."""
+
 import sys
 from pathlib import Path
 

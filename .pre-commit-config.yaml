@@ -61,7 +61,7 @@ repos:
   # General file checks
   # ═══════════════════════════════════════════════════════════════════════════
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v6.0.0
     hooks:
       - id: check-yaml
         name: Check YAML syntax
@@ -92,7 +92,7 @@ repos:
   # Python Code Formatting - Black
   # ═══════════════════════════════════════════════════════════════════════════
   - repo: https://github.com/psf/black
-    rev: 25.1.0
+    rev: 26.3.1
     hooks:
       - id: black
         name: Format with Black
@@ -104,7 +104,7 @@ repos:
   # Python Import Sorting - isort
   # ═══════════════════════════════════════════════════════════════════════════
   - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
+    rev: 8.0.1
     hooks:
       - id: isort
         name: Sort imports with isort
@@ -118,13 +118,13 @@ repos:
   # Re-enabled B905 (zip strict=), F401 (unused imports), B008 (func in defaults)
   # ═══════════════════════════════════════════════════════════════════════════
   - repo: https://github.com/pycqa/flake8
-    rev: 7.1.1
+    rev: 7.3.0
     hooks:
       - id: flake8
         name: Lint with Flake8
         args:
           - --max-line-length=512
-          - --extend-ignore=E203,E265,E266,E501,W503,E402,E226,C409,C901,B904,B907
+          - --extend-ignore=E203,E265,E266,E501,W503,E402,E226,C409,C901,B904,B907,F824
           - --max-complexity=15
           - --select=B,C,E,F,W,T4,B9
         additional_dependencies:
@@ -138,7 +138,7 @@ repos:
   # Python Linting - Flake8 (tests - relaxed)
   # ═══════════════════════════════════════════════════════════════════════════
   - repo: https://github.com/pycqa/flake8
-    rev: 7.1.1
+    rev: 7.3.0
     hooks:
       - id: flake8
         name: Lint tests with Flake8 (relaxed)
@@ -146,7 +146,7 @@ repos:
         # F401 (unused imports) often needed for fixtures
         args:
           - --max-line-length=512
-          - --extend-ignore=E203,E265,E266,E501,W503,E402,E226,C409,C901,B008,B904,B905,B907,F401,S101,S311
+          - --extend-ignore=E203,E265,E266,E501,W503,E402,E226,C409,C901,B008,B904,B905,B907,F401,F824,S101,S311
           - --max-complexity=20
           - --select=B,C,E,F,W,T4,B9
         additional_dependencies:
@@ -159,7 +159,7 @@ repos:
   # Python Type Checking - MyPy
   # ═══════════════════════════════════════════════════════════════════════════
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.13.0
+    rev: v1.20.0
     hooks:
       - id: mypy
         name: Type check with MyPy
@@ -167,7 +167,6 @@ repos:
           # - --install-types
           # - --non-interactive
           - --ignore-missing-imports
-          - --no-strict-optional
           - --python-version=3.14
           # - --python-version=3.12
           # Re-enabled (Epic 4.3): call-arg, override, no-redef, index,
@@ -197,7 +196,8 @@ repos:
         name: Security scan with Bandit
         args:
           - -q
-          - --skip=B101,B113,B311
+          - -c
+          - .bandit.yml
         files: ^src/.*\.py$
         exclude: ^src/tests/
 
@@ -205,7 +205,7 @@ repos:
   # Markdown Linting
   # ═══════════════════════════════════════════════════════════════════════════
   - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.42.0
+    rev: v0.48.0
     hooks:
       - id: markdownlint
         name: Lint Markdown files
@@ -214,27 +214,28 @@ repos:
           - --fix
         files: \.(md|markdown)$
         # Note: docs/ now included for linting (Epic 4.2.1)
-        # Excluding CHANGELOG.md (auto-generated format), docs/history/, and
-        # dependency header templates (used as YAML/requirements templates)
-        exclude: ^(CHANGELOG\.md|docs/history/|notes/.*_HEADER\.md)
+        # Excluding CHANGELOG.md (auto-generated format), docs/history/,
+        # notes/ subdirectories (generated analysis reports, fix plans),
+        # and dependency header templates (YAML/requirements templates)
+        exclude: ^(CHANGELOG\.md|docs/history/|notes/.+/|notes/.*_HEADER\.md)
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Shell Script Linting - shellcheck
   # ═══════════════════════════════════════════════════════════════════════════
   - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.10.0.1
+    rev: v0.11.0.1
     hooks:
       - id: shellcheck
         name: Lint shell scripts
         args:
-          - --severity=error
+          - --severity=warning
         files: \.(sh|bash)$
 
   # ═══════════════════════════════════════════════════════════════════════════
   # YAML Linting - yamllint
   # ═══════════════════════════════════════════════════════════════════════════
   - repo: https://github.com/adrienverge/yamllint
-    rev: v1.35.1
+    rev: v1.38.0
     hooks:
       - id: yamllint
         name: Lint YAML files

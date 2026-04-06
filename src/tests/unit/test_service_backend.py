@@ -18,6 +18,7 @@ Uses a mocked CascorServiceAdapter to avoid network dependencies.
 Task 5.8 of the Microservices Architecture Development Roadmap.
 Also covers Task 5.6 (runtime_checkable protocol conformance).
 """
+
 from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
 import pytest

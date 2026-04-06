@@ -4,6 +4,7 @@ Training Controls Button Layout Tests for Juniper Canopy Dashboard.
 
 Tests button icons, color scheme, styling, and layout organization.
 """
+
 import os
 
 import pytest

@@ -13,6 +13,7 @@ Tests cover:
 - close() cleanup
 - Singleton pattern via get_redis_client()
 """
+
 import os
 import sys
 from pathlib import Path

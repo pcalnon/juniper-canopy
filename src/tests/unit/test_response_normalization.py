@@ -20,6 +20,7 @@ after fixes — they will fail now and pass after Phase 2 fixes.
 
 Uses unittest.mock.MagicMock to create mock clients returning fixture responses.
 """
+
 from unittest.mock import MagicMock, PropertyMock
 
 import plotly.graph_objects as go

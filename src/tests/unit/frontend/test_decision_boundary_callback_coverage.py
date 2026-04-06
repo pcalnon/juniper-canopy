@@ -5,12 +5,14 @@ Target: Lines 189-211, 252
 
 Tests the update_boundary_plot callback function with various input combinations.
 """
+
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import plotly.graph_objects as go
 import pytest
 
+from frontend.base_component import create_empty_plot
 from frontend.components.decision_boundary import DecisionBoundary
 
 
@@ -59,7 +61,7 @@ class TestUpdateBoundaryPlotCallback:
 
         # Call internal logic that callback would execute
         if not boundary_data and not boundary_component.predict_fn:
-            empty_fig = boundary_component._create_empty_plot("No network loaded", theme)
+            empty_fig = create_empty_plot("No network loaded", theme)
             status = "Status: No network loaded"
 
         assert isinstance(empty_fig, go.Figure)
@@ -136,7 +138,7 @@ class TestUpdateBoundaryPlotCallback:
             if boundary_component.predict_fn and dataset:
                 pass  # Would compute boundary
             else:
-                fig = boundary_component._create_empty_plot("Waiting for network predictions...", theme)
+                fig = create_empty_plot("Waiting for network predictions...", theme)
                 status = "Status: Waiting for data"
 
         assert isinstance(fig, go.Figure)
@@ -291,7 +293,7 @@ class TestCallbackIntegration:
         def simulate_callback(boundary_data, dataset, resolution, show_confidence, theme):
             """Simulate the update_boundary_plot callback logic."""
             if not boundary_data and not boundary_component.predict_fn:
-                empty_fig = boundary_component._create_empty_plot("No network loaded", theme)
+                empty_fig = create_empty_plot("No network loaded", theme)
                 return empty_fig, "Status: No network loaded"
 
             boundary_component.resolution = resolution
@@ -305,7 +307,7 @@ class TestCallbackIntegration:
                 fig = boundary_component._create_boundary_plot(computed_boundary, dataset, show_conf, theme)
                 return fig, "Status: Live boundary computation"
             else:
-                fig = boundary_component._create_empty_plot("Waiting for network predictions...", theme)
+                fig = create_empty_plot("Waiting for network predictions...", theme)
                 return fig, "Status: Waiting for data"
 
         # Test with boundary data
@@ -320,7 +322,7 @@ class TestCallbackIntegration:
 
         def simulate_callback(boundary_data, dataset, resolution, show_confidence, theme):
             if not boundary_data and not boundary_component.predict_fn:
-                return boundary_component._create_empty_plot("No network loaded", theme), "Status: No network loaded"
+                return create_empty_plot("No network loaded", theme), "Status: No network loaded"
 
             boundary_component.resolution = resolution
             show_conf = "show" in show_confidence
@@ -333,7 +335,7 @@ class TestCallbackIntegration:
                 fig = boundary_component._create_boundary_plot(computed_boundary, dataset, show_conf, theme)
                 return fig, "Status: Live boundary computation"
             else:
-                fig = boundary_component._create_empty_plot("Waiting for network predictions...", theme)
+                fig = create_empty_plot("Waiting for network predictions...", theme)
                 return fig, "Status: Waiting for data"
 
         fig, status = simulate_callback(None, sample_dataset, 50, ["show"], "dark")
@@ -347,7 +349,7 @@ class TestCallbackIntegration:
 
         def simulate_callback(boundary_data, dataset, resolution, show_confidence, theme):
             if not boundary_data and not boundary_component.predict_fn:
-                return boundary_component._create_empty_plot("No network loaded", theme), "Status: No network loaded"
+                return create_empty_plot("No network loaded", theme), "Status: No network loaded"
 
             boundary_component.resolution = resolution
             show_conf = "show" in show_confidence
@@ -360,7 +362,7 @@ class TestCallbackIntegration:
                 fig = boundary_component._create_boundary_plot(computed_boundary, dataset, show_conf, theme)
                 return fig, "Status: Live boundary computation"
             else:
-                fig = boundary_component._create_empty_plot("Waiting for network predictions...", theme)
+                fig = create_empty_plot("Waiting for network predictions...", theme)
                 return fig, "Status: Waiting for data"
 
         fig, status = simulate_callback(None, None, 50, [], "light")

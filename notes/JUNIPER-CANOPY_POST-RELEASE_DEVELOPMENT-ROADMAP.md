@@ -1033,25 +1033,34 @@ The Juniper ecosystem completed a polyrepo migration (2026-02-22 to 2026-02-25) 
 
 ### Risk Assessment
 
-| Risk                                     | Likelihood | Impact | Mitigation                                               |
-| ---------------------------------------- | ---------- | ------ | -------------------------------------------------------- |
+| Risk                                     | Likelihood | Impact | Mitigation                                                   |
+|------------------------------------------|------------|--------|--------------------------------------------------------------|
 | CasCor serialization API changes         | Medium     | High   | Isolated to juniper-cascor-client; Canopy adapter unaffected |
-| WebSocket race conditions during scaling | Medium     | Medium | Audit lock ordering (CAN-MED-006) before adding features |
-| Dashboard feature scope creep            | High       | Medium | Strict dependency chains — implement in order            |
-| Test coverage regression                 | Low        | High   | Maintain coverage gates in CI (80% min)                  |
-| JuniperData availability during training | Medium     | Low    | Circuit breaker (CAN-MED-008) with graceful degradation  |
+| WebSocket race conditions during scaling | Medium     | Medium | Audit lock ordering (CAN-MED-006) before adding features     |
+| Dashboard feature scope creep            | High       | Medium | Strict dependency chains — implement in order                |
+| Test coverage regression                 | Low        | High   | Maintain coverage gates in CI (80% min)                      |
+| JuniperData availability during training | Medium     | Low    | Circuit breaker (CAN-MED-008) with graceful degradation      |
 
 ---
 
 ## Document History
 
-| Date       | Author   | Changes                                                                                                                                                 |
-| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-02-17 | AI Agent | Initial creation from JuniperData codebase audit                                                                                                        |
-| 2026-02-17 | AI Agent | Comprehensive rewrite: full notes/ audit, codebase validation, prioritization, and design analysis. Expanded from 28 items to 55 items across 5 phases. |
-| 2026-02-25 | AI Agent | Polyrepo migration impact analysis: updated status of 8 items (CAN-CRIT-001/002, CAN-HIGH-003/004/005/006, CAN-DEF-001/004), added migration notes, updated summary tables, revised design analysis for microservices architecture. |
-| 2026-02-25 | AI Agent | Codebase re-validation: fixed INTEG-004 validation (REST delegation, not ThreadPoolExecutor), corrected CAN-HIGH-007 test file list (WebSocket tests already converted; actual `requires_server` files identified), updated `-p no:warnings` to PARTIALLY COMPLETE (still in .pre-commit-config.yaml), corrected summary table arithmetic. |
-| 2026-03-15 | Documentation Audit | CAN-HIGH-001, CAN-MED-002, CAN-MED-005 marked COMPLETE. CAN-HIGH-007 path corrected. CAN-MED-011 description updated. CasCor integration and Cassandra/Redis status verified. |
-| 2026-03-26 | Documentation Automation | Updated API contracts documentation for external CasCor normalization and backend parity. Refreshed endpoint/websocket schemas in `docs/api/API_REFERENCE.md` and `docs/api/API_SCHEMAS.md` to match current source behavior (`ServiceBackend`/`CascorServiceAdapter`). |
-| 2026-04-01 | AI Agent | Marked SUPERSEDED. All 6 sprints from the backlog execution plan (CANOPY_DEFERRED_AND_BACKLOG_PLAN.md) are complete: 4144 tests passing, 56 skipped. ~30 items previously marked NOT STARTED are now complete. Remaining work items are in the Icebox (blocked on external dependencies) or tracked in DASHBOARD_AUGMENTATION_PLAN.md. |
-| 2026-04-05 | Documentation Automation | Refreshed CI/CD and testing operational documentation to match live workflow gates and job contracts (`.github/workflows/ci.yml`, `security-scan.yml`, `lockfile-update.yml`, `publish.yml`). Replaced stale conda/Codecov examples with current pip-first matrix/testing/lockfile/docs-link behavior and updated testing CI reproduction guidance. |
+| Date       | Author                   | Changes                                                                                                                                                                       |
+|------------|--------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 2026-02-17 | AI Agent                 | Initial creation from JuniperData codebase audit                                                                                                                              |
+| 2026-02-17 | AI Agent                 | Comprehensive rewrite: full notes/ audit, codebase validation, prioritization, and design analysis. Expanded from 28 items to 55 items across 5 phases.                       |
+| 2026-02-25 | AI Agent                 | Polyrepo migration impact analysis: updated status of 8 items (CAN-CRIT-001/002, CAN-HIGH-003/004/005/006, CAN-DEF-001/004),                                                  |
+|            |                          | -- added migration notes, updated summary tables, revised design analysis for microservices architecture.                                                                        |
+| 2026-02-25 | AI Agent                 | Codebase re-validation: fixed INTEG-004 validation (REST delegation, not ThreadPoolExecutor),                                                                                 |
+|            |                          | -- corrected CAN-HIGH-007 test file list (WebSocket tests already converted; actual `requires_server` files identified),                                                         |
+|            |                          | updated `-p no:warnings` to PARTIALLY COMPLETE (still in .pre-commit-config.yaml), corrected summary table arithmetic.                                                        |
+| 2026-03-15 | Documentation Audit      | CAN-HIGH-001, CAN-MED-002, CAN-MED-005 marked COMPLETE. CAN-HIGH-007 path corrected.                                                                                          |
+|            |                          | -- CAN-MED-011 description updated. CasCor integration and Cassandra/Redis status verified.                                                                                      |
+| 2026-03-26 | Documentation Automation | Updated API contracts documentation for external CasCor normalization and backend parity.                                                                                     |
+|            |                          | -- Refreshed endpoint/websocket schemas in `docs/api/API_REFERENCE.md` and `docs/api/API_SCHEMAS.md` to match current source behavior (`ServiceBackend`/`CascorServiceAdapter`). |
+| 2026-04-01 | AI Agent                 | Marked SUPERSEDED. All 6 sprints from the backlog execution plan (CANOPY_DEFERRED_AND_BACKLOG_PLAN.md) are complete:                                                          |
+|            |                          | -- 4144 tests passing, 56 skipped. ~30 items previously marked NOT STARTED are now complete.                                                                                     |
+|            |                          | -- Remaining work items are in the Icebox (blocked on external dependencies) or tracked in DASHBOARD_AUGMENTATION_PLAN.md.                                                       |
+| 2026-04-05 | Documentation Automation | Updated CI/testing operational setup docs to match current source-of-truth workflows and fixtures:                                                                            |
+|            |                          | -- `docs/ci_cd/CICD_QUICK_START.md`, `docs/ci_cd/CICD_ENVIRONMENT_SETUP.md`, and `docs/testing/TESTING_ENVIRONMENT_SETUP.md`                                                     |
+|            |                          | now reflect pip-based CI installs, Python `3.12/3.13/3.14` matrix usage, lockfile freshness behavior, and marker gating/runtime defaults from `src/tests/conftest.py`.        |
