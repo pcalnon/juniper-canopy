@@ -248,7 +248,13 @@ class CascorServiceAdapter:
                                 else:
                                     candidate_pool_status = "Inactive"
                                     candidate_pool_phase = "Idle"
-                                # Map top candidate identity from CasCor state
+                                # Map top candidate identity from CasCor state.
+                                # Field-name bridge (NEW-02): cascor emits ``best_candidate_id`` /
+                                # ``best_candidate_uuid`` on its TrainingState while canopy's
+                                # TrainingState uses ``top_candidate_id`` / ``top_candidate_uuid``.
+                                # Both names refer to the same concept (highest-correlation candidate
+                                # in the current pool). Rather than rename either side, we bridge
+                                # the names at this single adapter seam and document it here.
                                 best_cand_id = data.get("best_candidate_id")
                                 second_cand_id = data.get("second_candidate_id")
                                 second_cand_corr = data.get("second_candidate_correlation", 0.0)
