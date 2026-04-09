@@ -42,6 +42,8 @@ import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
+from canopy_constants import BackendConstants
+
 from .data_adapter import DataAdapter, NetworkTopology, TrainingMetrics
 
 
@@ -401,7 +403,7 @@ class TrainingMonitor:
 
         # Metrics storage
         self.metrics_buffer: List[TrainingMetrics] = []
-        self.max_buffer_size = 10000
+        self.max_buffer_size = BackendConstants.MAX_METRICS_BUFFER_SIZE
 
         # State tracking
         self.is_training = False

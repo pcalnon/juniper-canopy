@@ -56,6 +56,8 @@ from datetime import UTC, datetime
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
+from canopy_constants import BackendConstants
+
 # Optional redis import - fail soft if not installed
 try:
     import redis
@@ -156,23 +158,23 @@ class RedisClient:
             return {"enabled": False}
 
         # Parse redis_url or use individual settings
-        redis_url = cache_config.get("redis_url", "redis://localhost:6379/0")
+        redis_url = cache_config.get("redis_url", f"redis://{BackendConstants.REDIS_DEFAULT_HOST}:{BackendConstants.REDIS_DEFAULT_PORT}/{BackendConstants.REDIS_DEFAULT_DB}")
 
         # Support environment variable override
-        redis_url = os.getenv("REDIS_URL", redis_url)
+        redis_url = os.getenv(BackendConstants.REDIS_URL_ENV_VAR, redis_url)
 
         parsed = urlparse(redis_url)
 
         return {
             "enabled": True,
-            "host": parsed.hostname or "localhost",
-            "port": parsed.port or 6379,
-            "db": int(parsed.path.lstrip("/") or 0),
+            "host": parsed.hostname or BackendConstants.REDIS_DEFAULT_HOST,
+            "port": parsed.port or BackendConstants.REDIS_DEFAULT_PORT,
+            "db": int(parsed.path.lstrip("/") or BackendConstants.REDIS_DEFAULT_DB),
             "password": parsed.password,
-            "ttl_seconds": cache_config.get("ttl_seconds", 3600),
-            "max_memory_mb": cache_config.get("max_memory_mb", 100),
-            "socket_timeout": 5.0,
-            "socket_connect_timeout": 5.0,
+            "ttl_seconds": cache_config.get("ttl_seconds", BackendConstants.REDIS_DEFAULT_TTL_SECONDS),
+            "max_memory_mb": cache_config.get("max_memory_mb", BackendConstants.REDIS_DEFAULT_MAX_MEMORY_MB),
+            "socket_timeout": BackendConstants.REDIS_SOCKET_TIMEOUT,
+            "socket_connect_timeout": BackendConstants.REDIS_CONNECT_TIMEOUT,
         }
 
     def _initialize_connection(self) -> bool:
@@ -218,8 +220,8 @@ class RedisClient:
             port=config["port"],
             db=config["db"],
             password=config.get("password"),
-            socket_timeout=config.get("socket_timeout", 5.0),
-            socket_connect_timeout=config.get("socket_connect_timeout", 5.0),
+            socket_timeout=config.get("socket_timeout", BackendConstants.REDIS_SOCKET_TIMEOUT),
+            socket_connect_timeout=config.get("socket_connect_timeout", BackendConstants.REDIS_CONNECT_TIMEOUT),
             decode_responses=True,
         )
         self._client = redis.Redis(connection_pool=self._connection_pool)
@@ -330,8 +332,8 @@ class RedisClient:
                 "message": f"Redis unavailable: {self._last_error or 'connection not established'}",
                 "timestamp": timestamp,
                 "details": {
-                    "host": config.get("host", "localhost"),
-                    "port": config.get("port", 6379),
+                    "host": config.get("host", BackendConstants.REDIS_DEFAULT_HOST),
+                    "port": config.get("port", BackendConstants.REDIS_DEFAULT_PORT),
                     "connection_attempts": self._connection_attempts,
                     "last_error": self._last_error,
                 },
@@ -344,8 +346,8 @@ class RedisClient:
                 "message": f"Redis connection failed: {self._last_error or 'ping failed'}",
                 "timestamp": timestamp,
                 "details": {
-                    "host": config.get("host", "localhost"),
-                    "port": config.get("port", 6379),
+                    "host": config.get("host", BackendConstants.REDIS_DEFAULT_HOST),
+                    "port": config.get("port", BackendConstants.REDIS_DEFAULT_PORT),
                     "last_error": self._last_error,
                     "connection_attempts": self._connection_attempts,
                 },
@@ -362,8 +364,8 @@ class RedisClient:
                 "message": "Redis connection healthy",
                 "timestamp": timestamp,
                 "details": {
-                    "host": config.get("host", "localhost"),
-                    "port": config.get("port", 6379),
+                    "host": config.get("host", BackendConstants.REDIS_DEFAULT_HOST),
+                    "port": config.get("port", BackendConstants.REDIS_DEFAULT_PORT),
                     "version": info.get("redis_version", "unknown"),
                     "uptime_seconds": info.get("uptime_in_seconds", 0),
                     "connected_clients": clients_info.get("connected_clients", 0),
@@ -379,8 +381,8 @@ class RedisClient:
                 "message": "Redis connection healthy (limited info)",
                 "timestamp": timestamp,
                 "details": {
-                    "host": config.get("host", "localhost"),
-                    "port": config.get("port", 6379),
+                    "host": config.get("host", BackendConstants.REDIS_DEFAULT_HOST),
+                    "port": config.get("port", BackendConstants.REDIS_DEFAULT_PORT),
                     "info_error": str(e),
                 },
             }

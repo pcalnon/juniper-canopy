@@ -52,6 +52,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from canopy_constants import BackendConstants
 from settings import get_settings
 
 CASSANDRA_AVAILABLE = False
@@ -104,16 +105,16 @@ class CassandraClient:
         self._demo_mode = get_settings().demo_mode
 
         self._enabled = self._config_manager.get("cassandra.enabled", False)
-        self._contact_points = self._config_manager.get("cassandra.contact_points", ["127.0.0.1"])
-        self._port = self._config_manager.get("cassandra.port", 9042)
-        self._keyspace = self._config_manager.get("cassandra.keyspace", "juniper_canopy")
+        self._contact_points = self._config_manager.get("cassandra.contact_points", [BackendConstants.CASSANDRA_DEFAULT_CONTACT_POINT])
+        self._port = self._config_manager.get("cassandra.port", BackendConstants.CASSANDRA_DEFAULT_PORT)
+        self._keyspace = self._config_manager.get("cassandra.keyspace", BackendConstants.CASSANDRA_DEFAULT_KEYSPACE)
         self._username = self._config_manager.get("cassandra.username", None)
         self._password = self._config_manager.get("cassandra.password", None)
-        self._connect_timeout = self._config_manager.get("cassandra.connect_timeout", 10)
+        self._connect_timeout = self._config_manager.get("cassandra.connect_timeout", BackendConstants.CASSANDRA_CONNECT_TIMEOUT)
 
         self._last_status_check: Optional[datetime] = None
         self._cached_status: Optional[Dict[str, Any]] = None
-        self._status_cache_ttl_seconds = 5
+        self._status_cache_ttl_seconds = BackendConstants.CASSANDRA_STATUS_CACHE_TTL_SECONDS
 
         if not self._demo_mode and self._enabled and CASSANDRA_AVAILABLE:
             self._try_connect()
@@ -221,7 +222,7 @@ class CassandraClient:
             "timestamp": datetime.now().isoformat(),
             "details": {
                 "contact_points": ["demo-cassandra-1", "demo-cassandra-2", "demo-cassandra-3"],
-                "port": 9042,
+                "port": BackendConstants.CASSANDRA_DEFAULT_PORT,
                 "keyspace": "juniper_canopy_demo",
                 "data_center": "demo-dc1",
                 "hosts": [

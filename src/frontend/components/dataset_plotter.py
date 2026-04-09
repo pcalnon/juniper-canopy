@@ -43,6 +43,8 @@ from dash import dcc, html
 from dash.dependencies import Input, Output
 from plotly.subplots import make_subplots
 
+from canopy_constants import DashboardConstants, SecurityConstants
+
 from ..base_component import BaseComponent, create_empty_plot
 
 
@@ -302,12 +304,12 @@ class DatasetPlotter(BaseComponent):
 
                 origin = f"{_flask_request.scheme}://{_flask_request.host}"
             except RuntimeError:
-                origin = "http://127.0.0.1:8050"
+                origin = SecurityConstants.CORS_LOCAL_ORIGIN
 
             options = []
             current_value = None
             try:
-                resp = _requests.get(f"{origin}/api/dataset/generators", timeout=5)
+                resp = _requests.get(f"{origin}/api/dataset/generators", timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT)
                 if resp.ok:
                     data = resp.json()
                     generators = data.get("generators", [])

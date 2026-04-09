@@ -42,6 +42,7 @@ from typing import Any, Callable, Dict, Optional, Tuple, Union
 from juniper_cascor_client import CascorTrainingStream, JuniperCascorClient, JuniperCascorClientError
 
 from backend.circuit_breaker import CircuitBreaker
+from canopy_constants import BackendConstants
 
 # from juniper_cascor_client.juniper_cascor_client.client import CascorTrainingStream, JuniperCascorClient
 # from juniper_cascor_client.client import CascorTrainingStream, JuniperCascorClient
@@ -140,7 +141,7 @@ class CascorServiceAdapter:
 
     def __init__(
         self,
-        service_url: str = "http://localhost:8200",
+        service_url: str = BackendConstants.DEFAULT_CASCOR_SERVICE_URL,
         api_key: Optional[str] = None,
         client: Optional[JuniperCascorClient] = None,
     ):
@@ -152,7 +153,7 @@ class CascorServiceAdapter:
         self._relay_task: Optional[asyncio.Task] = None
         self._attached_to_existing: bool = False
         self._state_update_callback: Optional[Callable] = None
-        self._circuit = CircuitBreaker(name="cascor", failure_threshold=5, recovery_timeout=60.0)
+        self._circuit = CircuitBreaker(name=BackendConstants.CIRCUIT_BREAKER_NAME, failure_threshold=BackendConstants.CIRCUIT_BREAKER_FAILURE_THRESHOLD, recovery_timeout=BackendConstants.CIRCUIT_BREAKER_RECOVERY_TIMEOUT)
 
         # Derive WebSocket URL from HTTP URL
         ws_url = service_url.replace("http://", "ws://").replace("https://", "wss://")
@@ -688,7 +689,7 @@ class CascorServiceAdapter:
         try:
             return self._circuit
         except AttributeError:
-            self._circuit = CircuitBreaker(name="cascor", failure_threshold=5, recovery_timeout=60.0)
+            self._circuit = CircuitBreaker(name=BackendConstants.CIRCUIT_BREAKER_NAME, failure_threshold=BackendConstants.CIRCUIT_BREAKER_FAILURE_THRESHOLD, recovery_timeout=BackendConstants.CIRCUIT_BREAKER_RECOVERY_TIMEOUT)
             return self._circuit
 
     def extract_network_topology(self) -> Optional[Dict[str, Any]]:

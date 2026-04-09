@@ -2564,7 +2564,7 @@ class DashboardManager:
 
         try:
             url = self._api_url(f"/api/train/{command}")
-            response = requests.post(url, timeout=2)
+            response = requests.post(url, timeout=DashboardConstants.DASHBOARD_POST_TIMEOUT)
             response.raise_for_status()
             success = True
         except Exception as e:
@@ -2610,7 +2610,7 @@ class DashboardManager:
         )
 
     def _handle_button_timeout_and_acks_handler(self, action=None, n_intervals=None, button_states=None, **kwargs):
-        """Re-enable buttons after timeout (2s) based on their individual timestamps."""
+        """Re-enable buttons after the dashboard timeout based on their individual timestamps."""
         if not button_states:
             return dash.no_update
 
@@ -2624,8 +2624,8 @@ class DashboardManager:
 
             if is_loading and timestamp > 0:
                 elapsed = current_time - timestamp
-                # Reset after 2 seconds timeout
-                if elapsed > 2.0:
+                # Reset after the configured timeout threshold
+                if elapsed > DashboardConstants.DASHBOARD_TIMEOUT_THRESHOLD:
                     new_states[cmd] = {"disabled": False, "loading": False, "timestamp": 0}
                     changed = True
                     self.logger.debug(f"Button {cmd} reset after {elapsed:.1f}s timeout")
@@ -2827,15 +2827,15 @@ class DashboardManager:
             "cn_random_candidates": int(cn_random_cands) if cn_random_cands is not None else TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT,
         }
 
-        max_retries = 3
+        max_retries = DashboardConstants.DASHBOARD_SET_PARAMS_MAX_RETRIES
         last_error = None
         for attempt in range(max_retries):
             try:
-                response = requests.post(self._api_url("/api/set_params"), json=params, timeout=10)
+                response = requests.post(self._api_url("/api/set_params"), json=params, timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT)
                 if response.status_code == 200:
                     # Verify parameters were applied by reading back state
                     try:
-                        verify_resp = requests.get(self._api_url("/api/state"), timeout=5)
+                        verify_resp = requests.get(self._api_url("/api/state"), timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT)
                         if verify_resp.status_code == 200:
                             backend_state = verify_resp.json()
                             mismatched = []
