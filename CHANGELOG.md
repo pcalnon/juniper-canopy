@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Hardcoded-values refactor (Wave 1 + Wave 2): added `SecurityConstants` (HTTP security headers, default CSP policy, rate-limit headers, body-limit error messages, exempt paths) and `BackendConstants` (REST endpoint paths, backend adapter timeouts, retry tuning, status keys) to `src/canopy_constants.py`. Extended `DashboardConstants` and `ServerConstants` with discovery host/port defaults, health probe paths, and additional dashboard tuning values.
 - Documented documentation-link validation workflow and troubleshooting for CI and local developer runs:
   - Added `Documentation Links` CI job reference with command parity and cross-repo policy modes in `docs/ci_cd/CICD_REFERENCE.md`
   - Added a dedicated documentation-link failure pattern runbook in `docs/ci_cd/CICD_MANUAL.md`
@@ -29,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Hardcoded-values refactor (Wave 2): replaced ~55 inline literals across 9 modules (`middleware.py`, `discovery.py`, 4 backend adapters, dashboard manager, demo mode, plotter) with imports from `canopy_constants`. Module-level backwards-compat aliases (`EXEMPT_PATHS`, `_DEFAULT_CSP`, `_MAX_REQUEST_BODY_BYTES`, `_DEFAULT_PORTS`, `_DEFAULT_HOST`, `_DEFAULT_TIMEOUT`) are kept as references to the canonical constants — preserving the public API surface that tests import by name. AGENTS.md "Constants Management" section updated to list the 7 constant classes now exported by `canopy_constants`. All 29 unit tests pass; pre-commit (21 hooks) is clean.
 - Extracted candidate pool section, history tracking, and pool display from `MetricsPanel` to `CandidateMetricsPanel`. Training Metrics tab retains candidate training trace in loss plot and candidate epoch progress bar for context
 - Component count increased from 11 to 12; updated test assertions accordingly
 - Updated CI and developer documentation for markdown link validation to reflect current `docs` workflow behavior and local reproduction commands:

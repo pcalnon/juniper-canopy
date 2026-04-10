@@ -555,7 +555,11 @@ interval = DashboardConstants.FAST_UPDATE_INTERVAL_MS
 
 - `TrainingConstants` - Training parameters (epochs, learning rates, hidden units)
 - `DashboardConstants` - UI behavior (update intervals, timeouts, data limits)
-- `ServerConstants` - Server configuration (host, port, WebSocket paths)
+- `ServerConstants` - Server configuration (host, port, WebSocket paths, discovery host/ports/timeout, health probe paths)
+- `SecurityConstants` - HTTP security headers (CSP, HSTS, X-Frame-Options, etc.), default CSP policy, rate-limit headers, body-limit error messages, exempt paths
+- `BackendConstants` - REST endpoint paths, backend adapter timeouts, retry tuning, status keys
+- `WebSocketConstants` - WebSocket message types, ping/pong intervals, reconnect backoff
+- `JuniperDataConstants` - JuniperData service URL defaults and dataset endpoint paths
 
 **When to use constants:**
 
