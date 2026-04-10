@@ -114,6 +114,98 @@ class DatasetResult(TypedDict, total=False):
     dataset_name: str
 
 
+class ControlResult(TypedDict, total=False):
+    """Return type for training control operations.
+
+    Both backends return varying shapes here:
+    - service backend uses a result envelope: {ok, error?, data?, message?}
+    - demo backend's pause/resume return the full state snapshot
+    - demo backend's start returns a state snapshot subset
+
+    All fields are optional (total=False) to permit existing implementations
+    to participate in the contract without runtime changes. Callers should
+    treat ``ok`` as the canonical success indicator when present and fall
+    back to inspecting status fields otherwise.
+    """
+
+    ok: bool
+    error: str
+    data: Dict[str, Any]
+    message: str
+    is_training: bool
+    is_running: bool
+    is_paused: bool
+    current_epoch: int
+    current_loss: float
+    current_accuracy: float
+    hidden_units: int
+
+
+class ApplyParamsResult(TypedDict, total=False):
+    """Return type for apply_params().
+
+    Same envelope as ControlResult. Both backends return ``{ok, error?, data?,
+    message?}`` from this method, with ``data`` carrying the cascor-side
+    response payload (or empty dict for canopy-only param batches).
+    """
+
+    ok: bool
+    error: str
+    data: Dict[str, Any]
+    message: str
+
+
+class NetworkStatsResult(TypedDict, total=False):
+    """Return type for get_network_stats().
+
+    Free-form because the underlying cascor `/statistics` endpoint and the
+    demo backend's hand-rolled stats dict have overlapping but non-identical
+    keys. Documents the most common fields from both sources.
+    """
+
+    hidden_units: int
+    current_epoch: int
+    input_size: int
+    output_size: int
+    learning_rate: float
+    max_epochs: int
+    max_hidden_units: int
+    network_loaded: bool
+    training_active: bool
+
+
+class RawTopologyResult(TypedDict, total=False):
+    """Return type for get_raw_topology().
+
+    Mirrors cascor's native weight-oriented topology format (the same shape
+    consumed by `_transform_topology` in cascor_service_adapter.py).
+    """
+
+    input_size: int
+    output_size: int
+    hidden_units: List[Dict[str, Any]]
+    output_weights: List[List[float]]
+    output_bias: List[float]
+
+
+class DecisionBoundaryResult(TypedDict, total=False):
+    """Return type for get_decision_boundary().
+
+    Frontend-format meshgrid: ``xx``/``yy`` are 2D mesh arrays (lists), ``Z``
+    is the 2D predictions array. ``x_min``/``x_max``/``y_min``/``y_max``
+    define the plot bounds.
+    """
+
+    xx: List[List[float]]
+    yy: List[List[float]]
+    Z: List[List[int]]
+    x_min: float
+    x_max: float
+    y_min: float
+    y_max: float
+    resolution: int
+
+
 @runtime_checkable
 class BackendProtocol(Protocol):
     """
@@ -126,23 +218,23 @@ class BackendProtocol(Protocol):
 
     # --- Training control ---
 
-    def start_training(self, reset: bool = True, **kwargs: Any) -> Dict[str, Any]:
+    def start_training(self, reset: bool = True, **kwargs: Any) -> ControlResult:
         """Start or restart training. Returns new training state."""
         ...
 
-    def stop_training(self) -> Dict[str, Any]:
+    def stop_training(self) -> ControlResult:
         """Stop training gracefully. Returns final state."""
         ...
 
-    def pause_training(self) -> Dict[str, Any]:
+    def pause_training(self) -> ControlResult:
         """Pause training (retaining state). Returns paused state."""
         ...
 
-    def resume_training(self) -> Dict[str, Any]:
+    def resume_training(self) -> ControlResult:
         """Resume paused training. Returns resumed state."""
         ...
 
-    def reset_training(self) -> Dict[str, Any]:
+    def reset_training(self) -> ControlResult:
         """Reset training to initial state. Returns reset state."""
         ...
 
@@ -174,11 +266,11 @@ class BackendProtocol(Protocol):
         """Return network topology for visualization, or None."""
         ...
 
-    def get_raw_topology(self) -> Optional[Dict[str, Any]]:
+    def get_raw_topology(self) -> Optional[RawTopologyResult]:
         """Return raw weight-oriented topology without graph transformation, or None."""
         ...
 
-    def get_network_stats(self) -> Dict[str, Any]:
+    def get_network_stats(self) -> NetworkStatsResult:
         """Return network statistics (weights, unit counts, etc.)."""
         ...
 
@@ -186,13 +278,13 @@ class BackendProtocol(Protocol):
         """Return current dataset info, or None."""
         ...
 
-    def get_decision_boundary(self, resolution: int = 50) -> Optional[Dict[str, Any]]:
+    def get_decision_boundary(self, resolution: int = 50) -> Optional[DecisionBoundaryResult]:
         """Return decision boundary grid data, or None if unavailable."""
         ...
 
     # --- Parameters ---
 
-    def apply_params(self, **params: Any) -> Dict[str, Any]:
+    def apply_params(self, **params: Any) -> ApplyParamsResult:
         """Apply training parameter changes. Returns updated params."""
         ...
 

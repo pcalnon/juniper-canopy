@@ -39,12 +39,22 @@
 #####################################################################################################################################################################################################
 
 import logging
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, List, Optional, cast
 
 import numpy as np
 import torch
 
-from backend.protocol import DatasetResult, MetricsResult, StatusResult, TopologyResult
+from backend.protocol import (
+    ApplyParamsResult,
+    ControlResult,
+    DatasetResult,
+    DecisionBoundaryResult,
+    MetricsResult,
+    NetworkStatsResult,
+    RawTopologyResult,
+    StatusResult,
+    TopologyResult,
+)
 from demo_mode import DemoMode
 
 logger = logging.getLogger("juniper_canopy.backend.demo_backend")
@@ -62,23 +72,23 @@ class DemoBackend:
 
     # --- Training control ---
 
-    def start_training(self, reset: bool = True, **kwargs: Any) -> Dict[str, Any]:
-        return self._demo.start(reset=reset)
+    def start_training(self, reset: bool = True, **kwargs: Any) -> ControlResult:
+        return cast(ControlResult, self._demo.start(reset=reset))
 
-    def stop_training(self) -> Dict[str, Any]:
+    def stop_training(self) -> ControlResult:
         self._demo.stop()
-        return self._demo.get_current_state()
+        return cast(ControlResult, self._demo.get_current_state())
 
-    def pause_training(self) -> Dict[str, Any]:
+    def pause_training(self) -> ControlResult:
         self._demo.pause()
-        return self._demo.get_current_state()
+        return cast(ControlResult, self._demo.get_current_state())
 
-    def resume_training(self) -> Dict[str, Any]:
+    def resume_training(self) -> ControlResult:
         self._demo.resume()
-        return self._demo.get_current_state()
+        return cast(ControlResult, self._demo.get_current_state())
 
-    def reset_training(self) -> Dict[str, Any]:
-        return self._demo.reset()
+    def reset_training(self) -> ControlResult:
+        return cast(ControlResult, self._demo.reset())
 
     def is_training_active(self) -> bool:
         return bool(self._demo.get_current_state().get("is_running", False))
@@ -177,7 +187,7 @@ class DemoBackend:
             "hidden_units": len(network.hidden_units),
         }
 
-    def get_raw_topology(self) -> Optional[Dict[str, Any]]:
+    def get_raw_topology(self) -> Optional[RawTopologyResult]:
         """Get raw weight-oriented topology matching CasCor's native format."""
         network = self._demo.get_network()
         if network is None:
@@ -207,24 +217,30 @@ class DemoBackend:
         if hasattr(network.output_layer, "bias") and network.output_layer.bias is not None:
             output_bias = [b.item() for b in network.output_layer.bias.data]
 
-        return {
-            "input_size": network.input_size,
-            "output_size": network.output_size,
-            "hidden_units": hidden_units,
-            "output_weights": output_weights,
-            "output_bias": output_bias,
-        }
+        return cast(
+            RawTopologyResult,
+            {
+                "input_size": network.input_size,
+                "output_size": network.output_size,
+                "hidden_units": hidden_units,
+                "output_weights": output_weights,
+                "output_bias": output_bias,
+            },
+        )
 
-    def get_network_stats(self) -> Dict[str, Any]:
+    def get_network_stats(self) -> NetworkStatsResult:
         network = self._demo.get_network()
         state = self._demo.get_current_state()
-        return {
-            "hidden_units": len(network.hidden_units) if network else 0,
-            "current_epoch": state.get("current_epoch", 0),
-            "input_size": network.input_size if network else 0,
-            "output_size": network.output_size if network else 0,
-            **state,
-        }
+        return cast(
+            NetworkStatsResult,
+            {
+                "hidden_units": len(network.hidden_units) if network else 0,
+                "current_epoch": state.get("current_epoch", 0),
+                "input_size": network.input_size if network else 0,
+                "output_size": network.output_size if network else 0,
+                **state,
+            },
+        )
 
     def get_dataset(self) -> Optional[DatasetResult]:
         dataset = self._demo.get_dataset()
@@ -255,7 +271,7 @@ class DemoBackend:
         self._demo.regenerate_dataset(n_samples=n_samples, n_spirals=n_spirals, noise=noise, n_rotations=n_rotations)
         return self.get_dataset()
 
-    def get_decision_boundary(self, resolution: int = 50) -> Optional[Dict[str, Any]]:
+    def get_decision_boundary(self, resolution: int = 50) -> Optional[DecisionBoundaryResult]:
         network = self._demo.get_network()
         if network is None:
             return None
@@ -280,22 +296,25 @@ class DemoBackend:
             # Apply threshold for binary class labels (matching real CasCor argmax)
             z = (predictions > 0.5).int().numpy().flatten()
 
-        return {
-            "xx": grid_x.tolist(),
-            "yy": grid_y.tolist(),
-            "Z": z.reshape(resolution, resolution).tolist(),
-            "x_min": x_min,
-            "x_max": x_max,
-            "y_min": y_min,
-            "y_max": y_max,
-            "resolution": resolution,
-        }
+        return cast(
+            DecisionBoundaryResult,
+            {
+                "xx": grid_x.tolist(),
+                "yy": grid_y.tolist(),
+                "Z": z.reshape(resolution, resolution).tolist(),
+                "x_min": x_min,
+                "x_max": x_max,
+                "y_min": y_min,
+                "y_max": y_max,
+                "resolution": resolution,
+            },
+        )
 
     # --- Parameters ---
 
-    def apply_params(self, **params: Any) -> Dict[str, Any]:
+    def apply_params(self, **params: Any) -> ApplyParamsResult:
         self._demo.apply_params(**params)
-        return params
+        return cast(ApplyParamsResult, {"ok": True, "data": params})
 
     # --- Lifecycle ---
 

@@ -383,3 +383,124 @@ class TestLifecycle:
         await service_backend.shutdown()
         mock_adapter.stop_metrics_relay.assert_awaited_once()
         mock_adapter.shutdown.assert_called_once()
+
+
+class TestPhase4TypedContract:
+    """Phase 4 / P5-RC-18: BackendProtocol method returns conform to the
+    declared TypedDict shapes. These are field-presence contract tests, not
+    runtime type assertions — TypedDicts erase to plain dicts at runtime.
+    See juniper-ml/notes/code-review/CANOPY_CASCOR_INTERFACE_ROADMAP_2026-04-08.md §6.1.
+    """
+
+    def test_start_training_envelope_keys(self, service_backend):
+        """start_training() returns the ControlResult envelope with `ok` set."""
+        result = service_backend.start_training(reset=True)
+        assert isinstance(result, dict)
+        assert "ok" in result
+        assert isinstance(result["ok"], bool)
+
+    def test_stop_training_envelope_keys(self, service_backend):
+        result = service_backend.stop_training()
+        assert isinstance(result, dict)
+        assert "ok" in result
+
+    def test_pause_resume_reset_envelope_shape(self, service_backend, mock_adapter):
+        """pause/resume/reset all return the ControlResult envelope from the adapter."""
+        mock_adapter.pause_training.return_value = {"ok": True, "data": {}}
+        mock_adapter.resume_training.return_value = {"ok": True, "data": {}}
+        mock_adapter.reset_training.return_value = {"ok": True, "data": {}}
+        for method_name in ("pause_training", "resume_training", "reset_training"):
+            result = getattr(service_backend, method_name)()
+            assert isinstance(result, dict), f"{method_name} should return dict"
+            assert "ok" in result, f"{method_name} should include 'ok' field"
+
+    def test_apply_params_envelope_keys(self, service_backend, mock_adapter):
+        """apply_params() returns the ControlResult-shaped envelope (ok + data/error)."""
+        mock_adapter.apply_params.return_value = {"ok": True, "data": {"learning_rate": 0.05}}
+        result = service_backend.apply_params(nn_learning_rate=0.05)
+        assert isinstance(result, dict)
+        assert "ok" in result
+
+    def test_get_status_typed_fields(self, service_backend, mock_adapter):
+        """get_status() returns StatusResult with the canonical field set when
+        the cascor response is in nested format (which exercises the assembler
+        at service_backend.py:105-140). The flat-format short-circuit just casts
+        the raw dict and is covered by the existing TestStatusAndMetrics class."""
+        mock_adapter.get_training_status.return_value = {
+            "state_machine": {"status": "Stopped", "phase": "idle"},
+            "monitor": {"current_epoch": 0, "current_hidden_units": 0},
+            "training_state": {
+                "input_size": 2,
+                "output_size": 1,
+                "learning_rate": 0.01,
+                "max_hidden_units": 100,
+                "max_epochs": 1000,
+            },
+            "training_active": False,
+            "network_loaded": True,
+        }
+        result = service_backend.get_status()
+        assert isinstance(result, dict)
+        # All canonical StatusResult fields should be derivable from a nested
+        # cascor response
+        for canonical_field in (
+            "is_training",
+            "is_running",
+            "is_paused",
+            "completed",
+            "failed",
+            "phase",
+            "current_epoch",
+            "hidden_units",
+        ):
+            assert canonical_field in result, f"StatusResult missing {canonical_field}"
+
+    def test_get_metrics_returns_dict(self, service_backend):
+        """get_metrics() returns a MetricsResult-shaped dict."""
+        result = service_backend.get_metrics()
+        assert isinstance(result, dict)
+
+    def test_get_metrics_history_returns_list_of_dicts(self, service_backend):
+        """get_metrics_history() returns a list of MetricsResult-shaped dicts."""
+        result = service_backend.get_metrics_history(count=10)
+        assert isinstance(result, list)
+        for entry in result:
+            assert isinstance(entry, dict)
+
+    def test_get_network_stats_returns_dict(self, service_backend):
+        """get_network_stats() returns a NetworkStatsResult-shaped dict."""
+        result = service_backend.get_network_stats()
+        assert isinstance(result, dict)
+
+    def test_get_raw_topology_returns_dict_or_none(self, service_backend, mock_adapter):
+        """get_raw_topology() returns a RawTopologyResult or None."""
+        mock_adapter.get_raw_topology.return_value = {
+            "input_size": 2,
+            "output_size": 1,
+            "hidden_units": [],
+            "output_weights": [[0.1, 0.2]],
+            "output_bias": [0.0],
+        }
+        result = service_backend.get_raw_topology()
+        assert result is None or isinstance(result, dict)
+        if result is not None:
+            for field in ("input_size", "output_size", "hidden_units"):
+                assert field in result, f"RawTopologyResult missing {field}"
+
+    def test_get_decision_boundary_returns_dict_or_none(self, service_backend, mock_adapter):
+        """get_decision_boundary() returns a DecisionBoundaryResult or None."""
+        mock_adapter.get_decision_boundary.return_value = {
+            "xx": [[0.0, 1.0]],
+            "yy": [[0.0, 1.0]],
+            "Z": [[0, 1]],
+            "x_min": 0.0,
+            "x_max": 1.0,
+            "y_min": 0.0,
+            "y_max": 1.0,
+            "resolution": 50,
+        }
+        result = service_backend.get_decision_boundary(resolution=50)
+        assert result is None or isinstance(result, dict)
+        if result is not None:
+            for field in ("xx", "yy", "Z", "x_min", "x_max"):
+                assert field in result, f"DecisionBoundaryResult missing {field}"
