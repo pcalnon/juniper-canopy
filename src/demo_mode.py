@@ -584,6 +584,21 @@ class DemoMode:
         # Cascade event markers for loss chart (epoch, unit_index, correlation)
         self.cascade_events: List[Dict[str, Any]] = []
 
+        # Cascade growth counter — incremented in _training_loop after each
+        # candidate install. Mirrored to TrainingState.grow_iteration. Also reset
+        # in _reset_state_and_history(); declared here so get_current_state()
+        # is safe before start() is called.
+        self.current_iteration: int = 0
+
+        # Phase 3 progress fields (mirror cascor TrainingState semantics so the
+        # canopy progress UI displays non-zero values during demo training).
+        # See juniper-ml/notes/code-review/CANOPY_CASCOR_INTERFACE_ROADMAP_2026-04-08.md §5.
+        self._best_correlation_state: float = 0.0
+        self._candidates_trained_count: int = 0
+        self._candidates_total_count: int = 0
+        self._phase_detail: str = ""
+        self._phase_started_at: str = ""
+
         # Metrics buffer for realistic curves
         self.metrics_history: deque = deque(maxlen=TrainingConstants.METRICS_HISTORY_MAXLEN)
 
@@ -692,6 +707,14 @@ class DemoMode:
             second_candidate_id=second_cand_id,
             second_candidate_score=second_cand_score,
             pool_metrics=pool_metrics,
+            # Phase 3 progress fields — mirror cascor TrainingState semantics.
+            grow_iteration=self.current_iteration,
+            grow_max=self.max_hidden_units,
+            best_correlation=self._best_correlation_state,
+            candidates_trained=self._candidates_trained_count,
+            candidates_total=self._candidates_total_count,
+            phase_detail=self._phase_detail,
+            phase_started_at=self._phase_started_at,
         )
 
     def _broadcast_state(self):
@@ -1096,6 +1119,8 @@ class DemoMode:
 
         # Phase 1: Initial output training
         self.state_machine.set_phase(TrainingPhase.OUTPUT)
+        self._phase_detail = "training_output"
+        self._phase_started_at = datetime.now().isoformat()
         # Initialize last_emit far enough in the past that the first step triggers an emission
         last_emit = time.monotonic() - self.update_interval
         for step in range(TrainingConstants.OUTPUT_RETRAIN_STEPS):
@@ -1158,6 +1183,10 @@ class DemoMode:
 
             # Step 2a: Train candidate pool (NO LOCK — candidate-local state only)
             self.state_machine.set_phase(TrainingPhase.CANDIDATE)
+            self._phase_detail = "training_candidates"
+            self._phase_started_at = datetime.now().isoformat()
+            self._candidates_total_count = TrainingConstants.CANDIDATE_POOL_SIZE
+            self._candidates_trained_count = 0
             if self.candidate_pool:
                 self.candidate_pool.update_pool(
                     status="Active",
@@ -1176,6 +1205,10 @@ class DemoMode:
                 # Respect pause — wait if paused, don't emit
                 while self._pause.is_set() and not self._stop.is_set():
                     self._stop.wait(0.1)
+                # Update Phase 3 progress fields visible to the dashboard.
+                self._candidates_trained_count = max(0, int(idx) + 1)
+                self._candidates_total_count = max(self._candidates_total_count, int(pool_size))
+                self._best_correlation_state = float(best_corr)
                 now = time.monotonic()
                 if now - _emit_tracker[0] >= self.update_interval:
                     self._emit_training_metrics()
@@ -1196,6 +1229,7 @@ class DemoMode:
                 break
 
             best_unit, best_correlation = result
+            self._best_correlation_state = float(best_correlation)
 
             # Step 2b: Install candidate (BRIEF LOCK — modifies shared network state)
             with self._lock:
@@ -1222,6 +1256,8 @@ class DemoMode:
 
             # Step 2c: Retrain output layer (NO LOCK per step — only lock for metric emission)
             self.state_machine.set_phase(TrainingPhase.OUTPUT)
+            self._phase_detail = "retraining_output"
+            self._phase_started_at = datetime.now().isoformat()
             last_retrain_emit = time.monotonic()
             for step in range(TrainingConstants.OUTPUT_RETRAIN_STEPS):
                 if self._stop.is_set():
@@ -1422,6 +1458,13 @@ class DemoMode:
         self.convergence_threshold = TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD
         self._cascade_cooldown_remaining = 0
         self.cascade_events = []
+
+        # Reset Phase 3 progress fields
+        self._best_correlation_state = 0.0
+        self._candidates_trained_count = 0
+        self._candidates_total_count = 0
+        self._phase_detail = ""
+        self._phase_started_at = ""
         # Note: spiral_rotations is NOT reset here — it persists across training resets
         # so the user's chosen complexity is preserved. Only explicitly changed via apply_params.
 
@@ -1673,6 +1716,16 @@ class DemoMode:
                 "convergence_threshold": self.convergence_threshold,
                 "spiral_rotations": self.spiral_rotations,
                 "cascade_events": list(self.cascade_events),
+                # Phase 3 progress fields — kept in sync with self.training_state
+                # by _update_candidate_pool_state() so consumers reading either
+                # source see the same values.
+                "grow_iteration": self.current_iteration,
+                "grow_max": self.max_hidden_units,
+                "best_correlation": self._best_correlation_state,
+                "candidates_trained": self._candidates_trained_count,
+                "candidates_total": self._candidates_total_count,
+                "phase_detail": self._phase_detail,
+                "phase_started_at": self._phase_started_at,
             }
             # Include dataset versioning metadata when available
             if hasattr(self, "dataset") and self.dataset:

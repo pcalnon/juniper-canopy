@@ -240,5 +240,85 @@ class TestDemoModeDataGeneration:
         assert len(network.hidden_units) >= 0  # May or may not have added depending on timing
 
 
+class TestPhase3ProgressFields:
+    """Phase 3 metrics granularity: TrainingState progress fields are exposed
+    by DemoMode so the canopy progress UI displays non-zero values during demo
+    training. See juniper-ml/notes/code-review/CANOPY_CASCOR_INTERFACE_ROADMAP_2026-04-08.md §5.
+    """
+
+    PHASE3_FIELDS = (
+        "grow_iteration",
+        "grow_max",
+        "best_correlation",
+        "candidates_trained",
+        "candidates_total",
+        "phase_detail",
+        "phase_started_at",
+    )
+
+    def test_get_current_state_exposes_phase3_fields_before_start(self):
+        """get_current_state() must include all Phase 3 fields immediately
+        after construction (before start) so any consumer that reads state
+        early sees the keys with safe default values rather than KeyError."""
+        demo = DemoMode(update_interval=0.1)
+        state = demo.get_current_state()
+        for field in self.PHASE3_FIELDS:
+            assert field in state, f"Phase 3 field missing from get_current_state(): {field}"
+        # Defaults at this point: nothing has trained yet
+        assert state["grow_iteration"] == 0
+        assert state["grow_max"] == demo.max_hidden_units
+        assert state["best_correlation"] == 0.0
+        assert state["candidates_trained"] == 0
+        assert state["candidates_total"] == 0
+        assert state["phase_detail"] == ""
+        assert state["phase_started_at"] == ""
+
+    def test_training_state_includes_phase3_fields_after_status_update(self):
+        """After a training-status update fires, the canopy TrainingState
+        object must carry the Phase 3 fields too — that's the path consumed
+        by the dashboard's WebSocket relay."""
+        demo = DemoMode(update_interval=0.1)
+        if demo.training_state is None:
+            pytest.skip("backend.training_monitor.TrainingState unavailable in this environment")
+        # Trigger one explicit status update without running the loop.
+        demo._update_training_status()
+        ts_state = demo.training_state.get_state()
+        for field in self.PHASE3_FIELDS:
+            assert field in ts_state, f"Phase 3 field missing from TrainingState: {field}"
+        assert ts_state["grow_max"] == demo.max_hidden_units
+
+    def test_phase3_fields_track_training_progress(self):
+        """After running the demo loop briefly, at least one Phase 3 field
+        should reflect that training happened. We check phase_detail
+        (set as soon as the loop enters Phase 1 output training) and
+        phase_started_at (a non-empty ISO timestamp)."""
+        demo = DemoMode(update_interval=0.05)
+        demo.start()
+        time.sleep(0.5)
+        try:
+            state = demo.get_current_state()
+            assert state["phase_detail"] in ("training_output", "training_candidates", "retraining_output"), state["phase_detail"]
+            assert state["phase_started_at"] != "", "phase_started_at should be set after the loop enters a phase"
+        finally:
+            demo.stop()
+
+    def test_reset_clears_phase3_state(self):
+        """Reset must zero out the Phase 3 state so a fresh run starts clean."""
+        demo = DemoMode(update_interval=0.1)
+        demo._best_correlation_state = 0.42
+        demo._candidates_trained_count = 5
+        demo._candidates_total_count = 10
+        demo._phase_detail = "training_candidates"
+        demo._phase_started_at = "2026-04-09T17:30:00"
+        demo.current_iteration = 3
+        demo._reset_state_and_history()
+        assert demo._best_correlation_state == 0.0
+        assert demo._candidates_trained_count == 0
+        assert demo._candidates_total_count == 0
+        assert demo._phase_detail == ""
+        assert demo._phase_started_at == ""
+        assert demo.current_iteration == 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
