@@ -306,3 +306,60 @@ class TestLifecycle:
         await demo_backend.initialize()
         await demo_backend.shutdown()
         assert demo_backend.is_training_active() is False
+
+
+class TestPhase4TypedContract:
+    """Phase 4 / P5-RC-18: DemoBackend conforms to the same TypedDict
+    contract as ServiceBackend. Field-presence assertions only — TypedDicts
+    erase to plain dicts at runtime.
+    See juniper-ml/notes/code-review/CANOPY_CASCOR_INTERFACE_ROADMAP_2026-04-08.md §6.1.
+    """
+
+    def test_apply_params_returns_envelope(self, demo_backend):
+        """apply_params() returns ControlResult-shaped envelope, not raw params dict.
+        Phase 4 standardized this — old shape was the params dict directly."""
+        result = demo_backend.apply_params(learning_rate=0.05)
+        assert isinstance(result, dict)
+        assert "ok" in result, "ApplyParamsResult must include 'ok' field"
+        assert result["ok"] is True
+        assert "data" in result
+
+    def test_pause_resume_return_dicts(self, demo_backend):
+        """pause/resume_training return ControlResult-shaped dicts."""
+        demo_backend.start_training()
+        try:
+            for method_name in ("pause_training", "resume_training"):
+                result = getattr(demo_backend, method_name)()
+                assert isinstance(result, dict), f"{method_name} should return dict"
+        finally:
+            demo_backend.stop_training()
+
+    def test_get_status_typed_fields(self, demo_backend):
+        """get_status() returns StatusResult with the canonical field set."""
+        result = demo_backend.get_status()
+        assert isinstance(result, dict)
+        for canonical_field in ("is_training", "is_running", "phase"):
+            assert canonical_field in result, f"StatusResult missing {canonical_field}"
+
+    def test_get_raw_topology_envelope(self, demo_backend):
+        """get_raw_topology() returns RawTopologyResult or None with cascor-shape keys."""
+        result = demo_backend.get_raw_topology()
+        assert result is None or isinstance(result, dict)
+        if result is not None:
+            for field in ("input_size", "output_size", "hidden_units", "output_weights"):
+                assert field in result, f"RawTopologyResult missing {field}"
+
+    def test_get_network_stats_envelope(self, demo_backend):
+        """get_network_stats() returns NetworkStatsResult with the canonical fields."""
+        result = demo_backend.get_network_stats()
+        assert isinstance(result, dict)
+        for field in ("hidden_units", "current_epoch", "input_size", "output_size"):
+            assert field in result, f"NetworkStatsResult missing {field}"
+
+    def test_get_decision_boundary_envelope(self, demo_backend):
+        """get_decision_boundary() returns DecisionBoundaryResult or None."""
+        result = demo_backend.get_decision_boundary(resolution=20)
+        assert result is None or isinstance(result, dict)
+        if result is not None:
+            for field in ("xx", "yy", "Z", "x_min", "x_max", "y_min", "y_max", "resolution"):
+                assert field in result, f"DecisionBoundaryResult missing {field}"

@@ -40,10 +40,20 @@
 #####################################################################################################################################################################################################
 
 import logging
-from typing import Any, Callable, Dict, List, Optional, cast
+from typing import Any, Callable, List, Optional, cast
 
 from backend.cascor_service_adapter import CascorServiceAdapter, _first_defined
-from backend.protocol import DatasetResult, MetricsResult, StatusResult, TopologyResult
+from backend.protocol import (
+    ApplyParamsResult,
+    ControlResult,
+    DatasetResult,
+    DecisionBoundaryResult,
+    MetricsResult,
+    NetworkStatsResult,
+    RawTopologyResult,
+    StatusResult,
+    TopologyResult,
+)
 from backend.state_sync import CascorStateSync, SyncedState
 
 logger = logging.getLogger("juniper_canopy.backend.service_backend")
@@ -72,26 +82,26 @@ class ServiceBackend:
 
     # --- Training control ---
 
-    def start_training(self, reset: bool = True, **kwargs: Any) -> Dict[str, Any]:
+    def start_training(self, reset: bool = True, **kwargs: Any) -> ControlResult:
         if self._adapter.network is None:
-            return {"ok": False, "error": "No network created"}
+            return ControlResult(ok=False, error="No network created")
         if self._adapter.is_training_in_progress():
-            return {"ok": False, "error": "Training already in progress"}
+            return ControlResult(ok=False, error="Training already in progress")
         success = self._adapter.start_training_background(**kwargs)
-        return {"ok": success, "is_training": success}
+        return ControlResult(ok=success, is_training=success)
 
-    def stop_training(self) -> Dict[str, Any]:
+    def stop_training(self) -> ControlResult:
         success = self._adapter.request_training_stop()
-        return {"ok": success}
+        return ControlResult(ok=success)
 
-    def pause_training(self) -> Dict[str, Any]:
-        return self._adapter.pause_training()
+    def pause_training(self) -> ControlResult:
+        return cast(ControlResult, self._adapter.pause_training())
 
-    def resume_training(self) -> Dict[str, Any]:
-        return self._adapter.resume_training()
+    def resume_training(self) -> ControlResult:
+        return cast(ControlResult, self._adapter.resume_training())
 
-    def reset_training(self) -> Dict[str, Any]:
-        return self._adapter.reset_training()
+    def reset_training(self) -> ControlResult:
+        return cast(ControlResult, self._adapter.reset_training())
 
     def is_training_active(self) -> bool:
         return self._adapter.is_training_in_progress()
@@ -157,11 +167,11 @@ class ServiceBackend:
             return cast(TopologyResult, self._synced_state.topology)
         return result
 
-    def get_raw_topology(self) -> Optional[Dict[str, Any]]:
-        return self._adapter.get_raw_topology()
+    def get_raw_topology(self) -> Optional[RawTopologyResult]:
+        return cast(Optional[RawTopologyResult], self._adapter.get_raw_topology())
 
-    def get_network_stats(self) -> Dict[str, Any]:
-        return self._adapter.get_network_data()
+    def get_network_stats(self) -> NetworkStatsResult:
+        return cast(NetworkStatsResult, self._adapter.get_network_data())
 
     def get_dataset(self) -> Optional[DatasetResult]:
         raw = self._adapter.get_dataset_info()
@@ -189,13 +199,13 @@ class ServiceBackend:
             return cast(DatasetResult, result)
         return cast(DatasetResult, raw)
 
-    def get_decision_boundary(self, resolution: int = 50) -> Optional[Dict[str, Any]]:
-        return self._adapter.get_decision_boundary(resolution)
+    def get_decision_boundary(self, resolution: int = 50) -> Optional[DecisionBoundaryResult]:
+        return cast(Optional[DecisionBoundaryResult], self._adapter.get_decision_boundary(resolution))
 
     # --- Parameters ---
 
-    def apply_params(self, **params: Any) -> Dict[str, Any]:
-        return self._adapter.apply_params(**params)
+    def apply_params(self, **params: Any) -> ApplyParamsResult:
+        return cast(ApplyParamsResult, self._adapter.apply_params(**params))
 
     # --- Lifecycle ---
 
