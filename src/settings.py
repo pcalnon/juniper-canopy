@@ -65,10 +65,11 @@ class TrainingParamConfig(BaseModel):
 class TrainingSettings(BaseModel):
     """Training parameter configuration (replaces YAML training section)."""
 
-    epochs: TrainingParamConfig = TrainingParamConfig(min=10, max=10000000, default=1000000)
+    # epochs.max raised to 1e11, max_iterations.max raised to 1e6 per requirements 2026-04-10
+    epochs: TrainingParamConfig = TrainingParamConfig(min=10, max=100000000000, default=1000000)
     learning_rate: TrainingParamConfig = TrainingParamConfig(min=0.0001, max=1.0, default=0.01)
     hidden_units: TrainingParamConfig = TrainingParamConfig(min=0, max=10000, default=1000)
-    max_iterations: TrainingParamConfig = TrainingParamConfig(min=1, max=100000, default=1000)
+    max_iterations: TrainingParamConfig = TrainingParamConfig(min=1, max=1000000, default=1000)
     preset_epochs: TrainingParamConfig = TrainingParamConfig(min=1, max=10000, default=50)
 
 
