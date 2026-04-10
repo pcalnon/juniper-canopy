@@ -39,14 +39,16 @@ class TrainingConstants:
     """
 
     # ── Neural Network: Epoch limits ──
+    # MAX_TRAINING_EPOCHS raised to 1e11 (100 billion) per requirements 2026-04-10
     MIN_TRAINING_EPOCHS: Final[int] = 10
-    MAX_TRAINING_EPOCHS: Final[int] = 10000000
+    MAX_TRAINING_EPOCHS: Final[int] = 100000000000
     DEFAULT_TRAINING_EPOCHS: Final[int] = 1000000
 
     # ── Neural Network: Maximum growth iterations (hidden unit additions) ──
+    # MAX_MAX_GROWTH_ITERATIONS raised to 1e6 (1 million) per requirements 2026-04-10
     DEFAULT_MAX_GROWTH_ITERATIONS: Final[int] = 1000
     MIN_MAX_GROWTH_ITERATIONS: Final[int] = 1
-    MAX_MAX_GROWTH_ITERATIONS: Final[int] = 100000
+    MAX_MAX_GROWTH_ITERATIONS: Final[int] = 1000000
 
     # ── Neural Network: Output weight initialization method ──
     DEFAULT_INIT_OUTPUT_WEIGHTS: Final[str] = "zero"

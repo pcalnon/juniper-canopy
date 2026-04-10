@@ -22,11 +22,16 @@ class TestTrainingConstants:
     """Test training constants validity and relationships."""
 
     def test_epoch_constraints(self):
-        """Test epoch min/max/default relationships."""
+        """Test epoch min/max/default relationships.
+
+        Updated 2026-04-10: MAX_TRAINING_EPOCHS raised from 1e7 to 1e11 per
+        canopy requirements — the cap should not silently surprise users with
+        long-running jobs by clipping at an artificially low value.
+        """
         assert TrainingConstants.MIN_TRAINING_EPOCHS < TrainingConstants.DEFAULT_TRAINING_EPOCHS
         assert TrainingConstants.DEFAULT_TRAINING_EPOCHS < TrainingConstants.MAX_TRAINING_EPOCHS
         assert TrainingConstants.MIN_TRAINING_EPOCHS == 10
-        assert TrainingConstants.MAX_TRAINING_EPOCHS == 10000000
+        assert TrainingConstants.MAX_TRAINING_EPOCHS == 100000000000
         assert TrainingConstants.DEFAULT_TRAINING_EPOCHS == 1000000
 
     def test_learning_rate_constraints(self):
