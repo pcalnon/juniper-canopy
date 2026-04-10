@@ -401,6 +401,52 @@ class TestFix13ZeroMetricPreservation:
         assert dashboard["metrics"]["loss"] == 0.0
         assert dashboard["metrics"]["accuracy"] == 0.0
 
+    def test_normalize_metric_no_redundant_nested_keys(self):
+        """NEW-01 (Phase 1 deferred): _normalize_metric returns only the flat
+        normalized fields. The redundant nested ``metrics``/``network_topology``
+        keys (which used to be built here AND rebuilt by _to_dashboard_metric
+        immediately downstream) must NOT appear in the output. The dashboard's
+        nested format is built downstream by _to_dashboard_metric.
+
+        See juniper-ml/notes/code-review/CANOPY_CASCOR_INTERFACE_ROADMAP_2026-04-08.md §3.5.
+        """
+        metric = {
+            "loss": 0.5,
+            "accuracy": 0.8,
+            "validation_loss": 0.6,
+            "validation_accuracy": 0.7,
+            "hidden_units": 3,
+            "epoch": 7,
+            "phase": "output",
+        }
+        normalized = CascorServiceAdapter._normalize_metric(metric)
+
+        # Flat keys must be present
+        for flat_key in (
+            "epoch",
+            "train_loss",
+            "train_accuracy",
+            "val_loss",
+            "val_accuracy",
+            "hidden_units",
+            "phase",
+            "timestamp",
+        ):
+            assert flat_key in normalized, f"flat key {flat_key} missing from _normalize_metric output"
+
+        # Redundant nested keys must NOT be present (NEW-01)
+        assert "metrics" not in normalized, "_normalize_metric should not return a 'metrics' nested dict (NEW-01)"
+        assert "network_topology" not in normalized, "_normalize_metric should not return a 'network_topology' nested dict (NEW-01)"
+
+        # Verify the values flow correctly
+        assert normalized["train_loss"] == 0.5
+        assert normalized["train_accuracy"] == 0.8
+        assert normalized["val_loss"] == 0.6
+        assert normalized["val_accuracy"] == 0.7
+        assert normalized["hidden_units"] == 3
+        assert normalized["epoch"] == 7
+        assert normalized["phase"] == "output"
+
 
 # ==================================================================
 # Helper-function hardening tests

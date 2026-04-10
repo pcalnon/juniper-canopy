@@ -514,12 +514,24 @@ class CascorServiceAdapter:
 
     @staticmethod
     def _normalize_metric(entry: dict) -> dict:
-        """Normalize a single metric entry to canopy's canonical field names.
+        """Normalize a single metric entry to canopy's canonical flat field names.
 
-        Handles both real cascor names (loss, accuracy, validation_loss,
-        validation_accuracy) and canopy names (train_loss, train_accuracy,
-        val_loss, val_accuracy).  Uses ``"key" in entry`` checks instead of
-        ``or`` chains so that valid 0.0 values are preserved.
+        Returns ONLY the flat normalized fields (``train_loss``, ``train_accuracy``,
+        ``val_loss``, ``val_accuracy``, ``hidden_units``, ``epoch``, ``phase``,
+        ``timestamp``). The dashboard's nested format (``metrics.*``,
+        ``network_topology.*``) is built downstream by ``_to_dashboard_metric``.
+
+        Handles both real cascor names (``loss``, ``accuracy``,
+        ``validation_loss``, ``validation_accuracy``) and canopy names
+        (``train_loss``, ``train_accuracy``, ``val_loss``, ``val_accuracy``).
+        Uses ``"key" in entry`` checks instead of ``or`` chains so that valid
+        0.0 values are preserved.
+
+        NEW-01 (Phase 1 deferred): previously this function returned BOTH the
+        flat keys and a redundant pre-built nested format. Every caller piped
+        the result through ``_to_dashboard_metric``, which discarded the nested
+        portion and rebuilt it from the flat keys — so the nested keys were
+        dead. Removed to make the contract single-source-of-truth.
         """
         train_loss = _first_defined(
             entry.get("train_loss") if "train_loss" in entry else None,
@@ -537,25 +549,14 @@ class CascorServiceAdapter:
             entry.get("val_accuracy") if "val_accuracy" in entry else None,
             entry.get("validation_accuracy") if "validation_accuracy" in entry else None,
         )
-        hidden_units = entry.get("hidden_units", 0)
-        epoch = entry.get("epoch", 0)
 
         return {
-            # Legacy dashboard shape used by metrics panel rendering.
-            "epoch": epoch,
-            "metrics": {
-                "loss": train_loss,
-                "accuracy": train_accuracy,
-                "val_loss": val_loss,
-                "val_accuracy": val_accuracy,
-            },
-            "network_topology": {"hidden_units": hidden_units},
-            # Canonical normalized names retained for API/client compatibility.
+            "epoch": entry.get("epoch", 0),
             "train_loss": train_loss,
             "train_accuracy": train_accuracy,
             "val_loss": val_loss,
             "val_accuracy": val_accuracy,
-            "hidden_units": hidden_units,
+            "hidden_units": entry.get("hidden_units", 0),
             "phase": entry.get("phase"),
             "timestamp": entry.get("timestamp"),
         }
