@@ -10,27 +10,16 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
+from canopy_constants import SecurityConstants
 from security import APIKeyAuth, RateLimiter
 
-EXEMPT_PATH_PREFIXES = ("/dashboard",)
-
-EXEMPT_PATHS = {
-    "/",
-    "/health",
-    "/api/health",
-    "/v1/health",
-    "/v1/health/live",
-    "/v1/health/ready",
-    "/docs",
-    "/openapi.json",
-    "/redoc",
-}
-
-# Default Content-Security-Policy for Canopy.
-# - Dash requires 'unsafe-inline' for styles and scripts.
-# - cdn.jsdelivr.net serves Bootstrap CSS via dash-bootstrap-components.
-# - data: in img-src is needed for Bootstrap's inline SVG data URIs (form controls).
-_DEFAULT_CSP = "default-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'"
+# Module-level aliases preserved for tests that import these names directly
+# (test_middleware.py, test_middleware_coverage.py, test_csp_bootstrap_cdn.py).
+# The canonical source of truth is :class:`canopy_constants.SecurityConstants`.
+EXEMPT_PATH_PREFIXES = SecurityConstants.EXEMPT_PATH_PREFIXES
+EXEMPT_PATHS = SecurityConstants.EXEMPT_PATHS
+_DEFAULT_CSP = SecurityConstants.DEFAULT_CSP_POLICY
+_MAX_REQUEST_BODY_BYTES = SecurityConstants.MAX_REQUEST_BODY_BYTES
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -48,19 +37,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         response = await call_next(request)
 
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        response.headers["Content-Security-Policy"] = self._csp
+        response.headers[SecurityConstants.HEADER_X_CONTENT_TYPE_OPTIONS] = SecurityConstants.NOSNIFF_VALUE
+        response.headers[SecurityConstants.HEADER_X_FRAME_OPTIONS] = SecurityConstants.FRAME_OPTIONS_DENY
+        response.headers[SecurityConstants.HEADER_REFERRER_POLICY] = SecurityConstants.REFERRER_POLICY_VALUE
+        response.headers[SecurityConstants.HEADER_PERMISSIONS_POLICY] = SecurityConstants.PERMISSIONS_POLICY_VALUE
+        response.headers[SecurityConstants.HEADER_CONTENT_SECURITY_POLICY] = self._csp
 
-        if request.headers.get("X-Forwarded-Proto") == "https":
-            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        if request.headers.get(SecurityConstants.HEADER_X_FORWARDED_PROTO) == SecurityConstants.HTTPS_SCHEME:
+            response.headers[SecurityConstants.HEADER_STRICT_TRANSPORT_SECURITY] = SecurityConstants.HSTS_VALUE
 
         return response
-
-
-_MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
@@ -71,13 +57,13 @@ class RequestBodyLimitMiddleware(BaseHTTPMiddleware):
         self._max_bytes = max_bytes
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        content_length = request.headers.get("content-length")
+        content_length = request.headers.get(SecurityConstants.HEADER_CONTENT_LENGTH)
         if content_length is not None:
             try:
                 if int(content_length) > self._max_bytes:
-                    return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+                    return JSONResponse(status_code=SecurityConstants.HTTP_PAYLOAD_TOO_LARGE, content={"detail": SecurityConstants.ERROR_BODY_TOO_LARGE})
             except (ValueError, OverflowError):
-                return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length header"})
+                return JSONResponse(status_code=SecurityConstants.HTTP_BAD_REQUEST, content={"detail": SecurityConstants.ERROR_INVALID_CONTENT_LENGTH})
         return await call_next(request)
 
 
@@ -141,9 +127,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
 
         if self._rate_limiter.enabled and hasattr(request.state, "rate_limit_remaining"):
-            response.headers["X-RateLimit-Limit"] = str(self._rate_limiter.limit)
-            response.headers["X-RateLimit-Remaining"] = str(request.state.rate_limit_remaining)
-            response.headers["X-RateLimit-Reset"] = str(request.state.rate_limit_reset)
+            response.headers[SecurityConstants.HEADER_RATE_LIMIT] = str(self._rate_limiter.limit)
+            response.headers[SecurityConstants.HEADER_RATE_LIMIT_REMAINING] = str(request.state.rate_limit_remaining)
+            response.headers[SecurityConstants.HEADER_RATE_LIMIT_RESET] = str(request.state.rate_limit_reset)
 
         return response
 

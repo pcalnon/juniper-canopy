@@ -63,7 +63,7 @@ import numpy as np
 import torch
 
 from backend.training_state_machine import Command, TrainingPhase, TrainingStateMachine  # TrainingStatus,
-from canopy_constants import TrainingConstants
+from canopy_constants import BackendConstants, TrainingConstants
 from settings import get_settings
 
 # import copy
@@ -1486,7 +1486,7 @@ class DemoMode:
 
         # Wait for thread to finish
         if self.thread:
-            self.thread.join(timeout=5.0)
+            self.thread.join(timeout=BackendConstants.DEMO_THREAD_JOIN_TIMEOUT)
             if self.thread.is_alive():
                 self.logger.warning("Demo thread did not stop cleanly")
         self._perform_reset()
@@ -1608,7 +1608,7 @@ class DemoMode:
         # Stop without FSM command (RESET already handled it)
         self._stop.set()
         if self.thread:
-            self.thread.join(timeout=5.0)
+            self.thread.join(timeout=BackendConstants.DEMO_THREAD_JOIN_TIMEOUT)
         self._perform_reset()
 
     def _perform_reset(self):
@@ -1898,8 +1898,8 @@ if __name__ == "__main__":
     demo.start()
 
     try:
-        # Run for 30 seconds
-        time.sleep(30)
+        # Run for the configured demo main loop sleep period
+        time.sleep(BackendConstants.DEMO_MAIN_LOOP_SLEEP)
     except KeyboardInterrupt:
         pass
     finally:
