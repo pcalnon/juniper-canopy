@@ -371,8 +371,31 @@ async def websocket_training_endpoint(websocket: WebSocket):
     if not await _authenticate_websocket(websocket):
         return
 
+    # Phase B-pre-a: Origin validation (M-SEC-01b)
+    from ws_security import validate_origin
+
+    ws_settings = settings.websocket
+    if ws_settings.allowed_origins:
+        if not validate_origin(websocket, ws_settings.allowed_origins):
+            from audit_log import log_ws_origin_rejected
+
+            origin = websocket.headers.get("origin", "")
+            client_ip = websocket.client[0] if websocket.client else "unknown"
+            log_ws_origin_rejected("/ws/training", client_ip, origin)
+            await websocket.close(code=4003, reason="Origin not allowed")
+            return
+
+    # Phase B-pre-a: Per-IP connection cap (M-SEC-04)
+    if not websocket_manager.check_per_ip_limit(websocket, ws_settings.max_connections_per_ip):
+        await websocket.close(code=1013, reason="Per-IP connection limit reached")
+        return
+
     client_id = f"training-client-{id(websocket)}"
     await websocket_manager.connect(websocket, client_id=client_id)
+
+    idle_timeout = ws_settings.idle_timeout_seconds
+    max_msg_size = ws_settings.max_message_size_training
+
     try:
         # Send initial status
         status = backend.get_status()
@@ -384,13 +407,15 @@ async def websocket_training_endpoint(websocket: WebSocket):
         state_data = training_state.get_state() if training_state else status
         await websocket_manager.send_personal_message({"type": "state", "timestamp": time.time(), "data": state_data}, websocket)
 
-        # Message handling loop
+        # Message handling loop (with idle timeout)
         while True:
             try:
-                # Receive message from client
-                data = await websocket.receive_text()
+                if idle_timeout and idle_timeout > 0:
+                    data = await asyncio.wait_for(websocket.receive_text(), timeout=idle_timeout)
+                else:
+                    data = await websocket.receive_text()
 
-                if len(data) > _WS_MAX_MESSAGE_SIZE:
+                if len(data) > max_msg_size:
                     await websocket_manager.send_personal_message({"ok": False, "error": "Message too large"}, websocket)
                     continue
 
@@ -403,6 +428,10 @@ async def websocket_training_endpoint(websocket: WebSocket):
                 else:
                     system_logger.debug(f"Received message: {message.get('type')}")
 
+            except asyncio.TimeoutError:
+                system_logger.info(f"WebSocket idle timeout ({idle_timeout}s), closing: {client_id}")
+                await websocket.close(code=1000, reason="Idle timeout")
+                break
             except WebSocketDisconnect:
                 system_logger.info(f"Client disconnected: {client_id}")
                 break
@@ -433,17 +462,37 @@ async def websocket_control_endpoint(websocket: WebSocket):
     if not await _authenticate_websocket(websocket):
         return
 
+    # Phase B-pre-a: Origin validation (M-SEC-01b)
+    from ws_security import validate_origin
+
+    ws_settings = settings.websocket
+    if ws_settings.allowed_origins:
+        if not validate_origin(websocket, ws_settings.allowed_origins):
+            from audit_log import log_ws_origin_rejected
+
+            origin = websocket.headers.get("origin", "")
+            client_ip = websocket.client[0] if websocket.client else "unknown"
+            log_ws_origin_rejected("/ws/control", client_ip, origin)
+            await websocket.close(code=4003, reason="Origin not allowed")
+            return
+
+    # Phase B-pre-a: Per-IP connection cap (M-SEC-04)
+    if not websocket_manager.check_per_ip_limit(websocket, ws_settings.max_connections_per_ip):
+        await websocket.close(code=1013, reason="Per-IP connection limit reached")
+        return
+
     client_id = f"control-client-{id(websocket)}"
     await websocket_manager.connect(websocket, client_id=client_id)
     # Connection confirmation is sent automatically by websocket_manager.connect()
 
     _valid_commands = {"start", "stop", "pause", "resume", "reset"}
+    max_msg_size = ws_settings.max_message_size_control
 
     try:
         while True:
             data = await websocket.receive_text()
 
-            if len(data) > _WS_MAX_MESSAGE_SIZE:
+            if len(data) > max_msg_size:
                 await websocket_manager.send_personal_message({"ok": False, "error": "Message too large"}, websocket)
                 continue
 

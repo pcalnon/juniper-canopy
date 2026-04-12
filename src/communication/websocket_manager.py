@@ -187,6 +187,9 @@ class WebSocketManager:
         self.reconnect_attempts = _settings.websocket.reconnect_attempts
         self.reconnect_delay = _settings.websocket.reconnect_delay
 
+        # Phase B-pre-a: Per-IP connection tracking (M-SEC-04)
+        self._per_ip_counts: Dict[str, int] = {}
+
         self.logger.info(f"WebSocketManager initialized: " f"max_connections={self.max_connections}, " f"heartbeat_interval={self.heartbeat_interval}s, " f"reconnect_attempts={self.reconnect_attempts}, " f"reconnect_delay={self.reconnect_delay}s")
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
@@ -263,6 +266,31 @@ class WebSocketManager:
             websocket,
         )
 
+    def check_per_ip_limit(self, websocket: WebSocket, max_per_ip: int) -> bool:
+        """Check if the source IP has room for another connection (M-SEC-04).
+
+        Increments the counter if allowed. Counter is decremented in disconnect().
+
+        Returns:
+            True if the connection is allowed, False if limit reached.
+        """
+        source_ip = websocket.client[0] if websocket.client else "unknown"
+        current = self._per_ip_counts.get(source_ip, 0)
+        if current >= max_per_ip:
+            self.logger.warning(f"Per-IP limit reached for {source_ip} ({current}/{max_per_ip})")
+            return False
+        self._per_ip_counts[source_ip] = current + 1
+        return True
+
+    def _decrement_ip_count(self, websocket: WebSocket) -> None:
+        """Decrement per-IP counter on disconnect."""
+        source_ip = websocket.client[0] if websocket.client else "unknown"
+        count = self._per_ip_counts.get(source_ip, 0)
+        if count <= 1:
+            self._per_ip_counts.pop(source_ip, None)
+        else:
+            self._per_ip_counts[source_ip] = count - 1
+
     def disconnect(self, websocket: WebSocket):
         """
         Remove WebSocket connection.
@@ -279,6 +307,7 @@ class WebSocketManager:
 
             self.active_connections.discard(websocket)
             self.connection_metadata.pop(websocket, None)
+            self._decrement_ip_count(websocket)
 
             self.logger.info(f"Client disconnected: {client_id} " f"(Remaining: {len(self.active_connections)})")
 
