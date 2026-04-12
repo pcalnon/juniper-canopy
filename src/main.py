@@ -1985,9 +1985,10 @@ async def ws_endpoint(websocket: WebSocket):
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        websocket_manager.disconnect(websocket)
+        pass
     except Exception:
         system_logger.error("Unexpected error on /ws endpoint", exc_info=True)
+    finally:
         websocket_manager.disconnect(websocket)
 
 

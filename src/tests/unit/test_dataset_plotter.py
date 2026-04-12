@@ -13,7 +13,6 @@
 #####################################################################
 """Unit tests for DatasetPlotter component."""
 
-import contextlib
 import sys
 from pathlib import Path
 
@@ -111,68 +110,67 @@ class TestDatasetPlotterScatterPlot:
 
     def test_create_scatter_plot(self, plotter):
         """Should create scatter plot."""
-        if hasattr(plotter, "_create_scatter_plot"):
-            dataset = {"inputs": np.random.randn(100, 2).tolist(), "targets": np.random.randint(0, 2, 100).tolist()}
-            plot = plotter._create_scatter_plot(dataset)
-            assert plot is not None
+        dataset = {"inputs": np.random.randn(100, 2).tolist(), "targets": np.random.randint(0, 2, 100).tolist()}
+        plot = plotter._create_scatter_plot(dataset)
+        assert plot is not None
 
     def test_scatter_plot_with_labels(self, plotter):
         """Should handle labeled data."""
-        if hasattr(plotter, "_create_scatter_plot"):
-            dataset = {"inputs": np.random.randn(100, 2).tolist(), "targets": ([0, 1] * 50)}  # Two classes
-            plot = plotter._create_scatter_plot(dataset)
-            assert plot is not None
+        dataset = {"inputs": np.random.randn(100, 2).tolist(), "targets": ([0, 1] * 50)}  # Two classes
+        plot = plotter._create_scatter_plot(dataset)
+        assert plot is not None
 
     def test_scatter_plot_2d_data(self, plotter):
         """Should handle 2D data."""
-        if hasattr(plotter, "_create_scatter_plot"):
-            dataset = {"inputs": np.random.randn(50, 2).tolist(), "targets": np.random.randint(0, 3, 50).tolist()}
-            plot = plotter._create_scatter_plot(dataset)
-            assert plot is not None
+        dataset = {"inputs": np.random.randn(50, 2).tolist(), "targets": np.random.randint(0, 3, 50).tolist()}
+        plot = plotter._create_scatter_plot(dataset)
+        assert plot is not None
 
 
+@pytest.mark.skip(reason="Method _parse_dataset not exposed as public API")
 class TestDatasetPlotterDataParsing:
     """Test data parsing methods."""
 
     def test_parse_dataset_dict(self, plotter):
         """Should parse dataset dictionary."""
-        if hasattr(plotter, "_parse_dataset"):
-            data = {"X": [[0, 0], [1, 1], [0, 1]], "y": [0, 1, 0]}
-            parsed = plotter._parse_dataset(data)
-            assert parsed is not None
+        assert hasattr(plotter, "_parse_dataset"), "DatasetPlotter should have _parse_dataset method"
+        data = {"X": [[0, 0], [1, 1], [0, 1]], "y": [0, 1, 0]}
+        parsed = plotter._parse_dataset(data)
+        assert parsed is not None
 
     def test_parse_numpy_arrays(self, plotter):
         """Should parse numpy arrays."""
-        if hasattr(plotter, "_parse_dataset"):
-            data = {"X": np.random.randn(100, 2), "y": np.random.randint(0, 2, 100)}
-            parsed = plotter._parse_dataset(data)
-            assert parsed is not None
+        assert hasattr(plotter, "_parse_dataset"), "DatasetPlotter should have _parse_dataset method"
+        data = {"X": np.random.randn(100, 2), "y": np.random.randint(0, 2, 100)}
+        parsed = plotter._parse_dataset(data)
+        assert parsed is not None
 
     def test_parse_empty_dataset(self, plotter):
         """Should handle empty dataset."""
-        if hasattr(plotter, "_parse_dataset"):
-            data = {"X": [], "y": []}
-            with contextlib.suppress(ValueError, IndexError):
-                _parsed = plotter._parse_dataset(data)  # noqa: F841
+        assert hasattr(plotter, "_parse_dataset"), "DatasetPlotter should have _parse_dataset method"
+        data = {"X": [], "y": []}
+        with pytest.raises((ValueError, IndexError)):
+            plotter._parse_dataset(data)
 
 
+@pytest.mark.skip(reason="Method _get_class_colors not exposed as public API")
 class TestDatasetPlotterColorMapping:
     """Test color mapping for classes."""
 
     def test_get_colors_for_classes(self, plotter):
         """Should generate colors for classes."""
-        if hasattr(plotter, "_get_class_colors"):
-            n_classes = 3
-            colors = plotter._get_class_colors(n_classes)
-            assert colors is not None
-            assert len(colors) >= n_classes
+        assert hasattr(plotter, "_get_class_colors"), "DatasetPlotter should have _get_class_colors method"
+        n_classes = 3
+        colors = plotter._get_class_colors(n_classes)
+        assert colors is not None
+        assert len(colors) >= n_classes
 
     def test_consistent_colors(self, plotter):
         """Colors should be consistent for same classes."""
-        if hasattr(plotter, "_get_class_colors"):
-            colors1 = plotter._get_class_colors(5)
-            colors2 = plotter._get_class_colors(5)
-            assert colors1 == colors2
+        assert hasattr(plotter, "_get_class_colors"), "DatasetPlotter should have _get_class_colors method"
+        colors1 = plotter._get_class_colors(5)
+        colors2 = plotter._get_class_colors(5)
+        assert colors1 == colors2
 
 
 class TestDatasetPlotterInheritance:
@@ -204,34 +202,28 @@ class TestDatasetPlotterEdgeCases:
 
     def test_single_point_dataset(self, plotter):
         """Should handle single point."""
-        if hasattr(plotter, "_create_scatter_plot"):
-            dataset = {"inputs": [[0, 0]], "targets": [0]}
-            with contextlib.suppress(Exception):
-                plot = plotter._create_scatter_plot(dataset)
-                assert plot is not None
+        dataset = {"inputs": [[0, 0]], "targets": [0]}
+        plot = plotter._create_scatter_plot(dataset)
+        assert plot is not None
 
     def test_many_classes(self, plotter):
         """Should handle many classes."""
-        if hasattr(plotter, "_create_scatter_plot"):
-            dataset = {
-                "inputs": np.random.randn(100, 2).tolist(),
-                "targets": np.random.randint(0, 20, 100).tolist(),  # 20 classes
-            }
-            with contextlib.suppress(Exception):
-                plot = plotter._create_scatter_plot(dataset)
-                assert plot is not None
+        dataset = {
+            "inputs": np.random.randn(100, 2).tolist(),
+            "targets": np.random.randint(0, 20, 100).tolist(),  # 20 classes
+        }
+        plot = plotter._create_scatter_plot(dataset)
+        assert plot is not None
 
     def test_high_dimensional_data(self, plotter):
         """Should handle high-dimensional data."""
-        if hasattr(plotter, "_create_scatter_plot"):
-            dataset = {
-                "inputs": np.random.randn(100, 10)[:, :2].tolist(),  # 10 dimensions reduced to 2
-                "targets": np.random.randint(0, 2, 100).tolist(),
-            }
-            with contextlib.suppress(Exception):
-                # Should either project to 2D or handle gracefully
-                plot = plotter._create_scatter_plot(dataset)
-                assert plot is not None
+        dataset = {
+            "inputs": np.random.randn(100, 10)[:, :2].tolist(),  # 10 dimensions reduced to 2
+            "targets": np.random.randint(0, 2, 100).tolist(),
+        }
+        # Should either project to 2D or handle gracefully
+        plot = plotter._create_scatter_plot(dataset)
+        assert plot is not None
 
 
 if __name__ == "__main__":

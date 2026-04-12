@@ -11,7 +11,6 @@ Tests WebSocket functionality:
 - Multi-client scenarios
 """
 
-import contextlib
 import os
 import sys
 import time
@@ -326,9 +325,8 @@ class TestWebSocketEndpoints:
             websocket.receive_json()  # Connection
             websocket.receive_json()  # Initial status
 
-            # Send invalid JSON
-            with contextlib.suppress(Exception):
-                websocket.send_text("invalid json {{{")
+            # Send invalid JSON -- server should handle gracefully
+            websocket.send_text("invalid json {{{")
 
     def test_ws_connection_after_disconnect(self, client):
         """Test can reconnect after disconnection."""

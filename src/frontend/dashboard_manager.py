@@ -1328,11 +1328,12 @@ class DashboardManager:
                 Output("dark-mode-toggle", "children"),
             ],
             Input("dark-mode-toggle", "n_clicks"),
+            State("dark-mode-store", "data"),
             prevent_initial_call=True,
         )
-        def toggle_dark_mode(n_clicks):
+        def toggle_dark_mode(n_clicks, current_dark_mode):
             """Toggle dark mode on button click."""
-            return self._toggle_dark_mode_handler(n_clicks=n_clicks)
+            return self._toggle_dark_mode_handler(current_dark_mode=current_dark_mode)
 
         @self.app.callback(
             Output("theme-state", "data"),
@@ -2137,9 +2138,9 @@ class DashboardManager:
             return self._init_params_from_backend_handler(n, current_applied)
 
     # Define event handlers for callbacks
-    def _toggle_dark_mode_handler(self, n_clicks=None):
+    def _toggle_dark_mode_handler(self, current_dark_mode=None):
         """Toggle dark mode on button click."""
-        is_dark = (n_clicks % 2) == 1
+        is_dark = not current_dark_mode
         icon = "☀️" if is_dark else "🌙"
         return is_dark, icon
 

@@ -209,50 +209,52 @@ class TestApiUrl:
 class TestThemeHandlers:
     """Tests for dark mode / theme handling methods."""
 
-    def test_toggle_dark_mode_first_click_light_to_dark(self, reset_singletons):
-        """Test first click toggles from light to dark."""
+    def test_toggle_dark_mode_from_light_to_dark(self, reset_singletons):
+        """Test toggling from light mode (False) to dark mode (True)."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
 
-        # First click (n_clicks=1) -> odd -> dark mode
-        is_dark, icon = manager._toggle_dark_mode_handler(n_clicks=1)
+        # current_dark_mode=False -> toggled to True (dark mode)
+        is_dark, icon = manager._toggle_dark_mode_handler(current_dark_mode=False)
         assert is_dark is True
         assert icon == "☀️"  # Sun icon shows when in dark mode (to switch to light)
 
-    def test_toggle_dark_mode_second_click_dark_to_light(self, reset_singletons):
-        """Test second click toggles from dark back to light."""
+    def test_toggle_dark_mode_from_dark_to_light(self, reset_singletons):
+        """Test toggling from dark mode (True) to light mode (False)."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
 
-        # Second click (n_clicks=2) -> even -> light mode
-        is_dark, icon = manager._toggle_dark_mode_handler(n_clicks=2)
+        # current_dark_mode=True -> toggled to False (light mode)
+        is_dark, icon = manager._toggle_dark_mode_handler(current_dark_mode=True)
         assert is_dark is False
         assert icon == "🌙"  # Moon icon shows when in light mode (to switch to dark)
 
-    def test_toggle_dark_mode_repeated_clicks(self, reset_singletons):
-        """Test repeated clicks toggle back and forth."""
+    def test_toggle_dark_mode_repeated_toggles(self, reset_singletons):
+        """Test repeated toggles alternate between dark and light."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
 
-        # Simulate multiple clicks
+        # Simulate toggling back and forth
+        current = False
         for i in range(1, 5):
-            is_dark, icon = manager._toggle_dark_mode_handler(n_clicks=i)
-            expected_dark = i % 2 == 1  # Odd clicks = dark, even clicks = light
-            assert is_dark == expected_dark, f"Click {i}: expected dark={expected_dark}, got {is_dark}"
+            is_dark, icon = manager._toggle_dark_mode_handler(current_dark_mode=current)
+            expected_dark = not current
+            assert is_dark == expected_dark, f"Toggle {i}: expected dark={expected_dark}, got {is_dark}"
+            current = is_dark
 
-    def test_toggle_dark_mode_zero_clicks(self, reset_singletons):
-        """Test zero clicks results in light mode."""
+    def test_toggle_dark_mode_none_becomes_dark(self, reset_singletons):
+        """Test None current_dark_mode results in dark mode (not None = True)."""
         from frontend.dashboard_manager import DashboardManager
 
         manager = DashboardManager({})
 
-        # n_clicks=0 -> even -> light mode
-        is_dark, icon = manager._toggle_dark_mode_handler(n_clicks=0)
-        assert is_dark is False
-        assert icon == "🌙"
+        # current_dark_mode=None -> not None = True (dark mode)
+        is_dark, icon = manager._toggle_dark_mode_handler(current_dark_mode=None)
+        assert is_dark is True
+        assert icon == "☀️"
 
     def test_update_theme_state_dark(self, reset_singletons):
         """Test theme state returns 'dark' when is_dark is True."""

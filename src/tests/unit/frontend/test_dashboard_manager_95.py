@@ -289,7 +289,7 @@ class TestCallbackHandlerReturns:
 
     def test_toggle_dark_mode_handler_returns_tuple(self, dashboard_manager):
         """Test toggle dark mode handler returns expected tuple."""
-        result = dashboard_manager._toggle_dark_mode_handler(n_clicks=3)
+        result = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=False)
         assert isinstance(result, tuple)
         assert len(result) == 2
         is_dark, icon = result

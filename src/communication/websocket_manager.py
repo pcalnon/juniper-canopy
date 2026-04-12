@@ -326,9 +326,9 @@ class WebSocketManager:
             )
         """
         try:
-            # Add timestamp if not present
+            # Add timestamp if not present (copy to avoid mutating caller's dict)
             if "timestamp" not in message:
-                message["timestamp"] = datetime.now().isoformat()
+                message = {**message, "timestamp": datetime.now().isoformat()}
 
             # Send as JSON
             await websocket.send_json(message)

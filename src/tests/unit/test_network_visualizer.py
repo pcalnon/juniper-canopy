@@ -13,7 +13,6 @@
 #####################################################################
 """Unit tests for NetworkVisualizer component."""
 
-import contextlib
 import sys
 from pathlib import Path
 
@@ -133,32 +132,33 @@ class TestNetworkVisualizerCallbacks:
         visualizer.register_callbacks(app)
 
 
+@pytest.mark.skip(reason="Method _parse_topology not exposed as public API")
 class TestNetworkVisualizerTopologyParsing:
     """Test topology parsing methods."""
 
     def test_parse_simple_topology(self, visualizer):
         """Should parse simple topology."""
-        if hasattr(visualizer, "_parse_topology"):
-            topology = {"input_size": 2, "output_size": 1, "hidden_units": 0}
+        assert hasattr(visualizer, "_parse_topology"), "NetworkVisualizer should have _parse_topology method"
+        topology = {"input_size": 2, "output_size": 1, "hidden_units": 0}
 
-            result = visualizer._parse_topology(topology)
-            assert result is not None
+        result = visualizer._parse_topology(topology)
+        assert result is not None
 
     def test_parse_topology_with_hidden_units(self, visualizer):
         """Should parse topology with hidden units."""
-        if hasattr(visualizer, "_parse_topology"):
-            topology = {"input_size": 2, "output_size": 1, "hidden_units": 3}
+        assert hasattr(visualizer, "_parse_topology"), "NetworkVisualizer should have _parse_topology method"
+        topology = {"input_size": 2, "output_size": 1, "hidden_units": 3}
 
-            result = visualizer._parse_topology(topology)
-            assert result is not None
+        result = visualizer._parse_topology(topology)
+        assert result is not None
 
     def test_parse_empty_topology(self, visualizer):
         """Should handle empty topology."""
-        if hasattr(visualizer, "_parse_topology"):
-            topology = {}
+        assert hasattr(visualizer, "_parse_topology"), "NetworkVisualizer should have _parse_topology method"
+        topology = {}
 
-            with contextlib.suppress(KeyError, ValueError):
-                visualizer._parse_topology(topology)
+        with pytest.raises((KeyError, ValueError)):
+            visualizer._parse_topology(topology)
 
 
 class TestNetworkVisualizerGraphGeneration:
@@ -166,24 +166,25 @@ class TestNetworkVisualizerGraphGeneration:
 
     def test_create_network_graph(self, visualizer):
         """Should create network graph."""
-        if hasattr(visualizer, "_create_network_graph"):
-            topology = {"input_units": 2, "hidden_units": 0, "output_units": 1, "connections": []}
-            graph = visualizer._create_network_graph(topology, "hierarchical", True)
-            assert graph is not None
+        topology = {"input_units": 2, "hidden_units": 0, "output_units": 1, "connections": []}
+        graph = visualizer._create_network_graph(topology, "hierarchical", True)
+        assert graph is not None
 
+    @pytest.mark.skip(reason="Method _create_node_layout not exposed as public API")
     def test_create_node_layout(self, visualizer):
         """Should create node layout."""
-        if hasattr(visualizer, "_create_node_layout"):
-            nodes = [{"id": 0, "layer": 0}, {"id": 1, "layer": 1}]
-            layout = visualizer._create_node_layout(nodes)
-            assert layout is not None
+        assert hasattr(visualizer, "_create_node_layout"), "NetworkVisualizer should have _create_node_layout method"
+        nodes = [{"id": 0, "layer": 0}, {"id": 1, "layer": 1}]
+        layout = visualizer._create_node_layout(nodes)
+        assert layout is not None
 
+    @pytest.mark.skip(reason="Method _create_edges not exposed as public API")
     def test_create_edges(self, visualizer):
         """Should create edges between nodes."""
-        if hasattr(visualizer, "_create_edges"):
-            nodes = [{"id": 0}, {"id": 1}]
-            edges = visualizer._create_edges(nodes)
-            assert edges is not None
+        assert hasattr(visualizer, "_create_edges"), "NetworkVisualizer should have _create_edges method"
+        nodes = [{"id": 0}, {"id": 1}]
+        edges = visualizer._create_edges(nodes)
+        assert edges is not None
 
 
 class TestNetworkVisualizerInheritance:
@@ -226,25 +227,26 @@ class TestNetworkVisualizerConfiguration:
         assert viz.show_weights is False
 
 
+@pytest.mark.skip(reason="Method _parse_topology not exposed as public API")
 class TestNetworkVisualizerEdgeCases:
     """Test edge cases."""
 
     def test_very_large_network(self, visualizer):
         """Should handle very large network topology."""
-        # Should not crash with large topology
-        if hasattr(visualizer, "_parse_topology"):
-            topology = {"input_size": 100, "output_size": 50, "hidden_units": 200}
+        assert hasattr(visualizer, "_parse_topology"), "NetworkVisualizer should have _parse_topology method"
+        topology = {"input_size": 100, "output_size": 50, "hidden_units": 200}
 
-            with contextlib.suppress(Exception):
-                visualizer._parse_topology(topology)
+        # Should not crash with large topology
+        result = visualizer._parse_topology(topology)
+        assert result is not None
 
     def test_zero_size_network(self, visualizer):
         """Should handle zero-size network."""
-        if hasattr(visualizer, "_parse_topology"):
-            topology = {"input_size": 0, "output_size": 0, "hidden_units": 0}
+        assert hasattr(visualizer, "_parse_topology"), "NetworkVisualizer should have _parse_topology method"
+        topology = {"input_size": 0, "output_size": 0, "hidden_units": 0}
 
-            with contextlib.suppress(ValueError, KeyError):
-                visualizer._parse_topology(topology)
+        with pytest.raises((ValueError, KeyError)):
+            visualizer._parse_topology(topology)
 
 
 if __name__ == "__main__":

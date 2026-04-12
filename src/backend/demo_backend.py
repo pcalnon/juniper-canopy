@@ -319,6 +319,11 @@ class DemoBackend:
     # --- Lifecycle ---
 
     async def initialize(self) -> bool:
+        """Initialize the demo backend and start the training simulation.
+
+        Auto-start is intentional: demo mode exists to immediately present
+        a running simulation to the user without requiring manual start.
+        """
         self._demo.start()
         logger.info("DemoBackend initialized and started")
         return True

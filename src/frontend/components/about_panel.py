@@ -212,7 +212,7 @@ class AboutPanel(BaseComponent):
                                         html.Li(
                                             html.A(
                                                 "📚 API Documentation",
-                                                href="https://github.com/pcalnon/juniper-canopy/blob/main/docs/API.md",
+                                                href="https://github.com/pcalnon/juniper-canopy/blob/main/docs/api/API_REFERENCE.md",
                                                 target="_blank",
                                                 style={"textDecoration": "none"},
                                             )
