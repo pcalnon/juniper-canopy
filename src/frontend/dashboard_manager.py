@@ -52,6 +52,7 @@ from .callback_context import get_callback_context
 from .components.about_panel import AboutPanel
 from .components.candidate_metrics_panel import CandidateMetricsPanel
 from .components.cassandra_panel import CassandraPanel
+from .components.connection_indicator import CONNECTION_INDICATOR_JS, connection_indicator_layout
 from .components.dataset_plotter import DatasetPlotter
 from .components.decision_boundary import DecisionBoundary
 from .components.hdf5_snapshots_panel import HDF5SnapshotsPanel
@@ -489,6 +490,8 @@ class DashboardManager:
                                                                 "fontSize": "0.9em",
                                                             },
                                                         ),
+                                                        # Phase B: WebSocket connection indicator badge
+                                                        connection_indicator_layout(),
                                                     ],
                                                     style={
                                                         "display": "flex",
@@ -1198,12 +1201,13 @@ class DashboardManager:
                 dcc.Interval(id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0),
                 # One-shot interval for parameter initialization (fires once, 1s after load)
                 dcc.Interval(id="params-init-interval", interval=1000, max_intervals=1, n_intervals=0),
-                # WebSocket real-time metrics buffer (P5-RC-05)
-                dcc.Store(id="ws-metrics-buffer", data=[]),
-                # WebSocket real-time topology buffer (OI-2)
+                # Phase B: WebSocket drain stores (structured objects, D-07)
+                dcc.Store(id="ws-metrics-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
                 dcc.Store(id="ws-topology-buffer", data=None),
-                # WebSocket real-time state change buffer
                 dcc.Store(id="ws-state-buffer", data=None),
+                dcc.Store(id="ws-cascade-add-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
+                dcc.Store(id="ws-candidate-progress-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
+                dcc.Store(id="ws-connection-status", data={"connected": False, "reconnecting": False, "mode": "demo" if get_settings().demo_mode else "live"}),
                 # Raw weight-oriented topology for heatmap view (OF-1)
                 dcc.Store(id="network-visualizer-raw-topology-store", data=None),
                 # Tooltips for parameter controls
@@ -1486,58 +1490,34 @@ class DashboardManager:
     # Component data store updaters
     def _setup_datastore_callbacks(self):
 
-        # P5-RC-05: WebSocket clientside callback for real-time metrics push.
-        # Connects to /ws/training and accumulates metrics in ws-metrics-buffer.
+        # Phase B: WebSocket drain callbacks.
+        # WS connection and buffering handled by websocket_client.js + ws_dash_bridge.js.
+        # These clientside callbacks drain ring buffers into Dash stores on each interval tick.
+
+        # Drain metrics buffer → ws-metrics-buffer store (D-07 structured object)
         self.app.clientside_callback(
             """
             function(n) {
-                // Only initialize once
-                if (window._juniper_ws) return window.dash_clientside.no_update;
-                var proto = (location.protocol === 'https:') ? 'wss:' : 'ws:';
-                var url = proto + '//' + location.host + '/ws/training';
-                try {
-                    var ws = new WebSocket(url);
-                    window._juniper_ws = ws;
-                    window._juniper_ws_buffer = window._juniper_ws_buffer || [];
-                    ws.onmessage = function(evt) {
-                        try {
-                            var msg = JSON.parse(evt.data);
-                            if (msg.type === 'metrics' && msg.data) {
-                                window._juniper_ws_buffer.push(msg.data);
-                                if (window._juniper_ws_buffer.length > 10000) {
-                                    window._juniper_ws_buffer = window._juniper_ws_buffer.slice(-5000);
-                                }
-                            }
-                            if (msg.type === 'topology' && msg.data) {
-                                window._juniper_ws_topology = msg.data;
-                            }
-                            if (msg.type === 'state_change' && msg.data) {
-                                window._juniper_ws_state = msg.data;
-                            }
-                        } catch(e) {}
-                    };
-                    ws.onclose = function() { window._juniper_ws = null; };
-                } catch(e) {}
-                return window.dash_clientside.no_update;
+                if (!window._juniperWsDrain) return window.dash_clientside.no_update;
+                var events = window._juniperWsDrain.drainMetrics();
+                if (!events || events.length === 0) return window.dash_clientside.no_update;
+                window._juniperWsDrain._gen++;
+                return {events: events, gen: window._juniperWsDrain._gen, last_drain_ms: Date.now()};
             }
             """,
             Output("ws-metrics-buffer", "data"),
             Input("fast-update-interval", "n_intervals"),
-            prevent_initial_call=False,
+            prevent_initial_call=True,
         )
 
-        # OI-2: Clientside callback to drain WebSocket topology buffer into Dash store.
-        # The WS onmessage handler stores the latest topology in window._juniper_ws_topology.
-        # This callback checks for it on each fast-interval tick and pushes it to the store.
+        # Drain topology buffer → ws-topology-buffer store
         self.app.clientside_callback(
             """
             function(n) {
-                if (window._juniper_ws_topology) {
-                    var topo = window._juniper_ws_topology;
-                    window._juniper_ws_topology = null;
-                    return topo;
-                }
-                return window.dash_clientside.no_update;
+                if (!window._juniperWsDrain) return window.dash_clientside.no_update;
+                var topo = window._juniperWsDrain.drainTopology();
+                if (!topo) return window.dash_clientside.no_update;
+                return topo;
             }
             """,
             Output("ws-topology-buffer", "data"),
@@ -1545,23 +1525,72 @@ class DashboardManager:
             prevent_initial_call=True,
         )
 
-        # Clientside callback to drain WebSocket state buffer into Dash store.
-        # The WS onmessage handler stores the latest state_change in window._juniper_ws_state.
-        # This callback checks for it on each fast-interval tick and pushes it to the store.
+        # Drain state buffer → ws-state-buffer store
         self.app.clientside_callback(
             """
             function(n) {
-                if (window._juniper_ws_state) {
-                    var state = window._juniper_ws_state;
-                    window._juniper_ws_state = null;
-                    return state;
-                }
-                return window.dash_clientside.no_update;
+                if (!window._juniperWsDrain) return window.dash_clientside.no_update;
+                var state = window._juniperWsDrain.drainState();
+                if (!state) return window.dash_clientside.no_update;
+                return state;
             }
             """,
             Output("ws-state-buffer", "data"),
             Input("fast-update-interval", "n_intervals"),
             prevent_initial_call=True,
+        )
+
+        # Drain cascade_add buffer → ws-cascade-add-buffer store
+        self.app.clientside_callback(
+            """
+            function(n) {
+                if (!window._juniperWsDrain) return window.dash_clientside.no_update;
+                var events = window._juniperWsDrain.drainCascadeAdd();
+                if (!events || events.length === 0) return window.dash_clientside.no_update;
+                window._juniperWsDrain._gen++;
+                return {events: events, gen: window._juniperWsDrain._gen, last_drain_ms: Date.now()};
+            }
+            """,
+            Output("ws-cascade-add-buffer", "data"),
+            Input("fast-update-interval", "n_intervals"),
+            prevent_initial_call=True,
+        )
+
+        # Drain candidate_progress buffer → ws-candidate-progress-buffer store
+        self.app.clientside_callback(
+            """
+            function(n) {
+                if (!window._juniperWsDrain) return window.dash_clientside.no_update;
+                var events = window._juniperWsDrain.drainCandidateProgress();
+                if (!events || events.length === 0) return window.dash_clientside.no_update;
+                window._juniperWsDrain._gen++;
+                return {events: events, gen: window._juniperWsDrain._gen, last_drain_ms: Date.now()};
+            }
+            """,
+            Output("ws-candidate-progress-buffer", "data"),
+            Input("fast-update-interval", "n_intervals"),
+            prevent_initial_call=True,
+        )
+
+        # Connection status → ws-connection-status store (peek, not drain)
+        self.app.clientside_callback(
+            """
+            function(n) {
+                if (!window._juniperWsDrain) return window.dash_clientside.no_update;
+                return window._juniperWsDrain.peekConnectionStatus();
+            }
+            """,
+            Output("ws-connection-status", "data"),
+            Input("fast-update-interval", "n_intervals"),
+            prevent_initial_call=True,
+        )
+
+        # Phase B: Connection indicator badge (4-state: connected/reconnecting/offline/demo)
+        self.app.clientside_callback(
+            CONNECTION_INDICATOR_JS,
+            Output("ws-connection-indicator", "children"),
+            Output("ws-connection-indicator", "style"),
+            Input("ws-connection-status", "data"),
         )
 
         @self.app.callback(
@@ -1591,26 +1620,29 @@ class DashboardManager:
             Output("metrics-panel-metrics-store", "data"),
             Input("fast-update-interval", "n_intervals"),
             dash.dependencies.State("metrics-panel-display-mode-store", "data"),
+            dash.dependencies.State("ws-connection-status", "data"),
         )
-        def update_metrics_store(n, display_mode_state):
+        def update_metrics_store(n, display_mode_state, ws_status):
             """Fetch metrics history from API and update metrics panel store.
 
-            When WebSocket data is available in the JS buffer, it is consumed
-            as a supplement to REST-polled data.
+            Phase B polling toggle: when WS bridge is connected, skip REST poll.
+            Falls back to 1 Hz REST (D-05) when WS disconnected.
             """
-            return self._update_metrics_store_handler(n=n, display_mode_state=display_mode_state)
+            return self._update_metrics_store_handler(n=n, display_mode_state=display_mode_state, ws_status=ws_status)
 
         @self.app.callback(
             Output("network-visualizer-topology-store", "data"),
             Input("slow-update-interval", "n_intervals"),
             Input("ws-topology-buffer", "data"),
             Input("visualization-tabs", "active_tab"),
+            dash.dependencies.State("ws-connection-status", "data"),
         )
-        def update_topology_store(n, ws_topology, active_tab):
+        def update_topology_store(n, ws_topology, active_tab, ws_status):
             """Fetch topology from API or accept WebSocket push.
 
             OI-2: WebSocket topology pushes (from cascade_add events) take
             priority over REST polling for near-real-time updates.
+            Phase B: skip REST poll when WS connected (D-54: REST paths preserved).
             """
             ctx = dash.callback_context
             trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
@@ -1620,6 +1652,11 @@ class DashboardManager:
                 from backend.cascor_service_adapter import CascorServiceAdapter
 
                 return CascorServiceAdapter._transform_topology(ws_topology)
+
+            # Phase B: skip REST poll when WS bridge is connected
+            settings = get_settings()
+            if settings.ws_bridge_enabled and ws_status and ws_status.get("connected"):
+                return dash.no_update
 
             # REST fallback — only poll when topology tab is active
             return self._update_topology_store_handler(n=n, active_tab=active_tab)
@@ -2386,8 +2423,17 @@ class DashboardManager:
                 ]
             )
 
-    def _update_metrics_store_handler(self, n=None, display_mode_state=None):
-        """Fetch metrics history from API and update metrics panel store."""
+    def _update_metrics_store_handler(self, n=None, display_mode_state=None, ws_status=None):
+        """Fetch metrics history from API and update metrics panel store.
+
+        Phase B polling toggle: when WS bridge reports connected, skip REST poll
+        to eliminate redundant traffic. Falls back to 1 Hz (every 10th tick at
+        100ms fast interval) when WS is disconnected (D-05).
+        """
+        settings = get_settings()
+        if settings.ws_bridge_enabled and ws_status and ws_status.get("connected"):
+            return dash.no_update
+
         try:
             mode_state = display_mode_state or {"mode": "window", "window_size": 100}
             mode = mode_state.get("mode", "window")

@@ -172,6 +172,17 @@ class Settings(BaseSettings):
     audit_log_path: str = "/var/log/canopy/audit.log"
     audit_log_retention_days: int = 90
 
+    # Phase B: Browser WebSocket bridge (D-17, D-18, D-04)
+    enable_browser_ws_bridge: bool = False  # D-17: dev flip (off by default, P7 flips to True)
+    disable_ws_bridge: bool = False  # D-18: permanent kill switch
+    enable_raf_coalescer: bool = False  # D-04: rAF coalescer scaffolded but disabled
+    enable_ws_latency_beacon: bool = True  # Latency beacon enabled by default
+
+    @property
+    def ws_bridge_enabled(self) -> bool:
+        """Runtime check: bridge is active only when dev-flipped ON and not kill-switched."""
+        return self.enable_browser_ws_bridge and not self.disable_ws_bridge
+
     # ── Legacy CASCOR_* fallback validators ────────────────────────────
 
     @field_validator("demo_mode", mode="before")
