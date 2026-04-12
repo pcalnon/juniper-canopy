@@ -89,6 +89,18 @@ class WebSocketSettings(BaseModel):
     reconnect_attempts: int = 5
     reconnect_delay: int = 2
 
+    # Phase B-pre-a: WebSocket security (M-SEC-01b, M-SEC-03, M-SEC-04)
+    allowed_origins: list[str] = [
+        "http://localhost:8050",
+        "http://127.0.0.1:8050",
+        "https://localhost:8050",
+        "https://127.0.0.1:8050",
+    ]
+    max_connections_per_ip: int = 5
+    idle_timeout_seconds: int = 120
+    max_message_size_training: int = 4096
+    max_message_size_control: int = 65536
+
 
 class CascorDiscoverySettings(BaseModel):
     """Settings for auto-discovery of running cascor instances."""
@@ -154,6 +166,11 @@ class Settings(BaseSettings):
 
     # Smoothing
     metrics_smoothing_window: int = 10
+
+    # Phase B-pre-a: Audit logging (M-SEC-07)
+    audit_log_enabled: bool = True
+    audit_log_path: str = "/var/log/canopy/audit.log"
+    audit_log_retention_days: int = 90
 
     # ── Legacy CASCOR_* fallback validators ────────────────────────────
 
