@@ -48,6 +48,7 @@
 #
 #####################################################################################################################################################################################################
 import logging
+import threading
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -108,9 +109,16 @@ class CassandraClient:
         self._contact_points = self._config_manager.get("cassandra.contact_points", [BackendConstants.CASSANDRA_DEFAULT_CONTACT_POINT])
         self._port = self._config_manager.get("cassandra.port", BackendConstants.CASSANDRA_DEFAULT_PORT)
         self._keyspace = self._config_manager.get("cassandra.keyspace", BackendConstants.CASSANDRA_DEFAULT_KEYSPACE)
-        self._username = self._config_manager.get("cassandra.username", None)
-        self._password = self._config_manager.get("cassandra.password", None)
         self._connect_timeout = self._config_manager.get("cassandra.connect_timeout", BackendConstants.CASSANDRA_CONNECT_TIMEOUT)
+
+        username = self._config_manager.get("cassandra.username", None)
+        password = self._config_manager.get("cassandra.password", None)
+        self._auth_provider = None
+        if username and password and CASSANDRA_AVAILABLE:
+            self._auth_provider = PlainTextAuthProvider(
+                username=username,
+                password=password,
+            )
 
         self._last_status_check: Optional[datetime] = None
         self._cached_status: Optional[Dict[str, Any]] = None
@@ -131,17 +139,10 @@ class CassandraClient:
             return False
 
         try:
-            auth_provider = None
-            if self._username and self._password:
-                auth_provider = PlainTextAuthProvider(
-                    username=self._username,
-                    password=self._password,
-                )
-
             self._cluster = Cluster(
                 contact_points=self._contact_points,
                 port=self._port,
-                auth_provider=auth_provider,
+                auth_provider=self._auth_provider,
                 connect_timeout=self._connect_timeout,
             )
             self._session = self._cluster.connect()
@@ -480,6 +481,7 @@ class CassandraClient:
 
 
 _cassandra_client_instance: Optional[CassandraClient] = None
+_cassandra_lock = threading.Lock()
 
 
 def get_cassandra_client(config_manager: Optional[Any] = None) -> CassandraClient:
@@ -495,6 +497,8 @@ def get_cassandra_client(config_manager: Optional[Any] = None) -> CassandraClien
     global _cassandra_client_instance
 
     if _cassandra_client_instance is None:
-        _cassandra_client_instance = CassandraClient(config_manager)
+        with _cassandra_lock:
+            if _cassandra_client_instance is None:
+                _cassandra_client_instance = CassandraClient(config_manager)
 
     return _cassandra_client_instance

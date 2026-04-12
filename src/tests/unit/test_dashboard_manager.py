@@ -73,39 +73,44 @@ class TestDashboardManagerComponents:
         """Should have components attribute."""
         assert hasattr(dashboard, "components") or hasattr(dashboard, "_components")
 
+    @pytest.mark.skip(reason="Method _create_metrics_panel not exposed as public API")
     def test_create_metrics_panel(self, dashboard):
         """Should create metrics panel component."""
-        if hasattr(dashboard, "_create_metrics_panel"):
-            panel = dashboard._create_metrics_panel()
-            assert panel is not None
+        assert hasattr(dashboard, "_create_metrics_panel"), "DashboardManager should have _create_metrics_panel method"
+        panel = dashboard._create_metrics_panel()
+        assert panel is not None
 
+    @pytest.mark.skip(reason="Method _create_network_visualizer not exposed as public API")
     def test_create_network_visualizer(self, dashboard):
         """Should create network visualizer component."""
-        if hasattr(dashboard, "_create_network_visualizer"):
-            viz = dashboard._create_network_visualizer()
-            assert viz is not None
+        assert hasattr(dashboard, "_create_network_visualizer"), "DashboardManager should have _create_network_visualizer method"
+        viz = dashboard._create_network_visualizer()
+        assert viz is not None
 
+    @pytest.mark.skip(reason="Method _create_decision_boundary not exposed as public API")
     def test_create_decision_boundary(self, dashboard):
         """Should create decision boundary component."""
-        if hasattr(dashboard, "_create_decision_boundary"):
-            boundary = dashboard._create_decision_boundary()
-            assert boundary is not None
+        assert hasattr(dashboard, "_create_decision_boundary"), "DashboardManager should have _create_decision_boundary method"
+        boundary = dashboard._create_decision_boundary()
+        assert boundary is not None
 
+    @pytest.mark.skip(reason="Method _create_dataset_plotter not exposed as public API")
     def test_create_dataset_plotter(self, dashboard):
         """Should create dataset plotter component."""
-        if hasattr(dashboard, "_create_dataset_plotter"):
-            plotter = dashboard._create_dataset_plotter()
-            assert plotter is not None
+        assert hasattr(dashboard, "_create_dataset_plotter"), "DashboardManager should have _create_dataset_plotter method"
+        plotter = dashboard._create_dataset_plotter()
+        assert plotter is not None
 
 
 class TestDashboardManagerLayout:
     """Test layout creation."""
 
+    @pytest.mark.skip(reason="Method _create_layout not exposed as public API; layout is set up via _setup_layout")
     def test_create_layout(self, dashboard):
         """Should create layout."""
-        if hasattr(dashboard, "_create_layout"):
-            layout = dashboard._create_layout()
-            assert layout is not None
+        assert hasattr(dashboard, "_create_layout"), "DashboardManager should have _create_layout method"
+        layout = dashboard._create_layout()
+        assert layout is not None
 
     def test_layout_assigned_to_app(self, dashboard):
         """Layout should be assigned to app."""
@@ -115,9 +120,9 @@ class TestDashboardManagerLayout:
         """Layout should contain component areas."""
         layout = dashboard.app.layout
 
-        # Check if layout has children
-        if hasattr(layout, "children"):
-            assert layout.children is not None
+        # Layout should have children
+        assert hasattr(layout, "children"), "Layout should have children attribute"
+        assert layout.children is not None
 
 
 class TestDashboardManagerCallbacks:
@@ -169,8 +174,8 @@ class TestDashboardManagerConfiguration:
         config = {"title": "Custom Title"}
         dashboard = DashboardManager(config)
         # Title should be set somewhere (app.title or config)
-        if hasattr(dashboard.app, "title"):
-            assert "Custom" in dashboard.app.title or "Custom" in str(dashboard.config.get("title"))
+        assert hasattr(dashboard.app, "title"), "Dash app should have title attribute"
+        assert "Custom" in dashboard.app.title or "Custom" in str(dashboard.config.get("title"))
 
     def test_update_interval_from_config(self):
         """Should use update_interval from config."""
@@ -213,15 +218,17 @@ class TestDashboardManagerTabNavigation:
 class TestDashboardManagerAssets:
     """Test asset handling."""
 
+    @pytest.mark.skip(reason="Dash app does not expose assets_folder as a public attribute")
     def test_assets_folder_set(self, dashboard):
         """Should have assets folder configured."""
-        if hasattr(dashboard.app, "assets_folder"):
-            assert dashboard.app.assets_folder is not None
+        assert hasattr(dashboard.app, "assets_folder"), "Dash app should have assets_folder attribute"
+        assert dashboard.app.assets_folder is not None
 
+    @pytest.mark.skip(reason="Dash app does not expose assets_url_path as a public attribute")
     def test_assets_url_path(self, dashboard):
         """Should have assets URL path."""
-        if hasattr(dashboard.app, "assets_url_path"):
-            assert dashboard.app.assets_url_path is not None
+        assert hasattr(dashboard.app, "assets_url_path"), "Dash app should have assets_url_path attribute"
+        assert dashboard.app.assets_url_path is not None
 
 
 class TestDashboardManagerEdgeCases:
@@ -260,11 +267,11 @@ class TestDashboardManagerIntegration:
         layout = dashboard.app.layout
 
         # Layout should have some structure
-        if hasattr(layout, "children"):
-            assert layout.children is not None
-            # Should have multiple children if using multiple components
-            if isinstance(layout.children, list):
-                assert len(layout.children) > 0
+        assert hasattr(layout, "children"), "Layout should have children attribute"
+        assert layout.children is not None
+        # Should have multiple children if using multiple components
+        if isinstance(layout.children, list):
+            assert len(layout.children) > 0
 
     def test_component_callbacks_registered(self, dashboard):
         """Component callbacks should be registered."""

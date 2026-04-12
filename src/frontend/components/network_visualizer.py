@@ -38,8 +38,7 @@
 import hashlib
 import json
 import math
-
-# from datetime import datetime
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import networkx as nx
@@ -299,6 +298,7 @@ class NetworkVisualizer(BaseComponent):
         @app.callback(
             [
                 Output(f"{self.component_id}-graph", "figure"),
+                Output(f"{self.component_id}-graph", "config"),
                 Output(f"{self.component_id}-input-count", "children"),
                 Output(f"{self.component_id}-hidden-count", "children"),
                 Output(f"{self.component_id}-output-count", "children"),
@@ -369,9 +369,22 @@ class NetworkVisualizer(BaseComponent):
                 if ctx.triggered and len(ctx.triggered) == 1:
                     trigger_id = ctx.triggered[0]["prop_id"]
                     if "fast-update-interval" in trigger_id and not current_highlight:
-                        return (dash.no_update,) * 7
+                        return (dash.no_update,) * 8
             except Exception:  # nosec B110 — callback_context unavailable outside Dash request
                 pass
+
+            def _dynamic_graph_config():
+                """Build dcc.Graph config with a timestamped screenshot filename."""
+                return {
+                    "displayModeBar": True,
+                    "displaylogo": False,
+                    "modeBarButtonsToAdd": ["select2d", "lasso2d"],
+                    "toImageButtonOptions": {
+                        "format": "png",
+                        "scale": 2,
+                        "filename": f"canopy_network_{datetime.now():%Y%m%d_%H%M%S}",
+                    },
+                }
 
             def compute_hash(topo):
                 key = {
@@ -390,14 +403,14 @@ class NetworkVisualizer(BaseComponent):
                     hidden_count = str(len(raw_topology.get("hidden_units", [])))
                     output_count = str(raw_topology.get("output_size", 0))
                     connection_count = "—"
-                    return fig, input_count, hidden_count, output_count, connection_count, prev_hash, current_highlight
+                    return fig, _dynamic_graph_config(), input_count, hidden_count, output_count, connection_count, prev_hash, current_highlight
                 else:
                     empty_fig = self._create_empty_graph(theme)
-                    return empty_fig, "0", "0", "0", "—", None, None
+                    return empty_fig, _dynamic_graph_config(), "0", "0", "0", "—", None, None
 
             if not topology_data or topology_data.get("input_units", 0) == 0:
                 empty_fig = self._create_empty_graph(theme, view_mode=view_mode)
-                return empty_fig, "0", "0", "0", "0", None, None
+                return empty_fig, _dynamic_graph_config(), "0", "0", "0", "0", None, None
 
             current_hash = compute_hash(topology_data)
             n_hidden = topology_data.get("hidden_units", 0)
@@ -459,7 +472,7 @@ class NetworkVisualizer(BaseComponent):
             output_count = str(topology_data.get("output_units", 0))
             connection_count = str(len(topology_data.get("connections", [])))
 
-            return fig, input_count, hidden_count, output_count, connection_count, current_hash, new_highlight
+            return fig, _dynamic_graph_config(), input_count, hidden_count, output_count, connection_count, current_hash, new_highlight
 
         @app.callback(
             Output(f"{self.component_id}-stats-bar", "style"),

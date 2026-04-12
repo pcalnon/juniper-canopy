@@ -110,7 +110,7 @@ class ServiceBackend:
 
     def get_status(self) -> StatusResult:
         raw = self._adapter.get_training_status()
-        if not isinstance(raw, dict) or not CascorServiceAdapter._is_cascor_nested(raw):
+        if not isinstance(raw, dict) or not CascorServiceAdapter.is_cascor_nested(raw):
             return cast(StatusResult, raw)
         sm = raw.get("state_machine", {}) if isinstance(raw.get("state_machine"), dict) else {}
         monitor = raw.get("monitor", {}) if isinstance(raw.get("monitor"), dict) else {}
@@ -218,14 +218,14 @@ class ServiceBackend:
             if has_network:
                 logger.info("ServiceBackend: attached to existing cascor network")
                 # Sync current cascor state into canopy
-                self._synced_state = CascorStateSync(self._adapter._client).sync()
+                self._synced_state = CascorStateSync(self._adapter.client).sync()
                 logger.info(f"ServiceBackend: state synced — status={self._synced_state.status}, epoch={self._synced_state.current_epoch}, params={len(self._synced_state.params)} keys")
             else:
                 logger.info("ServiceBackend: no existing cascor network found (will create on start)")
             await self._adapter.start_metrics_relay()
-            logger.info(f"ServiceBackend connected to {self._adapter._service_url}")
+            logger.info(f"ServiceBackend connected to {self._adapter.service_url}")
         else:
-            logger.error(f"ServiceBackend failed to connect to {self._adapter._service_url}")
+            logger.error(f"ServiceBackend failed to connect to {self._adapter.service_url}")
         return connected
 
     def get_synced_state(self) -> Optional[SyncedState]:

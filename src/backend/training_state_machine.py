@@ -95,35 +95,43 @@ class TrainingStateMachine:
 
     def get_status(self) -> TrainingStatus:
         """Get current training status."""
-        return self._status
+        with self._lock:
+            return self._status
 
     def get_phase(self) -> TrainingPhase:
         """Get current training phase."""
-        return self._phase
+        with self._lock:
+            return self._phase
 
     def get_paused_phase(self) -> Optional[TrainingPhase]:
         """Get phase that was active when paused."""
-        return self._paused_phase
+        with self._lock:
+            return self._paused_phase
 
     def is_stopped(self) -> bool:
         """Check if in Stopped state."""
-        return self._status == TrainingStatus.STOPPED
+        with self._lock:
+            return self._status == TrainingStatus.STOPPED
 
     def is_started(self) -> bool:
         """Check if in Started state."""
-        return self._status == TrainingStatus.STARTED
+        with self._lock:
+            return self._status == TrainingStatus.STARTED
 
     def is_paused(self) -> bool:
         """Check if in Paused state."""
-        return self._status == TrainingStatus.PAUSED
+        with self._lock:
+            return self._status == TrainingStatus.PAUSED
 
     def is_completed(self) -> bool:
         """Check if in Completed state."""
-        return self._status == TrainingStatus.COMPLETED
+        with self._lock:
+            return self._status == TrainingStatus.COMPLETED
 
     def is_failed(self) -> bool:
         """Check if in Failed state."""
-        return self._status == TrainingStatus.FAILED
+        with self._lock:
+            return self._status == TrainingStatus.FAILED
 
     def handle_command(self, command: Command) -> bool:
         """

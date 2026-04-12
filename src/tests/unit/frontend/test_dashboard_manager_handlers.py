@@ -39,29 +39,32 @@ def dashboard_manager():
 class TestThemeToggleHandlers:
     """Test theme toggle callback handlers."""
 
-    def test_toggle_dark_mode_handler_odd_clicks(self, dashboard_manager):
-        """Test dark mode toggle returns (True, sun icon) for odd clicks."""
-        result = dashboard_manager._toggle_dark_mode_handler(n_clicks=1)
+    def test_toggle_dark_mode_handler_light_to_dark(self, dashboard_manager):
+        """Test dark mode toggle returns (True, sun icon) when current is light."""
+        result = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=False)
         assert result[0] is True
         assert result[1] == "☀️"
 
-    def test_toggle_dark_mode_handler_even_clicks(self, dashboard_manager):
-        """Test dark mode toggle returns (False, moon icon) for even clicks."""
-        result = dashboard_manager._toggle_dark_mode_handler(n_clicks=2)
+    def test_toggle_dark_mode_handler_dark_to_light(self, dashboard_manager):
+        """Test dark mode toggle returns (False, moon icon) when current is dark."""
+        result = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=True)
         assert result[0] is False
         assert result[1] == "🌙"
 
-    def test_toggle_dark_mode_handler_zero_clicks(self, dashboard_manager):
-        """Test dark mode toggle returns (False, moon icon) for zero clicks."""
-        result = dashboard_manager._toggle_dark_mode_handler(n_clicks=0)
-        assert result[0] is False
-        assert result[1] == "🌙"
-
-    def test_toggle_dark_mode_handler_three_clicks(self, dashboard_manager):
-        """Test dark mode toggle returns (True, sun icon) for 3 clicks."""
-        result = dashboard_manager._toggle_dark_mode_handler(n_clicks=3)
+    def test_toggle_dark_mode_handler_none_to_dark(self, dashboard_manager):
+        """Test dark mode toggle returns (True, sun icon) when current is None."""
+        result = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=None)
         assert result[0] is True
         assert result[1] == "☀️"
+
+    def test_toggle_dark_mode_handler_roundtrip(self, dashboard_manager):
+        """Test dark mode toggle roundtrip: False -> True -> False."""
+        result1 = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=False)
+        assert result1[0] is True
+        assert result1[1] == "☀️"
+        result2 = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=result1[0])
+        assert result2[0] is False
+        assert result2[1] == "🌙"
 
     def test_update_theme_state_handler_dark(self, dashboard_manager):
         """Test theme state update for dark mode returns 'dark'."""

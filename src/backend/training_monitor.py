@@ -265,40 +265,40 @@ class TrainingState:
 
     def __init__(self):
         """Initialize TrainingState with default values."""
-        self.__lock = threading.Lock()
-        self.__status: str = "Stopped"
-        self.__phase: str = "Idle"
-        self.__learning_rate: float = 0.0
-        self.__max_hidden_units: int = 0
-        self.__max_epochs: int = 200
-        self.__current_epoch: int = 0
-        self.__current_step: int = 0
-        self.__network_name: str = ""
-        self.__dataset_name: str = ""
-        self.__dataset_version: int = 0
-        self.__threshold_function: str = ""
-        self.__optimizer_name: str = ""
-        self.__timestamp: float = time.time()
-
-        self.__candidate_pool_status: str = "Inactive"
-        self.__candidate_pool_phase: str = "Idle"
-        self.__candidate_pool_size: int = 0
-        self.__top_candidate_id: str = ""
-        self.__top_candidate_score: float = 0.0
-        self.__second_candidate_id: str = ""
-        self.__second_candidate_score: float = 0.0
-        self.__pool_metrics: Dict[str, Any] = {}
-
-        self.__phase_detail: str = ""
-        self.__grow_iteration: int = 0
-        self.__grow_max: int = 0
-        self.__best_correlation: float = 0.0
-        self.__candidates_trained: int = 0
-        self.__candidates_total: int = 0
-        self.__phase_started_at: str = ""
-        self.__candidate_epoch: int = 0
-        self.__candidate_total_epochs: int = 0
-        self.__all_correlations: List[float] = []
+        self._lock = threading.Lock()
+        self._state: Dict[str, Any] = {
+            "status": "Stopped",
+            "phase": "Idle",
+            "learning_rate": 0.0,
+            "max_hidden_units": 0,
+            "max_epochs": 200,
+            "current_epoch": 0,
+            "current_step": 0,
+            "network_name": "",
+            "dataset_name": "",
+            "dataset_version": 0,
+            "threshold_function": "",
+            "optimizer_name": "",
+            "timestamp": time.time(),
+            "candidate_pool_status": "Inactive",
+            "candidate_pool_phase": "Idle",
+            "candidate_pool_size": 0,
+            "top_candidate_id": "",
+            "top_candidate_score": 0.0,
+            "second_candidate_id": "",
+            "second_candidate_score": 0.0,
+            "pool_metrics": {},
+            "phase_detail": "",
+            "grow_iteration": 0,
+            "grow_max": 0,
+            "best_correlation": 0.0,
+            "candidates_trained": 0,
+            "candidates_total": 0,
+            "phase_started_at": "",
+            "candidate_epoch": 0,
+            "candidate_total_epochs": 0,
+            "all_correlations": [],
+        }
 
     def get_state(self) -> Dict[str, Any]:
         """
@@ -307,40 +307,12 @@ class TrainingState:
         Returns:
             Dictionary containing all state fields
         """
-        with self.__lock:
-            return {
-                "status": self.__status,
-                "phase": self.__phase,
-                "learning_rate": self.__learning_rate,
-                "max_hidden_units": self.__max_hidden_units,
-                "max_epochs": self.__max_epochs,
-                "current_epoch": self.__current_epoch,
-                "current_step": self.__current_step,
-                "network_name": self.__network_name,
-                "dataset_name": self.__dataset_name,
-                "dataset_version": self.__dataset_version,
-                "threshold_function": self.__threshold_function,
-                "optimizer_name": self.__optimizer_name,
-                "timestamp": self.__timestamp,
-                "candidate_pool_status": self.__candidate_pool_status,
-                "candidate_pool_phase": self.__candidate_pool_phase,
-                "candidate_pool_size": self.__candidate_pool_size,
-                "top_candidate_id": self.__top_candidate_id,
-                "top_candidate_score": self.__top_candidate_score,
-                "second_candidate_id": self.__second_candidate_id,
-                "second_candidate_score": self.__second_candidate_score,
-                "pool_metrics": self.__pool_metrics,
-                "phase_detail": self.__phase_detail,
-                "grow_iteration": self.__grow_iteration,
-                "grow_max": self.__grow_max,
-                "best_correlation": self.__best_correlation,
-                "candidates_trained": self.__candidates_trained,
-                "candidates_total": self.__candidates_total,
-                "phase_started_at": self.__phase_started_at,
-                "candidate_epoch": self.__candidate_epoch,
-                "candidate_total_epochs": self.__candidate_total_epochs,
-                "all_correlations": list(self.__all_correlations),
-            }
+        with self._lock:
+            snapshot = dict(self._state)
+            # Return a defensive copy of mutable containers
+            snapshot["all_correlations"] = list(snapshot["all_correlations"])
+            snapshot["pool_metrics"] = dict(snapshot.get("pool_metrics", {}))
+            return snapshot
 
     def update_state(self, **kwargs) -> None:
         """
@@ -353,22 +325,19 @@ class TrainingState:
         Args:
             **kwargs: State fields to update (status, phase, learning_rate, etc.)
         """
-        cls_name = self.__class__.__name__
         updated = False
 
-        with self.__lock:
+        with self._lock:
             for key, value in kwargs.items():
                 if value is None or key not in self._STATE_FIELDS:
                     continue
 
-                mangled_name = f"_{cls_name}__{key}"
-
-                if mangled_name in self.__dict__:
-                    self.__dict__[mangled_name] = value
+                if key in self._state:
+                    self._state[key] = value
                     updated = True
 
             if updated and "timestamp" not in kwargs:
-                self.__timestamp = time.time()
+                self._state["timestamp"] = time.time()
 
     def to_json(self) -> str:
         """

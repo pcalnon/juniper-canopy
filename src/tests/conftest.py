@@ -10,7 +10,6 @@ Environment Variables for Test Control:
     ENABLE_SLOW_TESTS: Set to "1" to run slow tests (>1s execution)
 """
 
-import asyncio
 import contextlib
 import json
 import os
@@ -245,14 +244,6 @@ def pytest_collection_modifyitems(config, items):
                 item.add_marker(skip_redis)
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create event loop for async tests."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
-
-
 @pytest.fixture(scope="session", autouse=True)
 def mock_juniper_data_client():
     """
@@ -374,6 +365,8 @@ def mock_juniper_data_client():
     mock_client_instance.delete_dataset.side_effect = _delete_dataset
     mock_client_instance.health_check.return_value = {"status": "healthy"}
     mock_client_instance.is_ready.return_value = True
+    # Expose _created dict for per-test isolation (see _isolate_mock_datasets fixture)
+    mock_client_instance._created_datasets = _created
     mock_client_instance.list_generators.return_value = [
         {"name": "spiral"},
         {"name": "xor"},
@@ -390,6 +383,21 @@ def mock_juniper_data_client():
 
     with patch("juniper_data_client.client.JuniperDataClient", mock_client_class), patch("juniper_data_client.JuniperDataClient", mock_client_class):
         yield mock_client_instance
+
+
+@pytest.fixture(autouse=True)
+def _isolate_mock_datasets(mock_juniper_data_client):
+    """Reset mock dataset state between tests to prevent cross-test pollution.
+
+    The session-scoped mock_juniper_data_client holds a mutable _created dict
+    that accumulates state as tests create/delete datasets. Without per-test
+    isolation, earlier tests leak dataset entries into later tests.
+    """
+    created = mock_juniper_data_client._created_datasets
+    initial_state = dict(created)
+    yield
+    created.clear()
+    created.update(initial_state)
 
 
 @pytest.fixture(scope="module")
@@ -611,45 +619,40 @@ def ensure_test_data_directory():
 
 
 # Singleton reset for test isolation
-@pytest.fixture(autouse=True)
-def reset_singletons():
-    """Reset singleton instances before each test for proper isolation."""
-    # Import here to avoid circular imports
+def _stop_demo_instance(instance):
+    """Stop a DemoMode instance, handling expected teardown errors."""
+    if instance is not None:
+        try:
+            instance.stop()
+        except (RuntimeError, AttributeError) as exc:
+            # RuntimeError: thread not started or already stopped
+            # AttributeError: partially-initialized instance missing state_machine/thread
+            import logging
+
+            logging.getLogger(__name__).debug("Ignoring expected error stopping DemoMode during test teardown: %s", exc)
+
+
+def _reset_all_singletons():
+    """Reset all singleton instances to ensure test isolation.
+
+    Uses direct attribute access (no hasattr guards) so renamed internals
+    cause an immediate AttributeError rather than silently skipping the reset.
+    """
     with contextlib.suppress(ImportError):
+        import config_manager as config_manager_module
         import demo_mode as demo_mode_module
-        from config_manager import ConfigManager
-        from demo_mode import DemoMode
         from settings import get_settings
 
-        # Reset Settings cache
+        # Reset Settings cache (lru_cache)
         get_settings.cache_clear()
 
-        # Reset ConfigManager singleton
-        if hasattr(ConfigManager, "_instance"):
-            ConfigManager._instance = None
-        if hasattr(ConfigManager, "_instances"):
-            ConfigManager._instances.clear()
+        # Reset ConfigManager module-level singleton
+        # (ConfigManager uses a module-level _config_instance, not a class attr)
+        config_manager_module._config_instance = None
 
-        # Reset DemoMode singleton
-        if hasattr(DemoMode, "_instance"):
-            # Stop any running demo mode
-            if DemoMode._instance is not None and hasattr(DemoMode._instance, "stop"):
-                with contextlib.suppress(Exception):
-                    DemoMode._instance.stop()
-            DemoMode._instance = None
-        if hasattr(DemoMode, "_instances"):
-            for instance in DemoMode._instances.values():
-                if hasattr(instance, "stop"):
-                    with contextlib.suppress(Exception):
-                        instance.stop()
-            DemoMode._instances.clear()
-
-        # Reset module-level _demo_instance singleton used by get_demo_mode()
-        if hasattr(demo_mode_module, "_demo_instance"):
-            if demo_mode_module._demo_instance is not None and hasattr(demo_mode_module._demo_instance, "stop"):
-                with contextlib.suppress(Exception):
-                    demo_mode_module._demo_instance.stop()
-            demo_mode_module._demo_instance = None
+        # Reset DemoMode module-level singleton used by get_demo_mode()
+        _stop_demo_instance(demo_mode_module._demo_instance)
+        demo_mode_module._demo_instance = None
 
     # Reset security singletons
     with contextlib.suppress(ImportError):
@@ -662,48 +665,14 @@ def reset_singletons():
         from frontend.callback_context import CallbackContextAdapter
 
         CallbackContextAdapter.reset_instance()
+
+
+@pytest.fixture(autouse=True)
+def reset_singletons():
+    """Reset singleton instances before and after each test for proper isolation."""
+    _reset_all_singletons()
     yield
-
-    # Clean up after test
-    with contextlib.suppress(ImportError):
-        import demo_mode as demo_mode_module
-        from config_manager import ConfigManager
-        from demo_mode import DemoMode
-        from settings import get_settings
-
-        # Reset Settings cache
-        get_settings.cache_clear()
-
-        # Reset again after test
-        if hasattr(ConfigManager, "_instance"):
-            ConfigManager._instance = None
-        if hasattr(ConfigManager, "_instances"):
-            ConfigManager._instances.clear()
-
-        if hasattr(DemoMode, "_instance"):
-            if DemoMode._instance is not None and hasattr(DemoMode._instance, "stop"):
-                with contextlib.suppress(Exception):
-                    DemoMode._instance.stop()
-            DemoMode._instance = None
-        if hasattr(DemoMode, "_instances"):
-            for instance in DemoMode._instances.values():
-                if hasattr(instance, "stop"):
-                    with contextlib.suppress(Exception):
-                        instance.stop()
-            DemoMode._instances.clear()
-
-        # Reset module-level _demo_instance singleton used by get_demo_mode()
-        if hasattr(demo_mode_module, "_demo_instance"):
-            if demo_mode_module._demo_instance is not None and hasattr(demo_mode_module._demo_instance, "stop"):
-                with contextlib.suppress(Exception):
-                    demo_mode_module._demo_instance.stop()
-            demo_mode_module._demo_instance = None
-
-    # Reset security singletons after test
-    with contextlib.suppress(ImportError):
-        from security import reset_security_state
-
-        reset_security_state()
+    _reset_all_singletons()
 
 
 # Fake backend root fixture for testing CasCor integration

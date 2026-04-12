@@ -37,6 +37,7 @@
 import asyncio
 import contextlib
 import logging
+import time
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 from juniper_cascor_client import CascorTrainingStream, JuniperCascorClient, JuniperCascorClientError
@@ -155,9 +156,35 @@ class CascorServiceAdapter:
         self._state_update_callback: Optional[Callable] = None
         self._circuit = CircuitBreaker(name=BackendConstants.CIRCUIT_BREAKER_NAME, failure_threshold=BackendConstants.CIRCUIT_BREAKER_FAILURE_THRESHOLD, recovery_timeout=BackendConstants.CIRCUIT_BREAKER_RECOVERY_TIMEOUT)
 
+        # Network property TTL cache
+        self._network_cache = None
+        self._network_cache_time = 0
+
         # Derive WebSocket URL from HTTP URL
         ws_url = service_url.replace("http://", "ws://").replace("https://", "wss://")
         self._ws_url = ws_url
+
+    @property
+    def service_url(self) -> str:
+        """Return the CasCor service URL."""
+        return self._service_url
+
+    @property
+    def client(self) -> JuniperCascorClient:
+        """Return the underlying JuniperCascorClient instance."""
+        return self._client
+
+    @staticmethod
+    def is_cascor_nested(data: dict) -> bool:
+        """Detect whether data uses cascor's nested structure.
+
+        Uses positive detection of nested structure (state_machine/monitor/
+        training_state) rather than checking for flat keys, which could
+        misfire if cascor ever adds a flat field.
+
+        Public wrapper around ``_is_cascor_nested`` for use by external callers.
+        """
+        return CascorServiceAdapter._is_cascor_nested(data)
 
     def set_state_update_callback(self, callback: Callable) -> None:
         """Register a callback invoked when cascor broadcasts state changes."""
@@ -314,7 +341,7 @@ class CascorServiceAdapter:
                     await stream.disconnect()
                 except asyncio.CancelledError:
                     relay_enabled = False
-                except Exception as e:
+                except OSError as e:
                     delay = backoff[min(attempt, len(backoff) - 1)]
                     logger.warning(f"Cascor metrics stream disconnected ({e}). Reconnecting in {delay}s")
                     attempt += 1
@@ -322,6 +349,9 @@ class CascorServiceAdapter:
                         await asyncio.sleep(delay)
                     except asyncio.CancelledError:
                         relay_enabled = False
+                except Exception as e:
+                    logger.error("Unexpected error in relay loop: %s", e, exc_info=True)
+                    break
 
         self._relay_task = asyncio.create_task(_relay_loop())
         logger.info("Metrics relay started")
@@ -341,13 +371,23 @@ class CascorServiceAdapter:
 
     @property
     def network(self) -> Optional[_NetworkSentinel]:
-        """Return a truthy sentinel if the service has a network, else None."""
+        """Return a truthy sentinel if the service has a network, else None.
+
+        Results are cached for 30 seconds to avoid redundant HTTP calls.
+        """
+        now = time.monotonic()
+        if self._network_cache is not None and now - self._network_cache_time < 30:
+            return self._network_cache
         try:
             result = self._client.get_network()
             if result and not result.get("error"):
-                return _NetworkSentinel()
+                self._network_cache = _NetworkSentinel()
+                self._network_cache_time = now
+                return self._network_cache
         except Exception as e:
             logger.debug("Failed to query network: %s", e)
+        self._network_cache = None
+        self._network_cache_time = now
         return None
 
     # ------------------------------------------------------------------

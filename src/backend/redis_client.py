@@ -51,6 +51,7 @@
 #####################################################################################################################################################################################################
 import logging
 import os
+import threading
 import time
 from datetime import UTC, datetime
 from typing import Any, Dict, Optional
@@ -67,8 +68,12 @@ try:
     REDIS_AVAILABLE = True
 except ImportError:
     redis = None
-    RedisConnectionError = Exception
-    RedisTimeoutError = Exception
+
+    class _RedisSentinelError(Exception):
+        """Sentinel exception that is never raised -- used when redis-py is not installed."""
+
+    RedisConnectionError = _RedisSentinelError
+    RedisTimeoutError = _RedisSentinelError
     REDIS_AVAILABLE = False
 
 
@@ -522,6 +527,7 @@ class RedisClient:
 
 # Global instance for singleton pattern
 _redis_client_instance: Optional[RedisClient] = None
+_redis_lock = threading.Lock()
 
 
 def get_redis_client(config_manager: Optional[Any] = None, force_new: bool = False) -> RedisClient:
@@ -538,6 +544,10 @@ def get_redis_client(config_manager: Optional[Any] = None, force_new: bool = Fal
     global _redis_client_instance
 
     if _redis_client_instance is None or force_new:
-        _redis_client_instance = RedisClient(config_manager)
+        with _redis_lock:
+            if _redis_client_instance is None or force_new:
+                if force_new and _redis_client_instance is not None:
+                    _redis_client_instance.close()
+                _redis_client_instance = RedisClient(config_manager)
 
     return _redis_client_instance

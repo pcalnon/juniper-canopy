@@ -33,15 +33,19 @@
 # COMPLETED:
 #
 #####################################################################################################################################################################################################
+from __future__ import annotations
+
 import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import numpy as np
-import torch
 
 from .statistics import compute_weight_statistics
+
+if TYPE_CHECKING:
+    import torch
 
 
 @dataclass
@@ -327,6 +331,16 @@ class DataAdapter:
         if targets is None and labels is not None:
             targets = labels
 
+        if inputs is None or targets is None:
+            return {
+                "dataset_name": dataset_name or "Unknown",
+                "inputs": None,
+                "targets": None,
+                "num_samples": 0,
+                "num_features": 0,
+                "num_classes": 0,
+            }
+
         return {
             "dataset_name": dataset_name,
             "inputs": inputs.tolist() if isinstance(inputs, np.ndarray) else inputs,
@@ -346,6 +360,8 @@ class DataAdapter:
         Returns:
             Serialized state dictionary
         """
+        import torch  # noqa: F811 — lazy import to avoid ~2GB load at module level
+
         serialized = {}
 
         for key, value in network_state.items():
@@ -387,6 +403,8 @@ class DataAdapter:
         Returns:
             Dictionary containing comprehensive network statistics
         """
+        import torch  # noqa: F811 — lazy import to avoid ~2GB load at module level
+
         # Collect all weights into single array
         all_weights = []
 

@@ -293,15 +293,16 @@ class TestCassandraClientConnectionFailure:
         cc_module._cassandra_client_instance = None
 
         with patch.object(cc_module, "CASSANDRA_AVAILABLE", True):
-            with patch.object(cc_module, "Cluster") as mock_cluster:
-                mock_cluster.side_effect = Exception("Connection refused")
+            with patch.object(cc_module, "PlainTextAuthProvider", MagicMock()):
+                with patch.object(cc_module, "Cluster") as mock_cluster:
+                    mock_cluster.side_effect = Exception("Connection refused")
 
-                client = cc_module.CassandraClient(config_manager=enabled_config_manager)
-                status = client.get_status()
+                    client = cc_module.CassandraClient(config_manager=enabled_config_manager)
+                    status = client.get_status()
 
-                assert status["status"] == "UNAVAILABLE"
-                assert status["mode"] == "LIVE"
-                assert "unable to connect" in status["message"].lower()
+                    assert status["status"] == "UNAVAILABLE"
+                    assert status["mode"] == "LIVE"
+                    assert "unable to connect" in status["message"].lower()
 
     @pytest.mark.unit
     def test_try_connect_returns_false_on_exception(self, enabled_config_manager, monkeypatch):
@@ -314,15 +315,16 @@ class TestCassandraClientConnectionFailure:
         cc_module._cassandra_client_instance = None
 
         with patch.object(cc_module, "CASSANDRA_AVAILABLE", True):
-            with patch.object(cc_module, "Cluster") as mock_cluster:
-                mock_cluster.side_effect = RuntimeError("Timeout connecting to cluster")
+            with patch.object(cc_module, "PlainTextAuthProvider", MagicMock()):
+                with patch.object(cc_module, "Cluster") as mock_cluster:
+                    mock_cluster.side_effect = RuntimeError("Timeout connecting to cluster")
 
-                client = cc_module.CassandraClient(config_manager=enabled_config_manager)
+                    client = cc_module.CassandraClient(config_manager=enabled_config_manager)
 
-                result = client._try_connect()
-                assert result is False
-                assert client._cluster is None
-                assert client._session is None
+                    result = client._try_connect()
+                    assert result is False
+                    assert client._cluster is None
+                    assert client._session is None
 
 
 class TestCassandraClientStatusStructure:
@@ -959,13 +961,14 @@ class TestCassandraClientGetMetricsNotConnected:
         cc_module._cassandra_client_instance = None
 
         with patch.object(cc_module, "CASSANDRA_AVAILABLE", True):
-            client = cc_module.CassandraClient(config_manager=enabled_config_manager)
-            client._cluster = None
-            client._session = None
+            with patch.object(cc_module, "PlainTextAuthProvider", MagicMock()):
+                client = cc_module.CassandraClient(config_manager=enabled_config_manager)
+                client._cluster = None
+                client._session = None
 
-            metrics = client.get_metrics()
+                metrics = client.get_metrics()
 
-            assert metrics["status"] == "UNAVAILABLE"
-            assert metrics["mode"] == "LIVE"
-            assert "not connected" in metrics["message"].lower()
-            assert metrics["metrics"] == {}
+                assert metrics["status"] == "UNAVAILABLE"
+                assert metrics["mode"] == "LIVE"
+                assert "not connected" in metrics["message"].lower()
+                assert metrics["metrics"] == {}

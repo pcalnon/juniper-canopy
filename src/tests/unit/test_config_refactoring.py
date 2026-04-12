@@ -5,7 +5,6 @@ Unit tests for configuration refactoring across juniper_canopy components.
 Tests configuration hierarchy: Environment Variables > YAML > Constants
 """
 
-import contextlib
 import os
 from unittest.mock import patch
 
@@ -264,25 +263,23 @@ class TestConfigValidation:
         """Test training parameter validation."""
         config_mgr = ConfigManager()
 
-        with contextlib.suppress(KeyError):
-            # Should have epochs parameter config
-            epochs_config = config_mgr.get_training_param_config("epochs")
-            assert "min" in epochs_config
-            assert "max" in epochs_config
-            assert "default" in epochs_config
-            assert epochs_config["min"] <= epochs_config["default"] <= epochs_config["max"]
+        # Should have epochs parameter config
+        epochs_config = config_mgr.get_training_param_config("epochs")
+        assert "min" in epochs_config
+        assert "max" in epochs_config
+        assert "default" in epochs_config
+        assert epochs_config["min"] <= epochs_config["default"] <= epochs_config["max"]
 
     def test_training_param_value_validation(self):
         """Test training parameter value validation."""
         config_mgr = ConfigManager()
 
-        with contextlib.suppress(KeyError):
-            # Valid value should pass
-            assert config_mgr.validate_training_param_value("epochs", 100)
+        # Valid value should pass
+        assert config_mgr.validate_training_param_value("epochs", 100)
 
-            # Out of range should fail
-            with pytest.raises(ValueError):
-                config_mgr.validate_training_param_value("epochs", 10000)
+        # Out of range should fail
+        with pytest.raises(ValueError):
+            config_mgr.validate_training_param_value("epochs", 10000)
 
 
 class TestConstantsConsistency:

@@ -19,7 +19,6 @@
 #####################################################################################################################################################################################################
 """Integration tests for demo mode API and WebSocket endpoints."""
 
-import contextlib
 import os
 import time
 
@@ -112,13 +111,12 @@ class TestWebSocketTrainingEndpoint:
 
             metrics_received = False
             for _ in range(15):
-                with contextlib.suppress(Exception):
-                    message = websocket.receive_json(timeout=2.0)
-                    if message.get("type") == "metrics":
-                        metrics_received = True
-                        assert "data" in message
-                        assert "timestamp" in message
-                        break
+                message = websocket.receive_json(timeout=2.0)
+                if message.get("type") == "metrics":
+                    metrics_received = True
+                    assert "data" in message
+                    assert "timestamp" in message
+                    break
             if not metrics_received:
                 pytest.skip("Broadcast delivery not available (requires real server event loop)")
 
