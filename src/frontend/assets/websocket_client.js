@@ -22,7 +22,7 @@ class CascorWebSocket {
         this.messageBuffer = [];
         this.status = 'disconnected';
         this.reconnectAttempts = 0;
-        this.maxReconnectDelay = 30000; // 30 seconds max backoff (GAP-WS-30)
+        this.maxReconnectDelay = 60000; // 60 seconds max backoff (GAP-WS-31)
         this.baseReconnectDelay = 500; // 500ms initial delay
 
         // Phase B: connection status flags
@@ -122,11 +122,12 @@ class CascorWebSocket {
 
     /**
      * Schedule reconnection with jitter-backoff (GAP-WS-30).
-     * No attempt cap (GAP-WS-31) — retries forever with max 30s delay.
+     * No attempt cap (GAP-WS-31) — retries forever with max 60s delay.
+     * Exponent capped at 7 to prevent numeric overflow (Phase F).
      */
     _scheduleReconnect() {
-        // GAP-WS-30: jitter backoff — delay = random * min(30s, 500ms * 2^attempt)
-        var delay = Math.random() * Math.min(this.maxReconnectDelay, this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts));
+        // Phase F: jitter backoff — delay = random * min(60s, 500ms * 2^min(attempt, 7))
+        var delay = Math.random() * Math.min(this.maxReconnectDelay, this.baseReconnectDelay * Math.pow(2, Math.min(this.reconnectAttempts, 7)));
 
         this.reconnectAttempts++;
         this.reconnecting = true;
@@ -160,6 +161,14 @@ class CascorWebSocket {
     _handleMessage(message) {
         var type = message.type;
         var data = message.data;
+
+        // Phase F: respond to server heartbeat pings with pong
+        if (type === 'ping') {
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                this.ws.send(JSON.stringify({type: "pong"}));
+            }
+            return;
+        }
 
         // Phase B: capture server_instance_id from connection_established
         if (type === 'connection_established' && data && data.server_instance_id) {
