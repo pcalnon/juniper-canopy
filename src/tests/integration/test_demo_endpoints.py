@@ -131,15 +131,12 @@ class TestWebSocketTrainingEndpoint:
                 pytest.skip("Broadcast delivery not available (requires real server event loop)")
 
 
-def _send_csrf_auth(client, ws):
-    """Phase B-pre-b: send CSRF first-frame auth on /ws/control (M-SEC-02)."""
-    token = client.get("/api/csrf").json().get("csrf_token", "")
-    if token:
-        ws.send_json({"type": "auth", "csrf_token": token})
-
-
 class TestWebSocketControlEndpoint:
-    """Test /ws/control WebSocket endpoint in demo mode."""
+    """Test /ws/control WebSocket endpoint in demo mode.
+
+    CSRF auth is handled automatically by the conftest.py monkeypatch on
+    every /ws/control connection; tests must NOT send a second auth frame.
+    """
 
     def test_control_websocket_accepts_connection(self, test_client):
         """Test control WebSocket connection is accepted."""
@@ -152,7 +149,6 @@ class TestWebSocketControlEndpoint:
         with test_client.websocket_connect("/ws/control") as websocket:
             # Skip connection message
             websocket.receive_json()
-            _send_csrf_auth(test_client, websocket)
 
             # Send start command
             websocket.send_json({"command": "start", "reset": True})
@@ -165,7 +161,6 @@ class TestWebSocketControlEndpoint:
         """Test control commands execute successfully."""
         with test_client.websocket_connect("/ws/control") as websocket:
             websocket.receive_json()
-            _send_csrf_auth(test_client, websocket)
 
             # Test start command
             websocket.send_json({"command": "start", "reset": True})

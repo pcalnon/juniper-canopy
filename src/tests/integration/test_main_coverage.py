@@ -37,13 +37,6 @@ def client():
         yield test_client
 
 
-def _send_csrf_auth(client, ws):
-    """Phase B-pre-b: send CSRF first-frame auth on /ws/control (M-SEC-02)."""
-    token = client.get("/api/csrf").json().get("csrf_token", "")
-    if token:
-        ws.send_json({"type": "auth", "csrf_token": token})
-
-
 # =============================================================================
 # schedule_broadcast() Tests
 # =============================================================================
@@ -388,7 +381,6 @@ class TestWebSocketControlEndpoint:
         """WebSocket /ws/control should handle start command."""
         with client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
-            _send_csrf_auth(client, ws)
             ws.send_json({"command": "start"})
             # Drain messages until we find the control response (training
             # thread broadcasts can interleave with control responses)
@@ -404,7 +396,6 @@ class TestWebSocketControlEndpoint:
         """WebSocket /ws/control should handle stop command."""
         with client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
-            _send_csrf_auth(client, ws)
             ws.send_json({"command": "stop"})
             # Drain messages until we find the control response (training
             # thread broadcasts can interleave with control responses)
@@ -420,7 +411,6 @@ class TestWebSocketControlEndpoint:
         """WebSocket /ws/control should handle pause command."""
         with client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
-            _send_csrf_auth(client, ws)
             ws.send_json({"command": "pause"})
             # Drain messages until we find the control response (training
             # thread broadcasts can interleave with control responses)
@@ -436,7 +426,6 @@ class TestWebSocketControlEndpoint:
         """WebSocket /ws/control should handle resume command."""
         with client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
-            _send_csrf_auth(client, ws)
             ws.send_json({"command": "resume"})
             # Drain messages until we find the control response (training
             # thread broadcasts can interleave with control responses)
@@ -452,7 +441,6 @@ class TestWebSocketControlEndpoint:
         """WebSocket /ws/control should handle reset command."""
         with client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
-            _send_csrf_auth(client, ws)
             ws.send_json({"command": "reset"})
             # Drain messages until we find the control response (training
             # thread broadcasts can interleave with control responses)
@@ -468,7 +456,6 @@ class TestWebSocketControlEndpoint:
         """WebSocket /ws/control should return error for unknown command."""
         with client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
-            _send_csrf_auth(client, ws)
             ws.send_json({"command": "invalid_cmd"})
             # Drain messages until we find the control response (training
             # thread broadcasts can interleave with control responses)
@@ -863,7 +850,6 @@ class TestWebSocketExceptionHandling:
         """WebSocket /ws/control should handle connection close."""
         with client.websocket_connect("/ws/control") as ws:
             ws.receive_json()
-            _send_csrf_auth(client, ws)
             ws.send_json({"command": "stop"})
             ws.receive_json()
 
@@ -1319,7 +1305,6 @@ class TestWebSocketWithCascorIntegration:
 
             with client.websocket_connect("/ws/control") as ws:
                 ws.receive_json()
-                _send_csrf_auth(client, ws)
                 ws.send_json({"command": "start"})
                 # Drain messages until we find the control response (training
                 # thread broadcasts can interleave with control responses)
