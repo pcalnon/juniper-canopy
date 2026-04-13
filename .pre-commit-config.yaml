@@ -253,6 +253,12 @@ repos:
         language: system
         files: ^\.env(\.secrets)?$
         types: [file]
+      - id: normalize-metric-format-guard
+        name: Guard _normalize_metric dual-format contract (C-22)
+        entry: "bash -c 'if git diff --cached --diff-filter=D -- src/tests/fixtures/normalize_metric_shape.golden.json | grep -q .; then echo \"ERROR: normalize_metric_shape.golden.json must not be deleted (C-22 contract)\" && exit 1; fi'"
+        language: system
+        files: normalize_metric_shape\.golden\.json$
+        types: [file]
 
 # CI configuration (for pre-commit.ci service, if used)
 ci:
