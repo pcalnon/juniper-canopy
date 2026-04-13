@@ -36,6 +36,7 @@
 
 import asyncio
 import contextlib
+import json
 import logging
 import time
 from typing import Any, Callable, Dict, Optional, Tuple, Union
@@ -231,9 +232,10 @@ class CascorServiceAdapter:
         """
 
         async def _relay_loop():
+            import random
+
             from communication.websocket_manager import websocket_manager
 
-            backoff = [1, 2, 5, 10, 30]
             attempt = 0
             relay_enabled = True
             while relay_enabled:
@@ -243,6 +245,13 @@ class CascorServiceAdapter:
                     attempt = 0
                     async for message in stream.stream():
                         msg_type = message.get("type", "")
+
+                        # Phase F: respond to cascor heartbeat pings with pong
+                        if msg_type == "ping":
+                            if stream._ws:
+                                await stream._ws.send(json.dumps({"type": "pong"}))
+                            continue
+
                         data = message.get("data", message)
 
                         # Normalize metrics payloads to dashboard format (P5-RC-14)
@@ -342,8 +351,10 @@ class CascorServiceAdapter:
                 except asyncio.CancelledError:
                     relay_enabled = False
                 except OSError as e:
-                    delay = backoff[min(attempt, len(backoff) - 1)]
-                    logger.warning(f"Cascor metrics stream disconnected ({e}). Reconnecting in {delay}s")
+                    # Phase F: jitter backoff — matches JS formula (GAP-WS-30/31)
+                    delay = random.random() * min(60, 0.5 * (2 ** min(attempt, 7)))
+                    delay = max(delay, 0.5)  # Floor at 500ms
+                    logger.warning(f"Cascor metrics stream disconnected ({e}). Reconnecting in {delay:.1f}s")
                     attempt += 1
                     try:
                         await asyncio.sleep(delay)

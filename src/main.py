@@ -558,6 +558,11 @@ async def websocket_control_endpoint(websocket: WebSocket):
                 await websocket_manager.send_personal_message({"ok": False, "error": "Invalid JSON"}, websocket)
                 continue
 
+            # Phase F: respond to server heartbeat pings with pong
+            if message.get("type") == "ping":
+                await websocket_manager.send_personal_message({"type": "pong"}, websocket)
+                continue
+
             command = message.get("command", "")
 
             if command not in _valid_commands:
