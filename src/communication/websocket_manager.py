@@ -326,9 +326,13 @@ class WebSocketManager:
             )
         """
         try:
-            # Add timestamp if not present (copy to avoid mutating caller's dict)
+            # Add timestamp if not present (copy to avoid mutating caller's dict).
+            # Schema contract (module docstring lines 40, 58, …): timestamp is a
+            # Unix float matching `time.time()`, which is what create_*_message()
+            # emits. Stay consistent so test_websocket_message_schema assertions
+            # against `isinstance(ts, (int, float))` hold for every path.
             if "timestamp" not in message:
-                message = {**message, "timestamp": datetime.now().isoformat()}
+                message = {**message, "timestamp": time.time()}
 
             # Send as JSON
             await websocket.send_json(message)
@@ -362,9 +366,10 @@ class WebSocketManager:
             self.logger.debug("No active connections for broadcast")
             return
 
-        # Add timestamp if not present (copy to avoid mutating caller's dict)
+        # Add timestamp if not present (copy to avoid mutating caller's dict).
+        # Match the Unix-float schema used by create_*_message() helpers.
         if "timestamp" not in message:
-            message = {**message, "timestamp": datetime.now().isoformat()}
+            message = {**message, "timestamp": time.time()}
 
         # Track message
         self.message_count += 1

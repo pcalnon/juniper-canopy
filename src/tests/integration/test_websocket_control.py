@@ -40,6 +40,12 @@ class TestWebSocketControlIntegration:
         assert conn_msg.get("type") == "connection_established"
         return conn_msg
 
+    def _send_csrf_auth(self, client, websocket):
+        """Phase B-pre-b: send CSRF first-frame auth on /ws/control (M-SEC-02)."""
+        token = client.get("/api/csrf").json().get("csrf_token", "")
+        if token:
+            websocket.send_json({"type": "auth", "csrf_token": token})
+
     def _receive_command_response(self, websocket, timeout_messages=100):
         """
         Helper to receive command response, skipping any broadcast messages.
@@ -71,6 +77,7 @@ class TestWebSocketControlIntegration:
         with TestClient(demo_app) as client:
             with client.websocket_connect("/ws/control") as websocket:
                 self._skip_connection_message(websocket)
+                self._send_csrf_auth(client, websocket)
                 websocket.send_json({"command": "start", "reset": True})
                 response = self._receive_command_response(websocket)
                 assert response.get("ok") is True
@@ -84,6 +91,7 @@ class TestWebSocketControlIntegration:
         with TestClient(demo_app) as client:
             with client.websocket_connect("/ws/control") as websocket:
                 self._skip_connection_message(websocket)
+                self._send_csrf_auth(client, websocket)
                 websocket.send_json({"command": "start", "reset": True})
                 response = self._receive_command_response(websocket)
                 assert response["ok"]
@@ -101,6 +109,7 @@ class TestWebSocketControlIntegration:
         with TestClient(demo_app) as client:
             with client.websocket_connect("/ws/control") as websocket:
                 self._skip_connection_message(websocket)
+                self._send_csrf_auth(client, websocket)
                 self._validate_pause_resume_commands(websocket, time)
 
     def _validate_pause_resume_commands(self, websocket, time):
@@ -131,6 +140,7 @@ class TestWebSocketControlIntegration:
         with TestClient(demo_app) as client:
             with client.websocket_connect("/ws/control") as websocket:
                 self._skip_connection_message(websocket)
+                self._send_csrf_auth(client, websocket)
                 websocket.send_json({"command": "start"})  # Start first
                 time.sleep(0.1)  # Allow message delivery
                 self._receive_command_response(websocket)
@@ -149,6 +159,7 @@ class TestWebSocketControlIntegration:
         with TestClient(demo_app) as client:
             with client.websocket_connect("/ws/control") as websocket:
                 self._skip_connection_message(websocket)
+                self._send_csrf_auth(client, websocket)
                 self._validate_reset_command(websocket, time)
 
     def _validate_reset_command(self, websocket, time):
@@ -172,6 +183,7 @@ class TestWebSocketControlIntegration:
         with TestClient(demo_app) as client:
             with client.websocket_connect("/ws/control") as websocket:
                 self._skip_connection_message(websocket)
+                self._send_csrf_auth(client, websocket)
                 websocket.send_json({"command": "invalid_command"})
                 response = self._receive_command_response(websocket)
                 assert not response["ok"]
@@ -288,6 +300,12 @@ class TestEndToEndFlow:
         assert conn_msg.get("type") in ["connection_established", "initial_status"]
         return conn_msg
 
+    def _send_csrf_auth(self, client, websocket):
+        """Phase B-pre-b: send CSRF first-frame auth on /ws/control (M-SEC-02)."""
+        token = client.get("/api/csrf").json().get("csrf_token", "")
+        if token:
+            websocket.send_json({"type": "auth", "csrf_token": token})
+
     def test_complete_training_lifecycle(self, demo_app):
         """Test complete training lifecycle: start -> pause -> resume -> stop."""
         import time
@@ -297,6 +315,7 @@ class TestEndToEndFlow:
         with TestClient(demo_app) as client:
             with client.websocket_connect("/ws/control") as websocket:
                 self._skip_connection_message(websocket)
+                self._send_csrf_auth(client, websocket)
                 self._test_client_training_commands(websocket, time)
 
     def _test_client_training_commands(self, websocket, time):

@@ -250,6 +250,7 @@ def pytest_collection_modifyitems(config, items):
 # existing and future test gets it without per-call changes.
 _WS_TEST_ORIGIN = "http://localhost:8050"
 _original_ws_connect = None
+_original_ws_receive_json = None
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -269,6 +270,44 @@ def _inject_ws_origin_header():
     TestClient.websocket_connect = _patched_ws_connect
     yield
     TestClient.websocket_connect = _original_ws_connect
+
+
+# Starlette's WebSocketTestSession.receive_json() does not accept a `timeout`
+# kwarg, but several integration tests pass one as a safety net against hangs
+# (e.g. `websocket.receive_json(timeout=2.0)`). Monkeypatch the method to
+# accept an optional timeout by routing through the test session's BlockingPortal
+# with `anyio.fail_after`. This preserves starlette's original behavior when
+# no timeout is supplied.
+@pytest.fixture(scope="session", autouse=True)
+def _inject_ws_receive_json_timeout():
+    """Add optional `timeout` kwarg to WebSocketTestSession.receive_json."""
+    import json as _json
+
+    import anyio
+    from starlette.testclient import WebSocketTestSession
+
+    global _original_ws_receive_json
+    _original_ws_receive_json = WebSocketTestSession.receive_json
+
+    def _patched_receive_json(self, mode="text", timeout=None):
+        if timeout is None:
+            return _original_ws_receive_json(self, mode=mode)
+
+        async def _recv_with_timeout():
+            with anyio.fail_after(timeout):
+                return await self._send_rx.receive()
+
+        message = self.portal.call(_recv_with_timeout)
+        self._raise_on_close(message)
+        if mode == "text":
+            text = message["text"]
+        else:
+            text = message["bytes"].decode("utf-8")
+        return _json.loads(text)
+
+    WebSocketTestSession.receive_json = _patched_receive_json
+    yield
+    WebSocketTestSession.receive_json = _original_ws_receive_json
 
 
 @pytest.fixture(scope="session", autouse=True)
