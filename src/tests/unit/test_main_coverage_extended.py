@@ -44,6 +44,19 @@ def app_client():
         yield client
 
 
+import contextlib
+
+
+@contextlib.contextmanager
+def csrf_control_ws(client):
+    """Connect to /ws/control with CSRF auth first-frame."""
+    token = client.get("/api/csrf").json().get("csrf_token", "")
+    with client.websocket_connect("/ws/control") as ws:
+        if token:
+            ws.send_json({"type": "auth", "csrf_token": token})
+        yield ws
+
+
 class TestSetupMonitoringCallbacks:
     """Test setup_monitoring_callbacks function (lines 265-298)."""
 
@@ -128,7 +141,7 @@ class TestWebSocketControlEndpoint:
     @pytest.mark.unit
     def test_websocket_control_start_command(self, app_client):
         """Test start command on control websocket."""
-        with app_client.websocket_connect("/ws/control") as ws:
+        with csrf_control_ws(app_client) as ws:
             ws.receive_json()
             ws.send_json({"command": "start", "reset": False})
             # Drain messages until we find the control response (training
@@ -142,7 +155,7 @@ class TestWebSocketControlEndpoint:
     @pytest.mark.unit
     def test_websocket_control_stop_command(self, app_client):
         """Test stop command on control websocket."""
-        with app_client.websocket_connect("/ws/control") as ws:
+        with csrf_control_ws(app_client) as ws:
             ws.receive_json()
             ws.send_json({"command": "stop"})
             # Drain messages until we find the control response (training
@@ -156,7 +169,7 @@ class TestWebSocketControlEndpoint:
     @pytest.mark.unit
     def test_websocket_control_pause_command(self, app_client):
         """Test pause command on control websocket."""
-        with app_client.websocket_connect("/ws/control") as ws:
+        with csrf_control_ws(app_client) as ws:
             ws.receive_json()
             ws.send_json({"command": "pause"})
             # Drain messages until we find the control response (training
@@ -170,7 +183,7 @@ class TestWebSocketControlEndpoint:
     @pytest.mark.unit
     def test_websocket_control_resume_command(self, app_client):
         """Test resume command on control websocket."""
-        with app_client.websocket_connect("/ws/control") as ws:
+        with csrf_control_ws(app_client) as ws:
             ws.receive_json()
             ws.send_json({"command": "resume"})
             # Drain messages until we find the control response (training
@@ -184,7 +197,7 @@ class TestWebSocketControlEndpoint:
     @pytest.mark.unit
     def test_websocket_control_reset_command(self, app_client):
         """Test reset command on control websocket."""
-        with app_client.websocket_connect("/ws/control") as ws:
+        with csrf_control_ws(app_client) as ws:
             ws.receive_json()
             ws.send_json({"command": "reset"})
             # Drain messages until we find the control response (training
@@ -198,7 +211,7 @@ class TestWebSocketControlEndpoint:
     @pytest.mark.unit
     def test_websocket_control_unknown_command(self, app_client):
         """Test unknown command returns error."""
-        with app_client.websocket_connect("/ws/control") as ws:
+        with csrf_control_ws(app_client) as ws:
             ws.receive_json()
             ws.send_json({"command": "invalid_command"})
             # Drain messages until we find the control response (training
@@ -858,7 +871,7 @@ class TestControlWebSocketBranches:
     @pytest.mark.unit
     def test_control_start_with_reset_true(self, app_client):
         """Test start command with reset=true."""
-        with app_client.websocket_connect("/ws/control") as ws:
+        with csrf_control_ws(app_client) as ws:
             ws.receive_json()
             ws.send_json({"command": "start", "reset": True})
             # The control ack may be interleaved with broadcast messages
@@ -872,7 +885,7 @@ class TestControlWebSocketBranches:
     @pytest.mark.unit
     def test_control_command_sequence(self, app_client):
         """Test sequence of control commands."""
-        with app_client.websocket_connect("/ws/control") as ws:
+        with csrf_control_ws(app_client) as ws:
             ws.receive_json()
 
             ws.send_json({"command": "start"})
@@ -984,7 +997,7 @@ class TestControlWebSocketLateInit:
     @pytest.mark.unit
     def test_control_websocket_initializes_demo_mode(self, app_client):
         """Test control WebSocket initializes demo mode if needed."""
-        with app_client.websocket_connect("/ws/control") as ws:
+        with csrf_control_ws(app_client) as ws:
             ws.receive_json()
             ws.send_json({"command": "start"})
             # Drain messages until we find the control response (training
@@ -1002,7 +1015,7 @@ class TestControlCommandErrorHandling:
     @pytest.mark.unit
     def test_unknown_command_returns_error(self, app_client):
         """Test unknown command returns error response."""
-        with app_client.websocket_connect("/ws/control") as ws:
+        with csrf_control_ws(app_client) as ws:
             ws.receive_json()
             ws.send_json({"command": "invalid_command_xyz"})
             # The control response may be interleaved with broadcast messages

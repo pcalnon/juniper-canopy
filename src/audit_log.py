@@ -102,3 +102,13 @@ def log_ws_origin_rejected(endpoint: str, client_ip: str, origin: str) -> None:
 def log_ws_rate_limited(endpoint: str, client_ip: str, reason: str = "per_ip_cap") -> None:
     """Log a rate-limited connection."""
     _emit("ws_rate_limited", endpoint=endpoint, client_ip=client_ip, reason=reason)
+
+
+def log_ws_csrf_rejected(endpoint: str, client_ip: str, reason: str) -> None:
+    """Log a CSRF validation failure (M-SEC-02)."""
+    _emit("ws_csrf_rejected", endpoint=endpoint, client_ip=client_ip, reason=reason)
+
+
+def log_ws_command(endpoint: str, client_ip: str, command: str, status: str) -> None:
+    """Log a WebSocket control command execution."""
+    _emit("ws_command", endpoint=endpoint, client_ip=client_ip, command=command, status=status)

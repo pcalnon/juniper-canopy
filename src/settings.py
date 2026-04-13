@@ -178,6 +178,12 @@ class Settings(BaseSettings):
     enable_raf_coalescer: bool = False  # D-04: rAF coalescer scaffolded but disabled
     enable_ws_latency_beacon: bool = True  # Latency beacon enabled by default
 
+    # Phase B-pre-b: CSRF + control-path security (M-SEC-02)
+    csrf_enabled: bool = True  # CSRF protection on /ws/control
+    csrf_token_ttl_seconds: int = 3600  # 1h sliding TTL
+    session_secret_key: str = ""  # SessionMiddleware secret (auto-generated if empty)
+    ws_control_auth_timeout: float = 5.0  # Seconds to wait for CSRF first-frame
+
     @property
     def ws_bridge_enabled(self) -> bool:
         """Runtime check: bridge is active only when dev-flipped ON and not kill-switched."""
