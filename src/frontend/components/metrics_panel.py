@@ -669,6 +669,57 @@ class MetricsPanel(BaseComponent):
         def update_metrics_display(metrics_data: List[Dict[str, Any]], theme: str, display_mode_state: Dict, view_state: Dict, training_state: Dict):
             return self._update_metrics_display_handler(metrics_data=metrics_data, theme=theme, view_state=view_state, display_mode_state=display_mode_state, training_state=training_state)
 
+        # Phase B: Incremental chart update via Plotly.extendTraces (§S7).
+        # When WS bridge pushes new metrics events, append them to the
+        # existing chart traces without rebuilding the full figure.
+        # Max 5000 points retained per trace to bound memory.
+        app.clientside_callback(
+            """
+            function(wsBuffer, lossId, accId) {
+                if (!wsBuffer || !wsBuffer.events || wsBuffer.events.length === 0) {
+                    return [window.dash_clientside.no_update, window.dash_clientside.no_update];
+                }
+                var events = wsBuffer.events;
+                var epochs = [], losses = [], accuracies = [];
+                for (var i = 0; i < events.length; i++) {
+                    var e = events[i];
+                    var epoch = e.epoch || e.current_epoch || i;
+                    var loss = e.loss || e.error || e.current_error;
+                    var acc = e.accuracy || e.correct_percentage;
+                    if (loss !== undefined && loss !== null) {
+                        epochs.push(epoch);
+                        losses.push(loss);
+                        accuracies.push(acc !== undefined && acc !== null ? acc : 0);
+                    }
+                }
+                if (epochs.length === 0) {
+                    return [window.dash_clientside.no_update, window.dash_clientside.no_update];
+                }
+                // extendTraces on loss plot (trace 0)
+                var lossEl = document.getElementById(lossId);
+                if (lossEl && lossEl.data && lossEl.data.length > 0) {
+                    try {
+                        Plotly.extendTraces(lossEl, {x: [epochs], y: [losses]}, [0], 5000);
+                    } catch(e) {}
+                }
+                // extendTraces on accuracy plot (trace 0)
+                var accEl = document.getElementById(accId);
+                if (accEl && accEl.data && accEl.data.length > 0) {
+                    try {
+                        Plotly.extendTraces(accEl, {x: [epochs], y: [accuracies]}, [0], 5000);
+                    } catch(e) {}
+                }
+                return [window.dash_clientside.no_update, window.dash_clientside.no_update];
+            }
+            """,
+            Output(f"{self.component_id}-loss-plot", "figure", allow_duplicate=True),
+            Output(f"{self.component_id}-accuracy-plot", "figure", allow_duplicate=True),
+            Input("ws-metrics-buffer", "data"),
+            State(f"{self.component_id}-loss-plot", "id"),
+            State(f"{self.component_id}-accuracy-plot", "id"),
+            prevent_initial_call=True,
+        )
+
         # Replay Controls Callbacks
         @app.callback(
             Output(f"{self.component_id}-replay-controls", "style"),

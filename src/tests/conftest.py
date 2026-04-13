@@ -244,28 +244,60 @@ def pytest_collection_modifyitems(config, items):
                 item.add_marker(skip_redis)
 
 
-# Phase B-pre-a: WebSocket origin validation (M-SEC-01b) requires all WS
-# test connections to include an allowed Origin header. Monkeypatch the
-# TestClient.websocket_connect to inject the header automatically so every
-# existing and future test gets it without per-call changes.
+# Phase B-pre-a + B-pre-b: WebSocket test infrastructure.
+# 1. Injects Origin header on ALL WS connections (M-SEC-01b).
+# 2. Auto-sends CSRF auth first-frame on /ws/control connections (M-SEC-02).
+# This means every existing and future test gets both fixes automatically.
 _WS_TEST_ORIGIN = "http://localhost:8050"
 _original_ws_connect = None
 _original_ws_receive_json = None
 
 
+class _CsrfWsSession:
+    """Wrapper that sends the CSRF auth first-frame after WS connect."""
+
+    def __init__(self, session, csrf_token):
+        self._session = session
+        self._csrf_token = csrf_token
+
+    def __enter__(self):
+        ws = self._session.__enter__()
+        if self._csrf_token:
+            ws.send_json({"type": "auth", "csrf_token": self._csrf_token})
+        return ws
+
+    def __exit__(self, *args):
+        return self._session.__exit__(*args)
+
+
 @pytest.fixture(scope="session", autouse=True)
-def _inject_ws_origin_header():
-    """Inject Origin header into all TestClient.websocket_connect calls."""
+def _inject_ws_origin_and_csrf():
+    """Inject Origin header + CSRF auth into TestClient.websocket_connect."""
     from starlette.testclient import TestClient
 
     global _original_ws_connect
     _original_ws_connect = TestClient.websocket_connect
 
     def _patched_ws_connect(self, url, subprotocols=None, **kwargs):
+        # Pop internal-only kwargs before passing to starlette
+        skip_csrf = kwargs.pop("_skip_csrf", False)
+
         headers = kwargs.get("headers", {})
         headers.setdefault("origin", _WS_TEST_ORIGIN)
         kwargs["headers"] = headers
-        return _original_ws_connect(self, url, subprotocols=subprotocols, **kwargs)
+        session = _original_ws_connect(self, url, subprotocols=subprotocols, **kwargs)
+
+        # Phase B-pre-b: auto-send CSRF auth for /ws/control connections
+        # Pass _skip_csrf=True to bypass (used by CSRF validation tests)
+        if "/ws/control" in url and not skip_csrf:
+            try:
+                csrf_resp = self.get("/api/csrf")
+                csrf_token = csrf_resp.json().get("csrf_token", "")
+            except Exception:
+                csrf_token = ""
+            return _CsrfWsSession(session, csrf_token)
+
+        return session
 
     TestClient.websocket_connect = _patched_ws_connect
     yield

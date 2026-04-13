@@ -254,12 +254,8 @@ class TestWebSocketEndpoints:
             pass
 
     def test_websocket_control_connection(self, app_client):
-        """Test control WebSocket connection with CSRF auth."""
-        token = app_client.get("/api/csrf").json().get("csrf_token", "")
+        """Test control WebSocket connection."""
         with app_client.websocket_connect("/ws/control") as websocket:
-            if token:
-                websocket.send_json({"type": "auth", "csrf_token": token})
-            # Send a test command to verify connection is live
             websocket.send_json({"command": "unknown"})
             data = websocket.receive_json()
             assert isinstance(data, dict)

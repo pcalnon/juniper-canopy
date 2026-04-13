@@ -141,16 +141,11 @@ class TestWsControlCsrfAuth:
     def test_valid_csrf_allows_connection(self, client):
         """Valid CSRF token in first frame allows control WS connection."""
         token = client.get("/api/csrf").json()["csrf_token"]
-        with client.websocket_connect("/ws/control") as ws:
-            # Send CSRF auth first frame
+        with client.websocket_connect("/ws/control", _skip_csrf=True) as ws:
+            # Manually send CSRF auth first frame
             ws.send_json({"type": "auth", "csrf_token": token})
-            # If CSRF was rejected, the server would close the connection
-            # before we can send anything else. Send an unknown command
-            # to verify the connection is still alive (will get an error
-            # response but won't be disconnected).
             ws.send_json({"command": "unknown_test_cmd"})
             resp = ws.receive_json()
-            # Getting any response means the connection survived CSRF auth
             assert isinstance(resp, dict)
 
     def test_missing_csrf_closes_connection(self, client):
@@ -159,12 +154,11 @@ class TestWsControlCsrfAuth:
 
         closed = False
         try:
-            with client.websocket_connect("/ws/control") as ws:
+            with client.websocket_connect("/ws/control", _skip_csrf=True) as ws:
                 # Send a non-auth frame (no type: "auth")
                 ws.send_json({"command": "stop"})
-                # Server should close after seeing invalid first frame
                 ws.receive_json()
-                ws.receive_json()  # exhaust — should disconnect
+                ws.receive_json()
         except (WebSocketDisconnect, Exception):
             closed = True
         assert closed, "Expected connection to be closed after missing CSRF"
@@ -175,7 +169,7 @@ class TestWsControlCsrfAuth:
 
         closed = False
         try:
-            with client.websocket_connect("/ws/control") as ws:
+            with client.websocket_connect("/ws/control", _skip_csrf=True) as ws:
                 ws.send_json({"type": "auth", "csrf_token": "invalid-token"})
                 ws.receive_json()
                 ws.receive_json()
