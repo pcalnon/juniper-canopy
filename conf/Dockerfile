@@ -36,6 +36,9 @@ LABEL org.opencontainers.image.authors="Paul Calnon"
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.source="https://github.com/pcalnon/juniper-canopy"
 
+# Install curl for lightweight health checks (avoids spawning Python interpreter)
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
 # Create non-root user
 RUN groupadd --gid 1000 juniper && \
     useradd --uid 1000 --gid juniper --shell /bin/bash --create-home juniper
@@ -58,15 +61,21 @@ USER juniper
 # PYTHONPATH so imports from src/ resolve correctly
 ENV PYTHONPATH=/app/src
 
-# Service configuration
+# Service configuration — uses JUNIPER_CANOPY_ prefix for pydantic-settings.
+# Legacy CASCOR_ vars retained for backward compatibility with deployments
+# that have not yet migrated to JUNIPER_CANOPY_ naming.
 ENV CASCOR_ENV=production
 ENV CASCOR_DEBUG=false
+ENV JUNIPER_CANOPY_DEMO_MODE=false
+ENV JUNIPER_CANOPY_LOG_LEVEL=INFO
+ENV JUNIPER_DATA_URL=http://juniper-data:8100
+ENV CASCOR_SERVICE_URL=http://juniper-cascor:8200
 
 EXPOSE 8050
 
 # Health check for container orchestration (liveness + readiness)
-# start-period=5s: Dash/FastAPI hybrid app with pre-installed deps starts quickly
+# curl-based: lightweight, avoids spawning Python interpreter on every probe
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8050/v1/health', timeout=5)" || exit 1
+    CMD curl --fail --silent --max-time 5 http://localhost:8050/v1/health || exit 1
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8050"]
