@@ -26,3 +26,10 @@
 
 # Source code
 /src/ @pcalnon
+
+# Phase H (D-27): Hard merge gate — dual-format metric contract (C-22)
+# Changes to these files MUST be reviewed by the project lead.
+# DO NOT remove either the flat or nested metric format without an RFC (D-21).
+/src/backend/cascor_service_adapter.py @pcalnon
+/src/frontend/components/metrics_panel.py @pcalnon
+/src/tests/fixtures/normalize_metric_shape.golden.json @pcalnon

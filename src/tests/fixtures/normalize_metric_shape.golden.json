@@ -1,0 +1,26 @@
+{
+  "_comment": "Golden shape file for _normalize_metric output (Phase H, D-27). DO NOT remove keys — dual-format contract (C-22).",
+  "top_level_keys": [
+    "epoch",
+    "hidden_units",
+    "metrics",
+    "network_topology",
+    "phase",
+    "timestamp",
+    "train_accuracy",
+    "train_loss",
+    "val_accuracy",
+    "val_loss"
+  ],
+  "nested_keys": {
+    "metrics": [
+      "accuracy",
+      "loss",
+      "val_accuracy",
+      "val_loss"
+    ],
+    "network_topology": [
+      "hidden_units"
+    ]
+  }
+}
