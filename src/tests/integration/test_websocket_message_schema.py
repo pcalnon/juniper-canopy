@@ -187,15 +187,14 @@ class TestControlWebSocketSchema:
     """Test control WebSocket responses follow schema."""
 
     def test_control_ack_follows_schema(self, test_client):
-        """Test control acknowledgment messages follow schema."""
+        """Test control acknowledgment messages follow schema.
+
+        CSRF auth is handled automatically by the conftest.py monkeypatch on
+        every /ws/control connection; tests must NOT send a second auth frame.
+        """
         with test_client.websocket_connect("/ws/control") as websocket:
             # Skip connection established
             websocket.receive_json()
-
-            # Phase B-pre-b: send CSRF first-frame auth (M-SEC-02)
-            token = test_client.get("/api/csrf").json().get("csrf_token", "")
-            if token:
-                websocket.send_json({"type": "auth", "csrf_token": token})
 
             # Send control command
             websocket.send_json({"command": "start", "reset": True})
