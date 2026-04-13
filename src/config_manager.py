@@ -464,7 +464,7 @@ class ConfigManager:
 
         config_from_method = self.get_training_param_config(category)
         config_from_self = self.config.get(category, {})
-        config = config_from_method or config_from_self if config_from_method != config_from_self else config_from_method
+        config = config_from_method or config_from_self
 
         try:
             for key, value_tup in constants.items():

@@ -367,9 +367,6 @@ async def api_csrf_token(request: Request):
     return {"csrf_token": token, "enabled": True}
 
 
-_WS_MAX_MESSAGE_SIZE = 65536  # 64KB max message size for WebSocket
-
-
 async def _authenticate_websocket(websocket: WebSocket) -> bool:
     """Authenticate WebSocket connection using X-API-Key header.
 
