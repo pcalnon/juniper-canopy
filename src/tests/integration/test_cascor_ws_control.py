@@ -91,7 +91,12 @@ def _send_ws_command(client, command, **extra):
     Drains any broadcast messages (metrics/state) that may arrive between
     the connection acknowledgment and the command response.
     """
+    # Phase B-pre-b: fetch CSRF token for the required first-frame auth (M-SEC-02)
+    token = client.get("/api/csrf").json().get("csrf_token", "")
     with client.websocket_connect("/ws/control") as ws:
+        ws.receive_json()  # consume connection_established ack
+        if token:
+            ws.send_json({"type": "auth", "csrf_token": token})
         payload = {"command": command, **extra}
         ws.send_text(json.dumps(payload))
         # The demo backend training thread may broadcast metrics/state messages

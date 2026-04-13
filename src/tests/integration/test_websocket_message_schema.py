@@ -27,7 +27,11 @@ def test_client():
     """Create test client for FastAPI app."""
     from main import app
 
-    return TestClient(app)
+    # Use `with` so FastAPI's lifespan() fires and the `main.backend` global
+    # is initialized. Without the context manager the startup hook is skipped
+    # and every endpoint that touches `backend` raises AttributeError on None.
+    with TestClient(app) as client:
+        yield client
 
 
 @pytest.mark.requires_server
@@ -105,12 +109,29 @@ class TestWebSocketMessageSchema:
 
     def test_event_messages_follow_schema(self, test_client):
         """Test event messages follow schema."""
+        # Event messages are only emitted on state transitions (status_change)
+        # and cascade-unit additions. To make the test deterministic, drive a
+        # start/pause/resume cycle AFTER the WS is connected so the client
+        # receives the status_change events that fire on each transition.
+        import time as _t
+
+        test_client.post("/api/train/start")
+        _t.sleep(0.2)
         with test_client.websocket_connect("/ws/training") as websocket:
             websocket.receive_json()
 
+            # Drive state transitions to emit status_change events
+            test_client.post("/api/train/pause")
+            _t.sleep(0.1)
+            test_client.post("/api/train/resume")
+            _t.sleep(0.1)
+
             found = False
-            for _ in range(20):
-                message = websocket.receive_json(timeout=2.0)
+            for _ in range(30):
+                try:
+                    message = websocket.receive_json(timeout=2.0)
+                except Exception:
+                    break
 
                 if message.get("type") == "event":
                     found = True
@@ -131,6 +152,11 @@ class TestWebSocketMessageSchema:
 
     def test_all_messages_have_timestamp(self, test_client):
         """Test all messages include timestamp."""
+        # Start training explicitly so demo mode emits broadcasts to this client.
+        test_client.post("/api/train/start")
+        import time as _t
+
+        _t.sleep(0.3)
         with test_client.websocket_connect("/ws/training") as websocket:
             # Skip connection message (special case)
             websocket.receive_json()
@@ -138,7 +164,10 @@ class TestWebSocketMessageSchema:
             # Check next several messages
             checked = 0
             for _ in range(10):
-                message = websocket.receive_json(timeout=2.0)
+                try:
+                    message = websocket.receive_json(timeout=2.0)
+                except Exception:
+                    break
 
                 # Skip connection-related messages
                 if message.get("type") in ["connection_established", "ping", "pong"]:
@@ -162,6 +191,11 @@ class TestControlWebSocketSchema:
         with test_client.websocket_connect("/ws/control") as websocket:
             # Skip connection established
             websocket.receive_json()
+
+            # Phase B-pre-b: send CSRF first-frame auth (M-SEC-02)
+            token = test_client.get("/api/csrf").json().get("csrf_token", "")
+            if token:
+                websocket.send_json({"type": "auth", "csrf_token": token})
 
             # Send control command
             websocket.send_json({"command": "start", "reset": True})
@@ -211,6 +245,9 @@ class TestMessageFormatConsistency:
         """Test timestamps are Unix timestamps (seconds since epoch)."""
         import time
 
+        # Start training explicitly so demo mode emits broadcasts to this client.
+        test_client.post("/api/train/start")
+        time.sleep(0.3)
         with test_client.websocket_connect("/ws/training") as websocket:
             websocket.receive_json()
 
@@ -218,7 +255,10 @@ class TestMessageFormatConsistency:
 
             found = False
             for _ in range(10):
-                message = websocket.receive_json(timeout=2.0)
+                try:
+                    message = websocket.receive_json(timeout=2.0)
+                except Exception:
+                    break
 
                 if "timestamp" in message:
                     ts = message["timestamp"]
