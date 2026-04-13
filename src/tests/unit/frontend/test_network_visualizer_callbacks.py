@@ -895,6 +895,7 @@ class TestCallbackInvocation:
                 dcc.Store(id=f"{visualizer.component_id}-raw-topology-store"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
+                dcc.Store(id="ws-cascade-add-buffer"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
                 dcc.Checklist(id=f"{visualizer.component_id}-show-weights"),
                 dcc.RadioItems(id=f"{visualizer.component_id}-display-mode"),
@@ -937,6 +938,7 @@ class TestCallbackInvocation:
                 dcc.Store(id=f"{visualizer.component_id}-raw-topology-store"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
+                dcc.Store(id="ws-cascade-add-buffer"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
                 dcc.Checklist(id=f"{visualizer.component_id}-show-weights"),
                 dcc.RadioItems(id=f"{visualizer.component_id}-display-mode"),
@@ -966,6 +968,7 @@ class TestCallbackInvocation:
                     "light",  # theme
                     [],  # selected_nodes
                     0,  # n_intervals
+                    None,  # ws_cascade_add (D-06)
                     {"xaxis_range": None, "yaxis_range": None, "dragmode": "pan"},  # view_state
                     None,  # prev_hash
                     None,  # current_highlight
@@ -992,6 +995,7 @@ class TestCallbackInvocation:
                 dcc.Store(id=f"{visualizer.component_id}-raw-topology-store"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
+                dcc.Store(id="ws-cascade-add-buffer"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
                 dcc.Checklist(id=f"{visualizer.component_id}-show-weights"),
                 dcc.RadioItems(id=f"{visualizer.component_id}-display-mode"),
@@ -1020,6 +1024,7 @@ class TestCallbackInvocation:
                     "light",
                     [],
                     0,  # n_intervals
+                    None,  # ws_cascade_add (D-06)
                     None,  # view_state
                     None,  # prev_hash
                     None,  # current_highlight
@@ -1045,6 +1050,7 @@ class TestCallbackInvocation:
                 dcc.Store(id=f"{visualizer.component_id}-raw-topology-store"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
+                dcc.Store(id="ws-cascade-add-buffer"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
                 dcc.Checklist(id=f"{visualizer.component_id}-show-weights"),
                 dcc.RadioItems(id=f"{visualizer.component_id}-display-mode"),
@@ -1067,7 +1073,7 @@ class TestCallbackInvocation:
         for key, callback_info in app.callback_map.items():
             if callback_key in key:
                 func = callback_info["callback"]
-                result = func.__wrapped__(simple_topology, "hierarchical", ["show"], "2d", "node_graph", None, metrics_data, "light", [], 0, None, None, None)
+                result = func.__wrapped__(simple_topology, "hierarchical", ["show"], "2d", "node_graph", None, metrics_data, "light", [], 0, None, None, None, None)
                 fig, _config, _, _, _, _, _, new_highlight = result
                 assert isinstance(fig, go.Figure)
                 # Should have detected new unit and created highlight
@@ -1091,6 +1097,7 @@ class TestCallbackInvocation:
                 dcc.Store(id=f"{visualizer.component_id}-raw-topology-store"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
+                dcc.Store(id="ws-cascade-add-buffer"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
                 dcc.Checklist(id=f"{visualizer.component_id}-show-weights"),
                 dcc.RadioItems(id=f"{visualizer.component_id}-display-mode"),
@@ -1110,7 +1117,7 @@ class TestCallbackInvocation:
         for key, callback_info in app.callback_map.items():
             if callback_key in key:
                 func = callback_info["callback"]
-                result = func.__wrapped__(simple_topology, "hierarchical", [], "2d", "node_graph", None, [], "light", [], 0, view_state, None, None)
+                result = func.__wrapped__(simple_topology, "hierarchical", [], "2d", "node_graph", None, [], "light", [], 0, None, view_state, None, None)
                 fig, _config, _, _, _, _, _, _ = result
                 assert isinstance(fig, go.Figure)
                 break
@@ -1131,6 +1138,7 @@ class TestCallbackInvocation:
                 dcc.Store(id=f"{visualizer.component_id}-raw-topology-store"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
+                dcc.Store(id="ws-cascade-add-buffer"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
                 dcc.Checklist(id=f"{visualizer.component_id}-show-weights"),
                 dcc.RadioItems(id=f"{visualizer.component_id}-display-mode"),
@@ -1174,6 +1182,7 @@ class TestCallbackInvocation:
                 dcc.Store(id=f"{visualizer.component_id}-raw-topology-store"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
+                dcc.Store(id="ws-cascade-add-buffer"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
                 dcc.Checklist(id=f"{visualizer.component_id}-show-weights"),
                 dcc.RadioItems(id=f"{visualizer.component_id}-display-mode"),
@@ -1216,6 +1225,7 @@ class TestCallbackInvocation:
                 dcc.Store(id=f"{visualizer.component_id}-raw-topology-store"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
+                dcc.Store(id="ws-cascade-add-buffer"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
                 dcc.Checklist(id=f"{visualizer.component_id}-show-weights"),
                 dcc.RadioItems(id=f"{visualizer.component_id}-display-mode"),
@@ -1258,6 +1268,7 @@ class TestCallbackInvocation:
                 dcc.Store(id=f"{visualizer.component_id}-raw-topology-store"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
+                dcc.Store(id="ws-cascade-add-buffer"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
                 dcc.Checklist(id=f"{visualizer.component_id}-show-weights"),
                 dcc.RadioItems(id=f"{visualizer.component_id}-display-mode"),
@@ -1300,6 +1311,7 @@ class TestCallbackInvocation:
                 dcc.Store(id=f"{visualizer.component_id}-raw-topology-store"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
+                dcc.Store(id="ws-cascade-add-buffer"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
                 dcc.Checklist(id=f"{visualizer.component_id}-show-weights"),
                 dcc.RadioItems(id=f"{visualizer.component_id}-display-mode"),
@@ -1341,6 +1353,7 @@ class TestCallbackInvocation:
                 dcc.Store(id=f"{visualizer.component_id}-raw-topology-store"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
+                dcc.Store(id="ws-cascade-add-buffer"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
                 dcc.Checklist(id=f"{visualizer.component_id}-show-weights"),
                 dcc.RadioItems(id=f"{visualizer.component_id}-display-mode"),
@@ -1448,6 +1461,7 @@ class TestWeightHeatmapRendering:
                 dcc.Store(id=f"{visualizer.component_id}-raw-topology-store"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
+                dcc.Store(id="ws-cascade-add-buffer"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
                 dcc.Checklist(id=f"{visualizer.component_id}-show-weights"),
                 dcc.RadioItems(id=f"{visualizer.component_id}-display-mode"),
@@ -1486,6 +1500,7 @@ class TestWeightHeatmapRendering:
                     "light",
                     [],
                     0,
+                    None,  # ws_cascade_add (D-06)
                     None,
                     None,
                     None,

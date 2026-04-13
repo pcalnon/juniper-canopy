@@ -98,10 +98,7 @@ class TestWebSocketEndpointsDemo:
 
     def test_websocket_control_connect_disconnect(self, app_client):
         """Test WebSocket control connection and disconnect."""
-        token = app_client.get("/api/csrf").json().get("csrf_token", "")
         with app_client.websocket_connect("/ws/control") as ws:
-            if token:
-                ws.send_json({"type": "auth", "csrf_token": token})
             ws.send_json({"command": "unknown"})
             data = ws.receive_json()
             assert isinstance(data, dict)
