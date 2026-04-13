@@ -317,6 +317,7 @@ class NetworkVisualizer(BaseComponent):
                 Input("theme-state", "data"),
                 Input(f"{self.component_id}-selected-nodes", "data"),
                 Input("fast-update-interval", "n_intervals"),
+                Input("ws-cascade-add-buffer", "data"),  # D-06: WS cascade_add events trigger topo refresh
             ],
             [
                 State(f"{self.component_id}-view-state", "data"),
@@ -335,6 +336,7 @@ class NetworkVisualizer(BaseComponent):
             theme: str,
             selected_nodes: List[str],
             n_intervals: int,
+            ws_cascade_add: Optional[Dict[str, Any]],  # D-06: WS cascade_add events
             view_state: Dict[str, Any],
             prev_hash: str,
             current_highlight: Optional[Dict[str, Any]],

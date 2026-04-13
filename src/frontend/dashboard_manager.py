@@ -2462,6 +2462,26 @@ class DashboardManager:
                 metrics = []
 
             self.logger.debug(f"Fetched {len(metrics)} metrics from {url}")
+
+            # Phase B: Track REST polling bandwidth (P0 motivator proof metric)
+            if not hasattr(self, "_rest_bytes_gauge"):
+                try:
+                    from prometheus_client import Gauge
+
+                    self._rest_bytes_gauge = Gauge(
+                        "canopy_rest_polling_bytes_per_sec",
+                        "REST polling response size in bytes (per endpoint)",
+                        ["endpoint"],
+                    )
+                except Exception:
+                    self._rest_bytes_gauge = None
+            if self._rest_bytes_gauge:
+                try:
+                    content_length = len(response.content) if hasattr(response, "content") else 0
+                    self._rest_bytes_gauge.labels(endpoint="/api/metrics/history").set(content_length)
+                except (TypeError, AttributeError):
+                    pass
+
             return metrics
         except Exception as e:
             self.logger.warning(f"Failed to fetch metrics from API: {type(e).__name__}: {e}")
