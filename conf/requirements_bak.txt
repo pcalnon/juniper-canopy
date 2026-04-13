@@ -105,7 +105,7 @@ python-multipart==0.0.26
 PyYAML==6.0.3
 requests==2.33.1
 retrying==1.4.2
-rich==14.3.3
+rich==15.0.0
 rich-toolkit==0.19.7
 ruyaml==0.91.0
 scipy==1.17.1
