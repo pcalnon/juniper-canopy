@@ -87,11 +87,11 @@ def cascor_client(mock_service_backend):
 def _send_ws_command(client, command, **extra):
     """Send a command over /ws/control and return the response dict.
 
+    CSRF auth is handled automatically by the conftest.py monkeypatch.
     Drains any broadcast messages (metrics/state) that may arrive between
     the connection acknowledgment and the command response.
     """
     with client.websocket_connect("/ws/control") as ws:
-        ws.receive_json()  # consume connection_established ack
         payload = {"command": command, **extra}
         ws.send_text(json.dumps(payload))
         # The demo backend training thread may broadcast metrics/state messages
