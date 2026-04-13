@@ -41,6 +41,7 @@ import importlib.metadata
 import json
 import os
 import re
+import secrets
 
 # import sys
 import time
@@ -272,6 +273,20 @@ api_key_auth = get_api_key_auth()
 rate_limiter = get_rate_limiter()
 app.add_middleware(SecurityMiddleware, api_key_auth=api_key_auth, rate_limiter=rate_limiter)
 
+# Phase B-pre-b: SessionMiddleware for CSRF token management (M-SEC-02)
+from starlette.middleware.sessions import SessionMiddleware
+
+_session_secret = settings.session_secret_key or secrets.token_urlsafe(32)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=_session_secret,
+    session_cookie="canopy_session",
+    max_age=settings.csrf_token_ttl_seconds,
+    same_site="strict",
+    https_only=False,  # Allow HTTP in dev; HTTPS enforced by reverse proxy in prod
+    path="/",
+)
+
 # Observability middleware (LIFO: last added runs first)
 app.add_middleware(RequestIdMiddleware)
 if settings.metrics_enabled:
@@ -331,6 +346,25 @@ async def root():
         Redirect response to /dashboard/
     """
     return RedirectResponse(url="/dashboard/")
+
+
+# ── Phase B-pre-b: CSRF token endpoint (M-SEC-02) ────────────────────
+
+from csrf import get_csrf_store
+
+
+@app.get("/api/csrf")
+async def api_csrf_token(request: Request):
+    """Mint a CSRF token for WebSocket control-path authentication.
+
+    The token is stored server-side with a 1h sliding TTL and must be
+    sent as the first frame after /ws/control connection is accepted.
+    """
+    if not settings.csrf_enabled:
+        return {"csrf_token": "", "enabled": False}  # nosec B105 — empty token when CSRF disabled
+    store = get_csrf_store(ttl_seconds=settings.csrf_token_ttl_seconds)
+    token = store.mint()
+    return {"csrf_token": token, "enabled": True}
 
 
 _WS_MAX_MESSAGE_SIZE = 65536  # 64KB max message size for WebSocket
@@ -445,19 +479,13 @@ async def websocket_training_endpoint(websocket: WebSocket):
 
 @app.websocket("/ws/control")
 async def websocket_control_endpoint(websocket: WebSocket):
-    """
-    WebSocket endpoint for training control commands.
-    Handles:
-    - Start/stop training
-    - Pause/resume
-    - Reset
-    - Configuration updates
-    Commands:
-        {'command': 'start', 'reset': true/false}
-        {'command': 'stop'}
-        {'command': 'pause'}
-        {'command': 'resume'}
-        {'command': 'reset'}
+    """WebSocket endpoint for training control commands.
+
+    Phase B-pre-b security gates:
+    1. API key authentication
+    2. Origin validation (M-SEC-01b)
+    3. Per-IP connection cap (M-SEC-04)
+    4. CSRF first-frame auth (M-SEC-02) — 5s timeout → close 1008
     """
     if not await _authenticate_websocket(websocket):
         return
@@ -473,17 +501,45 @@ async def websocket_control_endpoint(websocket: WebSocket):
             origin = websocket.headers.get("origin", "")
             client_ip = websocket.client[0] if websocket.client else "unknown"
             log_ws_origin_rejected("/ws/control", client_ip, origin)
-            await websocket.close(code=4003, reason="Origin not allowed")
+            await websocket.close(code=4003, reason="Policy violation")  # M-SEC-06: opaque
             return
 
     # Phase B-pre-a: Per-IP connection cap (M-SEC-04)
     if not websocket_manager.check_per_ip_limit(websocket, ws_settings.max_connections_per_ip):
-        await websocket.close(code=1013, reason="Per-IP connection limit reached")
+        await websocket.close(code=1013, reason="Policy violation")  # M-SEC-06: opaque
         return
 
     client_id = f"control-client-{id(websocket)}"
     await websocket_manager.connect(websocket, client_id=client_id)
-    # Connection confirmation is sent automatically by websocket_manager.connect()
+
+    # Phase B-pre-b: CSRF first-frame authentication (M-SEC-02)
+    if settings.csrf_enabled:
+        from audit_log import log_ws_csrf_rejected
+
+        client_ip = websocket.client[0] if websocket.client else "unknown"
+        try:
+            raw_auth = await asyncio.wait_for(
+                websocket.receive_text(),
+                timeout=settings.ws_control_auth_timeout,
+            )
+            auth_msg = json.loads(raw_auth)
+            if auth_msg.get("type") != "auth" or not auth_msg.get("csrf_token"):
+                log_ws_csrf_rejected("/ws/control", client_ip, "missing_or_invalid_frame")
+                await websocket.close(code=1008, reason="Policy violation")
+                return
+            csrf_store = get_csrf_store()
+            if not csrf_store.validate(auth_msg["csrf_token"]):
+                log_ws_csrf_rejected("/ws/control", client_ip, "invalid_token")
+                await websocket.close(code=1008, reason="Policy violation")
+                return
+        except asyncio.TimeoutError:
+            log_ws_csrf_rejected("/ws/control", client_ip, "auth_timeout")
+            await websocket.close(code=1008, reason="Policy violation")
+            return
+        except (json.JSONDecodeError, Exception):
+            log_ws_csrf_rejected("/ws/control", client_ip, "malformed_auth")
+            await websocket.close(code=1008, reason="Policy violation")
+            return
 
     _valid_commands = {"start", "stop", "pause", "resume", "reset"}
     max_msg_size = ws_settings.max_message_size_control

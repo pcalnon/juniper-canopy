@@ -14,7 +14,7 @@
  */
 
 class CascorWebSocket {
-    constructor(url) {
+    constructor(url, options) {
         this.url = url;
         this.ws = null;
         this.handlers = {};
@@ -32,6 +32,9 @@ class CascorWebSocket {
         // Phase B: seq tracking
         this._lastSeq = -1;
         this._serverInstanceId = null;
+
+        // Phase B-pre-b: CSRF auth for control WS (M-SEC-02)
+        this._csrfEnabled = (options && options.csrf) || false;
 
         // Auto-connect on construction
         this.connect();
@@ -59,6 +62,15 @@ class CascorWebSocket {
                 this._setStatus('open');
                 this.connected = true;
                 this.reconnecting = false;
+
+                // Phase B-pre-b: send CSRF auth first-frame for control WS (M-SEC-02)
+                if (this._csrfEnabled && window.__canopy_csrf) {
+                    console.log('[CascorWS] Sending CSRF auth frame');
+                    this.ws.send(JSON.stringify({
+                        type: "auth",
+                        csrf_token: window.__canopy_csrf
+                    }));
+                }
 
                 // Phase B: send resume on reconnect if we have seq history
                 if (this.reconnectAttempts > 0 && this._lastSeq >= 0 && this._serverInstanceId) {
@@ -285,12 +297,39 @@ class CascorWebSocket {
 var trainingWSUrl = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws/training';
 window.cascorWS = new CascorWebSocket(trainingWSUrl);
 
-// Create global singleton WebSocket for control commands
-var controlWSUrl = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws/control';
-window.cascorControlWS = new CascorWebSocket(controlWSUrl);
+// Phase B-pre-b: Fetch CSRF token before connecting control WS (M-SEC-02)
+window.__canopy_csrf = null;
+
+function _initControlWS() {
+    var controlWSUrl = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws/control';
+    window.cascorControlWS = new CascorWebSocket(controlWSUrl, {csrf: true});
+    window.cascorControlWS.onStatus(function(status) { console.log('[Control WS] Status: ' + status); });
+}
+
+// Fetch CSRF token, then connect control WS
+(function() {
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", "/api/csrf", true);
+    xhr.onload = function() {
+        try {
+            var resp = JSON.parse(xhr.responseText);
+            if (resp.csrf_token) {
+                window.__canopy_csrf = resp.csrf_token;
+                console.log('[CascorWS] CSRF token acquired');
+            }
+        } catch(e) {
+            console.warn('[CascorWS] Failed to parse CSRF response:', e);
+        }
+        _initControlWS();
+    };
+    xhr.onerror = function() {
+        console.warn('[CascorWS] CSRF fetch failed, connecting control WS without CSRF');
+        _initControlWS();
+    };
+    xhr.send();
+})();
 
 // Log status changes
 window.cascorWS.onStatus(function(status) { console.log('[Training WS] Status: ' + status); });
-window.cascorControlWS.onStatus(function(status) { console.log('[Control WS] Status: ' + status); });
 
 console.log('[CascorWS] WebSocket clients initialized');
