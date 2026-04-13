@@ -23,7 +23,7 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "09:00"
-      timezone: "America/New_York"
+      timezone: "America/Chicago"
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
