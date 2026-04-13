@@ -168,7 +168,11 @@ class CascorLogger:
     Provides independent control over console and file logging levels.
     """
 
-    # Add custom level numbers for logging levels
+    # Add custom level numbers for logging levels.
+    # FATAL_LEVEL is intentionally set to 60 (above standard Python logging's FATAL=50 alias
+    # for CRITICAL) to distinguish unrecoverable-termination events from critical-but-survivable
+    # ones: fatal() callers are expected to immediately abort the process, while critical()
+    # callers may continue. Callers relying on standard logging.FATAL will still hit CRITICAL_LEVEL.
     TRACE_LEVEL = 1
     VERBOSE_LEVEL = 5
     DEBUG_LEVEL = 10
