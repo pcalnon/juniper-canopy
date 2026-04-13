@@ -173,7 +173,7 @@ class Settings(BaseSettings):
     audit_log_retention_days: int = 90
 
     # Phase B: Browser WebSocket bridge (D-17, D-18, D-04)
-    enable_browser_ws_bridge: bool = False  # D-17: dev flip (off by default, P7 flips to True)
+    enable_browser_ws_bridge: bool = True  # D-17: P7 flag-flip — 72h staging soak passed
     disable_ws_bridge: bool = False  # D-18: permanent kill switch
     enable_raf_coalescer: bool = False  # D-04: rAF coalescer scaffolded but disabled
     enable_ws_latency_beacon: bool = True  # Latency beacon enabled by default
