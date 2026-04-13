@@ -5,9 +5,11 @@
  * replacing HTTP polling for efficient real-time monitoring.
  *
  * Features:
- * - Automatic reconnection with exponential backoff
+ * - Automatic reconnection with jitter-backoff (GAP-WS-30), no attempt cap (GAP-WS-31)
  * - Type-based message dispatching
- * - Connection status tracking
+ * - Connection status tracking (connected/reconnecting flags)
+ * - Sequence tracking with gap detection
+ * - Resume protocol on reconnect (sends last_seq + server_instance_id)
  * - In-memory message buffering for Dash integration
  */
 
@@ -20,8 +22,16 @@ class CascorWebSocket {
         this.messageBuffer = [];
         this.status = 'disconnected';
         this.reconnectAttempts = 0;
-        this.maxReconnectDelay = 5000; // 5 seconds max backoff
+        this.maxReconnectDelay = 30000; // 30 seconds max backoff (GAP-WS-30)
         this.baseReconnectDelay = 500; // 500ms initial delay
+
+        // Phase B: connection status flags
+        this.connected = false;
+        this.reconnecting = false;
+
+        // Phase B: seq tracking
+        this._lastSeq = -1;
+        this._serverInstanceId = null;
 
         // Auto-connect on construction
         this.connect();
@@ -37,6 +47,8 @@ class CascorWebSocket {
         }
 
         this._setStatus('connecting');
+        this.reconnecting = this.reconnectAttempts > 0;
+        this._notifyConnectionStatus();
         console.log(`[CascorWS] Connecting to ${this.url}`);
 
         try {
@@ -45,18 +57,38 @@ class CascorWebSocket {
             this.ws.onopen = () => {
                 console.log('[CascorWS] Connected');
                 this._setStatus('open');
+                this.connected = true;
+                this.reconnecting = false;
+
+                // Phase B: send resume on reconnect if we have seq history
+                if (this.reconnectAttempts > 0 && this._lastSeq >= 0 && this._serverInstanceId) {
+                    console.log(`[CascorWS] Sending resume (last_seq=${this._lastSeq}, server=${this._serverInstanceId})`);
+                    this.ws.send(JSON.stringify({
+                        type: "resume",
+                        data: {
+                            last_seq: this._lastSeq,
+                            server_instance_id: this._serverInstanceId
+                        }
+                    }));
+                }
+
                 this.reconnectAttempts = 0; // Reset on successful connection
+                this._notifyConnectionStatus();
             };
 
             this.ws.onclose = (event) => {
                 console.log(`[CascorWS] Disconnected: ${event.code} ${event.reason}`);
                 this._setStatus('closed');
+                this.connected = false;
+                this._notifyConnectionStatus();
                 this._scheduleReconnect();
             };
 
             this.ws.onerror = (error) => {
                 console.error('[CascorWS] Error:', error);
                 this._setStatus('error');
+                this.connected = false;
+                this._notifyConnectionStatus();
             };
 
             this.ws.onmessage = (event) => {
@@ -70,26 +102,24 @@ class CascorWebSocket {
         } catch (err) {
             console.error('[CascorWS] Connection failed:', err);
             this._setStatus('error');
+            this.connected = false;
+            this._notifyConnectionStatus();
             this._scheduleReconnect();
         }
     }
 
     /**
-     * Schedule reconnection with exponential backoff
+     * Schedule reconnection with jitter-backoff (GAP-WS-30).
+     * No attempt cap (GAP-WS-31) — retries forever with max 30s delay.
      */
     _scheduleReconnect() {
-        if (this.reconnectAttempts >= 10) {
-            console.warn('[CascorWS] Max reconnection attempts reached. Stopping.');
-            return;
-        }
-
-        const delay = Math.min(
-            this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts),
-            this.maxReconnectDelay
-        );
+        // GAP-WS-30: jitter backoff — delay = random * min(30s, 500ms * 2^attempt)
+        var delay = Math.random() * Math.min(this.maxReconnectDelay, this.baseReconnectDelay * Math.pow(2, this.reconnectAttempts));
 
         this.reconnectAttempts++;
-        console.log(`[CascorWS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+        this.reconnecting = true;
+        this._notifyConnectionStatus();
+        console.log(`[CascorWS] Reconnecting in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts})`);
 
         setTimeout(() => this.connect(), delay);
     }
@@ -116,10 +146,32 @@ class CascorWebSocket {
      * @private
      */
     _handleMessage(message) {
-        const { type, data } = message;
+        var type = message.type;
+        var data = message.data;
+
+        // Phase B: capture server_instance_id from connection_established
+        if (type === 'connection_established' && data && data.server_instance_id) {
+            this._serverInstanceId = data.server_instance_id;
+            console.log(`[CascorWS] Server instance: ${this._serverInstanceId}`);
+        }
+
+        // Phase B: handle resume_failed — clear seq, fallback to REST
+        if (type === 'resume_failed') {
+            console.warn('[CascorWS] Resume failed, resetting seq tracking');
+            this._lastSeq = -1;
+        }
+
+        // Phase B: seq tracking — detect gaps
+        if (message.seq !== undefined && message.seq !== null) {
+            var expectedSeq = this._lastSeq + 1;
+            if (this._lastSeq >= 0 && message.seq !== expectedSeq) {
+                console.warn(`[CascorWS] Seq gap detected: expected ${expectedSeq}, got ${message.seq}`);
+            }
+            this._lastSeq = message.seq;
+        }
 
         // Add to buffer for Dash clientside callbacks
-        this.messageBuffer.push({ type, data, timestamp: Date.now() });
+        this.messageBuffer.push({ type: type, data: data, timestamp: Date.now() });
 
         // Limit buffer size (keep last 100 messages)
         if (this.messageBuffer.length > 100) {
@@ -152,11 +204,25 @@ class CascorWebSocket {
     }
 
     /**
+     * Notify connection status change to drain bridge (Phase B)
+     * @private
+     */
+    _notifyConnectionStatus() {
+        if (window._juniperWsDrain) {
+            window._juniperWsDrain._connectionStatus = {
+                connected: this.connected,
+                reconnecting: this.reconnecting,
+                mode: "live"
+            };
+        }
+    }
+
+    /**
      * Get and clear buffered messages (for Dash integration)
      * @returns {Array} Buffered messages
      */
     getBufferedMessages() {
-        const messages = [...this.messageBuffer];
+        var messages = this.messageBuffer.slice();
         this.messageBuffer = [];
         return messages;
     }
@@ -167,25 +233,26 @@ class CascorWebSocket {
      * @returns {Promise} Promise that resolves when ack is received or rejects on timeout
      */
     send(message) {
-        return new Promise((resolve, reject) => {
-            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                this.ws.send(JSON.stringify(message));
+        var self = this;
+        return new Promise(function(resolve, reject) {
+            if (self.ws && self.ws.readyState === WebSocket.OPEN) {
+                self.ws.send(JSON.stringify(message));
 
                 // Set up ack handler with timeout
-                const timeout = setTimeout(() => {
+                var timeout = setTimeout(function() {
                     reject(new Error('Command timeout (no ack received)'));
                 }, 5000);
 
                 // Listen for ack
-                const ackHandler = (data) => {
+                var ackHandler = function(data) {
                     if (data.command === message.command) {
                         clearTimeout(timeout);
-                        this.off('control_ack', ackHandler);
+                        self.off('control_ack', ackHandler);
                         resolve(data);
                     }
                 };
 
-                this.on('control_ack', ackHandler);
+                self.on('control_ack', ackHandler);
             } else {
                 reject(new Error('WebSocket not connected'));
                 console.warn('[CascorWS] Cannot send message: not connected');
@@ -215,15 +282,15 @@ class CascorWebSocket {
 }
 
 // Create global singleton WebSocket for training updates
-const trainingWSUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/training`;
+var trainingWSUrl = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws/training';
 window.cascorWS = new CascorWebSocket(trainingWSUrl);
 
 // Create global singleton WebSocket for control commands
-const controlWSUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/control`;
+var controlWSUrl = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws/control';
 window.cascorControlWS = new CascorWebSocket(controlWSUrl);
 
 // Log status changes
-window.cascorWS.onStatus(status => console.log(`[Training WS] Status: ${status}`));
-window.cascorControlWS.onStatus(status => console.log(`[Control WS] Status: ${status}`));
+window.cascorWS.onStatus(function(status) { console.log('[Training WS] Status: ' + status); });
+window.cascorControlWS.onStatus(function(status) { console.log('[Control WS] Status: ' + status); });
 
 console.log('[CascorWS] WebSocket clients initialized');

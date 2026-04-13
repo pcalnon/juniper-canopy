@@ -2328,6 +2328,63 @@ async def api_remote_disconnect():
     return JSONResponse({"error": "Failed to disconnect"}, status_code=500)
 
 
+# ── Phase B: Browser WebSocket observability endpoints ────────────────
+
+# Prometheus metrics singletons (created once, reused)
+_ws_latency_hist = None
+_ws_error_counter = None
+
+try:
+    from prometheus_client import Counter as _PromCounter
+    from prometheus_client import Histogram as _PromHistogram
+
+    _ws_latency_hist = _PromHistogram(
+        "canopy_ws_browser_latency_ms",
+        "Browser-reported WebSocket round-trip latency",
+        ["endpoint"],
+        buckets=[5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
+    )
+    _ws_error_counter = _PromCounter(
+        "canopy_ws_browser_errors_total",
+        "Browser-reported WebSocket errors",
+        ["endpoint"],
+    )
+except Exception:  # nosec B110 — graceful degradation when prometheus_client not installed
+    pass
+
+
+class WsLatencyReport(BaseModel):
+    """Browser-reported WebSocket round-trip latency sample."""
+
+    latency_ms: float
+    endpoint: str = "/ws/training"
+
+
+class WsBrowserErrorReport(BaseModel):
+    """Browser-reported WebSocket error."""
+
+    error: str
+    endpoint: str = "/ws/training"
+    user_agent: str = ""
+
+
+@app.post("/api/ws_latency")
+async def api_ws_latency(report: WsLatencyReport):
+    """Accept browser-reported WS latency and feed Prometheus histogram."""
+    if _ws_latency_hist:
+        _ws_latency_hist.labels(endpoint=report.endpoint).observe(report.latency_ms)
+    return {"status": "ok"}
+
+
+@app.post("/api/ws_browser_errors")
+async def api_ws_browser_errors(report: WsBrowserErrorReport):
+    """Accept browser-reported WS errors and feed Prometheus counter."""
+    if _ws_error_counter:
+        _ws_error_counter.labels(endpoint=report.endpoint).inc()
+    system_logger.warning(f"Browser WS error on {report.endpoint}: {report.error}")
+    return {"status": "ok"}
+
+
 # Dash app is automatically mounted at /dashboard/ via DashboardManager
 
 
