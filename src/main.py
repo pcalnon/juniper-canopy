@@ -69,7 +69,7 @@ from pydantic import BaseModel
 # from backend.data_adapter import DataAdapter  trunk-ignore(ruff/E402)
 from backend.training_monitor import TrainingState  # trunk-ignore(ruff/E402)
 from canopy_constants import TrainingConstants  # trunk-ignore(ruff/E402)
-from communication.websocket_manager import websocket_manager
+from communication.websocket_manager import create_command_response_message, websocket_manager
 from frontend.dashboard_manager import DashboardManager
 from health import DependencyStatus, ErrorResponse, ReadinessResponse, probe_dependency
 from logger.logger import (
@@ -123,6 +123,18 @@ loop_holder = {"loop": None}
 # Global state tracking
 juniper_data_available = False
 training_state = TrainingState()  # Global TrainingState instance
+
+# Phase D §S10.1: per-command budgets for /ws/control. Seeded from the
+# pydantic settings at import time but kept as a plain dict so tests can
+# monkeypatch individual entries without fighting BaseModel's __setattr__.
+_PHASE_D_CONTROL_TIMEOUTS: dict[str, float] = {
+    "start": settings.ws_control_start_timeout,
+    "stop": settings.ws_control_stop_timeout,
+    "pause": settings.ws_control_stop_timeout,
+    "resume": settings.ws_control_stop_timeout,
+    "reset": settings.ws_control_stop_timeout,
+    "set_params": settings.ws_control_set_params_timeout,
+}
 
 
 @asynccontextmanager
@@ -538,21 +550,56 @@ async def websocket_control_endpoint(websocket: WebSocket):
             await websocket.close(code=1008, reason="Policy violation")
             return
 
-    _valid_commands = {"start", "stop", "pause", "resume", "reset"}
+    _valid_commands = {"start", "stop", "pause", "resume", "reset", "set_params"}
     max_msg_size = ws_settings.max_message_size_control
+
+    # Phase D §S10.1: per-command timeouts — reads _PHASE_D_CONTROL_TIMEOUTS
+    # each iteration so tests can patch the module-level dict to force
+    # asyncio.wait_for to trip without mutating the pydantic Settings model.
+    def _command_timeout(cmd: str) -> float:
+        return _PHASE_D_CONTROL_TIMEOUTS.get(cmd, _PHASE_D_CONTROL_TIMEOUTS["stop"])
+
+    def _execute_command(cmd: str, params: dict | None, reset: bool):  # noqa: ANN202
+        """Blocking dispatch to the backend; runs in the thread pool.
+
+        Return type is intentionally unannotated: backend methods have
+        ``Any`` return types and the caller treats the result as "maybe a
+        dict" when building the command_response envelope.
+        """
+        if cmd == "start":
+            return backend.start_training(reset=reset)
+        if cmd == "stop":
+            return backend.stop_training()
+        if cmd == "pause":
+            return backend.pause_training()
+        if cmd == "resume":
+            return backend.resume_training()
+        if cmd == "reset":
+            return backend.reset_training()
+        if cmd == "set_params":
+            if not params:
+                raise ValueError("set_params requires a 'params' dict")
+            return backend.apply_params(**params)
+        raise ValueError(f"Unhandled command: {cmd}")
 
     try:
         while True:
             data = await websocket.receive_text()
 
             if len(data) > max_msg_size:
-                await websocket_manager.send_personal_message({"ok": False, "error": "Message too large"}, websocket)
+                await websocket_manager.send_personal_message(
+                    create_command_response_message("unknown", "error", error="Message too large"),
+                    websocket,
+                )
                 continue
 
             try:
                 message = json.loads(data)
             except json.JSONDecodeError:
-                await websocket_manager.send_personal_message({"ok": False, "error": "Invalid JSON"}, websocket)
+                await websocket_manager.send_personal_message(
+                    create_command_response_message("unknown", "error", error="Invalid JSON"),
+                    websocket,
+                )
                 continue
 
             # Phase F: respond to server heartbeat pings with pong
@@ -561,35 +608,65 @@ async def websocket_control_endpoint(websocket: WebSocket):
                 continue
 
             command = message.get("command", "")
+            command_id = message.get("command_id")
 
             if command not in _valid_commands:
-                await websocket_manager.send_personal_message({"ok": False, "error": f"Unknown command: {command}"}, websocket)
+                await websocket_manager.send_personal_message(
+                    create_command_response_message(
+                        command,
+                        "error",
+                        command_id=command_id,
+                        error=f"Unknown command: {command}",
+                        code="unknown_command",
+                    ),
+                    websocket,
+                )
                 continue
 
-            system_logger.info(f"Control command received: {command} (backend={backend.backend_type})")
+            system_logger.info(f"Control command received: {command} (backend={backend.backend_type}, id={command_id})")
 
+            timeout = _command_timeout(command)
             try:
-                if command == "start":
-                    reset = message.get("reset", True)
-                    result = backend.start_training(reset=reset)
-                    response = {"ok": True, "command": command, "state": result}
-                elif command == "stop":
-                    result = backend.stop_training()
-                    response = {"ok": True, "command": command, "state": result}
-                elif command == "pause":
-                    result = backend.pause_training()
-                    response = {"ok": True, "command": command, "state": result}
-                elif command == "resume":
-                    result = backend.resume_training()
-                    response = {"ok": True, "command": command, "state": result}
-                elif command == "reset":
-                    result = backend.reset_training()
-                    response = {"ok": True, "command": command, "state": result}
-
-                await websocket_manager.send_personal_message(response, websocket)
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        _execute_command,
+                        command,
+                        message.get("params"),
+                        message.get("reset", True),
+                    ),
+                    timeout=timeout,
+                )
+                await websocket_manager.send_personal_message(
+                    create_command_response_message(
+                        command,
+                        "success",
+                        command_id=command_id,
+                        data=result if isinstance(result, dict) else None,
+                    ),
+                    websocket,
+                )
+            except asyncio.TimeoutError:
+                system_logger.error(f"Command '{command}' timed out after {timeout}s")
+                await websocket_manager.send_personal_message(
+                    create_command_response_message(
+                        command,
+                        "error",
+                        command_id=command_id,
+                        error=f"Command timed out after {timeout}s",
+                    ),
+                    websocket,
+                )
             except Exception as e:
                 system_logger.error(f"Command execution error: {e}")
-                await websocket_manager.send_personal_message({"ok": False, "error": "Command execution failed"}, websocket)
+                await websocket_manager.send_personal_message(
+                    create_command_response_message(
+                        command,
+                        "error",
+                        command_id=command_id,
+                        error="Command execution failed",
+                    ),
+                    websocket,
+                )
 
     except WebSocketDisconnect:
         system_logger.info(f"Control client disconnected: {client_id}")
