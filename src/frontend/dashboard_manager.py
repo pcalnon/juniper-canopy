@@ -70,6 +70,135 @@ from .tooltips import CONTROL_TOOLTIPS
 # from flask import request
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Phase D §S10.3 (P12b) — training button clientside callback
+# ──────────────────────────────────────────────────────────────────────
+# Registered in place of the server-side ``handle_training_buttons``
+# when ``settings.enable_ws_control_buttons`` is True. Routes button
+# clicks through ``window.cascorControlWS.send(...)`` with automatic
+# REST fallback if the WS is unavailable, the send() promise rejects,
+# or the server returns a timeout/error envelope.
+#
+# Contract — inputs and outputs mirror the server-side callback, so
+# the rest of the dashboard (optimistic button-states store, debounce
+# store, timeout sweeper) keeps working unchanged. The JS is otherwise
+# a straight port of ``_handle_training_buttons_handler``:
+#
+#   * Debouncing: 500ms same-button guard via the last-button-click store.
+#   * Trigger mapping: ``start-button`` → "start", etc.
+#   * Optimistic UI: set ``button-states[command] = {disabled, loading,
+#     timestamp}`` synchronously so the button flips to "pending".
+#   * Routing decision: if ``window.cascorControlWS`` is open, call
+#     ``send({command, command_id})`` and handle the promise
+#     asynchronously. Success → keep optimistic state (the existing
+#     timeout sweeper + state-broadcast cleans up). Rejection → REST
+#     fallback via ``fetch('/api/train/<command>', {method:'POST'})``.
+#   * Disconnected path: straight REST via fetch, no WS attempt.
+#
+# The synchronous return value is the same dict/state tuple the
+# server-side handler produced, so existing Dash outputs
+# (``training-control-action``, ``button-states``) keep their shape.
+PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS = r"""
+function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, last_click, button_states) {
+    var dc = window.dash_clientside || {};
+    var no_update = (dc.no_update !== undefined) ? dc.no_update : null;
+    var ctx = dc.callback_context || {};
+    var triggered = ctx.triggered || [];
+    if (!triggered.length || triggered[0].value === null || triggered[0].value === undefined) {
+        return [no_update, no_update];
+    }
+
+    var triggerId = triggered[0].prop_id.split('.')[0];
+    var buttonMap = {
+        'start-button': 'start',
+        'pause-button': 'pause',
+        'stop-button': 'stop',
+        'resume-button': 'resume',
+        'reset-button': 'reset'
+    };
+    var command = buttonMap[triggerId];
+    if (!command) {
+        return [no_update, no_update];
+    }
+
+    var now = Date.now() / 1000.0;
+
+    // Debounce: ignore same-button clicks within 500ms.
+    if (last_click && last_click.button === triggerId) {
+        var sinceLast = now - (last_click.timestamp || 0);
+        if (sinceLast < 0.5) {
+            return [no_update, no_update];
+        }
+    }
+
+    // Optimistic UI: flip the clicked button to loading immediately.
+    var newStates = Object.assign({}, button_states || {});
+    newStates[command] = { disabled: true, loading: true, timestamp: now };
+
+    function restFallback(reason) {
+        if (reason) {
+            console.warn('[Phase D] REST fallback (' + command + '):', reason);
+        }
+        try {
+            fetch('/api/train/' + command, { method: 'POST', credentials: 'same-origin' })
+                .then(function(resp) {
+                    if (!resp.ok) {
+                        console.warn('[Phase D] REST /api/train/' + command + ' returned ' + resp.status);
+                    }
+                })
+                .catch(function(err) {
+                    console.error('[Phase D] REST /api/train/' + command + ' failed:', err);
+                });
+        } catch (err) {
+            console.error('[Phase D] REST fallback threw for ' + command + ':', err);
+        }
+    }
+
+    var ws = window.cascorControlWS;
+    var wsReady = !!(ws && ws.connected && ws.ws && ws.ws.readyState === 1 /* OPEN */);
+
+    if (wsReady && typeof ws.send === 'function') {
+        var commandId;
+        try {
+            commandId = (ws.constructor && typeof ws.constructor._uuidv4 === 'function')
+                ? ws.constructor._uuidv4()
+                : ('btn-' + now.toFixed(3) + '-' + Math.floor(Math.random() * 1e9).toString(16));
+        } catch (e) {
+            commandId = 'btn-' + now.toFixed(3) + '-' + Math.floor(Math.random() * 1e9).toString(16);
+        }
+        try {
+            var sendPromise = ws.send({ command: command, command_id: commandId });
+            if (sendPromise && typeof sendPromise.then === 'function') {
+                sendPromise
+                    .then(function(data) {
+                        console.log('[Phase D] WS command success:', command, data && data.command_id);
+                    })
+                    .catch(function(err) {
+                        restFallback('WS rejected: ' + (err && err.message));
+                    });
+            } else {
+                // send() returned something non-thenable — treat as failure.
+                restFallback('send() returned non-promise value');
+            }
+        } catch (err) {
+            restFallback('send() threw: ' + err);
+        }
+        return [
+            { last: triggerId, ts: now, success: true, transport: 'ws', command_id: commandId },
+            newStates
+        ];
+    }
+
+    // Fast path: WS unavailable — go straight to REST.
+    restFallback(wsReady ? null : 'WS not connected');
+    return [
+        { last: triggerId, ts: now, success: true, transport: 'rest' },
+        newStates
+    ];
+}
+"""
+
+
 # ── Sidebar Contextual Visibility Configuration ──
 # Defines which sidebar sections are visible for each tab.
 # Sections not listed (or with False) are hidden via display:none.
@@ -1760,36 +1889,65 @@ class DashboardManager:
     # Define button action callbacks
     def _setup_button_action_callbacks(self):
 
-        @self.app.callback(
-            [
-                Output("training-control-action", "data"),
-                Output("button-states", "data"),
-            ],
-            [
-                Input("start-button", "n_clicks"),
-                Input("pause-button", "n_clicks"),
-                Input("stop-button", "n_clicks"),
-                Input("resume-button", "n_clicks"),
-                Input("reset-button", "n_clicks"),
-            ],
-            [
-                dash.dependencies.State("last-button-click", "data"),
-                dash.dependencies.State("button-states", "data"),
-            ],
-            prevent_initial_call=True,
-        )
-        def handle_training_buttons(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, last_click, button_states, **kwargs):
-            """Handle training control button clicks with debouncing and optimistic UI."""
-            return self._handle_training_buttons_handler(
-                start_clicks=start_clicks,
-                pause_clicks=pause_clicks,
-                stop_clicks=stop_clicks,
-                resume_clicks=resume_clicks,
-                reset_clicks=reset_clicks,
-                last_click=last_click,
-                button_states=button_states,
-                **kwargs,
+        # Phase D §S10.3 (P12b): when enable_ws_control_buttons is True, training
+        # buttons route through ``window.cascorControlWS.send()`` via a Dash
+        # clientside callback. The browser decides WS-vs-REST per click with
+        # automatic REST fallback if the send() promise rejects. When the flag
+        # is off (default), the pre-Phase-D server-side handler is registered
+        # instead and keeps the existing behavior plus test fixtures untouched.
+        if getattr(self._settings, "enable_ws_control_buttons", False):
+            self.app.clientside_callback(
+                PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS,
+                [
+                    Output("training-control-action", "data"),
+                    Output("button-states", "data"),
+                ],
+                [
+                    Input("start-button", "n_clicks"),
+                    Input("pause-button", "n_clicks"),
+                    Input("stop-button", "n_clicks"),
+                    Input("resume-button", "n_clicks"),
+                    Input("reset-button", "n_clicks"),
+                ],
+                [
+                    dash.dependencies.State("last-button-click", "data"),
+                    dash.dependencies.State("button-states", "data"),
+                ],
+                prevent_initial_call=True,
             )
+            self.logger.info("Phase D: training buttons registered as CLIENTSIDE callback (enable_ws_control_buttons=True)")
+        else:
+
+            @self.app.callback(
+                [
+                    Output("training-control-action", "data"),
+                    Output("button-states", "data"),
+                ],
+                [
+                    Input("start-button", "n_clicks"),
+                    Input("pause-button", "n_clicks"),
+                    Input("stop-button", "n_clicks"),
+                    Input("resume-button", "n_clicks"),
+                    Input("reset-button", "n_clicks"),
+                ],
+                [
+                    dash.dependencies.State("last-button-click", "data"),
+                    dash.dependencies.State("button-states", "data"),
+                ],
+                prevent_initial_call=True,
+            )
+            def handle_training_buttons(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, last_click, button_states, **kwargs):
+                """Handle training control button clicks with debouncing and optimistic UI."""
+                return self._handle_training_buttons_handler(
+                    start_clicks=start_clicks,
+                    pause_clicks=pause_clicks,
+                    stop_clicks=stop_clicks,
+                    resume_clicks=resume_clicks,
+                    reset_clicks=reset_clicks,
+                    last_click=last_click,
+                    button_states=button_states,
+                    **kwargs,
+                )
 
         @self.app.callback(
             Output("last-button-click", "data"),
