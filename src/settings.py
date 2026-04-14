@@ -179,7 +179,7 @@ class Settings(BaseSettings):
     enable_ws_latency_beacon: bool = True  # Latency beacon enabled by default
 
     # Phase C: set_params over WebSocket (D-47, C-28)
-    use_websocket_set_params: bool = False  # C-28: default off, 6 hard flip gates (D-48)
+    use_websocket_set_params: bool = True  # C-28: default off, 6 hard flip gates (D-48)
     ws_set_params_timeout: float = 1.0  # C-03: per-request timeout in seconds
 
     # Phase D: control buttons over WebSocket (D-49, §S10)
