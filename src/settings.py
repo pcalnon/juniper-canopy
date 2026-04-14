@@ -183,7 +183,7 @@ class Settings(BaseSettings):
     ws_set_params_timeout: float = 1.0  # C-03: per-request timeout in seconds
 
     # Phase D: control buttons over WebSocket (D-49, §S10)
-    enable_ws_control_buttons: bool = False  # D-49: default off, browser buttons via /ws/control
+    enable_ws_control_buttons: bool = True  # D-49: P12b flag-flip — production soak passed, browser buttons via /ws/control
     ws_control_start_timeout: float = 10.0  # §S10.1 per-command start timeout
     ws_control_stop_timeout: float = 2.0  # §S10.1 per-command stop/pause/resume/reset timeout
     ws_control_set_params_timeout: float = 1.0  # §S10.1 per-command set_params timeout (mirrors ws_set_params_timeout)

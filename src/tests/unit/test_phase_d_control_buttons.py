@@ -106,13 +106,25 @@ class TestCommandResponseHelper:
 
 @pytest.mark.unit
 class TestFeatureFlag:
-    """D-49: default-off so browser buttons stay on REST at merge time."""
+    """D-49: post-P12b flip, default is ON — browser buttons route through
+    /ws/control on the happy path with REST fallback. Kill switch is
+    ``JUNIPER_CANOPY_ENABLE_WS_CONTROL_BUTTONS=false`` per §S10.7 rollback.
+    """
 
-    def test_enable_ws_control_buttons_default_off(self):
+    def test_enable_ws_control_buttons_default_on_after_flip(self):
+        """Post-production-soak: code default is True (P12b flag flip)."""
         from settings import get_settings
 
         settings = get_settings()
-        assert settings.enable_ws_control_buttons is False
+        assert settings.enable_ws_control_buttons is True
+
+    def test_kill_switch_env_var_disables_flag(self, monkeypatch):
+        """§S10.7 rollback path: env var false forces back to REST."""
+        from settings import Settings
+
+        monkeypatch.setenv("JUNIPER_CANOPY_ENABLE_WS_CONTROL_BUTTONS", "false")
+        fresh = Settings()
+        assert fresh.enable_ws_control_buttons is False
 
     def test_per_command_timeouts_match_spec(self):
         from settings import get_settings
@@ -128,7 +140,7 @@ class TestFeatureFlag:
 
         settings = get_settings()
         # The two flags are distinct settings — flipping one should not
-        # require the other. Default state: both off.
+        # require the other. Both are now default-on post-canary flip.
         assert hasattr(settings, "use_websocket_set_params")
         assert hasattr(settings, "enable_ws_control_buttons")
 
