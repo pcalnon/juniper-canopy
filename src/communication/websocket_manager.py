@@ -720,6 +720,55 @@ def create_control_ack_message(command: str, success: bool, message: str = "") -
     }
 
 
+def create_command_response_message(
+    command: str,
+    status: str,
+    *,
+    command_id: Optional[str] = None,
+    data: Optional[Dict[str, Any]] = None,
+    error: Optional[str] = None,
+    code: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Phase D §S10: canonical command_response envelope for /ws/control.
+
+    Mirrors ``juniper_cascor.api.websocket.messages.create_control_ack_message``
+    so browsers can correlate async responses by ``command_id`` regardless of
+    whether the command was served by canopy or cascor. ``code`` carries
+    machine-readable error categories such as ``"unknown_command"``.
+
+    The envelope intentionally omits ``seq`` (D-03): the /ws/control channel
+    has no replay buffer.
+
+    Backward-compat fields (``ok``, top-level ``command``, ``state``, ``error``)
+    are duplicated alongside the nested ``data`` block so existing integration
+    tests and pre-Phase-D clients keep working until the next round of tests
+    is migrated. Remove once §S10 adoption is complete.
+    """
+    is_success = status == "success"
+    msg: Dict[str, Any] = {
+        "type": "command_response",
+        "timestamp": time.time(),
+        "data": {
+            "command": command,
+            "status": status,
+        },
+        # Legacy compat (pre-Phase-D callers read these top-level fields)
+        "ok": is_success,
+        "command": command,
+    }
+    if command_id is not None:
+        msg["data"]["command_id"] = command_id
+    if data:
+        msg["data"]["result"] = data
+        msg["state"] = data  # legacy compat
+    if error:
+        msg["data"]["error"] = error
+        msg["error"] = error  # legacy compat
+    if code is not None:
+        msg["data"]["code"] = code
+    return msg
+
+
 def create_stats_message(stats: Dict[str, Any]) -> Dict[str, Any]:
     """
     Create a standardized network statistics message.

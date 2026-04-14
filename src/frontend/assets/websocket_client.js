@@ -36,6 +36,9 @@ class CascorWebSocket {
         // Phase B-pre-b: CSRF auth for control WS (M-SEC-02)
         this._csrfEnabled = (options && options.csrf) || false;
 
+        // Phase D §S10: per-command correlation map (command_id → pending promise)
+        this._pendingCommands = new Map();
+
         // Auto-connect on construction
         this.connect();
     }
@@ -92,6 +95,9 @@ class CascorWebSocket {
                 console.log(`[CascorWS] Disconnected: ${event.code} ${event.reason}`);
                 this._setStatus('closed');
                 this.connected = false;
+                // Phase D §S10: reject any in-flight correlated commands
+                // so the UI can fall back to REST or re-enable buttons.
+                this._rejectAllPending('WebSocket disconnected');
                 this._notifyConnectionStatus();
                 this._scheduleReconnect();
             };
@@ -168,6 +174,15 @@ class CascorWebSocket {
                 this.ws.send(JSON.stringify({type: "pong"}));
             }
             return;
+        }
+
+        // Phase D §S10: route command_response to the pending-command map
+        // before falling through to handlers/buffering. Any response with a
+        // matching command_id resolves the send() promise immediately.
+        if (type === 'command_response' && data && data.command_id) {
+            this._resolvePendingCommand(data);
+            // Still fall through so listeners that care (RISK-13 state-event
+            // resolution, observability) see the envelope.
         }
 
         // Phase B: capture server_instance_id from connection_established
@@ -249,36 +264,114 @@ class CascorWebSocket {
     }
 
     /**
-     * Send message to server (for control commands)
-     * @param {object} message - Message to send
-     * @returns {Promise} Promise that resolves when ack is received or rejects on timeout
+     * Send a control command and correlate the response by command_id (Phase D §S10).
+     *
+     * Auto-generates a command_id (UUIDv4-ish) if the caller did not supply
+     * one. Picks a per-command timeout matching the server-side budget:
+     * start=10s, set_params=1s, everything else=2s. The promise resolves
+     * with the command_response `data` block on success, or rejects on
+     * timeout / disconnect / server error envelope.
+     *
+     * @param {object} message - Message body; must include `command`. If
+     *   `command_id` is omitted one will be generated. Extra keys (`params`,
+     *   `reset`) are forwarded to the server untouched.
+     * @returns {Promise<object>} Resolves with the response data block.
      */
     send(message) {
         var self = this;
+        var cmd = message && message.command;
+        var commandId = (message && message.command_id) || CascorWebSocket._uuidv4();
+        var payload = Object.assign({}, message, { command_id: commandId });
+        // Phase D §S10.1 per-command ceilings — add 1s scheduling slack
+        var perCommandTimeoutMs;
+        if (cmd === 'start') {
+            perCommandTimeoutMs = 11000;
+        } else if (cmd === 'set_params') {
+            perCommandTimeoutMs = 2000;
+        } else {
+            perCommandTimeoutMs = 3000;
+        }
         return new Promise(function(resolve, reject) {
-            if (self.ws && self.ws.readyState === WebSocket.OPEN) {
-                self.ws.send(JSON.stringify(message));
-
-                // Set up ack handler with timeout
-                var timeout = setTimeout(function() {
-                    reject(new Error('Command timeout (no ack received)'));
-                }, 5000);
-
-                // Listen for ack
-                var ackHandler = function(data) {
-                    if (data.command === message.command) {
-                        clearTimeout(timeout);
-                        self.off('control_ack', ackHandler);
-                        resolve(data);
-                    }
-                };
-
-                self.on('control_ack', ackHandler);
-            } else {
-                reject(new Error('WebSocket not connected'));
+            if (!self.ws || self.ws.readyState !== WebSocket.OPEN) {
                 console.warn('[CascorWS] Cannot send message: not connected');
+                reject(new Error('WebSocket not connected'));
+                return;
+            }
+            var timeoutHandle = setTimeout(function() {
+                self._pendingCommands.delete(commandId);
+                reject(new Error('Command timeout (no command_response for ' + commandId + ')'));
+            }, perCommandTimeoutMs);
+            self._pendingCommands.set(commandId, {
+                resolve: resolve,
+                reject: reject,
+                timeoutHandle: timeoutHandle,
+                command: cmd,
+                sentAt: Date.now(),
+            });
+            try {
+                self.ws.send(JSON.stringify(payload));
+            } catch (err) {
+                clearTimeout(timeoutHandle);
+                self._pendingCommands.delete(commandId);
+                reject(err);
             }
         });
+    }
+
+    /**
+     * Resolve a pending command by its command_id when a command_response
+     * arrives from the server. Called from _handleMessage.
+     * @private
+     */
+    _resolvePendingCommand(data) {
+        if (!data || !data.command_id) { return false; }
+        var pending = this._pendingCommands.get(data.command_id);
+        if (!pending) { return false; }
+        clearTimeout(pending.timeoutHandle);
+        this._pendingCommands.delete(data.command_id);
+        if (data.status === 'error') {
+            var err = new Error(data.error || 'Command failed');
+            err.code = data.code;
+            err.command_id = data.command_id;
+            pending.reject(err);
+        } else {
+            pending.resolve(data);
+        }
+        return true;
+    }
+
+    /**
+     * Reject every pending command with the given reason. Used when the
+     * socket closes so callers can fall back to REST rather than waiting
+     * for a response that will never arrive.
+     * @private
+     */
+    _rejectAllPending(reason) {
+        var self = this;
+        this._pendingCommands.forEach(function(pending, commandId) {
+            clearTimeout(pending.timeoutHandle);
+            var err = new Error(reason);
+            err.command_id = commandId;
+            pending.reject(err);
+        });
+        this._pendingCommands.clear();
+    }
+
+    static _uuidv4() {
+        // RFC 4122 v4 using crypto.getRandomValues when available.
+        if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+            var buf = new Uint8Array(16);
+            crypto.getRandomValues(buf);
+            buf[6] = (buf[6] & 0x0f) | 0x40;
+            buf[8] = (buf[8] & 0x3f) | 0x80;
+            var hex = [];
+            for (var i = 0; i < 16; i++) {
+                var h = buf[i].toString(16);
+                hex.push(h.length === 1 ? '0' + h : h);
+            }
+            return hex[0]+hex[1]+hex[2]+hex[3]+'-'+hex[4]+hex[5]+'-'+hex[6]+hex[7]+'-'+hex[8]+hex[9]+'-'+hex[10]+hex[11]+hex[12]+hex[13]+hex[14]+hex[15];
+        }
+        return 'cmd-' + Date.now() + '-' + Math.floor(Math.random() * 1e9).toString(16);
     }
 
     /**
