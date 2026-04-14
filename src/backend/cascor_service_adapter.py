@@ -41,7 +41,8 @@ import logging
 import time
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
-from juniper_cascor_client import CascorTrainingStream, JuniperCascorClient, JuniperCascorClientError
+from juniper_cascor_client import CascorControlStream, CascorTrainingStream, JuniperCascorClient, JuniperCascorClientError
+from juniper_cascor_client.exceptions import JuniperCascorConnectionError
 
 from backend.circuit_breaker import CircuitBreaker
 from canopy_constants import BackendConstants
@@ -66,6 +67,82 @@ def _first_defined(*values, default=None):
         if v is not None:
             return v
     return default
+
+
+class ControlStreamSupervisor:
+    """Phase C: persistent /ws/control connection to cascor for set_params.
+
+    Maintains a background ``CascorControlStream`` with auto-reconnect.
+    Exposes ``set_params()`` that delegates to the stream's correlated
+    command/response mechanism. Bounded pending map (256 max, C-01).
+
+    The supervisor runs on the event loop passed at construction time.
+    ``apply_params`` calls it via ``asyncio.run_coroutine_threadsafe``.
+    """
+
+    _BACKOFF = [1, 2, 5, 10, 30]
+
+    def __init__(self, ws_url: str, api_key: Optional[str] = None) -> None:
+        self._ws_url = ws_url
+        self._api_key = api_key
+        self._stream: Optional[CascorControlStream] = None
+        self._connect_task: Optional[asyncio.Task] = None
+        self._shutdown = False
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
+
+    @property
+    def is_connected(self) -> bool:
+        return self._stream is not None and self._stream._ws is not None
+
+    async def start(self) -> None:
+        """Start the supervisor background connect loop."""
+        self.loop = asyncio.get_running_loop()
+        self._shutdown = False
+        self._connect_task = asyncio.create_task(self._connect_loop())
+
+    async def stop(self) -> None:
+        """Shut down the supervisor and close the stream."""
+        self._shutdown = True
+        if self._connect_task:
+            self._connect_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._connect_task
+        if self._stream:
+            await self._stream.disconnect()
+            self._stream = None
+
+    async def set_params(self, params: dict, *, timeout: float = 1.0) -> dict:
+        """Send set_params via the persistent control stream."""
+        if not self.is_connected or self._stream is None:
+            raise JuniperCascorConnectionError("Control stream not connected")
+        result = await self._stream.set_params(params, timeout=timeout)
+        return result if isinstance(result, dict) else {}
+
+    async def _connect_loop(self) -> None:
+        """Auto-reconnect loop with backoff."""
+        attempt = 0
+        while not self._shutdown:
+            try:
+                self._stream = CascorControlStream(
+                    base_url=self._ws_url,
+                    api_key=self._api_key,
+                )
+                await self._stream.connect()
+                logger.info("Control stream supervisor connected to %s", self._ws_url)
+                attempt = 0
+                # Stay connected until disconnect
+                while not self._shutdown and self.is_connected:
+                    await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                delay = self._BACKOFF[min(attempt, len(self._BACKOFF) - 1)]
+                logger.warning("Control stream supervisor disconnected (%s), reconnecting in %ds", e, delay)
+                attempt += 1
+                try:
+                    await asyncio.sleep(delay)
+                except asyncio.CancelledError:
+                    return
 
 
 class _ServiceTrainingMonitor:
@@ -164,6 +241,9 @@ class CascorServiceAdapter:
         # Derive WebSocket URL from HTTP URL
         ws_url = service_url.replace("http://", "ws://").replace("https://", "wss://")
         self._ws_url = ws_url
+
+        # Phase C: control stream supervisor for hot-param WS routing
+        self._control_supervisor = ControlStreamSupervisor(ws_url=ws_url, api_key=api_key)
 
     @property
     def service_url(self) -> str:
@@ -367,8 +447,22 @@ class CascorServiceAdapter:
         self._relay_task = asyncio.create_task(_relay_loop())
         logger.info("Metrics relay started")
 
+        # Phase C: start control stream supervisor for hot-param WS routing
+        from settings import get_settings
+
+        app_settings = get_settings()
+        if getattr(app_settings, "use_websocket_set_params", False):
+            await self._control_supervisor.start()
+            logger.info("Control stream supervisor started (use_websocket_set_params=True)")
+            assert len(self._HOT_CASCOR_PARAMS) > 0, "HOT_CASCOR_PARAMS must be non-empty when WS set_params enabled"
+        else:
+            logger.info("Control stream supervisor skipped (use_websocket_set_params=False)")
+
     async def stop_metrics_relay(self) -> None:
-        """Cancel the WebSocket relay task."""
+        """Cancel the WebSocket relay task and control stream supervisor."""
+        # Phase C: stop control supervisor
+        await self._control_supervisor.stop()
+
         if self._relay_task and not self._relay_task.done():
             self._relay_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -499,12 +593,41 @@ class CascorServiceAdapter:
 
     _CASCOR_TO_CANOPY_PARAM_MAP = {v: k for k, v in _CANOPY_TO_CASCOR_PARAM_MAP.items()}
 
+    # Phase C: hot params route over /ws/control; cold stay on REST PATCH (§S9)
+    _HOT_CASCOR_PARAMS: frozenset = frozenset(
+        {
+            "learning_rate",
+            "candidate_learning_rate",
+            "correlation_threshold",
+            "candidate_pool_size",
+            "max_hidden_units",
+            "epochs_max",
+            "max_iterations",
+            "patience",
+            "convergence_threshold",
+            "candidate_convergence_threshold",
+            "candidate_patience",
+        }
+    )
+
+    _COLD_CASCOR_PARAMS: frozenset = frozenset(
+        {
+            "init_output_weights",
+            "candidate_epochs",
+        }
+    )
+
     def apply_params(self, **params: Any) -> Dict[str, Any]:
         """Forward parameter updates to the running cascor instance.
 
         Maps canopy's nn_*/cn_* parameter namespace to cascor API parameter names.
         Keys not in the mapping are skipped (canopy-only parameters
         such as nn_spiral_rotations have no cascor service equivalent).
+
+        Phase C: when ``use_websocket_set_params=True``, hot params are
+        routed over /ws/control via ``set_params`` command with ``command_id``
+        correlation (D-01). Cold params always use REST PATCH. On WS failure,
+        hot params fall back to REST unconditionally.
         """
         mapped = {self._CANOPY_TO_CASCOR_PARAM_MAP[k]: v for k, v in params.items() if k in self._CANOPY_TO_CASCOR_PARAM_MAP}
         skipped = [k for k in params if k not in self._CANOPY_TO_CASCOR_PARAM_MAP]
@@ -512,13 +635,78 @@ class CascorServiceAdapter:
             logger.debug(f"Canopy-only params (no cascor mapping): {skipped}")
         if not mapped:
             return {"ok": True, "data": {}, "message": "No cascor-mappable params provided"}
+
+        from settings import get_settings
+
+        app_settings = get_settings()
+        use_ws = getattr(app_settings, "use_websocket_set_params", False)
+
+        hot = {k: v for k, v in mapped.items() if k in self._HOT_CASCOR_PARAMS}
+        cold = {k: v for k, v in mapped.items() if k in self._COLD_CASCOR_PARAMS}
+        unclassified = {k: v for k, v in mapped.items() if k not in self._HOT_CASCOR_PARAMS and k not in self._COLD_CASCOR_PARAMS}
+
+        if unclassified:
+            logger.warning(f"Unclassified params defaulting to REST (C-09): {list(unclassified.keys())}")
+            cold.update(unclassified)
+
+        result_data: Dict[str, Any] = {}
+
+        # Hot path: WS with REST fallback
+        if hot and use_ws:
+            ws_result = self._apply_params_hot(hot)
+            if ws_result is not None:
+                result_data.update(ws_result)
+            else:
+                # WS failed — fallback to REST
+                logger.warning("WS set_params failed, falling back to REST for hot params")
+                cold.update(hot)
+
+        elif hot:
+            # Feature flag off — hot params go through REST
+            cold.update(hot)
+
+        # Cold path: always REST
+        if cold:
+            try:
+                rest_result = self._client.update_params(cold)
+                result_data.update(rest_result if isinstance(rest_result, dict) else {})
+                logger.info(f"Cascor params updated via REST: {list(cold.keys())}")
+            except JuniperCascorClientError as e:
+                logger.error(f"Failed to update cascor params via REST: {e}")
+                return {"ok": False, "error": str(e)}
+
+        logger.info(f"Cascor params updated: {list(mapped.keys())}")
+        return {"ok": True, "data": result_data}
+
+    def _apply_params_hot(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Send hot params via /ws/control set_params with command_id.
+
+        Returns result dict on success, None on failure (caller falls back to REST).
+        Uses ``asyncio.run_coroutine_threadsafe`` since apply_params is called
+        from a thread (via asyncio.to_thread in the route handler).
+        """
+        supervisor = getattr(self, "_control_supervisor", None)
+        if supervisor is None or not supervisor.is_connected:
+            logger.debug("Control stream not connected, hot params will use REST fallback")
+            return None
+
+        from settings import get_settings
+
+        app_settings = get_settings()
+        timeout = getattr(app_settings, "ws_set_params_timeout", 1.0)
+
         try:
-            result = self._client.update_params(mapped)
-            logger.info(f"Cascor params updated: {list(mapped.keys())}")
-            return {"ok": True, "data": result}
-        except JuniperCascorClientError as e:
-            logger.error(f"Failed to update cascor params: {e}")
-            return {"ok": False, "error": str(e)}
+            loop = supervisor.loop
+            future = asyncio.run_coroutine_threadsafe(
+                supervisor.set_params(params, timeout=timeout),
+                loop,
+            )
+            result = future.result(timeout=timeout + 1.0)  # Extra 1s for scheduling overhead
+            logger.info(f"Cascor params updated via WS: {list(params.keys())}")
+            return result if isinstance(result, dict) else {}
+        except Exception as e:
+            logger.warning(f"WS set_params failed ({type(e).__name__}: {e}), will use REST fallback")
+            return None
 
     def get_canopy_params(self) -> Dict[str, Any]:
         """Fetch training params from cascor and map to canopy nn_*/cn_* namespace."""

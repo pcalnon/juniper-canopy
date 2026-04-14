@@ -147,6 +147,7 @@ except ImportError:
     _mock_jcc = types.ModuleType("juniper_cascor_client")
     _mock_jcc.JuniperCascorClient = MagicMock()  # type: ignore[attr-defined]
     _mock_jcc.JuniperCascorClientError = _JuniperCascorClientError  # type: ignore[attr-defined]
+    _mock_jcc.CascorControlStream = MagicMock()  # type: ignore[attr-defined]
     _mock_jcc.CascorTrainingStream = MagicMock()  # type: ignore[attr-defined]
     _mock_jcc.exceptions = _mock_jcc_exceptions  # type: ignore[attr-defined]
     _mock_jcc.client = _mock_jcc_client  # type: ignore[attr-defined]

@@ -178,6 +178,10 @@ class Settings(BaseSettings):
     enable_raf_coalescer: bool = False  # D-04: rAF coalescer scaffolded but disabled
     enable_ws_latency_beacon: bool = True  # Latency beacon enabled by default
 
+    # Phase C: set_params over WebSocket (D-47, C-28)
+    use_websocket_set_params: bool = False  # C-28: default off, 6 hard flip gates (D-48)
+    ws_set_params_timeout: float = 1.0  # C-03: per-request timeout in seconds
+
     # Phase B-pre-b: CSRF + control-path security (M-SEC-02)
     csrf_enabled: bool = True  # CSRF protection on /ws/control
     csrf_token_ttl_seconds: int = 3600  # 1h sliding TTL
