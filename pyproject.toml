@@ -196,6 +196,10 @@ module = [
     "torch.*",
     "juniper_data_client.*",
     "juniper_cascor_client.*",
+    "pydantic",
+    "pydantic.*",
+    "pydantic_settings",
+    "pydantic_settings.*",
 ]
 ignore_missing_imports = true
 
@@ -213,6 +217,12 @@ module = [
     "frontend.components.hdf5_snapshots_panel",
 ]
 strict_optional = false
+
+# Basedpyright / Pyright: suppress unresolved third-party imports when the IDE interpreter
+# has no site-packages for this project (prefer JuniperPython per AGENTS.md).
+[tool.basedpyright]
+include = ["src"]
+reportMissingImports = "none"
 
 # ==========================================
 # Pytest Configuration (additional)
