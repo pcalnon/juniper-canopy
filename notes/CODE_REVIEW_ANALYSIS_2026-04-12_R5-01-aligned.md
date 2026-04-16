@@ -25,23 +25,23 @@ The original issue IDs (CRIT-001, HIGH-001, etc.) are preserved for traceability
 
 R5-01 establishes 15 load-bearing constraints that override or modify prior analysis:
 
-| # | Constraint | Decision ID | Impact on Audit |
-|---|-----------|-------------|-----------------|
-| 1 | `command_id` everywhere (NOT `request_id`) | D-02, C-01 | Any fix touching WS correlation must use `command_id` |
-| 2 | No `seq` on `command_response` | D-03, C-02 | Control path is seq-free by design |
-| 3 | `server_instance_id` on `connection_established` | D-15, C-06 | New required field; forces full resync on crash |
-| 4 | REST preserved forever | D-21, D-54, D-56 | NO deprecation of REST endpoints, ever |
-| 5 | `replay_buffer_capacity` advertised | D-16, C-07 | Client-visible capacity in handshake |
-| 6 | Two-phase registration (`_pending_connections`) | D-14, C-08 | WS connect path restructured |
-| 7 | CSRF + HMAC auth first-frame | D-29, M-SEC-02 | All WS endpoints require first-frame auth |
-| 8 | `ws_security_enabled=True` default, CI-enforced | D-10, C-27 | Positive-sense security flag |
-| 9 | `set_params` timeout = 1.0s; per-command in D-48 | D-01, C-03 | Specific timeouts mandated |
-| 10 | Backpressure: `drop_oldest_progress_only` | D-19 | State events NEVER dropped; progress is |
-| 11 | Single-bucket rate limit 10 cmd/s, soft response | D-33 | Rate limit is not a close |
-| 12 | One-resume-per-connection | D-30 | Second resume → close 1003 |
-| 13 | Per-IP connection cap = 5 (configurable) | D-24 | Per-IP enforcement mandatory |
-| 14 | Replay buffer = 1024 entries default | D-35, C-05 | Bounded by design |
-| 15 | Kill-switch MTTR <=5 min, tested in staging | D-53 | Every phase has drilled kill switches |
+| #  | Constraint                                       | Decision ID      | Impact on Audit                                       |
+|----|--------------------------------------------------|------------------|-------------------------------------------------------|
+| 1  | `command_id` everywhere (NOT `request_id`)       | D-02, C-01       | Any fix touching WS correlation must use `command_id` |
+| 2  | No `seq` on `command_response`                   | D-03, C-02       | Control path is seq-free by design                    |
+| 3  | `server_instance_id` on `connection_established` | D-15, C-06       | New required field; forces full resync on crash       |
+| 4  | REST preserved forever                           | D-21, D-54, D-56 | NO deprecation of REST endpoints, ever                |
+| 5  | `replay_buffer_capacity` advertised              | D-16, C-07       | Client-visible capacity in handshake                  |
+| 6  | Two-phase registration (`_pending_connections`)  | D-14, C-08       | WS connect path restructured                          |
+| 7  | CSRF + HMAC auth first-frame                     | D-29, M-SEC-02   | All WS endpoints require first-frame auth             |
+| 8  | `ws_security_enabled=True` default, CI-enforced  | D-10, C-27       | Positive-sense security flag                          |
+| 9  | `set_params` timeout = 1.0s; per-command in D-48 | D-01, C-03       | Specific timeouts mandated                            |
+| 10 | Backpressure: `drop_oldest_progress_only`        | D-19             | State events NEVER dropped; progress is               |
+| 11 | Single-bucket rate limit 10 cmd/s, soft response | D-33             | Rate limit is not a close                             |
+| 12 | One-resume-per-connection                        | D-30             | Second resume → close 1003                            |
+| 13 | Per-IP connection cap = 5 (configurable)         | D-24             | Per-IP enforcement mandatory                          |
+| 14 | Replay buffer = 1024 entries default             | D-35, C-05       | Bounded by design                                     |
+| 15 | Kill-switch MTTR <=5 min, tested in staging      | D-53             | Every phase has drilled kill switches                 |
 
 These 15 constraints are the "north star" for re-evaluation. Any audit finding that conflicts with them requires rework.
 
@@ -49,13 +49,13 @@ These 15 constraints are the "north star" for re-evaluation. Any audit finding t
 
 ### 3.1 Alignment Category Definitions
 
-| Category | Meaning | Action |
-|----------|---------|--------|
-| **REAFFIRMED** | Issue is independent of R5-01; fix still needed | Proceed as originally planned |
-| **SUPERSEDED** | R5-01 provides a more comprehensive solution | Remove prior fix; wait for R5-01 phase |
-| **DEFERRED** | Fix would conflict with R5-01 phase work | Delay until after specified R5-01 phase |
-| **COORDINATED** | Fix must align with specific R5-01 phase | Execute as part of R5-01 phase |
-| **MODIFIED** | R5-01 changes the recommended fix | Apply R5-01-compliant variant |
+| Category        | Meaning                                         | Action                                  |
+|-----------------|-------------------------------------------------|-----------------------------------------|
+| **REAFFIRMED**  | Issue is independent of R5-01; fix still needed | Proceed as originally planned           |
+| **SUPERSEDED**  | R5-01 provides a more comprehensive solution    | Remove prior fix; wait for R5-01 phase  |
+| **DEFERRED**    | Fix would conflict with R5-01 phase work        | Delay until after specified R5-01 phase |
+| **COORDINATED** | Fix must align with specific R5-01 phase        | Execute as part of R5-01 phase          |
+| **MODIFIED**    | R5-01 changes the recommended fix               | Apply R5-01-compliant variant           |
 
 ### 3.2 Critical Issues
 
@@ -209,57 +209,57 @@ Extracting DashboardManager into sub-modules NOW would create massive merge conf
 
 To avoid duplication, medium severity issues are summarized in the table below. Full detail is provided only where R5-01 changes the recommended fix.
 
-| ID | Category | Description | Alignment | Action |
-|----|----------|-------------|-----------|--------|
-| MED-001 | WebSocket | max_connections not enforced | **MODIFIED** | R5-01 introduces per-IP caps (5 default) which are more important than global max. Keep global limit as secondary defense; per-IP is primary (Phase B-pre-a). |
-| MED-002 | WebSocket | broadcast() mutates message dict | REAFFIRMED | Original fix + send_personal_message fix remain correct. |
-| MED-003 | Security | CORS allows all methods/headers | REAFFIRMED | HTTP CORS is separate from R5-01's WS origin allowlist. Both needed. |
-| MED-004 | Performance | Sentry traces_sample_rate=1.0 | REAFFIRMED | Original fix remains correct. |
-| MED-005 | Performance | Prometheus endpoint cardinality | REAFFIRMED | R5-01 introduces additional Prometheus metrics (see Section 8.5 of canonical plan) that should follow the same route-template pattern. |
-| MED-006 | Performance | Blocking probe_dependency | REAFFIRMED | Original fix remains correct. |
-| MED-007 | Performance | Logger factory instance creation | REAFFIRMED | Original fix remains correct. |
-| MED-008 | Logic | ColoredFormatter LogRecord mutation | REAFFIRMED | Original fix remains correct. |
-| MED-009 | Config | app_config.yaml version stale | REAFFIRMED | Original fix remains correct. |
-| MED-010 | Config | pyproject.toml header version stale | REAFFIRMED | Original fix remains correct. |
-| MED-011 | Config | logging_config.yaml truncate mode | REAFFIRMED | Original fix remains correct. |
-| MED-012 | Config | TRACE level may crash | REAFFIRMED | Original fix remains correct. |
-| MED-013 | Config | CORS allowed_origins YAML syntax | REAFFIRMED | Note: R5-01 WS origin allowlist uses `ws_allowed_origins` (separate setting). Do not conflate. |
-| MED-014 | CI/CD | pip-audit scans subset | REAFFIRMED | Original fix remains correct. |
-| MED-015 | Config | No [dev] extra | REAFFIRMED | Original fix remains correct. |
-| MED-016 | Docker | Docker builds outside lockfile | REAFFIRMED | Original fix remains correct. |
-| MED-017 | Config | MyPy strict_optional conflict | REAFFIRMED | Original fix remains correct. |
-| MED-018 | Docker | Docker ENV uses localhost | REAFFIRMED | Original fix (root Dockerfile) remains correct; conf/Dockerfile gap still valid. |
-| MED-019 | CI/CD | Codecov config but no upload | REAFFIRMED | Original fix remains correct. |
-| MED-020 | Syntax | Duplicate cn_patience | REAFFIRMED | Original fix remains correct. |
-| MED-021 | API Design | Untyped dict for set_params | **COORDINATED** with Phase C | R5-01 Phase C mandates Pydantic model with `extra="forbid"` on cascor side. Canopy adapter routes unknown keys with WARNING. See detailed notes below. |
-| MED-022 | Config | get_rate_limiter bypasses settings | REAFFIRMED | Original fix remains correct. |
-| MED-023 | Logic | Content-length ValueError | REAFFIRMED | Original fix remains correct. |
-| MED-024 | Code Smell | Dead _create_candidate_pool_display | REAFFIRMED | Original fix remains correct. |
-| MED-025 | Syntax | Orphaned candidate callbacks | REAFFIRMED | Original fix remains correct. |
-| MED-026 | Code Smell | Hardcoded colors (500+) | **DEFERRED** (parallel with Phase B OK) | R5-01 Phase B edits many component files. Threading a ThemeColors rollout through Phase B edits is risky. Defer full rollout until Phase B is complete, but keep the `theme_constants.py` file in place. |
-| MED-027 | Architecture | NetworkVisualizer 10-input callback | **COORDINATED** with Phase B | R5-01 Phase B adds WS wire to network_visualizer.py. Callback restructure should happen AS PART OF Phase B work. |
-| MED-028 | Performance | time.sleep() blocking | REAFFIRMED | Original fix remains correct. |
-| MED-029 | Logic | Modulo toggle | REAFFIRMED | Original fix (boolean toggle pattern) remains correct. |
-| MED-030 | UI/UX | About panel broken link | REAFFIRMED | Original fix remains correct. |
-| MED-031 | Code Smell | _create_empty_plot duplicated | REAFFIRMED | Original fix remains correct. |
-| MED-032 | Security | Security scan bandit inconsistency | REAFFIRMED | Original fix remains correct. |
-| MED-033 | Dependencies | Conda CUDA toolkit bloat | REAFFIRMED | Original fix remains correct. |
-| MED-034 | Performance | Network property HTTP per access | REAFFIRMED | Original TTL cache fix remains correct. Does not interact with R5-01 WS path. |
-| MED-035 | Best Practice | Relay loop swallows exceptions | **COORDINATED** with Phase C | R5-01 Phase C introduces `_control_stream_supervisor` with backoff reconnect and explicit correlation map cleanup. The cascor_service_adapter.py relay loop will be substantially rewritten. |
-| MED-036 | Logic | ServiceBackend KeyError | REAFFIRMED | Original fix (`"inputs" in data` guard) remains correct. |
-| MED-037 | Architecture | Hard torch import | REAFFIRMED | Original fix (lazy import) remains correct. |
-| MED-038 | Logic | None crash in prepare_dataset | REAFFIRMED | Original fix remains correct. |
-| MED-039 | Concurrency | Cassandra singleton no lock | REAFFIRMED | Original fix remains correct. |
-| MED-040 | Security | Cassandra credentials as attributes | REAFFIRMED | Original fix remains correct. |
-| MED-041 | Concurrency | Redis singleton no lock | REAFFIRMED | Original fix remains correct. |
-| MED-042 | Logic | Redis exception sentinel | REAFFIRMED | Original fix remains correct. |
-| MED-043 | Resource Leak | Redis force_new connection leak | REAFFIRMED | Original fix remains correct. |
-| MED-044 | Logic | TrainingMonitor apply_params no-op | **COORDINATED** with Phase C | R5-01 Phase C introduces real `apply_params` semantics with hot/cold split. See detailed notes below. |
-| MED-045 | Logic | DemoBackend auto-start | REAFFIRMED | Original fix (document intent) remains correct. R5-01 RISK-08 requires demo mode parity tests. |
-| MED-046 | Architecture | ServiceBackend private attrs | **COORDINATED** with Phase C | R5-01 Phase C extends CascorServiceAdapter for hot/cold param split. Public API exposure should happen as part of Phase C work. |
-| MED-047 | Logic | TrainingState name-mangling | REAFFIRMED | Original fix (state dict) remains correct. |
-| MED-048 | Test Infra | Session-scoped mutable dict | REAFFIRMED | Original fix remains correct. |
-| MED-049 | Test Infra | reset_singletons hasattr fragility | REAFFIRMED | Original fix remains correct. |
+| ID      | Category      | Description                         | Alignment                               | Action                                                                                                                                                                                                   |
+|---------|---------------|-------------------------------------|-----------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| MED-001 | WebSocket     | max_connections not enforced        | **MODIFIED**                            | R5-01 introduces per-IP caps (5 default) which are more important than global max. Keep global limit as secondary defense; per-IP is primary (Phase B-pre-a).                                            |
+| MED-002 | WebSocket     | broadcast() mutates message dict    | REAFFIRMED                              | Original fix + send_personal_message fix remain correct.                                                                                                                                                 |
+| MED-003 | Security      | CORS allows all methods/headers     | REAFFIRMED                              | HTTP CORS is separate from R5-01's WS origin allowlist. Both needed.                                                                                                                                     |
+| MED-004 | Performance   | Sentry traces_sample_rate=1.0       | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-005 | Performance   | Prometheus endpoint cardinality     | REAFFIRMED                              | R5-01 introduces additional Prometheus metrics (see Section 8.5 of canonical plan) that should follow the same route-template pattern.                                                                   |
+| MED-006 | Performance   | Blocking probe_dependency           | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-007 | Performance   | Logger factory instance creation    | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-008 | Logic         | ColoredFormatter LogRecord mutation | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-009 | Config        | app_config.yaml version stale       | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-010 | Config        | pyproject.toml header version stale | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-011 | Config        | logging_config.yaml truncate mode   | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-012 | Config        | TRACE level may crash               | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-013 | Config        | CORS allowed_origins YAML syntax    | REAFFIRMED                              | Note: R5-01 WS origin allowlist uses `ws_allowed_origins` (separate setting). Do not conflate.                                                                                                           |
+| MED-014 | CI/CD         | pip-audit scans subset              | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-015 | Config        | No [dev] extra                      | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-016 | Docker        | Docker builds outside lockfile      | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-017 | Config        | MyPy strict_optional conflict       | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-018 | Docker        | Docker ENV uses localhost           | REAFFIRMED                              | Original fix (root Dockerfile) remains correct; conf/Dockerfile gap still valid.                                                                                                                         |
+| MED-019 | CI/CD         | Codecov config but no upload        | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-020 | Syntax        | Duplicate cn_patience               | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-021 | API Design    | Untyped dict for set_params         | **COORDINATED** with Phase C            | R5-01 Phase C mandates Pydantic model with `extra="forbid"` on cascor side. Canopy adapter routes unknown keys with WARNING. See detailed notes below.                                                   |
+| MED-022 | Config        | get_rate_limiter bypasses settings  | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-023 | Logic         | Content-length ValueError           | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-024 | Code Smell    | Dead _create_candidate_pool_display | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-025 | Syntax        | Orphaned candidate callbacks        | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-026 | Code Smell    | Hardcoded colors (500+)             | **DEFERRED** (parallel with Phase B OK) | R5-01 Phase B edits many component files. Threading a ThemeColors rollout through Phase B edits is risky. Defer full rollout until Phase B is complete, but keep the `theme_constants.py` file in place. |
+| MED-027 | Architecture  | NetworkVisualizer 10-input callback | **COORDINATED** with Phase B            | R5-01 Phase B adds WS wire to network_visualizer.py. Callback restructure should happen AS PART OF Phase B work.                                                                                         |
+| MED-028 | Performance   | time.sleep() blocking               | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-029 | Logic         | Modulo toggle                       | REAFFIRMED                              | Original fix (boolean toggle pattern) remains correct.                                                                                                                                                   |
+| MED-030 | UI/UX         | About panel broken link             | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-031 | Code Smell    | _create_empty_plot duplicated       | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-032 | Security      | Security scan bandit inconsistency  | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-033 | Dependencies  | Conda CUDA toolkit bloat            | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-034 | Performance   | Network property HTTP per access    | REAFFIRMED                              | Original TTL cache fix remains correct. Does not interact with R5-01 WS path.                                                                                                                            |
+| MED-035 | Best Practice | Relay loop swallows exceptions      | **COORDINATED** with Phase C            | R5-01 Phase C introduces `_control_stream_supervisor` with backoff reconnect and explicit correlation map cleanup. The cascor_service_adapter.py relay loop will be substantially rewritten.             |
+| MED-036 | Logic         | ServiceBackend KeyError             | REAFFIRMED                              | Original fix (`"inputs" in data` guard) remains correct.                                                                                                                                                 |
+| MED-037 | Architecture  | Hard torch import                   | REAFFIRMED                              | Original fix (lazy import) remains correct.                                                                                                                                                              |
+| MED-038 | Logic         | None crash in prepare_dataset       | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-039 | Concurrency   | Cassandra singleton no lock         | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-040 | Security      | Cassandra credentials as attributes | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-041 | Concurrency   | Redis singleton no lock             | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-042 | Logic         | Redis exception sentinel            | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-043 | Resource Leak | Redis force_new connection leak     | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-044 | Logic         | TrainingMonitor apply_params no-op  | **COORDINATED** with Phase C            | R5-01 Phase C introduces real `apply_params` semantics with hot/cold split. See detailed notes below.                                                                                                    |
+| MED-045 | Logic         | DemoBackend auto-start              | REAFFIRMED                              | Original fix (document intent) remains correct. R5-01 RISK-08 requires demo mode parity tests.                                                                                                           |
+| MED-046 | Architecture  | ServiceBackend private attrs        | **COORDINATED** with Phase C            | R5-01 Phase C extends CascorServiceAdapter for hot/cold param split. Public API exposure should happen as part of Phase C work.                                                                          |
+| MED-047 | Logic         | TrainingState name-mangling         | REAFFIRMED                              | Original fix (state dict) remains correct.                                                                                                                                                               |
+| MED-048 | Test Infra    | Session-scoped mutable dict         | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
+| MED-049 | Test Infra    | reset_singletons hasattr fragility  | REAFFIRMED                              | Original fix remains correct.                                                                                                                                                                            |
 
 ### 3.5 Detailed Notes on Coordinated MED Issues
 
@@ -316,9 +316,9 @@ R5-01 Phase C substantially extends `cascor_service_adapter.py`:
 
 All LOW severity issues are REAFFIRMED. None are affected by R5-01.
 
-| ID Range | Count | Category |
-|----------|-------|----------|
-| LOW-001 to LOW-022 | 22 | Independent fixes, all REAFFIRMED |
+| ID Range           | Count | Category                          |
+|--------------------|-------|-----------------------------------|
+| LOW-001 to LOW-022 | 22    | Independent fixes, all REAFFIRMED |
 
 **Special notes**:
 
@@ -330,40 +330,40 @@ All LOW severity issues are REAFFIRMED. None are affected by R5-01.
 
 R5-01 introduces NEW requirements that were not present in the original 2026-04-04 review. These are not "issues" per se but new acceptance criteria:
 
-| New Req ID | Description | Maps to R5-01 |
-|------------|-------------|---------------|
-| R5-01-NEW-001 | `server_instance_id` field on all `connection_established` envelopes | D-15, C-06 |
-| R5-01-NEW-002 | `replay_buffer_capacity` field on `connection_established` | D-16, C-07 |
-| R5-01-NEW-003 | `seq` field on all `/ws/training` messages | D-02, C-01 |
-| R5-01-NEW-004 | `emitted_at_monotonic` field on all envelopes | Phase 0-cascor |
-| R5-01-NEW-005 | `command_id` echo on all `/ws/control` responses | D-02, C-01 |
-| R5-01-NEW-006 | Two-phase registration (`_pending_connections`) | D-14, C-08 |
-| R5-01-NEW-007 | Resume protocol with one-resume-per-connection | D-30 |
-| R5-01-NEW-008 | CSRF first-frame auth (browser) with 5s timeout | M-SEC-02 |
-| R5-01-NEW-009 | HMAC first-frame auth (adapter) | D-29 |
-| R5-01-NEW-010 | Origin allowlist validation (case-insensitive, port-significant) | M-SEC-01b |
-| R5-01-NEW-011 | Per-IP connection cap (5 default) | D-24 |
-| R5-01-NEW-012 | Frame size cap (4096 on /ws/training, 65536 on /ws/control) | M-SEC-03 |
-| R5-01-NEW-013 | Rate limiting (10 cmd/s leaky bucket, soft response) | D-33, M-SEC-05 |
-| R5-01-NEW-014 | Heartbeat (30s ping, 5s pong timeout) | Phase F |
-| R5-01-NEW-015 | Per-command timeouts (D-48 matrix) | D-48 |
-| R5-01-NEW-016 | `window._juniperWsDrain` namespace + drain callbacks | Phase B |
-| R5-01-NEW-017 | Polling elimination (>=90% reduction) | Phase B (P0 win) |
-| R5-01-NEW-018 | Connection indicator 4-state badge | Phase B, RISK-08 |
-| R5-01-NEW-019 | CSRF token endpoint `GET /api/csrf` | Phase B-pre-b |
-| R5-01-NEW-020 | Latency beacon endpoint `POST /api/ws_latency` | Phase B |
+| New Req ID    | Description                                                          | Maps to R5-01    |
+|---------------|----------------------------------------------------------------------|------------------|
+| R5-01-NEW-001 | `server_instance_id` field on all `connection_established` envelopes | D-15, C-06       |
+| R5-01-NEW-002 | `replay_buffer_capacity` field on `connection_established`           | D-16, C-07       |
+| R5-01-NEW-003 | `seq` field on all `/ws/training` messages                           | D-02, C-01       |
+| R5-01-NEW-004 | `emitted_at_monotonic` field on all envelopes                        | Phase 0-cascor   |
+| R5-01-NEW-005 | `command_id` echo on all `/ws/control` responses                     | D-02, C-01       |
+| R5-01-NEW-006 | Two-phase registration (`_pending_connections`)                      | D-14, C-08       |
+| R5-01-NEW-007 | Resume protocol with one-resume-per-connection                       | D-30             |
+| R5-01-NEW-008 | CSRF first-frame auth (browser) with 5s timeout                      | M-SEC-02         |
+| R5-01-NEW-009 | HMAC first-frame auth (adapter)                                      | D-29             |
+| R5-01-NEW-010 | Origin allowlist validation (case-insensitive, port-significant)     | M-SEC-01b        |
+| R5-01-NEW-011 | Per-IP connection cap (5 default)                                    | D-24             |
+| R5-01-NEW-012 | Frame size cap (4096 on /ws/training, 65536 on /ws/control)          | M-SEC-03         |
+| R5-01-NEW-013 | Rate limiting (10 cmd/s leaky bucket, soft response)                 | D-33, M-SEC-05   |
+| R5-01-NEW-014 | Heartbeat (30s ping, 5s pong timeout)                                | Phase F          |
+| R5-01-NEW-015 | Per-command timeouts (D-48 matrix)                                   | D-48             |
+| R5-01-NEW-016 | `window._juniperWsDrain` namespace + drain callbacks                 | Phase B          |
+| R5-01-NEW-017 | Polling elimination (>=90% reduction)                                | Phase B (P0 win) |
+| R5-01-NEW-018 | Connection indicator 4-state badge                                   | Phase B, RISK-08 |
+| R5-01-NEW-019 | CSRF token endpoint `GET /api/csrf`                                  | Phase B-pre-b    |
+| R5-01-NEW-020 | Latency beacon endpoint `POST /api/ws_latency`                       | Phase B          |
 
 These should be tracked as forward work, not as audit gaps. They represent the R5-01 implementation scope.
 
 ## 5. Re-prioritized Severity Distribution
 
-| Severity | Original | REAFFIRMED | SUPERSEDED | DEFERRED | COORDINATED | MODIFIED |
-|----------|----------|------------|-----------|----------|-------------|----------|
-| Critical | 3 | 3 | 0 | 0 | 0 | 0 |
-| High | 19 | 15 | 1 | 1 | 2 | 0 |
-| Medium | 47 | 40 | 0 | 1 | 5 | 1 |
-| Low | 30+ | 30+ | 0 | 0 | 0 | 0 |
-| **Total** | **99+** | **88+** | **1** | **2** | **7** | **1** |
+| Severity  | Original | REAFFIRMED | SUPERSEDED | DEFERRED | COORDINATED | MODIFIED |
+|-----------|----------|------------|------------|----------|-------------|----------|
+| Critical  | 3        | 3          | 0          | 0        | 0           | 0        |
+| High      | 19       | 15         | 1          | 1        | 2           | 0        |
+| Medium    | 47       | 40         | 0          | 1        | 5           | 1        |
+| Low       | 30+      | 30+        | 0          | 0        | 0           | 0        |
+| **Total** | **99+**  | **88+**    | **1**      | **2**    | **7**       | **1**    |
 
 **88+ REAFFIRMED issues** represent independent fixes that proceed on their current trajectory.
 
@@ -383,14 +383,14 @@ Audit-identified test quality issues (HIGH-016/017/018/019) must be resolved BEF
 
 ## 7. Action Summary
 
-| Action | Count | Notes |
-|--------|-------|-------|
-| Proceed as originally planned | 88+ | REAFFIRMED issues |
-| Cancel / do not remediate | 1 | HIGH-005 (band-aid retained, canonical fix via Phase B) |
-| Defer until after Phase B | 2 | HIGH-014, MED-026 |
-| Align with specific R5-01 phase | 7 | HIGH-010, HIGH-017, MED-021, MED-027, MED-035, MED-044, MED-046 |
-| Modify fix approach | 1 | MED-001 (defer to per-IP caps) |
-| Track as new forward work | 20 | R5-01-NEW-001 through R5-01-NEW-020 |
+| Action                          | Count | Notes                                                           |
+|---------------------------------|-------|-----------------------------------------------------------------|
+| Proceed as originally planned   | 88+   | REAFFIRMED issues                                               |
+| Cancel / do not remediate       | 1     | HIGH-005 (band-aid retained, canonical fix via Phase B)         |
+| Defer until after Phase B       | 2     | HIGH-014, MED-026                                               |
+| Align with specific R5-01 phase | 7     | HIGH-010, HIGH-017, MED-021, MED-027, MED-035, MED-044, MED-046 |
+| Modify fix approach             | 1     | MED-001 (defer to per-IP caps)                                  |
+| Track as new forward work       | 20    | R5-01-NEW-001 through R5-01-NEW-020                             |
 
 ## 8. Validation Checklist
 

@@ -21,15 +21,15 @@ The prior roadmap assumed all audit issues could be remediated independently. Th
 
 ### Key Changes vs Original Roadmap
 
-| Change | Description | Impact |
-|--------|-------------|--------|
-| **Track structure replaces Phase structure** | 4 tracks (PRE/PAR/EMB/POST) instead of 5 phases (0-5) | Enables parallel execution with R5-01 |
-| **HIGH-005 superseded** | Async HTTP migration replaced by R5-01 Phase B WebSocket bridge | No further canopy-side work needed |
-| **HIGH-014 deferred** | DashboardManager extraction waits for R5-01 Phase B stability | Avoids massive merge conflict |
-| **MED-026 deferred** | ThemeColors rollout waits for Phase B to complete | Avoids threading rollout through Phase B edits |
-| **7 issues coordinated** | HIGH-010, HIGH-017, MED-021/027/035/044/046 | Align with specific R5-01 phases |
-| **1 issue modified** | MED-001 defers to R5-01 per-IP caps | Global limit becomes secondary |
-| **20 new requirements added** | R5-01-NEW-001 through R5-01-NEW-020 | Tracked as forward work, not audit gaps |
+| Change                                       | Description                                                     | Impact                                         |
+|----------------------------------------------|-----------------------------------------------------------------|------------------------------------------------|
+| **Track structure replaces Phase structure** | 4 tracks (PRE/PAR/EMB/POST) instead of 5 phases (0-5)           | Enables parallel execution with R5-01          |
+| **HIGH-005 superseded**                      | Async HTTP migration replaced by R5-01 Phase B WebSocket bridge | No further canopy-side work needed             |
+| **HIGH-014 deferred**                        | DashboardManager extraction waits for R5-01 Phase B stability   | Avoids massive merge conflict                  |
+| **MED-026 deferred**                         | ThemeColors rollout waits for Phase B to complete               | Avoids threading rollout through Phase B edits |
+| **7 issues coordinated**                     | HIGH-010, HIGH-017, MED-021/027/035/044/046                     | Align with specific R5-01 phases               |
+| **1 issue modified**                         | MED-001 defers to R5-01 per-IP caps                             | Global limit becomes secondary                 |
+| **20 new requirements added**                | R5-01-NEW-001 through R5-01-NEW-020                             | Tracked as forward work, not audit gaps        |
 
 ## 1. Roadmap Overview
 
@@ -100,14 +100,14 @@ Fix all release-blocking security, concurrency, CI/CD, and backend service issue
 
 ### Deferred from PR #146 to Other Tracks
 
-| Issue | Moved To | Reason |
-|-------|----------|--------|
-| HIGH-005 | **SUPERSEDED** | R5-01 Phase B provides canonical fix |
-| HIGH-014 | Track POST-1 | Conflicts with Phase B edits |
-| MED-026 | Track POST-1 | Component files edited in Phase B |
-| HIGH-008 conf/Dockerfile | Track POST-2 | Secondary Dockerfile needs separate review |
-| MED-018 conf/Dockerfile | Track POST-2 | Secondary Dockerfile needs separate review |
-| LOW-010 conf/Dockerfile | Track POST-2 | Secondary Dockerfile needs separate review |
+| Issue                    | Moved To       | Reason                                     |
+|--------------------------|----------------|--------------------------------------------|
+| HIGH-005                 | **SUPERSEDED** | R5-01 Phase B provides canonical fix       |
+| HIGH-014                 | Track POST-1   | Conflicts with Phase B edits               |
+| MED-026                  | Track POST-1   | Component files edited in Phase B          |
+| HIGH-008 conf/Dockerfile | Track POST-2   | Secondary Dockerfile needs separate review |
+| MED-018 conf/Dockerfile  | Track POST-2   | Secondary Dockerfile needs separate review |
+| LOW-010 conf/Dockerfile  | Track POST-2   | Secondary Dockerfile needs separate review |
 
 ### Remaining Track PRE Work
 
@@ -120,11 +120,11 @@ All Track PRE work is complete as of 2026-04-12 PR #146 merge.
 **Blocks**: Release
 **Status as of 2026-04-12**: **SUBSTANTIALLY COMPLETE** via PR #146
 
-### Goals
+### Goals, Track PAR
 
 Fix test quality, observability, and low-severity issues in parallel with R5-01 phases. Track PAR-1 (test quality) MUST complete before R5-01 Phase 0-cascor starts to prevent contamination of new contract tests.
 
-### Completed via PR #146
+### Completed via PR #146, Track PAR
 
 - [x] **HIGH-016**: Removed contextlib.suppress from test assertions
 - [x] **HIGH-018**: Removed hasattr guards from test bodies
@@ -139,16 +139,16 @@ Fix test quality, observability, and low-severity issues in parallel with R5-01 
 - [x] **LOW-011/012/013/014**: Pre-commit and config cleanups
 - [x] **LOW-016/017/018/019/020**: Frontend cleanups
 
-### Partial / Coordinated
+### Partial / Coordinated, Track PAR
 
 - [~] **HIGH-017**: Partial (pytest.fail guards added); full rework to contract tests happens in Track EMB-1 with Phase 0-cascor
 - [ ] **LOW-008**: **MODIFY** to align with R5-01 WS frame size caps (4096 bytes on /ws/training, 65536 on /ws/control)
 
-### Remaining Track PAR Work
+### Remaining Track PAR Work, Track PAR
 
-| Task | Issue | Priority | Target |
-|------|-------|----------|--------|
-| PAR-3.1 | LOW-008 MODIFY | LOW | Before R5-01 Phase B-pre-a |
+| Task    | Issue          | Priority | Target                     |
+|---------|----------------|----------|----------------------------|
+| PAR-3.1 | LOW-008 MODIFY | LOW      | Before R5-01 Phase B-pre-a |
 
 Track PAR is otherwise complete.
 
@@ -391,10 +391,10 @@ This section summarizes the 11 R5-01 phases and their canopy impact. See [R5-01 
 
 ### Step POST-1: Architecture Refactors (After Phase B Stable)
 
-| Task | Issue | Target | Effort |
-|------|-------|--------|--------|
-| POST-1.1 | HIGH-014 | Extract DashboardManager sub-modules | High (multi-day) |
-| POST-1.2 | MED-026 | Wire ThemeColors into all component files | High (multi-day) |
+| Task     | Issue    | Target                                    | Effort           |
+|----------|----------|-------------------------------------------|------------------|
+| POST-1.1 | HIGH-014 | Extract DashboardManager sub-modules      | High (multi-day) |
+| POST-1.2 | MED-026  | Wire ThemeColors into all component files | High (multi-day) |
 
 **Prerequisite**: Phase B flag-flipped in production with >=7 days soak and zero page alerts.
 
@@ -402,18 +402,18 @@ This section summarizes the 11 R5-01 phases and their canopy impact. See [R5-01 
 
 **Prerequisite**: Ops decision on whether `conf/Dockerfile` is still active.
 
-| Task | Issue | Action |
-|------|-------|--------|
+| Task     | Issue    | Action                                                        |
+|----------|----------|---------------------------------------------------------------|
 | POST-2.1 | HIGH-008 | Apply production defaults to conf/Dockerfile (or remove file) |
-| POST-2.2 | MED-018 | Docker service URLs (or remove file) |
-| POST-2.3 | LOW-010 | curl-based health check (or remove file) |
+| POST-2.2 | MED-018  | Docker service URLs (or remove file)                          |
+| POST-2.3 | LOW-010  | curl-based health check (or remove file)                      |
 
 ### Step POST-3: Minor Completions
 
-| Task | Issue | Action |
-|------|-------|--------|
+| Task     | Issue   | Action                                       |
+|----------|---------|----------------------------------------------|
 | POST-3.1 | LOW-003 | Simplify confusing ternary in config_manager |
-| POST-3.2 | LOW-007 | Document FATAL_LEVEL=60 divergence |
+| POST-3.2 | LOW-007 | Document FATAL_LEVEL=60 divergence           |
 
 ## 6. Timeline & Dependencies
 
@@ -462,12 +462,12 @@ This section summarizes the 11 R5-01 phases and their canopy impact. See [R5-01 
 
 ## 7. Resource Allocation
 
-| Role | Track PRE | Track PAR | R5-01 Phases | Track POST |
-|------|-----------|-----------|--------------|------------|
-| Primary dev | Complete (PR #146) | Complete (PR #146) | Phase B leads | POST-1 leads |
-| Code review | Complete (PR #146) | Complete (PR #146) | Cross-project | Single reviewer OK |
-| QA | Test suite validation | Test suite validation | R5-01 acceptance gates | Test suite validation |
-| Ops | None | None | Phase B soak monitoring | None |
+| Role        | Track PRE             | Track PAR             | R5-01 Phases            | Track POST            |
+|-------------|-----------------------|-----------------------|-------------------------|-----------------------|
+| Primary dev | Complete (PR #146)    | Complete (PR #146)    | Phase B leads           | POST-1 leads          |
+| Code review | Complete (PR #146)    | Complete (PR #146)    | Cross-project           | Single reviewer OK    |
+| QA          | Test suite validation | Test suite validation | R5-01 acceptance gates  | Test suite validation |
+| Ops         | None                  | None                  | Phase B soak monitoring | None                  |
 
 ## 8. Metrics & Monitoring
 
@@ -494,37 +494,37 @@ This section summarizes the 11 R5-01 phases and their canopy impact. See [R5-01 
 
 ## 9. Risk Register
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|-----------|--------|------------|
-| R5-01 Phase 0-cascor delay cascades to all downstream phases | Medium | High | Track PRE/PAR work already unblocks release; R5-01 delays do not block audit-level release |
-| Track EMB coordination failures (duplicate work) | Medium | Medium | Shared roadmap; explicit handoff from audit PR owners to R5-01 phase owners |
-| POST-1 HIGH-014 extraction becomes infeasible after Phase B | Low | Medium | Accept as ongoing technical debt; revisit quarterly |
-| R5-01 Phase B kill switch needed post-flag-flip | Low | High (P0) | Kill-switch MTTR <=5 min required per D-53; R5-01 has kill switches |
-| `conf/Dockerfile` ambiguity blocks POST-2 | Low | Low | Ops decision required; fallback is deletion |
+| Risk                                                         | Likelihood | Impact    | Mitigation                                                                                 |
+|--------------------------------------------------------------|------------|-----------|--------------------------------------------------------------------------------------------|
+| R5-01 Phase 0-cascor delay cascades to all downstream phases | Medium     | High      | Track PRE/PAR work already unblocks release; R5-01 delays do not block audit-level release |
+| Track EMB coordination failures (duplicate work)             | Medium     | Medium    | Shared roadmap; explicit handoff from audit PR owners to R5-01 phase owners                |
+| POST-1 HIGH-014 extraction becomes infeasible after Phase B  | Low        | Medium    | Accept as ongoing technical debt; revisit quarterly                                        |
+| R5-01 Phase B kill switch needed post-flag-flip              | Low        | High (P0) | Kill-switch MTTR <=5 min required per D-53; R5-01 has kill switches                        |
+| `conf/Dockerfile` ambiguity blocks POST-2                    | Low        | Low       | Ops decision required; fallback is deletion                                                |
 
 ## 10. Decision Log
 
-| Decision | Rationale | Date |
-|----------|-----------|------|
-| Supersede HIGH-005 | R5-01 Phase B provides canonical fix (WS bridge eliminates polling) | 2026-04-12 |
-| Defer HIGH-014 to Track POST-1 | Phase B rewrites large portions of dashboard_manager.py; extraction conflicts | 2026-04-12 |
-| Defer MED-026 to Track POST-1 | ThemeColors rollout touches all component files; Phase B also edits them | 2026-04-12 |
-| Modify MED-001 interpretation | R5-01 per-IP caps supersede global max_connections as primary defense | 2026-04-12 |
-| Coordinate HIGH-010 with Phase 0-cascor | WebSocket endpoints substantially rewritten in Phase 0-cascor | 2026-04-12 |
-| Coordinate HIGH-017 with Phase 0-cascor + H | Schema tests become contract tests via FakeCascorServerHarness | 2026-04-12 |
-| Coordinate MED-021/044/046 with Phase C | set_params adapter refactor happens in Phase C | 2026-04-12 |
-| Coordinate MED-035 with Phase C | Relay loop rewritten in Phase C `_control_stream_supervisor` | 2026-04-12 |
-| Coordinate MED-027 with Phase B | network_visualizer.py edited for WS wire in Phase B | 2026-04-12 |
+| Decision                                    | Rationale                                                                     | Date       |
+|---------------------------------------------|-------------------------------------------------------------------------------|------------|
+| Supersede HIGH-005                          | R5-01 Phase B provides canonical fix (WS bridge eliminates polling)           | 2026-04-12 |
+| Defer HIGH-014 to Track POST-1              | Phase B rewrites large portions of dashboard_manager.py; extraction conflicts | 2026-04-12 |
+| Defer MED-026 to Track POST-1               | ThemeColors rollout touches all component files; Phase B also edits them      | 2026-04-12 |
+| Modify MED-001 interpretation               | R5-01 per-IP caps supersede global max_connections as primary defense         | 2026-04-12 |
+| Coordinate HIGH-010 with Phase 0-cascor     | WebSocket endpoints substantially rewritten in Phase 0-cascor                 | 2026-04-12 |
+| Coordinate HIGH-017 with Phase 0-cascor + H | Schema tests become contract tests via FakeCascorServerHarness                | 2026-04-12 |
+| Coordinate MED-021/044/046 with Phase C     | set_params adapter refactor happens in Phase C                                | 2026-04-12 |
+| Coordinate MED-035 with Phase C             | Relay loop rewritten in Phase C `_control_stream_supervisor`                  | 2026-04-12 |
+| Coordinate MED-027 with Phase B             | network_visualizer.py edited for WS wire in Phase B                           | 2026-04-12 |
 
 ## 11. Completion Status (as of 2026-04-12)
 
-| Track | Tasks | Completed | Remaining | % Complete |
-|-------|-------|-----------|-----------|------------|
-| Track PRE | ~40 | ~38 | ~2 (conf/Dockerfile in POST-2) | ~95% |
-| Track PAR | ~30 | ~28 | ~2 (LOW-008 modify, HIGH-017 full rework) | ~93% |
-| Track EMB | ~7 coordinated | 0 | 7 (blocked by R5-01 phases) | 0% |
-| Track POST | ~7 | 0 | 7 (blocked by R5-01 Phase B) | 0% |
-| **Total** | **~84** | **~66** | **~18** | **~79%** |
+| Track      | Tasks          | Completed | Remaining                                 | % Complete |
+|------------|----------------|-----------|-------------------------------------------|------------|
+| Track PRE  | ~40            | ~38       | ~2 (conf/Dockerfile in POST-2)            | ~95%       |
+| Track PAR  | ~30            | ~28       | ~2 (LOW-008 modify, HIGH-017 full rework) | ~93%       |
+| Track EMB  | ~7 coordinated | 0         | 7 (blocked by R5-01 phases)               | 0%         |
+| Track POST | ~7             | 0         | 7 (blocked by R5-01 Phase B)              | 0%         |
+| **Total**  | **~84**        | **~66**   | **~18**                                   | **~79%**   |
 
 **Overall Status**: Track PRE and Track PAR are substantially complete via PR #146. Track EMB and Track POST are blocked by R5-01 sequencing, which is expected and correct.
 

@@ -27,22 +27,22 @@ The audit methodology (8-domain parallel execution, verification chain, sign-off
 
 ### 2.1 Original Audit Results (unchanged by this re-evaluation)
 
-| Status | Count | Percentage |
-|--------|-------|------------|
-| VERIFIED | 57 | 63% |
-| PARTIALLY FIXED | 16 | 18% |
-| NOT FIXED | 18 | 20% |
-| REGRESSIONS | 0 | 0% |
+| Status          | Count | Percentage |
+|-----------------|-------|------------|
+| VERIFIED        | 57    | 63%        |
+| PARTIALLY FIXED | 16    | 18%        |
+| NOT FIXED       | 18    | 20%        |
+| REGRESSIONS     | 0     | 0%         |
 
 ### 2.2 Gap Disposition After R5-01 Alignment
 
-| Disposition | Count | Description |
-|-------------|-------|-------------|
-| **REAFFIRMED** | 22 | Gap still valid; original remediation applies |
-| **SUPERSEDED** | 1 | R5-01 provides canonical fix; no audit remediation |
-| **DEFERRED** | 4 | Gap waits for R5-01 Phase B completion |
-| **COORDINATED** | 7 | Remediation must align with specific R5-01 phase |
-| **Total** | **34** | |
+| Disposition     | Count  | Description                                        |
+|-----------------|--------|----------------------------------------------------|
+| **REAFFIRMED**  | 22     | Gap still valid; original remediation applies      |
+| **SUPERSEDED**  | 1      | R5-01 provides canonical fix; no audit remediation |
+| **DEFERRED**    | 4      | Gap waits for R5-01 Phase B completion             |
+| **COORDINATED** | 7      | Remediation must align with specific R5-01 phase   |
+| **Total**       | **34** |                                                    |
 
 ## 3. Gap Re-Evaluation (Detailed)
 
@@ -335,38 +335,38 @@ The public API exposure (from the prior audit fix) is still correct but **insuff
 
 ### Priority 1: Complete Track PRE & PAR (Done via PR #146)
 
-| Gap | Issue | Status | Action |
-|-----|-------|--------|--------|
+| Gap                    | Issue   | Status                      | Action        |
+|------------------------|---------|-----------------------------|---------------|
 | All 22 REAFFIRMED gaps | Various | Mostly complete via PR #146 | Merge PR #146 |
 
 ### Priority 2: Track EMB -- Align with R5-01 Phase Owners
 
-| Gap | Issue | R5-01 Phase | Responsibility |
-|-----|-------|-------------|----------------|
-| GAP-P06 | HIGH-010 /ws handler | Phase 0-cascor | Coordinate with Phase 0-cascor implementer |
-| GAP-015 | HIGH-017 schema tests | Phase 0-cascor | Coordinate with Phase 0-cascor implementer |
-| GAP-P10 | MED-027 NetworkVisualizer | Phase B | Coordinate with Phase B implementer |
-| GAP-012 | MED-046 ServiceBackend API | Phase C | Coordinate with Phase C implementer |
-| GAP-P12 | MED-035 Relay exceptions | Phase C | Coordinate with Phase C implementer |
-| MED-021 | set_params Pydantic | Phase C | Coordinate with Phase C implementer |
-| MED-044 | TrainingMonitor apply_params | Phase C | Coordinate with Phase C implementer |
+| Gap     | Issue                        | R5-01 Phase    | Responsibility                             |
+|---------|------------------------------|----------------|--------------------------------------------|
+| GAP-P06 | HIGH-010 /ws handler         | Phase 0-cascor | Coordinate with Phase 0-cascor implementer |
+| GAP-015 | HIGH-017 schema tests        | Phase 0-cascor | Coordinate with Phase 0-cascor implementer |
+| GAP-P10 | MED-027 NetworkVisualizer    | Phase B        | Coordinate with Phase B implementer        |
+| GAP-012 | MED-046 ServiceBackend API   | Phase C        | Coordinate with Phase C implementer        |
+| GAP-P12 | MED-035 Relay exceptions     | Phase C        | Coordinate with Phase C implementer        |
+| MED-021 | set_params Pydantic          | Phase C        | Coordinate with Phase C implementer        |
+| MED-044 | TrainingMonitor apply_params | Phase C        | Coordinate with Phase C implementer        |
 
 ### Priority 3: Track POST -- Post-R5-01 Phase B Production Stable
 
-| Gap | Issue | Prerequisite | Effort |
-|-----|-------|--------------|--------|
-| GAP-006 | HIGH-014 DashboardManager extract | Phase B stable >=7 days | High |
-| GAP-P09 | MED-026 ThemeColors rollout | Phase B stable >=7 days | High |
-| GAP-P02 | HIGH-008 conf/Dockerfile | Ops decision | Low |
-| GAP-P03 | MED-018 conf/Dockerfile | Ops decision | Low |
-| GAP-P04 | LOW-010 conf/Dockerfile | Ops decision | Low |
-| GAP-P13 | LOW-003 config_manager | None | Low |
-| GAP-P14 | LOW-007 FATAL_LEVEL docs | None | Low |
+| Gap     | Issue                             | Prerequisite            | Effort |
+|---------|-----------------------------------|-------------------------|--------|
+| GAP-006 | HIGH-014 DashboardManager extract | Phase B stable >=7 days | High   |
+| GAP-P09 | MED-026 ThemeColors rollout       | Phase B stable >=7 days | High   |
+| GAP-P02 | HIGH-008 conf/Dockerfile          | Ops decision            | Low    |
+| GAP-P03 | MED-018 conf/Dockerfile           | Ops decision            | Low    |
+| GAP-P04 | LOW-010 conf/Dockerfile           | Ops decision            | Low    |
+| GAP-P13 | LOW-003 config_manager            | None                    | Low    |
+| GAP-P14 | LOW-007 FATAL_LEVEL docs          | None                    | Low    |
 
 ### Priority 4: Superseded -- No Further Work
 
-| Gap | Issue | Canonical Solution |
-|-----|-------|-------------------|
+| Gap     | Issue              | Canonical Solution             |
+|---------|--------------------|--------------------------------|
 | GAP-P05 | HIGH-005 sync HTTP | R5-01 Phase B WebSocket bridge |
 
 ## 6. Audit Sign-Off Criteria (Updated)
@@ -385,41 +385,41 @@ The audit passes when:
 
 These R5-01 requirements are NEW forward work (not audit gaps) and should be tracked in a separate R5-01 implementation backlog:
 
-| Req ID | Description | Phase |
-|--------|-------------|-------|
-| R5-01-NEW-001 | `server_instance_id` on connection_established | 0-cascor |
-| R5-01-NEW-002 | `replay_buffer_capacity` on connection_established | 0-cascor |
-| R5-01-NEW-003 | `seq` field on /ws/training messages | 0-cascor |
-| R5-01-NEW-004 | `emitted_at_monotonic` on all envelopes | 0-cascor |
-| R5-01-NEW-005 | `command_id` echo on /ws/control responses | 0-cascor / C |
-| R5-01-NEW-006 | Two-phase registration (`_pending_connections`) | 0-cascor / B-pre-a |
-| R5-01-NEW-007 | Resume protocol with one-resume-per-connection | 0-cascor |
-| R5-01-NEW-008 | CSRF first-frame auth (browser) with 5s timeout | B-pre-b |
-| R5-01-NEW-009 | HMAC first-frame auth (adapter) | B-pre-b / C |
-| R5-01-NEW-010 | Origin allowlist validation | B-pre-a |
-| R5-01-NEW-011 | Per-IP connection cap (5 default) | B-pre-a |
-| R5-01-NEW-012 | Frame size cap (4096 / 65536) | B-pre-a |
-| R5-01-NEW-013 | Rate limiting (10 cmd/s soft response) | B-pre-b |
-| R5-01-NEW-014 | Heartbeat (30s ping, 5s pong timeout) | F |
-| R5-01-NEW-015 | Per-command timeouts (D-48 matrix) | C / D |
-| R5-01-NEW-016 | `window._juniperWsDrain` namespace + drain callbacks | B |
-| R5-01-NEW-017 | Polling elimination (>=90% reduction) | B (P0 win) |
-| R5-01-NEW-018 | Connection indicator 4-state badge | B |
-| R5-01-NEW-019 | CSRF token endpoint `GET /api/csrf` | B-pre-b |
-| R5-01-NEW-020 | Latency beacon endpoint `POST /api/ws_latency` | B |
+| Req ID        | Description                                          | Phase              |
+|---------------|------------------------------------------------------|--------------------|
+| R5-01-NEW-001 | `server_instance_id` on connection_established       | 0-cascor           |
+| R5-01-NEW-002 | `replay_buffer_capacity` on connection_established   | 0-cascor           |
+| R5-01-NEW-003 | `seq` field on /ws/training messages                 | 0-cascor           |
+| R5-01-NEW-004 | `emitted_at_monotonic` on all envelopes              | 0-cascor           |
+| R5-01-NEW-005 | `command_id` echo on /ws/control responses           | 0-cascor / C       |
+| R5-01-NEW-006 | Two-phase registration (`_pending_connections`)      | 0-cascor / B-pre-a |
+| R5-01-NEW-007 | Resume protocol with one-resume-per-connection       | 0-cascor           |
+| R5-01-NEW-008 | CSRF first-frame auth (browser) with 5s timeout      | B-pre-b            |
+| R5-01-NEW-009 | HMAC first-frame auth (adapter)                      | B-pre-b / C        |
+| R5-01-NEW-010 | Origin allowlist validation                          | B-pre-a            |
+| R5-01-NEW-011 | Per-IP connection cap (5 default)                    | B-pre-a            |
+| R5-01-NEW-012 | Frame size cap (4096 / 65536)                        | B-pre-a            |
+| R5-01-NEW-013 | Rate limiting (10 cmd/s soft response)               | B-pre-b            |
+| R5-01-NEW-014 | Heartbeat (30s ping, 5s pong timeout)                | F                  |
+| R5-01-NEW-015 | Per-command timeouts (D-48 matrix)                   | C / D              |
+| R5-01-NEW-016 | `window._juniperWsDrain` namespace + drain callbacks | B                  |
+| R5-01-NEW-017 | Polling elimination (>=90% reduction)                | B (P0 win)         |
+| R5-01-NEW-018 | Connection indicator 4-state badge                   | B                  |
+| R5-01-NEW-019 | CSRF token endpoint `GET /api/csrf`                  | B-pre-b            |
+| R5-01-NEW-020 | Latency beacon endpoint `POST /api/ws_latency`       | B                  |
 
 ## 8. Audit Execution Phases (Revised)
 
 The original audit's 12-phase execution plan is preserved for reference. Phases 1-11 are substantially complete. Phase 12 (final validation, documentation, cleanup) now includes the R5-01 alignment work documented here.
 
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 1 | Write audit plan | DONE |
-| 2-9 | Execute 8 audit domains | DONE |
-| 10 | Compile gap analysis | DONE |
-| 11 | Run full test suite validation | DONE |
-| 12 | Final validation, documentation, cleanup | **IN PROGRESS** (this document) |
-| **NEW: 13** | R5-01 alignment re-evaluation | **DONE** (this document) |
+| Phase       | Description                              | Status                          |
+|-------------|------------------------------------------|---------------------------------|
+| 1           | Write audit plan                         | DONE                            |
+| 2-9         | Execute 8 audit domains                  | DONE                            |
+| 10          | Compile gap analysis                     | DONE                            |
+| 11          | Run full test suite validation           | DONE                            |
+| 12          | Final validation, documentation, cleanup | **IN PROGRESS** (this document) |
+| **NEW: 13** | R5-01 alignment re-evaluation            | **DONE** (this document)        |
 
 ## 9. Metrics & Observability Alignment
 
@@ -475,42 +475,42 @@ This re-evaluation preserves the following invariants:
 
 For quick reference, this table maps each audit gap to its R5-01 disposition:
 
-| Gap ID | Issue ID | Severity | Original Status | R5-01 Disposition |
-|--------|----------|----------|-----------------|-------------------|
-| GAP-001 | MED-040 | Medium | NOT FIXED | REAFFIRMED |
-| GAP-002 | MED-039 | Medium | NOT FIXED | REAFFIRMED |
-| GAP-003 | MED-041 | Medium | NOT FIXED | REAFFIRMED |
-| GAP-004 | HIGH-007 | High | NOT FIXED | REAFFIRMED |
-| GAP-005 | MED-045 | Medium | NOT FIXED | REAFFIRMED |
-| GAP-006 | HIGH-014 | High | NOT FIXED | DEFERRED (Phase B) |
-| GAP-007 | MED-034 | Medium | NOT FIXED | REAFFIRMED |
-| GAP-008 | MED-037 | Medium | NOT FIXED | REAFFIRMED |
-| GAP-009 | MED-038 | Medium | NOT FIXED | REAFFIRMED |
-| GAP-010 | MED-042 | Medium | NOT FIXED | REAFFIRMED |
-| GAP-011 | MED-043 | Medium | NOT FIXED | REAFFIRMED |
-| GAP-012 | MED-046 | Medium | NOT FIXED | COORDINATED (Phase C) |
-| GAP-013 | MED-047 | Medium | NOT FIXED | REAFFIRMED |
-| GAP-014 | HIGH-016 | High | NOT FIXED | REAFFIRMED |
-| GAP-015 | HIGH-017 | High | NOT FIXED | COORDINATED (0-cascor + H) |
-| GAP-016 | HIGH-018 | High | NOT FIXED | REAFFIRMED |
-| GAP-017 | MED-048 | Medium | NOT FIXED | REAFFIRMED |
-| GAP-018 | MED-049 | Medium | NOT FIXED | REAFFIRMED |
-| GAP-P01 | HIGH-015 | High | PARTIAL | REAFFIRMED |
-| GAP-P02 | HIGH-008 | High | PARTIAL | REAFFIRMED (POST-2) |
-| GAP-P03 | MED-018 | Medium | PARTIAL | REAFFIRMED (POST-2) |
-| GAP-P04 | LOW-010 | Low | PARTIAL | REAFFIRMED (POST-2) |
-| GAP-P05 | HIGH-005 | High | PARTIAL | **SUPERSEDED** (Phase B) |
-| GAP-P06 | HIGH-010 | High | PARTIAL | COORDINATED (0-cascor) |
-| GAP-P07 | MED-002 | Medium | PARTIAL | REAFFIRMED |
-| GAP-P08 | MED-029 | Medium | PARTIAL | REAFFIRMED |
-| GAP-P09 | MED-026 | Medium | PARTIAL | DEFERRED (Phase B) |
-| GAP-P10 | MED-027 | Medium | PARTIAL | COORDINATED (Phase B) |
-| GAP-P11 | MED-030 | Medium | PARTIAL | REAFFIRMED |
-| GAP-P12 | MED-035 | Medium | PARTIAL | COORDINATED (Phase C) |
-| GAP-P13 | LOW-003 | Low | PARTIAL | REAFFIRMED (POST-3) |
-| GAP-P14 | LOW-007 | Low | PARTIAL | REAFFIRMED (POST-3) |
-| GAP-P15 | HIGH-019 | High | PARTIAL | REAFFIRMED |
-| GAP-P16 | LOW-021 | Low | PARTIAL | REAFFIRMED |
+| Gap ID  | Issue ID | Severity | Original Status | R5-01 Disposition          |
+|---------|----------|----------|-----------------|----------------------------|
+| GAP-001 | MED-040  | Medium   | NOT FIXED       | REAFFIRMED                 |
+| GAP-002 | MED-039  | Medium   | NOT FIXED       | REAFFIRMED                 |
+| GAP-003 | MED-041  | Medium   | NOT FIXED       | REAFFIRMED                 |
+| GAP-004 | HIGH-007 | High     | NOT FIXED       | REAFFIRMED                 |
+| GAP-005 | MED-045  | Medium   | NOT FIXED       | REAFFIRMED                 |
+| GAP-006 | HIGH-014 | High     | NOT FIXED       | DEFERRED (Phase B)         |
+| GAP-007 | MED-034  | Medium   | NOT FIXED       | REAFFIRMED                 |
+| GAP-008 | MED-037  | Medium   | NOT FIXED       | REAFFIRMED                 |
+| GAP-009 | MED-038  | Medium   | NOT FIXED       | REAFFIRMED                 |
+| GAP-010 | MED-042  | Medium   | NOT FIXED       | REAFFIRMED                 |
+| GAP-011 | MED-043  | Medium   | NOT FIXED       | REAFFIRMED                 |
+| GAP-012 | MED-046  | Medium   | NOT FIXED       | COORDINATED (Phase C)      |
+| GAP-013 | MED-047  | Medium   | NOT FIXED       | REAFFIRMED                 |
+| GAP-014 | HIGH-016 | High     | NOT FIXED       | REAFFIRMED                 |
+| GAP-015 | HIGH-017 | High     | NOT FIXED       | COORDINATED (0-cascor + H) |
+| GAP-016 | HIGH-018 | High     | NOT FIXED       | REAFFIRMED                 |
+| GAP-017 | MED-048  | Medium   | NOT FIXED       | REAFFIRMED                 |
+| GAP-018 | MED-049  | Medium   | NOT FIXED       | REAFFIRMED                 |
+| GAP-P01 | HIGH-015 | High     | PARTIAL         | REAFFIRMED                 |
+| GAP-P02 | HIGH-008 | High     | PARTIAL         | REAFFIRMED (POST-2)        |
+| GAP-P03 | MED-018  | Medium   | PARTIAL         | REAFFIRMED (POST-2)        |
+| GAP-P04 | LOW-010  | Low      | PARTIAL         | REAFFIRMED (POST-2)        |
+| GAP-P05 | HIGH-005 | High     | PARTIAL         | **SUPERSEDED** (Phase B)   |
+| GAP-P06 | HIGH-010 | High     | PARTIAL         | COORDINATED (0-cascor)     |
+| GAP-P07 | MED-002  | Medium   | PARTIAL         | REAFFIRMED                 |
+| GAP-P08 | MED-029  | Medium   | PARTIAL         | REAFFIRMED                 |
+| GAP-P09 | MED-026  | Medium   | PARTIAL         | DEFERRED (Phase B)         |
+| GAP-P10 | MED-027  | Medium   | PARTIAL         | COORDINATED (Phase B)      |
+| GAP-P11 | MED-030  | Medium   | PARTIAL         | REAFFIRMED                 |
+| GAP-P12 | MED-035  | Medium   | PARTIAL         | COORDINATED (Phase C)      |
+| GAP-P13 | LOW-003  | Low      | PARTIAL         | REAFFIRMED (POST-3)        |
+| GAP-P14 | LOW-007  | Low      | PARTIAL         | REAFFIRMED (POST-3)        |
+| GAP-P15 | HIGH-019 | High     | PARTIAL         | REAFFIRMED                 |
+| GAP-P16 | LOW-021  | Low      | PARTIAL         | REAFFIRMED                 |
 
 ---
 
