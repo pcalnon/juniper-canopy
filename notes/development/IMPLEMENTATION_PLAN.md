@@ -1,7 +1,7 @@
-# Juniper Canopy Implementation Plan
+ Juniper Canopy Implementation Plan
 
-**Last Updated:** 2025-12-12  
-**Version:** 1.0.0  
+**Last Updated:** 2025-12-12
+**Version:** 1.0.0
 **Status:** Complete (Historical Reference)
 
 ## Table of Contents
@@ -83,8 +83,8 @@ This document provides a comprehensive implementation plan for all fixes and enh
 
 ## Phase 0: Core UX Stabilization (P0)
 
-**Objective:** Fix critical bugs that make the dashboard feel unreliable.  
-**Estimated Effort:** 1-2 days  
+**Objective:** Fix critical bugs that make the dashboard feel unreliable.
+**Estimated Effort:** 1-2 days
 **Files Affected:** `dashboard_manager.py`, `metrics_panel.py`, `network_visualizer.py`
 
 ### P0-1: Training Controls Button State Fix
@@ -100,14 +100,14 @@ Location: src/frontend/dashboard_manager.py
 Methods: _handle_training_buttons_handler, _handle_button_timeout_and_acks_handler
 
 1. Make button-states store the single source of truth
-2. Reset n_clicks state or interpret clicks idempotently  
+2. Reset n_clicks state or interpret clicks idempotently
 3. Update button-states to re-enable after backend acknowledgment
 4. Add explicit timeout handler (5s max)
 5. Clear loading state on success/failure
 ```
 
-**Complexity:** Medium  
-**Risk:** Medium  
+**Complexity:** Medium
+**Risk:** Medium
 **Tests Required:** Button state transitions, debouncing, timeout behavior
 
 ---
@@ -128,8 +128,8 @@ Changes:
 5. Visual indicator showing unsaved changes
 ```
 
-**Complexity:** Medium  
-**Risk:** Medium  
+**Complexity:** Medium
+**Risk:** Medium
 **Tests Required:** Parameter change tracking, Apply button behavior
 
 ---
@@ -152,8 +152,8 @@ Method: _update_top_status_phase_handler, _get_status_phase_display_content
 4. Update phase: Idle → Output → Candidate (based on training phase)
 ```
 
-**Complexity:** Low-Medium  
-**Risk:** Medium  
+**Complexity:** Low-Medium
+**Risk:** Medium
 **Tests Required:** State display updates, phase transitions
 
 ---
@@ -185,8 +185,8 @@ Implementation:
 4. Add reset button that clears view state
 ```
 
-**Complexity:** Medium  
-**Risk:** Medium-High  
+**Complexity:** Medium
+**Risk:** Medium-High
 **Tests Required:** Range persistence across updates, reset functionality
 
 ---
@@ -209,8 +209,8 @@ Location: src/frontend/components/network_visualizer.py
 5. Apply stored dragmode on figure recreation
 ```
 
-**Complexity:** Medium  
-**Risk:** Medium  
+**Complexity:** Medium
+**Risk:** Medium
 **Tests Required:** Tool selection persistence, correct tool behavior
 
 ---
@@ -233,8 +233,8 @@ Location: src/frontend/components/network_visualizer.py
 5. Compare topology hash to detect actual changes
 ```
 
-**Complexity:** Medium  
-**Risk:** Medium-High  
+**Complexity:** Medium
+**Risk:** Medium-High
 **Tests Required:** Interaction persistence, topology change detection
 
 ---
@@ -253,15 +253,15 @@ Location: src/frontend/components/network_visualizer.py
 3. Ensure contrast ratio meets WCAG standards
 ```
 
-**Complexity:** Low  
-**Risk:** Low  
+**Complexity:** Low
+**Risk:** Low
 **Tests Required:** Dark mode styling verification
 
 ---
 
 ## Phase 1: High-Impact Enhancements (P1)
 
-**Objective:** Add high-value features and complete remaining important fixes.  
+**Objective:** Add high-value features and complete remaining important fixes.
 **Estimated Effort:** 2-4 days
 
 ### P1-1: Candidate Node Info Section Fix
@@ -281,8 +281,8 @@ Location: src/frontend/components/metrics_panel.py
 6. Show current pool expanded by default
 ```
 
-**Complexity:** Medium  
-**Risk:** Medium  
+**Complexity:** Medium
+**Risk:** Medium
 **Tests Required:** Pool history, collapse/expand, ordering
 
 ---
@@ -307,8 +307,8 @@ Method: _calculate_layout
 4. Add layout configuration constants
 ```
 
-**Complexity:** Medium  
-**Risk:** Medium  
+**Complexity:** Medium
+**Risk:** Medium
 **Tests Required:** Layout calculations, centering, edge visibility
 
 ---
@@ -339,8 +339,8 @@ Dependencies:
 - Metrics history must be accurate and bounded
 ```
 
-**Complexity:** High  
-**Risk:** High  
+**Complexity:** High
+**Risk:** High
 **Tests Required:** Replay state machine, speed controls, range selection
 
 ---
@@ -367,15 +367,15 @@ Phase 2 (deferred):
 - Label editing
 ```
 
-**Complexity:** High (full), Medium (Phase 1)  
-**Risk:** High  
+**Complexity:** High (full), Medium (Phase 1)
+**Risk:** High
 **Tests Required:** Selection state, visual feedback
 
 ---
 
 ## Phase 2: Polish & Medium-Priority Features (P2)
 
-**Objective:** Add polish and medium-priority features.  
+**Objective:** Add polish and medium-priority features.
 **Estimated Effort:** 2-3 days
 
 ### P2-1: Most Recently Added Node Indicator
@@ -393,8 +393,8 @@ Location: src/frontend/components/network_visualizer.py
 6. Distinct from selection indicator styling
 ```
 
-**Complexity:** Medium  
-**Risk:** Medium  
+**Complexity:** Medium
+**Risk:** Medium
 **Tests Required:** New node detection, animation timing
 
 ---
@@ -411,8 +411,8 @@ Location: src/frontend/components/network_visualizer.py
 3. Include network stats in filename if desired
 ```
 
-**Complexity:** Low-Medium  
-**Risk:** Low  
+**Complexity:** Low-Medium
+**Risk:** Low
 **Tests Required:** Filename generation
 
 ---
@@ -434,8 +434,8 @@ Content:
 6. System information (Python version, dependencies)
 ```
 
-**Complexity:** Low-Medium  
-**Risk:** Low  
+**Complexity:** Low-Medium
+**Risk:** Low
 **Tests Required:** Content rendering, link validation
 
 ---
@@ -459,15 +459,15 @@ Phase 2 (Actions):
 - Delete snapshot
 ```
 
-**Complexity:** High  
-**Risk:** High  
+**Complexity:** High
+**Risk:** High
 **Dependencies:** Backend snapshot API
 
 ---
 
 ## Phase 3: Advanced Features & Infrastructure (P3)
 
-**Objective:** Long-term features requiring significant backend work.  
+**Objective:** Long-term features requiring significant backend work.
 **Estimated Effort:** Multi-week
 
 ### P3-1: Training Metrics Save/Load
@@ -484,7 +484,7 @@ Phase 2 (Actions):
 
 ### P3-2: Network Topology 3D View
 
-**Complexity:** Very High  
+**Complexity:** Very High
 **Risk:** High
 
 **Implementation considerations:**
