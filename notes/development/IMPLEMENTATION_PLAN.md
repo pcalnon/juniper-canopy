@@ -1,4 +1,4 @@
- Juniper Canopy Implementation Plan
+# Juniper Canopy Implementation Plan
 
 **Last Updated:** 2025-12-12
 **Version:** 1.0.0
