@@ -48,31 +48,26 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-# import dash
 import uvicorn
-
-# from fastapi.staticfiles import StaticFiles
 from a2wsgi import WSGIMiddleware
 
-# from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+# from fastapi.staticfiles import StaticFiles
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
-# from dash import html, dcc
-# Add src directory to Python path
-# src_dir = Path(__file__).parent
-# sys.path.insert(0, str(src_dir))
-# from backend.training_monitor import TrainingMonitor  trunk-ignore(ruff/E402)
 # from backend.data_adapter import DataAdapter  trunk-ignore(ruff/E402)
+# from backend.training_monitor import TrainingMonitor  trunk-ignore(ruff/E402)
 from backend.training_monitor import TrainingState  # trunk-ignore(ruff/E402)
 from canopy_constants import TrainingConstants  # trunk-ignore(ruff/E402)
 from communication.websocket_manager import create_command_response_message, websocket_manager
 from frontend.dashboard_manager import DashboardManager
 from health import DependencyStatus, ErrorResponse, ReadinessResponse, probe_dependency
-from logger.logger import (
+
+# import logging
+from logger.logger import (  # LogContext,; Alert,; ColoredFormatter,; JsonFormatter,; CascorLogger,; TrainingLogger,
     get_system_logger,
     get_training_logger,
     get_ui_logger,
@@ -87,21 +82,13 @@ from observability import (
 from secrets_util import get_secret
 from settings import get_settings
 
-try:
-    APP_VERSION = importlib.metadata.version("juniper-canopy")
-except importlib.metadata.PackageNotFoundError:
-    APP_VERSION = "0.4.0"
+# import dash
+# from dash import html, dcc
 
-# import logging
 
-# from logger.logger import (
-#     LogContext,
-#     Alert,
-#     ColoredFormatter,
-#     JsonFormatter,
-#     CascorLogger,
-#     TrainingLogger,
-# )
+# src_dir = Path(__file__).parent
+# sys.path.insert(0, str(src_dir))
+
 
 # Initialize configuration
 settings = get_settings()
@@ -2208,9 +2195,6 @@ async def api_train_status():
         Training status dictionary with network info and training state.
     """
     return {"backend": backend.backend_type, **backend.get_status()}
-
-
-# from pydantic import BaseModel
 
 
 class SetParamsRequest(BaseModel):
