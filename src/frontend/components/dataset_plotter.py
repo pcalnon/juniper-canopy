@@ -325,10 +325,13 @@ class DatasetPlotter(BaseComponent):
                         current_value = options[0]["value"]
             except Exception:
                 # Fallback: provide basic generator list
+                # XREPO-01 / DC-01 (2026-04-24): dropdown ``value``
+                # fields must match the juniper-data server registry
+                # keys. Circles uses ``"circles"`` (plural).
                 options = [
                     {"label": "Spiral", "value": "spiral"},
                     {"label": "XOR", "value": "xor"},
-                    {"label": "Circle", "value": "circle"},
+                    {"label": "Circles", "value": "circles"},
                     {"label": "Moon", "value": "moon"},
                 ]
                 current_value = "spiral"
