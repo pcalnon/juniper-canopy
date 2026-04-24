@@ -181,12 +181,18 @@ class TestDatasetCreationE2E:
         assert result["meta"]["n_classes"] == 3
         assert result["meta"]["n_full"] == 3 * 40
 
-    def test_create_circle_dataset(self, fake_client):
-        """Create a circle dataset and validate response structure."""
-        result = fake_client.create_dataset("circle", {"n_points": 80, "noise": 0.08, "factor": 0.4, "seed": 11})
+    def test_create_circles_dataset(self, fake_client):
+        """Create a circles dataset and validate response structure.
+
+        XREPO-01 / DC-01 (2026-04-24): canonical server-side name is
+        ``"circles"``; the legacy ``"circle"`` alias is still accepted
+        by the fake client but is covered in the data-client's own
+        parity test rather than here.
+        """
+        result = fake_client.create_dataset("circles", {"n_points": 80, "noise": 0.08, "factor": 0.4, "seed": 11})
 
         assert "dataset_id" in result
-        assert result["generator"] == "circle"
+        assert result["generator"] == "circles"
         assert result["meta"]["n_features"] == 2
         assert result["meta"]["n_classes"] == 2
 
@@ -269,9 +275,9 @@ class TestArtifactDownloadE2E:
         for key in NPZ_REQUIRED_KEYS:
             assert loaded[key].dtype == np.float32
 
-    def test_download_circle_npz(self, fake_client):
-        """Download circle NPZ and validate arrays."""
-        result = fake_client.create_dataset("circle", {"n_points": 100, "factor": 0.5, "seed": 22})
+    def test_download_circles_npz(self, fake_client):
+        """Download circles NPZ and validate arrays."""
+        result = fake_client.create_dataset("circles", {"n_points": 100, "factor": 0.5, "seed": 22})
         arrays = fake_client.download_artifact_npz(result["dataset_id"])
 
         _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=2, expected_n_full=100)
@@ -343,9 +349,9 @@ class TestTrainingConsumptionE2E:
         assert math.isfinite(loss)
         assert loss >= 0.0
 
-    def test_circle_training_step(self, fake_client):
-        """Circle dataset converts to tensors and produces finite loss."""
-        result = fake_client.create_dataset("circle", {"n_points": 100, "seed": 12})
+    def test_circles_training_step(self, fake_client):
+        """Circles dataset converts to tensors and produces finite loss."""
+        result = fake_client.create_dataset("circles", {"n_points": 100, "seed": 12})
         arrays = fake_client.download_artifact_npz(result["dataset_id"])
 
         loss = _run_training_step(arrays)

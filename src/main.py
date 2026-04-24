@@ -1012,9 +1012,12 @@ async def list_dataset_generators():
     # Fallback to built-in demo generators
     if not generators:
         generators = [
+            # XREPO-01 / DC-01 (2026-04-24): generator ``name`` values
+            # must match the juniper-data server registry keys. The
+            # concentric-circles generator is ``"circles"`` (plural).
             {"name": "spiral", "display_name": "Spiral", "description": "N-arm spiral classification"},
             {"name": "xor", "display_name": "XOR", "description": "XOR gate classification"},
-            {"name": "circle", "display_name": "Circle", "description": "Concentric circle classification"},
+            {"name": "circles", "display_name": "Circles", "description": "Concentric circles classification"},
             {"name": "moon", "display_name": "Moon", "description": "Two interleaving half-moon classification"},
         ]
 

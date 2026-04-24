@@ -390,7 +390,10 @@ def mock_juniper_data_client():
     # Import exception classes (real or stub — both available at this point)
     from juniper_data_client.exceptions import JuniperDataClientError, JuniperDataNotFoundError
 
-    valid_generators = {"spiral", "xor", "circle", "moon"}
+    # XREPO-01 / DC-01 (2026-04-24): canonical server-side name is
+    # ``"circles"``; ``"circle"`` remains accepted as a legacy alias
+    # during the juniper-data-client deprecation window.
+    valid_generators = {"spiral", "xor", "circle", "circles", "moon"}
     _created = {}  # dataset_id → creation params
 
     def _make_npz(n_samples, n_classes, seed=42):
@@ -435,7 +438,7 @@ def mock_juniper_data_client():
         elif gen == "xor":
             n_pts = int(params.get("n_points", 100))
             return _make_npz(n_pts, 2, params.get("seed", 42))
-        elif gen in ("circle", "moon"):
+        elif gen in ("circle", "circles", "moon"):
             n_pts = int(params.get("n_points", 100))
             return _make_npz(n_pts, 2, params.get("seed", 42))
         return dict(default_npz)
@@ -469,7 +472,7 @@ def mock_juniper_data_client():
     mock_client_instance.list_generators.return_value = [
         {"name": "spiral"},
         {"name": "xor"},
-        {"name": "circle"},
+        {"name": "circles"},
         {"name": "moon"},
     ]
 
