@@ -225,13 +225,22 @@ class WebSocketManager:
                 logger.setLevel(logging.INFO)
             return logger
 
-    async def connect(self, websocket: WebSocket, client_id: Optional[str] = None):
+    async def connect(
+        self,
+        websocket: WebSocket,
+        client_id: Optional[str] = None,
+        subprotocol: Optional[str] = None,
+    ):
         """
         Accept new WebSocket connection.
 
         Args:
             websocket: WebSocket connection to accept
             client_id: Optional client identifier (default: auto-generated)
+            subprotocol: Optional subprotocol to echo back. Set when the
+                endpoint negotiated a bearer token via the
+                ``Sec-WebSocket-Protocol`` header (SEC-06) so the server
+                response acknowledges the chosen subprotocol.
 
         Example:
             await websocket_manager.connect(websocket, client_id='dashboard-1')
@@ -241,7 +250,7 @@ class WebSocketManager:
             await websocket.close(code=1013, reason="Max connections reached")
             return
 
-        await websocket.accept()
+        await websocket.accept(subprotocol=subprotocol)
 
         # Add to active connections
         self.active_connections.add(websocket)

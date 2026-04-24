@@ -194,6 +194,13 @@ class Settings(BaseSettings):
     session_secret_key: str = ""  # SessionMiddleware secret (auto-generated if empty)
     ws_control_auth_timeout: float = 5.0  # Seconds to wait for CSRF first-frame
 
+    # Phase 1B Track 1 (SEC-06): opt-in Sec-WebSocket-Protocol bearer auth for
+    # all WS endpoints. Defaults to False until every downstream client
+    # (cascor-client, dashboard JS) is updated to negotiate the subprotocol.
+    # When enabled, clients must send `Sec-WebSocket-Protocol: bearer, <key>`
+    # and the server validates <key> against `api_keys` before accepting.
+    ws_auth_enabled: bool = False
+
     @property
     def ws_bridge_enabled(self) -> bool:
         """Runtime check: bridge is active only when dev-flipped ON and not kill-switched."""

@@ -41,8 +41,11 @@ class TestRemoteWorkerEndpointsNoBackend:
         assert "connected" in data
 
     def test_remote_connect_no_backend(self, app_client):
-        """Remote connect should return 503 in demo mode."""
-        response = app_client.post("/api/remote/connect", params={"host": "localhost", "port": 5000, "authkey": "test"})
+        """Remote connect should return 503 in demo mode (SEC-13: JSON body required)."""
+        response = app_client.post(
+            "/api/remote/connect",
+            json={"host": "localhost", "port": 5000, "authkey": "test"},
+        )
         assert response.status_code == 503
         assert "Not available in demo mode" in response.json().get("error", "")
 
