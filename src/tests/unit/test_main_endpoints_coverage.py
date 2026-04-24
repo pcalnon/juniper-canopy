@@ -499,8 +499,11 @@ class TestRemoteWorkerEndpoints:
 
     @pytest.mark.unit
     def test_remote_connect(self, app_client):
-        """POST /api/remote/connect returns 503 in demo mode."""
-        response = app_client.post("/api/remote/connect?host=localhost&port=5000&authkey=secret")
+        """POST /api/remote/connect returns 503 in demo mode (SEC-13: body required)."""
+        response = app_client.post(
+            "/api/remote/connect",
+            json={"host": "localhost", "port": 5000, "authkey": "secret"},
+        )
         assert response.status_code == 503
         assert "demo" in response.json()["error"].lower()
 

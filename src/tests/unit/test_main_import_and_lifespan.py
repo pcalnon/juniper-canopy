@@ -153,9 +153,20 @@ class TestRemoteWorkerEndpointsDemo:
         assert response.status_code == 200
 
     def test_remote_connect_demo_no_backend(self, app_client):
-        """Remote connect returns 503 in demo mode."""
-        response = app_client.post("/api/remote/connect", params={"host": "localhost", "port": 5000, "authkey": "secret"})
+        """Remote connect returns 503 in demo mode. SEC-13: authkey must be in JSON body, not query params."""
+        response = app_client.post(
+            "/api/remote/connect",
+            json={"host": "localhost", "port": 5000, "authkey": "secret"},
+        )
         assert response.status_code == 503
+
+    def test_remote_connect_rejects_query_param_authkey(self, app_client):
+        """SEC-13: sending authkey as a query param must no longer work (leak mitigation)."""
+        response = app_client.post(
+            "/api/remote/connect",
+            params={"host": "localhost", "port": 5000, "authkey": "secret"},
+        )
+        assert response.status_code == 422
 
     def test_remote_start_workers_demo_no_backend(self, app_client):
         """Remote start workers returns 503 in demo mode."""

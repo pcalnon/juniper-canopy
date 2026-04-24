@@ -45,6 +45,7 @@ import secrets
 
 # import sys
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -56,7 +57,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, SecretStr
 
 # from backend.data_adapter import DataAdapter  trunk-ignore(ruff/E402)
 # from backend.training_monitor import TrainingMonitor  trunk-ignore(ruff/E402)
@@ -382,6 +383,42 @@ async def _authenticate_websocket(websocket: WebSocket) -> bool:
     return True
 
 
+WS_BEARER_SUBPROTOCOL = "bearer"
+
+
+async def _authenticate_websocket_token(websocket: WebSocket) -> tuple[bool, str | None]:
+    """SEC-06 opt-in bearer-token auth over ``Sec-WebSocket-Protocol``.
+
+    When ``settings.ws_auth_enabled`` is False, this is a no-op that returns
+    ``(True, None)`` so the caller proceeds with the legacy header-based
+    ``_authenticate_websocket`` flow. When enabled, the client must send
+    ``Sec-WebSocket-Protocol: bearer, <token>``; the token is validated
+    against ``api_key_auth`` using constant-time comparison. On success the
+    caller must echo ``"bearer"`` as the accepted subprotocol. On failure
+    the WebSocket is closed with code 1008 and the caller should return.
+
+    Returns:
+        (authenticated, subprotocol_to_echo). ``subprotocol_to_echo`` is
+        ``"bearer"`` on success when auth is enabled, ``None`` when disabled
+        (preserves prior unauthenticated default for legacy clients).
+    """
+    if not getattr(settings, "ws_auth_enabled", False):
+        return True, None
+
+    header = websocket.headers.get("sec-websocket-protocol", "")
+    parts = [p.strip() for p in header.split(",") if p.strip()]
+    if len(parts) < 2 or parts[0].lower() != WS_BEARER_SUBPROTOCOL:
+        await websocket.close(code=1008, reason="Authentication required")
+        return False, None
+
+    token = parts[1]
+    if not api_key_auth.validate(token):
+        await websocket.close(code=1008, reason="Invalid authentication token")
+        return False, None
+
+    return True, WS_BEARER_SUBPROTOCOL
+
+
 @app.websocket("/ws/training")
 async def websocket_training_endpoint(websocket: WebSocket):
     """
@@ -399,6 +436,11 @@ async def websocket_training_endpoint(websocket: WebSocket):
         };
     """
     if not await _authenticate_websocket(websocket):
+        return
+
+    # SEC-06: opt-in bearer-token auth over Sec-WebSocket-Protocol
+    ws_auth_ok, ws_subprotocol = await _authenticate_websocket_token(websocket)
+    if not ws_auth_ok:
         return
 
     # Phase B-pre-a: Origin validation (M-SEC-01b)
@@ -421,7 +463,7 @@ async def websocket_training_endpoint(websocket: WebSocket):
         return
 
     client_id = f"training-client-{id(websocket)}"
-    await websocket_manager.connect(websocket, client_id=client_id)
+    await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol)
 
     idle_timeout = ws_settings.idle_timeout_seconds
     max_msg_size = ws_settings.max_message_size_training
@@ -486,6 +528,11 @@ async def websocket_control_endpoint(websocket: WebSocket):
     if not await _authenticate_websocket(websocket):
         return
 
+    # SEC-06: opt-in bearer-token auth over Sec-WebSocket-Protocol
+    ws_auth_ok, ws_subprotocol = await _authenticate_websocket_token(websocket)
+    if not ws_auth_ok:
+        return
+
     # Phase B-pre-a: Origin validation (M-SEC-01b)
     from ws_security import validate_origin
 
@@ -506,7 +553,7 @@ async def websocket_control_endpoint(websocket: WebSocket):
         return
 
     client_id = f"control-client-{id(websocket)}"
-    await websocket_manager.connect(websocket, client_id=client_id)
+    await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol)
 
     # Phase B-pre-b: CSRF first-frame authentication (M-SEC-02)
     if settings.csrf_enabled:
@@ -978,9 +1025,16 @@ async def generate_dataset(request: Request):
     try:
         dataset = backend.regenerate_dataset(n_samples=n_samples, n_spirals=n_spirals, noise=noise, n_rotations=n_rotations)
         return dataset or {"status": "generated"}
-    except Exception as e:
-        system_logger.error(f"Dataset generation failed: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+    except Exception as exc:
+        # SEC-14: never leak internal exception messages to clients; log the
+        # full traceback server-side and return an opaque error_id so the
+        # operator can correlate the client report with server logs.
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error(f"Dataset generation failed [error_id={error_id}]", exception=exc)
+        return JSONResponse(
+            {"error": "Internal server error", "error_id": error_id},
+            status_code=500,
+        )
 
 
 @app.get("/api/dataset/generators")
@@ -2037,9 +2091,21 @@ async def get_worker_stats():
         try:
             result = backend._adapter._client.get_worker_stats()
             return result.get("data", result)
-        except Exception as e:
-            system_logger.warning(f"Failed to fetch worker stats from CasCor: {e}")
-            return {"total": 0, "idle": 0, "busy": 0, "stale": 0, "total_tasks_completed": 0, "total_tasks_failed": 0, "average_health_score": 0, "error": str(e)}
+        except Exception:
+            # SEC-14: return an opaque error_id instead of the exception message.
+            error_id = uuid.uuid4().hex[:12]
+            system_logger.warning(f"Failed to fetch worker stats from CasCor [error_id={error_id}]")
+            return {
+                "total": 0,
+                "idle": 0,
+                "busy": 0,
+                "stale": 0,
+                "total_tasks_completed": 0,
+                "total_tasks_failed": 0,
+                "average_health_score": 0,
+                "error": "Upstream error",
+                "error_id": error_id,
+            }
 
     import time
 
@@ -2058,9 +2124,11 @@ async def get_worker_list():
         try:
             result = backend._adapter._client.list_workers()
             return result.get("data", result)
-        except Exception as e:
-            system_logger.warning(f"Failed to fetch worker list from CasCor: {e}")
-            return {"workers": [], "count": 0, "error": str(e)}
+        except Exception:
+            # SEC-14: return an opaque error_id instead of the exception message.
+            error_id = uuid.uuid4().hex[:12]
+            system_logger.warning(f"Failed to fetch worker list from CasCor [error_id={error_id}]")
+            return {"workers": [], "count": 0, "error": "Upstream error", "error_id": error_id}
 
     import time
 
@@ -2097,12 +2165,44 @@ async def get_worker_list():
 async def ws_endpoint(websocket: WebSocket):
     """
     General WebSocket endpoint for compatibility.
+
+    Security gates (SEC-05, SEC-06, SEC-12) mirror /ws/training and
+    /ws/control so every WebSocket route enforces the same policy:
+    1. API-key header auth (legacy)
+    2. Opt-in Sec-WebSocket-Protocol bearer-token auth
+    3. Origin allowlist (CSWSH defense)
+    4. Per-IP connection cap
+
     Handles both text and non-text frames gracefully.
     """
     if not await _authenticate_websocket(websocket):
         return
 
-    await websocket_manager.connect(websocket)
+    # SEC-06: opt-in bearer-token auth over Sec-WebSocket-Protocol
+    ws_auth_ok, ws_subprotocol = await _authenticate_websocket_token(websocket)
+    if not ws_auth_ok:
+        return
+
+    # SEC-05 / SEC-12: Origin validation (parity with /ws/training, /ws/control)
+    from ws_security import validate_origin
+
+    ws_settings = settings.websocket
+    if ws_settings.allowed_origins:
+        if not validate_origin(websocket, ws_settings.allowed_origins):
+            from audit_log import log_ws_origin_rejected
+
+            origin = websocket.headers.get("origin", "")
+            client_ip = websocket.client[0] if websocket.client else "unknown"
+            log_ws_origin_rejected("/ws", client_ip, origin)
+            await websocket.close(code=4003, reason="Origin not allowed")
+            return
+
+    # SEC-12: Per-IP connection cap (parity with /ws/training, /ws/control)
+    if not websocket_manager.check_per_ip_limit(websocket, ws_settings.max_connections_per_ip):
+        await websocket.close(code=1013, reason="Per-IP connection limit reached")
+        return
+
+    await websocket_manager.connect(websocket, subprotocol=ws_subprotocol)
     try:
         while True:
             await websocket.receive_text()
@@ -2350,9 +2450,14 @@ async def api_set_params(body: SetParamsRequest):
         await websocket_manager.broadcast({"type": "params_updated", "data": broadcast_data})
 
         return {"status": "success", "state": training_state.get_state()}
-    except Exception as e:
-        system_logger.error(f"Failed to set parameters: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+    except Exception as exc:
+        # SEC-14: return an opaque error_id; full traceback goes to logs only.
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error(f"Failed to set parameters [error_id={error_id}]", exception=exc)
+        return JSONResponse(
+            {"error": "Internal server error", "error_id": error_id},
+            status_code=500,
+        )
 
 
 # =========================================================================
@@ -2372,27 +2477,47 @@ async def api_remote_status():
     return {"available": False, "connected": False, "workers_active": False, "error": "Not available in demo mode"}
 
 
+class RemoteConnectRequest(BaseModel):
+    """Request body for ``POST /api/remote/connect`` (SEC-13).
+
+    The authkey was previously a query parameter and therefore leaked into
+    web-server access logs, browser history, and Referer headers. It now
+    travels in the POST body as a ``SecretStr`` so it is redacted in
+    Pydantic logs/reprs and never appears in URLs.
+    """
+
+    host: str = Field(..., min_length=1)
+    port: int = Field(..., ge=1, le=65535)
+    authkey: SecretStr
+
+
 @app.post("/api/remote/connect")
-async def api_remote_connect(host: str, port: int, authkey: str):
+async def api_remote_connect(request: RemoteConnectRequest):
     """
     Connect to a remote CandidateTrainingManager (P1-NEW-002).
-    Args:
-        host: Remote manager host address.
-        port: Remote manager port.
-        authkey: Authentication key for secure connection.
-    Returns:
-        Connection status.
+
+    Request body (SEC-13): ``{"host": str, "port": int, "authkey": str}``.
+    Callers that still send ``authkey`` as a query parameter will receive a
+    422 from FastAPI because the body is now required.
     """
     if backend.backend_type != "service" or not hasattr(backend, "_adapter"):
         return JSONResponse({"error": "Not available in demo mode"}, status_code=503)
 
     try:
-        success = backend._adapter.connect_remote_workers((host, port), authkey)
+        success = backend._adapter.connect_remote_workers((request.host, request.port), request.authkey.get_secret_value())
         if success:
-            return {"status": "connected", "address": f"{host}:{port}"}
+            return {"status": "connected", "address": f"{request.host}:{request.port}"}
         return JSONResponse({"error": "Connection failed"}, status_code=500)
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error(
+            f"Remote connect failed [error_id={error_id} host={request.host} port={request.port}]",
+            exception=exc,
+        )
+        return JSONResponse(
+            {"error": "Internal server error", "error_id": error_id},
+            status_code=500,
+        )
 
 
 @app.post("/api/remote/start_workers")
