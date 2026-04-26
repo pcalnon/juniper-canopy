@@ -1665,12 +1665,19 @@ class DemoMode:
         except Exception as exc:
             self.logger.warning("JuniperData dataset generation failed (%s), falling back to local generation", exc)
             self.dataset = self._generate_spiral_dataset_local(n_samples=n_samples)
-        self.network.train_x = self.dataset["inputs_tensor"]
-        self.network.train_y = self.dataset["targets_tensor"]
-        self.current_epoch = 0
-        self.current_loss = 1.0
-        self.current_accuracy = 0.5
+        # CONC-07/BUG-CN-11: train_x/train_y and the current_* counters are read by
+        # the training thread under self._lock; mutating them outside the lock allowed
+        # readers to observe a partial state (e.g. new train_x with stale train_y, or
+        # a stale epoch counter alongside the freshly assigned dataset). Apply all
+        # reset state changes atomically inside the lock. Dataset generation stays
+        # outside the lock so the (potentially slow) JuniperData round-trip does not
+        # block training-thread state reads.
         with self._lock:
+            self.network.train_x = self.dataset["inputs_tensor"]
+            self.network.train_y = self.dataset["targets_tensor"]
+            self.current_epoch = 0
+            self.current_loss = 1.0
+            self.current_accuracy = 0.5
             self.metrics_history.clear()
         self.logger.info(f"Dataset regenerated: n_samples={n_samples}, n_rotations={n_rotations}")
         return self.dataset
