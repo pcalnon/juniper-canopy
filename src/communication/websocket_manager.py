@@ -135,6 +135,7 @@ import contextlib
 
 # import json
 import logging
+import threading
 import time
 from datetime import datetime
 
@@ -189,6 +190,14 @@ class WebSocketManager:
 
         # Phase B-pre-a: Per-IP connection tracking (M-SEC-04)
         self._per_ip_counts: Dict[str, int] = {}
+        # CONC-01 (Phase 3B): The check_per_ip_limit / _decrement_ip_count pair
+        # is a non-atomic read-modify-write on _per_ip_counts. While both methods
+        # are sync (no await between get and assign, so async tasks on a single
+        # event loop cannot interleave with themselves), disconnect() can also
+        # be called from background-thread send paths. Use a threading.Lock so
+        # the protection holds for any caller — sync, async, or BG thread —
+        # without forcing the public API to become async.
+        self._ip_lock = threading.Lock()
 
         self.logger.info(f"WebSocketManager initialized: " f"max_connections={self.max_connections}, " f"heartbeat_interval={self.heartbeat_interval}s, " f"reconnect_attempts={self.reconnect_attempts}, " f"reconnect_delay={self.reconnect_delay}s")
 
@@ -284,21 +293,29 @@ class WebSocketManager:
             True if the connection is allowed, False if limit reached.
         """
         source_ip = websocket.client[0] if websocket.client else "unknown"
-        current = self._per_ip_counts.get(source_ip, 0)
-        if current >= max_per_ip:
-            self.logger.warning(f"Per-IP limit reached for {source_ip} ({current}/{max_per_ip})")
-            return False
-        self._per_ip_counts[source_ip] = current + 1
+        # CONC-01 (Phase 3B): atomic check-then-increment under self._ip_lock —
+        # before this guard two near-simultaneous connections from the same IP
+        # could both read `current = max_per_ip - 1`, both pass the check, and
+        # both write `max_per_ip`, exceeding the configured per-IP cap.
+        with self._ip_lock:
+            current = self._per_ip_counts.get(source_ip, 0)
+            if current >= max_per_ip:
+                self.logger.warning(f"Per-IP limit reached for {source_ip} ({current}/{max_per_ip})")
+                return False
+            self._per_ip_counts[source_ip] = current + 1
         return True
 
     def _decrement_ip_count(self, websocket: WebSocket) -> None:
         """Decrement per-IP counter on disconnect."""
         source_ip = websocket.client[0] if websocket.client else "unknown"
-        count = self._per_ip_counts.get(source_ip, 0)
-        if count <= 1:
-            self._per_ip_counts.pop(source_ip, None)
-        else:
-            self._per_ip_counts[source_ip] = count - 1
+        # CONC-01 (Phase 3B): symmetric atomic decrement so a concurrent
+        # disconnect cannot lose a count and underflow the limiter.
+        with self._ip_lock:
+            count = self._per_ip_counts.get(source_ip, 0)
+            if count <= 1:
+                self._per_ip_counts.pop(source_ip, None)
+            else:
+                self._per_ip_counts[source_ip] = count - 1
 
     def disconnect(self, websocket: WebSocket):
         """
