@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from observability import (
+    UNMATCHED_ENDPOINT_LABEL,
     JuniperJsonFormatter,
     PrometheusMiddleware,
     RequestIdMiddleware,
@@ -189,12 +190,27 @@ class TestRequestIdMiddleware:
 class TestPrometheusMiddleware:
     """Tests for PrometheusMiddleware."""
 
+    @staticmethod
+    def _build_request(*, method: str, url_path: str, route_template: str | None) -> MagicMock:
+        request = MagicMock()
+        request.url.path = url_path
+        request.method = method
+        if route_template is None:
+            request.scope = {}
+        else:
+            route = MagicMock()
+            route.path = route_template
+            request.scope = {"route": route}
+        return request
+
     @pytest.mark.asyncio
-    async def test_increments_counter_and_records_histogram(self):
+    async def test_matched_route_uses_template_for_endpoint_label(self):
+        """When Starlette resolves a route, the endpoint label is the template, not the raw URL."""
         with patch("prometheus_client.Counter") as MockCounter, patch("prometheus_client.Histogram") as MockHistogram:
-            mock_counter = MagicMock()
+            request_count = MagicMock()
+            unmatched_count = MagicMock()
+            MockCounter.side_effect = [request_count, unmatched_count]
             mock_histogram = MagicMock()
-            MockCounter.return_value = mock_counter
             MockHistogram.return_value = mock_histogram
 
             middleware = PrometheusMiddleware(app=MagicMock(), service_name="test", namespace="juniper_canopy")
@@ -205,63 +221,77 @@ class TestPrometheusMiddleware:
             async def mock_call_next(request):
                 return response
 
-            route = MagicMock()
-            route.path = "/v1/test"
-            request = MagicMock()
-            request.url.path = "/v1/test"
-            request.method = "GET"
-            request.scope = {"route": route}
-
+            request = self._build_request(method="GET", url_path="/v1/items/12345", route_template="/v1/items/{item_id}")
             result = await middleware.dispatch(request, mock_call_next)
 
-            mock_counter.labels.assert_called_once_with(method="GET", endpoint="/v1/test", status="200")
-            mock_counter.labels().inc.assert_called_once()
-            mock_histogram.labels.assert_called_once_with(method="GET", endpoint="/v1/test")
+            request_count.labels.assert_called_once_with(method="GET", endpoint="/v1/items/{item_id}", status="200")
+            request_count.labels().inc.assert_called_once()
+            mock_histogram.labels.assert_called_once_with(method="GET", endpoint="/v1/items/{item_id}")
             mock_histogram.labels().observe.assert_called_once()
+            unmatched_count.labels.assert_not_called()
             assert result == response
 
     @pytest.mark.asyncio
-    async def test_uses_route_template_not_raw_path(self):
-        """Verify route template is used for endpoint label to avoid cardinality explosion."""
+    async def test_unmatched_route_collapses_to_single_label(self):
+        """No resolved route → endpoint label collapses to UNMATCHED_ENDPOINT_LABEL and unmatched counter increments."""
         with patch("prometheus_client.Counter") as MockCounter, patch("prometheus_client.Histogram") as MockHistogram:
-            mock_counter = MagicMock()
-            mock_histogram = MagicMock()
-            MockCounter.return_value = mock_counter
-            MockHistogram.return_value = mock_histogram
+            request_count = MagicMock()
+            unmatched_count = MagicMock()
+            MockCounter.side_effect = [request_count, unmatched_count]
+            MockHistogram.return_value = MagicMock()
 
-            middleware = PrometheusMiddleware(app=MagicMock(), service_name="test", namespace="test")
+            middleware = PrometheusMiddleware(app=MagicMock(), service_name="test", namespace="juniper_canopy")
 
             response = MagicMock()
-            response.status_code = 200
+            response.status_code = 404
 
             async def mock_call_next(request):
                 return response
 
-            route = MagicMock()
-            route.path = "/v1/items/{item_id}"
-            request = MagicMock()
-            request.url.path = "/v1/items/12345"
-            request.method = "GET"
-            request.scope = {"route": route}
-
+            request = self._build_request(method="GET", url_path="/totally/unknown/path", route_template=None)
             await middleware.dispatch(request, mock_call_next)
 
-            mock_counter.labels.assert_called_once_with(method="GET", endpoint="/v1/items/{item_id}", status="200")
+            request_count.labels.assert_called_once_with(method="GET", endpoint=UNMATCHED_ENDPOINT_LABEL, status="404")
+            unmatched_count.labels.assert_called_once_with(method="GET")
+            unmatched_count.labels().inc.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cardinality_bounded_under_high_entropy_paths(self):
+        """Sending N distinct unmatched URLs must still produce only one endpoint label value."""
+        with patch("prometheus_client.Counter") as MockCounter, patch("prometheus_client.Histogram") as MockHistogram:
+            request_count = MagicMock()
+            unmatched_count = MagicMock()
+            MockCounter.side_effect = [request_count, unmatched_count]
+            MockHistogram.return_value = MagicMock()
+
+            middleware = PrometheusMiddleware(app=MagicMock(), service_name="test", namespace="juniper_canopy")
+
+            response = MagicMock()
+            response.status_code = 404
+
+            async def mock_call_next(request):
+                return response
+
+            for i in range(50):
+                request = self._build_request(method="GET", url_path=f"/attacker/{i}/abc", route_template=None)
+                await middleware.dispatch(request, mock_call_next)
+
+            distinct_endpoints = {call.kwargs["endpoint"] for call in request_count.labels.call_args_list}
+            assert distinct_endpoints == {UNMATCHED_ENDPOINT_LABEL}, f"endpoint label cardinality leaked: {distinct_endpoints}"
+            assert unmatched_count.labels.call_count == 50
 
     @pytest.mark.asyncio
     async def test_namespace_prefix_applied_to_metric_names(self):
-        """Verify that the namespace parameter prefixes metric names."""
+        """Verify that the namespace parameter prefixes all three metric names."""
         with patch("prometheus_client.Counter") as MockCounter, patch("prometheus_client.Histogram") as MockHistogram:
             MockCounter.return_value = MagicMock()
             MockHistogram.return_value = MagicMock()
 
             PrometheusMiddleware(app=MagicMock(), service_name="test", namespace="juniper_canopy")
 
-            MockCounter.assert_called_once_with(
-                "juniper_canopy_http_requests_total",
-                "Total HTTP requests",
-                ["method", "endpoint", "status"],
-            )
+            counter_names = [call.args[0] for call in MockCounter.call_args_list]
+            assert "juniper_canopy_http_requests_total" in counter_names
+            assert "juniper_canopy_http_unmatched_requests_total" in counter_names
             MockHistogram.assert_called_once_with(
                 "juniper_canopy_http_request_duration_seconds",
                 "HTTP request duration in seconds",
@@ -277,11 +307,9 @@ class TestPrometheusMiddleware:
 
             PrometheusMiddleware(app=MagicMock(), service_name="test", namespace="")
 
-            MockCounter.assert_called_once_with(
-                "http_requests_total",
-                "Total HTTP requests",
-                ["method", "endpoint", "status"],
-            )
+            counter_names = [call.args[0] for call in MockCounter.call_args_list]
+            assert "http_requests_total" in counter_names
+            assert "http_unmatched_requests_total" in counter_names
 
 
 @pytest.mark.unit
