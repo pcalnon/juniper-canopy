@@ -1637,10 +1637,18 @@ class DemoMode:
         self._perform_reset()
 
     def _perform_reset(self):
+        # BUG-CN-01 (Phase 3D): keep `is_running`, `_stop`, and `_pause`
+        # transitions atomic by holding `self._lock` across all three. The
+        # pre-fix version released the lock between `is_running = False` and
+        # the event clears, so the training loop could observe `is_running ==
+        # False` while `_stop` was still set — leaving the next start() call
+        # racing against a stale stop signal that gets cleared a moment later.
+        # Holding the lock keeps the state machine and the threading.Event
+        # primitives in sync from the perspective of every reader.
         with self._lock:
             self.is_running = False
-        self._stop.clear()
-        self._pause.clear()
+            self._stop.clear()
+            self._pause.clear()
 
     def _broadcast_status(self, status: str):
         """
