@@ -938,7 +938,7 @@ logs/ui.log        # User interactions
 
 - [README.md](../README.md) - Quick start guide
 - [API_REFERENCE.md](api/API_REFERENCE.md) - Complete API documentation
-- [DEVELOPMENT_ROADMAP.md](../notes/development/DEVELOPMENT_ROADMAP.md) - Planned features
+- [DEVELOPMENT_ROADMAP.md](../notes/history/DEVELOPMENT_ROADMAP.md) - Planned features
 - [CHANGELOG.md](../CHANGELOG.md) - Release history
 
 ### Support

@@ -1252,7 +1252,7 @@ The demo mode must accurately simulate the real CasCor backend to enable UI deve
 
 **Implementation:** [src/demo_mode.py](src/demo_mode.py)
 
-**Non-MVP Features (see [DEVELOPMENT_ROADMAP.md](notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md)):**
+**Non-MVP Features (see [DEVELOPMENT_ROADMAP.md](notes/development/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md)):**
 
 - HDF5 snapshot playback
 - Export formats (Cytoscape)
@@ -2419,7 +2419,7 @@ This directory contains historical documentation that has been superseded or con
    - Quick start commands
    - Current features
 
-3. **[notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md](notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md)** - Update status
+3. **[notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md](notes/development/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md)** - Update status
    - Mark completed items
    - Update in-progress status
    - Add newly identified work
@@ -2456,7 +2456,7 @@ All new or modified code must meet these requirements before merging:
 
 - [ ] [CHANGELOG.md](CHANGELOG.md) updated with changes and impact
 - [ ] [README.md](README.md) reflects current run/test instructions
-- [ ] [notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md](notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md) status updated
+- [ ] [notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md](notes/development/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md) status updated
 - [ ] Code comments only where complexity requires explanation
 - [ ] All public methods have docstrings
 

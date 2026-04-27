@@ -3,7 +3,7 @@
 **Date**: 2026-04-04
 **Branch**: `fix/ci-test-collection-and-deps`
 **Status**: Implemented and Verified
-**Related Analysis**: [CI_TEST_FAILURE_ANALYSIS_2026-04-04.md](CI_TEST_FAILURE_ANALYSIS_2026-04-04.md)
+**Related Analysis**: [CI_TEST_FAILURE_ANALYSIS_2026-04-04.md](../history/CI_TEST_FAILURE_ANALYSIS_2026-04-04.md) (archived)
 
 ---
 

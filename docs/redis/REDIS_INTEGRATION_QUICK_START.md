@@ -421,7 +421,7 @@ redis-cli config set maxmemory-policy allkeys-lru
 
 **To track implementation progress:**
 
-1. Check [DEVELOPMENT_ROADMAP.md](../../notes/development/DEVELOPMENT_ROADMAP.md) for Redis tasks
+1. Check [DEVELOPMENT_ROADMAP.md](../../notes/history/DEVELOPMENT_ROADMAP.md) for Redis tasks
 2. Review [CHANGELOG.md](../../CHANGELOG.md) for updates
 3. Monitor GitHub issues for Redis integration milestone
 
@@ -544,7 +544,7 @@ cache:
 Use in-memory caching (`type: memory`) until Redis implementation is complete.
 
 **Track Progress:**
-Check [DEVELOPMENT_ROADMAP.md](../../notes/development/DEVELOPMENT_ROADMAP.md) for Redis implementation status.
+Check [DEVELOPMENT_ROADMAP.md](../../notes/history/DEVELOPMENT_ROADMAP.md) for Redis implementation status.
 
 ---
 
