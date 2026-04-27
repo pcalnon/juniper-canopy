@@ -1,8 +1,8 @@
 """Extended coverage tests for the observability module.
 
-Covers PrometheusMiddleware fallback to raw path, configure_sentry
-parameter forwarding, invalid log levels, request ID context isolation,
-and _ensure_canopy_metrics lazy initialization.
+Covers PrometheusMiddleware unmatched-route bucketing (METRICS-MON
+seed-01), configure_sentry parameter forwarding, invalid log levels,
+request ID context isolation, and _ensure_canopy_metrics lazy init.
 """
 
 import json
@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from observability import (
+    UNMATCHED_ENDPOINT_LABEL,
     JuniperJsonFormatter,
     PrometheusMiddleware,
     RequestIdMiddleware,
@@ -28,13 +29,13 @@ class TestPrometheusMiddlewareCoverage:
     """Additional PrometheusMiddleware edge cases."""
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_raw_path_when_no_route(self):
-        """When scope has no 'route', endpoint label uses request.url.path."""
+    async def test_unmatched_collapses_to_label_when_no_route(self):
+        """When scope has no 'route' key, endpoint label collapses to UNMATCHED_ENDPOINT_LABEL."""
         with patch("prometheus_client.Counter") as MockCounter, patch("prometheus_client.Histogram") as MockHistogram:
-            mock_counter = MagicMock()
-            mock_histogram = MagicMock()
-            MockCounter.return_value = mock_counter
-            MockHistogram.return_value = mock_histogram
+            request_count = MagicMock()
+            unmatched_count = MagicMock()
+            MockCounter.side_effect = [request_count, unmatched_count]
+            MockHistogram.return_value = MagicMock()
 
             middleware = PrometheusMiddleware(app=MagicMock(), namespace="test")
 
@@ -51,16 +52,17 @@ class TestPrometheusMiddlewareCoverage:
 
             await middleware.dispatch(request, mock_call_next)
 
-            mock_counter.labels.assert_called_once_with(method="GET", endpoint="/some/unmatched/path", status="200")
+            request_count.labels.assert_called_once_with(method="GET", endpoint=UNMATCHED_ENDPOINT_LABEL, status="200")
+            unmatched_count.labels.assert_called_once_with(method="GET")
 
     @pytest.mark.asyncio
-    async def test_route_is_none_falls_back_to_raw_path(self):
-        """When scope['route'] is None, endpoint label uses request.url.path."""
+    async def test_unmatched_collapses_to_label_when_route_is_none(self):
+        """When scope['route'] is None, endpoint label collapses to UNMATCHED_ENDPOINT_LABEL."""
         with patch("prometheus_client.Counter") as MockCounter, patch("prometheus_client.Histogram") as MockHistogram:
-            mock_counter = MagicMock()
-            mock_histogram = MagicMock()
-            MockCounter.return_value = mock_counter
-            MockHistogram.return_value = mock_histogram
+            request_count = MagicMock()
+            unmatched_count = MagicMock()
+            MockCounter.side_effect = [request_count, unmatched_count]
+            MockHistogram.return_value = MagicMock()
 
             middleware = PrometheusMiddleware(app=MagicMock(), namespace="test")
 
@@ -77,7 +79,8 @@ class TestPrometheusMiddlewareCoverage:
 
             await middleware.dispatch(request, mock_call_next)
 
-            mock_counter.labels.assert_called_once_with(method="POST", endpoint="/raw/path", status="200")
+            request_count.labels.assert_called_once_with(method="POST", endpoint=UNMATCHED_ENDPOINT_LABEL, status="200")
+            unmatched_count.labels.assert_called_once_with(method="POST")
 
     @pytest.mark.asyncio
     async def test_records_duration_as_positive_float(self):
@@ -145,11 +148,9 @@ class TestPrometheusMiddlewareCoverage:
 
             PrometheusMiddleware(app=MagicMock())
 
-            MockCounter.assert_called_once_with(
-                "juniper_canopy_http_requests_total",
-                "Total HTTP requests",
-                ["method", "endpoint", "status"],
-            )
+            counter_names = [call.args[0] for call in MockCounter.call_args_list]
+            assert "juniper_canopy_http_requests_total" in counter_names
+            assert "juniper_canopy_http_unmatched_requests_total" in counter_names
 
 
 @pytest.mark.unit

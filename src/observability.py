@@ -56,6 +56,16 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
             request_id_var.reset(token)
 
 
+# METRICS-MON seed-01 / R1.1: bound cardinality. The previous fallback to
+# ``request.url.path`` produced an unbounded ``endpoint`` label set under
+# attacker-controlled paths or path-parameter routes. Restrict the label
+# to the resolved Starlette route template; collapse unmatched requests
+# into ``UNMATCHED_ENDPOINT_LABEL`` and emit a separate counter so the
+# unmatched volume remains observable. Aligned with juniper-data and
+# juniper-cascor.
+UNMATCHED_ENDPOINT_LABEL = "_unmatched"
+
+
 class PrometheusMiddleware(BaseHTTPMiddleware):
     """Tracks http_requests_total and http_request_duration_seconds with namespace prefix."""
 
@@ -74,6 +84,11 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
             "HTTP request duration in seconds",
             ["method", "endpoint"],
         )
+        self._unmatched_count = Counter(
+            f"{prefix}http_unmatched_requests_total",
+            "HTTP requests not matching any registered route template",
+            ["method"],
+        )
 
     async def dispatch(
         self,
@@ -84,10 +99,15 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         duration = time.perf_counter() - start
 
-        # Use route template to avoid unbounded label cardinality from path parameters
         route = request.scope.get("route")
-        endpoint = route.path if route else request.url.path
+        template = getattr(route, "path", None) if route is not None else None
         method = request.method
+        if template:
+            endpoint = template
+        else:
+            endpoint = UNMATCHED_ENDPOINT_LABEL
+            self._unmatched_count.labels(method=method).inc()
+
         status = str(response.status_code)
 
         self._request_count.labels(method=method, endpoint=endpoint, status=status).inc()
