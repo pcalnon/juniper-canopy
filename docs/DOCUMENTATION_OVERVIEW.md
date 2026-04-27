@@ -48,8 +48,8 @@
 | **Set up CI/CD environment** | [CICD_ENVIRONMENT_SETUP.md](ci_cd/CICD_ENVIRONMENT_SETUP.md)              | docs/ci_cd/    |
 | **Learn CI/CD workflow**     | [CICD_MANUAL.md](ci_cd/CICD_MANUAL.md)                                    | docs/ci_cd/    |
 | **CI/CD reference**          | [CICD_REFERENCE.md](ci_cd/CICD_REFERENCE.md)                              | docs/ci_cd/    |
-| **Review release-readiness findings** | [CODE_REVIEW_ANALYSIS_2026-04-04.md](../notes/CODE_REVIEW_ANALYSIS_2026-04-04.md) | notes/ |
-| **Review remediation execution plan** | [CODE_REVIEW_PLAN_2026-04-04.md](../notes/CODE_REVIEW_PLAN_2026-04-04.md) | notes/ |
+| **Review release-readiness findings** | [CODE_REVIEW_ANALYSIS_2026-04-04.md](../notes/history/CODE_REVIEW_ANALYSIS_2026-04-04.md) | notes/history/ |
+| **Review remediation execution plan** | [CODE_REVIEW_PLAN_2026-04-04.md](../notes/history/CODE_REVIEW_PLAN_2026-04-04.md) | notes/history/ |
 | **Find technical reference** | [REFERENCE.md](REFERENCE.md)                                              | docs/          |
 | **See version history**      | [CHANGELOG.md](../CHANGELOG.md)                                           | Root           |
 | **Quick-reference dev tasks** | [DEVELOPER_CHEATSHEET.md](DEVELOPER_CHEATSHEET.md)              | docs/         |
