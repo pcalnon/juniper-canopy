@@ -622,6 +622,31 @@ class DemoMode:
 
         self.logger.info("DemoMode initialized with spiral dataset")
 
+    # CONC-08 (Phase 3C): `self.is_running` is touched from at least three
+    # contexts — the API control endpoints (start/stop/pause/resume/reset),
+    # the demo training thread itself (which clears it on completion or stop),
+    # and the regenerate_dataset path. Pre-fix sites were inconsistently
+    # locked: writes inside the training thread used `with self._lock:` while
+    # the API-side checks (`if self.is_running ...`) and the
+    # `was_running := self.is_running` walrus read it without the lock,
+    # leaving classic check-then-act races. The `running` property and
+    # `_set_running` helper below give every caller a single locked path so
+    # the field is read and written under `self._lock` consistently. The
+    # underlying `self.is_running` attribute is kept (rather than promoted to
+    # a property) so existing test code that introspects it as a plain field
+    # keeps working; the helpers are for the production code paths that
+    # actually run in the racing contexts.
+    @property
+    def running(self) -> bool:
+        """Thread-safe read of `is_running`."""
+        with self._lock:
+            return self.is_running
+
+    def _set_running(self, value: bool) -> None:
+        """Thread-safe write of `is_running`."""
+        with self._lock:
+            self.is_running = value
+
     def _initialize_training_state(self):
         """Initialize TrainingState with demo values."""
         if self.training_state:
@@ -1148,7 +1173,7 @@ class DemoMode:
                         break
 
         if self._stop.is_set():
-            self.is_running = False
+            self._set_running(False)  # CONC-08
             self.logger.info("Demo training stopped during initial output training")
             return
 
@@ -1290,7 +1315,7 @@ class DemoMode:
         # Mark completion
         self.state_machine.mark_completed()
         self._update_training_status()
-        self.is_running = False
+        self._set_running(False)  # CONC-08
         self.logger.info("Demo training simulation completed")
 
     def _emit_training_metrics(self):
@@ -1395,7 +1420,7 @@ class DemoMode:
             self.logger.error("FSM: Invalid START command in current state")
             return self.get_current_state()
 
-        if self.is_running and not reset:
+        if self.running and not reset:  # CONC-08
             self.logger.warning("Demo mode already running")
             return self.get_current_state()
 
@@ -1475,7 +1500,7 @@ class DemoMode:
             self.logger.error("FSM: Invalid STOP command in current state")
             return
 
-        if not self.is_running:
+        if not self.running:  # CONC-08
             # Update state even if not running
             # self._update_training_state()
             self._update_training_status()
@@ -1513,7 +1538,7 @@ class DemoMode:
             self.logger.error("FSM: Invalid PAUSE command in current state")
             return
 
-        if not self.is_running:
+        if not self.running:  # CONC-08
             self.logger.warning("Demo mode not running, cannot pause")
             return
 
@@ -1537,7 +1562,7 @@ class DemoMode:
             if candidate_state := self.state_machine.get_candidate_state():
                 self.logger.info(f"Restoring candidate state: {candidate_state}")
 
-        if not self.is_running:
+        if not self.running:  # CONC-08
             self.logger.warning("Demo mode not running, cannot resume")
             return
 
@@ -1581,7 +1606,7 @@ class DemoMode:
             self.logger.error("FSM: Failed to reset")
             return self.get_current_state()
 
-        if was_running := self.is_running:
+        if was_running := self.running:  # CONC-08
             self._reset_while_running(was_running)
         with self._lock:
             self._reset_state_and_history()
@@ -1657,7 +1682,7 @@ class DemoMode:
         Returns:
             New dataset dictionary.
         """
-        if self.is_running:
+        if self.running:  # CONC-08
             self.stop()
 
         try:

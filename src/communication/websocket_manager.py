@@ -181,6 +181,20 @@ class WebSocketManager:
         self.logger = self._setup_logger()
         self.message_count = 0
         self.event_loop: Optional[asyncio.AbstractEventLoop] = None
+        # BUG-CN-09 / BUG-CN-10 (Phase 3C): `active_connections`,
+        # `connection_metadata`, and `message_count` are touched from at least
+        # three execution contexts: the asyncio event loop (FastAPI websocket
+        # endpoints), background threads via `broadcast_from_thread →
+        # broadcast` (which currently re-enters the event loop but used to
+        # iterate directly), and `disconnect()` which can fire from
+        # `send_personal_message` after a send error. Iterating a bare `set()`
+        # while another thread mutates it raises
+        # `RuntimeError: Set changed size during iteration` (BUG-CN-09); the
+        # `self.message_count += 1` increment is also a non-atomic
+        # read-modify-write (BUG-CN-10). Guard every mutation site and the
+        # read-then-iterate snapshot with a single `threading.Lock` so the
+        # protection composes regardless of the calling context.
+        self._connections_lock = threading.Lock()
 
         _settings = get_settings()
         self.max_connections = _settings.websocket.max_connections
@@ -254,25 +268,36 @@ class WebSocketManager:
         Example:
             await websocket_manager.connect(websocket, client_id='dashboard-1')
         """
-        if len(self.active_connections) >= self.max_connections:
-            self.logger.warning(f"Max connections ({self.max_connections}) reached, rejecting client")
+        # BUG-CN-09 (Phase 3C): hold _connections_lock for the cap-check +
+        # add so a concurrent `connect()` cannot also pass `len(...) <
+        # max_connections` and overshoot, and so the set mutation cannot race
+        # with a broadcast snapshot.
+        with self._connections_lock:
+            if len(self.active_connections) >= self.max_connections:
+                self.logger.warning(f"Max connections ({self.max_connections}) reached, rejecting client")
+                # Release the lock before the (suspending) close — we already
+                # rejected the slot.
+                close_ws = True
+            else:
+                close_ws = False
+        if close_ws:
             await websocket.close(code=1013, reason="Max connections reached")
             return
 
         await websocket.accept(subprotocol=subprotocol)
 
-        # Add to active connections
-        self.active_connections.add(websocket)
+        with self._connections_lock:
+            self.active_connections.add(websocket)
+            self.connection_metadata[websocket] = {
+                "client_id": client_id or f"client-{id(websocket)}",
+                "connected_at": datetime.now().isoformat(),
+                "messages_sent": 0,
+                "last_message_at": None,
+            }
+            client_label = self.connection_metadata[websocket]["client_id"]
+            total_after = len(self.active_connections)
 
-        # Store metadata
-        self.connection_metadata[websocket] = {
-            "client_id": client_id or f"client-{id(websocket)}",
-            "connected_at": datetime.now().isoformat(),
-            "messages_sent": 0,
-            "last_message_at": None,
-        }
-
-        self.logger.info(f"Client connected: {self.connection_metadata[websocket]['client_id']} " f"(Total: {len(self.active_connections)})")
+        self.logger.info(f"Client connected: {client_label} " f"(Total: {total_after})")
 
         # Send initial connection acknowledgment
         await self.send_personal_message(
@@ -327,15 +352,21 @@ class WebSocketManager:
         Example:
             websocket_manager.disconnect(websocket)
         """
-        if websocket in self.active_connections:
+        # BUG-CN-09 (Phase 3C): membership probe + set/dict mutation must be
+        # atomic relative to broadcast snapshots and concurrent disconnects.
+        # _decrement_ip_count is intentionally invoked outside this lock so
+        # we don't nest _ip_lock under _connections_lock (lock-order rule).
+        with self._connections_lock:
+            if websocket not in self.active_connections:
+                return
             client_info = self.connection_metadata.get(websocket, {})
             client_id = client_info.get("client_id", "unknown")
-
             self.active_connections.discard(websocket)
             self.connection_metadata.pop(websocket, None)
-            self._decrement_ip_count(websocket)
+            remaining = len(self.active_connections)
 
-            self.logger.info(f"Client disconnected: {client_id} " f"(Remaining: {len(self.active_connections)})")
+        self._decrement_ip_count(websocket)
+        self.logger.info(f"Client disconnected: {client_id} " f"(Remaining: {remaining})")
 
     async def send_personal_message(self, message: dict, websocket: WebSocket):
         """
@@ -363,10 +394,16 @@ class WebSocketManager:
             # Send as JSON
             await websocket.send_json(message)
 
-            # Update metadata
-            if websocket in self.connection_metadata:
-                self.connection_metadata[websocket]["messages_sent"] += 1
-                self.connection_metadata[websocket]["last_message_at"] = datetime.now().isoformat()
+            # BUG-CN-09 / BUG-CN-10 (Phase 3C): per-connection metadata is
+            # mutated from any context that calls send_personal_message —
+            # protect under _connections_lock so the increment composes with
+            # broadcast() and disconnect().
+            now_iso = datetime.now().isoformat()
+            with self._connections_lock:
+                meta = self.connection_metadata.get(websocket)
+                if meta is not None:
+                    meta["messages_sent"] += 1
+                    meta["last_message_at"] = now_iso
 
         except Exception as e:
             self.logger.warning(f"Failed to send message to client: {e}")
@@ -388,40 +425,49 @@ class WebSocketManager:
                 'loss': 0.5
             })
         """
-        if not self.active_connections:
-            self.logger.debug("No active connections for broadcast")
-            return
+        # BUG-CN-09 / BUG-CN-10 (Phase 3C): snapshot the connection set under
+        # the lock and increment the message counter inside the same critical
+        # section, then iterate the snapshot outside the lock so a slow
+        # `await connection.send_json(message)` cannot block other connect /
+        # disconnect operations or other broadcasts.
+        excluded = exclude or set()
+        with self._connections_lock:
+            if not self.active_connections:
+                self.logger.debug("No active connections for broadcast")
+                return
+            self.message_count += 1
+            current_count = self.message_count
+            connections = self.active_connections - excluded
 
         # Add timestamp if not present (copy to avoid mutating caller's dict).
         # Match the Unix-float schema used by create_*_message() helpers.
         if "timestamp" not in message:
             message = {**message, "timestamp": time.time()}
 
-        # Track message
-        self.message_count += 1
-
-        # Send to all connections (excluding specified ones)
+        # Send to all connections in the snapshot.
         disconnected = set()
-        connections = self.active_connections - (exclude or set())
-
         for connection in connections:
             try:
                 await connection.send_json(message)
-
-                # Update metadata
-                if connection in self.connection_metadata:
-                    self.connection_metadata[connection]["messages_sent"] += 1
-                    self.connection_metadata[connection]["last_message_at"] = datetime.now().isoformat()
-
             except Exception as e:
                 self.logger.warning(f"Failed to broadcast to client: {e}")
                 disconnected.add(connection)
+                continue
 
-        # Remove disconnected clients
+            # Per-connection metadata bookkeeping under the same lock so the
+            # counter can't race with disconnect() removing the entry.
+            now_iso = datetime.now().isoformat()
+            with self._connections_lock:
+                meta = self.connection_metadata.get(connection)
+                if meta is not None:
+                    meta["messages_sent"] += 1
+                    meta["last_message_at"] = now_iso
+
+        # Remove disconnected clients (disconnect() reacquires the lock).
         for connection in disconnected:
             self.disconnect(connection)
 
-        self.logger.debug(f"Broadcast message #{self.message_count} to {len(connections)} clients " f"(type: {message.get('type', 'unknown')})")
+        self.logger.debug(f"Broadcast message #{current_count} to {len(connections)} clients " f"(type: {message.get('type', 'unknown')})")
 
     def broadcast_sync(self, message: dict):
         """
@@ -469,7 +515,12 @@ class WebSocketManager:
                 'data': {...}
             })
         """
-        if not self.active_connections:
+        # BUG-CN-09 (Phase 3C): the early-out used to read len(set) from a
+        # background thread without the lock. Snapshot the size under the
+        # lock and decide based on that to avoid racing against connect().
+        with self._connections_lock:
+            has_connections = bool(self.active_connections)
+        if not has_connections:
             # No clients connected, skip broadcast to avoid logging spam
             return
 
@@ -547,7 +598,8 @@ class WebSocketManager:
             count = websocket_manager.get_connection_count()
             print(f"{count} clients connected")
         """
-        return len(self.active_connections)
+        with self._connections_lock:
+            return len(self.active_connections)
 
     def get_connection_info(self) -> list:
         """
@@ -561,6 +613,10 @@ class WebSocketManager:
             for conn in connections:
                 print(f"{conn['client_id']}: {conn['messages_sent']} messages")
         """
+        # BUG-CN-09 (Phase 3C): snapshot the metadata dict under the lock so
+        # iteration cannot race with connect/disconnect mutating it.
+        with self._connections_lock:
+            metas = list(self.connection_metadata.values())
         return [
             {
                 "client_id": meta["client_id"],
@@ -568,7 +624,7 @@ class WebSocketManager:
                 "messages_sent": meta["messages_sent"],
                 "last_message_at": meta["last_message_at"],
             }
-            for meta in self.connection_metadata.values()
+            for meta in metas
         ]
 
     def get_statistics(self) -> dict:
@@ -587,9 +643,14 @@ class WebSocketManager:
             stats = websocket_manager.get_statistics()
             print(f"Broadcast {stats['total_messages_broadcast']} messages")
         """
+        # BUG-CN-09 / BUG-CN-10 (Phase 3C): atomic snapshot of count + counter
+        # so external observers don't see a torn read.
+        with self._connections_lock:
+            active_count = len(self.active_connections)
+            total_messages = self.message_count
         return {
-            "active_connections": len(self.active_connections),
-            "total_messages_broadcast": self.message_count,
+            "active_connections": active_count,
+            "total_messages_broadcast": total_messages,
             "connections_info": self.get_connection_info(),
         }
 
@@ -607,8 +668,12 @@ class WebSocketManager:
         # Send shutdown notice
         await self.broadcast({"type": "server_shutdown", "message": "Server is shutting down"})
 
-        # Close all connections (suppress errors for already-closed connections)
-        for websocket in list(self.active_connections):
+        # BUG-CN-09 (Phase 3C): snapshot the set under the lock before
+        # iterating so a late-arriving connect() cannot trigger a "set
+        # changed size during iteration" RuntimeError mid-shutdown.
+        with self._connections_lock:
+            to_close = list(self.active_connections)
+        for websocket in to_close:
             with contextlib.suppress(Exception):  # Connection may already be closed
                 await websocket.close()
             self.disconnect(websocket)
