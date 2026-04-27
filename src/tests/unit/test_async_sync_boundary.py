@@ -217,6 +217,8 @@ class TestWebSocketManagerBroadcastBoundary:
 
     def _make_manager(self):
         """Create a WebSocketManager with mocked settings."""
+        import threading
+
         with patch("communication.websocket_manager.WebSocketManager.__init__", lambda self: None):
             mgr = WebSocketManager.__new__(WebSocketManager)
             mgr.active_connections = set()
@@ -228,6 +230,11 @@ class TestWebSocketManagerBroadcastBoundary:
             mgr.heartbeat_interval = 30
             mgr.reconnect_attempts = 3
             mgr.reconnect_delay = 1.0
+            # Phase 3B/3C concurrency locks — bypass __init__ but still
+            # provide the locks the production methods now require.
+            mgr._per_ip_counts = {}
+            mgr._ip_lock = threading.Lock()
+            mgr._connections_lock = threading.Lock()
             return mgr
 
     def test_broadcast_sync_checks_is_running(self):
