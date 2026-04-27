@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (potentially breaking)
+
+- **METRICS-MON R1.2 / seed-02 / seed-03**: `/v1/health/ready` now returns **HTTP 503** (not 200) when the WebSocket manager singleton is unbound (the sole required dep for canopy). Optional upstream deps (JuniperData, JuniperCascor) being unhealthy continue to return 200 with body `status="degraded"` so the dashboard stays available with cached state. `/v1/health/live` runs an in-process liveness tick (verifies `websocket_manager.get_connection_count()` is responsive) within a 250 ms budget and returns **HTTP 503** on tick failure or budget exceedance. Both endpoints emit a new `X-Juniper-Readiness` header / liveness body fields (`tick`, `duration_ms`) so probe diagnostics surface in orchestrator logs without body parsing. See [`notes/code-review/METRICS_MONITORING_R1.2_PROBE_DESIGN_2026-04-27.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/code-review/METRICS_MONITORING_R1.2_PROBE_DESIGN_2026-04-27.md) in juniper-ml for the cross-repo contract; companion PRs land in juniper-data, juniper-cascor, and juniper-deploy. `/v1/health` (the legacy combined endpoint) and the deprecated `/health` / `/api/health` aliases are unchanged.
+
 ### Security
 
 - **SEC-05 / SEC-12** (Phase 1B Track 1, 2026-04-24): `/ws` generic WebSocket endpoint now enforces the same `validate_origin` and `check_per_ip_limit` gates as `/ws/training` and `/ws/control`. Requests from unlisted origins or IPs over the per-IP cap are closed with standardized codes (4003 / 1013). Origin rejections are audit-logged via `log_ws_origin_rejected("/ws", …)`.

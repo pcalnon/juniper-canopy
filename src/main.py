@@ -53,7 +53,7 @@ import uvicorn
 from a2wsgi import WSGIMiddleware
 
 # from fastapi.staticfiles import StaticFiles
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -738,24 +738,101 @@ async def health_check():
     }
 
 
+# R1.2 / seed-03: liveness tick budget. Pure in-process work; 250 ms catches
+# event-loop stalls and CPU starvation that the no-op ``return {"status":
+# "alive"}`` could not.
+_LIVENESS_TICK_BUDGET_MS = 250
+
+# R1.2 / seed-02: readiness header surfaces state to ``kubectl describe pod``
+# / ``curl -I`` without requiring body parsing.
+_READINESS_HEADER = "X-Juniper-Readiness"
+
+
+def _liveness_tick() -> None:
+    """Run the juniper-canopy liveness tick.
+
+    Pure in-process work: confirms the WebSocket manager singleton is
+    bound and responsive (``get_connection_count()`` returns an int).
+    Raises if the manager is missing or the call fails.
+    """
+    if websocket_manager is None:
+        raise RuntimeError("websocket_manager singleton not initialized")
+    count = websocket_manager.get_connection_count()
+    if not isinstance(count, int):
+        raise RuntimeError(f"websocket_manager.get_connection_count() returned non-int: {type(count).__name__}")
+
+
 @app.get("/v1/health/live")
-async def liveness_probe():
-    """Liveness probe — confirms the process is running."""
-    return {"status": "alive"}
+async def liveness_probe(response: Response) -> dict:
+    """Liveness probe — runs an in-process tick within a strict budget.
+
+    Returns 200 with ``{"status": "alive", "tick": "juniper-canopy",
+    "duration_ms": N}`` when the tick succeeds within
+    ``_LIVENESS_TICK_BUDGET_MS``. Returns 503 with ``{"status":
+    "unresponsive", ...}`` otherwise. See R1.2 / seed-03 in juniper-ml
+    notes/code-review/METRICS_MONITORING_R1.2_PROBE_DESIGN_2026-04-27.md.
+    """
+    started = time.perf_counter()
+    try:
+        _liveness_tick()
+    except Exception as exc:  # noqa: BLE001 — health probe must surface every failure
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        response.status_code = 503
+        return {
+            "status": "unresponsive",
+            "tick": "juniper-canopy",
+            "error": str(exc),
+            "duration_ms": duration_ms,
+        }
+
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    if duration_ms > _LIVENESS_TICK_BUDGET_MS:
+        response.status_code = 503
+        return {
+            "status": "unresponsive",
+            "tick": "juniper-canopy",
+            "error": f"tick exceeded budget: {duration_ms}ms > {_LIVENESS_TICK_BUDGET_MS}ms",
+            "duration_ms": duration_ms,
+        }
+
+    return {
+        "status": "alive",
+        "tick": "juniper-canopy",
+        "duration_ms": duration_ms,
+    }
 
 
 @app.get("/v1/health/ready", response_model=ReadinessResponse)
-async def readiness_probe() -> ReadinessResponse:
-    """Readiness probe with dependency health status.
+async def readiness_probe(response: Response) -> ReadinessResponse:
+    """Readiness probe — drives orchestrator traffic decisions via status code.
 
-    Probes JuniperData and JuniperCascor health endpoints and reports
-    overall readiness with per-dependency status.
+    Status code semantics (R1.2 / seed-02):
+
+    - 200, body status="ready"     — WebSocket manager bound; both
+      JuniperData and JuniperCascor either healthy or not_configured.
+    - 200, body status="degraded"  — WebSocket manager bound; an upstream
+      (data or cascor) is unhealthy. Canopy stays useful as a dashboard
+      shell with cached state.
+    - 503, body status="not_ready" — WebSocket manager unbound (canopy
+      cannot serve dashboard traffic).
+
+    Sets ``X-Juniper-Readiness`` header to mirror body status.
     """
-    # Probe JuniperData
+    dependencies: dict = {}
+
+    # Required dep: WebSocket manager.
+    if websocket_manager is None:
+        ws_dep = DependencyStatus(name="WebSocket Manager", status="unhealthy", message="singleton not initialized")
+    else:
+        ws_dep = DependencyStatus(name="WebSocket Manager", status="healthy", message="bound")
+    dependencies["websocket_manager"] = ws_dep
+
+    # Optional dep: JuniperData.
     data_url = settings.juniper_data_url
     data_dep = await probe_dependency("JuniperData Service", f"{data_url.rstrip('/')}/v1/health/live")
+    dependencies["juniper_data"] = data_dep
 
-    # Probe JuniperCascor
+    # Optional dep: JuniperCascor.
     ready_cascor_url = settings.cascor_service_url
     if ready_cascor_url:
         cascor_dep = await probe_dependency("JuniperCascor Service", f"{ready_cascor_url.rstrip('/')}/v1/health/live")
@@ -765,14 +842,19 @@ async def readiness_probe() -> ReadinessResponse:
             status="not_configured",
             message="JUNIPER_CANOPY_CASCOR_SERVICE_URL not set (demo mode)",
         )
+    dependencies["juniper_cascor"] = cascor_dep
 
-    dependencies = {"juniper_data": data_dep, "juniper_cascor": cascor_dep}
+    # Required dep failure → 503 / not_ready. Optional dep failure →
+    # 200 / degraded. ``not_configured`` collapses to ready.
+    if ws_dep.status == "unhealthy":
+        overall = "not_ready"
+        response.status_code = 503
+    elif data_dep.status == "unhealthy" or cascor_dep.status == "unhealthy":
+        overall = "degraded"
+    else:
+        overall = "ready"
 
-    overall = "ready"
-    for dep in dependencies.values():
-        if dep.status == "unhealthy":
-            overall = "degraded"
-            break
+    response.headers[_READINESS_HEADER] = overall
 
     return ReadinessResponse(
         status=overall,
@@ -781,7 +863,7 @@ async def readiness_probe() -> ReadinessResponse:
         dependencies=dependencies,
         details={
             "mode": backend.backend_type,
-            "active_connections": websocket_manager.get_connection_count(),
+            "active_connections": websocket_manager.get_connection_count() if websocket_manager is not None else 0,
             "training_active": backend.is_training_active(),
         },
     )

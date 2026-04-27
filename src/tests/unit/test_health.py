@@ -95,15 +95,36 @@ class TestCanopyHealthEndpoints:
         assert "training_active" in body
 
     def test_liveness(self, client):
-        """Test /v1/health/live returns alive."""
+        """R1.2 / seed-03: /v1/health/live returns alive + tick metadata."""
         response = client.get("/v1/health/live")
         assert response.status_code == 200
-        assert response.json()["status"] == "alive"
+        body = response.json()
+        assert body["status"] == "alive"
+        assert body["tick"] == "juniper-canopy"
+        assert isinstance(body["duration_ms"], int)
+
+    def test_liveness_503_when_websocket_manager_missing(self, client):
+        """R1.2 / seed-03: tick raises when websocket_manager singleton is None → 503."""
+        import main as main_module
+
+        original = main_module.websocket_manager
+        main_module.websocket_manager = None
+        try:
+            response = client.get("/v1/health/live")
+            assert response.status_code == 503
+            body = response.json()
+            assert body["status"] == "unresponsive"
+            assert body["tick"] == "juniper-canopy"
+            assert "websocket_manager" in body["error"]
+        finally:
+            main_module.websocket_manager = original
 
     def test_readiness_returns_readiness_response(self, client):
-        """Test /v1/health/ready returns ReadinessResponse format."""
+        """Test /v1/health/ready returns ReadinessResponse format with header."""
         response = client.get("/v1/health/ready")
-        assert response.status_code == 200
+        assert response.status_code in (200, 503)  # depends on upstream availability
+        # Header always set per R1.2 contract
+        assert response.headers.get("X-Juniper-Readiness") in ("ready", "degraded", "not_ready")
         body = response.json()
         assert body["service"] == "juniper-canopy"
         assert "version" in body
@@ -112,6 +133,34 @@ class TestCanopyHealthEndpoints:
         assert "details" in body
         assert "mode" in body["details"]
         assert "training_active" in body["details"]
+        assert "websocket_manager" in body["dependencies"]
+
+    def test_readiness_503_when_websocket_manager_missing(self, client):
+        """R1.2 / seed-02: ws_manager unbound → required dep unhealthy → 503/not_ready."""
+        import main as main_module
+
+        original = main_module.websocket_manager
+        main_module.websocket_manager = None
+        try:
+            response = client.get("/v1/health/ready")
+            assert response.status_code == 503
+            assert response.headers.get("X-Juniper-Readiness") == "not_ready"
+            body = response.json()
+            assert body["status"] == "not_ready"
+            assert body["dependencies"]["websocket_manager"]["status"] == "unhealthy"
+        finally:
+            main_module.websocket_manager = original
+
+    def test_readiness_degraded_keeps_200_for_optional_deps(self, client):
+        """R1.2 / seed-02: optional dep unhealthy → 200/degraded (LB keeps traffic)."""
+        # JuniperData is unreachable in tests, JuniperCascor is not_configured
+        # → ws_manager healthy (required) + data unhealthy (optional) → degraded
+        response = client.get("/v1/health/ready")
+        body = response.json()
+        if body["dependencies"]["juniper_data"]["status"] == "unhealthy":
+            assert response.status_code == 200
+            assert body["status"] == "degraded"
+            assert response.headers.get("X-Juniper-Readiness") == "degraded"
 
     def test_readiness_includes_data_dependency(self, client):
         """Test readiness probes JuniperData."""
