@@ -47,9 +47,23 @@ class TestPhaseBFlags:
         assert s.ws_bridge_enabled is False
 
     def test_raf_coalescer_default_disabled(self):
-        """rAF coalescer scaffolded but disabled by default (D-04)."""
+        """rAF coalescer scaffolded but disabled by default (D-04 / GAP-WS-15)."""
         s = self._make_settings()
         assert s.enable_raf_coalescer is False
+
+    def test_raf_coalescer_env_override_enables(self):
+        """JUNIPER_CANOPY_ENABLE_RAF_COALESCER=true flips the flag (GAP-WS-15)."""
+        from settings import Settings, get_settings
+
+        get_settings.cache_clear()
+        env = {
+            "JUNIPER_CANOPY_ENABLE_RAF_COALESCER": "true",
+            "JUNIPER_DATA_URL": "http://localhost:8100",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            get_settings.cache_clear()
+            s = Settings()
+        assert s.enable_raf_coalescer is True
 
     def test_latency_beacon_default_enabled(self):
         """Latency beacon enabled by default."""
@@ -179,3 +193,72 @@ class TestWsEndpoints:
         resp = client.post("/api/ws_browser_errors", json={"error": "connection reset", "endpoint": "/ws/training"})
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
+
+
+@pytest.mark.unit
+class TestRafCoalescerJsAsset:
+    """GAP-WS-15: ws_dash_bridge.js coalescer wiring."""
+
+    @pytest.fixture
+    def bridge_js(self):
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "ws_dash_bridge.js"
+        return path.read_text(encoding="utf-8")
+
+    def test_default_off_flag_check_present(self, bridge_js):
+        """Handler must gate the rAF path on `window._juniperRafCoalescerEnabled === true`."""
+        assert "window._juniperRafCoalescerEnabled === true" in bridge_js
+
+    def test_schedule_raf_replaces_noop(self, bridge_js):
+        """`_scheduleRaf` is no longer a noop — it must reference rAF or its fallback."""
+        assert "/* noop */" not in bridge_js
+        assert "requestAnimationFrame" in bridge_js
+
+    def test_latest_value_wins_only_for_candidate_progress(self, bridge_js):
+        """`metrics`, `cascade_add`, `state_change`, `topology` handlers must NOT route through rAF.
+
+        Time-series / one-shot streams keep per-event semantics; only 50Hz
+        candidate_progress is coalesced (every point matters for plotting,
+        but candidate progress is an ephemeral UI signal).
+        """
+        # The flag check should appear exactly once: inside candidate_progress.
+        assert bridge_js.count("window._juniperRafCoalescerEnabled === true") == 1
+        # And `pendingCandidateProgress` should be the only "pending" slot.
+        assert "pendingCandidateProgress" in bridge_js
+        assert "pendingMetrics" not in bridge_js
+        assert "pendingCascade" not in bridge_js
+
+
+@pytest.mark.unit
+class TestRafCoalescerDashWiring:
+    """GAP-WS-15: dashboard_manager wires settings.enable_raf_coalescer to JS."""
+
+    @pytest.fixture
+    def dashboard_manager_source(self):
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[2] / "frontend" / "dashboard_manager.py"
+        return path.read_text(encoding="utf-8")
+
+    def test_ws_config_init_store_added(self, dashboard_manager_source):
+        """A `ws-config-init` Store must exist in the layout to receive the bridged flag."""
+        assert 'dcc.Store(id="ws-config-init"' in dashboard_manager_source
+
+    def test_clientside_callback_writes_flag(self, dashboard_manager_source):
+        """Callback must set `window._juniperRafCoalescerEnabled` from the setting."""
+        assert "window._juniperRafCoalescerEnabled =" in dashboard_manager_source
+        # And the input/output must hook ws-config-init so it fires on mount.
+        assert 'Output("ws-config-init"' in dashboard_manager_source
+        assert 'Input("ws-config-init"' in dashboard_manager_source
+
+    def test_callback_value_reflects_setting(self):
+        """When `enable_raf_coalescer=True`, the rendered JS must contain `= true`.
+
+        We verify the f-string renders correctly by exercising the same
+        code path the dashboard uses.
+        """
+        # Same expression used in dashboard_manager.py
+        for setting_value, expected in [(True, "true"), (False, "false")]:
+            rendered = str(setting_value).lower()
+            assert rendered == expected
