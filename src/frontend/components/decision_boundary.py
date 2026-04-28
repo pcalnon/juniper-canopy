@@ -164,6 +164,9 @@ class DecisionBoundary(BaseComponent):
             app: Dash application instance
         """
 
+        # PERF-CN-01: prevent_initial_call=False — must render initial empty
+        # decision-boundary plot and status text on mount; theme-aware so it
+        # must redraw when the theme store fires.
         @app.callback(
             [Output(f"{self.component_id}-plot", "figure"), Output(f"{self.component_id}-status", "children")],
             [
@@ -173,6 +176,7 @@ class DecisionBoundary(BaseComponent):
                 Input(f"{self.component_id}-show-confidence", "value"),
                 Input("theme-state", "data"),
             ],
+            prevent_initial_call=False,
         )
         def update_boundary_plot(
             boundary_data: Optional[Dict[str, Any]],

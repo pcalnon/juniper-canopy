@@ -161,6 +161,8 @@ class WorkerPanel(BaseComponent):
     def register_callbacks(self, app):
         from dash.dependencies import Input, Output
 
+        # PERF-CN-01: prevent_initial_call=False — must hit the worker stats API
+        # on mount to populate badges/counts before the first interval tick.
         @app.callback(
             [
                 Output(f"{self.component_id}-status-badge", "children"),
@@ -175,6 +177,7 @@ class WorkerPanel(BaseComponent):
                 Output(f"{self.component_id}-worker-list", "children"),
             ],
             Input(f"{self.component_id}-refresh-interval", "n_intervals"),
+            prevent_initial_call=False,
         )
         def update_worker_panel(n_intervals):
             status_text = "UNAVAILABLE"

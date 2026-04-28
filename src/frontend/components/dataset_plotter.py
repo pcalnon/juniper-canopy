@@ -243,6 +243,9 @@ class DatasetPlotter(BaseComponent):
             app: Dash application instance
         """
 
+        # PERF-CN-01: prevent_initial_call=False — must render initial empty
+        # scatter/distribution plots and stats placeholders on mount; theme-aware
+        # so it must redraw when theme changes too.
         @app.callback(
             [
                 Output(f"{self.component_id}-scatter-plot", "figure"),
@@ -257,6 +260,7 @@ class DatasetPlotter(BaseComponent):
                 Input(f"{self.component_id}-split-selector", "value"),
                 Input("theme-state", "data"),
             ],
+            prevent_initial_call=False,
         )
         def update_dataset_plots(dataset: Optional[Dict[str, Any]], split: str, theme: str):
             """
@@ -272,9 +276,12 @@ class DatasetPlotter(BaseComponent):
             """
             return self._process_dataset_update(dataset, split, theme)
 
+        # PERF-CN-01: prevent_initial_call=False — theme-driven styling must be
+        # applied on mount so the stats summary matches the active theme.
         @app.callback(
             Output(f"{self.component_id}-stats-summary", "style"),
             Input("theme-state", "data"),
+            prevent_initial_call=False,
         )
         def update_stats_summary_theme(theme):
             """Update stats summary background for dark mode."""
@@ -288,12 +295,16 @@ class DatasetPlotter(BaseComponent):
             }
 
         # ── Populate dataset selector dropdown from available generators ──
+        # PERF-CN-01: prevent_initial_call=False — must hit /api/dataset/generators
+        # on mount to populate the dropdown (the params-init-interval fires once
+        # at app load specifically to drive this initial fetch).
         @app.callback(
             [
                 Output(f"{self.component_id}-dataset-selector", "options"),
                 Output(f"{self.component_id}-dataset-selector", "value"),
             ],
             Input("params-init-interval", "n_intervals"),
+            prevent_initial_call=False,
         )
         def populate_dataset_selector(n):
             """Fetch available dataset generators and populate the dropdown."""
