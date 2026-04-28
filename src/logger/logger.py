@@ -271,8 +271,20 @@ class CascorLogger:
         file_handler.setFormatter(file_formatter)
         self.logger.addHandler(file_handler)
 
-    def _log_with_context(self, level: int, message: str, **kwargs):
-        """Internal method to log with context data."""
+    def _log_with_context(self, level: int, message: str, *args, **kwargs):
+        """Internal method to log with context data.
+
+        Accepts stdlib-style ``*args`` for lazy ``%``-formatting of ``message``
+        (PERF-CN-02). The expensive string interpolation is deferred to
+        ``LogRecord.getMessage()`` which is only invoked when a handler is
+        actually going to emit the record.
+        """
+        # Short-circuit when nothing will emit at this level. This is the
+        # main reason lazy logging matters: we avoid building the args/record
+        # entirely when the level is filtered.
+        if not self.logger.isEnabledFor(level):
+            return
+
         # Capture the real caller's filename and line number (skip 2 frames:
         # _log_with_context -> public method -> actual caller)
         import inspect
@@ -282,8 +294,9 @@ class CascorLogger:
         fn = caller.f_code.co_filename if caller else ""
         lno = caller.f_lineno if caller else 0
 
-        # Create log record
-        record = self.logger.makeRecord(name=self.logger.name, level=level, fn=fn, lno=lno, msg=message, args=(), exc_info=None)
+        # Create log record. ``args`` is forwarded so that ``LogRecord.getMessage()``
+        # does the ``msg % args`` interpolation lazily (only when emitted).
+        record = self.logger.makeRecord(name=self.logger.name, level=level, fn=fn, lno=lno, msg=message, args=args, exc_info=None)
 
         # Add context data
         record.context_data = kwargs
@@ -291,41 +304,41 @@ class CascorLogger:
         # Handle the record
         self.logger.handle(record)
 
-    def fatal(self, message: str, **kwargs):
+    def fatal(self, message: str, *args, **kwargs):
         """Log fatal errors causing immediate termination."""
-        self._log_with_context(self.FATAL_LEVEL, message, **kwargs)
+        self._log_with_context(self.FATAL_LEVEL, message, *args, **kwargs)
 
-    def critical(self, message: str, **kwargs):
+    def critical(self, message: str, *args, **kwargs):
         """Log critical system failures."""
-        self._log_with_context(logging.CRITICAL, message, **kwargs)
+        self._log_with_context(logging.CRITICAL, message, *args, **kwargs)
 
-    def error(self, message: str, exception: Optional[Exception] = None, **kwargs):
+    def error(self, message: str, *args, exception: Optional[Exception] = None, **kwargs):
         """Log recoverable errors with optional exception details."""
         if exception:
             kwargs["exception_type"] = type(exception).__name__
             kwargs["exception_message"] = str(exception)
 
-        self._log_with_context(logging.ERROR, message, **kwargs)
+        self._log_with_context(logging.ERROR, message, *args, **kwargs)
 
-    def warning(self, message: str, **kwargs):
+    def warning(self, message: str, *args, **kwargs):
         """Log warnings and potential issues."""
-        self._log_with_context(logging.WARNING, message, **kwargs)
+        self._log_with_context(logging.WARNING, message, *args, **kwargs)
 
-    def info(self, message: str, **kwargs):
+    def info(self, message: str, *args, **kwargs):
         """Log general information and progress updates."""
-        self._log_with_context(logging.INFO, message, **kwargs)
+        self._log_with_context(logging.INFO, message, *args, **kwargs)
 
-    def debug(self, message: str, **kwargs):
+    def debug(self, message: str, *args, **kwargs):
         """Log debugging information."""
-        self._log_with_context(logging.DEBUG, message, **kwargs)
+        self._log_with_context(logging.DEBUG, message, *args, **kwargs)
 
-    def verbose(self, message: str, **kwargs):
+    def verbose(self, message: str, *args, **kwargs):
         """Log detailed debugging information."""
-        self._log_with_context(self.VERBOSE_LEVEL, message, **kwargs)
+        self._log_with_context(self.VERBOSE_LEVEL, message, *args, **kwargs)
 
-    def trace(self, message: str, **kwargs):
+    def trace(self, message: str, *args, **kwargs):
         """Log detailed tracing information."""
-        self._log_with_context(self.TRACE_LEVEL, message, **kwargs)
+        self._log_with_context(self.TRACE_LEVEL, message, *args, **kwargs)
 
     @contextmanager
     def context(self, **context_data):
@@ -333,11 +346,11 @@ class CascorLogger:
         # Store original context method if it exists
         original_log_method = self._log_with_context
 
-        def contextual_log(level, message, **kwargs):
+        def contextual_log(level, message, *args, **kwargs):
             # Merge context data with kwargs
             # merged_kwargs = {**context_data, **kwargs}
             merged_kwargs = context_data | kwargs
-            return original_log_method(level, message, **merged_kwargs)
+            return original_log_method(level, message, *args, **merged_kwargs)
 
         # Temporarily replace the log method
         self._log_with_context = contextual_log

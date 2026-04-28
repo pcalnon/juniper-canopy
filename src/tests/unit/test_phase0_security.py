@@ -156,7 +156,11 @@ class TestExceptionHandlerSuppression:
             await unhandled_exception_handler(request, exc)
             mock_logger.error.assert_called_once()
             call_args = mock_logger.error.call_args
-            assert "secret internal info" in call_args[0][0]
+            # PERF-CN-02 made this call lazy: error("...%s...", method, path, exc).
+            # The exception detail now lives in the positional args, not the
+            # format string itself. Search across the whole positional tuple.
+            full_call_repr = " ".join(str(a) for a in call_args[0])
+            assert "secret internal info" in full_call_repr
             assert call_args[1].get("exc_info") is True
 
 
