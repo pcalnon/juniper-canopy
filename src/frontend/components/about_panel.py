@@ -317,9 +317,13 @@ class AboutPanel(BaseComponent):
             """Toggle system information section."""
             return not is_open if n_clicks else is_open
 
+        # PERF-CN-01: prevent_initial_call=True — collapse defaults to closed,
+        # so the initial fire would only return [] anyway. React only when the
+        # user opens/closes the section.
         @app.callback(
             Output(f"{self.component_id}-system-info-content", "children"),
             Input(f"{self.component_id}-system-info-collapse", "is_open"),
+            prevent_initial_call=True,
         )
         def update_system_info(is_open):
             """Update system information content when opened."""

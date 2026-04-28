@@ -543,43 +543,59 @@ class MetricsPanel(BaseComponent):
             app: Dash application instance
         """
 
+        # PERF-CN-01: prevent_initial_call=False — must hit the API on mount to
+        # populate network stats before the first interval tick.
         @app.callback(
             Output(f"{self.component_id}-network-stats-store", "data"),
             [Input(f"{self.component_id}-stats-update-interval", "n_intervals")],
+            prevent_initial_call=False,
         )
         def fetch_network_stats(n_intervals):
             return self._fetch_network_stats_handler(n_intervals=n_intervals)
 
+        # PERF-CN-01: prevent_initial_call=False — must hit the API on mount to
+        # populate training state before the first interval tick.
         @app.callback(
             Output(f"{self.component_id}-training-state-store", "data"),
             [Input(f"{self.component_id}-stats-update-interval", "n_intervals")],
+            prevent_initial_call=False,
         )
         def fetch_training_state(n_intervals):
             return self._fetch_training_state_handler(n_intervals=n_intervals)
 
         # Candidate pool callbacks moved to CandidateMetricsPanel (candidate_metrics_panel.py)
 
+        # PERF-CN-01: prevent_initial_call=False — renders default progress text
+        # on mount; training-state-store is populated on mount.
         @app.callback(
             Output(f"{self.component_id}-progress-detail", "children"),
             [Input(f"{self.component_id}-training-state-store", "data")],
+            prevent_initial_call=False,
         )
         def update_progress_detail(state):
             return self._update_progress_detail_handler(state=state)
 
+        # PERF-CN-01: prevent_initial_call=False — renders default LR text on mount.
         @app.callback(
             Output(f"{self.component_id}-current-lr", "children"),
             [Input(f"{self.component_id}-training-state-store", "data")],
+            prevent_initial_call=False,
         )
         def update_learning_rate(state):
             return self._update_learning_rate_handler(state=state)
 
+        # PERF-CN-01: prevent_initial_call=False — renders default phase-duration
+        # text on mount.
         @app.callback(
             Output(f"{self.component_id}-phase-duration", "children"),
             [Input(f"{self.component_id}-training-state-store", "data")],
+            prevent_initial_call=False,
         )
         def update_phase_duration(state):
             return self._update_phase_duration_handler(state=state)
 
+        # PERF-CN-01: prevent_initial_call=False — renders progress bars in their
+        # initial (zeroed) state on mount.
         @app.callback(
             [
                 Output(f"{self.component_id}-progress-bars", "style"),
@@ -589,6 +605,7 @@ class MetricsPanel(BaseComponent):
                 Output(f"{self.component_id}-candidate-epoch-progress", "label"),
             ],
             [Input(f"{self.component_id}-training-state-store", "data")],
+            prevent_initial_call=False,
         )
         def update_training_progress(state):
             return self._update_training_progress_handler(state=state)
@@ -645,6 +662,9 @@ class MetricsPanel(BaseComponent):
 
             return new_state
 
+        # PERF-CN-01: prevent_initial_call=False — must render initial empty
+        # loss/accuracy plots and status text on mount; theme-aware so it must
+        # also redraw when the theme store fires.
         @app.callback(
             [
                 Output(f"{self.component_id}-loss-plot", "figure"),
@@ -665,6 +685,7 @@ class MetricsPanel(BaseComponent):
                 State(f"{self.component_id}-view-state", "data"),
                 State(f"{self.component_id}-training-state-store", "data"),
             ],
+            prevent_initial_call=False,
         )
         def update_metrics_display(metrics_data: List[Dict[str, Any]], theme: str, display_mode_state: Dict, view_state: Dict, training_state: Dict):
             return self._update_metrics_display_handler(metrics_data=metrics_data, theme=theme, view_state=view_state, display_mode_state=display_mode_state, training_state=training_state)
@@ -784,12 +805,15 @@ class MetricsPanel(BaseComponent):
         )
 
         # Replay Controls Callbacks
+        # PERF-CN-01: prevent_initial_call=False — theme-driven styling must be
+        # applied on mount so the replay controls bar matches the active theme.
         @app.callback(
             Output(f"{self.component_id}-replay-controls", "style"),
             [
                 Input(f"{self.component_id}-training-state-store", "data"),
                 Input("theme-state", "data"),
             ],
+            prevent_initial_call=False,
         )
         def toggle_replay_visibility(state, theme):
             """Show replay controls when training is not running."""
@@ -922,6 +946,8 @@ class MetricsPanel(BaseComponent):
 
             return state
 
+        # PERF-CN-01: prevent_initial_call=False — sets initial slider position
+        # and "0 / 0" replay-position text on mount.
         @app.callback(
             [
                 Output(f"{self.component_id}-replay-slider", "value"),
@@ -932,6 +958,7 @@ class MetricsPanel(BaseComponent):
                 Input(f"{self.component_id}-replay-state", "data"),
                 Input(f"{self.component_id}-metrics-store", "data"),
             ],
+            prevent_initial_call=False,
         )
         def update_replay_ui(state, metrics_data):
             """Update replay slider and position display."""
@@ -943,18 +970,24 @@ class MetricsPanel(BaseComponent):
 
             return slider_value, 100, position_text
 
+        # PERF-CN-01: prevent_initial_call=False — sets initial play-button icon
+        # ("▶") on mount.
         @app.callback(
             Output(f"{self.component_id}-replay-play", "children"),
             Input(f"{self.component_id}-replay-state", "data"),
+            prevent_initial_call=False,
         )
         def update_play_button(state):
             """Update play button icon based on replay state."""
             return "⏸" if state and state.get("mode") == "playing" else "▶"
 
         # Layout Save/Load Callbacks (P3-4)
+        # PERF-CN-01: prevent_initial_call=False — must populate the saved-layouts
+        # dropdown from the API on mount.
         @app.callback(
             Output(f"{self.component_id}-layout-dropdown", "options"),
             Input(f"{self.component_id}-layout-store", "data"),
+            prevent_initial_call=False,
         )
         def refresh_layout_dropdown(layout_data):
             """Refresh layout dropdown options from API."""
@@ -1005,6 +1038,9 @@ class MetricsPanel(BaseComponent):
             return self._delete_layout_handler(n_clicks, layout_name)
 
         # Display mode callbacks
+        # PERF-CN-01: prevent_initial_call=True — display-mode-store is already
+        # seeded with sensible defaults at layout time, so the initial fire would
+        # only re-emit the same values. React only to actual user changes.
         @app.callback(
             [
                 Output(f"{self.component_id}-display-mode-store", "data"),
@@ -1014,6 +1050,7 @@ class MetricsPanel(BaseComponent):
                 Input(f"{self.component_id}-display-mode", "value"),
                 Input(f"{self.component_id}-window-size", "value"),
             ],
+            prevent_initial_call=True,
         )
         def update_display_mode(mode, window_size):
             """Update display mode state and show/hide window size input."""

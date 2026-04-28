@@ -345,6 +345,8 @@ class CassandraPanel(BaseComponent):
         """
         from dash.dependencies import Input, Output
 
+        # PERF-CN-01: prevent_initial_call=False — must hit the Cassandra health
+        # API on mount to populate panel fields before the first interval tick.
         @app.callback(
             [
                 Output(f"{self.component_id}-status-badge", "children"),
@@ -360,6 +362,7 @@ class CassandraPanel(BaseComponent):
                 Output(f"{self.component_id}-error-area", "children"),
             ],
             Input(f"{self.component_id}-interval", "n_intervals"),
+            prevent_initial_call=False,
         )
         def update_cassandra_panel(n_intervals):
             """

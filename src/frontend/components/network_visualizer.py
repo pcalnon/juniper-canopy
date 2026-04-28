@@ -295,6 +295,9 @@ class NetworkVisualizer(BaseComponent):
 
             return new_state
 
+        # PERF-CN-01: prevent_initial_call=False — must render initial empty
+        # network graph (input/hidden/output counts at zero) on mount; theme-
+        # and view-mode-aware so it also redraws when those change.
         @app.callback(
             [
                 Output(f"{self.component_id}-graph", "figure"),
@@ -324,6 +327,7 @@ class NetworkVisualizer(BaseComponent):
                 State(f"{self.component_id}-topology-hash", "data"),
                 State(f"{self.component_id}-new-node-highlight", "data"),
             ],
+            prevent_initial_call=False,
         )
         def update_network_graph(
             topology_data: Dict[str, Any],
@@ -476,9 +480,12 @@ class NetworkVisualizer(BaseComponent):
 
             return fig, _dynamic_graph_config(), input_count, hidden_count, output_count, connection_count, current_hash, new_highlight
 
+        # PERF-CN-01: prevent_initial_call=False — theme-driven styling must be
+        # applied on mount so the network stats bar matches the active theme.
         @app.callback(
             Output(f"{self.component_id}-stats-bar", "style"),
             Input("theme-state", "data"),
+            prevent_initial_call=False,
         )
         def update_stats_bar_theme(theme):
             """Update stats bar background for dark mode."""

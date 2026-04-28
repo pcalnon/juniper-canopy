@@ -210,6 +210,9 @@ class ParametersPanel(BaseComponent):
         """
         from dash.dependencies import Input, Output
 
+        # PERF-CN-01: prevent_initial_call=False — must render the parameter
+        # tables on mount so the panel is not blank before the params-store is
+        # populated by the parameters-applied flow.
         @app.callback(
             [
                 Output(f"{self.component_id}-network-table", "children"),
@@ -217,6 +220,7 @@ class ParametersPanel(BaseComponent):
                 Output(f"{self.component_id}-candidate-table", "children"),
             ],
             Input(f"{self.component_id}-params-store", "data"),
+            prevent_initial_call=False,
         )
         def update_parameters_tables(data):
             """Update parameter tables when store data changes."""

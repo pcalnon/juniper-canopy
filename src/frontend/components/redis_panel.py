@@ -332,6 +332,8 @@ class RedisPanel(BaseComponent):
         """
         from dash.dependencies import Input, Output
 
+        # PERF-CN-01: prevent_initial_call=False — must hit the Redis health API
+        # on mount to populate panel fields before the first interval tick.
         @app.callback(
             [
                 Output(f"{self.component_id}-status-badge", "children"),
@@ -349,6 +351,7 @@ class RedisPanel(BaseComponent):
                 Output(f"{self.component_id}-keyspace", "children"),
             ],
             Input(f"{self.component_id}-refresh-interval", "n_intervals"),
+            prevent_initial_call=False,
         )
         def update_redis_panel(n_intervals):
             """Update all Redis panel fields from API."""

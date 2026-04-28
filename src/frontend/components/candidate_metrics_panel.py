@@ -231,12 +231,16 @@ class CandidateMetricsPanel(BaseComponent):
         """
 
         # ── Fetch training state (only when tab is active) ──
+        # PERF-CN-01: prevent_initial_call=False — must fetch initial state on mount
+        # so the candidate panel populates immediately rather than waiting for the
+        # first interval tick.
         @app.callback(
             Output(f"{self.component_id}-training-state-store", "data"),
             [
                 Input(f"{self.component_id}-update-interval", "n_intervals"),
                 Input("visualization-tabs", "active_tab"),
             ],
+            prevent_initial_call=False,
         )
         def fetch_training_state(n_intervals, active_tab):
             if active_tab != "candidates":
@@ -244,6 +248,8 @@ class CandidateMetricsPanel(BaseComponent):
             return self._fetch_training_state()
 
         # ── Update status display ──
+        # PERF-CN-01: prevent_initial_call=False — renders default "Inactive" badge
+        # on mount; downstream of training-state-store, which is populated on mount.
         @app.callback(
             [
                 Output(f"{self.component_id}-status-badge", "children"),
@@ -252,6 +258,7 @@ class CandidateMetricsPanel(BaseComponent):
                 Output(f"{self.component_id}-pool-size", "children"),
             ],
             [Input(f"{self.component_id}-training-state-store", "data")],
+            prevent_initial_call=False,
         )
         def update_status_display(state):
             if not state:
@@ -262,6 +269,8 @@ class CandidateMetricsPanel(BaseComponent):
             return pool_status, self._get_status_style(pool_phase), pool_phase, str(pool_size)
 
         # ── Update epoch progress ──
+        # PERF-CN-01: prevent_initial_call=False — renders hidden progress section
+        # on mount so the layout is correct before training begins.
         @app.callback(
             [
                 Output(f"{self.component_id}-progress-section", "style"),
@@ -269,6 +278,7 @@ class CandidateMetricsPanel(BaseComponent):
                 Output(f"{self.component_id}-epoch-progress", "label"),
             ],
             [Input(f"{self.component_id}-training-state-store", "data")],
+            prevent_initial_call=False,
         )
         def update_epoch_progress(state):
             if not state:
@@ -282,9 +292,12 @@ class CandidateMetricsPanel(BaseComponent):
             return {"display": "none"}, 0, ""
 
         # ── Update pool info ──
+        # PERF-CN-01: prevent_initial_call=False — renders "No active candidate
+        # pool" placeholder on mount so the panel is not blank.
         @app.callback(
             Output(f"{self.component_id}-pool-info", "children"),
             [Input(f"{self.component_id}-training-state-store", "data")],
+            prevent_initial_call=False,
         )
         def update_pool_info(state):
             if not state:
@@ -301,12 +314,15 @@ class CandidateMetricsPanel(BaseComponent):
             return self._create_candidate_pool_display(state)
 
         # ── Update candidate loss plot ──
+        # PERF-CN-01: prevent_initial_call=False — must render an initial empty
+        # figure on mount; theme-aware so it must redraw when theme changes too.
         @app.callback(
             Output(f"{self.component_id}-loss-plot", "figure"),
             [
                 Input(f"{self.component_id}-training-state-store", "data"),
                 Input("theme-state", "data"),
             ],
+            prevent_initial_call=False,
         )
         def update_loss_plot(state, theme):
             return self._create_candidate_loss_figure(state, theme=theme or "light")
@@ -328,10 +344,13 @@ class CandidateMetricsPanel(BaseComponent):
             return is_open, "▼"
 
         # ── Update pool history ──
+        # PERF-CN-01: prevent_initial_call=True — only needs to react when
+        # training-state-store changes; on mount the history is already empty.
         @app.callback(
             Output(f"{self.component_id}-pool-history-store", "data"),
             Input(f"{self.component_id}-training-state-store", "data"),
             State(f"{self.component_id}-pool-history-store", "data"),
+            prevent_initial_call=True,
         )
         def update_pool_history(state, history):
             if not state:
@@ -364,9 +383,12 @@ class CandidateMetricsPanel(BaseComponent):
             return history or []
 
         # ── Render pool history ──
+        # PERF-CN-01: prevent_initial_call=False — renders empty history section
+        # placeholder on mount so the layout is correct before training begins.
         @app.callback(
             Output(f"{self.component_id}-history-section", "children"),
             Input(f"{self.component_id}-pool-history-store", "data"),
+            prevent_initial_call=False,
         )
         def render_pool_history(history):
             return self._render_pool_history(history)

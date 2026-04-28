@@ -1470,9 +1470,13 @@ class DashboardManager:
             """Toggle dark mode on button click."""
             return self._toggle_dark_mode_handler(current_dark_mode=current_dark_mode)
 
+        # PERF-CN-01: prevent_initial_call=False — must propagate the initial
+        # dark-mode-store value to theme-state on mount so theme-aware components
+        # render with the correct theme on first paint.
         @self.app.callback(
             Output("theme-state", "data"),
             Input("dark-mode-store", "data"),
+            prevent_initial_call=False,
         )
         def update_theme_state(is_dark):
             """Update theme state based on dark mode store."""
@@ -1556,6 +1560,9 @@ class DashboardManager:
     # Define Status Bar callbacks
     def _setup_status_bar_callbacks(self):
 
+        # PERF-CN-01: prevent_initial_call=False — must populate the unified
+        # status bar (connection, latency, phase, epoch, hidden units) on mount
+        # before the first interval tick.
         @self.app.callback(
             [
                 Output("status-indicator", "style"),
@@ -1569,6 +1576,7 @@ class DashboardManager:
                 Output("top-hidden-units-display", "children"),
             ],
             Input("fast-update-interval", "n_intervals"),
+            prevent_initial_call=False,
         )
         def update_unified_status_bar(n_intervals):
             """Update unified status bar with all state info."""
@@ -1577,9 +1585,12 @@ class DashboardManager:
     # Define Network callbacks
     def _setup_network_callbacks(self):
 
+        # PERF-CN-01: prevent_initial_call=False — must populate the network
+        # info panel from the API on mount before the first interval tick.
         @self.app.callback(
             Output("network-info-panel", "children"),
             Input("slow-update-interval", "n_intervals"),
+            prevent_initial_call=False,
         )
         def update_network_info(n):
             """Update network information panel from API."""
@@ -1610,9 +1621,12 @@ class DashboardManager:
             icon = "▼" if new_state else "▶"
             return new_state, icon
 
+        # PERF-CN-01: prevent_initial_call=False — must populate the network
+        # info details panel from the API on mount before the first interval tick.
         @self.app.callback(
             Output("network-info-details-panel", "children"),
             Input("slow-update-interval", "n_intervals"),
+            prevent_initial_call=False,
         )
         def update_network_info_details(n):
             """Update detailed network information panel from API."""
@@ -1742,10 +1756,15 @@ class DashboardManager:
             Input("ws-connection-status", "data"),
         )
 
+        # PERF-CN-01: prevent_initial_call=True — only needs to react when the
+        # applied-params-store changes (which itself only changes after the
+        # backend init or a user Apply). The parameters panel handles an empty
+        # initial store via its own update_parameters_tables fallback.
         @self.app.callback(
             Output("parameters-panel-params-store", "data"),
             Input("applied-params-store", "data"),
             dash.dependencies.State("visualization-tabs", "active_tab"),
+            prevent_initial_call=True,
         )
         def update_parameters_panel_store(applied_data, active_tab):
             """Propagate applied parameters to the parameters panel store.
@@ -1765,11 +1784,15 @@ class DashboardManager:
                     stripped[key] = value
             return stripped
 
+        # PERF-CN-01: prevent_initial_call=False — must hit /api/metrics/history
+        # on mount to populate the metrics store before the first interval tick
+        # (also drives the metrics panel's plots and stats).
         @self.app.callback(
             Output("metrics-panel-metrics-store", "data"),
             Input("fast-update-interval", "n_intervals"),
             dash.dependencies.State("metrics-panel-display-mode-store", "data"),
             dash.dependencies.State("ws-connection-status", "data"),
+            prevent_initial_call=False,
         )
         def update_metrics_store(n, display_mode_state, ws_status):
             """Fetch metrics history from API and update metrics panel store.
@@ -1779,12 +1802,16 @@ class DashboardManager:
             """
             return self._update_metrics_store_handler(n=n, display_mode_state=display_mode_state, ws_status=ws_status)
 
+        # PERF-CN-01: prevent_initial_call=False — must hit /api/network/topology
+        # on mount (when the topology tab is active) so the network visualizer
+        # has data before the first interval tick.
         @self.app.callback(
             Output("network-visualizer-topology-store", "data"),
             Input("slow-update-interval", "n_intervals"),
             Input("ws-topology-buffer", "data"),
             Input("visualization-tabs", "active_tab"),
             dash.dependencies.State("ws-connection-status", "data"),
+            prevent_initial_call=False,
         )
         def update_topology_store(n, ws_topology, active_tab, ws_status):
             """Fetch topology from API or accept WebSocket push.
@@ -1810,11 +1837,15 @@ class DashboardManager:
             # REST fallback — only poll when topology tab is active
             return self._update_topology_store_handler(n=n, active_tab=active_tab)
 
+        # PERF-CN-01: prevent_initial_call=False — must hit the raw-topology API
+        # on mount when the topology tab is active and weight-matrix view is
+        # selected, so the heatmap renders before the first interval tick.
         @self.app.callback(
             Output("network-visualizer-raw-topology-store", "data"),
             Input("slow-update-interval", "n_intervals"),
             Input("visualization-tabs", "active_tab"),
             State("network-visualizer-view-mode", "value"),
+            prevent_initial_call=False,
         )
         def update_raw_topology_store(n, active_tab, view_mode):
             """Fetch raw weight-oriented topology for heatmap view (OF-1).
@@ -1823,30 +1854,42 @@ class DashboardManager:
             """
             return self._update_raw_topology_store_handler(n=n, active_tab=active_tab, view_mode=view_mode)
 
+        # PERF-CN-01: prevent_initial_call=False — must hit /api/dataset on
+        # mount when the dataset tab is active so the plotter has data before
+        # the first interval tick.
         @self.app.callback(
             Output("dataset-plotter-dataset-store", "data"),
             Input("slow-update-interval", "n_intervals"),
             Input("visualization-tabs", "active_tab"),
+            prevent_initial_call=False,
         )
         def update_dataset_store(n, active_tab):
             """Fetch dataset from API and update dataset plotter store."""
             return self._update_dataset_store_handler(n=n, active_tab=active_tab)
 
+        # PERF-CN-01: prevent_initial_call=False — must hit /api/decision-boundary
+        # on mount when the decision-boundary tab is active so the plot has data
+        # before the first interval tick.
         @self.app.callback(
             Output("decision-boundary-boundary-data", "data"),
             Input("fast-update-interval", "n_intervals"),
             Input("visualization-tabs", "active_tab"),
             Input("decision-boundary-refresh-btn", "n_clicks"),
             Input("decision-boundary-resolution-slider", "value"),
+            prevent_initial_call=False,
         )
         def update_boundary_store(n, active_tab, refresh_clicks, resolution):
             """Fetch decision boundary from API and update decision boundary store."""
             return self._update_boundary_store_handler(n=n, active_tab=active_tab, resolution=resolution)
 
+        # PERF-CN-01: prevent_initial_call=False — must populate the decision-
+        # boundary's dataset on mount when the tab is active so the plot has
+        # the underlying scatter data before the first interval tick.
         @self.app.callback(
             Output("decision-boundary-dataset-data", "data"),
             Input("fast-update-interval", "n_intervals"),
             Input("visualization-tabs", "active_tab"),
+            prevent_initial_call=False,
         )
         def update_boundary_dataset_store(n, active_tab):
             """Sync dataset data to decision boundary component."""
@@ -1969,14 +2012,21 @@ class DashboardManager:
                     **kwargs,
                 )
 
+        # PERF-CN-01: prevent_initial_call=True — only meaningful when an actual
+        # control action has been dispatched; the empty initial training-control-
+        # action store does not need a debounce timestamp.
         @self.app.callback(
             Output("last-button-click", "data"),
             Input("training-control-action", "data"),
+            prevent_initial_call=True,
         )
         def update_last_click(action):
             """Update last button click timestamp for debouncing."""
             return self._update_last_click_handler(action=action)
 
+        # PERF-CN-01: prevent_initial_call=False — must apply the initial
+        # button-states (disabled/loading flags and labels) on mount so the
+        # training control buttons render in their correct initial state.
         @self.app.callback(
             [
                 Output("start-button", "disabled"),
@@ -1991,6 +2041,7 @@ class DashboardManager:
                 Output("reset-button", "children"),
             ],
             Input("button-states", "data"),
+            prevent_initial_call=False,
         )
         def update_button_appearance(button_states):
             """Update button states (disabled/loading) with visual feedback."""
@@ -2072,23 +2123,33 @@ class DashboardManager:
 
         # ── Radio button enable/disable callbacks ──
 
+        # PERF-CN-01: prevent_initial_call=False — must compute initial
+        # disabled state on mount so the dependent inputs match the radio's
+        # default selection (otherwise the inputs render in a stale state).
         @self.app.callback(
             [Output("nn-growth-preset-epochs-input", "disabled"), Output("nn-growth-convergence-threshold-input", "disabled")],
             Input("nn-growth-trigger-radio", "value"),
+            prevent_initial_call=False,
         )
         def toggle_nn_growth_inputs(growth_trigger):
             return self._toggle_nn_growth_inputs_handler(growth_trigger)
 
+        # PERF-CN-01: prevent_initial_call=False — same rationale as above:
+        # initial disabled state must match the radio's default value on mount.
         @self.app.callback(
             [Output("cn-training-iterations-input", "disabled"), Output("cn-training-convergence-threshold-input", "disabled")],
             Input("cn-training-complete-radio", "value"),
+            prevent_initial_call=False,
         )
         def toggle_cn_training_inputs(training_complete):
             return self._toggle_cn_training_inputs_handler(training_complete)
 
+        # PERF-CN-01: prevent_initial_call=False — same rationale: initial
+        # candidate-selection inputs disabled state depends on the radio default.
         @self.app.callback(
             [Output("cn-top-candidates-input", "disabled"), Output("cn-random-candidates-input", "disabled")],
             Input("cn-candidate-selection-radio", "value"),
+            prevent_initial_call=False,
         )
         def toggle_cn_selection_inputs(selection_mode):
             return self._toggle_cn_selection_inputs_handler(selection_mode)
@@ -2160,6 +2221,10 @@ class DashboardManager:
                 # Store
                 Input("applied-params-store", "data"),
             ],
+            # PERF-CN-01: prevent_initial_call=False — must compute the initial
+            # disabled state of the Apply button by comparing current input
+            # values against the applied-params-store on mount.
+            prevent_initial_call=False,
         )
         def track_param_changes(
             nn_max_iter,
