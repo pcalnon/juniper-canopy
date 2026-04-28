@@ -673,6 +673,13 @@ class MetricsPanel(BaseComponent):
         # When WS bridge pushes new metrics events, append them to the
         # existing chart traces without rebuilding the full figure.
         # Max 5000 points retained per trace to bound memory.
+        #
+        # GAP-WS-14: extends to validation overlays. The original landing only
+        # fed trace 0 (Output Training / Accuracy); validation traces still
+        # forced a full figure rebuild whenever val_loss / val_accuracy
+        # changed. Trace indices vary at runtime depending on which optional
+        # overlays are present, so we look them up by name rather than
+        # hard-coding positions.
         app.clientside_callback(
             """
             function(wsBuffer, lossId, accId) {
@@ -681,6 +688,7 @@ class MetricsPanel(BaseComponent):
                 }
                 var events = wsBuffer.events;
                 var epochs = [], losses = [], accuracies = [];
+                var valEpochs = [], valLosses = [], valAccs = [];
                 for (var i = 0; i < events.length; i++) {
                     var e = events[i];
                     var epoch = e.epoch || e.current_epoch || i;
@@ -691,23 +699,78 @@ class MetricsPanel(BaseComponent):
                         losses.push(loss);
                         accuracies.push(acc !== undefined && acc !== null ? acc : 0);
                     }
+                    // GAP-WS-14: collect validation values when present so the
+                    // overlay traces stay in sync without forcing a rebuild.
+                    var vLoss = (e.val_loss !== undefined) ? e.val_loss
+                              : ((e.validation_loss !== undefined) ? e.validation_loss : null);
+                    var vAcc = (e.val_accuracy !== undefined) ? e.val_accuracy
+                             : ((e.validation_accuracy !== undefined) ? e.validation_accuracy : null);
+                    if (vLoss !== null && vLoss !== undefined) {
+                        valEpochs.push(epoch);
+                        valLosses.push(vLoss);
+                        valAccs.push(vAcc !== null && vAcc !== undefined ? vAcc : null);
+                    }
                 }
-                if (epochs.length === 0) {
+                if (epochs.length === 0 && valEpochs.length === 0) {
                     return [window.dash_clientside.no_update, window.dash_clientside.no_update];
                 }
-                // extendTraces on loss plot (trace 0)
+
+                // Locate optional traces by name. Positions vary depending on
+                // whether candidate-training / validation overlays are
+                // enabled in this view (GAP-WS-14).
+                function findTraceIndex(el, name) {
+                    if (!el || !el.data) return -1;
+                    for (var k = 0; k < el.data.length; k++) {
+                        if (el.data[k] && el.data[k].name === name) return k;
+                    }
+                    return -1;
+                }
+
+                // extendTraces on loss plot (trace 0 = Output Training)
                 var lossEl = document.getElementById(lossId);
                 if (lossEl && lossEl.data && lossEl.data.length > 0) {
-                    try {
-                        Plotly.extendTraces(lossEl, {x: [epochs], y: [losses]}, [0], 5000);
-                    } catch(e) {}
+                    if (epochs.length > 0) {
+                        try {
+                            Plotly.extendTraces(lossEl, {x: [epochs], y: [losses]}, [0], 5000);
+                        } catch(e) {}
+                    }
+                    if (valEpochs.length > 0) {
+                        var valLossIdx = findTraceIndex(lossEl, "Validation Loss");
+                        if (valLossIdx >= 0) {
+                            try {
+                                Plotly.extendTraces(lossEl, {x: [valEpochs], y: [valLosses]}, [valLossIdx], 5000);
+                            } catch(e) {}
+                        }
+                    }
                 }
-                // extendTraces on accuracy plot (trace 0)
+                // extendTraces on accuracy plot (trace 0 = Accuracy)
                 var accEl = document.getElementById(accId);
                 if (accEl && accEl.data && accEl.data.length > 0) {
-                    try {
-                        Plotly.extendTraces(accEl, {x: [epochs], y: [accuracies]}, [0], 5000);
-                    } catch(e) {}
+                    if (epochs.length > 0) {
+                        try {
+                            Plotly.extendTraces(accEl, {x: [epochs], y: [accuracies]}, [0], 5000);
+                        } catch(e) {}
+                    }
+                    if (valEpochs.length > 0) {
+                        var valAccIdx = findTraceIndex(accEl, "Validation Accuracy");
+                        if (valAccIdx >= 0) {
+                            // Filter null val_accuracy values so the overlay
+                            // only gains real points (the loss event may
+                            // arrive before the matching accuracy).
+                            var fEpochs = [], fAccs = [];
+                            for (var j = 0; j < valEpochs.length; j++) {
+                                if (valAccs[j] !== null && valAccs[j] !== undefined) {
+                                    fEpochs.push(valEpochs[j]);
+                                    fAccs.push(valAccs[j]);
+                                }
+                            }
+                            if (fEpochs.length > 0) {
+                                try {
+                                    Plotly.extendTraces(accEl, {x: [fEpochs], y: [fAccs]}, [valAccIdx], 5000);
+                                } catch(e) {}
+                            }
+                        }
+                    }
                 }
                 return [window.dash_clientside.no_update, window.dash_clientside.no_update];
             }
