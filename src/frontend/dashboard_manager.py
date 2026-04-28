@@ -1337,6 +1337,8 @@ class DashboardManager:
                 dcc.Store(id="ws-cascade-add-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
                 dcc.Store(id="ws-candidate-progress-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
                 dcc.Store(id="ws-connection-status", data={"connected": False, "reconnecting": False, "mode": "demo" if get_settings().demo_mode else "live"}),
+                # GAP-WS-15: bridge for `settings.enable_raf_coalescer` → JS `window._juniperRafCoalescerEnabled`
+                dcc.Store(id="ws-config-init", data=None),
                 # Raw weight-oriented topology for heatmap view (OF-1)
                 dcc.Store(id="network-visualizer-raw-topology-store", data=None),
                 # Tooltips for parameter controls
@@ -1622,6 +1624,24 @@ class DashboardManager:
         # Phase B: WebSocket drain callbacks.
         # WS connection and buffering handled by websocket_client.js + ws_dash_bridge.js.
         # These clientside callbacks drain ring buffers into Dash stores on each interval tick.
+
+        # GAP-WS-15: bridge `settings.enable_raf_coalescer` -> JS at app load.
+        # Fires on the layout-mount Input("ws-config-init", "id") so the JS
+        # global is set before the first WS event arrives. The flag controls
+        # whether the candidate_progress handler in ws_dash_bridge.js coalesces
+        # 50Hz events into one push per requestAnimationFrame (latest-value-wins).
+        raf_flag = "true" if getattr(self._settings, "enable_raf_coalescer", False) else "false"
+        self.app.clientside_callback(
+            f"""
+            function() {{
+                window._juniperRafCoalescerEnabled = {raf_flag};
+                return {{rafCoalescer: {raf_flag}}};
+            }}
+            """,
+            Output("ws-config-init", "data"),
+            Input("ws-config-init", "id"),
+            prevent_initial_call=False,
+        )
 
         # Drain metrics buffer → ws-metrics-buffer store (D-07 structured object)
         self.app.clientside_callback(

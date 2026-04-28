@@ -5,7 +5,13 @@
  * that Dash clientside callbacks drain on each interval tick.
  *
  * Ring bounds are enforced IN the handler (C-19), not in the drain.
- * rAF coalescer is scaffolded but disabled (D-04).
+ *
+ * GAP-WS-15: when window._juniperRafCoalescerEnabled is true, the
+ * candidate_progress handler coalesces 50Hz events via requestAnimationFrame
+ * (latest-value-wins). Default OFF; Python flips the flag at startup based
+ * on settings.enable_raf_coalescer. metrics / cascade_add / state / topology
+ * handlers are intentionally not coalesced — metrics is a time-series feed
+ * (every point matters for plotting) and the others are already low-frequency.
  *
  * Depends on: websocket_client.js (must load first — Dash serves assets alphabetically)
  */
@@ -64,8 +70,41 @@
         }
     };
 
-    // ── rAF scaffold (D-04: disabled) ──
-    window._juniperWsDrain._scheduleRaf = function() { /* noop */ };
+    // ── rAF coalescer for candidate_progress (GAP-WS-15) ──
+    // Holds the most recent candidate_progress event when the coalescer is
+    // enabled; rAF flush pushes it into the ring buffer at most once per
+    // animation frame. _rafScheduled prevents stacking flushes when many
+    // events arrive within one frame.
+    var pendingCandidateProgress = null;
+    var rafScheduled = false;
+
+    function flushPendingCandidateProgress() {
+        rafScheduled = false;
+        if (pendingCandidateProgress === null) {
+            return;
+        }
+        var drain = window._juniperWsDrain;
+        if (drain._candidateProgressBuffer.length >= MAX_CANDIDATE_PROGRESS) {
+            drain._candidateProgressBuffer.shift();
+        }
+        drain._candidateProgressBuffer.push(pendingCandidateProgress);
+        pendingCandidateProgress = null;
+    }
+
+    // Exposed for tests / diagnostics. Does latest-value-wins flush; safe to
+    // call even when coalescer is disabled.
+    window._juniperWsDrain._scheduleRaf = function() {
+        if (rafScheduled) {
+            return;
+        }
+        rafScheduled = true;
+        if (typeof window.requestAnimationFrame === "function") {
+            window.requestAnimationFrame(flushPendingCandidateProgress);
+        } else {
+            // Fallback for non-browser test environments (jsdom, headless)
+            setTimeout(flushPendingCandidateProgress, 16);
+        }
+    };
 
     // ── Register handlers on window.cascorWS ──
 
@@ -104,6 +143,15 @@
         });
 
         window.cascorWS.on("candidate_progress", function(data) {
+            // GAP-WS-15: when the coalescer is enabled, 50Hz candidate events
+            // are deduped to one push per rAF (latest-value-wins). Disabled
+            // path keeps the per-event push so existing tests/dashboards see
+            // identical behavior.
+            if (window._juniperRafCoalescerEnabled === true) {
+                pendingCandidateProgress = data;
+                drain._scheduleRaf();
+                return;
+            }
             if (drain._candidateProgressBuffer.length >= MAX_CANDIDATE_PROGRESS) {
                 drain._candidateProgressBuffer.shift();
             }
