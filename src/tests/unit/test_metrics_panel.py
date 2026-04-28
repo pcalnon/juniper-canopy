@@ -270,5 +270,64 @@ class TestMetricsPanelEdgeCases:
         assert panel.max_data_points is not None
 
 
+class TestExtendTracesValidationOverlays:
+    """GAP-WS-14: clientside extendTraces callback also feeds validation overlays.
+
+    The callback body is registered via `app.clientside_callback(...)` so it
+    only executes in a real browser. We verify the JS source string contains
+    the expected GAP-WS-14 invariants by inspecting metrics_panel.py directly.
+    """
+
+    @pytest.fixture
+    def metrics_panel_source(self):
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[2] / "frontend" / "components" / "metrics_panel.py"
+        return path.read_text(encoding="utf-8")
+
+    def test_validation_loss_extracted_from_event(self, metrics_panel_source):
+        """Loop must read both `val_loss` and the legacy `validation_loss` field."""
+        assert "e.val_loss" in metrics_panel_source
+        assert "e.validation_loss" in metrics_panel_source
+
+    def test_validation_accuracy_extracted_from_event(self, metrics_panel_source):
+        """Loop must read both `val_accuracy` and `validation_accuracy`."""
+        assert "e.val_accuracy" in metrics_panel_source
+        assert "e.validation_accuracy" in metrics_panel_source
+
+    def test_finds_validation_traces_by_name(self, metrics_panel_source):
+        """Trace lookup must match the visible trace names (positions vary at runtime)."""
+        assert '"Validation Loss"' in metrics_panel_source
+        assert '"Validation Accuracy"' in metrics_panel_source
+        # The helper that drives the lookup
+        assert "findTraceIndex" in metrics_panel_source
+
+    def test_extend_traces_called_for_validation(self, metrics_panel_source):
+        """Both `valLossIdx` and `valAccIdx` paths must call Plotly.extendTraces.
+
+        The original landing had 2 extendTraces calls (one per plot, trace 0).
+        GAP-WS-14 adds 2 more (one per validation overlay) for 4 total.
+        """
+        assert metrics_panel_source.count("Plotly.extendTraces") >= 4
+
+    def test_skips_validation_when_no_val_data(self, metrics_panel_source):
+        """The `valEpochs.length > 0` guard must wrap validation extends so
+        events without validation values don't fire empty extendTraces calls."""
+        assert "valEpochs.length > 0" in metrics_panel_source
+
+    def test_filter_null_val_accuracy_before_extend(self, metrics_panel_source):
+        """val_accuracy may lag val_loss by one event; the accuracy extend
+        must filter null entries to avoid pushing nulls into the trace."""
+        assert "fEpochs" in metrics_panel_source
+        assert "fAccs" in metrics_panel_source
+
+    def test_primary_trace_extends_unchanged(self, metrics_panel_source):
+        """The original trace 0 extends must still be present — GAP-WS-14
+        only adds validation overlays; it does not regress the primary
+        Output Training / Accuracy paths."""
+        # extendTraces called with traceIndices [0] (positional, primary trace).
+        assert "[0], 5000" in metrics_panel_source
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
