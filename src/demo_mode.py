@@ -602,7 +602,13 @@ class DemoMode:
         # Metrics buffer for realistic curves
         self.metrics_history: deque = deque(maxlen=TrainingConstants.METRICS_HISTORY_MAXLEN)
 
-        self.logger.info(f"DemoMode configuration: " f"max_epochs={self.max_epochs}, " f"max_hidden_units={self.max_hidden_units}, " f"cascade_every={self.cascade_every}, " f"update_interval={self.update_interval}s")
+        self.logger.info(
+            "DemoMode configuration: max_epochs=%s, max_hidden_units=%s, cascade_every=%s, update_interval=%ss",
+            self.max_epochs,
+            self.max_hidden_units,
+            self.cascade_every,
+            self.update_interval,
+        )
 
         # TrainingState instance
         try:
@@ -754,7 +760,7 @@ class DemoMode:
         except ImportError:
             pass
         except Exception as e:
-            self.logger.warning(f"State broadcast failed: {type(e).__name__}: {e}")
+            self.logger.warning("State broadcast failed: %s: %s", type(e).__name__, e)
 
     def _generate_spiral_dataset(self, n_samples: int = 200, algorithm: Optional[str] = None, n_rotations: Optional[float] = None) -> Dict[str, Any]:
         """
@@ -785,7 +791,7 @@ class DemoMode:
         if n_rotations is None:
             n_rotations = getattr(self, "spiral_rotations", TrainingConstants.DEFAULT_SPIRAL_ROTATIONS)
 
-        self.logger.info(f"Fetching dataset from JuniperData at {juniper_data_url} (n_rotations={n_rotations})")
+        self.logger.info("Fetching dataset from JuniperData at %s (n_rotations=%s)", juniper_data_url, n_rotations)
         return self._generate_spiral_dataset_from_juniper_data(n_samples, juniper_data_url, algorithm=algorithm, n_rotations=n_rotations)
 
     @staticmethod
@@ -940,7 +946,7 @@ class DemoMode:
             self.network._input_min = input_min
             self.network._input_max = input_max
 
-        self.logger.info(f"Generated spiral dataset via JuniperData: {len(inputs)} samples (normalized to [-1, 1])")
+        self.logger.info("Generated spiral dataset via JuniperData: %s samples (normalized to [-1, 1])", len(inputs))
 
         # Extract versioning metadata from response (if present)
         meta = response.get("meta", {})
@@ -1181,7 +1187,7 @@ class DemoMode:
         phase1_done = False
         with self._lock:
             if self.current_epoch >= self.max_epochs:
-                self.logger.info(f"Training complete: reached max_epochs={self.max_epochs} during initial training")
+                self.logger.info("Training complete: reached max_epochs=%s during initial training", self.max_epochs)
                 self.state_machine.mark_completed()
                 self.is_running = False
                 phase1_done = True
@@ -1194,10 +1200,10 @@ class DemoMode:
             # Check stopping criteria
             with self._lock:
                 if len(self.network.hidden_units) >= self.max_hidden_units:
-                    self.logger.info(f"Max hidden units reached ({self.max_hidden_units})")
+                    self.logger.info("Max hidden units reached (%s)", self.max_hidden_units)
                     break
                 if self.current_epoch >= self.max_epochs:
-                    self.logger.info(f"Max epochs reached ({self.max_epochs})")
+                    self.logger.info("Max epochs reached (%s)", self.max_epochs)
                     break
 
             # Check pause
@@ -1273,7 +1279,7 @@ class DemoMode:
                     }
                 )
 
-            self.logger.info(f"Installed cascade unit #{unit_index} (correlation={best_correlation:.4f})")
+            self.logger.info("Installed cascade unit #%s (correlation=%.4f)", unit_index, best_correlation)
             self._broadcast_cascade_add(unit_index, hidden_count, epoch_snapshot)
 
             # Emit metrics at cascade boundary (unconditional — ensures at least 1 per cycle)
@@ -1378,7 +1384,7 @@ class DemoMode:
             # Module not available - expected during initialization
             pass
         except Exception as e:
-            self.logger.warning(f"WebSocket broadcast failed: {type(e).__name__}: {e}")
+            self.logger.warning("WebSocket broadcast failed: %s: %s", type(e).__name__, e)
 
     def _broadcast_cascade_add(self, unit_index: int, hidden_count: int, epoch: int):
         """
@@ -1398,7 +1404,7 @@ class DemoMode:
             # Module not available - expected during initialization
             pass
         except Exception as e:
-            self.logger.warning(f"WebSocket cascade broadcast failed: {type(e).__name__}: {e}")
+            self.logger.warning("WebSocket cascade broadcast failed: %s: %s", type(e).__name__, e)
 
     def start(self, reset: bool = True) -> Dict[str, Any]:
         """
@@ -1560,7 +1566,7 @@ class DemoMode:
         # Restore candidate state if it was saved
         if self.state_machine.get_phase() == TrainingPhase.CANDIDATE:
             if candidate_state := self.state_machine.get_candidate_state():
-                self.logger.info(f"Restoring candidate state: {candidate_state}")
+                self.logger.info("Restoring candidate state: %s", candidate_state)
 
         if not self.running:  # CONC-08
             self.logger.warning("Demo mode not running, cannot resume")
@@ -1667,7 +1673,7 @@ class DemoMode:
         except ImportError:
             pass
         except Exception as e:
-            self.logger.warning(f"WebSocket status broadcast failed: {type(e).__name__}: {e}")
+            self.logger.warning("WebSocket status broadcast failed: %s: %s", type(e).__name__, e)
 
     def get_network(self) -> MockCascorNetwork:
         """
@@ -1712,7 +1718,7 @@ class DemoMode:
             self.current_loss = 1.0
             self.current_accuracy = 0.5
             self.metrics_history.clear()
-        self.logger.info(f"Dataset regenerated: n_samples={n_samples}, n_rotations={n_rotations}")
+        self.logger.info("Dataset regenerated: n_samples=%s, n_rotations=%s", n_samples, n_rotations)
         return self.dataset
 
     def get_dataset(self) -> Dict[str, Any]:
@@ -1815,26 +1821,26 @@ class DemoMode:
                 # Update Adam optimizer's learning rate to take effect immediately
                 for param_group in self.network.output_optimizer.param_groups:
                     param_group["lr"] = learning_rate
-                self.logger.info(f"Demo mode: learning_rate set to {learning_rate}")
+                self.logger.info("Demo mode: learning_rate set to %s", learning_rate)
 
             if max_hidden_units is not None:
                 self.max_hidden_units = max_hidden_units
-                self.logger.info(f"Demo mode: max_hidden_units set to {max_hidden_units}")
+                self.logger.info("Demo mode: max_hidden_units set to %s", max_hidden_units)
 
             if max_epochs is not None:
                 self.max_epochs = int(max_epochs)
-                self.logger.info(f"Demo mode: max_epochs set to {max_epochs}")
+                self.logger.info("Demo mode: max_epochs set to %s", max_epochs)
 
             if convergence_enabled is not None:
                 self.convergence_enabled = bool(convergence_enabled)
-                self.logger.info(f"Demo mode: convergence_enabled set to {self.convergence_enabled}")
+                self.logger.info("Demo mode: convergence_enabled set to %s", self.convergence_enabled)
 
             if convergence_threshold is not None:
                 self.convergence_threshold = max(
                     TrainingConstants.MIN_CONVERGENCE_THRESHOLD,
                     min(float(convergence_threshold), TrainingConstants.MAX_CONVERGENCE_THRESHOLD),
                 )
-                self.logger.info(f"Demo mode: convergence_threshold set to {self.convergence_threshold}")
+                self.logger.info("Demo mode: convergence_threshold set to %s", self.convergence_threshold)
 
             if spiral_rotations is not None:
                 new_rotations = max(
@@ -1843,7 +1849,7 @@ class DemoMode:
                 )
                 if new_rotations != self.spiral_rotations:
                     self.spiral_rotations = new_rotations
-                    self.logger.info(f"Demo mode: spiral_rotations set to {self.spiral_rotations} — regenerating dataset")
+                    self.logger.info("Demo mode: spiral_rotations set to %s — regenerating dataset", self.spiral_rotations)
                     # Regenerate dataset with new rotation count and reset training
                     try:
                         self.dataset = self._generate_spiral_dataset(n_samples=200, n_rotations=self.spiral_rotations)
@@ -1890,7 +1896,7 @@ class DemoMode:
                 if param_name in kwargs and kwargs[param_name] is not None:
                     value = cast_fn(kwargs[param_name])
                     setattr(self, param_name, value)
-                    self.logger.info(f"Demo mode: {param_name} set to {value}")
+                    self.logger.info("Demo mode: %s set to %s", param_name, value)
 
         # Update TrainingState with new parameter values
         if self.training_state:

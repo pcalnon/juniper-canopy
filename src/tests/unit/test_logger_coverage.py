@@ -158,6 +158,72 @@ class TestErrorLoggingWithException:
         logger.error("Error without exception")
 
 
+class TestLazyArgsFormatting:
+    """PERF-CN-02: CascorLogger supports stdlib-style lazy `%s` formatting via `*args`."""
+
+    def test_info_lazy_formatting_renders_in_log_file(self, tmp_log_dir, test_config):
+        """`logger.info("hello %s %d", "world", 42)` interpolates lazily and emits."""
+        logger = CascorLogger("test_lazy_info", log_dir=tmp_log_dir, config=test_config)
+        logger.info("hello %s %d", "world", 42)
+
+        log_file = Path(tmp_log_dir) / "test_lazy_info.log"
+        contents = log_file.read_text(encoding="utf-8")
+        assert "hello world 42" in contents
+
+    def test_warning_lazy_formatting_renders(self, tmp_log_dir, test_config):
+        """warning() also threads `*args` through to LogRecord.getMessage()."""
+        logger = CascorLogger("test_lazy_warn", log_dir=tmp_log_dir, config=test_config)
+        logger.warning("retry %d/%d for %s", 3, 5, "endpoint")
+
+        log_file = Path(tmp_log_dir) / "test_lazy_warn.log"
+        contents = log_file.read_text(encoding="utf-8")
+        assert "retry 3/5 for endpoint" in contents
+
+    def test_error_with_exception_and_args(self, tmp_log_dir, test_config):
+        """`exception=` keyword survives the `*args` extension."""
+        logger = CascorLogger("test_lazy_err", log_dir=tmp_log_dir, config=test_config)
+        try:
+            raise ValueError("boom")
+        except ValueError as e:
+            logger.error("op %s failed for %s", "save", "/tmp/x", exception=e)
+
+        log_file = Path(tmp_log_dir) / "test_lazy_err.log"
+        contents = log_file.read_text(encoding="utf-8")
+        assert "op save failed for /tmp/x" in contents
+
+    def test_legacy_single_arg_call_still_works(self, tmp_log_dir, test_config):
+        """Existing callers passing only `(message)` are unaffected."""
+        logger = CascorLogger("test_lazy_legacy", log_dir=tmp_log_dir, config=test_config)
+        logger.info("plain message, no interpolation")
+
+        log_file = Path(tmp_log_dir) / "test_lazy_legacy.log"
+        contents = log_file.read_text(encoding="utf-8")
+        assert "plain message, no interpolation" in contents
+
+    def test_short_circuits_below_level(self, tmp_log_dir, test_config):
+        """`isEnabledFor` short-circuit must skip record construction below
+        threshold so deferred formatting actually pays off."""
+        from unittest.mock import patch
+
+        logger = CascorLogger("test_lazy_skip", log_dir=tmp_log_dir, config=test_config)
+        # Force the underlying stdlib logger above DEBUG.
+        logger.logger.setLevel("INFO")
+
+        called = {"makeRecord": 0}
+        original_makeRecord = logger.logger.makeRecord
+
+        def counting_makeRecord(*a, **kw):
+            called["makeRecord"] += 1
+            return original_makeRecord(*a, **kw)
+
+        with patch.object(logger.logger, "makeRecord", side_effect=counting_makeRecord):
+            logger.debug("expensive %s", "thing")
+            logger.info("emitted %s", "thing")
+
+        # The DEBUG call must NOT have built a record; the INFO call must have.
+        assert called["makeRecord"] == 1
+
+
 class TestFileHandlers:
     """Test file handler creation."""
 

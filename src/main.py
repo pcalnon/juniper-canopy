@@ -135,7 +135,7 @@ async def lifespan(app: FastAPI):
         set_build_info("juniper_canopy", APP_VERSION)
 
     system_logger.info("Starting Juniper Canopy application")
-    system_logger.info(f"Settings: server={settings.server.host}:{settings.server.port}, demo={settings.demo_mode}")
+    system_logger.info("Settings: server=%s:%s, demo=%s", settings.server.host, settings.server.port, settings.demo_mode)
 
     # Capture the running event loop for thread-safe async scheduling
     loop_holder["loop"] = asyncio.get_running_loop()
@@ -161,7 +161,7 @@ async def lifespan(app: FastAPI):
                 timeout=settings.cascor_discovery.timeout_seconds,
             )
             if discovered_url:
-                system_logger.info(f"Auto-discovered cascor at {discovered_url} — activating service mode")
+                system_logger.info("Auto-discovered cascor at %s — activating service mode", discovered_url)
 
     backend = create_backend(service_url=discovered_url)
 
@@ -175,9 +175,9 @@ async def lifespan(app: FastAPI):
     data_probe = await probe_dependency("JuniperData", f"{juniper_data_url.rstrip('/')}/v1/health/live")
     if data_probe.status == "healthy":
         juniper_data_available = True
-        system_logger.info(f"JuniperData reachable at {juniper_data_url} ({data_probe.latency_ms:.1f}ms)")
+        system_logger.info("JuniperData reachable at %s (%.1fms)", juniper_data_url, data_probe.latency_ms)
     else:
-        system_logger.warning(f"JuniperData unreachable at {juniper_data_url}: {data_probe.message}")
+        system_logger.warning("JuniperData unreachable at %s: %s", juniper_data_url, data_probe.message)
 
     # Probe JuniperCascor at startup (service mode only) — fallback to demo on failure.
     backend_initialized = False
@@ -185,9 +185,9 @@ async def lifespan(app: FastAPI):
     if cascor_url and backend.backend_type == "service":
         cascor_probe = await probe_dependency("JuniperCascor", f"{cascor_url.rstrip('/')}/v1/health/live")
         if cascor_probe.status == "healthy":
-            system_logger.info(f"JuniperCascor reachable at {cascor_url} ({cascor_probe.latency_ms:.1f}ms)")
+            system_logger.info("JuniperCascor reachable at %s (%.1fms)", cascor_url, cascor_probe.latency_ms)
         else:
-            system_logger.warning(f"JuniperCascor unreachable at {cascor_url} — falling back to demo mode")
+            system_logger.warning("JuniperCascor unreachable at %s — falling back to demo mode", cascor_url)
             await backend.shutdown()
             from backend import create_backend
 
@@ -205,7 +205,12 @@ async def lifespan(app: FastAPI):
         if demo.training_state:
             demo_state = demo.training_state.get_state()
             training_state.update_state(**demo_state)
-            system_logger.info(f"Global training_state synced with demo defaults: LR={demo_state.get('learning_rate')}, " f"MaxHidden={demo_state.get('max_hidden_units')}, Epochs={demo_state.get('max_epochs')}")
+            system_logger.info(
+                "Global training_state synced with demo defaults: LR=%s, MaxHidden=%s, Epochs=%s",
+                demo_state.get("learning_rate"),
+                demo_state.get("max_hidden_units"),
+                demo_state.get("max_epochs"),
+            )
     elif backend.backend_type == "service":
         synced = backend.get_synced_state()
         if synced:
@@ -218,11 +223,16 @@ async def lifespan(app: FastAPI):
                 max_hidden_units=synced.params.get("max_hidden_units", training_state.get_state().get("max_hidden_units")),
                 **synced.progress_fields,
             )
-            system_logger.info(f"Global training_state synced with cascor: status={synced.status}, epoch={synced.current_epoch}, params={len(synced.params)} keys")
+            system_logger.info(
+                "Global training_state synced with cascor: status=%s, epoch=%s, params=%s keys",
+                synced.status,
+                synced.current_epoch,
+                len(synced.params),
+            )
         # Register callback so relay-driven state updates keep training_state current
         backend.set_state_update_callback(training_state.update_state)
 
-    system_logger.info(f"Backend initialized: {backend.backend_type}")
+    system_logger.info("Backend initialized: %s", backend.backend_type)
     system_logger.info("Application startup complete")
 
     yield
@@ -300,7 +310,7 @@ if settings.metrics_enabled:
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Catch-all handler returning a consistent JSON error shape."""
-    system_logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}", exc_info=True)
+    system_logger.error("Unhandled exception on %s %s: %s", request.method, request.url.path, exc, exc_info=True)
     body = ErrorResponse(error="Internal server error", detail="An unexpected error occurred.", status_code=500)
     return JSONResponse(body.model_dump(), status_code=500)
 
@@ -332,7 +342,7 @@ def schedule_broadcast(coroutine):
         try:
             asyncio.run_coroutine_threadsafe(coroutine, loop_holder["loop"])
         except Exception as e:
-            system_logger.error(f"Failed to schedule broadcast: {e}")
+            system_logger.error("Failed to schedule broadcast: %s", e)
     else:
         coroutine.close()
         system_logger.warning("Event loop not available for broadcasting")
@@ -498,17 +508,17 @@ async def websocket_training_endpoint(websocket: WebSocket):
                     await websocket_manager.send_personal_message({"type": "pong"}, websocket)
                 # Handle other messages as needed
                 else:
-                    system_logger.debug(f"Received message: {message.get('type')}")
+                    system_logger.debug("Received message: %s", message.get("type"))
 
             except asyncio.TimeoutError:
-                system_logger.info(f"WebSocket idle timeout ({idle_timeout}s), closing: {client_id}")
+                system_logger.info("WebSocket idle timeout (%ss), closing: %s", idle_timeout, client_id)
                 await websocket.close(code=1000, reason="Idle timeout")
                 break
             except WebSocketDisconnect:
-                system_logger.info(f"Client disconnected: {client_id}")
+                system_logger.info("Client disconnected: %s", client_id)
                 break
             except Exception as e:
-                system_logger.error(f"WebSocket error: {e}")
+                system_logger.error("WebSocket error: %s", e)
                 break
 
     finally:
@@ -657,7 +667,7 @@ async def websocket_control_endpoint(websocket: WebSocket):
                 )
                 continue
 
-            system_logger.info(f"Control command received: {command} (backend={backend.backend_type}, id={command_id})")
+            system_logger.info("Control command received: %s (backend=%s, id=%s)", command, backend.backend_type, command_id)
 
             timeout = _command_timeout(command)
             try:
@@ -680,7 +690,7 @@ async def websocket_control_endpoint(websocket: WebSocket):
                     websocket,
                 )
             except asyncio.TimeoutError:
-                system_logger.error(f"Command '{command}' timed out after {timeout}s")
+                system_logger.error("Command '%s' timed out after %ss", command, timeout)
                 await websocket_manager.send_personal_message(
                     create_command_response_message(
                         command,
@@ -691,7 +701,7 @@ async def websocket_control_endpoint(websocket: WebSocket):
                     websocket,
                 )
             except Exception as e:
-                system_logger.error(f"Command execution error: {e}")
+                system_logger.error("Command execution error: %s", e)
                 await websocket_manager.send_personal_message(
                     create_command_response_message(
                         command,
@@ -703,7 +713,7 @@ async def websocket_control_endpoint(websocket: WebSocket):
                 )
 
     except WebSocketDisconnect:
-        system_logger.info(f"Control client disconnected: {client_id}")
+        system_logger.info("Control client disconnected: %s", client_id)
     finally:
         websocket_manager.disconnect(websocket)
 
@@ -712,7 +722,7 @@ async def websocket_control_endpoint(websocket: WebSocket):
 @app.get("/api/health", deprecated=True)
 async def health_check_deprecated(request: Request):
     """Health check endpoint (deprecated — use /v1/health instead)."""
-    system_logger.warning(f"Deprecated health endpoint {request.url.path} called — use /v1/health, /v1/health/live, or /v1/health/ready instead")
+    system_logger.warning("Deprecated health endpoint %s called — use /v1/health, /v1/health/live, or /v1/health/ready instead", request.url.path)
     return {
         "status": "healthy",
         "timestamp": time.time(),
@@ -1030,7 +1040,7 @@ async def generate_dataset(request: Request):
         # full traceback server-side and return an opaque error_id so the
         # operator can correlate the client report with server logs.
         error_id = uuid.uuid4().hex[:12]
-        system_logger.error(f"Dataset generation failed [error_id={error_id}]", exception=exc)
+        system_logger.error("Dataset generation failed [error_id=%s]", error_id, exception=exc)
         return JSONResponse(
             {"error": "Internal server error", "error_id": error_id},
             status_code=500,
@@ -1061,7 +1071,7 @@ async def list_dataset_generators():
                     elif isinstance(data, dict) and "generators" in data:
                         generators = data["generators"]
         except Exception as e:
-            system_logger.debug(f"Failed to fetch generators from JuniperData: {e}")
+            system_logger.debug("Failed to fetch generators from JuniperData: %s", e)
 
     # Fallback to built-in demo generators
     if not generators:
@@ -1225,7 +1235,7 @@ async def get_snapshots():
     try:
         snapshots = _list_snapshot_files()
     except Exception as e:
-        system_logger.error(f"Failed to list snapshots: {e}")
+        system_logger.error("Failed to list snapshots: %s", e)
         snapshots = []
 
     # Demo mode or no real snapshots available → return mock data
@@ -1276,9 +1286,9 @@ async def get_snapshot_history(limit: int = 50):
                             entry = json.loads(line)
                             entries.append(entry)
                         except json.JSONDecodeError:
-                            system_logger.warning(f"Invalid JSON in history file: {line[:50]}...")
+                            system_logger.warning("Invalid JSON in history file: %s...", line[:50])
         except Exception as e:
-            system_logger.warning(f"Failed to read snapshot history: {e}")
+            system_logger.warning("Failed to read snapshot history: %s", e)
 
     # Return in reverse chronological order (newest first)
     entries.reverse()
@@ -1380,7 +1390,7 @@ async def get_snapshot_detail(snapshot_id: str):
     except ImportError:
         system_logger.debug("h5py not available, skipping HDF5 attribute extraction")
     except Exception as e:
-        system_logger.warning(f"Failed to read HDF5 attributes for {snapshot_file}: {e}")
+        system_logger.warning("Failed to read HDF5 attributes for %s: %s", snapshot_file, e)
 
     return detail
 
@@ -1429,9 +1439,9 @@ def _log_snapshot_activity(action: str, snapshot_id: str, details: dict = None, 
         with open(history_file, "a") as f:
             f.write(json.dumps(entry) + "\n")
 
-        system_logger.debug(f"Logged snapshot activity: {action} for {snapshot_id}")
+        system_logger.debug("Logged snapshot activity: %s for %s", action, snapshot_id)
     except Exception as e:
-        system_logger.warning(f"Failed to log snapshot activity: {e}")
+        system_logger.warning("Failed to log snapshot activity: %s", e)
 
 
 @app.post("/api/v1/snapshots", status_code=201)
@@ -1495,7 +1505,7 @@ async def create_snapshot(
             message="Demo snapshot created successfully",
         )
 
-        system_logger.info(f"Created demo snapshot: {snapshot_id}")
+        system_logger.info("Created demo snapshot: %s", snapshot_id)
 
         return {
             **snapshot,
@@ -1569,7 +1579,7 @@ async def create_snapshot(
             message="Snapshot created successfully",
         )
 
-        system_logger.info(f"Created snapshot: {snapshot_id} at {snapshot_path}")
+        system_logger.info("Created snapshot: %s at %s", snapshot_id, snapshot_path)
 
         return {
             **snapshot,
@@ -1579,7 +1589,7 @@ async def create_snapshot(
     except HTTPException:
         raise
     except Exception as e:
-        system_logger.error(f"Failed to create snapshot: {e}")
+        system_logger.error("Failed to create snapshot: %s", e)
         raise HTTPException(
             status_code=500,
             detail="Failed to create snapshot",
@@ -1707,7 +1717,7 @@ async def restore_snapshot(snapshot_id: str):
                 }
             )
 
-            system_logger.info(f"Restored from demo snapshot: {snapshot_id}")
+            system_logger.info("Restored from demo snapshot: %s", snapshot_id)
 
             return {
                 "status": "success",
@@ -1787,7 +1797,7 @@ async def restore_snapshot(snapshot_id: str):
             }
         )
 
-        system_logger.info(f"Restored from snapshot: {snapshot_id} at {snapshot_path}")
+        system_logger.info("Restored from snapshot: %s at %s", snapshot_id, snapshot_path)
 
         return {
             "status": "success",
@@ -1798,7 +1808,7 @@ async def restore_snapshot(snapshot_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        system_logger.error(f"Failed to restore snapshot: {e}")
+        system_logger.error("Failed to restore snapshot: %s", e)
         raise HTTPException(
             status_code=500,
             detail="Failed to restore snapshot",
@@ -1832,7 +1842,7 @@ def _load_layouts() -> dict:
             with open(layouts_file) as f:
                 return dict(json.load(f))
         except Exception as e:
-            system_logger.warning(f"Failed to load layouts file: {e}")
+            system_logger.warning("Failed to load layouts file: %s", e)
     return {}
 
 
@@ -1846,7 +1856,7 @@ def _save_layouts(layouts: dict) -> None:
             json.dump(layouts, f, indent=2)
             f.write("\n")
     except Exception as e:
-        system_logger.error(f"Failed to save layouts file: {e}")
+        system_logger.error("Failed to save layouts file: %s", e)
         raise
 
 
@@ -1947,10 +1957,10 @@ async def save_metrics_layout(
     try:
         _save_layouts(layouts)
     except Exception as e:
-        system_logger.debug(f"Failed to save layout: {e}")
+        system_logger.debug("Failed to save layout: %s", e)
         raise HTTPException(status_code=500, detail="Failed to save layout") from e
 
-    system_logger.info(f"Saved metrics layout: {name}")
+    system_logger.info("Saved metrics layout: %s", name)
 
     return {
         "name": name,
@@ -1982,10 +1992,10 @@ async def delete_metrics_layout(name: str):
     try:
         _save_layouts(layouts)
     except Exception as e:
-        system_logger.debug(f"Failed to delete layout: {e}")
+        system_logger.debug("Failed to delete layout: %s", e)
         raise HTTPException(status_code=500, detail="Failed to delete layout") from e
 
-    system_logger.info(f"Deleted metrics layout: {name}")
+    system_logger.info("Deleted metrics layout: %s", name)
 
     return {
         "name": name,
@@ -2097,7 +2107,7 @@ async def get_worker_stats():
         except Exception:
             # SEC-14: return an opaque error_id instead of the exception message.
             error_id = uuid.uuid4().hex[:12]
-            system_logger.warning(f"Failed to fetch worker stats from CasCor [error_id={error_id}]")
+            system_logger.warning("Failed to fetch worker stats from CasCor [error_id=%s]", error_id)
             return {
                 "total": 0,
                 "idle": 0,
@@ -2130,7 +2140,7 @@ async def get_worker_list():
         except Exception:
             # SEC-14: return an opaque error_id instead of the exception message.
             error_id = uuid.uuid4().hex[:12]
-            system_logger.warning(f"Failed to fetch worker list from CasCor [error_id={error_id}]")
+            system_logger.warning("Failed to fetch worker list from CasCor [error_id=%s]", error_id)
             return {"workers": [], "count": 0, "error": "Upstream error", "error_id": error_id}
 
     import time
@@ -2440,13 +2450,13 @@ async def api_set_params(body: SetParamsRequest):
         result = await asyncio.to_thread(backend.apply_params, **backend_updates)
         if isinstance(result, dict) and not result.get("ok", True):
             error_msg = result.get("error", "unknown")
-            system_logger.warning(f"Backend parameter application failed: {error_msg}")
+            system_logger.warning("Backend parameter application failed: %s", error_msg)
             return JSONResponse({"error": f"Backend rejected parameters: {error_msg}"}, status_code=502)
 
         # Only update TrainingState AFTER backend confirms success
         if ts_updates:
             training_state.update_state(**ts_updates)
-        system_logger.info(f"Parameters updated: {backend_updates}")
+        system_logger.info("Parameters updated: %s", backend_updates)
 
         # Broadcast params update with applied parameters
         broadcast_data = {**training_state.get_state(), "applied_params": backend_updates}
@@ -2456,7 +2466,7 @@ async def api_set_params(body: SetParamsRequest):
     except Exception as exc:
         # SEC-14: return an opaque error_id; full traceback goes to logs only.
         error_id = uuid.uuid4().hex[:12]
-        system_logger.error(f"Failed to set parameters [error_id={error_id}]", exception=exc)
+        system_logger.error("Failed to set parameters [error_id=%s]", error_id, exception=exc)
         return JSONResponse(
             {"error": "Internal server error", "error_id": error_id},
             status_code=500,
@@ -2628,7 +2638,7 @@ async def api_ws_browser_errors(report: WsBrowserErrorReport):
     """Accept browser-reported WS errors and feed Prometheus counter."""
     if _ws_error_counter:
         _ws_error_counter.labels(endpoint=report.endpoint).inc()
-    system_logger.warning(f"Browser WS error on {report.endpoint}: {report.error}")
+    system_logger.warning("Browser WS error on %s: %s", report.endpoint, report.error)
     return {"status": "ok"}
 
 
@@ -2641,11 +2651,11 @@ def main():
     port = settings.server.port
     debug = settings.server.debug
 
-    system_logger.info(f"Starting server on {host}:{port}")
-    system_logger.info(f"Debug mode: {debug}")
-    system_logger.info(f"Dashboard available at: http://{host}:{port}/dashboard/")
-    system_logger.info(f"WebSocket endpoint: ws://{host}:{port}/ws")
-    system_logger.info(f"API documentation: http://{host}:{port}/docs")
+    system_logger.info("Starting server on %s:%s", host, port)
+    system_logger.info("Debug mode: %s", debug)
+    system_logger.info("Dashboard available at: http://%s:%s/dashboard/", host, port)
+    system_logger.info("WebSocket endpoint: ws://%s:%s/ws", host, port)
+    system_logger.info("API documentation: http://%s:%s/docs", host, port)
 
     # Run server
     uvicorn.run(app, host=host, port=port, log_level="info" if debug else "warning")
