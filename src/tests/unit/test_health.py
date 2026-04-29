@@ -52,11 +52,17 @@ class TestReadinessResponseModel:
 
 @pytest.mark.unit
 class TestProbeDependency:
-    """Test the probe_dependency utility function."""
+    """Test the probe_dependency utility function.
+
+    METRICS-MON R2.1.5: ``probe_dependency`` is now an async wrapper
+    around the synchronous :func:`juniper_observability.probe_dependency`
+    (the actual HTTP call lives in ``juniper_observability.health.probe``).
+    Patches target the shared module accordingly.
+    """
 
     @pytest.mark.asyncio
     async def test_probe_healthy(self):
-        with patch("health.urllib.request.urlopen") as mock:
+        with patch("juniper_observability.health.probe.urllib.request.urlopen") as mock:
             mock.return_value.__enter__ = lambda s: s
             mock.return_value.__exit__ = lambda s, *a: None
             result = await probe_dependency("Test", "http://localhost:8100/v1/health/live")
@@ -66,7 +72,7 @@ class TestProbeDependency:
 
     @pytest.mark.asyncio
     async def test_probe_unhealthy(self):
-        with patch("health.urllib.request.urlopen", side_effect=ConnectionRefusedError("refused")):
+        with patch("juniper_observability.health.probe.urllib.request.urlopen", side_effect=ConnectionRefusedError("refused")):
             result = await probe_dependency("Test", "http://localhost:9999/v1/health/live")
             assert result.status == "unhealthy"
             assert "ConnectionRefusedError" in result.message
@@ -75,7 +81,7 @@ class TestProbeDependency:
     async def test_probe_timeout(self):
         from urllib.error import URLError
 
-        with patch("health.urllib.request.urlopen", side_effect=URLError("timeout")):
+        with patch("juniper_observability.health.probe.urllib.request.urlopen", side_effect=URLError("timeout")):
             result = await probe_dependency("Slow", "http://localhost:8100/v1/health/live", timeout=0.1)
             assert result.status == "unhealthy"
             assert result.latency_ms is not None

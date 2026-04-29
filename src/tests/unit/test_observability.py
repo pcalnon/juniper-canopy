@@ -71,12 +71,20 @@ class TestJuniperJsonFormatter:
             assert "exception" in parsed
             assert "ValueError" in parsed["exception"]
 
-    def test_format_default_service_name(self):
+    def test_format_default_service_name_is_shared_lib_default(self):
+        """METRICS-MON R2.1.5: canopy consumes the shared formatter.
+
+        Canopy used to default to ``"juniper-canopy"``; after migrating
+        to ``juniper_observability.JuniperJsonFormatter``, the unset
+        default is the shared lib's ``"juniper-service"``. All canopy
+        call sites pass the service name explicitly (see
+        ``configure_logging`` and ``main.lifespan``).
+        """
         formatter = JuniperJsonFormatter()
         record = logging.LogRecord(name="test", level=logging.INFO, pathname="", lineno=0, msg="hi", args=None, exc_info=None)
         output = formatter.format(record)
         parsed = json.loads(output)
-        assert parsed["service"] == "juniper-canopy"
+        assert parsed["service"] == "juniper-service"
 
 
 @pytest.mark.unit
@@ -385,3 +393,112 @@ class TestCanopyMetrics:
             mock_gauge.set.assert_called_with(0)
 
         obs._canopy_metrics = None
+
+
+@pytest.mark.unit
+class TestObservabilityShim:
+    """METRICS-MON R2.1.5: ``observability`` re-exports from the shared lib.
+
+    These tests pin the migration: every cross-cutting symbol that
+    historically lived inline must now resolve to the same object the
+    shared :mod:`juniper_observability` package exposes. If a future
+    change accidentally re-introduces a local copy, these assertions
+    fail loudly.
+    """
+
+    def test_json_formatter_is_shared(self):
+        import juniper_observability
+
+        import observability as canopy_obs
+
+        assert canopy_obs.JuniperJsonFormatter is juniper_observability.JuniperJsonFormatter
+
+    def test_request_id_middleware_is_shared(self):
+        import juniper_observability
+
+        import observability as canopy_obs
+
+        assert canopy_obs.RequestIdMiddleware is juniper_observability.RequestIdMiddleware
+        assert canopy_obs.request_id_var is juniper_observability.request_id_var
+
+    def test_prometheus_middleware_is_shared(self):
+        import juniper_observability
+
+        import observability as canopy_obs
+
+        assert canopy_obs.PrometheusMiddleware is juniper_observability.PrometheusMiddleware
+        assert canopy_obs.UNMATCHED_ENDPOINT_LABEL == juniper_observability.UNMATCHED_ENDPOINT_LABEL
+
+    def test_configure_logging_is_shared(self):
+        import juniper_observability
+
+        import observability as canopy_obs
+
+        assert canopy_obs.configure_logging is juniper_observability.configure_logging
+
+    def test_prometheus_app_helpers_are_shared(self):
+        import juniper_observability
+
+        import observability as canopy_obs
+
+        assert canopy_obs.get_prometheus_app is juniper_observability.get_prometheus_app
+        assert canopy_obs.set_build_info is juniper_observability.set_build_info
+
+    def test_configure_sentry_installs_before_send(self):
+        """METRICS-MON R2.1.5: shared `configure_sentry` adds the SEC-15 hook.
+
+        Canopy's previous local `configure_sentry` did not install a
+        ``before_send`` hook. The migration to the shared lib adds it
+        for free, scrubbing ``X-API-Key`` / ``Authorization`` /
+        ``Cookie`` from outbound Sentry events.
+        """
+        from juniper_observability.sentry import _strip_sensitive_headers as shared_strip
+
+        with patch("sentry_sdk.init") as mock_init:
+            configure_sentry("https://k@o0.ingest.sentry.io/0", "juniper-canopy", "0.4.0")
+            kw = mock_init.call_args.kwargs
+            assert kw["before_send"] is shared_strip
+
+    def test_health_models_are_shared(self):
+        import juniper_observability
+
+        from health import DependencyStatus, ReadinessResponse
+
+        assert DependencyStatus is juniper_observability.DependencyStatus
+        assert ReadinessResponse is juniper_observability.ReadinessResponse
+
+    def test_readiness_timestamp_is_tz_aware_utc(self):
+        """METRICS-MON R2.1.5: closes BUG-JD-06-equivalent naive-tz drift.
+
+        Canopy's former ``ReadinessResponse.timestamp`` defaulted to
+        ``datetime.now().timestamp()`` (locale-dependent). The shared
+        model uses ``datetime.now(UTC).timestamp()`` so all services
+        emit the same epoch-seconds value regardless of host timezone.
+        """
+        import time
+
+        from juniper_observability import ReadinessResponse
+
+        rr = ReadinessResponse(status="ready", version="0.4.0", service="juniper-canopy")
+        assert abs(time.time() - rr.timestamp) < 60.0
+
+    def test_async_probe_dependency_delegates_to_shared(self):
+        """canopy's async ``probe_dependency`` wraps the shared sync version.
+
+        ``health.py`` imports the shared probe as
+        ``_probe_dependency_sync``; patches must target that local
+        binding (patching ``juniper_observability.probe_dependency``
+        directly would not affect the already-bound reference).
+        """
+        import asyncio
+
+        from juniper_observability import DependencyStatus as Shared
+
+        from health import probe_dependency as canopy_probe
+
+        with patch("health._probe_dependency_sync") as mock_probe:
+            mock_probe.return_value = Shared(name="x", status="healthy", latency_ms=1.0, message="ok")
+            result = asyncio.run(canopy_probe("x", "http://example/health", timeout=1.0))
+            mock_probe.assert_called_once_with("x", "http://example/health", 1.0)
+            assert result.name == "x"
+            assert result.status == "healthy"

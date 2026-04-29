@@ -1,16 +1,38 @@
 """Health check models and utilities for JuniperCanopy.
 
-Provides standardized health response models shared across all Juniper
-services, and a dependency probe utility for readiness checks.
+METRICS-MON R2.1.5 / seed-06: :class:`DependencyStatus` and
+:class:`ReadinessResponse` are re-exported from the shared
+:mod:`juniper_observability` package so all three Juniper servers
+consume one source of truth. :class:`ErrorResponse` is canopy-specific
+and stays here.
+
+The migration **closes BUG-JD-06-equivalent naive-tz drift**: canopy's
+former ``timestamp: float = Field(default_factory=lambda: datetime.now().timestamp())``
+used local time, while juniper-data's was already tz-aware UTC. The
+shared model uses ``datetime.now(UTC).timestamp()`` so all services
+emit the same epoch-seconds value regardless of host timezone.
+
+:func:`probe_dependency` stays async (canopy's REST handlers ``await``
+it). Internally it now delegates to the shared synchronous
+:func:`juniper_observability.probe_dependency` via
+:func:`asyncio.to_thread`, eliminating the duplicated implementation.
+
+New code should prefer ``from juniper_observability import …`` for
+:class:`DependencyStatus` / :class:`ReadinessResponse` / the synchronous
+``probe_dependency`` to make the dependency on the shared lib explicit.
+
+See: notes/code-review/METRICS_MONITORING_R2.1_SHARED_OBSERVABILITY_DESIGN_2026-04-28.md
+in juniper-ml.
 """
 
 import asyncio
-import time
-import urllib.request
-from datetime import datetime
-from typing import Literal, Optional
+from typing import Optional
 
-from pydantic import BaseModel, Field
+from juniper_observability import DependencyStatus, ReadinessResponse
+from juniper_observability import probe_dependency as _probe_dependency_sync
+from pydantic import BaseModel
+
+__all__ = ["DependencyStatus", "ErrorResponse", "ReadinessResponse", "probe_dependency"]
 
 
 class ErrorResponse(BaseModel):
@@ -21,45 +43,13 @@ class ErrorResponse(BaseModel):
     status_code: int
 
 
-class DependencyStatus(BaseModel):
-    """Health status of a single dependency."""
-
-    name: str
-    status: Literal["healthy", "unhealthy", "degraded", "not_configured"]
-    latency_ms: float | None = None
-    message: str | None = None
-
-
-class ReadinessResponse(BaseModel):
-    """Standard /v1/health/ready response for all Juniper services."""
-
-    status: Literal["ready", "degraded", "not_ready"]
-    version: str
-    service: str
-    timestamp: float = Field(default_factory=lambda: datetime.now().timestamp())
-    dependencies: dict[str, DependencyStatus] = {}
-    details: dict[str, object] = {}
-
-
-def _probe_dependency_sync(name: str, url: str, timeout: float) -> DependencyStatus:
-    """Synchronous probe implementation (runs in a thread via async wrapper)."""
-    start = time.monotonic()
-    try:
-        urllib.request.urlopen(url, timeout=timeout)  # nosec B310 — internal health probe
-        latency = (time.monotonic() - start) * 1000
-        return DependencyStatus(name=name, status="healthy", latency_ms=round(latency, 1), message=url)
-    except Exception as e:
-        latency = (time.monotonic() - start) * 1000
-        return DependencyStatus(
-            name=name,
-            status="unhealthy",
-            latency_ms=round(latency, 1),
-            message=f"{url} — {type(e).__name__}: {e}",
-        )
-
-
 async def probe_dependency(name: str, url: str, timeout: float = 5.0) -> DependencyStatus:
     """Probe a dependency health endpoint without blocking the event loop.
+
+    Async wrapper around the shared synchronous
+    :func:`juniper_observability.probe_dependency` — runs the blocking
+    ``urllib.request.urlopen`` call on a worker thread so async REST
+    handlers can ``await`` it.
 
     Args:
         name: Human-readable name of the dependency.
