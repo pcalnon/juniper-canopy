@@ -326,5 +326,83 @@ class TestApplyInFlightIntervalPause:
         assert 'Input("apply-in-flight", "data")' in window
 
 
+class TestContextMenuWiring:
+    """CAN-018: right-click context menus.
+
+    Verifies the source-level wiring (Stores in layout, clientside
+    callbacks installed, JS asset shipped). Browser interaction is
+    out of scope for unit tests — same source-invariant pattern as
+    GAP-WS-15 and CAN-000.
+    """
+
+    @pytest.fixture
+    def dashboard_manager_source(self):
+        path = Path(__file__).resolve().parents[2] / "frontend" / "dashboard_manager.py"
+        return path.read_text(encoding="utf-8")
+
+    @pytest.fixture
+    def context_menus_js(self):
+        path = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "context_menus.js"
+        return path.read_text(encoding="utf-8")
+
+    def test_control_tooltips_store_in_layout(self, dashboard_manager_source):
+        """Layout must expose CONTROL_TOOLTIPS to JS via a Store seeded
+        with the dict, so context_menus.js reads descriptions from one
+        source instead of duplicating them."""
+        assert 'dcc.Store(id="control-tooltips-store"' in dashboard_manager_source
+        assert "data=CONTROL_TOOLTIPS" in dashboard_manager_source
+
+    def test_tutorial_trigger_store_in_layout(self, dashboard_manager_source):
+        """Layout must include the trigger Store the JS writes when
+        'View tutorial' is clicked."""
+        assert 'dcc.Store(id="context-menu-tutorial-trigger"' in dashboard_manager_source
+
+    def test_install_callback_calls_js_entry_point(self, dashboard_manager_source):
+        """Mount-time clientside callback must call the JS install
+        function, gated on window.juniperCanopy existing."""
+        assert "juniperCanopy.installContextMenus" in dashboard_manager_source
+
+    def test_tutorial_trigger_switches_active_tab(self, dashboard_manager_source):
+        """When the JS writes the trigger Store, a clientside callback
+        must set visualization-tabs.active_tab to 'tutorial'."""
+        assert 'Input("context-menu-tutorial-trigger", "data")' in dashboard_manager_source
+        idx = dashboard_manager_source.find('Input("context-menu-tutorial-trigger", "data")')
+        window = dashboard_manager_source[max(0, idx - 800) : idx + 200]
+        assert 'Output("visualization-tabs", "active_tab"' in window
+        assert 'return "tutorial"' in window
+
+    def test_js_asset_exists_and_exposes_install(self, context_menus_js):
+        """assets/context_menus.js exists and exposes the install entry point."""
+        assert "window.juniperCanopy" in context_menus_js
+        assert "installContextMenus" in context_menus_js
+
+    def test_js_walks_up_dom_to_find_tooltip(self, context_menus_js):
+        """Right-click target may not carry the registered id directly
+        (dcc.Input wraps a child element). The asset must walk up the
+        DOM looking for an id that matches CONTROL_TOOLTIPS keys."""
+        assert "parentElement" in context_menus_js
+
+    def test_js_writes_tutorial_trigger_via_set_props(self, context_menus_js):
+        """View-tutorial click must bump the trigger Store so the
+        Python clientside callback fires."""
+        assert "dash_clientside" in context_menus_js
+        assert "set_props" in context_menus_js
+        assert '"context-menu-tutorial-trigger"' in context_menus_js
+
+    def test_js_does_not_break_default_contextmenu_for_unknown_targets(self, context_menus_js):
+        """When the right-click target has no matching tooltip id, the
+        browser's default context menu must still appear — we only call
+        preventDefault when we have something to show."""
+        idx = context_menus_js.find("function onContextMenu")
+        assert idx != -1
+        body = context_menus_js[idx : idx + 600]
+        assert "findTooltipForElement" in body
+        return_idx = body.find("return;")
+        prevent_idx = body.find("preventDefault")
+        assert return_idx != -1 and prevent_idx != -1
+        # The null-guard return MUST come before preventDefault.
+        assert return_idx < prevent_idx
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
