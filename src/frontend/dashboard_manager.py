@@ -1347,6 +1347,13 @@ class DashboardManager:
                 dcc.Store(id="network-visualizer-raw-topology-store", data=None),
                 # Tooltips for parameter controls
                 *[dbc.Tooltip(text, target=target_id, placement="top") for target_id, text in CONTROL_TOOLTIPS.items()],
+                # CAN-018: right-click context menus reuse the same tooltip
+                # source. The Store exposes the dict to clientside JS; the
+                # tutorial-trigger Store is written by the JS context-menu's
+                # "View tutorial" action and drives a clientside callback
+                # that switches `visualization-tabs.active_tab` to "tutorial".
+                dcc.Store(id="control-tooltips-store", data=CONTROL_TOOLTIPS),
+                dcc.Store(id="context-menu-tutorial-trigger", data=None),
                 # Getting Started welcome modal (shows on first visit)
                 dbc.Modal(
                     [
@@ -1689,6 +1696,39 @@ class DashboardManager:
             ],
             Input("apply-in-flight", "data"),
             prevent_initial_call=False,
+        )
+
+        # CAN-018: hand the CONTROL_TOOLTIPS dict to the
+        # context_menus.js asset on layout mount so it can intercept
+        # right-clicks on every tooltipped control. The asset is
+        # idempotent — repeat invocations only refresh the dict.
+        self.app.clientside_callback(
+            """
+            function(tooltips) {
+                if (window.juniperCanopy && window.juniperCanopy.installContextMenus) {
+                    window.juniperCanopy.installContextMenus(tooltips || {});
+                }
+                return window.dash_clientside.no_update;
+            }
+            """,
+            Output("control-tooltips-store", "data", allow_duplicate=True),
+            Input("control-tooltips-store", "data"),
+            prevent_initial_call="initial_duplicate",
+        )
+
+        # CAN-018: when the JS context-menu's "View tutorial" link is
+        # clicked, it bumps `context-menu-tutorial-trigger`. Switch the
+        # active tab so the user lands on the Tutorial tab.
+        self.app.clientside_callback(
+            """
+            function(triggerTs) {
+                if (!triggerTs) return window.dash_clientside.no_update;
+                return "tutorial";
+            }
+            """,
+            Output("visualization-tabs", "active_tab", allow_duplicate=True),
+            Input("context-menu-tutorial-trigger", "data"),
+            prevent_initial_call=True,
         )
 
         # Phase B: WebSocket drain callbacks.
