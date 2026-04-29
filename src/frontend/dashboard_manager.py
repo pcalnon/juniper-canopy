@@ -1325,6 +1325,19 @@ class DashboardManager:
                         ),
                     ]
                 ),
+                # CAN-016a: dashboard layout state persisted to localStorage.
+                # Currently captures the last-active tab so the dashboard
+                # restores to whatever the user was looking at on the
+                # previous session. Theme already persists via the
+                # `dark-mode-store` Store; this is the same pattern.
+                # Schema is open so future layout state (sidebar collapse,
+                # window-size overrides, etc.) can be added without a
+                # storage migration — unknown keys are ignored on read.
+                dcc.Store(
+                    id="layout-state-store",
+                    storage_type="local",
+                    data={"active_tab": "metrics"},
+                ),
                 # Update intervals
                 dcc.Interval(id="fast-update-interval", interval=DashboardConstants.FAST_UPDATE_INTERVAL_MS, n_intervals=0),
                 dcc.Interval(id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0),
@@ -1689,6 +1702,41 @@ class DashboardManager:
             ],
             Input("apply-in-flight", "data"),
             prevent_initial_call=False,
+        )
+
+        # CAN-016a: restore the persisted active tab on layout mount.
+        # `layout-state-store` is `storage_type="local"`, so on a fresh
+        # session it carries the layout default; on a returning session
+        # it carries whatever was stamped at the last tab change.
+        self.app.clientside_callback(
+            """
+            function(state) {
+                if (!state || !state.active_tab) return window.dash_clientside.no_update;
+                return state.active_tab;
+            }
+            """,
+            Output("visualization-tabs", "active_tab", allow_duplicate=True),
+            Input("layout-state-store", "data"),
+            prevent_initial_call="initial_duplicate",
+        )
+
+        # CAN-016a: stamp the layout-state-store whenever the active
+        # tab changes. Spread-merge over the existing state so future
+        # layout keys (sidebar collapse, etc.) co-exist without
+        # collisions.
+        self.app.clientside_callback(
+            """
+            function(activeTab, state) {
+                if (!activeTab) return window.dash_clientside.no_update;
+                var prev = state || {};
+                if (prev.active_tab === activeTab) return window.dash_clientside.no_update;
+                return Object.assign({}, prev, {active_tab: activeTab});
+            }
+            """,
+            Output("layout-state-store", "data", allow_duplicate=True),
+            Input("visualization-tabs", "active_tab"),
+            State("layout-state-store", "data"),
+            prevent_initial_call=True,
         )
 
         # Phase B: WebSocket drain callbacks.

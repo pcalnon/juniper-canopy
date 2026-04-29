@@ -326,5 +326,52 @@ class TestApplyInFlightIntervalPause:
         assert 'Input("apply-in-flight", "data")' in window
 
 
+class TestLayoutStatePersistence:
+    """CAN-016a: persist dashboard layout state (active tab) to localStorage."""
+
+    @pytest.fixture
+    def dashboard_manager_source(self):
+        path = Path(__file__).resolve().parents[2] / "frontend" / "dashboard_manager.py"
+        return path.read_text(encoding="utf-8")
+
+    def test_layout_state_store_uses_localStorage(self, dashboard_manager_source):
+        """The persistence Store must declare `storage_type="local"`, same
+        pattern the existing `dark-mode-store` uses for theme."""
+        idx = dashboard_manager_source.find('id="layout-state-store"')
+        assert idx != -1
+        window = dashboard_manager_source[idx : idx + 200]
+        assert 'storage_type="local"' in window
+
+    def test_layout_state_store_seeds_active_tab(self, dashboard_manager_source):
+        """Default state must seed `active_tab` so the read callback
+        always has a value (fresh sessions / cleared localStorage)."""
+        idx = dashboard_manager_source.find('id="layout-state-store"')
+        assert idx != -1
+        window = dashboard_manager_source[idx : idx + 300]
+        assert '"active_tab"' in window
+
+    def test_read_callback_restores_active_tab_on_mount(self, dashboard_manager_source):
+        """Mount-time clientside callback must read the Store and write
+        `visualization-tabs.active_tab` so the user lands on the same tab."""
+        idx = dashboard_manager_source.find('Input("layout-state-store", "data")')
+        assert idx != -1
+        window = dashboard_manager_source[max(0, idx - 800) : idx + 200]
+        assert 'Output("visualization-tabs", "active_tab"' in window
+        assert "state.active_tab" in window
+
+    def test_write_callback_stamps_state_on_tab_change(self, dashboard_manager_source):
+        """When the user switches tabs, the active_tab must be stamped
+        onto the layout-state-store so the next page load restores it.
+        Spread-merge over prior state for forward-compat with future
+        layout keys (sidebar collapse, etc.)."""
+        assert 'Output("layout-state-store", "data"' in dashboard_manager_source
+        assert "Object.assign" in dashboard_manager_source
+
+    def test_no_self_loop_on_same_tab(self, dashboard_manager_source):
+        """Writer must short-circuit when the new active_tab equals the
+        already-persisted one, preventing redundant Store writes."""
+        assert "prev.active_tab === activeTab" in dashboard_manager_source
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
