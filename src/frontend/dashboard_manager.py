@@ -1999,9 +1999,14 @@ class DashboardManager:
 
                 return CascorServiceAdapter._transform_topology(ws_topology)
 
-            # Phase B: skip REST poll when WS bridge is connected
+            # Phase B: skip REST poll when WS bridge is connected.
+            # GAP-WS-25: also require topologyReceived so we don't blank the
+            # network view in the window between socket-open and the first
+            # topology frame. Cascor only broadcasts `topology` on cascade_add
+            # (grow events) — a fresh tab opened mid-training could otherwise
+            # wait minutes for one, leaving the visualizer empty.
             settings = get_settings()
-            if settings.ws_bridge_enabled and ws_status and ws_status.get("connected"):
+            if settings.ws_bridge_enabled and ws_status and ws_status.get("connected") and ws_status.get("topologyReceived"):
                 return dash.no_update
 
             # REST fallback — only poll when topology tab is active
@@ -2021,6 +2026,13 @@ class DashboardManager:
             """Fetch raw weight-oriented topology for heatmap view (OF-1).
 
             Only polls when topology tab is active AND weight matrix view is selected.
+
+            GAP-WS-25: deliberately NOT WS-gated — cascor does not broadcast
+            raw weight matrices on /ws/training (only the structural `topology`
+            event from cascade_add). REST is the only source for this view, so
+            gating on ``ws_status.connected`` would blank the heatmap whenever
+            the socket is up. Per-tab + per-view-mode gating already restricts
+            polling to the heatmap surface.
             """
             return self._update_raw_topology_store_handler(n=n, active_tab=active_tab, view_mode=view_mode)
 
