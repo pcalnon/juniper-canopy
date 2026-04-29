@@ -1248,6 +1248,24 @@ class DashboardManager:
                                     ],
                                     id="sidebar-network-info-section",
                                 ),
+                                # CAN-005: Pinned Parameters mirror.
+                                # Hidden when nothing is pinned; otherwise
+                                # shows name + current value rows for every
+                                # parameter the user pinned via the
+                                # Parameters tab. Read-only — editing still
+                                # happens through the dedicated sidebar
+                                # sections to avoid duplicate-id collisions.
+                                html.Div(
+                                    dbc.Card(
+                                        [
+                                            dbc.CardHeader(html.H5("Pinned Parameters", className="mb-0")),
+                                            dbc.CardBody(html.Div(id="sidebar-pinned-list")),
+                                        ],
+                                        className="mb-3",
+                                    ),
+                                    id="sidebar-pinned-card",
+                                    style={"display": "none"},
+                                ),
                             ],
                             width=3,
                         ),
@@ -1325,6 +1343,11 @@ class DashboardManager:
                         ),
                     ]
                 ),
+                # CAN-005: pinned meta parameters persisted to localStorage.
+                # The Parameters tab's pin checkboxes write here; the
+                # `sidebar-pinned-card` reads it to render a read-only
+                # name+value mirror visible from any tab.
+                dcc.Store(id="pinned-params-store", storage_type="local", data=[]),
                 # CAN-016a: dashboard layout state persisted to localStorage.
                 # Currently captures the last-active tab so the dashboard
                 # restores to whatever the user was looking at on the
@@ -2041,6 +2064,75 @@ class DashboardManager:
         )
         def generate_dataset(n_clicks, n_samples, n_spirals, n_rotations, noise):
             return self._generate_dataset_handler(n_samples, n_spirals, n_rotations, noise)
+
+        # CAN-005: persist the set of pinned parameter keys whenever any
+        # pin checkbox in the Parameters panel toggles. Pattern-match
+        # ``{"type": "param-pin", "key": ALL}`` lets one callback receive
+        # every checkbox's value + id without enumerating per-key
+        # dependencies. The store is the source of truth for both the
+        # Parameters tab table re-render and the sidebar mirror below.
+        @self.app.callback(
+            Output("pinned-params-store", "data"),
+            Input({"type": "param-pin", "key": dash.ALL}, "value"),
+            dash.dependencies.State({"type": "param-pin", "key": dash.ALL}, "id"),
+            prevent_initial_call=True,
+        )
+        def update_pinned_params_store(values, ids):
+            """Build the pinned-keys list from current checkbox state."""
+            pinned = []
+            for v, id_dict in zip(values or [], ids or [], strict=False):
+                if v:
+                    pinned.append(id_dict.get("key"))
+            return [k for k in pinned if k]
+
+        # CAN-005: render the sidebar's "Pinned Parameters" mirror.
+        # When the pinned list is empty, hide the entire card so the
+        # sidebar reclaims the vertical space. When populated, show
+        # name+value rows, pulling values from the Parameters panel
+        # store (already stripped of nn_/cn_ prefixes by
+        # update_parameters_panel_store above).
+        from .components.parameters_panel import PARAM_DISPLAY_NAMES
+
+        @self.app.callback(
+            [
+                Output("sidebar-pinned-list", "children"),
+                Output("sidebar-pinned-card", "style"),
+            ],
+            [
+                Input("pinned-params-store", "data"),
+                Input("parameters-panel-params-store", "data"),
+            ],
+            prevent_initial_call=False,
+        )
+        def render_sidebar_pinned_mirror(pinned, params):
+            pinned_keys = list(pinned or [])
+            if not pinned_keys:
+                return [], {"display": "none"}
+            params = params or {}
+            rows = []
+            for key in pinned_keys:
+                display_name = PARAM_DISPLAY_NAMES.get(key, key)
+                value = params.get(key, "—")
+                if isinstance(value, bool):
+                    value = "Enabled" if value else "Disabled"
+                elif isinstance(value, list):
+                    value = "Enabled" if "enabled" in value else "Disabled"
+                rows.append(
+                    html.Div(
+                        [
+                            html.Span(display_name, style={"fontSize": "0.85em", "color": "var(--text-muted)"}),
+                            html.Strong(str(value), className="ms-2"),
+                        ],
+                        style={
+                            "display": "flex",
+                            "justifyContent": "space-between",
+                            "alignItems": "baseline",
+                            "padding": "4px 0",
+                            "borderBottom": "1px solid var(--bs-border-color, rgba(0,0,0,.08))",
+                        },
+                    )
+                )
+            return rows, {"display": "block"}
 
     def _generate_dataset_handler(self, n_samples, n_spirals, n_rotations, noise):
         """Handle dataset generation request."""
