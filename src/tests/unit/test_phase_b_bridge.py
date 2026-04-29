@@ -417,3 +417,153 @@ class TestGapWs25TopologyRestGate:
         """The existing topology callback signature stays — we only tightened
         the gate condition, didn't add new inputs."""
         assert "def update_topology_store(n, ws_topology, active_tab, ws_status):" in dashboard_manager_source
+
+
+@pytest.mark.unit
+class TestGapWs18ChunkedMessageReassembler:
+    """GAP-WS-18: client reassembles chunked_message envelopes from cascor.
+
+    Pairs with the cascor server-side chunker that splits oversized topology
+    broadcasts (>60 KB serialized JSON) into a sequence of ``chunked_message``
+    envelopes sharing a chunk_id. Without the client reassembler, those chunks
+    would be silently dropped and the visualizer would never paint.
+    """
+
+    @pytest.fixture
+    def client_js(self):
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "websocket_client.js"
+        return path.read_text(encoding="utf-8")
+
+    def test_chunk_groups_map_initialized(self, client_js):
+        assert "this._chunkGroups = new Map()" in client_js
+        assert "this._maxChunkGroups" in client_js
+
+    def test_chunked_message_dispatched_to_reassembler(self, client_js):
+        """`_handleMessage` must route `chunked_message` to `_reassembleChunk`
+        and not fall through to user-handler dispatch (those frames have no
+        meaning to the dashboard)."""
+        assert "type === 'chunked_message'" in client_js or 'type === "chunked_message"' in client_js
+        assert "this._reassembleChunk(message)" in client_js
+        # On reassembly success, recurse so the original envelope flows through
+        # the same dispatch as a normal message.
+        assert "this._handleMessage(reassembled)" in client_js
+
+    def test_reassembler_validates_chunk_envelope(self, client_js):
+        """Invalid chunk_index / total_chunks must be rejected, not crash."""
+        assert "idx < 0 || idx >= total" in client_js
+        assert "total < 1" in client_js
+
+    def test_reassembler_evicts_oldest_at_cap(self, client_js):
+        """When _maxChunkGroups is hit, the oldest in-flight group is evicted
+        so a buggy or hostile server can't leak memory by sending unfinished
+        groups."""
+        assert "this._chunkGroups.size >= this._maxChunkGroups" in client_js
+        assert "this._chunkGroups.keys().next().value" in client_js
+        assert "this._chunkGroups.delete(oldestKey)" in client_js
+
+    def test_reassembler_handles_duplicate_chunk_silently(self, client_js):
+        """Resume replay can re-deliver chunks; duplicates must be ignored
+        without warning spam."""
+        assert "Duplicate chunk" in client_js
+
+    def test_reassembler_parses_reassembled_payload(self, client_js):
+        """Successful reassembly must JSON.parse the joined payloads."""
+        assert "group.chunks.join('')" in client_js
+        assert "JSON.parse(text)" in client_js
+
+    def test_reassembly_end_to_end_via_node(self, tmp_path):
+        """Spin up Node and exercise the reassembly logic against a synthetic
+        chunk sequence to validate end-to-end behavior, not just source-level
+        invariants. Skipped if Node is not available."""
+        import shutil
+        import subprocess
+
+        node_bin = shutil.which("node")
+        if not node_bin:
+            pytest.skip("node not available")
+
+        from pathlib import Path
+
+        client_js_path = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "websocket_client.js"
+
+        harness_src = r"""
+import { readFileSync } from 'node:fs';
+
+globalThis.window = globalThis;
+globalThis.location = { protocol: 'http:', host: 'localhost' };
+globalThis.WebSocket = class { constructor() {} send() {} close() {} };
+globalThis.XMLHttpRequest = class { open() {} send() {} };
+if (!globalThis.crypto || typeof globalThis.crypto.getRandomValues !== 'function') {
+    Object.defineProperty(globalThis, 'crypto', {
+        value: {
+            getRandomValues: (b) => {
+                for (let i = 0; i < b.length; i++) b[i] = Math.floor(Math.random() * 256);
+                return b;
+            },
+        },
+        configurable: true,
+    });
+}
+
+// Load the client; truncate the auto-init/singleton tail so we don't need
+// a real server, then evaluate just the class definition.
+let raw = readFileSync(process.argv[2], 'utf8');
+const cutMarker = '// Create global singleton WebSocket';
+const cutIdx = raw.indexOf(cutMarker);
+if (cutIdx > 0) {
+    raw = raw.slice(0, cutIdx);
+}
+// Append a globalThis bridge so the class escapes the strict-mode module scope.
+const src = raw.replace(/this\.connect\(\);/g, '/* test: auto-connect suppressed */')
+    + '\nglobalThis.CascorWebSocket = CascorWebSocket;\n';
+eval(src);
+const CascorWebSocket = globalThis.CascorWebSocket;
+
+const original = { type: 'topology', timestamp: 1.0, data: { hidden: 'x'.repeat(100) } };
+const fullJson = JSON.stringify(original);
+const chunkSize = 30;
+const chunks = [];
+for (let i = 0; i < fullJson.length; i += chunkSize) {
+    chunks.push(fullJson.slice(i, i + chunkSize));
+}
+
+const ws = new CascorWebSocket('ws://localhost/ws/test');
+let receivedTopology = null;
+ws.on('topology', (data) => { receivedTopology = data; });
+
+const chunkId = 'test-group-1';
+chunks.forEach((payload, idx) => {
+    ws._handleMessage({
+        type: 'chunked_message',
+        data: {
+            chunk_id: chunkId,
+            chunk_index: idx,
+            total_chunks: chunks.length,
+            original_type: 'topology',
+            payload: payload,
+        },
+    });
+});
+
+if (!receivedTopology) {
+    console.error('FAIL: topology handler not invoked');
+    process.exit(1);
+}
+if (receivedTopology.hidden !== original.data.hidden) {
+    console.error('FAIL: reassembled data mismatch');
+    process.exit(1);
+}
+console.log('OK');
+"""
+        harness = tmp_path / "harness.mjs"
+        harness.write_text(harness_src)
+        result = subprocess.run(
+            [node_bin, str(harness), str(client_js_path)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, f"Node harness failed:\nstdout={result.stdout}\nstderr={result.stderr}"
+        assert "OK" in result.stdout
