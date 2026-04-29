@@ -63,6 +63,7 @@ from .components.redis_panel import RedisPanel
 from .components.tutorial_panel import TutorialPanel
 from .components.worker_panel import WorkerPanel
 from .tooltips import CONTROL_TOOLTIPS
+from .walkthrough_steps import get_walkthrough_steps as _walkthrough_steps  # CAN-019
 
 # from urllib.parse import urljoin
 
@@ -1361,6 +1362,14 @@ class DashboardManager:
                     storage_type="local",
                     data={"active_tab": "metrics"},
                 ),
+                # CAN-019: walkthrough tutorial state.
+                #   walkthrough-steps-store holds the static step config (set
+                #     once at mount from walkthrough_steps.WALKTHROUGH_STEPS).
+                #   walkthrough-state-store holds {active, index} — toggled by
+                #     the Tutorial-tab launch button and by the JS overlay's
+                #     Skip / Done handlers (via dash_clientside.set_props).
+                dcc.Store(id="walkthrough-steps-store", data=_walkthrough_steps()),
+                dcc.Store(id="walkthrough-state-store", data={"active": False, "index": 0}),
                 # Update intervals
                 dcc.Interval(id="fast-update-interval", interval=DashboardConstants.FAST_UPDATE_INTERVAL_MS, n_intervals=0),
                 dcc.Interval(id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0),
@@ -1784,6 +1793,47 @@ class DashboardManager:
             Output("visualization-tabs", "active_tab", allow_duplicate=True),
             Input("layout-state-store", "data"),
             prevent_initial_call="initial_duplicate",
+        )
+
+        # CAN-019: launch the walkthrough overlay when the Tutorial-tab button
+        # is clicked. Writes `{active: true, index: 0}` to the state store; the
+        # overlay-driver callback below reacts to that and calls
+        # window._juniperWalkthrough.show(steps, 0).
+        self.app.clientside_callback(
+            """
+            function(nClicks) {
+                if (!nClicks) return window.dash_clientside.no_update;
+                return {active: true, index: 0};
+            }
+            """,
+            Output("walkthrough-state-store", "data", allow_duplicate=True),
+            Input("walkthrough-launch-btn", "n_clicks"),
+            prevent_initial_call=True,
+        )
+
+        # CAN-019: drive the JS overlay from walkthrough-state-store changes.
+        # Triggers on every state update — when active flips true, show the
+        # step at the stored index; when false, hide the overlay (in case it
+        # was dismissed via an external path like a programmatic `Esc`).
+        self.app.clientside_callback(
+            """
+            function(state, steps) {
+                if (!window._juniperWalkthrough) {
+                    return window.dash_clientside.no_update;
+                }
+                if (state && state.active) {
+                    var stepsArr = Array.isArray(steps) ? steps : [];
+                    window._juniperWalkthrough.show(stepsArr, (state.index|0));
+                } else {
+                    window._juniperWalkthrough.hide();
+                }
+                return window.dash_clientside.no_update;
+            }
+            """,
+            Output("walkthrough-state-store", "data", allow_duplicate=True),
+            Input("walkthrough-state-store", "data"),
+            State("walkthrough-steps-store", "data"),
+            prevent_initial_call=True,
         )
 
         # CAN-016a: stamp the layout-state-store whenever the active
