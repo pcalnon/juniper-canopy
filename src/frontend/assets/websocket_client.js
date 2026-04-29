@@ -39,6 +39,15 @@ class CascorWebSocket {
         // Phase D §S10: per-command correlation map (command_id → pending promise)
         this._pendingCommands = new Map();
 
+        // GAP-WS-18: chunked_message reassembly. Server splits oversized
+        // broadcasts (~64 KB+) into a sequence of chunked_message envelopes
+        // sharing a chunk_id. We accumulate chunks here until all N arrive,
+        // then JSON.parse the concatenated payloads and re-dispatch the
+        // reassembled message. Bounded to MAX_CHUNK_GROUPS to prevent a
+        // bad actor or buggy server from leaking memory.
+        this._chunkGroups = new Map();
+        this._maxChunkGroups = 8;
+
         // Auto-connect on construction
         this.connect();
     }
@@ -225,6 +234,18 @@ class CascorWebSocket {
             this._lastSeq = message.seq;
         }
 
+        // GAP-WS-18: chunked_message — accumulate, and when complete recurse
+        // with the reassembled envelope so it flows through the same handler
+        // dispatch as a normal message. Chunk frames themselves never reach
+        // user handlers (they have no semantic meaning to the dashboard).
+        if (type === 'chunked_message') {
+            var reassembled = this._reassembleChunk(message);
+            if (reassembled) {
+                this._handleMessage(reassembled);
+            }
+            return;
+        }
+
         // Add to buffer for Dash clientside callbacks
         this.messageBuffer.push({ type: type, data: data, timestamp: Date.now() });
 
@@ -240,6 +261,76 @@ class CascorWebSocket {
             } catch (err) {
                 console.error(`[CascorWS] Handler error for type '${type}':`, err);
             }
+        }
+    }
+
+    /**
+     * GAP-WS-18: accumulate one chunked_message frame; on completion return
+     * the reassembled original envelope (parsed JSON), otherwise null.
+     *
+     * Returns null on:
+     *   - More chunks expected
+     *   - Duplicate chunk_index (replay scenario — silently ignored)
+     *   - Invalid chunk_index (out of range)
+     *   - JSON parse failure on reassembly (group is dropped)
+     *
+     * Memory bound: at most ``_maxChunkGroups`` in-flight groups; oldest is
+     * evicted when the cap is hit (the reassembled message will be lost,
+     * which is preferable to leaking).
+     * @private
+     */
+    _reassembleChunk(message) {
+        var data = message && message.data;
+        if (!data || typeof data.chunk_id !== 'string') {
+            return null;
+        }
+        var groupId = data.chunk_id;
+        var total = data.total_chunks;
+        var idx = data.chunk_index;
+        var payload = typeof data.payload === 'string' ? data.payload : '';
+
+        if (typeof total !== 'number' || total < 1 || typeof idx !== 'number' || idx < 0 || idx >= total) {
+            console.warn(`[CascorWS] Invalid chunk envelope: chunk_id=${groupId} idx=${idx} total=${total}`);
+            return null;
+        }
+
+        var group = this._chunkGroups.get(groupId);
+        if (!group) {
+            // Evict oldest group if we've hit the cap (Map iteration order is insertion order).
+            if (this._chunkGroups.size >= this._maxChunkGroups) {
+                var oldestKey = this._chunkGroups.keys().next().value;
+                console.warn(`[CascorWS] Evicting incomplete chunk group ${oldestKey} to admit ${groupId}`);
+                this._chunkGroups.delete(oldestKey);
+            }
+            group = {
+                chunks: new Array(total),
+                received: 0,
+                total: total,
+                originalType: data.original_type,
+                firstSeen: Date.now(),
+            };
+            this._chunkGroups.set(groupId, group);
+        }
+
+        if (group.chunks[idx] !== undefined) {
+            // Duplicate chunk — likely a resume replay. Silently ignore.
+            return null;
+        }
+        group.chunks[idx] = payload;
+        group.received += 1;
+
+        if (group.received < group.total) {
+            return null;
+        }
+
+        // Complete: reassemble + parse + dispatch.
+        this._chunkGroups.delete(groupId);
+        var text = group.chunks.join('');
+        try {
+            return JSON.parse(text);
+        } catch (err) {
+            console.error(`[CascorWS] Failed to parse reassembled chunk group ${groupId} (${group.originalType}):`, err);
+            return null;
         }
     }
 
