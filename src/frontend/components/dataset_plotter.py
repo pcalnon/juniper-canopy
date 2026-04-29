@@ -125,57 +125,133 @@ class DatasetPlotter(BaseComponent):
                     ],
                     style={"marginBottom": "10px"},
                 ),
-                # Generate Dataset modal
+                # Dataset modal — three tabs: Generate / Upload File / Fetch URL (CAN-016b).
+                # The Generate tab keeps the original spiral parameters and confirm
+                # button; the Upload tab adds a dcc.Upload + import-file button; the
+                # URL tab adds a text input + fetch-and-import button. Each tab has
+                # its own confirm button so dashboard_manager can wire them
+                # independently without context-aware footer logic.
                 dbc.Modal(
                     [
-                        dbc.ModalHeader(dbc.ModalTitle("Generate New Dataset")),
+                        dbc.ModalHeader(dbc.ModalTitle("Dataset")),
                         dbc.ModalBody(
                             [
-                                dbc.Row(
+                                dbc.Tabs(
                                     [
-                                        dbc.Col(
-                                            [
-                                                dbc.Label("Samples"),
-                                                dbc.Input(id=f"{self.component_id}-gen-samples", type="number", value=200, min=20, max=2000, step=10),
-                                            ],
-                                            width=6,
+                                        dbc.Tab(
+                                            html.Div(
+                                                [
+                                                    dbc.Row(
+                                                        [
+                                                            dbc.Col(
+                                                                [
+                                                                    dbc.Label("Samples"),
+                                                                    dbc.Input(id=f"{self.component_id}-gen-samples", type="number", value=200, min=20, max=2000, step=10),
+                                                                ],
+                                                                width=6,
+                                                            ),
+                                                            dbc.Col(
+                                                                [
+                                                                    dbc.Label("Spirals"),
+                                                                    dbc.Input(id=f"{self.component_id}-gen-spirals", type="number", value=2, min=2, max=6, step=1),
+                                                                ],
+                                                                width=6,
+                                                            ),
+                                                        ],
+                                                        className="mb-3",
+                                                    ),
+                                                    dbc.Row(
+                                                        [
+                                                            dbc.Col(
+                                                                [
+                                                                    dbc.Label("Rotations"),
+                                                                    dbc.Input(id=f"{self.component_id}-gen-rotations", type="number", value=1.5, min=0.1, max=10.0, step=0.1),
+                                                                ],
+                                                                width=6,
+                                                            ),
+                                                            dbc.Col(
+                                                                [
+                                                                    dbc.Label("Noise"),
+                                                                    dbc.Input(id=f"{self.component_id}-gen-noise", type="number", value=0.1, min=0.0, max=1.0, step=0.01),
+                                                                ],
+                                                                width=6,
+                                                            ),
+                                                        ],
+                                                        className="mb-3",
+                                                    ),
+                                                    dbc.Button("Generate", id=f"{self.component_id}-gen-confirm", color="primary"),
+                                                    html.Div(id=f"{self.component_id}-gen-status", style={"color": "#6c757d", "fontSize": "0.85em", "marginTop": "10px"}),
+                                                ],
+                                                style={"paddingTop": "15px"},
+                                            ),
+                                            label="Generate",
+                                            tab_id=f"{self.component_id}-tab-generate",
                                         ),
-                                        dbc.Col(
-                                            [
-                                                dbc.Label("Spirals"),
-                                                dbc.Input(id=f"{self.component_id}-gen-spirals", type="number", value=2, min=2, max=6, step=1),
-                                            ],
-                                            width=6,
+                                        dbc.Tab(
+                                            html.Div(
+                                                [
+                                                    html.Small(
+                                                        "Upload a CSV file. Last column = integer class label; preceding columns = numeric features. Header row auto-detected. Limits: 10 MB, 50,000 rows, 100 features.",
+                                                        style={"color": "#6c757d", "display": "block", "marginBottom": "10px"},
+                                                    ),
+                                                    dcc.Upload(
+                                                        id=f"{self.component_id}-import-file-upload",
+                                                        children=html.Div(["Drag and drop or ", html.A("select a CSV file")]),
+                                                        multiple=False,
+                                                        accept=".csv,text/csv",
+                                                        style={
+                                                            "width": "100%",
+                                                            "height": "60px",
+                                                            "lineHeight": "60px",
+                                                            "borderWidth": "1px",
+                                                            "borderStyle": "dashed",
+                                                            "borderRadius": "5px",
+                                                            "textAlign": "center",
+                                                            "marginBottom": "10px",
+                                                        },
+                                                    ),
+                                                    html.Div(
+                                                        id=f"{self.component_id}-import-file-name",
+                                                        style={"color": "#6c757d", "fontSize": "0.85em", "marginBottom": "10px"},
+                                                    ),
+                                                    dbc.Button("Import File", id=f"{self.component_id}-import-file-confirm", color="primary", disabled=True),
+                                                    html.Div(id=f"{self.component_id}-import-file-status", style={"color": "#6c757d", "fontSize": "0.85em", "marginTop": "10px"}),
+                                                ],
+                                                style={"paddingTop": "15px"},
+                                            ),
+                                            label="Upload File",
+                                            tab_id=f"{self.component_id}-tab-upload",
+                                        ),
+                                        dbc.Tab(
+                                            html.Div(
+                                                [
+                                                    html.Small(
+                                                        "Fetch a CSV from an http(s) URL. Same format and limits as Upload File. The canopy server performs the fetch — confirm the URL is reachable from the server's network.",
+                                                        style={"color": "#6c757d", "display": "block", "marginBottom": "10px"},
+                                                    ),
+                                                    dbc.Input(
+                                                        id=f"{self.component_id}-import-url-input",
+                                                        type="url",
+                                                        placeholder="https://example.com/dataset.csv",
+                                                        style={"marginBottom": "10px"},
+                                                    ),
+                                                    dbc.Button("Fetch & Import", id=f"{self.component_id}-import-url-confirm", color="primary"),
+                                                    html.Div(id=f"{self.component_id}-import-url-status", style={"color": "#6c757d", "fontSize": "0.85em", "marginTop": "10px"}),
+                                                ],
+                                                style={"paddingTop": "15px"},
+                                            ),
+                                            label="Fetch URL",
+                                            tab_id=f"{self.component_id}-tab-url",
                                         ),
                                     ],
-                                    className="mb-3",
+                                    id=f"{self.component_id}-modal-tabs",
+                                    active_tab=f"{self.component_id}-tab-generate",
                                 ),
-                                dbc.Row(
-                                    [
-                                        dbc.Col(
-                                            [
-                                                dbc.Label("Rotations"),
-                                                dbc.Input(id=f"{self.component_id}-gen-rotations", type="number", value=1.5, min=0.1, max=10.0, step=0.1),
-                                            ],
-                                            width=6,
-                                        ),
-                                        dbc.Col(
-                                            [
-                                                dbc.Label("Noise"),
-                                                dbc.Input(id=f"{self.component_id}-gen-noise", type="number", value=0.1, min=0.0, max=1.0, step=0.01),
-                                            ],
-                                            width=6,
-                                        ),
-                                    ],
-                                    className="mb-3",
-                                ),
-                                html.Div(id=f"{self.component_id}-gen-status", style={"color": "#6c757d", "fontSize": "0.85em"}),
                             ]
                         ),
                         dbc.ModalFooter(
                             [
-                                dbc.Button("Generate", id=f"{self.component_id}-gen-confirm", color="primary"),
-                                dbc.Button("Cancel", id=f"{self.component_id}-gen-cancel", color="secondary", className="ms-2"),
+                                dbc.Button("Cancel", id=f"{self.component_id}-gen-cancel", color="secondary"),
                             ]
                         ),
                     ],

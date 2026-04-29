@@ -2085,11 +2085,14 @@ class DashboardManager:
                 Input("dataset-plotter-generate-btn", "n_clicks"),
                 Input("dataset-plotter-gen-cancel", "n_clicks"),
                 Input("dataset-plotter-gen-confirm", "n_clicks"),
+                # CAN-016b: import-file / import-url confirm clicks also close the modal.
+                Input("dataset-plotter-import-file-confirm", "n_clicks"),
+                Input("dataset-plotter-import-url-confirm", "n_clicks"),
             ],
             dash.dependencies.State("dataset-plotter-generate-modal", "is_open"),
             prevent_initial_call=True,
         )
-        def toggle_generate_modal(open_clicks, cancel_clicks, confirm_clicks, is_open):
+        def toggle_generate_modal(open_clicks, cancel_clicks, confirm_clicks, import_file_clicks, import_url_clicks, is_open):
             ctx = get_callback_context()
             trigger = ctx.triggered_id
             if trigger == "dataset-plotter-generate-btn":
@@ -2112,6 +2115,54 @@ class DashboardManager:
         )
         def generate_dataset(n_clicks, n_samples, n_spirals, n_rotations, noise):
             return self._generate_dataset_handler(n_samples, n_spirals, n_rotations, noise)
+
+        # CAN-016b: enable the "Import File" button only after a file has been
+        # selected (dcc.Upload populates `contents` + `filename`). Show the
+        # filename as a small label below the upload widget for visual confirmation.
+        @self.app.callback(
+            [
+                Output("dataset-plotter-import-file-name", "children"),
+                Output("dataset-plotter-import-file-confirm", "disabled"),
+            ],
+            Input("dataset-plotter-import-file-upload", "filename"),
+            prevent_initial_call=True,
+        )
+        def update_import_file_label(filename):
+            if not filename:
+                return "", True
+            return f"Selected: {filename}", False
+
+        # CAN-016b: file-upload import handler. dcc.Upload posts a base64
+        # data-URL string in `contents`; we POST it as multipart to
+        # /api/dataset/import-file via the handler below.
+        @self.app.callback(
+            [
+                Output("dataset-plotter-import-file-status", "children"),
+                Output("dataset-plotter-dataset-store", "data", allow_duplicate=True),
+            ],
+            Input("dataset-plotter-import-file-confirm", "n_clicks"),
+            [
+                dash.dependencies.State("dataset-plotter-import-file-upload", "contents"),
+                dash.dependencies.State("dataset-plotter-import-file-upload", "filename"),
+            ],
+            prevent_initial_call=True,
+        )
+        def import_dataset_file(n_clicks, contents, filename):
+            return self._import_dataset_file_handler(contents, filename)
+
+        # CAN-016b: URL-fetch import handler. POSTs the URL to
+        # /api/dataset/import-url; the canopy server fetches the CSV.
+        @self.app.callback(
+            [
+                Output("dataset-plotter-import-url-status", "children"),
+                Output("dataset-plotter-dataset-store", "data", allow_duplicate=True),
+            ],
+            Input("dataset-plotter-import-url-confirm", "n_clicks"),
+            dash.dependencies.State("dataset-plotter-import-url-input", "value"),
+            prevent_initial_call=True,
+        )
+        def import_dataset_url(n_clicks, url):
+            return self._import_dataset_url_handler(url)
 
         # CAN-005: persist the set of pinned parameter keys whenever any
         # pin checkbox in the Parameters panel toggles. Pattern-match
@@ -2198,6 +2249,65 @@ class DashboardManager:
             return f"❌ {response.json().get('error', 'Failed')}", dash.no_update
         except Exception as e:
             self.logger.warning(f"Dataset generation failed: {e}")
+            return f"❌ Error: {e}", dash.no_update
+
+    def _import_dataset_file_handler(self, contents, filename):
+        """CAN-016b: handle CSV file-upload import.
+
+        ``dcc.Upload.contents`` is a data-URL like ``data:text/csv;base64,<b64>``.
+        We strip the prefix, decode the base64 body, and POST the raw bytes as
+        multipart to /api/dataset/import-file. The server-side handler validates
+        format + size, parses, and replaces the active dataset.
+        """
+        if not contents:
+            return "❌ No file selected", dash.no_update
+        try:
+            import base64
+
+            if "," not in contents:
+                return "❌ Invalid file payload (missing data-URL header)", dash.no_update
+            _, b64_body = contents.split(",", 1)
+            try:
+                file_bytes = base64.b64decode(b64_body, validate=False)
+            except (ValueError, TypeError) as exc:
+                return f"❌ Could not decode upload: {exc}", dash.no_update
+
+            url = self._api_url("/api/dataset/import-file")
+            files = {"file": (filename or "upload.csv", file_bytes, "text/csv")}
+            response = requests.post(url, files=files, timeout=DashboardConstants.API_TIMEOUT_SECONDS + 10)
+            if response.ok:
+                return f"✅ Imported {filename or 'file'}", response.json()
+            try:
+                err = response.json().get("error", f"HTTP {response.status_code}")
+            except Exception:
+                err = f"HTTP {response.status_code}"
+            return f"❌ {err}", dash.no_update
+        except Exception as e:
+            self.logger.warning(f"Dataset import (file) failed: {e}")
+            return f"❌ Error: {e}", dash.no_update
+
+    def _import_dataset_url_handler(self, url_value):
+        """CAN-016b: handle URL-fetch dataset import.
+
+        Posts the URL as JSON to /api/dataset/import-url; the server-side
+        handler does the fetch + parse + dataset replacement. The canopy
+        server's network is what reaches the URL, not the user's browser —
+        useful for fetching from internal hosts the user can't see directly.
+        """
+        if not url_value or not url_value.strip():
+            return "❌ Enter a URL", dash.no_update
+        try:
+            url = self._api_url("/api/dataset/import-url")
+            response = requests.post(url, json={"url": url_value.strip()}, timeout=DashboardConstants.API_TIMEOUT_SECONDS + 15)
+            if response.ok:
+                return f"✅ Imported from {url_value.strip()}", response.json()
+            try:
+                err = response.json().get("error", f"HTTP {response.status_code}")
+            except Exception:
+                err = f"HTTP {response.status_code}"
+            return f"❌ {err}", dash.no_update
+        except Exception as e:
+            self.logger.warning(f"Dataset import (url) failed: {e}")
             return f"❌ Error: {e}", dash.no_update
 
     # Define button action callbacks

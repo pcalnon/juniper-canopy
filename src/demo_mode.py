@@ -1721,6 +1721,80 @@ class DemoMode:
         self.logger.info("Dataset regenerated: n_samples=%s, n_rotations=%s", n_samples, n_rotations)
         return self.dataset
 
+    def import_dataset(self, inputs: Any, targets: Any, source_label: str = "imported") -> Dict[str, Any]:
+        """CAN-016b: install a pre-parsed dataset (file upload, URL fetch, etc).
+
+        Caller is responsible for parsing the source format (CSV, JSON, …) into
+        2-D numpy float32 inputs and 1-D numpy int targets. We don't wrap that
+        in here because callers (REST endpoints, tests) often want to surface
+        parse errors to the user before mutation kicks in.
+
+        Mirrors ``regenerate_dataset``'s lock discipline — dataset construction
+        outside the lock, atomic commit of ``train_x`` / ``train_y`` /
+        counters / metrics_history.clear() inside the lock so the training
+        thread never observes a half-replaced dataset (CONC-07/BUG-CN-11).
+
+        Args:
+            inputs: 2-D numpy.ndarray of shape (n_samples, n_features), float32 preferred.
+            targets: 1-D numpy.ndarray of shape (n_samples,), int dtype.
+            source_label: short tag for logging / dataset.metadata; e.g. "upload:foo.csv".
+
+        Returns:
+            Dataset dict matching the shape produced by ``_generate_spiral_dataset``.
+
+        Raises:
+            ValueError: shape mismatch, empty arrays, or dtype that can't be coerced.
+        """
+        import numpy as np
+        import torch
+
+        inputs_arr = np.asarray(inputs)
+        targets_arr = np.asarray(targets)
+        if inputs_arr.ndim != 2 or inputs_arr.shape[0] == 0:
+            raise ValueError(f"inputs must be 2-D with at least 1 row; got shape {inputs_arr.shape}")
+        if targets_arr.ndim != 1 or targets_arr.shape[0] != inputs_arr.shape[0]:
+            raise ValueError(f"targets must be 1-D with length matching inputs; got shape {targets_arr.shape} vs inputs {inputs_arr.shape}")
+
+        inputs_f32 = inputs_arr.astype(np.float32, copy=False)
+        try:
+            targets_i = targets_arr.astype(np.int64, copy=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"targets could not be coerced to integer labels: {exc}") from exc
+
+        if self.running:  # CONC-08: stop training before swapping the dataset.
+            self.stop()
+
+        inputs_tensor = torch.from_numpy(inputs_f32)
+        targets_tensor = torch.from_numpy(targets_i)
+        new_dataset = {
+            "inputs": inputs_f32.tolist(),
+            "targets": targets_i.tolist(),
+            "inputs_tensor": inputs_tensor,
+            "targets_tensor": targets_tensor,
+            "n_samples": int(inputs_f32.shape[0]),
+            "n_features": int(inputs_f32.shape[1]),
+            "n_classes": int(targets_i.max()) + 1 if targets_i.size > 0 else 0,
+            "source": source_label,
+        }
+
+        with self._lock:
+            self.dataset = new_dataset
+            self.network.train_x = inputs_tensor
+            self.network.train_y = targets_tensor
+            self.current_epoch = 0
+            self.current_loss = 1.0
+            self.current_accuracy = 0.5
+            self.metrics_history.clear()
+
+        self.logger.info(
+            "Dataset imported (%s): n_samples=%d, n_features=%d, n_classes=%d",
+            source_label,
+            new_dataset["n_samples"],
+            new_dataset["n_features"],
+            new_dataset["n_classes"],
+        )
+        return new_dataset
+
     def get_dataset(self) -> Dict[str, Any]:
         """
         Get demo dataset.
