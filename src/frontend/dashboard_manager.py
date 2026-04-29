@@ -1360,6 +1360,13 @@ class DashboardManager:
                 dcc.Store(id="network-visualizer-raw-topology-store", data=None),
                 # Tooltips for parameter controls
                 *[dbc.Tooltip(text, target=target_id, placement="top") for target_id, text in CONTROL_TOOLTIPS.items()],
+                # CAN-018: right-click context menus reuse the same tooltip
+                # source. The Store exposes the dict to clientside JS; the
+                # tutorial-trigger Store is written by the JS context-menu's
+                # "View tutorial" action and drives a clientside callback
+                # that switches `visualization-tabs.active_tab` to "tutorial".
+                dcc.Store(id="control-tooltips-store", data=CONTROL_TOOLTIPS),
+                dcc.Store(id="context-menu-tutorial-trigger", data=None),
                 # Getting Started welcome modal (shows on first visit)
                 dbc.Modal(
                     [
