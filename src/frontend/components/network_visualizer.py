@@ -159,6 +159,37 @@ class NetworkVisualizer(BaseComponent):
                     ],
                     style={"marginBottom": "10px"},
                 ),
+                # CAN-020: Hierarchy-depth slider. Filters which cascade-correlation
+                # hidden units (and their incoming/outgoing connections) are rendered.
+                # In CasCor the cascade order *is* the hierarchy — unit 0 was added
+                # first, unit N-1 most recently. Slider max auto-bumps clientside as
+                # the topology grows; the user-picked value persists across grow
+                # events so a "show only the first 3 units" focus is not reset on
+                # every cascade_add. Hidden until at least one hidden unit exists.
+                html.Div(
+                    [
+                        html.Label(
+                            [
+                                html.Span("Hidden depth: "),
+                                html.Span(id=f"{self.component_id}-depth-label", children="all"),
+                            ],
+                            style={"marginRight": "10px", "minWidth": "120px", "display": "inline-block"},
+                        ),
+                        dcc.Slider(
+                            id=f"{self.component_id}-depth-slider",
+                            min=0,
+                            max=0,  # bumped clientside as topology grows
+                            step=1,
+                            value=0,
+                            marks=None,
+                            tooltip={"placement": "bottom", "always_visible": False},
+                            included=True,
+                            updatemode="mouseup",
+                        ),
+                    ],
+                    id=f"{self.component_id}-depth-slider-container",
+                    style={"marginBottom": "10px", "padding": "0 10px", "display": "none"},
+                ),
                 # Network statistics
                 html.Div(
                     id=f"{self.component_id}-stats-bar",
@@ -316,6 +347,7 @@ class NetworkVisualizer(BaseComponent):
                 Input(f"{self.component_id}-view-mode", "value"),  # P3-5: 2D/3D toggle
                 Input(f"{self.component_id}-display-mode", "value"),  # OF-1: Node Graph / Weight Matrix
                 Input(f"{self.component_id}-raw-topology-store", "data"),  # OF-1: Raw topology for heatmap
+                Input(f"{self.component_id}-depth-slider", "value"),  # CAN-020: hierarchy depth filter
                 Input("metrics-panel-metrics-store", "data"),
                 Input("theme-state", "data"),
                 Input(f"{self.component_id}-selected-nodes", "data"),
@@ -336,6 +368,7 @@ class NetworkVisualizer(BaseComponent):
             view_mode: str,  # P3-5: 2D/3D mode
             display_mode: str,  # OF-1: "node_graph" or "weight_matrix"
             raw_topology: Optional[Dict[str, Any]],  # OF-1: Raw topology for heatmap
+            depth_filter: Optional[int],  # CAN-020: hierarchy depth filter (None = no filter)
             metrics_data: List[Dict[str, Any]],
             theme: str,
             selected_nodes: List[str],
@@ -418,6 +451,12 @@ class NetworkVisualizer(BaseComponent):
                 empty_fig = self._create_empty_graph(theme, view_mode=view_mode)
                 return empty_fig, _dynamic_graph_config(), "0", "0", "0", "0", None, None
 
+            # CAN-020: hierarchy filter — keep only the first ``depth_filter``
+            # hidden units (cascade order). Run BEFORE compute_hash so the
+            # cache invalidates when the filter changes; run AFTER the empty-
+            # topology fast-path so we don't bother filtering an empty topo.
+            n_hidden_total = topology_data.get("hidden_units", 0)
+            topology_data, depth_label = self._apply_hierarchy_filter(topology_data, depth_filter, n_hidden_total)
             current_hash = compute_hash(topology_data)
             n_hidden = topology_data.get("hidden_units", 0)
 
@@ -474,7 +513,12 @@ class NetworkVisualizer(BaseComponent):
 
             # Extract counts
             input_count = str(topology_data.get("input_units", 0))
-            hidden_count = str(n_hidden)
+            # CAN-020: when filtering, surface "K of N" so the user can see
+            # what's hidden vs. shown without losing the total in the stats bar.
+            if n_hidden_total != n_hidden:
+                hidden_count = f"{n_hidden} of {n_hidden_total}"
+            else:
+                hidden_count = str(n_hidden)
             output_count = str(topology_data.get("output_units", 0))
             connection_count = str(len(topology_data.get("connections", [])))
 
@@ -612,7 +656,95 @@ class NetworkVisualizer(BaseComponent):
                 "border": "1px solid #2c5282" if is_dark else "1px solid #90caf9",
             }
 
+        # CAN-020: clientside slider-bounds + label sync. The slider's ``max``
+        # must track ``topology.hidden_units`` so the user can pick any cascade
+        # depth, and the container should hide entirely when there are zero
+        # hidden units (no useful filter to apply). The label below the slider
+        # reads "all" when the value is at max (no filter active) and the
+        # explicit count otherwise. Done clientside so we don't need to round-
+        # trip the topology store through the server every time a unit is added.
+        app.clientside_callback(
+            """
+            function(topology, currentValue) {
+                if (!topology) {
+                    return [0, 0, {marginBottom: "10px", padding: "0 10px", display: "none"}, "all"];
+                }
+                var nHidden = topology.hidden_units || 0;
+                if (nHidden === 0) {
+                    return [0, 0, {marginBottom: "10px", padding: "0 10px", display: "none"}, "all"];
+                }
+                // Bump max to current hidden-unit count.
+                // Preserve the user-picked value across grow events as long as
+                // it's still in range; otherwise snap to the new max (= show all).
+                var v = currentValue;
+                if (v === null || v === undefined || v > nHidden) {
+                    v = nHidden;
+                }
+                var label = (v === nHidden) ? "all" : (v + " of " + nHidden);
+                return [
+                    nHidden,
+                    v,
+                    {marginBottom: "10px", padding: "0 10px", display: "block"},
+                    label
+                ];
+            }
+            """,
+            [
+                Output(f"{self.component_id}-depth-slider", "max"),
+                Output(f"{self.component_id}-depth-slider", "value"),
+                Output(f"{self.component_id}-depth-slider-container", "style"),
+                Output(f"{self.component_id}-depth-label", "children"),
+            ],
+            Input(f"{self.component_id}-topology-store", "data"),
+            State(f"{self.component_id}-depth-slider", "value"),
+        )
+
         self.logger.debug(f"Callbacks registered for {self.component_id}")
+
+    @staticmethod
+    def _apply_hierarchy_filter(
+        topology: Dict[str, Any],
+        depth: Optional[int],
+        n_hidden_total: int,
+    ) -> tuple[Dict[str, Any], str]:
+        """CAN-020: filter ``topology`` to the first ``depth`` hidden units.
+
+        Returns ``(filtered_topology, depth_label)``. If ``depth`` is None,
+        zero, or >= the total hidden count, the original topology is returned
+        unchanged with label "all". Otherwise:
+        - ``hidden_units`` is capped at ``depth``
+        - ``connections`` drops any edge touching ``hidden_K`` for K >= depth
+
+        The filter is a no-op for topologies with zero hidden units. We never
+        mutate the input dict — the input is a Dash store payload that other
+        callbacks may also read, and mutation would race.
+        """
+        if depth is None or depth <= 0 or depth >= n_hidden_total or n_hidden_total == 0:
+            return topology, "all"
+
+        filtered = dict(topology)
+        filtered["hidden_units"] = depth
+
+        connections = topology.get("connections", []) or []
+        kept = []
+        for conn in connections:
+            from_node = str(conn.get("from", ""))
+            to_node = str(conn.get("to", ""))
+            if from_node.startswith("hidden_"):
+                try:
+                    if int(from_node.split("_", 1)[1]) >= depth:
+                        continue
+                except (ValueError, IndexError):
+                    pass
+            if to_node.startswith("hidden_"):
+                try:
+                    if int(to_node.split("_", 1)[1]) >= depth:
+                        continue
+                except (ValueError, IndexError):
+                    pass
+            kept.append(conn)
+        filtered["connections"] = kept
+        return filtered, f"{depth} of {n_hidden_total}"
 
     def _create_network_graph(
         self,

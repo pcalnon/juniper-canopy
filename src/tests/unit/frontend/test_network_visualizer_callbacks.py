@@ -964,6 +964,7 @@ class TestCallbackInvocation:
                     "2d",  # view_mode (P3-5)
                     "node_graph",  # display_mode (OF-1)
                     None,  # raw_topology (OF-1)
+                    None,  # depth_filter (CAN-020)
                     [],  # metrics_data
                     "light",  # theme
                     [],  # selected_nodes
@@ -1020,6 +1021,7 @@ class TestCallbackInvocation:
                     "2d",  # view_mode (P3-5)
                     "node_graph",  # display_mode (OF-1)
                     None,  # raw_topology (OF-1)
+                    None,  # depth_filter (CAN-020)
                     [],
                     "light",
                     [],
@@ -1073,7 +1075,7 @@ class TestCallbackInvocation:
         for key, callback_info in app.callback_map.items():
             if callback_key in key:
                 func = callback_info["callback"]
-                result = func.__wrapped__(simple_topology, "hierarchical", ["show"], "2d", "node_graph", None, metrics_data, "light", [], 0, None, None, None, None)
+                result = func.__wrapped__(simple_topology, "hierarchical", ["show"], "2d", "node_graph", None, None, metrics_data, "light", [], 0, None, None, None, None)
                 fig, _config, _, _, _, _, _, new_highlight = result
                 assert isinstance(fig, go.Figure)
                 # Should have detected new unit and created highlight
@@ -1117,7 +1119,7 @@ class TestCallbackInvocation:
         for key, callback_info in app.callback_map.items():
             if callback_key in key:
                 func = callback_info["callback"]
-                result = func.__wrapped__(simple_topology, "hierarchical", [], "2d", "node_graph", None, [], "light", [], 0, None, view_state, None, None)
+                result = func.__wrapped__(simple_topology, "hierarchical", [], "2d", "node_graph", None, None, [], "light", [], 0, None, view_state, None, None)
                 fig, _config, _, _, _, _, _, _ = result
                 assert isinstance(fig, go.Figure)
                 break
@@ -1496,6 +1498,7 @@ class TestWeightHeatmapRendering:
                     "2d",
                     "weight_matrix",  # display_mode
                     raw_topology,  # raw_topology
+                    None,  # depth_filter (CAN-020)
                     [],
                     "light",
                     [],
