@@ -53,7 +53,7 @@ import uvicorn
 from a2wsgi import WSGIMiddleware
 
 # from fastapi.staticfiles import StaticFiles
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -1045,6 +1045,108 @@ async def generate_dataset(request: Request):
             {"error": "Internal server error", "error_id": error_id},
             status_code=500,
         )
+
+
+@app.post("/api/dataset/import-file")
+async def import_dataset_file(file: UploadFile = File(...)):  # noqa: B008 — FastAPI canonical pattern for multipart parameters
+    """CAN-016b: import a dataset from an uploaded CSV file (demo mode only).
+
+    Format: see ``dataset_import.parse_csv_bytes`` — CSV, last column is the
+    integer class label, optional header auto-detected. 10 MB / 50k rows /
+    100 features cap.
+    """
+    if backend.backend_type != "demo":
+        return JSONResponse(
+            {"error": "Dataset import only available in demo mode (cascor backend doesn't accept inline datasets yet)"},
+            status_code=400,
+        )
+    if not hasattr(backend, "import_dataset"):
+        return JSONResponse({"error": "Backend does not support dataset import"}, status_code=501)
+
+    from dataset_import import DatasetImportError, parse_csv_bytes
+
+    raw = await file.read()
+    try:
+        inputs, targets = parse_csv_bytes(raw)
+    except DatasetImportError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+    try:
+        dataset = backend.import_dataset(inputs, targets, source_label=f"upload:{file.filename or 'unnamed.csv'}")
+        return dataset or {"status": "imported"}
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except Exception as exc:
+        # SEC-14: opaque server-side error with correlation id (matches the
+        # ``/api/dataset/generate`` pattern). Don't leak exception details.
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Dataset import (file) failed [error_id=%s]", error_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
+
+class _ImportUrlRequest(BaseModel):
+    """Body for ``POST /api/dataset/import-url``."""
+
+    url: str = Field(..., min_length=1, max_length=2048)
+
+
+@app.post("/api/dataset/import-url")
+async def import_dataset_url(request: _ImportUrlRequest):
+    """CAN-016b: fetch a CSV from a URL and import it (demo mode only).
+
+    Network access is gated by ``settings.dataset_import_url_enabled`` (off by
+    default in production-leaning configs to avoid letting the canopy server
+    issue arbitrary outbound requests). 10s fetch timeout, 10 MB body cap.
+    """
+    if backend.backend_type != "demo":
+        return JSONResponse(
+            {"error": "Dataset import only available in demo mode (cascor backend doesn't accept inline datasets yet)"},
+            status_code=400,
+        )
+    if not getattr(settings, "dataset_import_url_enabled", True):
+        return JSONResponse({"error": "URL-based dataset import is disabled by configuration"}, status_code=403)
+    if not hasattr(backend, "import_dataset"):
+        return JSONResponse({"error": "Backend does not support dataset import"}, status_code=501)
+
+    url = request.url.strip()
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return JSONResponse({"error": "URL must use http:// or https:// scheme"}, status_code=400)
+
+    try:
+        import httpx
+    except ImportError:
+        return JSONResponse({"error": "URL import requires httpx — not available in this build"}, status_code=501)
+
+    from dataset_import import MAX_FILE_BYTES, DatasetImportError, parse_csv_bytes
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            resp = await client.get(url)
+        if resp.status_code != 200:
+            return JSONResponse({"error": f"Fetch failed: HTTP {resp.status_code}"}, status_code=400)
+        raw = resp.content
+    except httpx.TimeoutException:
+        return JSONResponse({"error": "Fetch timed out (10s limit)"}, status_code=504)
+    except httpx.HTTPError as exc:
+        return JSONResponse({"error": f"Fetch failed: {type(exc).__name__}"}, status_code=400)
+
+    if len(raw) > MAX_FILE_BYTES:
+        return JSONResponse({"error": f"Remote file too large: {len(raw)} bytes (limit {MAX_FILE_BYTES})"}, status_code=413)
+
+    try:
+        inputs, targets = parse_csv_bytes(raw)
+    except DatasetImportError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+    try:
+        dataset = backend.import_dataset(inputs, targets, source_label=f"url:{url}")
+        return dataset or {"status": "imported"}
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Dataset import (url) failed [error_id=%s]", error_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
 
 
 @app.get("/api/dataset/generators")
