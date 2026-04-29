@@ -77,19 +77,31 @@ CANDIDATE_TRAINING_PARAMS = [
 ]
 
 
-def _build_table(params, data):
-    """Build a dbc.Table from parameter definitions and current data."""
-    header = html.Thead(
-        html.Tr(
-            [
-                html.Th("Parameter"),
-                html.Th("Current Value"),
-                html.Th("Min"),
-                html.Th("Max"),
-                html.Th("Default"),
-            ]
-        )
+def _build_table(params, data, pinned_keys=None):
+    """Build a dbc.Table from parameter definitions and current data.
+
+    CAN-005: when ``pinned_keys`` is provided, each row gains a pin
+    checkbox in a leading column. Toggling the checkbox writes to
+    ``pinned-params-store``; the canopy sidebar mirrors the current
+    value of every pinned param in a read-only "Pinned Parameters"
+    card so the user can see the values they care about at a glance
+    from any tab.
+    """
+    pinned_set = set(pinned_keys or [])
+    header_cells = []
+    if pinned_keys is not None:
+        header_cells.append(html.Th("Pin", style={"width": "44px"}))
+    header_cells.extend(
+        [
+            html.Th("Parameter"),
+            html.Th("Current Value"),
+            html.Th("Min"),
+            html.Th("Max"),
+            html.Th("Default"),
+        ]
     )
+    header = html.Thead(html.Tr(header_cells))
+
     rows = []
     for key, name, default, min_val, max_val in params:
         current = data.get(key, "—")
@@ -97,17 +109,32 @@ def _build_table(params, data):
             current = "Enabled" if current else "Disabled"
         elif isinstance(current, list):
             current = "Enabled" if "enabled" in current else "Disabled"
-        rows.append(
-            html.Tr(
-                [
-                    html.Td(name),
-                    html.Td(html.Strong(str(current))),
-                    html.Td(str(min_val)),
-                    html.Td(str(max_val)),
-                    html.Td(str(default)),
-                ]
+
+        cells = []
+        if pinned_keys is not None:
+            cells.append(
+                html.Td(
+                    dbc.Checkbox(
+                        id={"type": "param-pin", "key": key},
+                        value=key in pinned_set,
+                        # Empty visible label; aria text lives on the table cell
+                        label="",
+                        label_class_name="visually-hidden",
+                    ),
+                    style={"textAlign": "center"},
+                )
             )
+        cells.extend(
+            [
+                html.Td(name),
+                html.Td(html.Strong(str(current))),
+                html.Td(str(min_val)),
+                html.Td(str(max_val)),
+                html.Td(str(default)),
+            ]
         )
+        rows.append(html.Tr(cells))
+
     body = html.Tbody(rows)
     return dbc.Table(
         [header, body],
@@ -117,6 +144,13 @@ def _build_table(params, data):
         size="sm",
         className="mb-0",
     )
+
+
+# CAN-005: name lookup for the sidebar's "Pinned Parameters" mirror.
+# Concatenated here so dashboard_manager can render pinned param rows
+# without re-importing each per-section list.
+ALL_PARAMS = NETWORK_TRAINING_PARAMS + DATASET_PARAMS + CANDIDATE_TRAINING_PARAMS
+PARAM_DISPLAY_NAMES = {key: name for (key, name, *_rest) in ALL_PARAMS}
 
 
 class ParametersPanel(BaseComponent):
@@ -213,26 +247,32 @@ class ParametersPanel(BaseComponent):
         # PERF-CN-01: prevent_initial_call=False — must render the parameter
         # tables on mount so the panel is not blank before the params-store is
         # populated by the parameters-applied flow.
+        # CAN-005: also reads `pinned-params-store` so the table re-renders
+        # the checkbox column with the current pin state.
         @app.callback(
             [
                 Output(f"{self.component_id}-network-table", "children"),
                 Output(f"{self.component_id}-dataset-table", "children"),
                 Output(f"{self.component_id}-candidate-table", "children"),
             ],
-            Input(f"{self.component_id}-params-store", "data"),
+            [
+                Input(f"{self.component_id}-params-store", "data"),
+                Input("pinned-params-store", "data"),
+            ],
             prevent_initial_call=False,
         )
-        def update_parameters_tables(data):
+        def update_parameters_tables(data, pinned):
             """Update parameter tables when store data changes."""
             if not data:
                 data = {}
+            pinned_keys = list(pinned or [])
             network_data = {p[0]: data.get(p[0], p[2]) for p in NETWORK_TRAINING_PARAMS}
             dataset_data = {p[0]: data.get(p[0], p[2]) for p in DATASET_PARAMS}
             candidate_data = {p[0]: data.get(p[0], p[2]) for p in CANDIDATE_TRAINING_PARAMS}
             return (
-                _build_table(NETWORK_TRAINING_PARAMS, network_data),
-                _build_table(DATASET_PARAMS, dataset_data),
-                _build_table(CANDIDATE_TRAINING_PARAMS, candidate_data),
+                _build_table(NETWORK_TRAINING_PARAMS, network_data, pinned_keys=pinned_keys),
+                _build_table(DATASET_PARAMS, dataset_data, pinned_keys=pinned_keys),
+                _build_table(CANDIDATE_TRAINING_PARAMS, candidate_data, pinned_keys=pinned_keys),
             )
 
         self._cb_update_parameters_tables = update_parameters_tables

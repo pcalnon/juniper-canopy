@@ -326,5 +326,69 @@ class TestApplyInFlightIntervalPause:
         assert 'Input("apply-in-flight", "data")' in window
 
 
+class TestPinnedParameters:
+    """CAN-005: pin/unpin meta params + sidebar mirror."""
+
+    @pytest.fixture
+    def dashboard_manager_source(self):
+        path = Path(__file__).resolve().parents[2] / "frontend" / "dashboard_manager.py"
+        return path.read_text(encoding="utf-8")
+
+    @pytest.fixture
+    def parameters_panel_source(self):
+        path = Path(__file__).resolve().parents[2] / "frontend" / "components" / "parameters_panel.py"
+        return path.read_text(encoding="utf-8")
+
+    def test_pinned_store_uses_localStorage(self, dashboard_manager_source):
+        """Pinned IDs must persist via storage_type='local' so reloads
+        preserve the user's pin selections."""
+        idx = dashboard_manager_source.find('id="pinned-params-store"')
+        assert idx != -1
+        window = dashboard_manager_source[idx : idx + 200]
+        assert 'storage_type="local"' in window
+
+    def test_sidebar_pinned_card_in_layout(self, dashboard_manager_source):
+        """Sidebar must include a `sidebar-pinned-card` Div + the
+        `sidebar-pinned-list` body that the render callback writes."""
+        assert 'id="sidebar-pinned-card"' in dashboard_manager_source
+        assert 'id="sidebar-pinned-list"' in dashboard_manager_source
+
+    def test_pin_checkboxes_use_pattern_matching_id(self, parameters_panel_source):
+        """Each pin checkbox uses a `{"type": "param-pin", "key": …}` id
+        so a single ALL-pattern callback can collect every checkbox's
+        state in one shot."""
+        assert '{"type": "param-pin", "key": key}' in parameters_panel_source
+
+    def test_param_display_names_export(self, parameters_panel_source):
+        """The sidebar mirror needs human-readable names for each pinned
+        key — exposed via PARAM_DISPLAY_NAMES."""
+        assert "PARAM_DISPLAY_NAMES" in parameters_panel_source
+        assert "ALL_PARAMS" in parameters_panel_source
+
+    def test_pin_toggle_callback_writes_store(self, dashboard_manager_source):
+        """ALL-pattern callback must write `pinned-params-store.data`."""
+        assert 'Output("pinned-params-store", "data")' in dashboard_manager_source
+        assert "param-pin" in dashboard_manager_source
+        assert "dash.ALL" in dashboard_manager_source
+
+    def test_sidebar_mirror_callback_renders_or_hides_card(self, dashboard_manager_source):
+        """Mirror callback returns ([rows], {style}) and hides the card
+        when the pinned list is empty."""
+        idx = dashboard_manager_source.find('Output("sidebar-pinned-list"')
+        assert idx != -1
+        # The full callback body (incl. both empty and populated paths)
+        # is well under 3000 chars.
+        window = dashboard_manager_source[idx : idx + 3000]
+        assert 'Output("sidebar-pinned-card", "style")' in window
+        assert '{"display": "none"}' in window
+        assert '{"display": "block"}' in window
+
+    def test_table_callback_reads_pinned_store(self, parameters_panel_source):
+        """update_parameters_tables takes pinned-params-store as a
+        second Input so the checkbox column re-renders when pin state
+        changes."""
+        assert 'Input("pinned-params-store", "data")' in parameters_panel_source
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
