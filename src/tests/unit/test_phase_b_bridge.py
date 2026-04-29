@@ -365,3 +365,55 @@ class TestGapWs16RestSwitchoverGate:
         """The REST poll suppression must require ws_status['metricsReceived'], not
         only 'connected'."""
         assert 'ws_status.get("metricsReceived")' in dashboard_manager_source
+
+
+@pytest.mark.unit
+class TestGapWs25TopologyRestGate:
+    """GAP-WS-25: topology REST poll waits for first WS topology frame.
+
+    Mirrors GAP-WS-16's metricsReceived pattern. Cascor only broadcasts
+    `topology` on cascade_add (grow events), so a fresh tab can wait
+    minutes for one. Until the first frame arrives, REST keeps polling
+    so the visualizer paints something.
+    """
+
+    @pytest.fixture
+    def bridge_js(self):
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "ws_dash_bridge.js"
+        return path.read_text(encoding="utf-8")
+
+    @pytest.fixture
+    def dashboard_manager_source(self):
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[2] / "frontend" / "dashboard_manager.py"
+        return path.read_text(encoding="utf-8")
+
+    def test_topology_received_flag_initialized_false(self, bridge_js):
+        assert "_topologyReceived: false" in bridge_js
+
+    def test_topology_received_flag_set_on_first_topology_frame(self, bridge_js):
+        assert "drain._topologyReceived = true" in bridge_js
+
+    def test_peek_connection_status_merges_topology_received(self, bridge_js):
+        assert "topologyReceived: !!this._topologyReceived" in bridge_js
+
+    def test_dashboard_topology_gate_requires_topology_received(self, dashboard_manager_source):
+        """The topology REST gate must require ws_status['topologyReceived']."""
+        assert 'ws_status.get("topologyReceived")' in dashboard_manager_source
+
+    def test_raw_topology_intentionally_ungated(self, dashboard_manager_source):
+        """Raw topology has no WS source — must remain ungated, with a
+        comment explaining why so future contributors don't 'fix' it."""
+        assert "raw weight matrices" in dashboard_manager_source
+        assert "GAP-WS-25" in dashboard_manager_source
+        # The raw-topology callback signature must not include ws_status —
+        # the callback definition stays as-is.
+        assert "def update_raw_topology_store(n, active_tab, view_mode):" in dashboard_manager_source
+
+    def test_topology_callback_signature_unchanged(self, dashboard_manager_source):
+        """The existing topology callback signature stays — we only tightened
+        the gate condition, didn't add new inputs."""
+        assert "def update_topology_store(n, ws_topology, active_tab, ws_status):" in dashboard_manager_source

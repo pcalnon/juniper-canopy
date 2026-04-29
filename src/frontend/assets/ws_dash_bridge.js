@@ -39,6 +39,12 @@
         // _connectionStatus wholesale on every status change; peekConnectionStatus
         // merges this flag back in so it survives reconnects.
         _metricsReceived: false,
+        // GAP-WS-25: same pattern for topology. Cascor only broadcasts
+        // `topology` on cascade_add (network grow events) — a fresh tab opened
+        // mid-training could wait minutes for one. Until the first topology
+        // frame arrives, the REST /api/topology poll keeps running so the
+        // network visualizer paints something. Once a frame arrives, REST quiets.
+        _topologyReceived: false,
         _gen: 0,                      // drain generation counter
 
         // ── Drain methods (called by Dash clientside callbacks) ──
@@ -76,12 +82,14 @@
         peekConnectionStatus: function() {
             // GAP-WS-16: merge metricsReceived into the status object so the
             // REST poll's switchover gate sees a stable flag across reconnects.
+            // GAP-WS-25: same merge for topologyReceived.
             var status = this._connectionStatus || {};
             return {
                 connected: !!status.connected,
                 reconnecting: !!status.reconnecting,
                 mode: status.mode || "live",
-                metricsReceived: !!this._metricsReceived
+                metricsReceived: !!this._metricsReceived,
+                topologyReceived: !!this._topologyReceived
             };
         }
     };
@@ -169,6 +177,8 @@
         window.cascorWS.on("topology", function(data) {
             // Latest only — overwrites previous
             drain._topologyBuffer = data;
+            // GAP-WS-25: first topology frame arrives — REST poll can quiet down.
+            drain._topologyReceived = true;
         });
 
         window.cascorWS.on("cascade_add", function(data) {
