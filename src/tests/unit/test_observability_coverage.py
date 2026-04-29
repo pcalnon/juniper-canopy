@@ -141,7 +141,15 @@ class TestPrometheusMiddlewareCoverage:
             mock_counter.labels.assert_called_once_with(method="GET", endpoint="/missing", status="404")
 
     def test_default_service_name_and_namespace(self):
-        """Verify PrometheusMiddleware uses defaults when not specified."""
+        """METRICS-MON R2.1.5: PrometheusMiddleware defaults are shared-lib defaults.
+
+        Canopy used to default ``namespace="juniper_canopy"``; after
+        migrating to ``juniper_observability.PrometheusMiddleware``,
+        the unset default is the shared lib's ``"juniper"`` (the cross-
+        service namespace prefix). All canopy call sites pass
+        ``namespace="juniper_canopy"`` explicitly (see ``main.py``), so
+        this only affects ad-hoc construction.
+        """
         with patch("prometheus_client.Counter") as MockCounter, patch("prometheus_client.Histogram") as MockHistogram:
             MockCounter.return_value = MagicMock()
             MockHistogram.return_value = MagicMock()
@@ -149,8 +157,8 @@ class TestPrometheusMiddlewareCoverage:
             PrometheusMiddleware(app=MagicMock())
 
             counter_names = [call.args[0] for call in MockCounter.call_args_list]
-            assert "juniper_canopy_http_requests_total" in counter_names
-            assert "juniper_canopy_http_unmatched_requests_total" in counter_names
+            assert "juniper_http_requests_total" in counter_names
+            assert "juniper_http_unmatched_requests_total" in counter_names
 
 
 @pytest.mark.unit

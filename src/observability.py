@@ -1,194 +1,83 @@
-"""Observability module for structured logging, Prometheus metrics, and Sentry integration."""
+"""Observability surface for juniper-canopy.
 
-import json
-import logging
-import sys
-import time
-import uuid
-from contextvars import ContextVar
+METRICS-MON R2.1.5 / seed-06: the cross-cutting machinery
+(:class:`JuniperJsonFormatter`, :class:`RequestIdMiddleware`,
+:class:`PrometheusMiddleware`, :data:`UNMATCHED_ENDPOINT_LABEL`,
+:data:`request_id_var`, :func:`configure_logging`,
+:func:`get_prometheus_app`, :func:`set_build_info`) lives in the shared
+:mod:`juniper_observability` package and is re-exported here for
+backwards compatibility with existing imports across ``main.py`` and
+the test suites.
 
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.requests import Request
-from starlette.responses import Response
+What stays in this module:
 
-request_id_var: ContextVar[str] = ContextVar("request_id", default="")
+- :func:`configure_sentry` — thin wrapper that delegates to the shared
+  implementation but accepts ``traces_sample_rate`` as a positional
+  argument (canopy's existing call site in ``main.py`` passes it
+  positionally as the fourth argument). The shared signature requires
+  it as keyword-only.
+- The canopy-specific Prometheus metrics
+  (:func:`set_websocket_connections`, :func:`inc_websocket_messages`,
+  :func:`set_demo_mode_active`) and the lazy-init helper that backs
+  them.
+
+New code should prefer ``from juniper_observability import …`` for the
+re-exported symbols to make the dependency on the shared lib explicit.
+
+The migration also closes a security gap: canopy's local
+:func:`configure_sentry` did **not** install the SEC-15
+``before_send`` hook. The shared implementation does (defense in depth
+against future Sentry SDK changes that may re-attach request headers).
+
+See: notes/code-review/METRICS_MONITORING_R2.1_SHARED_OBSERVABILITY_DESIGN_2026-04-28.md
+in juniper-ml.
+"""
+
+# Cross-service primitives — re-exported from juniper-observability.
+from juniper_observability import (  # noqa: F401 — re-exported for backwards compat
+    DEFAULT_LOG_FORMAT_PLAIN,
+    DEFAULT_SENTRY_TRACES_SAMPLE_RATE,
+    LOG_FORMAT_JSON,
+    UNMATCHED_ENDPOINT_LABEL,
+    JuniperJsonFormatter,
+    PrometheusMiddleware,
+    RequestIdMiddleware,
+    configure_logging,
+)
+from juniper_observability import configure_sentry as _shared_configure_sentry
+from juniper_observability import (  # noqa: F401 — re-exported for backwards compat
+    get_prometheus_app,
+    request_id_var,
+    set_build_info,
+)
 
 _SERVICE_NAME_DEFAULT: str = "juniper-canopy"
 _NAMESPACE_DEFAULT: str = "juniper_canopy"
 
 
-class JuniperJsonFormatter(logging.Formatter):
-    """JSON log formatter with request_id propagation."""
-
-    def __init__(self, service: str = _SERVICE_NAME_DEFAULT) -> None:
-        super().__init__()
-        self._service = service
-
-    def format(self, record: logging.LogRecord) -> str:
-        log_entry = {
-            "timestamp": self.formatTime(record, self.datefmt),
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
-            "service": self._service,
-            "request_id": request_id_var.get(""),
-        }
-        if record.exc_info and record.exc_info[1] is not None:
-            log_entry["exception"] = self.formatException(record.exc_info)
-        return json.dumps(log_entry)
-
-
-class RequestIdMiddleware(BaseHTTPMiddleware):
-    """Injects X-Request-ID into ContextVar and response header."""
-
-    async def dispatch(
-        self,
-        request: Request,
-        call_next: RequestResponseEndpoint,
-    ) -> Response:
-        rid = request.headers.get("X-Request-ID", str(uuid.uuid4()))
-        token = request_id_var.set(rid)
-        try:
-            response = await call_next(request)
-            response.headers["X-Request-ID"] = rid
-            return response
-        finally:
-            request_id_var.reset(token)
-
-
-# METRICS-MON seed-01 / R1.1: bound cardinality. The previous fallback to
-# ``request.url.path`` produced an unbounded ``endpoint`` label set under
-# attacker-controlled paths or path-parameter routes. Restrict the label
-# to the resolved Starlette route template; collapse unmatched requests
-# into ``UNMATCHED_ENDPOINT_LABEL`` and emit a separate counter so the
-# unmatched volume remains observable. Aligned with juniper-data and
-# juniper-cascor.
-UNMATCHED_ENDPOINT_LABEL = "_unmatched"
-
-
-class PrometheusMiddleware(BaseHTTPMiddleware):
-    """Tracks http_requests_total and http_request_duration_seconds with namespace prefix."""
-
-    def __init__(self, app: object, service_name: str = _SERVICE_NAME_DEFAULT, namespace: str = _NAMESPACE_DEFAULT) -> None:
-        super().__init__(app)
-        from prometheus_client import Counter, Histogram
-
-        prefix = f"{namespace}_" if namespace else ""
-        self._request_count = Counter(
-            f"{prefix}http_requests_total",
-            "Total HTTP requests",
-            ["method", "endpoint", "status"],
-        )
-        self._request_duration = Histogram(
-            f"{prefix}http_request_duration_seconds",
-            "HTTP request duration in seconds",
-            ["method", "endpoint"],
-        )
-        self._unmatched_count = Counter(
-            f"{prefix}http_unmatched_requests_total",
-            "HTTP requests not matching any registered route template",
-            ["method"],
-        )
-
-    async def dispatch(
-        self,
-        request: Request,
-        call_next: RequestResponseEndpoint,
-    ) -> Response:
-        start = time.perf_counter()
-        response = await call_next(request)
-        duration = time.perf_counter() - start
-
-        route = request.scope.get("route")
-        template = getattr(route, "path", None) if route is not None else None
-        method = request.method
-        if template:
-            endpoint = template
-        else:
-            endpoint = UNMATCHED_ENDPOINT_LABEL
-            self._unmatched_count.labels(method=method).inc()
-
-        status = str(response.status_code)
-
-        self._request_count.labels(method=method, endpoint=endpoint, status=status).inc()
-        self._request_duration.labels(method=method, endpoint=endpoint).observe(duration)
-
-        return response
-
-
-def configure_logging(log_level: str, log_format: str, service_name: str = _SERVICE_NAME_DEFAULT) -> None:
-    """Configure logging — JSON when log_format='json', plain text otherwise.
-
-    Args:
-        log_level: Logging level string (e.g. "INFO", "DEBUG").
-        log_format: Format mode — "json" for structured JSON, anything else for plain text.
-        service_name: Service name included in JSON log entries.
-    """
-    level = getattr(logging, log_level.upper(), logging.INFO)
-    root = logging.getLogger()
-    root.setLevel(level)
-
-    # Remove existing handlers to avoid duplicate output
-    for handler in root.handlers[:]:
-        root.removeHandler(handler)
-
-    handler = logging.StreamHandler()
-    handler.setLevel(level)
-
-    if log_format == "json":
-        handler.setFormatter(JuniperJsonFormatter(service=service_name))
-    else:
-        handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
-
-    root.addHandler(handler)
-
-
 def configure_sentry(dsn: str | None, service_name: str, version: str, traces_sample_rate: float = 0.1) -> None:
-    """Initialize Sentry with FastAPI integration. No-op when dsn is None or empty.
+    """Initialize Sentry via the shared :func:`juniper_observability.configure_sentry`.
+
+    Canopy's historical signature accepts ``traces_sample_rate`` as a
+    positional fourth argument (see ``main.py``); the shared signature
+    requires it keyword-only. This wrapper preserves the canopy call
+    convention while delegating to the shared implementation, which
+    additionally installs the SEC-15 ``before_send`` hook (canopy's
+    previous local implementation did not).
 
     Args:
         dsn: Sentry DSN URL. Pass None or empty string to skip initialization.
         service_name: Service name for Sentry environment tag.
         version: Application version string.
-        traces_sample_rate: Fraction of transactions to send to Sentry (0.0-1.0, default 0.1).
+        traces_sample_rate: Fraction of transactions to send to Sentry
+            (0.0-1.0, default 0.1 — preserves canopy's prior default).
     """
-    if not dsn:
-        return
-
-    import sentry_sdk
-
-    sentry_sdk.init(
-        dsn=dsn,
-        send_default_pii=False,
-        enable_logs=True,
+    _shared_configure_sentry(
+        dsn,
+        service_name,
+        version,
         traces_sample_rate=traces_sample_rate,
-        release=f"{service_name}@{version}",
     )
-
-
-def get_prometheus_app():
-    """Return ASGI app for /metrics endpoint via prometheus_client.make_asgi_app().
-
-    Returns:
-        ASGI application serving Prometheus metrics.
-    """
-    from prometheus_client import make_asgi_app
-
-    return make_asgi_app()
-
-
-def set_build_info(namespace: str, version: str) -> None:
-    """Set build information as a Prometheus Info metric.
-
-    Args:
-        namespace: Metric namespace prefix (e.g. "juniper_canopy").
-        version: Application version string.
-    """
-    from prometheus_client import Info
-
-    python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    info = Info(f"{namespace}_build", f"Build information for {namespace.replace('_', '-')} service")
-    info.info({"version": version, "python_version": python_version})
 
 
 # ---------------------------------------------------------------------------
