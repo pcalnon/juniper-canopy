@@ -24,7 +24,25 @@ class TutorialPanel(BaseComponent):
     def get_layout(self) -> html.Div:
         return html.Div(
             [
-                html.H3("Tutorial & Reference Guide", className="mb-3"),
+                html.Div(
+                    [
+                        html.H3("Tutorial & Reference Guide", style={"display": "inline-block", "marginRight": "20px"}),
+                        # CAN-019: launches the interactive walkthrough overlay.
+                        # Sets ``walkthrough-state-store`` to ``{active: True,
+                        # index: 0}``; a clientside callback in dashboard_manager
+                        # picks that up and calls
+                        # ``window._juniperWalkthrough.show(steps, 0)``.
+                        dbc.Button(
+                            "▶ Take a guided tour",
+                            id="walkthrough-launch-btn",
+                            color="primary",
+                            outline=True,
+                            size="sm",
+                            style={"verticalAlign": "middle"},
+                        ),
+                    ],
+                    className="mb-3",
+                ),
                 dbc.Accordion(
                     [
                         dbc.AccordionItem(
