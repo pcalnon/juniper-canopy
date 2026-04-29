@@ -57,6 +57,8 @@ from .components.dataset_plotter import DatasetPlotter
 from .components.decision_boundary import DecisionBoundary
 from .components.hdf5_snapshots_panel import HDF5SnapshotsPanel
 from .components.metrics_panel import MetricsPanel
+from .components.network_evolution import MAX_SNAPSHOTS as _EVOLUTION_MAX_SNAPSHOTS
+from .components.network_evolution import NetworkEvolution
 from .components.network_visualizer import NetworkVisualizer
 from .components.parameters_panel import ParametersPanel
 from .components.redis_panel import RedisPanel
@@ -456,6 +458,8 @@ class DashboardManager:
         # Parameters Panel
         self.parameters_panel = ParametersPanel(self.config.get("parameters_panel", {}), component_id="parameters-panel")
         self.tutorial_panel = TutorialPanel(self.config.get("tutorial_panel", {}), component_id="tutorial-panel")
+        # Network Evolution: small-multiples cascade-growth timeline.
+        self.network_evolution = NetworkEvolution(self.config.get("network_evolution", {}), component_id="network-evolution")
 
         # Remote Worker Monitoring Panel
         self.worker_panel = WorkerPanel(self.config.get("worker_panel", {}), component_id="worker-panel")
@@ -472,6 +476,7 @@ class DashboardManager:
         self.register_component(self.cassandra_panel)
         self.register_component(self.parameters_panel)
         self.register_component(self.tutorial_panel)
+        self.register_component(self.network_evolution)
         self.register_component(self.worker_panel)
 
         self.logger.info("All MVP components initialized and registered")
@@ -1291,6 +1296,11 @@ class DashboardManager:
                                             tab_id="topology",
                                         ),
                                         dbc.Tab(
+                                            self.network_evolution.get_layout(),
+                                            label="Network Evolution",
+                                            tab_id="evolution",
+                                        ),
+                                        dbc.Tab(
                                             self.decision_boundary.get_layout(),
                                             label="Decision Boundary",
                                             tab_id="boundaries",
@@ -1370,6 +1380,11 @@ class DashboardManager:
                 #     Skip / Done handlers (via dash_clientside.set_props).
                 dcc.Store(id="walkthrough-steps-store", data=_walkthrough_steps()),
                 dcc.Store(id="walkthrough-state-store", data={"active": False, "index": 0}),
+                # Network Evolution: ring-buffered timeline of cascade-grow
+                # snapshots, populated client-side from ws-cascade-add-buffer
+                # events. Each entry is a tiny dict with counts only — full
+                # connections lists would explode the store at 20×.
+                dcc.Store(id="evolution-snapshots-store", data=[]),
                 # Update intervals
                 dcc.Interval(id="fast-update-interval", interval=DashboardConstants.FAST_UPDATE_INTERVAL_MS, n_intervals=0),
                 dcc.Interval(id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0),
@@ -1974,6 +1989,90 @@ class DashboardManager:
             Output("ws-connection-indicator", "children"),
             Output("ws-connection-indicator", "style"),
             Input("ws-connection-status", "data"),
+        )
+
+        # Network Evolution: capture a snapshot whenever a ``cascade_add`` event
+        # arrives over WebSocket. Reads the current topology from the existing
+        # network-visualizer store (no need for a parallel data path). Bounded
+        # to MAX_SNAPSHOTS — oldest evicted on overflow. Snapshots are pushed
+        # to the head so the grid renders newest-first.
+        #
+        # Auto-clear semantics: when input_units changes (= different network /
+        # dataset replacement) or hidden_units shrinks below the most recent
+        # snapshot's count (= reset signal), wipe the timeline. This keeps a
+        # session-bounded view and avoids carrying stale snapshots across runs.
+        self.app.clientside_callback(
+            f"""
+            function(cascadeBuf, topology, snapshots) {{
+                var snaps = Array.isArray(snapshots) ? snapshots : [];
+                if (!topology) {{
+                    return window.dash_clientside.no_update;
+                }}
+                var iu = (topology.input_units|0);
+                var hu = (topology.hidden_units|0);
+                var ou = (topology.output_units|0);
+
+                // Auto-clear on dataset / network reset.
+                if (snaps.length > 0) {{
+                    var head = snaps[0];
+                    if ((head.input_units|0) !== iu || hu < (head.hidden_units|0)) {{
+                        snaps = [];
+                    }}
+                }}
+
+                // Read epoch from metrics store if available.
+                var epoch = null;
+                try {{
+                    if (window._juniperWsDrain && Array.isArray(window._juniperWsDrain._metricsBuffer)
+                            && window._juniperWsDrain._metricsBuffer.length > 0) {{
+                        var lastMetric = window._juniperWsDrain._metricsBuffer[window._juniperWsDrain._metricsBuffer.length - 1];
+                        if (lastMetric && typeof lastMetric.epoch !== "undefined") {{
+                            epoch = lastMetric.epoch;
+                        }}
+                    }}
+                }} catch (e) {{ /* best-effort epoch tagging */ }}
+
+                // De-dupe: only push if hidden_units differs from the head.
+                if (snaps.length > 0 && (snaps[0].hidden_units|0) === hu
+                        && (snaps[0].input_units|0) === iu
+                        && (snaps[0].output_units|0) === ou) {{
+                    return window.dash_clientside.no_update;
+                }}
+
+                var newSnap = {{
+                    timestamp: Date.now(),
+                    epoch: epoch,
+                    input_units: iu,
+                    hidden_units: hu,
+                    output_units: ou,
+                }};
+                var next = [newSnap].concat(snaps);
+                if (next.length > {_EVOLUTION_MAX_SNAPSHOTS}) {{
+                    next = next.slice(0, {_EVOLUTION_MAX_SNAPSHOTS});
+                }}
+                return next;
+            }}
+            """,
+            Output("evolution-snapshots-store", "data", allow_duplicate=True),
+            [
+                Input("ws-cascade-add-buffer", "data"),
+                Input("network-visualizer-topology-store", "data"),
+            ],
+            State("evolution-snapshots-store", "data"),
+            prevent_initial_call=True,
+        )
+
+        # Network Evolution: explicit Clear button wipes the snapshots store.
+        self.app.clientside_callback(
+            """
+            function(nClicks) {
+                if (!nClicks) return window.dash_clientside.no_update;
+                return [];
+            }
+            """,
+            Output("evolution-snapshots-store", "data", allow_duplicate=True),
+            Input("network-evolution-clear-btn", "n_clicks"),
+            prevent_initial_call=True,
         )
 
         # PERF-CN-01: prevent_initial_call=True — only needs to react when the
