@@ -1330,6 +1330,10 @@ class DashboardManager:
                 dcc.Interval(id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0),
                 # One-shot interval for parameter initialization (fires once, 1s after load)
                 dcc.Interval(id="params-init-interval", interval=1000, max_intervals=1, n_intervals=0),
+                # CAN-000: pause periodic update intervals while the Apply Parameters
+                # button is in flight, so a server roundtrip isn't racing against
+                # interval-driven REST polls / clientside drains.
+                dcc.Store(id="apply-in-flight", data=False),
                 # Phase B: WebSocket drain stores (structured objects, D-07)
                 dcc.Store(id="ws-metrics-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
                 dcc.Store(id="ws-topology-buffer", data=None),
@@ -1634,6 +1638,58 @@ class DashboardManager:
 
     # Component data store updaters
     def _setup_datastore_callbacks(self):
+
+        # CAN-000: pause periodic update intervals while Apply Parameters is in
+        # flight. The user-visible behavior fix is that the dashboard stops
+        # firing REST polls and ws-buffer drains the moment Apply is clicked
+        # and resumes the next time `applied-params-store` updates (the
+        # apply_parameters server callback always writes that store, on both
+        # success and failure paths, so resume is reliable).
+        #
+        # Three small clientside callbacks:
+        #   1. apply-button click -> apply-in-flight = True
+        #   2. applied-params-store update -> apply-in-flight = False
+        #   3. apply-in-flight -> {fast,slow}-update-interval.disabled
+        # The third callback fires on layout mount (prevent_initial_call=False)
+        # so the intervals start in their default enabled state.
+        self.app.clientside_callback(
+            """
+            function(nClicks) {
+                if (!nClicks) return window.dash_clientside.no_update;
+                return true;
+            }
+            """,
+            Output("apply-in-flight", "data"),
+            Input("apply-params-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        self.app.clientside_callback(
+            """
+            function(appliedData) {
+                // applied-params-store is written by apply_parameters() on
+                // every click, success or failure. Whenever it updates,
+                // the in-flight clamp can come off.
+                return false;
+            }
+            """,
+            Output("apply-in-flight", "data", allow_duplicate=True),
+            Input("applied-params-store", "data"),
+            prevent_initial_call=True,
+        )
+        self.app.clientside_callback(
+            """
+            function(inFlight) {
+                var disabled = Boolean(inFlight);
+                return [disabled, disabled];
+            }
+            """,
+            [
+                Output("fast-update-interval", "disabled"),
+                Output("slow-update-interval", "disabled"),
+            ],
+            Input("apply-in-flight", "data"),
+            prevent_initial_call=False,
+        )
 
         # Phase B: WebSocket drain callbacks.
         # WS connection and buffering handled by websocket_client.js + ws_dash_bridge.js.

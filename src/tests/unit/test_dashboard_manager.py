@@ -281,5 +281,50 @@ class TestDashboardManagerIntegration:
         assert isinstance(callback_map, dict)
 
 
+class TestApplyInFlightIntervalPause:
+    """CAN-000: Periodic update intervals must pause while Apply is in flight.
+
+    The wiring lives in `_setup_datastore_callbacks` (three clientside
+    callbacks driving an `apply-in-flight` store). The clientside JS only
+    runs in a browser, so the unit tests verify the wiring at the source
+    level — same pattern as the GAP-WS-15 / GAP-WS-14 / PERF-CN-02 tests.
+    """
+
+    @pytest.fixture
+    def dashboard_manager_source(self):
+        path = Path(__file__).resolve().parents[2] / "frontend" / "dashboard_manager.py"
+        return path.read_text(encoding="utf-8")
+
+    def test_apply_in_flight_store_exists(self, dashboard_manager_source):
+        """Layout must include the `apply-in-flight` Store."""
+        assert 'dcc.Store(id="apply-in-flight"' in dashboard_manager_source
+
+    def test_clientside_callback_sets_in_flight_on_click(self, dashboard_manager_source):
+        """Click on Apply button must flip the store to True."""
+        assert 'Output("apply-in-flight", "data")' in dashboard_manager_source
+        assert 'Input("apply-params-button", "n_clicks")' in dashboard_manager_source
+
+    def test_clientside_callback_clears_in_flight_on_apply_complete(self, dashboard_manager_source):
+        """When applied-params-store updates, the in-flight clamp comes off."""
+        assert 'Output("apply-in-flight", "data", allow_duplicate=True)' in dashboard_manager_source
+        assert 'Input("applied-params-store", "data")' in dashboard_manager_source
+
+    def test_in_flight_drives_interval_disabled(self, dashboard_manager_source):
+        """The `apply-in-flight` store toggles the `disabled` prop on both
+        update intervals."""
+        assert 'Output("fast-update-interval", "disabled")' in dashboard_manager_source
+        assert 'Output("slow-update-interval", "disabled")' in dashboard_manager_source
+        # Direct Input on apply-in-flight from the third callback in the
+        # CAN-000 cluster.
+        idx = dashboard_manager_source.find('Output("fast-update-interval", "disabled")')
+        assert idx != -1
+        # The Input("apply-in-flight", "data") line must appear in close
+        # proximity to the disabled Outputs (within ~500 chars), proving the
+        # CAN-000 cluster is wired together rather than being three unrelated
+        # callbacks that happen to share names.
+        window = dashboard_manager_source[idx : idx + 500]
+        assert 'Input("apply-in-flight", "data")' in window
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
