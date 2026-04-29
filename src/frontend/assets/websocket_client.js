@@ -76,6 +76,7 @@ class CascorWebSocket {
                 }
 
                 // Phase B: send resume on reconnect if we have seq history
+                var sentResume = false;
                 if (this.reconnectAttempts > 0 && this._lastSeq >= 0 && this._serverInstanceId) {
                     console.log(`[CascorWS] Sending resume (last_seq=${this._lastSeq}, server=${this._serverInstanceId})`);
                     this.ws.send(JSON.stringify({
@@ -85,6 +86,24 @@ class CascorWebSocket {
                             server_instance_id: this._serverInstanceId
                         }
                     }));
+                    sentResume = true;
+                }
+
+                // GAP-WS-16: on reconnects, also request a metrics burst so
+                // the metrics window backfills past the resume gap. Fresh
+                // connects get the burst automatically server-side; resumes
+                // only replay broadcast seqs > last_seq, which can leave the
+                // metrics view sparse if the gap was long. Skip this on the
+                // /ws/control socket (no metrics there) — gated by csrf flag.
+                if (sentResume && !this._csrfEnabled) {
+                    try {
+                        this.ws.send(JSON.stringify({
+                            type: "subscribe_metrics",
+                            data: {max_count: 100}
+                        }));
+                    } catch (err) {
+                        console.warn('[CascorWS] subscribe_metrics send failed:', err);
+                    }
                 }
 
                 this.reconnectAttempts = 0; // Reset on successful connection

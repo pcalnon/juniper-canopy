@@ -31,6 +31,14 @@
         _cascadeAddBuffer: [],        // max MAX_CASCADE_ADD
         _candidateProgressBuffer: [], // max MAX_CANDIDATE_PROGRESS
         _connectionStatus: {connected: false, reconnecting: false, mode: "live"},
+        // GAP-WS-16: metricsReceived flips true when initial_metrics or the
+        // first metrics frame is delivered, so the REST /api/metrics/history
+        // poll can stay quiet until WS metrics are actually flowing instead
+        // of switching off the moment the socket reports connected. Stored
+        // outside _connectionStatus because websocket_client.js replaces
+        // _connectionStatus wholesale on every status change; peekConnectionStatus
+        // merges this flag back in so it survives reconnects.
+        _metricsReceived: false,
         _gen: 0,                      // drain generation counter
 
         // ── Drain methods (called by Dash clientside callbacks) ──
@@ -66,7 +74,15 @@
         },
 
         peekConnectionStatus: function() {
-            return this._connectionStatus;
+            // GAP-WS-16: merge metricsReceived into the status object so the
+            // REST poll's switchover gate sees a stable flag across reconnects.
+            var status = this._connectionStatus || {};
+            return {
+                connected: !!status.connected,
+                reconnecting: !!status.reconnecting,
+                mode: status.mode || "live",
+                metricsReceived: !!this._metricsReceived
+            };
         }
     };
 
@@ -123,6 +139,26 @@
                 drain._metricsBuffer.shift(); // drop oldest
             }
             drain._metricsBuffer.push(data);
+            // GAP-WS-16: first live metrics frame arrives — REST poll can quiet down.
+            drain._metricsReceived = true;
+        });
+
+        // GAP-WS-16: initial_metrics burst — server delivers up to N most-recent
+        // metrics on fresh connect (or in response to subscribe_metrics). Drain
+        // the array into the same ring buffer so the existing metrics drain
+        // callback paints them. data.metrics is the array; data.count and
+        // data.current_seq are diagnostics only.
+        window.cascorWS.on("initial_metrics", function(data) {
+            if (!data || !Array.isArray(data.metrics)) {
+                return;
+            }
+            for (var i = 0; i < data.metrics.length; i++) {
+                if (drain._metricsBuffer.length >= MAX_METRICS) {
+                    drain._metricsBuffer.shift();
+                }
+                drain._metricsBuffer.push(data.metrics[i]);
+            }
+            drain._metricsReceived = true;
         });
 
         window.cascorWS.on("state_change", function(data) {
