@@ -2875,9 +2875,16 @@ class DashboardManager:
         Phase B polling toggle: when WS bridge reports connected, skip REST poll
         to eliminate redundant traffic. Falls back to 1 Hz (every 10th tick at
         100ms fast interval) when WS is disconnected (D-05).
+
+        GAP-WS-16: the gate now also requires ``metricsReceived`` so REST
+        keeps polling during the brief window between socket-open and the
+        first metrics frame (initial_metrics burst on fresh connect, or a
+        live metrics broadcast on resume). Without this, a tab that
+        connects while training is mid-stream sees an empty chart for one
+        polling interval.
         """
         settings = get_settings()
-        if settings.ws_bridge_enabled and ws_status and ws_status.get("connected"):
+        if settings.ws_bridge_enabled and ws_status and ws_status.get("connected") and ws_status.get("metricsReceived"):
             return dash.no_update
 
         try:

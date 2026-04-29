@@ -75,8 +75,10 @@ class TestPhaseBFlags:
 class TestMetricsPollingToggle:
     """Test polling toggle in _update_metrics_store_handler."""
 
-    def test_returns_no_update_when_ws_connected_and_bridge_enabled(self):
-        """When WS bridge is connected AND enabled, REST poll is skipped."""
+    def test_returns_no_update_when_ws_connected_and_metrics_received(self):
+        """GAP-WS-16: REST poll is skipped only when WS reports BOTH connected
+        AND metricsReceived (avoids the empty-chart blip during the connect→
+        first-frame window)."""
         import dash
 
         from frontend.dashboard_manager import DashboardManager
@@ -84,13 +86,39 @@ class TestMetricsPollingToggle:
         dm = DashboardManager.__new__(DashboardManager)
         dm.logger = __import__("logging").getLogger("test")
 
-        ws_status = {"connected": True, "reconnecting": False, "mode": "live"}
+        ws_status = {"connected": True, "reconnecting": False, "mode": "live", "metricsReceived": True}
 
         with patch("frontend.dashboard_manager.get_settings") as mock_settings:
             mock_settings.return_value.ws_bridge_enabled = True
             result = dm._update_metrics_store_handler(n=1, ws_status=ws_status)
 
         assert result is dash.no_update
+
+    def test_rest_poll_continues_when_connected_but_no_metrics_yet(self):
+        """GAP-WS-16: connected=True but metricsReceived=False keeps REST polling
+        until the first WS metrics frame arrives. Without this gate, a tab that
+        connects mid-training shows an empty chart for one polling interval."""
+        from frontend.dashboard_manager import DashboardManager
+
+        dm = DashboardManager.__new__(DashboardManager)
+        dm.logger = __import__("logging").getLogger("test")
+        dm._api_base_url = "http://127.0.0.1:8050"
+
+        ws_status = {"connected": True, "reconnecting": False, "mode": "live", "metricsReceived": False}
+
+        with patch("frontend.dashboard_manager.get_settings") as mock_settings, patch("frontend.dashboard_manager.requests") as mock_requests:
+            mock_settings.return_value.ws_bridge_enabled = True
+            mock_resp = mock_requests.get.return_value
+            mock_resp.ok = True
+            mock_resp.json.return_value = [{"epoch": 1, "error": 0.5}]
+            result = dm._update_metrics_store_handler(
+                n=1,
+                display_mode_state={"mode": "window", "window_size": 100},
+                ws_status=ws_status,
+            )
+
+        assert isinstance(result, list)
+        assert len(result) == 1
 
     def test_falls_back_to_rest_when_ws_disconnected(self):
         """When WS is disconnected, REST poll proceeds normally."""
@@ -262,3 +290,78 @@ class TestRafCoalescerDashWiring:
         for setting_value, expected in [(True, "true"), (False, "false")]:
             rendered = str(setting_value).lower()
             assert rendered == expected
+
+
+@pytest.mark.unit
+class TestGapWs16BridgeAssets:
+    """GAP-WS-16: ws_dash_bridge.js initial_metrics handler + metricsReceived flag."""
+
+    @pytest.fixture
+    def bridge_js(self):
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "ws_dash_bridge.js"
+        return path.read_text(encoding="utf-8")
+
+    def test_initial_metrics_handler_registered(self, bridge_js):
+        """Handler must exist for the initial_metrics envelope sent on fresh connect."""
+        assert 'window.cascorWS.on("initial_metrics"' in bridge_js
+
+    def test_initial_metrics_drains_into_metrics_buffer(self, bridge_js):
+        """initial_metrics handler must push each entry into the metrics ring buffer."""
+        # The handler reads data.metrics as an array and pushes into _metricsBuffer
+        assert "data.metrics" in bridge_js
+        assert "_metricsBuffer.push(data.metrics" in bridge_js
+
+    def test_metrics_received_flag_set_on_initial_burst(self, bridge_js):
+        """initial_metrics handler must flip _metricsReceived so REST poll quiets down."""
+        assert "_metricsReceived: false" in bridge_js
+        assert "drain._metricsReceived = true" in bridge_js
+
+    def test_metrics_received_flag_set_on_live_metrics(self, bridge_js):
+        """First live `metrics` frame must also flip the flag (covers resume path)."""
+        # _metricsReceived = true should appear in BOTH the metrics handler and
+        # the initial_metrics handler — twice total.
+        assert bridge_js.count("drain._metricsReceived = true") == 2
+
+    def test_peek_connection_status_merges_metrics_received(self, bridge_js):
+        """peekConnectionStatus must surface the flag so the REST gate can read it."""
+        assert "metricsReceived: !!this._metricsReceived" in bridge_js
+
+
+@pytest.mark.unit
+class TestGapWs16WebSocketClientResume:
+    """GAP-WS-16: websocket_client.js sends subscribe_metrics on reconnect."""
+
+    @pytest.fixture
+    def client_js(self):
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "websocket_client.js"
+        return path.read_text(encoding="utf-8")
+
+    def test_subscribe_metrics_sent_after_resume(self, client_js):
+        """On reconnect the client must request a metrics burst to backfill the gap."""
+        assert '"subscribe_metrics"' in client_js or "'subscribe_metrics'" in client_js
+
+    def test_subscribe_metrics_skipped_for_control_socket(self, client_js):
+        """The /ws/control socket has no metrics — subscribe_metrics must be gated on
+        !this._csrfEnabled (the control socket is the CSRF-enabled one)."""
+        assert "!this._csrfEnabled" in client_js
+
+
+@pytest.mark.unit
+class TestGapWs16RestSwitchoverGate:
+    """GAP-WS-16: dashboard_manager REST→WS switchover must wait for first metrics frame."""
+
+    @pytest.fixture
+    def dashboard_manager_source(self):
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[2] / "frontend" / "dashboard_manager.py"
+        return path.read_text(encoding="utf-8")
+
+    def test_gate_requires_metrics_received(self, dashboard_manager_source):
+        """The REST poll suppression must require ws_status['metricsReceived'], not
+        only 'connected'."""
+        assert 'ws_status.get("metricsReceived")' in dashboard_manager_source
