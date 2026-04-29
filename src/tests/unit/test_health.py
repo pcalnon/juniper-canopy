@@ -139,6 +139,99 @@ class TestCanopyHealthEndpoints:
 
 
 @pytest.mark.unit
+class TestReadinessDownstreamInjection:
+    """METRICS-MON R2.3 / seed-15: probe-direction symmetry.
+
+    Asserts the canopy-side severity policy when an injected upstream
+    dependency is unhealthy:
+
+      * `juniper-data` unhealthy   → status="degraded", HTTP 200
+      * `juniper-cascor` unhealthy → status="degraded", HTTP 200
+
+    Canopy intentionally **does not** return 503 when an upstream is
+    down — the dashboard remains reachable so operators can read the
+    "X is broken" diagnostic in the body. This contrasts with cascor's
+    `/v1/health/ready` which returns 503 when JuniperData is unreachable
+    (`test_readiness_503_when_juniper_data_unhealthy` in
+    juniper-cascor). The asymmetry is documented in
+    `juniper-deploy/notes/PROBE_GRAPH.md`.
+    """
+
+    @pytest.mark.asyncio
+    async def test_degraded_when_only_data_unhealthy(self, client):
+        """JuniperData unhealthy + JuniperCascor not_configured → degraded (200)."""
+        from health import DependencyStatus
+
+        async def fake_probe(name, url, timeout=5.0):
+            return DependencyStatus(name=name, status="unhealthy", latency_ms=1.0, message=f"injected: {url}")
+
+        with patch("main.probe_dependency", side_effect=fake_probe):
+            response = client.get("/v1/health/ready")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "degraded"
+        assert body["dependencies"]["juniper_data"]["status"] == "unhealthy"
+        # Cascor remains not_configured (URL unset in default test settings).
+        assert body["dependencies"]["juniper_cascor"]["status"] == "not_configured"
+
+    def test_degraded_when_cascor_unhealthy_with_url_set(self, client, monkeypatch):
+        """JuniperCascor unhealthy (URL set) → degraded (200)."""
+        import main as main_module
+        from health import DependencyStatus
+
+        async def fake_probe(name, url, timeout=5.0):
+            # juniper-data healthy, juniper-cascor unhealthy
+            if "JuniperCascor" in name:
+                return DependencyStatus(name=name, status="unhealthy", latency_ms=1.0, message=f"injected: {url}")
+            return DependencyStatus(name=name, status="healthy", latency_ms=1.0, message=url)
+
+        # Settings is loaded once at module import as `main.settings`; patch
+        # the runtime attribute the readiness handler reads.
+        monkeypatch.setattr(main_module.settings, "cascor_service_url", "http://injected-cascor:8200", raising=False)
+        with patch("main.probe_dependency", side_effect=fake_probe):
+            response = client.get("/v1/health/ready")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "degraded"
+        assert body["dependencies"]["juniper_cascor"]["status"] == "unhealthy"
+        assert body["dependencies"]["juniper_data"]["status"] == "healthy"
+
+    def test_ready_when_all_configured_upstreams_healthy(self, client, monkeypatch):
+        """All probed upstreams healthy → ready (200, no degraded transition)."""
+        import main as main_module
+        from health import DependencyStatus
+
+        async def fake_probe(name, url, timeout=5.0):
+            return DependencyStatus(name=name, status="healthy", latency_ms=1.0, message=url)
+
+        monkeypatch.setattr(main_module.settings, "cascor_service_url", "http://injected-cascor:8200", raising=False)
+        with patch("main.probe_dependency", side_effect=fake_probe):
+            response = client.get("/v1/health/ready")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "ready"
+        assert body["dependencies"]["juniper_data"]["status"] == "healthy"
+        assert body["dependencies"]["juniper_cascor"]["status"] == "healthy"
+
+    @pytest.mark.asyncio
+    async def test_canopy_never_returns_503_on_upstream_down(self, client):
+        """Severity policy: canopy MUST NOT propagate 503 when an upstream is unhealthy.
+
+        The dashboard must remain reachable so operators can see the
+        diagnostic body. If this ever flips to 503 it would page on
+        every downstream incident — explicit regression guard.
+        """
+        from health import DependencyStatus
+
+        async def fake_probe(name, url, timeout=5.0):
+            return DependencyStatus(name=name, status="unhealthy", latency_ms=1.0, message="injected")
+
+        with patch("main.probe_dependency", side_effect=fake_probe):
+            response = client.get("/v1/health/ready")
+        assert response.status_code != 503, "canopy should not 503 on upstream-down per probe-graph severity policy"
+
+
+@pytest.mark.unit
 class TestDeprecatedEndpoints:
     """Test deprecated health endpoint aliases."""
 
