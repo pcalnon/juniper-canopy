@@ -1734,6 +1734,42 @@ class DashboardManager:
             prevent_initial_call=False,
         )
 
+        # CAN-018: hand the CONTROL_TOOLTIPS dict to the
+        # context_menus.js asset on layout mount so it can intercept
+        # right-clicks on every tooltipped control. The asset is
+        # idempotent — repeat invocations only refresh the dict.
+        # NOTE: this clientside_callback was clobbered during the
+        # Phase-1/2 merge sequence and restored from PR #191's tip
+        # (commit 52f905d) — see fix/track-6d-restore-clobbered-tests.
+        self.app.clientside_callback(
+            """
+            function(tooltips) {
+                if (window.juniperCanopy && window.juniperCanopy.installContextMenus) {
+                    window.juniperCanopy.installContextMenus(tooltips || {});
+                }
+                return window.dash_clientside.no_update;
+            }
+            """,
+            Output("control-tooltips-store", "data", allow_duplicate=True),
+            Input("control-tooltips-store", "data"),
+            prevent_initial_call="initial_duplicate",
+        )
+
+        # CAN-018: when the JS context-menu's "View tutorial" link is
+        # clicked, it bumps `context-menu-tutorial-trigger`. Switch the
+        # active tab so the user lands on the Tutorial tab.
+        self.app.clientside_callback(
+            """
+            function(triggerTs) {
+                if (!triggerTs) return window.dash_clientside.no_update;
+                return "tutorial";
+            }
+            """,
+            Output("visualization-tabs", "active_tab", allow_duplicate=True),
+            Input("context-menu-tutorial-trigger", "data"),
+            prevent_initial_call=True,
+        )
+
         # CAN-016a: restore the persisted active tab on layout mount.
         # `layout-state-store` is `storage_type="local"`, so on a fresh
         # session it carries the layout default; on a returning session
