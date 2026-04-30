@@ -50,6 +50,12 @@ class TrainingConstants:
     MIN_MAX_GROWTH_ITERATIONS: Final[int] = 1
     MAX_MAX_GROWTH_ITERATIONS: Final[int] = 1000000
 
+    # ── Neural Network: Per-output-training-pass epoch budget (Phase 6E A-1) ──
+    # Distinct from MAX_TRAINING_EPOCHS (global ceiling). Surfaced by cascor PR #157.
+    DEFAULT_OUTPUT_EPOCHS: Final[int] = 25
+    MIN_OUTPUT_EPOCHS: Final[int] = 1
+    MAX_OUTPUT_EPOCHS: Final[int] = 1000000
+
     # ── Neural Network: Output weight initialization method ──
     DEFAULT_INIT_OUTPUT_WEIGHTS: Final[str] = "zero"
     INIT_OUTPUT_WEIGHTS_OPTIONS: Final[list] = ["zero", "random"]

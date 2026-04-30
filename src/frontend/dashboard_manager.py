@@ -743,6 +743,17 @@ class DashboardManager:
                                                                                 className="mb-2",
                                                                                 debounce=True,
                                                                             ),
+                                                                            html.P("Output Epochs (per pass):", className="mb-1 fw-bold"),
+                                                                            dbc.Input(
+                                                                                id="nn-output-epochs-input",
+                                                                                type="number",
+                                                                                value=self.training_defaults.get("output_epochs", TrainingConstants.DEFAULT_OUTPUT_EPOCHS),
+                                                                                step=1,
+                                                                                min=TrainingConstants.MIN_OUTPUT_EPOCHS,
+                                                                                max=TrainingConstants.MAX_OUTPUT_EPOCHS,
+                                                                                className="mb-2",
+                                                                                debounce=True,
+                                                                            ),
                                                                             html.P("Output Weight Init:", className="mb-1 fw-bold"),
                                                                             dcc.Dropdown(
                                                                                 id="nn-init-output-weights-dropdown",
@@ -2728,6 +2739,8 @@ class DashboardManager:
                 Input("cn-candidate-selection-radio", "value"),
                 Input("cn-top-candidates-input", "value"),
                 Input("cn-random-candidates-input", "value"),
+                # Phase 6E A-1: output_epochs (per-output-pass epoch budget)
+                Input("nn-output-epochs-input", "value"),
                 # Store
                 Input("applied-params-store", "data"),
             ],
@@ -2761,6 +2774,7 @@ class DashboardManager:
             cn_cand_selection,
             cn_top_cands,
             cn_random_cands,
+            nn_output_epochs,
             applied,
         ):
             """Enable Apply button when parameters differ from applied values."""
@@ -2789,6 +2803,7 @@ class DashboardManager:
                 cn_cand_selection,
                 cn_top_cands,
                 cn_random_cands,
+                nn_output_epochs,
                 applied,
             )
 
@@ -2827,6 +2842,8 @@ class DashboardManager:
                 dash.dependencies.State("cn-candidate-selection-radio", "value"),
                 dash.dependencies.State("cn-top-candidates-input", "value"),
                 dash.dependencies.State("cn-random-candidates-input", "value"),
+                # Phase 6E A-1: output_epochs (per-output-pass epoch budget)
+                dash.dependencies.State("nn-output-epochs-input", "value"),
             ],
             prevent_initial_call=True,
         )
@@ -2856,6 +2873,7 @@ class DashboardManager:
             cn_cand_selection,
             cn_top_cands,
             cn_random_cands,
+            nn_output_epochs,
         ):
             """Apply parameters to backend and update applied store."""
             return self._apply_parameters_handler(
@@ -2884,6 +2902,7 @@ class DashboardManager:
                 cn_cand_selection,
                 cn_top_cands,
                 cn_random_cands,
+                nn_output_epochs,
             )
 
         # ── Initialize from backend on first load ──
@@ -2916,6 +2935,8 @@ class DashboardManager:
                 Output("cn-candidate-selection-radio", "value"),
                 Output("cn-top-candidates-input", "value"),
                 Output("cn-random-candidates-input", "value"),
+                # Phase 6E A-1: output_epochs (per-output-pass epoch budget)
+                Output("nn-output-epochs-input", "value"),
                 # Store
                 Output("applied-params-store", "data", allow_duplicate=True),
             ],
@@ -3529,7 +3550,8 @@ class DashboardManager:
         cn_cand_selection,
         cn_top_cands,
         cn_random_cands,
-        applied,
+        nn_output_epochs=None,
+        applied=None,
     ):
         """Enable Apply button when parameters differ from applied values."""
         if not applied:
@@ -3571,6 +3593,7 @@ class DashboardManager:
             (cn_cand_selection, "cn_candidate_selection", "str"),
             (cn_top_cands, "cn_top_candidates", "int"),
             (cn_random_cands, "cn_random_candidates", "int"),
+            (nn_output_epochs, "nn_output_epochs", "int"),
         ]
 
         has_changes = False
@@ -3619,6 +3642,7 @@ class DashboardManager:
         cn_cand_selection,
         cn_top_cands,
         cn_random_cands,
+        nn_output_epochs=None,
     ):
         """Apply parameters to backend and update applied store."""
         if not n_clicks:
@@ -3652,6 +3676,7 @@ class DashboardManager:
             "cn_candidate_selection": cn_cand_selection,
             "cn_top_candidates": int(cn_top_cands) if cn_top_cands is not None else TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT,
             "cn_random_candidates": int(cn_random_cands) if cn_random_cands is not None else TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT,
+            "nn_output_epochs": int(nn_output_epochs) if nn_output_epochs is not None else TrainingConstants.DEFAULT_OUTPUT_EPOCHS,
         }
 
         max_retries = DashboardConstants.DASHBOARD_SET_PARAMS_MAX_RETRIES
@@ -3695,7 +3720,7 @@ class DashboardManager:
 
     def _init_params_from_backend_handler(self, n, current_applied):
         """Initialize input values and applied params from backend on first load."""
-        NUM_OUTPUTS = 25
+        NUM_OUTPUTS = 26
         if current_applied:
             return (dash.no_update,) * NUM_OUTPUTS
         try:
@@ -3726,6 +3751,7 @@ class DashboardManager:
                 cn_cand_selection = state.get("cn_candidate_selection")
                 cn_top_cands = state.get("cn_top_candidates", TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT)
                 cn_random_cands = state.get("cn_random_candidates", TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT)
+                nn_output_epochs = state.get("nn_output_epochs", TrainingConstants.DEFAULT_OUTPUT_EPOCHS)
 
                 applied = {
                     "nn_max_iterations": nn_max_iter,
@@ -3752,6 +3778,7 @@ class DashboardManager:
                     "cn_candidate_selection": cn_cand_selection,
                     "cn_top_candidates": cn_top_cands,
                     "cn_random_candidates": cn_random_cands,
+                    "nn_output_epochs": nn_output_epochs,
                 }
                 return (
                     nn_max_iter,
@@ -3778,6 +3805,7 @@ class DashboardManager:
                     cn_cand_selection,
                     cn_top_cands,
                     cn_random_cands,
+                    nn_output_epochs,
                     applied,
                 )
         except Exception as e:

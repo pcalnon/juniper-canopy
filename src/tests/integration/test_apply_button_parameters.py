@@ -514,8 +514,8 @@ class TestApplyButtonDashboardIntegration:
             with manager.app.server.request_context(env):
                 result = manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-            # Result is a 25-tuple: (...24 values..., applied_dict)
-            applied = result[24]
+            # Result is a 26-tuple: (...25 values..., applied_dict)
+            applied = result[25]
             assert "nn_max_hidden_units" in applied
             assert "nn_max_total_epochs" in applied
             assert "nn_growth_trigger" in applied
@@ -1004,3 +1004,248 @@ class TestConvergenceApplyRoundTrip:
         )
         assert disabled is False
         assert "Unsaved" in status
+
+
+class TestPhase6EA1OutputEpochs:
+    """Phase 6E Sprint A-1 — output_epochs sidebar surface (cascor PR #157)."""
+
+    def _baseline_applied(self):
+        return {
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
+            "nn_output_epochs": 25,
+        }
+
+    def test_track_changes_detects_output_epochs_change(self, reset_singletons):
+        """track_param_changes flags Apply enabled when output_epochs differs from applied."""
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+        applied = self._baseline_applied()
+
+        disabled, status = manager._track_param_changes_handler(
+            1000,
+            200,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            50,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            30,
+            [],
+            None,
+            1,
+            1,
+            nn_output_epochs=99,
+            applied=applied,
+        )
+        assert disabled is False
+        assert "Unsaved" in status
+
+    def test_track_changes_no_diff_when_output_epochs_matches(self, reset_singletons):
+        """track_param_changes leaves Apply disabled when output_epochs matches applied."""
+        import dash
+
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+        applied = self._baseline_applied()
+
+        disabled, status = manager._track_param_changes_handler(
+            1000,
+            200,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            50,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            30,
+            [],
+            None,
+            1,
+            1,
+            nn_output_epochs=25,
+            applied=applied,
+        )
+        assert disabled is True
+        assert status is dash.no_update
+
+    def test_apply_handler_includes_output_epochs_in_payload(self, reset_singletons):
+        """_apply_parameters_handler sends nn_output_epochs to backend."""
+        from werkzeug.test import EnvironBuilder
+
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+
+        with patch("requests.post") as mock_post:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_post.return_value = mock_response
+
+            builder = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/")
+            env = builder.get_environ()
+
+            with manager.app.server.request_context(env):
+                params, status = manager._apply_parameters_handler(
+                    n_clicks=1,
+                    nn_max_iter=1000,
+                    nn_max_epochs=200,
+                    nn_lr=0.01,
+                    nn_max_hu=10,
+                    nn_multi_node=[],
+                    nn_growth_trigger="convergence",
+                    nn_growth_epochs=50,
+                    nn_growth_conv_thresh=0.001,
+                    nn_patience=50,
+                    nn_spiral_rot=1.5,
+                    nn_spiral_num=2,
+                    nn_dataset_elem=1000,
+                    nn_dataset_noise=0.25,
+                    cn_pool_size=100,
+                    cn_corr_thresh=0.001,
+                    cn_selected=1,
+                    cn_training_complete="preset_epochs",
+                    cn_training_iter=500,
+                    cn_training_conv_thresh=0.0001,
+                    cn_patience=30,
+                    cn_multi_cand=[],
+                    cn_cand_selection=None,
+                    cn_top_cands=1,
+                    cn_random_cands=1,
+                    nn_output_epochs=77,
+                )
+
+            assert "nn_output_epochs" in params
+            assert params["nn_output_epochs"] == 77
+            json_payload = mock_post.call_args.kwargs.get("json") or mock_post.call_args[1].get("json")
+            assert json_payload["nn_output_epochs"] == 77
+
+    def test_apply_handler_uses_default_when_output_epochs_missing(self, reset_singletons):
+        """When the callback omits nn_output_epochs, the handler falls back to TrainingConstants default."""
+        from werkzeug.test import EnvironBuilder
+
+        from canopy_constants import TrainingConstants
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+
+        with patch("requests.post") as mock_post:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_post.return_value = mock_response
+
+            builder = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/")
+            env = builder.get_environ()
+
+            with manager.app.server.request_context(env):
+                params, _ = manager._apply_parameters_handler(
+                    n_clicks=1,
+                    nn_max_iter=1000,
+                    nn_max_epochs=200,
+                    nn_lr=0.01,
+                    nn_max_hu=10,
+                    nn_multi_node=[],
+                    nn_growth_trigger="convergence",
+                    nn_growth_epochs=50,
+                    nn_growth_conv_thresh=0.001,
+                    nn_patience=50,
+                    nn_spiral_rot=1.5,
+                    nn_spiral_num=2,
+                    nn_dataset_elem=1000,
+                    nn_dataset_noise=0.25,
+                    cn_pool_size=100,
+                    cn_corr_thresh=0.001,
+                    cn_selected=1,
+                    cn_training_complete="preset_epochs",
+                    cn_training_iter=500,
+                    cn_training_conv_thresh=0.0001,
+                    cn_patience=30,
+                    cn_multi_cand=[],
+                    cn_cand_selection=None,
+                    cn_top_cands=1,
+                    cn_random_cands=1,
+                )
+
+            assert params["nn_output_epochs"] == TrainingConstants.DEFAULT_OUTPUT_EPOCHS
+
+    def test_init_from_backend_populates_output_epochs(self, reset_singletons):
+        """_init_params_from_backend_handler reads nn_output_epochs from /api/state."""
+        from werkzeug.test import EnvironBuilder
+
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+
+        with patch("requests.get") as mock_get:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "nn_max_total_epochs": 250,
+                "nn_output_epochs": 42,
+            }
+            mock_get.return_value = mock_response
+
+            builder = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/")
+            env = builder.get_environ()
+
+            with manager.app.server.request_context(env):
+                result = manager._init_params_from_backend_handler(n=1, current_applied=None)
+
+            # NUM_OUTPUTS=26: output_epochs at index 24, applied dict at index 25.
+            assert result[24] == 42
+            applied = result[25]
+            assert applied["nn_output_epochs"] == 42
+
+    def test_cascor_adapter_maps_nn_output_epochs(self):
+        """cascor_service_adapter forwards nn_output_epochs as cascor's output_epochs (hot path)."""
+        from backend.cascor_service_adapter import CascorServiceAdapter
+
+        assert CascorServiceAdapter._CANOPY_TO_CASCOR_PARAM_MAP["nn_output_epochs"] == "output_epochs"
+        assert "output_epochs" in CascorServiceAdapter._HOT_CASCOR_PARAMS
