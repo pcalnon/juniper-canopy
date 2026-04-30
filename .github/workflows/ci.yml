@@ -384,7 +384,9 @@ jobs:
           echo "╚════════════════════════════════════════════════════════════╝"
           pip install -e ".[juniper-data,juniper-cascor,observability]"
           pip freeze > reports/security/pip-freeze.txt
-          pip-audit --output reports/security/pip-audit.txt 2>&1 || PIP_AUDIT_EXIT=$?
+          # --ignore-vuln CVE-2026-3219: pip 26.0.1 on the runner image
+          # has no fix available as of 2026-04-29.
+          pip-audit --ignore-vuln CVE-2026-3219 --output reports/security/pip-audit.txt 2>&1 || PIP_AUDIT_EXIT=$?
           if [ "${PIP_AUDIT_EXIT:-0}" -ne 0 ]; then
             echo "::error::pip-audit found vulnerabilities in dependencies!"
             echo "vulnerabilities_found=true" >> "$GITHUB_OUTPUT"

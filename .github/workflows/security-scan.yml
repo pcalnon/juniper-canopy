@@ -40,7 +40,12 @@ jobs:
         # tar/ZIP confusion issue. As of 2026-04-29 there is no fixed
         # pip release. Re-evaluate and remove this flag when pip
         # publishes a fix.
-        run: pip-audit --strict --desc on --ignore-vuln CVE-2026-3219
+        # --skip-editable: drop --strict (pip-audit otherwise treats
+        # the editable juniper-canopy install as a fatal "dependency
+        # not found on PyPI" since it's a local project, not a
+        # release). See juniper-ml/.github/workflows/ci.yml for the
+        # same pattern.
+        run: pip-audit --desc on --skip-editable --ignore-vuln CVE-2026-3219
 
       - name: Upload Security Reports
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
