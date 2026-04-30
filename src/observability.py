@@ -109,6 +109,18 @@ def _ensure_canopy_metrics() -> dict:
                 "juniper_canopy_demo_mode_active",
                 "Whether demo mode is currently active (0 or 1)",
             ),
+            # METRICS-MON R2.2.5 / seed-05: inbound-frame validation counter.
+            # Bumped from cascor_service_adapter._relay_loop when an inbound
+            # frame fails validation against the canonical envelope schemas
+            # in juniper_cascor_protocol.envelope. The ``type`` label is
+            # cardinality-bounded by the protocol package (collapses to
+            # ``"_unmatched"`` after UNKNOWN_TYPE_BUDGET=16 distinct unknowns
+            # per process), mirroring the R1.1 HTTP cardinality discipline.
+            "unrecognized_ws_frames_total": Counter(
+                "juniper_canopy_unrecognized_ws_frames_total",
+                "WS frames that failed envelope validation, by reported type and endpoint.",
+                ["type", "endpoint"],
+            ),
         }
     return _canopy_metrics
 
@@ -140,3 +152,29 @@ def set_demo_mode_active(active: bool) -> None:
         active: Whether demo mode is currently active.
     """
     _ensure_canopy_metrics()["demo_mode_active"].set(1 if active else 0)
+
+
+def inc_unrecognized_ws_frame(type_label: str, endpoint: str) -> None:
+    """Record an inbound WS frame that failed envelope validation.
+
+    METRICS-MON R2.2.5 / seed-05: increments
+    ``juniper_canopy_unrecognized_ws_frames_total{type, endpoint}`` and
+    emits a structured WARNING log line so operators see the unrecognized
+    type even on stacks without Prometheus scraping.
+
+    Args:
+        type_label: The cardinality-bounded type string from the
+            ``UnknownEnvelope`` returned by
+            :func:`juniper_cascor_protocol.envelope.validate_envelope`.
+            Already collapsed to ``"_unmatched"`` if the per-process
+            distinct-unknown-type budget is exhausted.
+        endpoint: ``"training"`` or ``"control"`` — which WS endpoint
+            the frame arrived on.
+    """
+    import logging
+
+    logging.getLogger("juniper_canopy.observability").warning(
+        "juniper_canopy_unrecognized_ws_frame",
+        extra={"type": type_label, "endpoint": endpoint},
+    )
+    _ensure_canopy_metrics()["unrecognized_ws_frames_total"].labels(type=type_label, endpoint=endpoint).inc()
