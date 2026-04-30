@@ -324,6 +324,26 @@ class CascorServiceAdapter:
                     await stream.connect()
                     attempt = 0
                     async for message in stream.stream():
+                        # METRICS-MON R2.2.5 / seed-05: validate the inbound
+                        # frame against juniper-cascor-protocol's canonical
+                        # envelope schemas. Validation is observational —
+                        # never raises, never modifies ``message`` — so the
+                        # downstream dispatch logic stays byte-compatible.
+                        # On UnknownEnvelope (unknown type OR known type with
+                        # invalid payload) increments
+                        # juniper_canopy_unrecognized_ws_frames_total with
+                        # the cardinality-bounded type label.
+                        try:
+                            from juniper_cascor_protocol.envelope import UnknownEnvelope, validate_envelope
+
+                            from observability import inc_unrecognized_ws_frame
+
+                            _envelope = validate_envelope(message)
+                            if isinstance(_envelope, UnknownEnvelope):
+                                inc_unrecognized_ws_frame(_envelope.type, "training")
+                        except Exception:  # noqa: BLE001 — observability MUST NOT break the relay loop
+                            logger.debug("Inbound-frame validation hook errored; relay continues", exc_info=True)
+
                         msg_type = message.get("type", "")
 
                         # Phase F: respond to cascor heartbeat pings with pong
