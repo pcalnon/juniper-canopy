@@ -60,6 +60,28 @@ class TrainingConstants:
     DEFAULT_INIT_OUTPUT_WEIGHTS: Final[str] = "zero"
     INIT_OUTPUT_WEIGHTS_OPTIONS: Final[list] = ["zero", "random"]
 
+    # ── Neural Network: Output-layer optimizer (Phase 6E A-2 — cascor PR #158) ──
+    # Mirrors the Literal in cascor's NetworkCreateRequest / TrainingParams /
+    # TrainingParamUpdateRequest. Live changes take effect at the next
+    # output-training pass (the running optimizer keeps its momentum mid-pass).
+    DEFAULT_OPTIMIZER_TYPE: Final[str] = "Adam"
+    OPTIMIZER_TYPE_OPTIONS: Final[list] = [
+        "Adam",
+        "AdamW",
+        "SGD",
+        "RMSprop",
+        "NAdam",
+        "RAdam",
+        "Adamax",
+        "Adagrad",
+        "Adadelta",
+        "Adafactor",
+        "ASGD",
+        "LBFGS",
+        "Rprop",
+        "Muon",
+    ]
+
     # ── Neural Network: Learning rate ──
     DEFAULT_LEARNING_RATE: Final[float] = 0.01
     MIN_LEARNING_RATE: Final[float] = 0.0001

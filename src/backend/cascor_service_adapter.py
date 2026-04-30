@@ -582,6 +582,7 @@ class CascorServiceAdapter:
         "nn_max_iterations": "max_iterations",
         "nn_output_epochs": "output_epochs",
         "nn_init_output_weights": "init_output_weights",
+        "nn_optimizer_type": "optimizer_type",
         "nn_growth_convergence_threshold": "convergence_threshold",
         "nn_patience": "patience",
         "cn_patience": "candidate_patience",
@@ -616,6 +617,11 @@ class CascorServiceAdapter:
         {
             "init_output_weights",
             "candidate_epochs",
+            # Phase 6E A-2: optimizer swap takes effect at next output-training
+            # pass. Mid-pass changes are not supported (cascor lifecycle uses a
+            # special-cased _write_optimizer_type setter that mutates the nested
+            # config; the running optimizer instance keeps its momentum).
+            "optimizer_type",
         }
     )
 
