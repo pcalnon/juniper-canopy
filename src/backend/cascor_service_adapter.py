@@ -583,6 +583,7 @@ class CascorServiceAdapter:
         "nn_output_epochs": "output_epochs",
         "nn_init_output_weights": "init_output_weights",
         "nn_optimizer_type": "optimizer_type",
+        "nn_activation_function_name": "activation_function_name",
         "nn_growth_convergence_threshold": "convergence_threshold",
         "nn_patience": "patience",
         "cn_patience": "candidate_patience",
@@ -622,6 +623,12 @@ class CascorServiceAdapter:
             # special-cased _write_optimizer_type setter that mutates the nested
             # config; the running optimizer instance keeps its momentum).
             "optimizer_type",
+            # Phase 6E A-3: activation function swap takes effect at next
+            # cascade growth pass; existing cascaded units keep whatever
+            # activation they were trained with. cascor's lifecycle re-runs
+            # _init_activation_function on PATCH so activation_fn /
+            # activation_fn_no_diff actually refresh from the registry.
+            "activation_function_name",
         }
     )
 
