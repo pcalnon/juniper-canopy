@@ -762,6 +762,14 @@ class DashboardManager:
                                                                                 clearable=False,
                                                                                 className="mb-2",
                                                                             ),
+                                                                            html.P("Output Optimizer:", className="mb-1 fw-bold"),
+                                                                            dcc.Dropdown(
+                                                                                id="nn-optimizer-type-dropdown",
+                                                                                options=[{"label": v, "value": v} for v in TrainingConstants.OPTIMIZER_TYPE_OPTIONS],
+                                                                                value=self.training_defaults.get("optimizer_type", TrainingConstants.DEFAULT_OPTIMIZER_TYPE),
+                                                                                clearable=False,
+                                                                                className="mb-2",
+                                                                            ),
                                                                             html.P("Learning Rate:", className="mb-1 fw-bold"),
                                                                             dbc.Input(
                                                                                 id="nn-learning-rate-input",
@@ -2741,6 +2749,8 @@ class DashboardManager:
                 Input("cn-random-candidates-input", "value"),
                 # Phase 6E A-1: output_epochs (per-output-pass epoch budget)
                 Input("nn-output-epochs-input", "value"),
+                # Phase 6E A-2: optimizer_type (output-layer optimizer)
+                Input("nn-optimizer-type-dropdown", "value"),
                 # Store
                 Input("applied-params-store", "data"),
             ],
@@ -2775,6 +2785,7 @@ class DashboardManager:
             cn_top_cands,
             cn_random_cands,
             nn_output_epochs,
+            nn_optimizer_type,
             applied,
         ):
             """Enable Apply button when parameters differ from applied values."""
@@ -2804,6 +2815,7 @@ class DashboardManager:
                 cn_top_cands,
                 cn_random_cands,
                 nn_output_epochs,
+                nn_optimizer_type,
                 applied,
             )
 
@@ -2844,6 +2856,8 @@ class DashboardManager:
                 dash.dependencies.State("cn-random-candidates-input", "value"),
                 # Phase 6E A-1: output_epochs (per-output-pass epoch budget)
                 dash.dependencies.State("nn-output-epochs-input", "value"),
+                # Phase 6E A-2: optimizer_type (output-layer optimizer)
+                dash.dependencies.State("nn-optimizer-type-dropdown", "value"),
             ],
             prevent_initial_call=True,
         )
@@ -2874,6 +2888,7 @@ class DashboardManager:
             cn_top_cands,
             cn_random_cands,
             nn_output_epochs,
+            nn_optimizer_type,
         ):
             """Apply parameters to backend and update applied store."""
             return self._apply_parameters_handler(
@@ -2903,6 +2918,7 @@ class DashboardManager:
                 cn_top_cands,
                 cn_random_cands,
                 nn_output_epochs,
+                nn_optimizer_type,
             )
 
         # ── Initialize from backend on first load ──
@@ -2937,6 +2953,8 @@ class DashboardManager:
                 Output("cn-random-candidates-input", "value"),
                 # Phase 6E A-1: output_epochs (per-output-pass epoch budget)
                 Output("nn-output-epochs-input", "value"),
+                # Phase 6E A-2: optimizer_type (output-layer optimizer)
+                Output("nn-optimizer-type-dropdown", "value"),
                 # Store
                 Output("applied-params-store", "data", allow_duplicate=True),
             ],
@@ -3551,6 +3569,7 @@ class DashboardManager:
         cn_top_cands,
         cn_random_cands,
         nn_output_epochs=None,
+        nn_optimizer_type=None,
         applied=None,
     ):
         """Enable Apply button when parameters differ from applied values."""
@@ -3594,6 +3613,7 @@ class DashboardManager:
             (cn_top_cands, "cn_top_candidates", "int"),
             (cn_random_cands, "cn_random_candidates", "int"),
             (nn_output_epochs, "nn_output_epochs", "int"),
+            (nn_optimizer_type, "nn_optimizer_type", "str"),
         ]
 
         has_changes = False
@@ -3643,6 +3663,7 @@ class DashboardManager:
         cn_top_cands,
         cn_random_cands,
         nn_output_epochs=None,
+        nn_optimizer_type=None,
     ):
         """Apply parameters to backend and update applied store."""
         if not n_clicks:
@@ -3677,6 +3698,7 @@ class DashboardManager:
             "cn_top_candidates": int(cn_top_cands) if cn_top_cands is not None else TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT,
             "cn_random_candidates": int(cn_random_cands) if cn_random_cands is not None else TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT,
             "nn_output_epochs": int(nn_output_epochs) if nn_output_epochs is not None else TrainingConstants.DEFAULT_OUTPUT_EPOCHS,
+            "nn_optimizer_type": nn_optimizer_type or TrainingConstants.DEFAULT_OPTIMIZER_TYPE,
         }
 
         max_retries = DashboardConstants.DASHBOARD_SET_PARAMS_MAX_RETRIES
@@ -3720,7 +3742,7 @@ class DashboardManager:
 
     def _init_params_from_backend_handler(self, n, current_applied):
         """Initialize input values and applied params from backend on first load."""
-        NUM_OUTPUTS = 26
+        NUM_OUTPUTS = 27
         if current_applied:
             return (dash.no_update,) * NUM_OUTPUTS
         try:
@@ -3752,6 +3774,7 @@ class DashboardManager:
                 cn_top_cands = state.get("cn_top_candidates", TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT)
                 cn_random_cands = state.get("cn_random_candidates", TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT)
                 nn_output_epochs = state.get("nn_output_epochs", TrainingConstants.DEFAULT_OUTPUT_EPOCHS)
+                nn_optimizer_type = state.get("nn_optimizer_type", TrainingConstants.DEFAULT_OPTIMIZER_TYPE)
 
                 applied = {
                     "nn_max_iterations": nn_max_iter,
@@ -3779,6 +3802,7 @@ class DashboardManager:
                     "cn_top_candidates": cn_top_cands,
                     "cn_random_candidates": cn_random_cands,
                     "nn_output_epochs": nn_output_epochs,
+                    "nn_optimizer_type": nn_optimizer_type,
                 }
                 return (
                     nn_max_iter,
@@ -3806,6 +3830,7 @@ class DashboardManager:
                     cn_top_cands,
                     cn_random_cands,
                     nn_output_epochs,
+                    nn_optimizer_type,
                     applied,
                 )
         except Exception as e:

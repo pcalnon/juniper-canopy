@@ -514,8 +514,8 @@ class TestApplyButtonDashboardIntegration:
             with manager.app.server.request_context(env):
                 result = manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-            # Result is a 26-tuple: (...25 values..., applied_dict)
-            applied = result[25]
+            # Result is a 27-tuple: (...26 values..., applied_dict)
+            applied = result[26]
             assert "nn_max_hidden_units" in applied
             assert "nn_max_total_epochs" in applied
             assert "nn_growth_trigger" in applied
@@ -1238,9 +1238,9 @@ class TestPhase6EA1OutputEpochs:
             with manager.app.server.request_context(env):
                 result = manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-            # NUM_OUTPUTS=26: output_epochs at index 24, applied dict at index 25.
+            # NUM_OUTPUTS=27: output_epochs at index 24, optimizer_type at 25, applied dict at 26.
             assert result[24] == 42
-            applied = result[25]
+            applied = result[26]
             assert applied["nn_output_epochs"] == 42
 
     def test_cascor_adapter_maps_nn_output_epochs(self):
@@ -1249,3 +1249,277 @@ class TestPhase6EA1OutputEpochs:
 
         assert CascorServiceAdapter._CANOPY_TO_CASCOR_PARAM_MAP["nn_output_epochs"] == "output_epochs"
         assert "output_epochs" in CascorServiceAdapter._HOT_CASCOR_PARAMS
+
+
+class TestPhase6EA2OptimizerType:
+    """Phase 6E Sprint A-2 — optimizer_type sidebar surface (cascor PR #158)."""
+
+    def _baseline_applied(self):
+        return {
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
+            "nn_output_epochs": 25,
+            "nn_optimizer_type": "Adam",
+        }
+
+    def test_track_changes_detects_optimizer_change(self, reset_singletons):
+        """track_param_changes flags Apply enabled when optimizer_type differs from applied."""
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+        applied = self._baseline_applied()
+
+        disabled, status = manager._track_param_changes_handler(
+            1000,
+            200,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            50,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            30,
+            [],
+            None,
+            1,
+            1,
+            nn_output_epochs=25,
+            nn_optimizer_type="AdamW",
+            applied=applied,
+        )
+        assert disabled is False
+        assert "Unsaved" in status
+
+    def test_track_changes_no_diff_when_optimizer_matches(self, reset_singletons):
+        """track_param_changes leaves Apply disabled when optimizer_type matches applied."""
+        import dash
+
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+        applied = self._baseline_applied()
+
+        disabled, status = manager._track_param_changes_handler(
+            1000,
+            200,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            50,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            30,
+            [],
+            None,
+            1,
+            1,
+            nn_output_epochs=25,
+            nn_optimizer_type="Adam",
+            applied=applied,
+        )
+        assert disabled is True
+        assert status is dash.no_update
+
+    def test_apply_handler_includes_optimizer_in_payload(self, reset_singletons):
+        """_apply_parameters_handler sends nn_optimizer_type to backend."""
+        from werkzeug.test import EnvironBuilder
+
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+
+        with patch("requests.post") as mock_post:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_post.return_value = mock_response
+
+            builder = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/")
+            env = builder.get_environ()
+
+            with manager.app.server.request_context(env):
+                params, status = manager._apply_parameters_handler(
+                    n_clicks=1,
+                    nn_max_iter=1000,
+                    nn_max_epochs=200,
+                    nn_lr=0.01,
+                    nn_max_hu=10,
+                    nn_multi_node=[],
+                    nn_growth_trigger="convergence",
+                    nn_growth_epochs=50,
+                    nn_growth_conv_thresh=0.001,
+                    nn_patience=50,
+                    nn_spiral_rot=1.5,
+                    nn_spiral_num=2,
+                    nn_dataset_elem=1000,
+                    nn_dataset_noise=0.25,
+                    cn_pool_size=100,
+                    cn_corr_thresh=0.001,
+                    cn_selected=1,
+                    cn_training_complete="preset_epochs",
+                    cn_training_iter=500,
+                    cn_training_conv_thresh=0.0001,
+                    cn_patience=30,
+                    cn_multi_cand=[],
+                    cn_cand_selection=None,
+                    cn_top_cands=1,
+                    cn_random_cands=1,
+                    nn_output_epochs=25,
+                    nn_optimizer_type="SGD",
+                )
+
+            assert params["nn_optimizer_type"] == "SGD"
+            json_payload = mock_post.call_args.kwargs.get("json") or mock_post.call_args[1].get("json")
+            assert json_payload["nn_optimizer_type"] == "SGD"
+
+    def test_apply_handler_uses_default_when_optimizer_missing(self, reset_singletons):
+        """When the callback omits nn_optimizer_type, the handler falls back to TrainingConstants default."""
+        from werkzeug.test import EnvironBuilder
+
+        from canopy_constants import TrainingConstants
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+
+        with patch("requests.post") as mock_post:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_post.return_value = mock_response
+
+            builder = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/")
+            env = builder.get_environ()
+
+            with manager.app.server.request_context(env):
+                params, _ = manager._apply_parameters_handler(
+                    n_clicks=1,
+                    nn_max_iter=1000,
+                    nn_max_epochs=200,
+                    nn_lr=0.01,
+                    nn_max_hu=10,
+                    nn_multi_node=[],
+                    nn_growth_trigger="convergence",
+                    nn_growth_epochs=50,
+                    nn_growth_conv_thresh=0.001,
+                    nn_patience=50,
+                    nn_spiral_rot=1.5,
+                    nn_spiral_num=2,
+                    nn_dataset_elem=1000,
+                    nn_dataset_noise=0.25,
+                    cn_pool_size=100,
+                    cn_corr_thresh=0.001,
+                    cn_selected=1,
+                    cn_training_complete="preset_epochs",
+                    cn_training_iter=500,
+                    cn_training_conv_thresh=0.0001,
+                    cn_patience=30,
+                    cn_multi_cand=[],
+                    cn_cand_selection=None,
+                    cn_top_cands=1,
+                    cn_random_cands=1,
+                )
+
+            assert params["nn_optimizer_type"] == TrainingConstants.DEFAULT_OPTIMIZER_TYPE
+
+    def test_init_from_backend_populates_optimizer(self, reset_singletons):
+        """_init_params_from_backend_handler reads nn_optimizer_type from /api/state."""
+        from werkzeug.test import EnvironBuilder
+
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+
+        with patch("requests.get") as mock_get:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "nn_max_total_epochs": 250,
+                "nn_optimizer_type": "AdamW",
+            }
+            mock_get.return_value = mock_response
+
+            builder = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/")
+            env = builder.get_environ()
+
+            with manager.app.server.request_context(env):
+                result = manager._init_params_from_backend_handler(n=1, current_applied=None)
+
+            # NUM_OUTPUTS=27: optimizer_type at index 25, applied dict at 26.
+            assert result[25] == "AdamW"
+            applied = result[26]
+            assert applied["nn_optimizer_type"] == "AdamW"
+
+    def test_cascor_adapter_maps_nn_optimizer_type(self):
+        """cascor_service_adapter forwards nn_optimizer_type as cascor's optimizer_type (cold path)."""
+        from backend.cascor_service_adapter import CascorServiceAdapter
+
+        assert CascorServiceAdapter._CANOPY_TO_CASCOR_PARAM_MAP["nn_optimizer_type"] == "optimizer_type"
+        # optimizer changes take effect at next output-pass — cold path.
+        assert "optimizer_type" in CascorServiceAdapter._COLD_CASCOR_PARAMS
+        assert "optimizer_type" not in CascorServiceAdapter._HOT_CASCOR_PARAMS
+
+    def test_optimizer_options_match_cascor_literal(self):
+        """OPTIMIZER_TYPE_OPTIONS matches the Literal accepted by cascor's TrainingParams."""
+        from canopy_constants import TrainingConstants
+
+        # Cascor's NetworkCreateRequest / TrainingParams Literal (PR #158).
+        cascor_literal = {
+            "Adam",
+            "AdamW",
+            "SGD",
+            "RMSprop",
+            "NAdam",
+            "RAdam",
+            "Adamax",
+            "Adagrad",
+            "Adadelta",
+            "Adafactor",
+            "ASGD",
+            "LBFGS",
+            "Rprop",
+            "Muon",
+        }
+        assert set(TrainingConstants.OPTIMIZER_TYPE_OPTIONS) == cascor_literal
+        assert TrainingConstants.DEFAULT_OPTIMIZER_TYPE == "Adam"
