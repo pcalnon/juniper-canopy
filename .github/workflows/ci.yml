@@ -327,6 +327,11 @@ jobs:
           fetch-depth: 0
 
       - name: Run Gitleaks (Secrets Detection)
+        # Skip on repository_dispatch: gitleaks-action does not yet
+        # support that event ("ERROR: The [repository_dispatch]
+        # event is not yet supported"), so the action errors out
+        # before any scanning happens. Other event types still scan.
+        if: github.event_name != 'repository_dispatch'
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
