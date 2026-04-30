@@ -514,8 +514,8 @@ class TestApplyButtonDashboardIntegration:
             with manager.app.server.request_context(env):
                 result = manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-            # Result is a 27-tuple: (...26 values..., applied_dict)
-            applied = result[26]
+            # Result is a 28-tuple: (...27 values..., applied_dict)
+            applied = result[27]
             assert "nn_max_hidden_units" in applied
             assert "nn_max_total_epochs" in applied
             assert "nn_growth_trigger" in applied
@@ -1238,9 +1238,9 @@ class TestPhase6EA1OutputEpochs:
             with manager.app.server.request_context(env):
                 result = manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-            # NUM_OUTPUTS=27: output_epochs at index 24, optimizer_type at 25, applied dict at 26.
+            # NUM_OUTPUTS=28: output_epochs at index 24, optimizer_type at 25, activation at 26, applied dict at 27.
             assert result[24] == 42
-            applied = result[26]
+            applied = result[27]
             assert applied["nn_output_epochs"] == 42
 
     def test_cascor_adapter_maps_nn_output_epochs(self):
@@ -1486,9 +1486,9 @@ class TestPhase6EA2OptimizerType:
             with manager.app.server.request_context(env):
                 result = manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-            # NUM_OUTPUTS=27: optimizer_type at index 25, applied dict at 26.
+            # NUM_OUTPUTS=28: optimizer_type at index 25, applied dict at 27.
             assert result[25] == "AdamW"
-            applied = result[26]
+            applied = result[27]
             assert applied["nn_optimizer_type"] == "AdamW"
 
     def test_cascor_adapter_maps_nn_optimizer_type(self):
@@ -1523,3 +1523,283 @@ class TestPhase6EA2OptimizerType:
         }
         assert set(TrainingConstants.OPTIMIZER_TYPE_OPTIONS) == cascor_literal
         assert TrainingConstants.DEFAULT_OPTIMIZER_TYPE == "Adam"
+
+
+class TestPhase6EA3ActivationFunction:
+    """Phase 6E Sprint A-3 — activation_function_name sidebar surface (cascor PR #162)."""
+
+    def _baseline_applied(self):
+        return {
+            "nn_learning_rate": 0.01,
+            "nn_max_hidden_units": 10,
+            "nn_max_total_epochs": 200,
+            "nn_max_iterations": 1000,
+            "nn_multi_node_layers": False,
+            "nn_growth_trigger": "convergence",
+            "nn_growth_preset_epochs": 50,
+            "nn_growth_convergence_threshold": 0.001,
+            "nn_patience": 50,
+            "nn_spiral_rotations": 1.5,
+            "nn_spiral_number": 2,
+            "nn_dataset_elements": 1000,
+            "nn_dataset_noise": 0.25,
+            "cn_pool_size": 100,
+            "cn_correlation_threshold": 0.001,
+            "cn_selected_candidates": 1,
+            "cn_training_complete": "preset_epochs",
+            "cn_training_iterations": 500,
+            "cn_training_convergence_threshold": 0.0001,
+            "cn_patience": 30,
+            "cn_multi_candidate": False,
+            "cn_candidate_selection": None,
+            "cn_top_candidates": 1,
+            "cn_random_candidates": 1,
+            "nn_output_epochs": 25,
+            "nn_optimizer_type": "Adam",
+            "nn_activation_function_name": "Tanh",
+        }
+
+    def test_track_changes_detects_activation_change(self, reset_singletons):
+        """track_param_changes flags Apply enabled when activation_function differs from applied."""
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+        applied = self._baseline_applied()
+
+        disabled, status = manager._track_param_changes_handler(
+            1000,
+            200,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            50,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            30,
+            [],
+            None,
+            1,
+            1,
+            nn_output_epochs=25,
+            nn_optimizer_type="Adam",
+            nn_activation_function="ReLU",
+            applied=applied,
+        )
+        assert disabled is False
+        assert "Unsaved" in status
+
+    def test_track_changes_no_diff_when_activation_matches(self, reset_singletons):
+        """track_param_changes leaves Apply disabled when activation_function matches applied."""
+        import dash
+
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+        applied = self._baseline_applied()
+
+        disabled, status = manager._track_param_changes_handler(
+            1000,
+            200,
+            0.01,
+            10,
+            [],
+            "convergence",
+            50,
+            0.001,
+            50,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            30,
+            [],
+            None,
+            1,
+            1,
+            nn_output_epochs=25,
+            nn_optimizer_type="Adam",
+            nn_activation_function="Tanh",
+            applied=applied,
+        )
+        assert disabled is True
+        assert status is dash.no_update
+
+    def test_apply_handler_includes_activation_in_payload(self, reset_singletons):
+        """_apply_parameters_handler sends nn_activation_function_name to backend."""
+        from werkzeug.test import EnvironBuilder
+
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+
+        with patch("requests.post") as mock_post:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_post.return_value = mock_response
+
+            builder = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/")
+            env = builder.get_environ()
+
+            with manager.app.server.request_context(env):
+                params, status = manager._apply_parameters_handler(
+                    n_clicks=1,
+                    nn_max_iter=1000,
+                    nn_max_epochs=200,
+                    nn_lr=0.01,
+                    nn_max_hu=10,
+                    nn_multi_node=[],
+                    nn_growth_trigger="convergence",
+                    nn_growth_epochs=50,
+                    nn_growth_conv_thresh=0.001,
+                    nn_patience=50,
+                    nn_spiral_rot=1.5,
+                    nn_spiral_num=2,
+                    nn_dataset_elem=1000,
+                    nn_dataset_noise=0.25,
+                    cn_pool_size=100,
+                    cn_corr_thresh=0.001,
+                    cn_selected=1,
+                    cn_training_complete="preset_epochs",
+                    cn_training_iter=500,
+                    cn_training_conv_thresh=0.0001,
+                    cn_patience=30,
+                    cn_multi_cand=[],
+                    cn_cand_selection=None,
+                    cn_top_cands=1,
+                    cn_random_cands=1,
+                    nn_output_epochs=25,
+                    nn_optimizer_type="Adam",
+                    nn_activation_function="GELU",
+                )
+
+            assert params["nn_activation_function_name"] == "GELU"
+            json_payload = mock_post.call_args.kwargs.get("json") or mock_post.call_args[1].get("json")
+            assert json_payload["nn_activation_function_name"] == "GELU"
+
+    def test_apply_handler_uses_default_when_activation_missing(self, reset_singletons):
+        """When the callback omits nn_activation_function, the handler falls back to TrainingConstants default."""
+        from werkzeug.test import EnvironBuilder
+
+        from canopy_constants import TrainingConstants
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+
+        with patch("requests.post") as mock_post:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_post.return_value = mock_response
+
+            builder = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/")
+            env = builder.get_environ()
+
+            with manager.app.server.request_context(env):
+                params, _ = manager._apply_parameters_handler(
+                    n_clicks=1,
+                    nn_max_iter=1000,
+                    nn_max_epochs=200,
+                    nn_lr=0.01,
+                    nn_max_hu=10,
+                    nn_multi_node=[],
+                    nn_growth_trigger="convergence",
+                    nn_growth_epochs=50,
+                    nn_growth_conv_thresh=0.001,
+                    nn_patience=50,
+                    nn_spiral_rot=1.5,
+                    nn_spiral_num=2,
+                    nn_dataset_elem=1000,
+                    nn_dataset_noise=0.25,
+                    cn_pool_size=100,
+                    cn_corr_thresh=0.001,
+                    cn_selected=1,
+                    cn_training_complete="preset_epochs",
+                    cn_training_iter=500,
+                    cn_training_conv_thresh=0.0001,
+                    cn_patience=30,
+                    cn_multi_cand=[],
+                    cn_cand_selection=None,
+                    cn_top_cands=1,
+                    cn_random_cands=1,
+                )
+
+            assert params["nn_activation_function_name"] == TrainingConstants.DEFAULT_ACTIVATION_FUNCTION
+
+    def test_init_from_backend_populates_activation(self, reset_singletons):
+        """_init_params_from_backend_handler reads nn_activation_function_name from /api/state."""
+        from werkzeug.test import EnvironBuilder
+
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+
+        with patch("requests.get") as mock_get:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "nn_max_total_epochs": 250,
+                "nn_activation_function_name": "ReLU",
+            }
+            mock_get.return_value = mock_response
+
+            builder = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/")
+            env = builder.get_environ()
+
+            with manager.app.server.request_context(env):
+                result = manager._init_params_from_backend_handler(n=1, current_applied=None)
+
+            # NUM_OUTPUTS=28: activation at index 26, applied dict at 27.
+            assert result[26] == "ReLU"
+            applied = result[27]
+            assert applied["nn_activation_function_name"] == "ReLU"
+
+    def test_cascor_adapter_maps_nn_activation_function(self):
+        """cascor_service_adapter forwards nn_activation_function_name as cascor's activation_function_name (cold path)."""
+        from backend.cascor_service_adapter import CascorServiceAdapter
+
+        assert CascorServiceAdapter._CANOPY_TO_CASCOR_PARAM_MAP["nn_activation_function_name"] == "activation_function_name"
+        # Activation swap takes effect at next cascade growth pass — cold path.
+        assert "activation_function_name" in CascorServiceAdapter._COLD_CASCOR_PARAMS
+        assert "activation_function_name" not in CascorServiceAdapter._HOT_CASCOR_PARAMS
+
+    def test_activation_options_match_cascor_literal(self):
+        """ACTIVATION_FUNCTION_OPTIONS matches the Literal accepted by cascor's TrainingParams."""
+        from canopy_constants import TrainingConstants
+
+        # Cascor's NetworkCreateRequest / TrainingParams / TrainingParamUpdateRequest Literal (PR #162).
+        cascor_literal = {
+            "Identity",
+            "Tanh",
+            "Sigmoid",
+            "ReLU",
+            "LeakyReLU",
+            "ELU",
+            "SELU",
+            "GELU",
+            "Softmax",
+            "Softplus",
+            "Hardtanh",
+            "Softshrink",
+            "Tanhshrink",
+            "tanh",
+            "sigmoid",
+            "relu",
+        }
+        assert set(TrainingConstants.ACTIVATION_FUNCTION_OPTIONS) == cascor_literal
+        assert TrainingConstants.DEFAULT_ACTIVATION_FUNCTION == "Tanh"

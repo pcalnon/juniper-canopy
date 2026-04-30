@@ -82,6 +82,31 @@ class TrainingConstants:
         "Muon",
     ]
 
+    # ── Neural Network: Hidden-unit activation function (Phase 6E A-3 — cascor PR #162) ──
+    # Mirrors the Literal in cascor's NetworkCreateRequest / TrainingParams /
+    # TrainingParamUpdateRequest. Live changes take effect at the next
+    # cascade growth pass (existing units retain whatever activation they
+    # were trained with).
+    DEFAULT_ACTIVATION_FUNCTION: Final[str] = "Tanh"
+    ACTIVATION_FUNCTION_OPTIONS: Final[list] = [
+        "Identity",
+        "Tanh",
+        "Sigmoid",
+        "ReLU",
+        "LeakyReLU",
+        "ELU",
+        "SELU",
+        "GELU",
+        "Softmax",
+        "Softplus",
+        "Hardtanh",
+        "Softshrink",
+        "Tanhshrink",
+        "tanh",
+        "sigmoid",
+        "relu",
+    ]
+
     # ── Neural Network: Learning rate ──
     DEFAULT_LEARNING_RATE: Final[float] = 0.01
     MIN_LEARNING_RATE: Final[float] = 0.0001
