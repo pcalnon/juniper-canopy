@@ -57,6 +57,7 @@ def dashboard():
     dm.metrics_panel = type("Mock", (), {"get_layout": lambda self: None})()
     dm.candidate_metrics_panel = type("Mock", (), {"get_layout": lambda self: None})()
     dm.network_visualizer = type("Mock", (), {"get_layout": lambda self: None})()
+    dm.network_evolution = type("Mock", (), {"get_layout": lambda self: None})()
     dm.decision_boundary = type("Mock", (), {"get_layout": lambda self: None})()
     dm.dataset_plotter = type("Mock", (), {"get_layout": lambda self: None})()
     dm.hdf5_snapshots_panel = type("Mock", (), {"get_layout": lambda self: None})()
