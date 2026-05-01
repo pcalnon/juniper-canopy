@@ -103,13 +103,27 @@ jobs:
   # Migrated from conda to pip for CI portability (polyrepo Phase 5)
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   unit-tests:
-    name: Unit Tests + Coverage (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Unit Tests + Coverage (Python ${{ matrix.python-version }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # METRICS-MON R3.7 / seed-(R1.3 design): macOS leg runs in
+    # continue-on-error mode for the initial 2-week soak (started
+    # 2026-04-30). The Linux legs remain required; the macOS leg
+    # surfaces platform-divergence failures (POSIX-only assumptions
+    # in the WS / dashboard / dataset paths) without blocking PRs
+    # while we identify environment-specific issues. After the soak,
+    # flip the include block's ``experimental`` flag to false to make
+    # the macOS leg required.
+    continue-on-error: ${{ matrix.experimental == true }}
     needs: [pre-commit]
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ["3.12", "3.13", "3.14"]
+        include:
+          - os: macos-latest
+            python-version: "3.12"
+            experimental: true
 
     steps:
       - name: Checkout Code
@@ -127,11 +141,18 @@ jobs:
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - Install Dependencies                ║"
-          echo "║       Python ${{ matrix.python-version }}                                        ║"
+          echo "║       Python ${{ matrix.python-version }} on ${{ matrix.os }}              ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           python -m pip install --upgrade pip
-          # Install CPU-only PyTorch (CI doesn't need CUDA)
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          # METRICS-MON R3.7: torch wheel resolution differs by OS.
+          # Linux uses the CPU-only PyTorch index to avoid pulling CUDA
+          # wheels; macOS finds its native wheels via the default PyPI
+          # index — the CPU-only Linux index has no macOS-arm64 wheels.
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            pip install torch
+          else
+            pip install torch --index-url https://download.pytorch.org/whl/cpu
+          fi
           # Install all other CI dependencies
           pip install -r conf/requirements_ci.txt
           # Install project as editable so source-tree path resolution works
