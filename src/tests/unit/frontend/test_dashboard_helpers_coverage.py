@@ -867,7 +867,7 @@ class TestParameterTrackingHandler:
             "cn_top_candidates": 1,
             "cn_random_candidates": 1,
         }
-        disabled, status = manager._track_param_changes_handler(1000, 1000000, 0.01, 1000, [], "convergence", 50, 0.001, 50, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, 30, [], None, 1, 1, applied)
+        disabled, status = manager._track_param_changes_handler(1000, 1000000, 0.01, 1000, [], "convergence", 50, 0.001, 50, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, 30, [], None, 1, 1, applied=applied)
 
         assert disabled is True  # Button disabled when no changes
         assert status is dash.no_update
@@ -904,7 +904,7 @@ class TestParameterTrackingHandler:
             "cn_top_candidates": 1,
             "cn_random_candidates": 1,
         }
-        disabled, status = manager._track_param_changes_handler(1000, 1000000, 0.05, 1000, [], "convergence", 50, 0.001, 50, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, 30, [], None, 1, 1, applied)
+        disabled, status = manager._track_param_changes_handler(1000, 1000000, 0.05, 1000, [], "convergence", 50, 0.001, 50, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, 30, [], None, 1, 1, applied=applied)
 
         assert disabled is False  # Button enabled when changes exist
         assert "Unsaved" in status
@@ -915,7 +915,7 @@ class TestParameterTrackingHandler:
 
         manager = DashboardManager({})
 
-        disabled, status = manager._track_param_changes_handler(1000, 1000000, 0.01, 1000, [], "convergence", 50, 0.001, 50, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, 30, [], None, 1, 1, None)
+        disabled, status = manager._track_param_changes_handler(1000, 1000000, 0.01, 1000, [], "convergence", 50, 0.001, 50, 1.5, 2, 1000, 0.25, 100, 0.001, 1, "preset_epochs", 500, 0.0001, 30, [], None, 1, 1, applied=None)
 
         assert disabled is True
         assert status == ""
