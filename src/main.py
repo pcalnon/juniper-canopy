@@ -79,6 +79,7 @@ from observability import (
     configure_sentry,
     get_prometheus_app,
     set_build_info,
+    set_demo_mode_active,
 )
 from secrets_util import get_secret
 from settings import get_settings
@@ -233,6 +234,12 @@ async def lifespan(app: FastAPI):
         backend.set_state_update_callback(training_state.update_state)
 
     system_logger.info("Backend initialized: %s", backend.backend_type)
+    # METRICS-MON R3.2 / seed-11: reflect the post-fallback backend type in
+    # the ``juniper_canopy_demo_mode_active`` gauge. This is the single
+    # source of truth — the cascor-unreachable fallback above may flip the
+    # backend from "service" to "demo" before we get here, so reading
+    # ``settings.demo_mode`` directly would lie about the live state.
+    set_demo_mode_active(backend.backend_type == "demo")
     system_logger.info("Application startup complete")
 
     yield
