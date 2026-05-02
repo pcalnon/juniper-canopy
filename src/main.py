@@ -2867,9 +2867,14 @@ try:
     from prometheus_client import Counter as _PromCounter
     from prometheus_client import Histogram as _PromHistogram
 
+    # METRICS-MON R4.1: bucket layout is **tentative pending R5.1**.
+    # Per-boundary SLO rationale lives in
+    # ``notes/observability/HISTOGRAM_BUCKETS_RATIONALE_2026-05-02.md``.
+    # R5.1's SLO catalog will ratify or reshape; re-bucketing is a
+    # metric-version event but not a public-API break.
     _ws_latency_hist = _PromHistogram(
         "canopy_ws_browser_latency_ms",
-        "Browser-reported WebSocket round-trip latency",
+        "Browser-reported WebSocket round-trip latency (R4.1 buckets tentative pending R5.1)",
         ["endpoint"],
         buckets=[5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
     )
