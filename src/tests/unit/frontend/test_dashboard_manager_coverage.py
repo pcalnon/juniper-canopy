@@ -32,11 +32,11 @@ class TestDashboardManagerInitialization:
         # trunk-ignore(bandit/B101)
         assert isinstance(manager.app, dash.Dash)
         # trunk-ignore(bandit/B101)
-        # 13 core components: metrics, candidate_metrics, network, dataset,
-        # decision, about, hdf5_snapshots, redis, cassandra, parameters,
-        # tutorial, network_evolution (added in canopy#203 — Phase 6E
-        # Network Evolution timeline tab), worker.
-        assert len(manager.components) == 13
+        # 14 core components: metrics, candidate_metrics, network, dataset,
+        # decision, about, hdf5_snapshots, replay_player (Phase 6E B-6,
+        # CAN-015f), redis, cassandra, parameters, tutorial,
+        # network_evolution, worker.
+        assert len(manager.components) == 14
 
     def test_init_with_full_config(self):
         """Test initialization with complete configuration."""

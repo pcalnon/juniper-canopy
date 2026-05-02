@@ -1047,10 +1047,15 @@ class HDF5SnapshotsPanel(BaseComponent):
 
         # Callback: Modal confirm button → perform the chosen snapshot operation
         # (CAN-015e generalization of the original P3-2 restore confirm).
+        # CAN-015f (B-6): on a successful ``replay`` op, also populate the
+        # ``replay-player-session`` Store and switch the active tab to
+        # the Replay tab so the player UI is immediately interactive.
         @app.callback(
             Output(f"{self.component_id}-restore-modal", "is_open", allow_duplicate=True),
             Output(f"{self.component_id}-restore-status", "children"),
             Output(f"{self.component_id}-refresh-trigger", "data", allow_duplicate=True),
+            Output("replay-player-session", "data", allow_duplicate=True),
+            Output("visualization-tabs", "active_tab", allow_duplicate=True),
             Input(f"{self.component_id}-restore-confirm", "n_clicks"),
             State(f"{self.component_id}-restore-pending-id", "data"),
             State(f"{self.component_id}-refresh-trigger", "data"),
@@ -1065,7 +1070,7 @@ class HDF5SnapshotsPanel(BaseComponent):
             handler routes to the per-operation backend endpoint.
             """
             if not n_clicks or not pending:
-                return dash.no_update, dash.no_update, dash.no_update
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
             if isinstance(pending, dict):
                 snapshot_id = pending.get("id")
@@ -1076,7 +1081,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 operation = "restore"
 
             if not snapshot_id or operation not in ("restore", "replay", "resume", "retrain"):
-                return dash.no_update, dash.no_update, dash.no_update
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
             result = self._invoke_snapshot_op_handler(snapshot_id, operation)
             verb = {"restore": "restored", "replay": "replay started", "resume": "resumed", "retrain": "ready to retrain"}[operation]
@@ -1090,7 +1095,24 @@ class HDF5SnapshotsPanel(BaseComponent):
                     ],
                     style={"color": "#28a745", "padding": "10px", "backgroundColor": "#d4edda", "borderRadius": "5px"},
                 )
-                return False, status_content, (current_trigger or 0) + 1
+                # CAN-015f: hand off to the replay player on a successful
+                # ``replay`` op. The cascor /replay response contains the
+                # ``data`` block with snapshot_window/time_index/fsm_state
+                # which the player consumes directly.
+                replay_session: Any = dash.no_update
+                active_tab: Any = dash.no_update
+                if operation == "replay":
+                    payload = result.get("data") or {}
+                    inner = payload.get("data", payload)
+                    if isinstance(inner, dict):
+                        session = dict(inner)
+                        session.setdefault("snapshot_id", snapshot_id)
+                        session.setdefault("speed", 1.0)
+                        session.setdefault("playing", False)
+                        replay_session = session
+                        active_tab = "replay"
+                return False, status_content, (current_trigger or 0) + 1, replay_session, active_tab
+
             error = result.get("error", "Unknown error")
             status_content = html.Div(
                 [
@@ -1099,7 +1121,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 ],
                 style={"color": "#dc3545", "padding": "10px", "backgroundColor": "#f8d7da", "borderRadius": "5px"},
             )
-            return False, status_content, current_trigger or 0
+            return False, status_content, current_trigger or 0, dash.no_update, dash.no_update
 
         # Callback: Toggle history collapse (P3-3)
         @app.callback(

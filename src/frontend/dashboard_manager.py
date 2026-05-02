@@ -62,6 +62,7 @@ from .components.network_evolution import NetworkEvolution
 from .components.network_visualizer import NetworkVisualizer
 from .components.parameters_panel import ParametersPanel
 from .components.redis_panel import RedisPanel
+from .components.replay_player_panel import ReplayPlayerPanel
 from .components.tutorial_panel import TutorialPanel
 from .components.worker_panel import WorkerPanel
 from .tooltips import CONTROL_TOOLTIPS
@@ -449,6 +450,15 @@ class DashboardManager:
 
         self.hdf5_snapshots_panel = HDF5SnapshotsPanel(self.config.get("hdf5_snapshots_panel", {}), component_id="hdf5-snapshots-panel")
 
+        # Phase 6E Sprint B B-6 (CAN-015f): replay player UI for snapshot
+        # playback sessions. Bound to the ``replay-player-session`` Store
+        # which is populated by the snapshots panel after a successful
+        # POST /api/v1/snapshots/{id}/replay.
+        self.replay_player_panel = ReplayPlayerPanel(
+            self.config.get("replay_player_panel", {}),
+            component_id="replay-player-panel",
+        )
+
         # P3-6: Redis Monitoring Panel
         self.redis_panel = RedisPanel(self.config.get("redis_panel", {}), component_id="redis-panel")
 
@@ -472,6 +482,7 @@ class DashboardManager:
         self.register_component(self.decision_boundary)
         self.register_component(self.about_panel)
         self.register_component(self.hdf5_snapshots_panel)
+        self.register_component(self.replay_player_panel)
         self.register_component(self.redis_panel)
         self.register_component(self.cassandra_panel)
         self.register_component(self.parameters_panel)
@@ -1351,6 +1362,11 @@ class DashboardManager:
                                             self.hdf5_snapshots_panel.get_layout(),
                                             label="Snapshots",
                                             tab_id="snapshots",
+                                        ),
+                                        dbc.Tab(
+                                            self.replay_player_panel.get_layout(),
+                                            label="Replay",
+                                            tab_id="replay",
                                         ),
                                         dbc.Tab(
                                             self.redis_panel.get_layout(),
