@@ -1925,6 +1925,166 @@ async def restore_snapshot(snapshot_id: str):
 
 
 # ============================================================================
+# CAN-015 (Phase 6E Sprint B B-5): Replay / Resume / Retrain proxy routes
+# ============================================================================
+# These three endpoints proxy to the cascor /v1/snapshots/{id}/{op} endpoints
+# added in Sprint B B-1 (retrain), B-2 (resume), and B-3 (replay). Unlike
+# the existing /restore route which carries significant demo-mode +
+# legacy-mode compatibility logic, these new endpoints are thin proxies:
+# they delegate to the cascor adapter, surface the unified response shape,
+# and broadcast a state-change event for canopy clients on the WS stream.
+#
+# In demo mode the operations are not supported (cascor isn't running) —
+# the proxies return 501 Not Implemented with a helpful message rather
+# than silently no-op'ing. Demo-mode coverage is a follow-up if the
+# product wants Replay/Resume/Retrain available without a live backend.
+
+
+def _broadcast_snapshot_op(action: str, snapshot_id: str, payload: dict | None = None) -> None:
+    """Broadcast a snapshot-operation state event to all WS subscribers.
+    Mirrors the pre-existing snapshot_restored broadcast in
+    ``restore_snapshot`` but parameterized over the operation name."""
+    import asyncio as _asyncio
+    from typing import Any as _Any
+
+    data: dict[str, _Any] = {
+        "action": f"snapshot_{action}",
+        "snapshot_id": snapshot_id,
+        "training_state": training_state.get_state() if training_state else {},
+    }
+    if payload is not None:
+        data["payload"] = payload
+    msg: dict[str, _Any] = {"type": "state", "data": data}
+    # Fire-and-forget — broadcast is best-effort.
+    try:
+        loop = _asyncio.get_event_loop()
+        loop.create_task(websocket_manager.broadcast(msg))
+    except Exception as exc:
+        system_logger.debug("snapshot_op broadcast skipped: %s", exc)
+
+
+def _require_service_adapter():
+    """Snapshot operations beyond /restore require a live cascor backend.
+    Returns the adapter; raises HTTPException(501) when unavailable."""
+    from fastapi import HTTPException
+
+    if backend.backend_type != "service" or not hasattr(backend, "_adapter"):
+        raise HTTPException(
+            status_code=501,
+            detail="Snapshot replay/resume/retrain operations require a live cascor backend (service mode). Demo mode is not supported.",
+        )
+    return backend._adapter
+
+
+@app.post("/api/v1/snapshots/{snapshot_id}/replay")
+async def replay_snapshot_route(snapshot_id: str):
+    """Start a read-only replay session for a snapshot (CAN-015c).
+
+    Proxies to cascor's ``POST /v1/snapshots/{id}/replay``. Returns the
+    unified payload from cascor including ``operation``, ``fsm_state``,
+    ``time_index``, and a ``session`` block describing the playback
+    state. Canopy uses the ``session.length`` to wire the replay
+    player UI scrubber.
+    """
+    from fastapi import HTTPException
+
+    snapshot_id = _sanitize_snapshot_name(snapshot_id)
+    if backend.is_training_active():
+        raise HTTPException(status_code=409, detail="Cannot start replay while training is running. Pause or stop training first.")
+    adapter = _require_service_adapter()
+    try:
+        result = adapter.replay_snapshot(snapshot_id)
+        _log_snapshot_activity(action="replay", snapshot_id=snapshot_id, details={"mode": "service"}, message=f"Started replay of snapshot {snapshot_id}")
+        _broadcast_snapshot_op("replay_started", snapshot_id, payload=result)
+        return result
+    except Exception as e:
+        system_logger.error("Failed to start replay for %s: %s", snapshot_id, e)
+        raise HTTPException(status_code=500, detail=f"Failed to start replay: {e}") from e
+
+
+class _ReplayControlBody(BaseModel):
+    """Body schema for /replay/control. Mirrors the cascor route's
+    ReplayControlRequest — ``action`` discriminator + per-action params."""
+
+    action: str
+    time_index: int | None = None
+    value: float | None = None
+    start: int | None = None
+    end: int | None = None
+
+
+@app.post("/api/v1/snapshots/{snapshot_id}/replay/control")
+async def replay_control_route(snapshot_id: str, body: _ReplayControlBody):
+    """Send a playback control command to the active replay session
+    (CAN-015c). Proxies to cascor's ``/replay/control`` endpoint."""
+    from fastapi import HTTPException
+
+    snapshot_id = _sanitize_snapshot_name(snapshot_id)
+    adapter = _require_service_adapter()
+    params = body.model_dump(exclude_none=True, exclude={"action"})
+    try:
+        result = adapter.replay_control(snapshot_id, body.action, **params)
+        # Don't log/broadcast every play/pause/seek tick — too noisy. The
+        # ``stop`` action is the meaningful one to surface.
+        if body.action.lower() == "stop":
+            _log_snapshot_activity(action="replay_stopped", snapshot_id=snapshot_id, details={"mode": "service"}, message=f"Stopped replay of snapshot {snapshot_id}")
+            _broadcast_snapshot_op("replay_stopped", snapshot_id, payload=result)
+        return result
+    except Exception as e:
+        system_logger.error("Replay control failed for %s (action=%s): %s", snapshot_id, body.action, e)
+        # The cascor side maps bad params to 400 and missing-session to 409;
+        # we don't get to see the underlying status here without parsing
+        # JuniperCascorClientError. Map all to 500 for now and let the
+        # message carry the cascor detail.
+        raise HTTPException(status_code=500, detail=f"Replay control failed: {e}") from e
+
+
+@app.post("/api/v1/snapshots/{snapshot_id}/resume")
+async def resume_snapshot_route(snapshot_id: str):
+    """Continue training from a snapshot (CAN-015b).
+
+    Proxies to cascor's ``POST /v1/snapshots/{id}/resume``. Returns the
+    unified payload including ``resume_point_epoch`` so canopy can
+    render the visual boundary in the metrics-curve component.
+    """
+    from fastapi import HTTPException
+
+    snapshot_id = _sanitize_snapshot_name(snapshot_id)
+    if backend.is_training_active():
+        raise HTTPException(status_code=409, detail="Cannot resume while training is running. Pause or stop training first.")
+    adapter = _require_service_adapter()
+    try:
+        result = adapter.resume_snapshot(snapshot_id)
+        _log_snapshot_activity(action="resume", snapshot_id=snapshot_id, details={"mode": "service"}, message=f"Resumed snapshot {snapshot_id}")
+        _broadcast_snapshot_op("resumed", snapshot_id, payload=result)
+        return result
+    except Exception as e:
+        system_logger.error("Failed to resume %s: %s", snapshot_id, e)
+        raise HTTPException(status_code=500, detail=f"Failed to resume: {e}") from e
+
+
+@app.post("/api/v1/snapshots/{snapshot_id}/retrain")
+async def retrain_snapshot_route(snapshot_id: str):
+    """Reset training history and prepare a fresh run from a snapshot (CAN-015a).
+
+    Proxies to cascor's ``POST /v1/snapshots/{id}/retrain``."""
+    from fastapi import HTTPException
+
+    snapshot_id = _sanitize_snapshot_name(snapshot_id)
+    if backend.is_training_active():
+        raise HTTPException(status_code=409, detail="Cannot retrain while training is running. Pause or stop training first.")
+    adapter = _require_service_adapter()
+    try:
+        result = adapter.retrain_snapshot(snapshot_id)
+        _log_snapshot_activity(action="retrain", snapshot_id=snapshot_id, details={"mode": "service"}, message=f"Retrain prepared from snapshot {snapshot_id}")
+        _broadcast_snapshot_op("retrain_ready", snapshot_id, payload=result)
+        return result
+    except Exception as e:
+        system_logger.error("Failed to retrain from %s: %s", snapshot_id, e)
+        raise HTTPException(status_code=500, detail=f"Failed to retrain: {e}") from e
+
+
+# ============================================================================
 # Metrics Layouts API (P3-4)
 # ============================================================================
 

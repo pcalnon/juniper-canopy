@@ -544,3 +544,49 @@ class TestWebSocketURL:
     def test_ws_url_from_https(self):
         adapter = CascorServiceAdapter(service_url="https://cascor.example.com")
         assert adapter._ws_url == "wss://cascor.example.com"
+
+
+# =========================================================================
+# Phase 6E Sprint B (B-5): snapshot operation endpoints
+# =========================================================================
+
+
+class TestSnapshotOperationsB5:
+    """Verify replay/resume/retrain adapter methods proxy through ``_post``."""
+
+    def test_replay_snapshot_calls_replay_endpoint(self, adapter, mock_client):
+        mock_client._post.return_value = {"snapshot_id": "demo_001", "operation": "replay"}
+        result = adapter.replay_snapshot("demo_001")
+        mock_client._post.assert_called_once_with("/v1/snapshots/demo_001/replay")
+        assert result["operation"] == "replay"
+
+    def test_replay_control_passes_action_and_params(self, adapter, mock_client):
+        mock_client._post.return_value = {"action": "seek", "time_index": 42}
+        adapter.replay_control("demo_001", "seek", time_index=42)
+        mock_client._post.assert_called_once()
+        args, kwargs = mock_client._post.call_args
+        assert args[0] == "/v1/snapshots/demo_001/replay/control"
+        assert kwargs["json"] == {"action": "seek", "time_index": 42}
+
+    def test_replay_control_drops_none_params(self, adapter, mock_client):
+        mock_client._post.return_value = {}
+        adapter.replay_control("demo_001", "play", time_index=None, value=None)
+        kwargs = mock_client._post.call_args.kwargs
+        assert kwargs["json"] == {"action": "play"}
+
+    def test_resume_snapshot_calls_resume_endpoint(self, adapter, mock_client):
+        mock_client._post.return_value = {"snapshot_id": "demo_001", "operation": "resume"}
+        adapter.resume_snapshot("demo_001")
+        mock_client._post.assert_called_once_with("/v1/snapshots/demo_001/resume")
+
+    def test_retrain_snapshot_calls_retrain_endpoint(self, adapter, mock_client):
+        mock_client._post.return_value = {"snapshot_id": "demo_001", "operation": "retrain"}
+        adapter.retrain_snapshot("demo_001")
+        mock_client._post.assert_called_once_with("/v1/snapshots/demo_001/retrain")
+
+    def test_replay_snapshot_propagates_client_error(self, adapter, mock_client):
+        from juniper_cascor_client import JuniperCascorClientError
+
+        mock_client._post.side_effect = JuniperCascorClientError("boom")
+        with pytest.raises(JuniperCascorClientError):
+            adapter.replay_snapshot("demo_001")
