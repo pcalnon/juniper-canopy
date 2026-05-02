@@ -154,7 +154,8 @@ class TestDemoModeImportDataset:
 
         demo._lock = threading.RLock()
         demo._pause = threading.Event()
-        demo.running = False
+        # `running` is a read-only @property wrapping `is_running` under a lock
+        # (see demo_mode.py:645). Tests assign the underlying field directly.
         demo.is_running = False
         demo.dataset = {}
         demo.metrics_history = []

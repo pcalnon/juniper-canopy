@@ -89,25 +89,60 @@ _canopy_metrics: dict | None = None
 
 
 def _ensure_canopy_metrics() -> dict:
-    """Create canopy-related Prometheus metrics on first access."""
+    """Create canopy-related Prometheus metrics on first access.
+
+    In production this runs exactly once per process. In test contexts the
+    module-level ``_canopy_metrics`` cache may be reset (e.g. by a fixture
+    nulling it for re-init coverage) while the underlying Prometheus REGISTRY
+    still holds the prior collectors. We catch the resulting
+    ``Duplicated timeseries`` ``ValueError`` and adopt the already-registered
+    collectors instead of rebuilding them, which keeps test isolation cheap
+    without forcing every fixture to scrub REGISTRY by hand.
+    """
     global _canopy_metrics
     if _canopy_metrics is None:
-        from prometheus_client import Counter, Gauge
+        from prometheus_client import REGISTRY, Counter, Gauge
+
+        # ``Counter`` / ``Gauge`` register themselves with REGISTRY on
+        # construction and raise ``ValueError`` if the timeseries name is
+        # already present. Build the dict element-by-element so we can fall
+        # back to REGISTRY lookup on a per-metric basis.
+        def _get_or_create(metric_name: str, factory):
+            try:
+                return factory()
+            except ValueError as exc:
+                if "Duplicated timeseries" not in str(exc):
+                    raise
+                # Adopt the existing collector. ``REGISTRY._names_to_collectors``
+                # is private but is the supported lookup in test contexts.
+                existing = REGISTRY._names_to_collectors.get(metric_name)
+                if existing is None:
+                    raise
+                return existing
 
         _canopy_metrics = {
-            "websocket_connections_active": Gauge(
+            "websocket_connections_active": _get_or_create(
                 "juniper_canopy_websocket_connections_active",
-                "Number of active WebSocket connections",
-                ["channel"],
+                lambda: Gauge(
+                    "juniper_canopy_websocket_connections_active",
+                    "Number of active WebSocket connections",
+                    ["channel"],
+                ),
             ),
-            "websocket_messages_total": Counter(
+            "websocket_messages_total": _get_or_create(
                 "juniper_canopy_websocket_messages_total",
-                "Total WebSocket messages sent",
-                ["channel", "type"],
+                lambda: Counter(
+                    "juniper_canopy_websocket_messages_total",
+                    "Total WebSocket messages sent",
+                    ["channel", "type"],
+                ),
             ),
-            "demo_mode_active": Gauge(
+            "demo_mode_active": _get_or_create(
                 "juniper_canopy_demo_mode_active",
-                "Whether demo mode is currently active (0 or 1)",
+                lambda: Gauge(
+                    "juniper_canopy_demo_mode_active",
+                    "Whether demo mode is currently active (0 or 1)",
+                ),
             ),
             # METRICS-MON R2.2.5 / seed-05: inbound-frame validation counter.
             # Bumped from cascor_service_adapter._relay_loop when an inbound
@@ -116,10 +151,13 @@ def _ensure_canopy_metrics() -> dict:
             # cardinality-bounded by the protocol package (collapses to
             # ``"_unmatched"`` after UNKNOWN_TYPE_BUDGET=16 distinct unknowns
             # per process), mirroring the R1.1 HTTP cardinality discipline.
-            "unrecognized_ws_frames_total": Counter(
+            "unrecognized_ws_frames_total": _get_or_create(
                 "juniper_canopy_unrecognized_ws_frames_total",
-                "WS frames that failed envelope validation, by reported type and endpoint.",
-                ["type", "endpoint"],
+                lambda: Counter(
+                    "juniper_canopy_unrecognized_ws_frames_total",
+                    "WS frames that failed envelope validation, by reported type and endpoint.",
+                    ["type", "endpoint"],
+                ),
             ),
         }
     return _canopy_metrics
