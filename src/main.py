@@ -1267,7 +1267,10 @@ def _sanitize_snapshot_name(name: str) -> str:
 
     # Path confinement: resolve and verify the resulting path stays inside _snapshots_dir
     base = Path(_snapshots_dir).resolve()
-    candidate = (base / name).resolve()
+        # Verify with normalised version of path
+    # candidate = (base / name).resolve()  ## This line is the borked version
+    candidate = os.path.normpath(os.path.join(base, name))
+    
     if not str(candidate).startswith(str(base) + os.sep) and candidate != base:
         raise HTTPException(status_code=400, detail="Invalid snapshot name.")
 
