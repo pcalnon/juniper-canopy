@@ -39,7 +39,7 @@ import contextlib
 import json
 import logging
 import time
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union, cast
 
 from juniper_cascor_client import CascorControlStream, CascorTrainingStream, JuniperCascorClient, JuniperCascorClientError
 from juniper_cascor_client.exceptions import JuniperCascorConnectionError
@@ -1136,6 +1136,82 @@ class CascorServiceAdapter:
             logger.info("Snapshot restored via CasCor service (id=%s)", snapshot_id)
         except JuniperCascorClientError as e:
             logger.error("Failed to load snapshot %s: %s", snapshot_id, e)
+            raise
+
+    # ──────────────────────────────────────────────────────────────────
+    # CAN-015 (Phase 6E Sprint B) snapshot operation endpoints
+    # ──────────────────────────────────────────────────────────────────
+    # Restore (above) is the original snapshot operation. B-1..B-4 added
+    # three more semantically-distinct operations on the cascor side:
+    # ``replay`` (read-only playback), ``resume`` (continue training),
+    # and ``retrain`` (fresh training using snapshot weights). The
+    # cascor client wrapper hasn't been extended for these yet — when
+    # it is (cross-repo follow-up tracked separately), these adapter
+    # methods can switch to the typed wrappers. Until then we drive
+    # the underlying ``_post`` directly, which is what
+    # ``client.load_snapshot`` does internally anyway.
+
+    def replay_snapshot(self, snapshot_id: str) -> Dict[str, Any]:
+        """Start a read-only replay session via /v1/snapshots/{id}/replay.
+
+        Returns the unified response payload from cascor including the
+        ``operation``, ``fsm_state``, ``time_index``, and a ``session``
+        block describing the playback state. The caller (canopy
+        backend route) forwards this to the frontend so canopy can
+        wire the replay player UI to the returned ``length`` and
+        initial ``time_index``.
+
+        Raises ``JuniperCascorClientError`` on HTTP failure.
+        """
+        try:
+            data = self._client._post(f"/v1/snapshots/{snapshot_id}/replay")
+            logger.info("Snapshot replay started via CasCor service (id=%s)", snapshot_id)
+            return cast(Dict[str, Any], data)
+        except JuniperCascorClientError as e:
+            logger.error("Failed to start replay for %s: %s", snapshot_id, e)
+            raise
+
+    def replay_control(self, snapshot_id: str, action: str, **params: Any) -> Dict[str, Any]:
+        """Send a playback control command to /v1/snapshots/{id}/replay/control.
+
+        ``action`` is one of ``play`` / ``pause`` / ``seek`` / ``speed``
+        / ``range`` / ``stop``. Per-action parameters (``time_index``
+        for seek, ``value`` for speed, ``start`` and ``end`` for range)
+        are passed through unchanged via ``**params``.
+        """
+        body: Dict[str, Any] = {"action": action}
+        body.update({k: v for k, v in params.items() if v is not None})
+        try:
+            data = self._client._post(f"/v1/snapshots/{snapshot_id}/replay/control", json=body)
+            logger.info("Snapshot replay control via CasCor service (id=%s, action=%s)", snapshot_id, action)
+            return cast(Dict[str, Any], data)
+        except JuniperCascorClientError as e:
+            logger.error("Failed replay control for %s (action=%s): %s", snapshot_id, action, e)
+            raise
+
+    def resume_snapshot(self, snapshot_id: str) -> Dict[str, Any]:
+        """Continue training from a snapshot via /v1/snapshots/{id}/resume.
+
+        Returns the unified response payload including
+        ``resume_point_epoch`` so canopy can render the visual boundary
+        in the metrics-curve component.
+        """
+        try:
+            data = self._client._post(f"/v1/snapshots/{snapshot_id}/resume")
+            logger.info("Snapshot resume started via CasCor service (id=%s)", snapshot_id)
+            return cast(Dict[str, Any], data)
+        except JuniperCascorClientError as e:
+            logger.error("Failed to resume snapshot %s: %s", snapshot_id, e)
+            raise
+
+    def retrain_snapshot(self, snapshot_id: str) -> Dict[str, Any]:
+        """Reset training history and prepare a fresh run via /v1/snapshots/{id}/retrain."""
+        try:
+            data = self._client._post(f"/v1/snapshots/{snapshot_id}/retrain")
+            logger.info("Snapshot retrain started via CasCor service (id=%s)", snapshot_id)
+            return cast(Dict[str, Any], data)
+        except JuniperCascorClientError as e:
+            logger.error("Failed to retrain snapshot %s: %s", snapshot_id, e)
             raise
 
     # ------------------------------------------------------------------

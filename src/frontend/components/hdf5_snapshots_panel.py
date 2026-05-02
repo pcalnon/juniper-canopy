@@ -263,13 +263,21 @@ class HDF5SnapshotsPanel(BaseComponent):
                     ],
                     className="mb-3",
                 ),
-                # Restore confirmation modal (P3-2)
+                # Snapshot operation confirmation modal (CAN-015e
+                # generalization of P3-2). Modal title and confirm button
+                # label become generic to accommodate all four snapshot
+                # operations (Restore / Replay / Resume / Retrain); the
+                # body carries the operation-specific description and the
+                # snapshot ID. Original element ids preserved
+                # (``-restore-modal``, ``-restore-confirm``) so the
+                # existing callback graph keeps wiring up without touching
+                # downstream callbacks.
                 dbc.Modal(
                     [
-                        dbc.ModalHeader(dbc.ModalTitle("Confirm Restore")),
+                        dbc.ModalHeader(dbc.ModalTitle("Confirm Snapshot Operation")),
                         dbc.ModalBody(
                             id=f"{self.component_id}-restore-modal-body",
-                            children="Are you sure you want to restore from this snapshot?",
+                            children="Are you sure?",
                         ),
                         dbc.ModalFooter(
                             [
@@ -280,7 +288,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                                     className="me-2",
                                 ),
                                 dbc.Button(
-                                    "Restore",
+                                    "Confirm",
                                     id=f"{self.component_id}-restore-confirm",
                                     color="warning",
                                 ),
@@ -342,8 +350,18 @@ class HDF5SnapshotsPanel(BaseComponent):
                 dcc.Store(id=f"{self.component_id}-selected-id", data=None),
                 # Store for triggering table refresh after create (P3-1)
                 dcc.Store(id=f"{self.component_id}-refresh-trigger", data=0),
-                # Store for snapshot ID pending restore (P3-2)
+                # Store for snapshot operation pending confirmation (CAN-015e
+                # generalization of the P3-2 restore-pending-id; now holds a
+                # ``{"id": ..., "operation": ...}`` dict, falling back to a
+                # bare id string for legacy callers).
                 dcc.Store(id=f"{self.component_id}-restore-pending-id", data=None),
+                # CAN-015e (B-5): right-click context menu trigger. The
+                # clientside ``snapshot_context_menu.js`` writes
+                # ``{"snapshot_id": ..., "operation": ...}`` here when the
+                # user picks an item from the row's right-click menu;
+                # ``open_snapshot_op_modal`` watches this Store as a
+                # second Input alongside the dropdown-item pattern.
+                dcc.Store(id=f"{self.component_id}-context-menu-trigger", data=None),
             ],
             id=self.component_id,
             style={"padding": "20px", "maxWidth": "1000px", "margin": "0 auto"},
@@ -468,50 +486,88 @@ class HDF5SnapshotsPanel(BaseComponent):
             self.logger.warning(f"Failed to fetch snapshot detail for {snapshot_id}: {e}")
             return {}
 
-    def _restore_snapshot_handler(self, snapshot_id: str) -> Dict[str, Any]:
-        """
-        Restore from a snapshot via the backend API (P3-2).
+    # CAN-015e (Phase 6E Sprint B B-5): per-operation modal-body
+    # descriptions. Surfaced to the user in the confirmation modal so
+    # they understand which of the four semantically-distinct snapshot
+    # operations is about to fire (Restore / Replay / Resume / Retrain).
+    _OP_DESCRIPTIONS: Dict[str, str] = {
+        "restore": "Load this snapshot for inspection and modification. Training is NOT started — invoke Retrain or Resume to begin a training run.",
+        "replay": "Start a read-only playback session of this snapshot's training history. Use the replay player controls to scrub through metric and topology evolution.",
+        "resume": "Continue training from where this snapshot left off. The pre-resume history is preserved as read-only; new training extends past the snapshot's terminal epoch.",
+        "retrain": "Use this snapshot's weights and topology as a starting point for a fresh training run. All history / counters / auto-snap-best ratchet are reset to time index 0.",
+    }
+    _OP_CONFIRM_LABELS: Dict[str, str] = {
+        "restore": "Restore",
+        "replay": "Start Replay",
+        "resume": "Resume",
+        "retrain": "Retrain",
+    }
 
-        Args:
-            snapshot_id: The snapshot ID to restore from
+    def _build_op_confirm_body(self, snapshot_id: str, operation: str):
+        """Build the modal body for a snapshot-operation confirmation."""
+        return html.Div(
+            [
+                html.P(f"Confirm {operation.capitalize()} of snapshot:"),
+                html.P(html.Strong(snapshot_id), style={"fontFamily": "monospace", "fontSize": "1.1rem"}),
+                html.P(self._OP_DESCRIPTIONS.get(operation, ""), style={"fontSize": "0.9rem"}),
+                html.P(
+                    "⚠️ Training must be paused or stopped before any snapshot operation.",
+                    style={"color": "#856404", "fontSize": "0.85rem"},
+                ),
+            ]
+        )
 
-        Returns:
-            Dict with restore result or error information
+    def _invoke_snapshot_op_handler(self, snapshot_id: str, operation: str) -> Dict[str, Any]:
+        """Invoke one of the four snapshot operation endpoints (CAN-015e).
+
+        Routes to the canopy backend's
+        ``/api/v1/snapshots/{id}/{operation}`` proxy which forwards to
+        the cascor backend. ``operation`` must be one of ``restore`` /
+        ``replay`` / ``resume`` / ``retrain``.
         """
         if not snapshot_id:
             return {"success": False, "error": "No snapshot ID provided"}
+        if operation not in ("restore", "replay", "resume", "retrain"):
+            return {"success": False, "error": f"Unknown operation: {operation!r}"}
 
         try:
             resp = requests.post(
-                f"{self._api_base_url}/api/v1/snapshots/{snapshot_id}/restore",
-                timeout=self.api_timeout + 5,  # Allow extra time for restore
+                f"{self._api_base_url}/api/v1/snapshots/{snapshot_id}/{operation}",
+                timeout=self.api_timeout + 5,
             )
-
             if resp.status_code == 200:
                 data = resp.json()
-                self.logger.info(f"Restored from snapshot: {snapshot_id}")
-                return {"success": True, "data": data, "message": data.get("message", "Restored successfully")}
-            elif resp.status_code == 409:
-                error_detail = resp.json().get("detail", "Training is running")
-                self.logger.warning(f"Cannot restore: {error_detail}")
+                self.logger.info("Snapshot %s %sd: %s", snapshot_id, operation, data)
+                return {"success": True, "data": data, "message": data.get("message")}
+            if resp.status_code == 409:
+                error_detail = resp.json().get("detail", "Conflict — training may be running")
+                self.logger.warning("Cannot %s snapshot %s: %s", operation, snapshot_id, error_detail)
                 return {"success": False, "error": error_detail}
-            elif resp.status_code == 404:
-                self.logger.warning(f"Snapshot not found: {snapshot_id}")
+            if resp.status_code == 404:
+                self.logger.warning("Snapshot not found: %s", snapshot_id)
                 return {"success": False, "error": "Snapshot not found"}
-            else:
-                error_detail = resp.json().get("detail", "Unknown error") if resp.text else f"HTTP {resp.status_code}"
-                self.logger.warning(f"Failed to restore snapshot: {error_detail}")
+            if resp.status_code == 501:
+                error_detail = resp.json().get("detail", "Operation not supported in this mode")
+                self.logger.warning("Snapshot %s %s rejected: %s", snapshot_id, operation, error_detail)
                 return {"success": False, "error": error_detail}
-
+            error_detail = resp.json().get("detail", "Unknown error") if resp.text else f"HTTP {resp.status_code}"
+            self.logger.warning("Failed to %s snapshot %s: %s", operation, snapshot_id, error_detail)
+            return {"success": False, "error": error_detail}
         except requests.exceptions.Timeout:
-            self.logger.warning("Restore snapshot request timed out")
+            self.logger.warning("Snapshot %s request timed out (op=%s)", snapshot_id, operation)
             return {"success": False, "error": "Request timed out"}
         except requests.exceptions.ConnectionError:
-            self.logger.warning("Cannot connect to snapshot API for restore")
+            self.logger.warning("Cannot connect to snapshot API (op=%s)", operation)
             return {"success": False, "error": "Service unavailable"}
         except Exception as e:
-            self.logger.warning(f"Failed to restore snapshot: {e}")
+            self.logger.warning("Snapshot %s failed (op=%s): %s", snapshot_id, operation, e)
             return {"success": False, "error": str(e)}
+
+    def _restore_snapshot_handler(self, snapshot_id: str) -> Dict[str, Any]:
+        """CAN-015e backward-compat shim — keep the legacy name alive
+        for any code path that still calls it directly. Forwards to
+        ``_invoke_snapshot_op_handler`` with operation=``restore``."""
+        return self._invoke_snapshot_op_handler(snapshot_id, "restore")
 
     def _fetch_history_handler(self, limit: int = 50) -> Dict[str, Any]:
         """
@@ -667,6 +723,19 @@ class HDF5SnapshotsPanel(BaseComponent):
                 timestamp = self._format_timestamp(snapshot.get("timestamp", ""))
                 size = self._format_size(snapshot.get("size_bytes", 0))
 
+                # CAN-015e (Phase 6E Sprint B B-5): the per-row "Restore"
+                # button is replaced with a dropdown exposing all four
+                # snapshot operations from the cascor backend (Restore /
+                # Replay / Resume / Retrain). The legacy
+                # ``-restore-btn`` id is preserved as a hidden button so
+                # the existing P3-2 confirmation-modal callback graph
+                # keeps wiring up — it now fires from the dropdown items
+                # via clientside id-pattern matching on
+                # ``-snapshot-op-btn``. Each dropdown item carries a
+                # composite id ``{type, index, operation}`` so a single
+                # pattern-matching callback can route to the right
+                # endpoint without duplicating the open-modal logic per
+                # operation.
                 rows.append(
                     html.Tr(
                         [
@@ -684,14 +753,40 @@ class HDF5SnapshotsPanel(BaseComponent):
                                             outline=True,
                                             className="me-1",
                                         ),
-                                        dbc.Button(
-                                            "🔄 Restore",
-                                            id={"type": f"{self.component_id}-restore-btn", "index": snapshot_id},
+                                        dbc.DropdownMenu(
+                                            label="Load ▼",
                                             size="sm",
                                             color="warning",
-                                            outline=True,
+                                            # ``outline=True`` matches the legacy Restore button styling.
+                                            toggle_style={"borderColor": "#ffc107", "color": "#ffc107", "backgroundColor": "transparent"},
+                                            children=[
+                                                dbc.DropdownMenuItem(
+                                                    [html.Span("🔄 ", className="me-1"), "Restore — load for inspection"],
+                                                    id={"type": f"{self.component_id}-snapshot-op-btn", "index": snapshot_id, "op": "restore"},
+                                                    n_clicks=0,
+                                                ),
+                                                dbc.DropdownMenuItem(
+                                                    [html.Span("▶️ ", className="me-1"), "Replay — read-only playback"],
+                                                    id={"type": f"{self.component_id}-snapshot-op-btn", "index": snapshot_id, "op": "replay"},
+                                                    n_clicks=0,
+                                                ),
+                                                dbc.DropdownMenuItem(
+                                                    [html.Span("⏯️ ", className="me-1"), "Resume — continue training"],
+                                                    id={"type": f"{self.component_id}-snapshot-op-btn", "index": snapshot_id, "op": "resume"},
+                                                    n_clicks=0,
+                                                ),
+                                                dbc.DropdownMenuItem(
+                                                    [html.Span("🔁 ", className="me-1"), "Retrain — fresh run from these weights"],
+                                                    id={"type": f"{self.component_id}-snapshot-op-btn", "index": snapshot_id, "op": "retrain"},
+                                                    n_clicks=0,
+                                                ),
+                                            ],
                                         ),
                                     ],
+                                    # ``data-snapshot-id`` exposes the row's snapshot ID to
+                                    # the right-click context-menu JS handler (B-5: third UX
+                                    # entry point per design doc §7).
+                                    **{"data-snapshot-id": snapshot_id, "data-snapshot-row": "1"},
                                     style={"display": "flex", "gap": "5px"},
                                 ),
                                 style={"padding": "10px", "borderBottom": "1px solid var(--border-color, #dee2e6)"},
@@ -866,27 +961,35 @@ class HDF5SnapshotsPanel(BaseComponent):
 
         # Callback: Restore button click → open modal with snapshot ID (P3-2)
         @app.callback(
-            #     Output(f"{self.component_id}-restore-modal", "is_open"),
-            #     Output(f"{self.component_id}-restore-modal-body", "children"),
-            #     Output(f"{self.component_id}-restore-pending-id", "data"),
-            #     Input({"type": f"{self.component_id}-restore-btn", "index": ALL}, "n_clicks"),
-            #     State({"type": f"{self.component_id}-restore-btn", "index": ALL}, "id"),
-            #     State(f"{self.component_id}-restore-modal", "is_open"),
-            #     prevent_initial_call=True,
-            # )
+            # CAN-015e (B-5): the open-modal callback now listens to the
+            # generalized ``-snapshot-op-btn`` pattern, which carries the
+            # ``op`` (one of ``restore`` / ``replay`` / ``resume`` /
+            # ``retrain``) in its composite id. Same callback graph,
+            # broader operation surface. Right-click context menu (third
+            # entry point per design doc §7) writes to a separate Store
+            # that flows into a sibling callback below.
             Output(f"{self.component_id}-restore-modal", "is_open"),
             Output(f"{self.component_id}-restore-modal-body", "children"),
             Output(f"{self.component_id}-restore-pending-id", "data"),
-            Input({"type": f"{self.component_id}-restore-btn", "index": ALL}, "n_clicks"),
-            State({"type": f"{self.component_id}-restore-btn", "index": ALL}, "id"),
+            Input({"type": f"{self.component_id}-snapshot-op-btn", "index": ALL, "op": ALL}, "n_clicks"),
+            Input(f"{self.component_id}-context-menu-trigger", "data"),
             State(f"{self.component_id}-restore-modal", "is_open"),
             prevent_initial_call=True,
         )
-        def open_restore_modal(n_clicks_list, ids, is_open):
-            """Open restore confirmation modal when Restore button clicked."""
-            if not n_clicks_list or not any(n_clicks_list):
-                return False, "", None
+        def open_snapshot_op_modal(_n_clicks_list, ctx_trigger, _is_open):
+            """Open the snapshot-operation confirmation modal.
 
+            Consolidated entry point for all three UX surfaces:
+            - dropdown items on each snapshot row (the
+              ``-snapshot-op-btn`` pattern-matched Inputs)
+            - right-click context menu items (writes to
+              ``-context-menu-trigger`` Store via clientside JS)
+
+            Two-step modal selector: show a per-operation message, ask
+            for confirmation, fire on confirm. The pending_id store
+            grows to include the operation so the confirm callback
+            knows which endpoint to call.
+            """
             ctx = callback_context
             if not ctx.triggered:
                 return False, "", None
@@ -901,33 +1004,29 @@ class HDF5SnapshotsPanel(BaseComponent):
 
             import json
 
-            with contextlib.suppress(json.JSONDecodeError, IndexError):
-                id_str = prop_id.rsplit(".", 1)[0]
-                id_dict = json.loads(id_str)
-                snapshot_id = id_dict.get("index")
-                if snapshot_id:
-                    modal_body = html.Div(
-                        [
-                            html.P("Are you sure you want to restore from snapshot:"),
-                            html.P(
-                                html.Strong(snapshot_id),
-                                style={
-                                    "fontFamily": "monospace",
-                                    "fontSize": "1.1rem",
-                                },
-                            ),
-                            html.P(
-                                "⚠️ Training must be paused or stopped to restore.",
-                                style={"color": "#856404", "fontSize": "0.9rem"},
-                            ),
-                        ]
-                    )
-                    return True, modal_body, snapshot_id
+            snapshot_id: str | None = None
+            operation: str | None = None
 
-            # except (json.JSONDecodeError, IndexError):
-            #     pass
+            # Branch on which Input fired. The pattern-matched dropdown
+            # items have prop_ids like ``{"index": "...", ...}.n_clicks``
+            # while the context-menu Store fires with ``...-trigger.data``.
+            if prop_id.endswith("-context-menu-trigger.data"):
+                payload = triggered.get("value")
+                if isinstance(payload, dict):
+                    snapshot_id = payload.get("snapshot_id")
+                    operation = payload.get("operation")
+            else:
+                with contextlib.suppress(json.JSONDecodeError, IndexError):
+                    id_str = prop_id.rsplit(".", 1)[0]
+                    id_dict = json.loads(id_str)
+                    snapshot_id = id_dict.get("index")
+                    operation = id_dict.get("op")
 
-            return False, "", None
+            if not snapshot_id or operation not in ("restore", "replay", "resume", "retrain"):
+                return False, "", None
+
+            modal_body = self._build_op_confirm_body(snapshot_id, operation)
+            return True, modal_body, {"id": snapshot_id, "operation": operation}
 
         # Callback: Modal cancel button → close modal (P3-2)
         @app.callback(
@@ -946,7 +1045,8 @@ class HDF5SnapshotsPanel(BaseComponent):
             # return dash.no_update
             return False if n_clicks else dash.no_update
 
-        # Callback: Modal confirm button → perform restore (P3-2)
+        # Callback: Modal confirm button → perform the chosen snapshot operation
+        # (CAN-015e generalization of the original P3-2 restore confirm).
         @app.callback(
             Output(f"{self.component_id}-restore-modal", "is_open", allow_duplicate=True),
             Output(f"{self.component_id}-restore-status", "children"),
@@ -956,15 +1056,33 @@ class HDF5SnapshotsPanel(BaseComponent):
             State(f"{self.component_id}-refresh-trigger", "data"),
             prevent_initial_call=True,
         )
-        def confirm_restore(n_clicks, snapshot_id, current_trigger):
-            """Perform restore when confirmed."""
-            if not n_clicks or not snapshot_id:
+        def confirm_snapshot_op(n_clicks, pending, current_trigger):
+            """Perform the chosen snapshot operation when confirmed.
+
+            ``pending`` is the dict written by ``open_snapshot_op_modal``
+            with keys ``id`` and ``operation``. Operations:
+            ``restore`` / ``replay`` / ``resume`` / ``retrain``. The
+            handler routes to the per-operation backend endpoint.
+            """
+            if not n_clicks or not pending:
                 return dash.no_update, dash.no_update, dash.no_update
 
-            result = self._restore_snapshot_handler(snapshot_id)
+            if isinstance(pending, dict):
+                snapshot_id = pending.get("id")
+                operation = pending.get("operation", "restore")
+            else:
+                # Backward compat: older state had a bare snapshot id string.
+                snapshot_id = pending
+                operation = "restore"
+
+            if not snapshot_id or operation not in ("restore", "replay", "resume", "retrain"):
+                return dash.no_update, dash.no_update, dash.no_update
+
+            result = self._invoke_snapshot_op_handler(snapshot_id, operation)
+            verb = {"restore": "restored", "replay": "replay started", "resume": "resumed", "retrain": "ready to retrain"}[operation]
 
             if result.get("success"):
-                message = result.get("message", "Restored successfully")
+                message = result.get("message") or f"Snapshot {verb}"
                 status_content = html.Div(
                     [
                         html.Span("✅ ", style={"color": "#28a745"}),
@@ -973,16 +1091,15 @@ class HDF5SnapshotsPanel(BaseComponent):
                     style={"color": "#28a745", "padding": "10px", "backgroundColor": "#d4edda", "borderRadius": "5px"},
                 )
                 return False, status_content, (current_trigger or 0) + 1
-            else:
-                error = result.get("error", "Unknown error")
-                status_content = html.Div(
-                    [
-                        html.Span("❌ ", style={"color": "#dc3545"}),
-                        html.Span(f"Failed to restore: {error}"),
-                    ],
-                    style={"color": "#dc3545", "padding": "10px", "backgroundColor": "#f8d7da", "borderRadius": "5px"},
-                )
-                return False, status_content, current_trigger or 0
+            error = result.get("error", "Unknown error")
+            status_content = html.Div(
+                [
+                    html.Span("❌ ", style={"color": "#dc3545"}),
+                    html.Span(f"Failed ({operation}): {error}"),
+                ],
+                style={"color": "#dc3545", "padding": "10px", "backgroundColor": "#f8d7da", "borderRadius": "5px"},
+            )
+            return False, status_content, current_trigger or 0
 
         # Callback: Toggle history collapse (P3-3)
         @app.callback(
@@ -1075,9 +1192,11 @@ class HDF5SnapshotsPanel(BaseComponent):
         self._cb_update_snapshots_table = update_snapshots_table
         self._cb_select_snapshot = select_snapshot
         self._cb_update_detail_panel = update_detail_panel
-        self._cb_open_restore_modal = open_restore_modal
+        self._cb_open_restore_modal = open_snapshot_op_modal
+        self._cb_open_snapshot_op_modal = open_snapshot_op_modal
         self._cb_close_restore_modal = close_restore_modal
-        self._cb_confirm_restore = confirm_restore
+        self._cb_confirm_restore = confirm_snapshot_op
+        self._cb_confirm_snapshot_op = confirm_snapshot_op
         self._cb_toggle_history = toggle_history
 
         self.logger.debug(f"Callbacks registered for {self.component_id}")
