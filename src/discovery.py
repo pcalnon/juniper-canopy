@@ -1,14 +1,20 @@
 """Auto-discovery of running cascor instances for juniper-canopy.
 
-Probes well-known ports for a running cascor service before falling back to demo mode.
-Uses urllib.request (stdlib) via asyncio executor to avoid blocking the event loop.
+Probes well-known ports for a running cascor service before falling back
+to demo mode.
+
+METRICS-MON R4.2 / seed-10: discovery probes now use
+:class:`httpx.AsyncClient` natively rather than offloading
+``urllib.request.urlopen`` to a thread-pool worker. Same motivation as
+:func:`canopy.health.probe_dependency`: native async scales without the
+default 32-worker thread-pool ceiling that the previous offload pattern
+imposed.
 """
 
-import asyncio
-import json
 import logging
-import urllib.request
 from typing import Optional
+
+import httpx
 
 from canopy_constants import ServerConstants
 
@@ -21,23 +27,26 @@ _DEFAULT_HOST = ServerConstants.DEFAULT_DISCOVERY_HOST
 _DEFAULT_TIMEOUT = ServerConstants.DEFAULT_DISCOVERY_TIMEOUT
 
 
-def _probe_url_sync(url: str, timeout: float) -> bool:
-    """Synchronous probe of a cascor URL. Validates response body."""
+async def probe_cascor_url(url: str, timeout: float = _DEFAULT_TIMEOUT) -> bool:
+    """Async probe of a cascor URL. Returns True iff the URL serves a
+    live cascor health endpoint with the expected status payload.
+
+    METRICS-MON R4.2: uses :class:`httpx.AsyncClient` natively rather
+    than offloading a synchronous ``urllib.request.urlopen`` call to the
+    asyncio executor. The previous pattern was correct (no event-loop
+    block) but consumed one of the default 32 worker threads per
+    concurrent probe — :func:`discover_cascor` fans out across N ports,
+    so the offload ceiling matters at scale.
+    """
     try:
-        req = urllib.request.Request(f"{url}{ServerConstants.HEALTH_LIVE_ENDPOINT}")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
-            if resp.status != 200:
-                return False
-            body = json.loads(resp.read())
-            return bool(body.get(ServerConstants.HEALTH_STATUS_KEY) == ServerConstants.HEALTH_LIVE_OK_VALUE)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.get(f"{url}{ServerConstants.HEALTH_LIVE_ENDPOINT}")
+        if response.status_code != 200:
+            return False
+        body = response.json()
+        return bool(body.get(ServerConstants.HEALTH_STATUS_KEY) == ServerConstants.HEALTH_LIVE_OK_VALUE)
     except Exception:
         return False
-
-
-async def probe_cascor_url(url: str, timeout: float = _DEFAULT_TIMEOUT) -> bool:
-    """Async probe of a cascor URL. Runs synchronous I/O in executor."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _probe_url_sync, url, timeout)
 
 
 async def discover_cascor(
@@ -45,11 +54,10 @@ async def discover_cascor(
     ports: Optional[list] = None,
     timeout: float = _DEFAULT_TIMEOUT,
 ) -> Optional[str]:
-    """
-    Probe well-known ports for a running cascor instance.
+    """Probe well-known ports for a running cascor instance.
 
-    Returns the first responding URL (e.g. 'http://localhost:8200'), or None
-    if no cascor instance is found.
+    Returns the first responding URL (e.g. ``http://localhost:8200``),
+    or ``None`` if no cascor instance is found.
 
     Args:
         host: Hostname to probe (default: localhost).
