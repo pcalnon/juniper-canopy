@@ -57,6 +57,7 @@ from .components.dataset_plotter import DatasetPlotter
 from .components.decision_boundary import DecisionBoundary
 from .components.hdf5_snapshots_panel import HDF5SnapshotsPanel
 from .components.metrics_panel import MetricsPanel
+from .components.network_editor_panel import NetworkEditorPanel
 from .components.network_evolution import MAX_SNAPSHOTS as _EVOLUTION_MAX_SNAPSHOTS
 from .components.network_evolution import NetworkEvolution
 from .components.network_visualizer import NetworkVisualizer
@@ -459,6 +460,16 @@ class DashboardManager:
             component_id="replay-player-panel",
         )
 
+        # Phase 6E CAN-015h (h-5): network editor — surgical
+        # mutations on a restored snapshot. Idle when the cascor
+        # FSM is not Investigating; active state exposes append /
+        # remove / patch forms that talk to the canopy proxies
+        # under /api/v1/network/.
+        self.network_editor_panel = NetworkEditorPanel(
+            self.config.get("network_editor_panel", {}),
+            component_id="network-editor-panel",
+        )
+
         # P3-6: Redis Monitoring Panel
         self.redis_panel = RedisPanel(self.config.get("redis_panel", {}), component_id="redis-panel")
 
@@ -483,6 +494,7 @@ class DashboardManager:
         self.register_component(self.about_panel)
         self.register_component(self.hdf5_snapshots_panel)
         self.register_component(self.replay_player_panel)
+        self.register_component(self.network_editor_panel)
         self.register_component(self.redis_panel)
         self.register_component(self.cassandra_panel)
         self.register_component(self.parameters_panel)
@@ -1367,6 +1379,11 @@ class DashboardManager:
                                             self.replay_player_panel.get_layout(),
                                             label="Replay",
                                             tab_id="replay",
+                                        ),
+                                        dbc.Tab(
+                                            self.network_editor_panel.get_layout(),
+                                            label="Network Editor",
+                                            tab_id="network-editor",
                                         ),
                                         dbc.Tab(
                                             self.redis_panel.get_layout(),
