@@ -395,7 +395,8 @@ class TestDashCallbackExecution:
         def capturing_callback(*args, **kwargs):
             def wrapper(fn):
                 nonlocal captured_callback
-                captured_callback = fn
+                if captured_callback is None:
+                    captured_callback = fn
                 return original_callback(*args, **kwargs)(fn)
 
             return wrapper
@@ -425,7 +426,8 @@ class TestDashCallbackExecution:
         def capturing_callback(*args, **kwargs):
             def wrapper(fn):
                 nonlocal captured_callback
-                captured_callback = fn
+                if captured_callback is None:
+                    captured_callback = fn
                 return original_callback(*args, **kwargs)(fn)
 
             return wrapper
@@ -455,7 +457,8 @@ class TestDashCallbackExecution:
         def capturing_callback(*args, **kwargs):
             def wrapper(fn):
                 nonlocal captured_callback
-                captured_callback = fn
+                if captured_callback is None:
+                    captured_callback = fn
                 return original_callback(*args, **kwargs)(fn)
 
             return wrapper
@@ -485,7 +488,8 @@ class TestDashCallbackExecution:
         def capturing_callback(*args, **kwargs):
             def wrapper(fn):
                 nonlocal captured_callback
-                captured_callback = fn
+                if captured_callback is None:
+                    captured_callback = fn
                 return original_callback(*args, **kwargs)(fn)
 
             return wrapper
@@ -514,7 +518,8 @@ class TestDashCallbackExecution:
         def capturing_callback(*args, **kwargs):
             def wrapper(fn):
                 nonlocal captured_callback
-                captured_callback = fn
+                if captured_callback is None:
+                    captured_callback = fn
                 return original_callback(*args, **kwargs)(fn)
 
             return wrapper
@@ -542,7 +547,8 @@ class TestDashCallbackExecution:
         def capturing_callback(*args, **kwargs):
             def wrapper(fn):
                 nonlocal captured_callback
-                captured_callback = fn
+                if captured_callback is None:
+                    captured_callback = fn
                 return original_callback(*args, **kwargs)(fn)
 
             return wrapper
