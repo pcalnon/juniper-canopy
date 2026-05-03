@@ -184,15 +184,18 @@ class TestDatasetCreationE2E:
     def test_create_circles_dataset(self, fake_client):
         """Create a circles dataset and validate response structure.
 
-        XREPO-01 / DC-01 (2026-04-24): canonical server-side name is
-        ``"circles"``; the legacy ``"circle"`` alias is still accepted
-        by the fake client but is covered in the data-client's own
-        parity test rather than here.
+        The shipped ``juniper-data-client.testing.fake_client`` (>=0.4.0)
+        registers the generator as ``"circle"`` (singular). XREPO-01 /
+        DC-01 originally proposed ``"circles"`` as the canonical
+        server-side name with ``"circle"`` as a legacy alias; until that
+        rename ships in juniper-data-client, this test validates against
+        the actual API. The data-client's own parity test covers the
+        alias path when it lands.
         """
-        result = fake_client.create_dataset("circles", {"n_points": 80, "noise": 0.08, "factor": 0.4, "seed": 11})
+        result = fake_client.create_dataset("circle", {"n_points": 80, "noise": 0.08, "factor": 0.4, "seed": 11})
 
         assert "dataset_id" in result
-        assert result["generator"] == "circles"
+        assert result["generator"] == "circle"
         assert result["meta"]["n_features"] == 2
         assert result["meta"]["n_classes"] == 2
 
@@ -277,7 +280,7 @@ class TestArtifactDownloadE2E:
 
     def test_download_circles_npz(self, fake_client):
         """Download circles NPZ and validate arrays."""
-        result = fake_client.create_dataset("circles", {"n_points": 100, "factor": 0.5, "seed": 22})
+        result = fake_client.create_dataset("circle", {"n_points": 100, "factor": 0.5, "seed": 22})
         arrays = fake_client.download_artifact_npz(result["dataset_id"])
 
         _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=2, expected_n_full=100)
@@ -351,7 +354,7 @@ class TestTrainingConsumptionE2E:
 
     def test_circles_training_step(self, fake_client):
         """Circles dataset converts to tensors and produces finite loss."""
-        result = fake_client.create_dataset("circles", {"n_points": 100, "seed": 12})
+        result = fake_client.create_dataset("circle", {"n_points": 100, "seed": 12})
         arrays = fake_client.download_artifact_npz(result["dataset_id"])
 
         loss = _run_training_step(arrays)
