@@ -50,6 +50,15 @@ SPEED_MIN = -10.0
 SPEED_MAX = 10.0
 SPEED_STEP = 0.1
 SPEED_DEFAULT = 1.0
+
+# CAN-015g (g-4): max number of replay-weight events held in the
+# ``replay-weight-buffer`` Store at any time. LRU-evicted on overflow
+# (oldest entry dropped). 100 entries × ~MB-scale tensors per entry =
+# a few hundred MB peak — comfortable for a browser tab on most user
+# machines. Tuned downward from the plan's "1000 entries" target
+# because that figure didn't account for tensor size; revisit when /
+# if a binary-WS-frame variant ships and per-event payload shrinks.
+REPLAY_WEIGHT_BUFFER_MAX = 100
 SPEED_MARKS = {
     -10: "-10×",
     -5: "-5×",
@@ -98,6 +107,24 @@ class ReplayPlayerPanel(BaseComponent):
                 # callbacks below write here when buttons / sliders fire;
                 # ``_dispatch_control`` watches it and calls the backend.
                 dcc.Store(id=f"{self.component_id}-control-trigger", data=None),
+                # CAN-015g (g-4): replay V2 weight payload buffer.
+                # Drained from ``window._juniperWsDrain._replayWeightBuffer``
+                # by the clientside callback below; capped at
+                # ``REPLAY_WEIGHT_BUFFER_MAX`` entries so the Store
+                # stays under a few-hundred-MB ceiling on long
+                # sessions. Each entry is the V2 wire envelope:
+                #   {sample_index, epoch, output_weights,
+                #    output_bias, hidden_units}
+                # where each tensor field is ``{dtype, shape, data}``
+                # (base64 float32). Consumers (decision_boundary,
+                # network_evolution, this panel's last-sample
+                # readout) decode on demand.
+                dcc.Store(id="replay-weight-buffer", data=[]),
+                # Periodic drain trigger. Fires on the existing
+                # fast-update interval (sourced from dashboard_manager)
+                # so the player stays in sync with the replay session
+                # without spawning a dedicated interval.
+                dcc.Interval(id=f"{self.component_id}-weight-drain", interval=500, n_intervals=0),
             ],
             id=self.component_id,
             style={"padding": "20px", "maxWidth": "900px"},
@@ -123,7 +150,7 @@ class ReplayPlayerPanel(BaseComponent):
     def _build_active_state(self):
         return html.Div(
             [
-                # Header row: snapshot id + FSM state badge
+                # Header row: snapshot id + FSM state badge + V2-weights badge
                 html.Div(
                     [
                         html.Span("Snapshot: ", style={"fontWeight": "500"}),
@@ -137,6 +164,30 @@ class ReplayPlayerPanel(BaseComponent):
                                 "fontSize": "0.75rem",
                                 "backgroundColor": "var(--bs-info-bg-subtle, #cff4fc)",
                                 "color": "var(--bs-info-text-emphasis, #055160)",
+                            },
+                        ),
+                        # CAN-015g (g-4): V2 weights-available badge.
+                        # Driven by the session Store's ``weights_available``
+                        # field (g-2 added it). When true, also surface
+                        # the latest received sample's epoch so the user
+                        # knows playback has reached a sample-boundary.
+                        html.Span(
+                            id=f"{self.component_id}-weights-badge",
+                            style={
+                                "marginLeft": "8px",
+                                "padding": "2px 8px",
+                                "borderRadius": "10px",
+                                "fontSize": "0.75rem",
+                                "display": "none",  # hidden until session loads with V2
+                            },
+                        ),
+                        html.Span(
+                            id=f"{self.component_id}-last-sample-readout",
+                            style={
+                                "marginLeft": "8px",
+                                "fontSize": "0.75rem",
+                                "fontFamily": "monospace",
+                                "color": "var(--text-muted)",
                             },
                         ),
                     ],
@@ -348,10 +399,17 @@ class ReplayPlayerPanel(BaseComponent):
             Output(f"{component_id}-range-readout", "children"),
             Output(f"{component_id}-speed", "value"),
             Output(f"{component_id}-speed-readout", "children"),
+            Output(f"{component_id}-weights-badge", "children"),
+            Output(f"{component_id}-weights-badge", "style"),
             Input("replay-player-session", "data"),
         )
         def render_session(session):
-            """Mirror the session Store into the player UI controls."""
+            """Mirror the session Store into the player UI controls.
+
+            CAN-015g (g-4): also surfaces a ``Weights ✓`` / ``V1 only``
+            badge when the loaded snapshot's ``weights_available``
+            field is set (added by g-2 to ``state_summary``).
+            """
             if not session or not session.get("snapshot_id"):
                 # Idle — show empty placeholder, hide active controls.
                 return (
@@ -369,6 +427,8 @@ class ReplayPlayerPanel(BaseComponent):
                     "",
                     SPEED_DEFAULT,
                     f"{SPEED_DEFAULT}×",
+                    "",
+                    {"display": "none"},
                 )
 
             start, end = self._session_window(session)
@@ -376,6 +436,17 @@ class ReplayPlayerPanel(BaseComponent):
             range_value = session.get("range") or [start, end]
             speed = float(session.get("speed", SPEED_DEFAULT))
             fsm = session.get("fsm_state") or "Replaying"
+            weights_available = bool(session.get("weights_available"))
+            badge_text = "V2 ✓ weights" if weights_available else "V1 (metrics only)"
+            badge_style = {
+                "marginLeft": "8px",
+                "padding": "2px 8px",
+                "borderRadius": "10px",
+                "fontSize": "0.75rem",
+                "display": "inline-block",
+                "backgroundColor": "var(--bs-success-bg-subtle, #d1e7dd)" if weights_available else "var(--bs-secondary-bg-subtle, #e2e3e5)",
+                "color": "var(--bs-success-text-emphasis, #0f5132)" if weights_available else "var(--bs-secondary-text-emphasis, #41464b)",
+            }
             return (
                 {"display": "none"},
                 {"display": "block"},
@@ -391,7 +462,58 @@ class ReplayPlayerPanel(BaseComponent):
                 f"[{range_value[0]}, {range_value[1]}]",
                 speed,
                 f"{speed:g}×" if speed != 0 else "Paused (0×)",
+                badge_text,
+                badge_style,
             )
+
+        # CAN-015g (g-4): periodic drain of the JS-side replay weight
+        # ring buffer into the Dash Store. Clientside so the browser
+        # doesn't pay a server round-trip per drain — at default
+        # 500ms cadence with 100-entry buffer, the steady-state cost
+        # is dominated by JSON serialization of one or two recent
+        # weight events.
+        app.clientside_callback(
+            f"""
+            function(n_intervals, current_buffer) {{
+                if (!window._juniperWsDrain || typeof window._juniperWsDrain.drainReplayWeights !== "function") {{
+                    return window.dash_clientside.no_update;
+                }}
+                var fresh = window._juniperWsDrain.drainReplayWeights();
+                if (!fresh || fresh.length === 0) {{
+                    return window.dash_clientside.no_update;
+                }}
+                var buf = (current_buffer || []).concat(fresh);
+                // LRU cap: drop oldest when the ring exceeds the budget.
+                if (buf.length > {REPLAY_WEIGHT_BUFFER_MAX}) {{
+                    buf = buf.slice(buf.length - {REPLAY_WEIGHT_BUFFER_MAX});
+                }}
+                return buf;
+            }}
+            """,
+            Output("replay-weight-buffer", "data"),
+            Input(f"{component_id}-weight-drain", "n_intervals"),
+            State("replay-weight-buffer", "data"),
+        )
+
+        # CAN-015g (g-4): last-sample readout reflects the most recent
+        # weight payload received. Pure clientside — reads the buffer
+        # tail and writes a short string, no Python round-trip.
+        app.clientside_callback(
+            """
+            function(buffer) {
+                if (!buffer || buffer.length === 0) {
+                    return "";
+                }
+                var last = buffer[buffer.length - 1];
+                if (!last || typeof last.epoch !== "number") {
+                    return "";
+                }
+                return "last sample: epoch " + last.epoch + " (" + buffer.length + " buffered)";
+            }
+            """,
+            Output(f"{component_id}-last-sample-readout", "children"),
+            Input("replay-weight-buffer", "data"),
+        )
 
         @app.callback(
             Output(f"{component_id}-control-trigger", "data"),

@@ -292,3 +292,95 @@ class TestSpeedConfig:
     def test_speed_min_max_symmetry(self):
         # Bidirectional design — magnitude should match.
         assert abs(SPEED_MIN) == SPEED_MAX
+
+
+# =============================================================================
+# CAN-015g (g-4): replay weight buffer + V2 indicator wiring
+# =============================================================================
+
+
+class TestReplayWeightBufferLayout:
+    """Layout-level assertions for the new weight-buffer Store + indicators."""
+
+    def test_layout_has_replay_weight_buffer_store(self, panel):
+        layout_str = str(panel.get_layout())
+        assert "replay-weight-buffer" in layout_str
+
+    def test_layout_has_weight_drain_interval(self, panel):
+        layout_str = str(panel.get_layout())
+        assert "weight-drain" in layout_str
+
+    def test_layout_has_weights_badge(self, panel):
+        layout_str = str(panel.get_layout())
+        assert "weights-badge" in layout_str
+
+    def test_layout_has_last_sample_readout(self, panel):
+        layout_str = str(panel.get_layout())
+        assert "last-sample-readout" in layout_str
+
+    def test_replay_weight_buffer_max_is_documented(self):
+        from frontend.components.replay_player_panel import REPLAY_WEIGHT_BUFFER_MAX
+
+        # Cap exists and is non-trivial. Plan claimed 1000 but g-4
+        # tuned down — assert anything in the [10, 500] sanity band.
+        assert 10 <= REPLAY_WEIGHT_BUFFER_MAX <= 500
+
+
+class TestRenderSessionWeightsBadge:
+    """``render_session`` callback should drive the V2 weights-available badge."""
+
+    @pytest.fixture
+    def registered_panel(self, panel):
+        from unittest.mock import MagicMock
+
+        app = MagicMock()
+        # Capture clientside_callback wiring without spinning up Dash.
+        app.clientside_callback = MagicMock()
+        app.callback = lambda *a, **kw: (lambda fn: fn)
+        panel.register_callbacks(app)
+        return panel
+
+    def test_idle_session_hides_badge(self, registered_panel):
+        result = registered_panel._cb_render_session(None)
+        # Badge text and style are the last two outputs (g-4 added).
+        badge_style = result[-1]
+        assert badge_style == {"display": "none"}
+
+    def test_v2_session_shows_v2_badge(self, registered_panel):
+        session = {
+            "snapshot_id": "snap_001",
+            "fsm_state": "Replaying",
+            "weights_available": True,
+            "time_index": {"snapshot_window": {"start_epoch": 0, "end_epoch": 100}},
+        }
+        result = registered_panel._cb_render_session(session)
+        badge_text = result[-2]
+        badge_style = result[-1]
+        assert "V2" in badge_text
+        assert "weights" in badge_text.lower()
+        assert badge_style.get("display") == "inline-block"
+
+    def test_v1_session_shows_v1_badge(self, registered_panel):
+        session = {
+            "snapshot_id": "snap_001",
+            "fsm_state": "Replaying",
+            "weights_available": False,
+            "time_index": {"snapshot_window": {"start_epoch": 0, "end_epoch": 100}},
+        }
+        result = registered_panel._cb_render_session(session)
+        badge_text = result[-2]
+        badge_style = result[-1]
+        assert "V1" in badge_text or "metrics" in badge_text.lower()
+        assert badge_style.get("display") == "inline-block"
+
+    def test_clientside_callbacks_registered(self, panel):
+        # The drain callback + last-sample readout are clientside.
+        # Verify register_callbacks invoked clientside_callback at
+        # least twice (drain + readout).
+        from unittest.mock import MagicMock
+
+        app = MagicMock()
+        app.clientside_callback = MagicMock()
+        app.callback = lambda *a, **kw: (lambda fn: fn)
+        panel.register_callbacks(app)
+        assert app.clientside_callback.call_count >= 2
