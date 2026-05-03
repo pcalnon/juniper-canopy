@@ -101,7 +101,7 @@ def _ensure_canopy_metrics() -> dict:
     """
     global _canopy_metrics
     if _canopy_metrics is None:
-        from prometheus_client import REGISTRY, Counter, Gauge
+        from prometheus_client import REGISTRY, Counter, Gauge, Histogram
 
         # ``Counter`` / ``Gauge`` register themselves with REGISTRY on
         # construction and raise ``ValueError`` if the timeseries name is
@@ -159,8 +159,106 @@ def _ensure_canopy_metrics() -> dict:
                     ["type", "endpoint"],
                 ),
             ),
+            # METRICS-MON R4.3 / seed-13: outbound juniper-data-client
+            # request observability. Populated by the on_request hook
+            # closure built in :func:`build_data_client_request_hook`,
+            # which is passed to ``JuniperDataClient(on_request=...)``
+            # at construction time. Labels:
+            # * ``method`` — HTTP method ("GET" / "POST" / ...).
+            # * ``status_class`` — closed bucket: "2xx" / "4xx" / "5xx"
+            #   / "transport_error". Closed-set labels keep cardinality
+            #   bounded vs. raw status codes (R1.1 discipline).
+            # * ``error_type`` — exception class name on failure paths,
+            #   ``"none"`` on success. Closed by the typed-exception
+            #   surface of juniper-data-client (5 known classes + "none").
+            "data_client_requests_total": _get_or_create(
+                "juniper_canopy_data_client_requests_total",
+                lambda: Counter(
+                    "juniper_canopy_data_client_requests_total",
+                    "Outbound juniper-data-client HTTP requests, by method, status class, and error type",
+                    ["method", "status_class", "error_type"],
+                ),
+            ),
+            "data_client_request_duration_ms": _get_or_create(
+                "juniper_canopy_data_client_request_duration_ms",
+                lambda: Histogram(
+                    "juniper_canopy_data_client_request_duration_ms",
+                    # METRICS-MON R4.1 / R4.3: bucket layout is **tentative
+                    # pending R5.1**. Same human-UX-anchored decade pattern
+                    # as ``canopy_ws_browser_latency_ms`` (covered in
+                    # ``notes/observability/HISTOGRAM_BUCKETS_RATIONALE_2026-05-02.md``).
+                    "Outbound juniper-data-client HTTP request duration in milliseconds (R4.1 buckets tentative pending R5.1)",
+                    ["method", "status_class"],
+                    buckets=[1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
+                ),
+            ),
         }
     return _canopy_metrics
+
+
+def _classify_status(status: int | None) -> str:
+    """METRICS-MON R4.3: bucket an HTTP status code (or ``None`` on
+    transport failure) into a closed-set ``status_class`` label.
+
+    Returning closed-set strings instead of raw status codes keeps the
+    Counter cardinality bounded — a misbehaving server returning
+    arbitrary 4xx/5xx codes can't blow up the label space.
+    """
+    if status is None:
+        return "transport_error"
+    if 200 <= status < 300:
+        return "2xx"
+    if 400 <= status < 500:
+        return "4xx"
+    if 500 <= status < 600:
+        return "5xx"
+    # 1xx / 3xx are not expected on this surface (data-client follows
+    # redirects via requests' default; 1xx never reaches user code).
+    # Bucket as transport_error so anomalies show up.
+    return "transport_error"
+
+
+def build_data_client_request_hook():
+    """METRICS-MON R4.3: Prometheus-emitting closure for
+    :class:`juniper_data_client.JuniperDataClient`'s ``on_request``
+    instrumentation hook.
+
+    Returned closure matches the :data:`juniper_data_client.RequestHook`
+    signature ``(method, url, status, duration_ms, error)``. It bumps:
+
+    * ``juniper_canopy_data_client_requests_total{method, status_class,
+      error_type}`` — once per call.
+    * ``juniper_canopy_data_client_request_duration_ms{method,
+      status_class}`` — once per call (timing).
+
+    The hook is built once and passed to ``JuniperDataClient(on_request=
+    build_data_client_request_hook())`` at construction time. Building
+    it lazily (rather than as a module-level singleton) means tests
+    that null ``_canopy_metrics`` see a fresh closure on the next
+    construction.
+    """
+
+    def _hook(
+        method: str,
+        url: str,  # noqa: ARG001 — accepted to match RequestHook signature; not labeled (cardinality)
+        status: int | None,
+        duration_ms: float,
+        error: BaseException | None,
+    ) -> None:
+        metrics = _ensure_canopy_metrics()
+        status_class = _classify_status(status)
+        error_type = type(error).__name__ if error is not None else "none"
+        metrics["data_client_requests_total"].labels(
+            method=method,
+            status_class=status_class,
+            error_type=error_type,
+        ).inc()
+        metrics["data_client_request_duration_ms"].labels(
+            method=method,
+            status_class=status_class,
+        ).observe(duration_ms)
+
+    return _hook
 
 
 def set_websocket_connections(channel: str, count: int) -> None:
