@@ -40,7 +40,7 @@ jobs:
   update-lockfile:
     name: Update requirements.lock
     runs-on: ubuntu-latest
-    if: github.actor == 'dependabot[bot]'
+    # if: github.actor == 'dependabot[bot]'
 
     steps:
       - name: Checkout Code
