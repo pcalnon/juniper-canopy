@@ -61,6 +61,8 @@ def dashboard():
     dm.decision_boundary = type("Mock", (), {"get_layout": lambda self: None})()
     dm.dataset_plotter = type("Mock", (), {"get_layout": lambda self: None})()
     dm.hdf5_snapshots_panel = type("Mock", (), {"get_layout": lambda self: None})()
+    # Phase 6E Sprint B B-6 (CAN-015f): replay player panel.
+    dm.replay_player_panel = type("Mock", (), {"get_layout": lambda self: None})()
     dm.redis_panel = type("Mock", (), {"get_layout": lambda self: None})()
     dm.cassandra_panel = type("Mock", (), {"get_layout": lambda self: None})()
     dm.about_panel = type("Mock", (), {"get_layout": lambda self: None})()

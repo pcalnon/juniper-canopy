@@ -48,9 +48,25 @@ def demo_metrics_client():
 
     get_settings.cache_clear()
 
+    # Module-level guards in main.py decide route mounts at FIRST import time
+    # (``main.py:309`` mounts ``/metrics`` only if ``settings.metrics_enabled``).
+    # If an earlier test imported ``main`` under a settings cache that had
+    # metrics disabled, ``/metrics`` is missing now and our scrape returns
+    # 404. Same story for the demo-mode gauge: the singleton ``backend`` was
+    # bound to a non-demo settings snapshot, so lifespan set the gauge to 0.
+    # Patch both holes here so this fixture is independent of suite ordering.
+    from juniper_observability import get_prometheus_app
+
     from main import app
 
+    has_metrics_route = any(getattr(r, "path", None) == "/metrics" for r in app.routes)
+    if not has_metrics_route:
+        app.mount("/metrics", get_prometheus_app())
+
     with TestClient(app) as client:
+        from observability import set_demo_mode_active
+
+        set_demo_mode_active(True)
         yield client
 
 
