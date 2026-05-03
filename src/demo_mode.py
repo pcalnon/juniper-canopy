@@ -887,7 +887,18 @@ class DemoMode:
         from juniper_data_client import JuniperDataClient
         from juniper_data_client.exceptions import JuniperDataClientError
 
-        client = JuniperDataClient(base_url=juniper_data_url)
+        from observability import build_data_client_request_hook
+
+        # METRICS-MON R4.3 / seed-13: pass the Prometheus-emitting hook
+        # so every outbound HTTP call from this client instance bumps
+        # ``juniper_canopy_data_client_requests_total`` +
+        # ``juniper_canopy_data_client_request_duration_ms``. The hook
+        # is built fresh per client construction so test-side resets of
+        # ``_canopy_metrics`` see a usable closure on the next call.
+        client = JuniperDataClient(
+            base_url=juniper_data_url,
+            on_request=build_data_client_request_hook(),
+        )
 
         params: Dict[str, Any] = {
             "n_points_per_spiral": n_samples // 2,

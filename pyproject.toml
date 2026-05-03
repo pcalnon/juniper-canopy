@@ -101,7 +101,11 @@ Issues = "https://github.com/pcalnon/juniper-canopy/issues"
 
 [project.optional-dependencies]
 juniper-data = [
-    "juniper-data-client>=0.3.0",
+    # METRICS-MON R4.3 / seed-13: bumped from >=0.3.0 to >=0.4.1 because
+    # canopy now constructs ``JuniperDataClient`` with the ``on_request``
+    # instrumentation kwarg (added in 0.4.1). Pin floor matches the
+    # release that introduced the kwarg.
+    "juniper-data-client>=0.4.1",
     "requests>=2.28.0",
 ]
 juniper-cascor = [
