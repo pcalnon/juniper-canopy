@@ -290,6 +290,12 @@ filterwarnings = [
   "ignore::DeprecationWarning:plotly.*",
   "ignore::pytest.PytestUnraisableExceptionWarning",
   "once:CASCOR_.*is deprecated:DeprecationWarning:settings",
+  # _brotli is an indirect dep via httpx (used by starlette.testclient in
+  # tests/conftest.py). Under a free-threading interpreter (cpython-314t)
+  # its import re-enables the GIL with a RuntimeWarning that the
+  # 'error::RuntimeWarning' rule above would otherwise promote into a
+  # hard failure for any test whose fixture chain pulls in the test client.
+  "ignore:The global interpreter lock \\(GIL\\) has been enabled to load module:RuntimeWarning",
 ]
 
 # ==========================================
