@@ -590,3 +590,99 @@ class TestSnapshotOperationsB5:
         mock_client._post.side_effect = JuniperCascorClientError("boom")
         with pytest.raises(JuniperCascorClientError):
             adapter.replay_snapshot("demo_001")
+
+
+# =========================================================================
+# Phase 6E CAN-015h-4: network mutation endpoints
+# =========================================================================
+
+
+class TestNetworkMutationsH4:
+    """Verify patch_weights / add_hidden_unit / remove_hidden_unit adapter
+    methods proxy through ``_patch`` / ``_post`` / ``_delete``."""
+
+    def test_patch_weights_output_target(self, adapter, mock_client):
+        mock_client._patch.return_value = {"operation": "patch_weights", "fsm_state": "INVESTIGATING"}
+        result = adapter.patch_weights(target="output", field="weights", values=[[0.1], [0.2]])
+        mock_client._patch.assert_called_once()
+        args, kwargs = mock_client._patch.call_args
+        assert args[0] == "/v1/network/weights"
+        assert kwargs["json"] == {
+            "target": "output",
+            "field": "weights",
+            "values": [[0.1], [0.2]],
+            "dtype": "float32",
+        }
+        assert result["operation"] == "patch_weights"
+
+    def test_patch_weights_hidden_unit_target_includes_index(self, adapter, mock_client):
+        mock_client._patch.return_value = {"operation": "patch_weights"}
+        adapter.patch_weights(
+            target="hidden_unit",
+            field="bias",
+            values=[0.5],
+            hidden_unit_index=2,
+        )
+        kwargs = mock_client._patch.call_args.kwargs
+        assert kwargs["json"]["hidden_unit_index"] == 2
+        assert kwargs["json"]["target"] == "hidden_unit"
+        assert kwargs["json"]["field"] == "bias"
+
+    def test_patch_weights_hidden_unit_index_omitted_for_output(self, adapter, mock_client):
+        # When target is "output", hidden_unit_index must not appear
+        # in the body — the cascor route's Pydantic body has it as
+        # Optional and the validation requires it to be None for
+        # output-target patches.
+        mock_client._patch.return_value = {}
+        adapter.patch_weights(target="output", field="bias", values=[0.0])
+        kwargs = mock_client._patch.call_args.kwargs
+        assert "hidden_unit_index" not in kwargs["json"]
+
+    def test_patch_weights_propagates_client_error(self, adapter, mock_client):
+        from juniper_cascor_client import JuniperCascorClientError
+
+        mock_client._patch.side_effect = JuniperCascorClientError("422 NaN")
+        with pytest.raises(JuniperCascorClientError):
+            adapter.patch_weights(target="output", field="weights", values=[[float("nan")]])
+
+    def test_add_hidden_unit_calls_post_with_tail_position(self, adapter, mock_client):
+        mock_client._post.return_value = {"operation": "add_hidden_unit", "unit_index": 3}
+        result = adapter.add_hidden_unit(weights=[0.1, 0.2, 0.3], bias=0.0, activation="Tanh")
+        mock_client._post.assert_called_once()
+        args, kwargs = mock_client._post.call_args
+        assert args[0] == "/v1/network/hidden-units"
+        assert kwargs["json"] == {
+            "weights": [0.1, 0.2, 0.3],
+            "bias": 0.0,
+            "activation": "Tanh",
+            "position": "tail",
+        }
+        assert result["unit_index"] == 3
+
+    def test_add_hidden_unit_default_activation_and_bias(self, adapter, mock_client):
+        mock_client._post.return_value = {}
+        adapter.add_hidden_unit(weights=[0.0, 0.0])
+        kwargs = mock_client._post.call_args.kwargs
+        assert kwargs["json"]["bias"] == 0.0
+        assert kwargs["json"]["activation"] == "Tanh"
+
+    def test_add_hidden_unit_propagates_client_error(self, adapter, mock_client):
+        from juniper_cascor_client import JuniperCascorClientError
+
+        mock_client._post.side_effect = JuniperCascorClientError("409 at cap")
+        with pytest.raises(JuniperCascorClientError):
+            adapter.add_hidden_unit(weights=[0.0, 0.0])
+
+    def test_remove_hidden_unit_calls_delete(self, adapter, mock_client):
+        mock_client._delete.return_value = {"operation": "remove_hidden_unit", "removed_index": 1, "num_hidden_units": 2}
+        result = adapter.remove_hidden_unit(idx=1)
+        mock_client._delete.assert_called_once_with("/v1/network/hidden-units/1")
+        assert result["removed_index"] == 1
+        assert result["num_hidden_units"] == 2
+
+    def test_remove_hidden_unit_propagates_client_error(self, adapter, mock_client):
+        from juniper_cascor_client import JuniperCascorClientError
+
+        mock_client._delete.side_effect = JuniperCascorClientError("404 out of range")
+        with pytest.raises(JuniperCascorClientError):
+            adapter.remove_hidden_unit(idx=99)

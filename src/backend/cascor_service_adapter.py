@@ -1215,6 +1215,92 @@ class CascorServiceAdapter:
             raise
 
     # ------------------------------------------------------------------
+    # CAN-015h: network mutation endpoints (h-1 / h-2 / h-3)
+    # ------------------------------------------------------------------
+    # All three are FSM-gated to ``Investigating`` on the cascor side
+    # — the service returns 409 from any other state. The adapter is
+    # transport-only: validation and shape checks live in the cascor
+    # lifecycle, surfaced as JuniperCascorClientError → re-raise so
+    # canopy callers can map to UI feedback. Demo mode handling
+    # follows the B-5 pattern: the canopy backend route layer
+    # short-circuits to 501 before reaching the adapter.
+
+    def patch_weights(
+        self,
+        target: str,
+        field: str,
+        values: Any,
+        hidden_unit_index: Optional[int] = None,
+        dtype: str = "float32",
+    ) -> Dict[str, Any]:
+        """CAN-015h-1: surgical weight rewrite via PATCH /v1/network/weights.
+
+        ``target`` ∈ {"output", "hidden_unit"}, ``field`` ∈ {"weights", "bias"}.
+        ``hidden_unit_index`` is required iff ``target == "hidden_unit"``.
+        Mirrors the Pydantic model on the cascor side; the body is
+        passed through as-is so the cascor route's exact-shape /
+        NaN-Inf / FSM-gate validation runs unchanged.
+        """
+        body: Dict[str, Any] = {
+            "target": target,
+            "field": field,
+            "values": values,
+            "dtype": dtype,
+        }
+        if hidden_unit_index is not None:
+            body["hidden_unit_index"] = hidden_unit_index
+        try:
+            data = self._client._patch("/v1/network/weights", json=body)
+            logger.info("Weights patched via CasCor service (target=%s, field=%s)", target, field)
+            return cast(Dict[str, Any], data)
+        except JuniperCascorClientError as e:
+            logger.error("patch_weights failed (target=%s, field=%s): %s", target, field, e)
+            raise
+
+    def add_hidden_unit(
+        self,
+        weights: Any,
+        bias: float = 0.0,
+        activation: str = "Tanh",
+    ) -> Dict[str, Any]:
+        """CAN-015h-2: append a hidden unit at the cascade tail.
+
+        V1 is tail-only — the cascor route's Pydantic body forces
+        ``position="tail"``. New unit's output column is initialized
+        to zero by the cascor side regardless of the network's
+        ``init_output_weights`` config.
+        """
+        body: Dict[str, Any] = {
+            "weights": weights,
+            "bias": bias,
+            "activation": activation,
+            "position": "tail",
+        }
+        try:
+            data = self._client._post("/v1/network/hidden-units", json=body)
+            logger.info("Hidden unit appended via CasCor service (activation=%s)", activation)
+            return cast(Dict[str, Any], data)
+        except JuniperCascorClientError as e:
+            logger.error("add_hidden_unit failed: %s", e)
+            raise
+
+    def remove_hidden_unit(self, idx: int) -> Dict[str, Any]:
+        """CAN-015h-3: remove the hidden unit at ``idx`` with cascade rebuild.
+
+        Cascade-rebuild semantics live in cascor's lifecycle —
+        subsequent units' weights at the deleted column are dropped
+        so the forward-pass shape invariant holds. The adapter is
+        purely transport.
+        """
+        try:
+            data = self._client._delete(f"/v1/network/hidden-units/{idx}")
+            logger.info("Hidden unit removed via CasCor service (idx=%d)", idx)
+            return cast(Dict[str, Any], data)
+        except JuniperCascorClientError as e:
+            logger.error("remove_hidden_unit(idx=%d) failed: %s", idx, e)
+            raise
+
+    # ------------------------------------------------------------------
     # Monitoring no-ops (hooks are in-process CascorIntegration only)
     # ------------------------------------------------------------------
 
