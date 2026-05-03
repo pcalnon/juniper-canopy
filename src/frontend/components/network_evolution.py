@@ -23,10 +23,12 @@ button or by a training-reset signal.
 from typing import Any, Dict, List, Optional
 
 import dash_bootstrap_components as dbc
+import numpy as np
 import plotly.graph_objects as go
 from dash import Input, Output, State, dcc, html
 
 from ..base_component import BaseComponent
+from ..replay_forward import decode_tensor
 
 MAX_SNAPSHOTS = 20  # ring-buffer cap surfaced to the clientside callback
 
@@ -86,6 +88,31 @@ class NetworkEvolution(BaseComponent):
                         "padding": "8px",
                     },
                 ),
+                # CAN-015g (g-7): per-sample weight-norm sparklines.
+                # One trace per hidden unit + one for the output layer,
+                # X axis = sample epoch, Y axis = Frobenius norm of
+                # the unit's weight vector at that sample. Hidden by
+                # default; revealed only when ``replay-weight-buffer``
+                # has at least one entry. Provides visual feedback
+                # during V2 replay that decision-boundary playback
+                # alone doesn't (a unit's weight magnitude drift over
+                # samples is independent of the boundary surface).
+                html.Div(
+                    [
+                        html.H4("Replay weight evolution", style={"marginTop": "20px"}),
+                        html.Span(
+                            "Per-unit weight-norm trace across replay samples.",
+                            style={"color": "#6c757d", "fontSize": "0.85em"},
+                        ),
+                        dcc.Graph(
+                            id=f"{self.component_id}-weight-norms",
+                            config={"displayModeBar": False, "displaylogo": False},
+                            style={"height": "260px"},
+                        ),
+                    ],
+                    id=f"{self.component_id}-weight-norms-container",
+                    style={"display": "none"},
+                ),
             ],
             id=self.component_id,
             style={"padding": "20px"},
@@ -125,7 +152,117 @@ class NetworkEvolution(BaseComponent):
         def render_grid(snapshots: Optional[List[Dict[str, Any]]], theme: Optional[str]):
             return self._render_grid(snapshots or [], theme or "light")
 
+        # CAN-015g (g-7): weight-norm sparklines fed by the
+        # replay-weight-buffer Store. Container visibility is
+        # toggled here so the Replay weight evolution section only
+        # appears when there's V2 data to plot.
+        @app.callback(
+            [
+                Output(f"{self.component_id}-weight-norms-container", "style"),
+                Output(f"{self.component_id}-weight-norms", "figure"),
+            ],
+            Input("replay-weight-buffer", "data"),
+            State("theme-state", "data"),
+            prevent_initial_call=False,
+        )
+        def render_weight_norms(buffer: Optional[List[Dict[str, Any]]], theme: Optional[str]):
+            return self._render_weight_norms(buffer or [], theme or "light")
+
         self.logger.debug(f"Callbacks registered for {self.component_id}")
+
+    def _render_weight_norms(self, buffer: List[Dict[str, Any]], theme: str):
+        """Build per-unit weight-norm sparklines from the replay buffer.
+
+        Each entry in the buffer is a (still base64-encoded) V2 weight
+        payload. We decode just the tensors needed for the norm
+        computation — output_weights and per-unit weights — and
+        skip the bias scalar entirely. Decoding only what's needed
+        keeps the per-callback CPU bounded even when the buffer is
+        full.
+        """
+        # Hide the container entirely when there's no buffer — keeps
+        # the panel clean during pre-replay browsing.
+        if not buffer:
+            return {"display": "none"}, go.Figure()
+
+        # Walk the buffer in receive order. Each entry has a
+        # ``sample_index`` that's monotonic per replay session, and an
+        # ``epoch`` we use as the X-axis label.
+        epochs: List[int] = []
+        output_norms: List[float] = []
+        # Per-unit norms: keyed by unit cascade index (0-based). A unit
+        # may not exist in early samples (it was added later); we
+        # leave ``None`` placeholders so the trace breaks rather than
+        # connecting "unit didn't exist" to "unit existed."
+        unit_norms: Dict[int, List[Optional[float]]] = {}
+
+        for entry in buffer:
+            if not isinstance(entry, dict):
+                continue
+            epoch = entry.get("epoch")
+            if not isinstance(epoch, (int, float)):
+                continue
+            epochs.append(int(epoch))
+
+            ow_arr = decode_tensor(entry.get("output_weights"))
+            output_norms.append(float(np.linalg.norm(ow_arr)) if ow_arr is not None else float("nan"))
+
+            units = entry.get("hidden_units") or []
+            for idx, unit in enumerate(units):
+                if not isinstance(unit, dict):
+                    continue
+                w = decode_tensor(unit.get("weights"))
+                if w is None:
+                    continue
+                norm = float(np.linalg.norm(w))
+                bucket = unit_norms.setdefault(idx, [])
+                # Pad with None for prior samples where this unit
+                # hadn't been added yet.
+                while len(bucket) < len(epochs) - 1:
+                    bucket.append(None)
+                bucket.append(norm)
+
+        # Pad the tails of any unit traces that didn't extend to the
+        # final sample (shouldn't happen with current cascor semantics
+        # but defensive — Plotly skips ``None`` y-values automatically).
+        for bucket in unit_norms.values():
+            while len(bucket) < len(epochs):
+                bucket.append(None)
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=epochs,
+                y=output_norms,
+                mode="lines+markers",
+                name="output layer",
+                line={"color": "#0d6efd", "width": 2},
+                marker={"size": 5},
+            )
+        )
+        for idx in sorted(unit_norms.keys()):
+            fig.add_trace(
+                go.Scatter(
+                    x=epochs,
+                    y=unit_norms[idx],
+                    mode="lines+markers",
+                    name=f"unit {idx}",
+                    line={"width": 1.5},
+                    marker={"size": 4},
+                )
+            )
+
+        is_dark = theme == "dark"
+        fig.update_layout(
+            template="plotly_dark" if is_dark else "plotly_white",
+            margin={"l": 50, "r": 20, "t": 10, "b": 40},
+            xaxis_title="epoch",
+            yaxis_title="‖weights‖",
+            legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1.0, "font": {"size": 10}},
+            showlegend=True,
+            hovermode="x unified",
+        )
+        return {"display": "block", "marginTop": "20px"}, fig
 
     def _render_grid(self, snapshots: List[Dict[str, Any]], theme: str):
         if not snapshots:
