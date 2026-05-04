@@ -304,13 +304,21 @@ app.add_middleware(
     path="/",
 )
 
-# Observability middleware (LIFO: last added runs first)
-app.add_middleware(RequestIdMiddleware)
+# Observability middleware (LIFO: last added runs OUTERMOST).
+#
+# OBS-WIRE C.1: order matters — starlette is LIFO, so whatever is added
+# LAST runs OUTERMOST. ``RequestIdMiddleware`` MUST be added LAST so it
+# runs OUTERMOST and the ``request_id`` contextvar is set BEFORE
+# ``PrometheusMiddleware`` records the request (otherwise structured
+# logs emitted from inside the metrics path see request_id=None).
+# Matches the canonical pattern in juniper-data
+# (juniper_data/api/app.py) and juniper-cascor (src/api/app.py).
 if settings.metrics_enabled:
     from observability import PrometheusMiddleware
 
     app.add_middleware(PrometheusMiddleware, service_name="juniper-canopy", namespace="juniper_canopy")
     app.mount("/metrics", get_prometheus_app())
+app.add_middleware(RequestIdMiddleware)
 
 
 # Global exception handler for unhandled errors — returns standardized ErrorResponse.
@@ -480,7 +488,10 @@ async def websocket_training_endpoint(websocket: WebSocket):
         return
 
     client_id = f"training-client-{id(websocket)}"
-    await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol)
+    # OBS-WIRE A.4: pass channel="training" so connect/disconnect updates
+    # juniper_canopy_websocket_connections_active{channel="training"} and
+    # outbound dispatch labels juniper_canopy_websocket_messages_total{...}.
+    await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol, channel="training")
 
     idle_timeout = ws_settings.idle_timeout_seconds
     max_msg_size = ws_settings.max_message_size_training
@@ -570,7 +581,10 @@ async def websocket_control_endpoint(websocket: WebSocket):
         return
 
     client_id = f"control-client-{id(websocket)}"
-    await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol)
+    # OBS-WIRE A.4: pass channel="control" so connect/disconnect updates
+    # juniper_canopy_websocket_connections_active{channel="control"} and
+    # outbound dispatch labels juniper_canopy_websocket_messages_total{...}.
+    await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol, channel="control")
 
     # Phase B-pre-b: CSRF first-frame authentication (M-SEC-02)
     if settings.csrf_enabled:

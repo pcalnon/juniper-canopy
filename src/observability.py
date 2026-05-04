@@ -271,14 +271,48 @@ def set_websocket_connections(channel: str, count: int) -> None:
     _ensure_canopy_metrics()["websocket_connections_active"].labels(channel=channel).set(count)
 
 
+# OBS-WIRE A.4 / messages_total: closed-set allowlist for the ``type`` label
+# on ``juniper_canopy_websocket_messages_total``. Production message types
+# emitted by the WebSocketManager dispatch sites and the create_*_message()
+# helpers in :mod:`communication.websocket_manager`. Anything outside this
+# set collapses to ``"_other"`` so a misbehaving caller — or a future code
+# path that introduces a new type without thinking about cardinality —
+# cannot blow up the timeseries label space (R1.1 closed-set discipline,
+# same posture as ``unrecognized_ws_frames_total``).
+_WS_MESSAGE_TYPE_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "state",
+        "metrics",
+        "topology",
+        "event",
+        "control_ack",
+        "command_response",
+        "ping",
+        "pong",
+        "connection_established",
+        "server_shutdown",
+        "initial_status",
+        "initial_metrics",
+        "params_updated",
+        "candidate_progress",
+        "network_stats",
+        "state_change",
+        "error",
+    }
+)
+
+
 def inc_websocket_messages(channel: str, msg_type: str) -> None:
     """Increment the WebSocket messages counter.
 
     Args:
         channel: WebSocket channel — "training" or "control".
-        msg_type: Message type — "metrics", "state", "topology", "event", "control_ack", etc.
+        msg_type: Message type — collapsed to ``"_other"`` when outside the
+            closed allowlist :data:`_WS_MESSAGE_TYPE_ALLOWLIST` to keep the
+            counter cardinality bounded (R1.1).
     """
-    _ensure_canopy_metrics()["websocket_messages_total"].labels(channel=channel, type=msg_type).inc()
+    bucketed = msg_type if msg_type in _WS_MESSAGE_TYPE_ALLOWLIST else "_other"
+    _ensure_canopy_metrics()["websocket_messages_total"].labels(channel=channel, type=bucketed).inc()
 
 
 def set_demo_mode_active(active: bool) -> None:
