@@ -22,6 +22,7 @@ adapter — these tests verify:
 import os
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 src_dir = Path(__file__).parents[2]
 sys.path.insert(0, str(src_dir))
@@ -38,6 +39,22 @@ from main import app  # noqa: E402
 def client():
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def service_client(monkeypatch):
+    """TestClient with the global backend mocked as a live service adapter."""
+    import main
+
+    adapter = MagicMock()
+    backend = MagicMock()
+    backend.backend_type = "service"
+    backend._adapter = adapter
+    backend.shutdown = AsyncMock()
+
+    with TestClient(app) as test_client:
+        monkeypatch.setattr(main, "backend", backend)
+        yield test_client, adapter
 
 
 # =============================================================================
@@ -142,3 +159,81 @@ class TestSchemaDefaults:
     def test_add_hidden_unit_bias_and_activation_default(self, client):
         response = client.post("/api/v1/network/hidden-units", json={"weights": [0.1, 0.2]})
         assert response.status_code == 501
+
+
+# =============================================================================
+# Service-mode proxying — exact adapter contract
+# =============================================================================
+
+
+class TestServiceModeProxying:
+    """Verify live service-mode routes forward the exact editor payload."""
+
+    @pytest.mark.integration
+    def test_patch_weights_forwards_all_fields_to_adapter(self, service_client):
+        client, adapter = service_client
+        adapter.patch_weights.return_value = {
+            "operation": "patch_weights",
+            "target": "hidden_unit_weights",
+            "updated": True,
+        }
+
+        response = client.patch(
+            "/api/v1/network/weights",
+            json={
+                "target": "hidden_unit_weights",
+                "field": "weights",
+                "values": [0.1, -0.2, 0.3],
+                "hidden_unit_index": 2,
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["operation"] == "patch_weights"
+        adapter.patch_weights.assert_called_once_with(
+            target="hidden_unit_weights",
+            field="weights",
+            values=[0.1, -0.2, 0.3],
+            hidden_unit_index=2,
+            dtype="float32",
+        )
+
+    @pytest.mark.integration
+    def test_add_hidden_unit_defaults_forward_to_adapter(self, service_client):
+        client, adapter = service_client
+        adapter.add_hidden_unit.return_value = {"unit_index": 0, "num_hidden_units": 1}
+
+        response = client.post("/api/v1/network/hidden-units", json={"weights": [0.25, 0.5]})
+
+        assert response.status_code == 200
+        assert response.json()["num_hidden_units"] == 1
+        adapter.add_hidden_unit.assert_called_once_with(
+            weights=[0.25, 0.5],
+            bias=0.0,
+            activation="Tanh",
+        )
+
+    @pytest.mark.integration
+    def test_remove_hidden_unit_forwards_path_index(self, service_client):
+        client, adapter = service_client
+        adapter.remove_hidden_unit.return_value = {"removed_index": 4, "num_hidden_units": 4}
+
+        response = client.delete("/api/v1/network/hidden-units/4")
+
+        assert response.status_code == 200
+        assert response.json()["removed_index"] == 4
+        adapter.remove_hidden_unit.assert_called_once_with(idx=4)
+
+    @pytest.mark.integration
+    def test_adapter_failure_returns_route_specific_500(self, service_client):
+        client, adapter = service_client
+        adapter.patch_weights.side_effect = RuntimeError("cascor rejected invalid shape")
+
+        response = client.patch(
+            "/api/v1/network/weights",
+            json={"target": "output_weights", "field": "weights", "values": [0.1]},
+        )
+
+        assert response.status_code == 500
+        assert "patch_weights failed" in response.json()["detail"]
+        assert "invalid shape" in response.json()["detail"]
