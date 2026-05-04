@@ -48,6 +48,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 from a2wsgi import WSGIMiddleware
@@ -2085,6 +2086,90 @@ async def retrain_snapshot_route(snapshot_id: str):
     except Exception as e:
         system_logger.error("Failed to retrain from %s: %s", snapshot_id, e)
         raise HTTPException(status_code=500, detail=f"Failed to retrain: {e}") from e
+
+
+# ============================================================================
+# Network mutation proxies (Phase 6E CAN-015h, h-5)
+# ----------------------------------------------------------------------------
+# Forward the canopy Network Editor's submit actions to the cascor
+# mutation endpoints landed in CAN-015h-1/h-2/h-3. The cascor side is
+# the source of truth for FSM gating (rejects with 409 unless
+# Investigating), shape/NaN validation (400/422), and out-of-range
+# index handling (404). We surface the cascor detail verbatim.
+# ============================================================================
+
+
+class _PatchWeightsBody(BaseModel):
+    """Body schema for PATCH /api/v1/network/weights. Mirrors the
+    cascor-side ``PatchWeightsRequest`` — see juniper-cascor
+    ``src/api/models/network.py``.
+    """
+
+    target: str
+    field: str
+    values: Any
+    hidden_unit_index: int | None = None
+    dtype: str = "float32"
+
+
+@app.patch("/api/v1/network/weights")
+async def patch_weights_route(body: _PatchWeightsBody):
+    """Surgical weight rewrite — forwards to cascor's PATCH route."""
+    from fastapi import HTTPException
+
+    adapter = _require_service_adapter()
+    try:
+        return adapter.patch_weights(
+            target=body.target,
+            field=body.field,
+            values=body.values,
+            hidden_unit_index=body.hidden_unit_index,
+            dtype=body.dtype,
+        )
+    except Exception as e:
+        system_logger.error("patch_weights failed (target=%s, field=%s): %s", body.target, body.field, e)
+        raise HTTPException(status_code=500, detail=f"patch_weights failed: {e}") from e
+
+
+class _AddHiddenUnitBody(BaseModel):
+    """Body schema for POST /api/v1/network/hidden-units. Mirrors the
+    cascor-side ``AddHiddenUnitRequest`` — see juniper-cascor
+    ``src/api/models/network.py``.
+    """
+
+    weights: Any
+    bias: float = 0.0
+    activation: str = "Tanh"
+
+
+@app.post("/api/v1/network/hidden-units")
+async def add_hidden_unit_route(body: _AddHiddenUnitBody):
+    """Append a hidden unit at the cascade tail — forwards to cascor."""
+    from fastapi import HTTPException
+
+    adapter = _require_service_adapter()
+    try:
+        return adapter.add_hidden_unit(
+            weights=body.weights,
+            bias=body.bias,
+            activation=body.activation,
+        )
+    except Exception as e:
+        system_logger.error("add_hidden_unit failed (activation=%s): %s", body.activation, e)
+        raise HTTPException(status_code=500, detail=f"add_hidden_unit failed: {e}") from e
+
+
+@app.delete("/api/v1/network/hidden-units/{idx}")
+async def remove_hidden_unit_route(idx: int):
+    """Delete the hidden unit at ``idx`` — forwards to cascor."""
+    from fastapi import HTTPException
+
+    adapter = _require_service_adapter()
+    try:
+        return adapter.remove_hidden_unit(idx=idx)
+    except Exception as e:
+        system_logger.error("remove_hidden_unit(idx=%d) failed: %s", idx, e)
+        raise HTTPException(status_code=500, detail=f"remove_hidden_unit failed: {e}") from e
 
 
 # ============================================================================
