@@ -1,7 +1,7 @@
 # CI/CD Environment Setup
 
-**Last Updated:** 2026-04-05  
-**Version:** 0.26.0  
+**Last Updated:** 2026-05-04
+**Version:** 0.27.0
 **Status:** Current
 
 ## Table of Contents
@@ -25,7 +25,7 @@ The workflow definitions are:
 
 ## Runner and Python Strategy
 
-- Matrix jobs (`pre-commit`, `unit-tests`): Python `3.12`, `3.13`, `3.14`
+- Matrix jobs (`pre-commit`, `unit-tests`): Ubuntu Python `3.12`, `3.13`, `3.14`; unit tests also run on required macOS Python `3.12`
 - Single-version jobs (`integration-tests`, `build`, `security`, `docs`, `lockfile-check`, `dependency-docs`): Python `3.14`
 - `actions/setup-python` with `cache: pip` is used across jobs
 
@@ -34,7 +34,12 @@ Example from `ci.yml`:
 ```yaml
 strategy:
   matrix:
+    os: [ubuntu-latest]
     python-version: ["3.12", "3.13", "3.14"]
+    include:
+      - os: macos-latest
+        python-version: "3.12"
+        experimental: false
 ```
 
 ## Dependency Installation Model
@@ -45,20 +50,23 @@ Core install pattern:
 
 ```bash
 python -m pip install --upgrade pip
-pip install torch --index-url https://download.pytorch.org/whl/cpu
+if [ "$RUNNER_OS" = "macOS" ]; then
+  pip install torch
+else
+  pip install torch --index-url https://download.pytorch.org/whl/cpu
+fi
 pip install -r conf/requirements_ci.txt
 pip install -e .
 ```
 
 Why this matters:
 
-- `torch` is installed from the CPU index explicitly for runner compatibility.
+- `torch` is installed before `conf/requirements_ci.txt` because wheel resolution differs by runner OS.
+- Linux installs CPU-only torch from the PyTorch CPU index to avoid CUDA wheels.
+- macOS installs torch from the default PyPI index because the Linux CPU-only index has no macOS ARM wheels.
 - `pip install -e .` ensures imports resolve the current source tree.
-- `conf/requirements_ci.txt` is the CI baseline, not `requirements.txt`.
-
-- CI installs CPU-only torch explicitly.
-- `conf/requirements_ci.txt` now includes `prometheus-client` and `sentry-sdk` used by observability paths.
-- Editable install (`-e .`) ensures imports resolve from the source tree.
+- `conf/requirements_ci.txt` is the CI baseline, not `requirements.txt`; dependency PRs may bump minimum versions there when the CI floor changes.
+- `conf/requirements_ci.txt` includes `prometheus-client` and `sentry-sdk` used by observability paths.
 
 ## CI Environment Variables
 
@@ -69,11 +77,11 @@ uv pip compile pyproject.toml \
   --extra juniper-data \
   --extra juniper-cascor \
   --extra observability \
+  --constraint requirements.lock \
   -o /tmp/requirements.lock.check
-tail -n +3 requirements.lock > /tmp/lock_body
-tail -n +3 /tmp/requirements.lock.check > /tmp/check_body
-diff -u /tmp/lock_body /tmp/check_body
 ```
+
+The freshness check resolves with `requirements.lock` as a constraint, then compares package pin lines only. It fails when the committed lockfile no longer satisfies `pyproject.toml`, not merely because newer package versions exist.
 
 Security workflow installs scanning tools and project dependencies with:
 
@@ -106,10 +114,11 @@ uv pip compile pyproject.toml \
   --extra juniper-data \
   --extra juniper-cascor \
   --extra observability \
+  --constraint requirements.lock \
   -o /tmp/requirements.lock.check
 ```
 
-The check strips generated header lines before diffing so output path differences do not create false failures.
+The check compares resolved package pins only, ignoring comments and generated header paths so `uv` annotations and `/tmp` output paths do not create false failures.
 
 ### Documentation Links
 
@@ -138,8 +147,11 @@ uv pip compile pyproject.toml \
   --extra juniper-data \
   --extra juniper-cascor \
   --extra observability \
+  --upgrade \
   -o requirements.lock
 ```
+
+Dependabot branches also trigger `.github/workflows/lockfile-update.yml`, which runs the same extras with `--upgrade` and commits `requirements.lock` only when the resolved pins change.
 
 ### `Documentation Links` fails unexpectedly
 

@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-04-05
-**Version:** 0.26.0
+**Last Updated:** 2026-05-04
+**Version:** 0.27.0
 **Status:** Current
 
 ## Table of Contents
@@ -353,19 +353,19 @@ env:
 
 ### Jobs and dependencies
 
-| Job                 | Needs             | Python                  | Notes                                             |
-|---------------------|-------------------|-------------------------|---------------------------------------------------|
-| `pre-commit`        | —                 | matrix `3.12/3.13/3.14` | Runs `pre-commit --all-files`                     |
-| `unit-tests`        | `pre-commit`      | matrix `3.12/3.13/3.14` | Runs unit + regression markers with coverage gate |
-| `integration-tests` | `unit-tests`      | `3.14`                  | Runs fast integration subset                      |
-| `build`             | `unit-tests`      | `3.14`                  | Builds sdist and wheel                            |
-| `security`          | `pre-commit`      | `3.14`                  | Gitleaks + Bandit + pip-audit                     |
-| `dependency-docs`   | `build`           | `3.14`                  | Generates dependency docs via script              |
-| `lockfile-check`    | —                 | `3.14`                  | Recompiles lockfile and diffs body                |
-| `docs`              | —                 | `3.14`                  | Runs doc-link validation script                   |
-| `docker-build`      | `build`           | docker engine           | Builds image + health smoke test                  |
-| `required-checks`   | all core jobs     | n/a                     | Aggregated merge gate                             |
-| `notify`            | `required-checks` | n/a                     | Run summary                                       |
+| Job                 | Needs             | Python                                         | Notes                                             |
+|---------------------|-------------------|------------------------------------------------|---------------------------------------------------|
+| `pre-commit`        | —                 | Ubuntu matrix `3.12/3.13/3.14`                | Runs `pre-commit --all-files`                     |
+| `unit-tests`        | `pre-commit`      | Ubuntu matrix `3.12/3.13/3.14` + macOS `3.12` | Runs unit + regression markers with coverage gate |
+| `integration-tests` | `unit-tests`      | `3.14`                                         | Runs fast integration subset                      |
+| `build`             | `unit-tests`      | `3.14`                                         | Builds sdist and wheel                            |
+| `security`          | `pre-commit`      | `3.14`                                         | Gitleaks + Bandit + pip-audit                     |
+| `dependency-docs`   | `build`           | `3.14`                                         | Generates dependency docs via script              |
+| `lockfile-check`    | —                 | `3.14`                                         | Recompiles lockfile with constraints              |
+| `docs`              | —                 | `3.14`                                         | Runs doc-link validation script                   |
+| `docker-build`      | `build`           | docker engine                                  | Builds image + health smoke test                  |
+| `required-checks`   | all core jobs     | n/a                                            | Aggregated merge gate                             |
+| `notify`            | `required-checks` | n/a                                            | Run summary                                       |
 
 ### Test marker expressions in CI
 
@@ -400,10 +400,13 @@ uv pip compile pyproject.toml \
   --extra juniper-data \
   --extra juniper-cascor \
   --extra observability \
+  --constraint requirements.lock \
   -o /tmp/requirements.lock.check
 ```
 
-Then strips first two lines from both lockfiles before diffing to avoid path-only header differences.
+Then compares only resolved package pin lines from the committed lockfile and the generated check file. Comments, generated headers, and constraint annotations are ignored.
+
+This check answers whether `requirements.lock` still satisfies `pyproject.toml`. It does not fail merely because newer package versions are available on PyPI.
 
 ### Documentation links behavior
 
@@ -435,11 +438,12 @@ This catches broken internal file and heading links without requiring sibling re
 ### `lockfile-update.yml`
 
 - Trigger: push to `dependabot/pip/**`
-- Guard: `if: github.actor == 'dependabot[bot]'`
 - Uses `CROSS_REPO_DISPATCH_TOKEN` for checkout/push
 - Compiles lockfile with:
   - `--extra juniper-data`
   - `--extra juniper-cascor`
+  - `--extra observability`
+  - `--upgrade`
 - Commits only when diff exists
 
 ### `publish.yml`
@@ -691,7 +695,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-04-05
-**Version:** 0.25.1
+**Last Updated:** 2026-05-04
+**Version:** 0.27.0
 **Maintained By:** Development Team
 **Status:** ✅ Current
