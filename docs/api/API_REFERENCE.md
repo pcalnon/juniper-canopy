@@ -1,7 +1,7 @@
 # Juniper Canopy API Reference
 
-**Version:** 1.3.0
-**Last Updated:** March 30, 2026
+**Version:** 1.4.0
+**Last Updated:** May 4, 2026
 **Base URL:** `http://127.0.0.1:8050`
 
 ---
@@ -12,12 +12,13 @@
 2. [Authentication](#authentication)
 3. [REST API Endpoints](#rest-api-endpoints)
 4. [Training Control Endpoints](#training-control-endpoints)
-5. [Remote Worker Endpoints](#remote-worker-endpoints)
-6. [WebSocket Channels](#websocket-channels)
-7. [Data Models](#data-models)
-8. [Error Handling](#error-handling)
-9. [Rate Limiting](#rate-limiting)
-10. [Code Examples](#code-examples)
+5. [Network Mutation Endpoints](#network-mutation-endpoints)
+6. [Remote Worker Endpoints](#remote-worker-endpoints)
+7. [WebSocket Channels](#websocket-channels)
+8. [Data Models](#data-models)
+9. [Error Handling](#error-handling)
+10. [Rate Limiting](#rate-limiting)
+11. [Code Examples](#code-examples)
 
 ---
 
@@ -436,6 +437,120 @@ curl "http://127.0.0.1:8050/api/metrics/history?limit=100"
   - all `hidden_*` nodes use `layer: 1`
   - all `output_*` nodes use `layer: 2`
 - In service mode, output connection rows are derived by transposing CasCor `output_weights` from `(input+hidden, output)` to output-oriented rows.
+
+### Network Mutation Endpoints
+
+The network mutation endpoints are thin Canopy proxy routes for the Network Editor tab. They require a live CasCor service backend and forward requests through `CascorServiceAdapter` to CasCor's `/v1/network/...` mutation API.
+
+**Operational constraints:**
+
+- Demo mode is not supported. Canopy returns `501 Not Implemented` when `backend_type` is not `service` or no service adapter is attached.
+- CasCor is the source of truth for lifecycle gating and tensor validation. The mutation lifecycle is expected to reject edits outside the `Investigating` state.
+- Canopy performs request-body shape validation with Pydantic before proxying, but exact parameter shape, NaN/Inf checks, out-of-range hidden unit indexes, and activation validation are enforced by CasCor.
+- Current Canopy proxy handlers wrap adapter failures as `500` responses with a `detail` message such as `patch_weights failed: ...`; clients should display the detail rather than infer every upstream failure from the status code alone.
+
+Primary codepaths: `src/main.py`, `src/backend/cascor_service_adapter.py`, `src/frontend/components/network_editor_panel.py`.
+
+#### PATCH /api/v1/network/weights
+
+**Description:** Patch one weight or bias group in the loaded network. Used by the Network Editor "Patch weights" form.
+
+**Request Schema:**
+
+```json
+{
+  "target": "output_weights",
+  "field": "weights",
+  "values": [0.1, -0.2, 0.05],
+  "hidden_unit_index": null,
+  "dtype": "float32"
+}
+```
+
+**Fields:**
+
+- `target` (string, required) - Parameter group to patch. The Network Editor emits `output_weights`, `output_bias`, `hidden_unit_weights`, or `hidden_unit_bias`.
+- `field` (string, required) - `weights` or `bias`. The Network Editor derives this from `target`.
+- `values` (array or nested array, required) - New values. Shape must match the selected target; CasCor validates the exact shape.
+- `hidden_unit_index` (integer, optional) - Required for `hidden_unit_*` targets.
+- `dtype` (string, optional) - Defaults to `float32`.
+
+**Status Codes:**
+
+- `200 OK` - Patch accepted by CasCor.
+- `422 Unprocessable Entity` - Required Canopy request fields are missing or have invalid JSON types.
+- `501 Not Implemented` - Canopy is not running with a live CasCor service adapter.
+- `500 Internal Server Error` - Adapter or upstream CasCor mutation failed; inspect `detail`.
+
+**Example Request:**
+
+```bash
+curl -X PATCH http://127.0.0.1:8050/api/v1/network/weights \
+  -H "Content-Type: application/json" \
+  -d '{
+    "target": "hidden_unit_weights",
+    "field": "weights",
+    "values": [0.12, -0.04, 0.31],
+    "hidden_unit_index": 2,
+    "dtype": "float32"
+  }'
+```
+
+#### POST /api/v1/network/hidden-units
+
+**Description:** Append a hidden unit at the cascade tail. Used by the Network Editor "Append hidden unit" form.
+
+**Request Schema:**
+
+```json
+{
+  "weights": [0.1, -0.2, 0.05],
+  "bias": 0.0,
+  "activation": "Tanh"
+}
+```
+
+**Fields:**
+
+- `weights` (array, required) - Incoming weight vector. The expected length is `input_size + existing_hidden_units`.
+- `bias` (number, optional) - Defaults to `0.0`.
+- `activation` (string, optional) - Defaults to `Tanh`. The Network Editor offers `Tanh`, `Sigmoid`, `ReLU`, and `Linear`; CasCor validates against its activation registry.
+
+**Status Codes:**
+
+- `200 OK` - Hidden unit appended by CasCor.
+- `422 Unprocessable Entity` - Required Canopy request fields are missing or have invalid JSON types.
+- `501 Not Implemented` - Canopy is not running with a live CasCor service adapter.
+- `500 Internal Server Error` - Adapter or upstream CasCor mutation failed; inspect `detail`.
+
+**Example Request:**
+
+```bash
+curl -X POST http://127.0.0.1:8050/api/v1/network/hidden-units \
+  -H "Content-Type: application/json" \
+  -d '{"weights": [0.1, -0.2, 0.05], "bias": 0.0, "activation": "ReLU"}'
+```
+
+#### DELETE /api/v1/network/hidden-units/{idx}
+
+**Description:** Remove a hidden unit by zero-based index. CasCor rebuilds the cascade so downstream unit shapes remain valid.
+
+**Path Parameters:**
+
+- `idx` (integer, required) - Hidden unit index to remove.
+
+**Status Codes:**
+
+- `200 OK` - Hidden unit removed by CasCor.
+- `422 Unprocessable Entity` - `idx` is not an integer.
+- `501 Not Implemented` - Canopy is not running with a live CasCor service adapter.
+- `500 Internal Server Error` - Adapter or upstream CasCor mutation failed; inspect `detail`.
+
+**Example Request:**
+
+```bash
+curl -X DELETE http://127.0.0.1:8050/api/v1/network/hidden-units/2
+```
 
 ### GET /api/dataset
 
