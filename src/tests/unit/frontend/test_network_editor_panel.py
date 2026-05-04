@@ -35,6 +35,11 @@ def panel():
 
 
 class TestLayout:
+    def test_default_api_base_url_uses_configured_server_port(self):
+        panel = NetworkEditorPanel({}, component_id="ne-test")
+
+        assert panel._api_base_url == "http://127.0.0.1:8050"
+
     def test_layout_renders(self, panel):
         layout_str = str(panel.get_layout())
         assert "Network Editor" in layout_str
