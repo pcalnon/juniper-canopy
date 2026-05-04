@@ -1,8 +1,8 @@
 # Juniper Canopy User Manual
 
-**Version:** 0.25.0
+**Version:** 0.26.0
 **Status:** ✅ Production Ready
-**Last Updated:** March 30, 2026
+**Last Updated:** May 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -344,7 +344,78 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 
 ---
 
-### Tab 3: Decision Boundaries
+### Tab 3: Network Editor
+
+**Purpose:** Make surgical edits to a restored CasCor network snapshot.
+
+The Network Editor is for service-mode investigation workflows, not normal training. It is disabled until the CasCor lifecycle reports the `Investigating` state, which is entered by restoring a snapshot from the Snapshots tab. The panel polls `GET /api/status` every 2 seconds and unlocks when `state_machine.status` is `Investigating`.
+
+**Available Operations:**
+
+1. **Append Hidden Unit**
+   - Adds one hidden unit at the cascade tail.
+   - The weight vector length must match `input_size + existing_hidden_units`.
+   - `bias` defaults to `0.0`.
+   - Supported UI activation choices are `Tanh`, `Sigmoid`, `ReLU`, and `Linear`.
+   - CasCor initializes the new unit's output column to zero, so the unit has no output-layer effect until weights are patched or training is resumed.
+
+2. **Remove Hidden Unit**
+   - Deletes the selected zero-based hidden unit index.
+   - CasCor rebuilds downstream cascade weights so the forward-pass shape invariant still holds.
+   - The optimizer state is dropped on the CasCor side and rebuilt by fresh training.
+
+3. **Patch Weights**
+   - Patches one parameter group:
+     - `output_weights`
+     - `output_bias`
+     - `hidden_unit_weights`
+     - `hidden_unit_bias`
+   - `hidden_unit_*` targets require a hidden unit index.
+   - Values can be entered as comma-, semicolon-, or newline-separated floats.
+   - Canopy sends `dtype: "float32"` and lets CasCor validate the exact target shape.
+
+**Workflow:**
+
+1. Run Canopy in service mode against a live CasCor backend.
+2. Restore a snapshot from the Snapshots tab.
+3. Wait for the Network Editor badge to show `FSM: Investigating`.
+4. Review the topology readout and hidden unit indexes.
+5. Apply the smallest mutation needed.
+6. Use the API response shown in the status alert to confirm the edit.
+7. Resume or retrain from the edited snapshot when ready.
+
+**Constraints and Failure Modes:**
+
+- Demo mode cannot apply network mutations; Canopy returns `501 Not Implemented` for the proxy routes.
+- CasCor enforces the `Investigating` lifecycle gate and rejects mutation attempts from other states.
+- CasCor owns exact tensor shape checks, out-of-range hidden unit handling, NaN/Inf validation, and activation validation.
+- Canopy currently surfaces adapter failures as status alerts using the backend `detail` text.
+- Destructive operations should be treated as snapshot-scoped edits; keep an original snapshot available before removing units or replacing large weight groups.
+
+**Data Sources:**
+
+- Gating status: `GET /api/status`
+- Topology readout: `GET /api/topology`
+- Mutations:
+  - `PATCH /api/v1/network/weights`
+  - `POST /api/v1/network/hidden-units`
+  - `DELETE /api/v1/network/hidden-units/{idx}`
+
+**Example Patch Request:**
+
+```json
+{
+  "target": "hidden_unit_weights",
+  "field": "weights",
+  "values": [0.12, -0.04, 0.31],
+  "hidden_unit_index": 2,
+  "dtype": "float32"
+}
+```
+
+---
+
+### Tab 4: Decision Boundaries
 
 **Purpose:** Visualize how the network classifies the input space
 
@@ -410,7 +481,7 @@ frontend:
 
 ---
 
-### Tab 4: Dataset View
+### Tab 5: Dataset View
 
 **Purpose:** Explore the training dataset structure and distribution
 
