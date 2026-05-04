@@ -277,7 +277,7 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 
 ---
 
-### Tab 2: Network Topology
+### Network Topology Tab
 
 **Purpose:** Visualize network architecture and connection weights
 
@@ -344,7 +344,7 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 
 ---
 
-### Tab 3: Network Editor
+### Network Editor Tab
 
 **Purpose:** Make surgical edits to a restored CasCor network snapshot.
 
@@ -395,11 +395,15 @@ The Network Editor is for service-mode investigation workflows, not normal train
 **Data Sources:**
 
 - Gating status: `GET /api/status`
-- Topology readout: `GET /api/topology`
+- Public topology API: `GET /api/topology`
 - Mutations:
   - `PATCH /api/v1/network/weights`
   - `POST /api/v1/network/hidden-units`
   - `DELETE /api/v1/network/hidden-units/{idx}`
+
+**Troubleshooting:**
+
+- If the topology readout does not refresh after the editor unlocks, verify the panel's internal topology request path in `src/frontend/components/network_editor_panel.py` matches the public `GET /api/topology` route exposed by `src/main.py`.
 
 **Example Patch Request:**
 
@@ -415,7 +419,7 @@ The Network Editor is for service-mode investigation workflows, not normal train
 
 ---
 
-### Tab 4: Decision Boundaries
+### Decision Boundary Tab
 
 **Purpose:** Visualize how the network classifies the input space
 
@@ -481,7 +485,7 @@ frontend:
 
 ---
 
-### Tab 5: Dataset View
+### Dataset View Tab
 
 **Purpose:** Explore the training dataset structure and distribution
 
