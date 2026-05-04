@@ -22,7 +22,7 @@ adapter — these tests verify:
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 src_dir = Path(__file__).parents[2]
 sys.path.insert(0, str(src_dir))
@@ -50,6 +50,7 @@ def service_client(monkeypatch):
     backend = MagicMock()
     backend.backend_type = "service"
     backend._adapter = adapter
+    backend.shutdown = AsyncMock()
 
     with TestClient(app) as test_client:
         monkeypatch.setattr(main, "backend", backend)
