@@ -85,4 +85,3 @@ def test_patch_weights_does_not_synthesize_hidden_unit_index(adapter, mock_clien
         "dtype": "float32",
     }
     assert "hidden_unit_index" not in body
-
