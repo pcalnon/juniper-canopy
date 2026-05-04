@@ -50,6 +50,8 @@ import dash_bootstrap_components as dbc
 import requests
 from dash import Input, Output, State, dcc, html
 
+from settings import get_settings
+
 from ..base_component import BaseComponent
 
 # Activation choices mirror the cascor side's accepted set; we send
@@ -75,7 +77,8 @@ class NetworkEditorPanel(BaseComponent):
 
     def __init__(self, config: Dict[str, Any], component_id: str = "network-editor-panel"):
         super().__init__(config, component_id)
-        self._api_base_url = config.get("api_base_url", "")
+        _settings = get_settings()
+        self._api_base_url = config.get("api_base_url", f"http://127.0.0.1:{_settings.server.port}")
         self.api_timeout = float(config.get("api_timeout", 5))
 
     # ------------------------------------------------------------------
