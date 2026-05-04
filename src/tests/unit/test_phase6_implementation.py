@@ -622,10 +622,20 @@ class TestEmitTrainingMetrics:
         assert isinstance(demo.current_accuracy, float)
 
 
-@pytest.mark.timeout(120)
+@pytest.mark.timeout(240)
 class TestEndToEndTrainingLoop:
     """THE critical missing test: verify the restructured training loop produces
-    monotonic loss decrease across cascade additions."""
+    monotonic loss decrease across cascade additions.
+
+    Class-level timeout (240s) and per-thread join timeouts (180s) chosen
+    to accommodate Python-3.14-on-ubuntu runners — P-24 audit observed
+    ``test_loss_decreases_across_training`` exceeding the previous 90s
+    join on 3.14 while sibling test_training_loop_produces_cascade_units
+    passed within budget. Real cascade training on a GitHub-hosted
+    runner under 3.14 with default torch wheels lands closer to 100-150s
+    than 60-90s; this gives 30s+ of headroom without inviting silent
+    runaway training runs.
+    """
 
     def test_training_loop_produces_cascade_units(self):
         """Training loop should install cascade units and track cascade events."""
@@ -637,8 +647,8 @@ class TestEndToEndTrainingLoop:
         # Wait for training to complete naturally instead of polling during
         # training. Polling get_current_state() during CPU-intensive candidate
         # training causes GIL contention that starves the poll thread.
-        demo.thread.join(timeout=90)
-        assert not demo.thread.is_alive(), "Training did not complete within 90s"
+        demo.thread.join(timeout=180)
+        assert not demo.thread.is_alive(), "Training did not complete within 180s"
 
         # Training completed naturally (is_running=False), state is preserved
         state = demo.get_current_state()
@@ -658,8 +668,8 @@ class TestEndToEndTrainingLoop:
         demo.start()
 
         # Wait for training to complete naturally (same GIL contention fix)
-        demo.thread.join(timeout=90)
-        assert not demo.thread.is_alive(), "Training did not complete within 90s"
+        demo.thread.join(timeout=180)
+        assert not demo.thread.is_alive(), "Training did not complete within 180s"
 
         # Capture loss before stop() which may reset state
         final_loss = demo.current_loss

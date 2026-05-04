@@ -156,16 +156,18 @@ class TestProbeDependency:
         assert elapsed >= probe_latency * 0.9, f"wall-clock {elapsed*1000:.1f}ms below floor; mock probably not being awaited"
         # Concurrency property: 64 native-async probes overlap, so the
         # wall-clock is dominated by per-call ``httpx.AsyncClient``
-        # construction (observed ~10–15ms per client on this CI) plus
-        # the single shared 100ms sleep — typically ~700ms total. A
-        # genuine event-loop-blocking regression (any synchronous I/O
-        # in the probe path) would push elapsed toward serial wall-clock
-        # ``probe_count * probe_latency`` (= 6.4s here). Threshold at
-        # 25% of serial gives a wide safety margin against CI noise
-        # while still catching the regression we care about (which
-        # would land at ≥80% of serial).
+        # construction plus the single shared 100ms sleep. P-16 audit
+        # observed GitHub-hosted ubuntu runners landing 1672–2063 ms
+        # (vs the previous 1600 ms threshold = 25 % of the 6.4 s serial
+        # floor); macOS runners land within the original budget. The
+        # AsyncClient construction overhead is sensitive to runner
+        # cgroup scheduling — concurrency itself is healthy (a real
+        # blocking-call regression would push elapsed toward 80 % of
+        # serial = ~5.1 s). Bump to 50 % serial (3.2 s) so the gate
+        # tolerates the slower runners while still catching any
+        # serializing regression by a wide margin (5.1 s ≫ 3.2 s).
         serial_floor = probe_count * probe_latency
-        threshold = serial_floor * 0.25
+        threshold = serial_floor * 0.5
         assert elapsed < threshold, f"wall-clock {elapsed*1000:.1f}ms exceeded threshold {threshold*1000:.0f}ms (serial would be ~{serial_floor*1000:.0f}ms; blocking-call regression would push elapsed close to serial)"
 
 

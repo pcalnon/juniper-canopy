@@ -8,12 +8,15 @@ annotated-types==0.7.0
     # via pydantic
 anyio==4.13.0
     # via
+    #   httpx
     #   starlette
     #   watchfiles
 blinker==1.9.0
     # via flask
 certifi==2026.4.22
     # via
+    #   httpcore
+    #   httpx
     #   requests
     #   sentry-sdk
 charset-normalizer==3.4.7
@@ -35,12 +38,19 @@ fastapi==0.136.1
 flask==3.1.3
     # via dash
 h11==0.16.0
-    # via uvicorn
+    # via
+    #   httpcore
+    #   uvicorn
+httpcore==1.0.9
+    # via httpx
 httptools==0.7.1
     # via uvicorn
+httpx==0.28.1
+    # via juniper-canopy (pyproject.toml)
 idna==3.13
     # via
     #   anyio
+    #   httpx
     #   requests
 importlib-metadata==9.0.0
     # via dash
@@ -52,7 +62,7 @@ juniper-cascor-client==0.3.0
     # via juniper-canopy (pyproject.toml)
 juniper-cascor-protocol==0.1.0
     # via juniper-canopy (pyproject.toml)
-juniper-data-client==0.4.0
+juniper-data-client==0.4.1
     # via juniper-canopy (pyproject.toml)
 juniper-observability==0.1.1
     # via juniper-canopy (pyproject.toml)
