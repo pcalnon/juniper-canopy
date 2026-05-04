@@ -93,11 +93,7 @@ class NetworkEditorPanel(BaseComponent):
             [
                 html.H4("Network Editor", style={"marginBottom": "10px"}),
                 html.P(
-                    "Surgical edits to the loaded network — append/remove " + 
-                    "hidden units and patch individual parameter groups. " +
-                    "Available only while the cascor FSM is in the " +
-                    "Investigating state, which is entered by restoring a " + 
-                    "snapshot from the Snapshots tab.",
+                    "Surgical edits to the loaded network — append/remove " + "hidden units and patch individual parameter groups. " + "Available only while the cascor FSM is in the " + "Investigating state, which is entered by restoring a " + "snapshot from the Snapshots tab.",
                     style={"fontSize": "0.85rem", "color": "var(--text-muted)"},
                 ),
                 html.Div(idle_state, id=f"{self.component_id}-idle", style={"display": "block"}),
@@ -127,8 +123,7 @@ class NetworkEditorPanel(BaseComponent):
                             html.B("Snapshots"),
                             " tab to enter the ",
                             html.Code("Investigating"),
-                            " state. Once the FSM is in Investigating the " +
-                            "editor will unlock automatically.",
+                            " state. Once the FSM is in Investigating the " + "editor will unlock automatically.",
                         ],
                         style={"fontSize": "0.85rem"},
                     ),
@@ -172,8 +167,7 @@ class NetworkEditorPanel(BaseComponent):
                                 [
                                     "Appends one unit at the cascade tail. The weight vector length must equal ",
                                     html.Code("input_size + num_existing_hidden_units"),
-                                    ". The new unit's output column is initialized to zero so it contributes " +
-                                    "nothing until you patch the output layer or re-train.",
+                                    ". The new unit's output column is initialized to zero so it contributes " + "nothing until you patch the output layer or re-train.",
                                 ],
                                 style={"fontSize": "0.8rem", "color": "var(--text-muted)"},
                             ),
@@ -228,10 +222,7 @@ class NetworkEditorPanel(BaseComponent):
                         [
                             html.H5("Remove hidden unit", style={"marginBottom": "8px"}),
                             html.P(
-                                "Drops the unit at the chosen index and rebuilds " +
-                                "the cascade so the forward-pass shape invariant " +
-                                "still holds. The optimizer is dropped — fresh " +
-                                "training will rebuild it.",
+                                "Drops the unit at the chosen index and rebuilds " + "the cascade so the forward-pass shape invariant " + "still holds. The optimizer is dropped — fresh " + "training will rebuild it.",
                                 style={"fontSize": "0.8rem", "color": "var(--text-muted)"},
                             ),
                             dbc.Row(
@@ -270,10 +261,7 @@ class NetworkEditorPanel(BaseComponent):
                         [
                             html.H5("Patch weights", style={"marginBottom": "8px"}),
                             html.P(
-                                "Surgically rewrites a single parameter group. " +
-                                "The cascor side validates shape, dtype, and " +
-                                "NaN/Inf — invalid patches are rejected without " +
-                                "touching network state.",
+                                "Surgically rewrites a single parameter group. " + "The cascor side validates shape, dtype, and " + "NaN/Inf — invalid patches are rejected without " + "touching network state.",
                                 style={"fontSize": "0.8rem", "color": "var(--text-muted)"},
                             ),
                             dbc.Row(
