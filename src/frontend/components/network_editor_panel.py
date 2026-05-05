@@ -630,7 +630,10 @@ class NetworkEditorPanel(BaseComponent):
                 [
                     "Delete hidden unit ",
                     html.Strong(f"#{idx_int}"),
-                    "? Subsequent units shift down by one and the cascade " "is rebuilt so the forward-pass shape invariant still " "holds. The optimizer is dropped — fresh training will " "rebuild it.",
+                    "? Subsequent units shift down by one and the cascade " +
+                    "is rebuilt so the forward-pass shape invariant still " +
+                    "holds. The optimizer is dropped — fresh training will " +
+                    "rebuild it.",
                 ],
                 style={"fontSize": "0.9rem"},
             )
