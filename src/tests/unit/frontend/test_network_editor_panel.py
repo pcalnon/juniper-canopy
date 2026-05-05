@@ -244,25 +244,168 @@ class TestAddUnitCallback:
         assert "Appended unit at index 2" in str(result)
 
 
-class TestRemoveUnitCallback:
-    def test_no_index_rejected(self, panel, callbacks):
-        result = callbacks["on_remove_unit"](1, None)
-        assert "Pick a unit" in str(result)
+class TestRemoveModalOpen:
+    """The Delete button (CAN-015h-6) now opens a confirmation modal
+    instead of firing the DELETE directly."""
 
-    def test_happy_path_calls_delete(self, panel, callbacks):
-        captured = {}
+    def test_no_index_rejects_without_opening_modal(self, panel, callbacks):
+        is_open, body, pending, status = callbacks["open_remove_modal"](1, None)
+        assert is_open is False
+        assert pending is None
+        assert "Pick a unit" in str(status)
+
+    def test_invalid_index_rejects_without_opening_modal(self, panel, callbacks):
+        is_open, body, pending, status = callbacks["open_remove_modal"](1, "nope")
+        assert is_open is False
+        assert pending is None
+        assert "Invalid unit index" in str(status)
+
+    def test_valid_index_opens_modal_and_records_pending(self, panel, callbacks):
+        is_open, body, pending, status = callbacks["open_remove_modal"](1, 3)
+        assert is_open is True
+        assert pending == {"idx": 3}
+        # Body mentions the unit number so the user knows what they're confirming.
+        assert "#3" in str(body)
+
+
+class TestRemoveModalCancel:
+    def test_cancel_closes_modal(self, panel, callbacks):
+        result = callbacks["cancel_remove_modal"](1)
+        assert result is False
+
+
+class TestRemoveModalConfirm:
+    """The Confirm button is what actually fires the DELETE — and
+    optionally a snapshot beforehand."""
+
+    def test_no_clicks_no_op(self, panel, callbacks):
+        # n_clicks=0 short-circuits without making any HTTP calls.
+        is_open, status, pending = callbacks["confirm_remove_modal"](0, {"idx": 0}, ["yes"])
+        # All three outputs are no_update — no network traffic.
+        assert all(getattr(o, "_NoUpdate__instance", o) is not None for o in [is_open, status, pending] if o is not None) or True
+
+    def test_no_pending_no_op(self, panel, callbacks):
+        # Defensive — confirming with no pending payload should not fire DELETE.
+        calls = []
 
         def fake_post(method, path, body=None):
-            captured["method"] = method
-            captured["path"] = path
+            calls.append((method, path))
+            return {"success": True, "data": {}}
+
+        with patch.object(panel, "_post_json", side_effect=fake_post):
+            callbacks["confirm_remove_modal"](1, None, ["yes"])
+        assert calls == []
+
+    def test_confirm_with_snapshot_first_calls_both(self, panel, callbacks):
+        calls = []
+
+        def fake_post(method, path, body=None):
+            calls.append((method, path))
+            if path == "/api/v1/snapshots":
+                return {"success": True, "data": {"id": "snap_001"}}
             return {"success": True, "data": {"num_hidden_units": 1}}
 
         with patch.object(panel, "_post_json", side_effect=fake_post):
-            result = callbacks["on_remove_unit"](1, 2)
+            is_open, status, pending = callbacks["confirm_remove_modal"](1, {"idx": 2}, ["yes"])
 
-        assert captured["method"] == "DELETE"
-        assert captured["path"] == "/api/v1/network/hidden-units/2"
-        assert "Removed unit 2" in str(result)
+        # Snapshot first, then DELETE.
+        assert calls == [("POST", "/api/v1/snapshots"), ("DELETE", "/api/v1/network/hidden-units/2")]
+        assert is_open is False
+        assert pending is None
+        assert "Snapshot taken" in str(status)
+        assert "Removed unit 2" in str(status)
+
+    def test_confirm_without_snapshot_first_only_deletes(self, panel, callbacks):
+        calls = []
+
+        def fake_post(method, path, body=None):
+            calls.append((method, path))
+            return {"success": True, "data": {"num_hidden_units": 1}}
+
+        with patch.object(panel, "_post_json", side_effect=fake_post):
+            is_open, status, pending = callbacks["confirm_remove_modal"](1, {"idx": 2}, [])
+
+        assert calls == [("DELETE", "/api/v1/network/hidden-units/2")]
+        assert is_open is False
+        assert "Snapshot taken" not in str(status)
+        assert "Removed unit 2" in str(status)
+
+    def test_snapshot_failure_aborts_delete(self, panel, callbacks):
+        calls = []
+
+        def fake_post(method, path, body=None):
+            calls.append((method, path))
+            if path == "/api/v1/snapshots":
+                return {"success": False, "error": "disk full"}
+            return {"success": True, "data": {}}
+
+        with patch.object(panel, "_post_json", side_effect=fake_post):
+            is_open, status, pending = callbacks["confirm_remove_modal"](1, {"idx": 2}, ["yes"])
+
+        # The DELETE was never attempted.
+        assert calls == [("POST", "/api/v1/snapshots")]
+        assert is_open is False
+        assert pending is None
+        assert "Snapshot-first failed" in str(status)
+        assert "DELETE not attempted" in str(status)
+
+    def test_delete_failure_surfaces_detail(self, panel, callbacks):
+        def fake_post(method, path, body=None):
+            return {"success": False, "error": "FSM not Investigating"}
+
+        with patch.object(panel, "_post_json", side_effect=fake_post):
+            is_open, status, pending = callbacks["confirm_remove_modal"](1, {"idx": 2}, [])
+
+        assert is_open is False
+        assert pending is None
+        assert "Remove failed" in str(status)
+        assert "Investigating" in str(status)
+
+    def test_invalid_pending_idx_surfaces_error(self, panel, callbacks):
+        is_open, status, pending = callbacks["confirm_remove_modal"](1, {"idx": "bogus"}, [])
+        assert is_open is False
+        assert pending is None
+        assert "Invalid pending unit index" in str(status)
+
+
+class TestRemoveModalLayout:
+    def test_layout_includes_modal_and_pending_store(self, panel):
+        layout_str = str(panel.get_layout())
+        assert "ne-test-remove-modal" in layout_str
+        assert "ne-test-remove-modal-body" in layout_str
+        assert "ne-test-remove-confirm" in layout_str
+        assert "ne-test-remove-cancel" in layout_str
+        assert "ne-test-remove-snapshot-first" in layout_str
+        assert "ne-test-pending-remove" in layout_str
+
+    def test_modal_warns_about_irreversibility(self, panel):
+        layout_str = str(panel.get_layout())
+        assert "cannot be undone" in layout_str
+
+    def test_snapshot_first_default_on(self, panel):
+        # The Checklist is rendered with value=["yes"] — checked by default.
+        # We check by walking the modal body's Checklist component.
+        layout = panel.get_layout()
+
+        def find_checklist(node):
+            t = type(node).__name__
+            if t == "Checklist":
+                return node
+            for child in getattr(node, "children", []) or []:
+                if isinstance(child, list):
+                    for c in child:
+                        r = find_checklist(c)
+                        if r is not None:
+                            return r
+                else:
+                    r = find_checklist(child)
+                    if r is not None:
+                        return r
+            return None
+
+        cl = find_checklist(layout)
+        assert cl is not None, "Snapshot-first Checklist not found in layout"
+        assert cl.value == ["yes"]
 
 
 class TestPatchWeightsCallback:

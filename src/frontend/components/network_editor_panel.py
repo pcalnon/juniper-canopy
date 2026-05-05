@@ -38,9 +38,14 @@ talks to the cascor ``PATCH /v1/network/weights`` /
 ``DELETE /v1/network/hidden-units/{idx}`` endpoints landed in
 CAN-015h-1, h-2, h-3 (see juniper-cascor PRs #199, #200, #201).
 
-The h-6 follow-up wires this panel into the snapshot panel's
-B-5 confirm-modal pattern and adds the "snapshot first?" prompt
-prior to destructive operations.
+CAN-015h-6 adds the destructive-operation guard rails: the
+Delete button no longer fires the DELETE directly. Instead it
+opens a confirmation modal modeled on the snapshots panel's
+B-5 pattern. The modal text spells out that the change cannot
+be undone without restoring a previous snapshot, and exposes a
+"Take a snapshot first?" checkbox (default on) that POSTs to
+``/api/v1/snapshots`` before the DELETE — giving the user a
+fast escape hatch if they regret the surgery.
 """
 
 from typing import Any, Dict, List, Optional
@@ -99,6 +104,17 @@ class NetworkEditorPanel(BaseComponent):
                 html.Div(idle_state, id=f"{self.component_id}-idle", style={"display": "block"}),
                 html.Div(active_state, id=f"{self.component_id}-active", style={"display": "none"}),
                 html.Div(id=f"{self.component_id}-status", style={"marginTop": "10px"}),
+                # CAN-015h-6: confirmation modal for destructive ops.
+                # Currently gates DELETE /v1/network/hidden-units/{idx};
+                # the snapshot-first checkbox lets the user opt into a
+                # POST /api/v1/snapshots before the DELETE so the surgery
+                # is reversible.
+                self._build_remove_confirm_modal(),
+                # Pending-delete idx written by the Delete button click;
+                # consumed by the modal-confirm callback. Kept separate
+                # from the dropdown's value so racing the dropdown change
+                # mid-confirmation doesn't silently retarget the delete.
+                dcc.Store(id=f"{self.component_id}-pending-remove", data=None),
                 # Polled FSM state — we don't have a Store carrying
                 # cascor's state_machine summary, so the panel pulls it
                 # itself via /api/status on a 2s tick. The interval is
@@ -110,6 +126,57 @@ class NetworkEditorPanel(BaseComponent):
             ],
             id=f"{self.component_id}-root",
             style={"padding": "10px"},
+        )
+
+    def _build_remove_confirm_modal(self):
+        """Confirm-modal for the destructive DELETE op (CAN-015h-6).
+
+        Modeled on the snapshots panel's B-5 confirm-modal pattern.
+        Body text spells out that the surgery cannot be undone without
+        restoring a previous snapshot, and offers a "Take a snapshot
+        first?" checkbox so the user gets a one-click escape hatch.
+        """
+        return dbc.Modal(
+            [
+                dbc.ModalHeader(dbc.ModalTitle("Confirm unit removal")),
+                dbc.ModalBody(
+                    [
+                        html.Div(id=f"{self.component_id}-remove-modal-body"),
+                        html.P(
+                            html.Strong(
+                                "This cannot be undone without restoring a previous snapshot.",
+                            ),
+                            style={"color": "var(--bs-danger, #dc3545)", "marginTop": "10px"},
+                        ),
+                        dbc.Checklist(
+                            options=[{"label": "Take a snapshot first", "value": "yes"}],
+                            value=["yes"],
+                            id=f"{self.component_id}-remove-snapshot-first",
+                            switch=True,
+                            inline=False,
+                            style={"fontSize": "0.85rem"},
+                        ),
+                    ]
+                ),
+                dbc.ModalFooter(
+                    [
+                        dbc.Button(
+                            "Cancel",
+                            id=f"{self.component_id}-remove-cancel",
+                            color="secondary",
+                            className="me-2",
+                        ),
+                        dbc.Button(
+                            "Delete",
+                            id=f"{self.component_id}-remove-confirm",
+                            color="danger",
+                        ),
+                    ]
+                ),
+            ],
+            id=f"{self.component_id}-remove-modal",
+            is_open=False,
+            centered=True,
         )
 
     def _build_idle_state(self):
@@ -529,27 +596,104 @@ class NetworkEditorPanel(BaseComponent):
                 return self._status_alert(True, f"Appended unit at index {idx} (now {total} hidden units).")
             return self._status_alert(False, f"Add failed: {result['error']}")
 
+        # CAN-015h-6: the Delete button no longer fires the DELETE
+        # directly — it opens the confirmation modal. The modal's
+        # Confirm button is what actually issues the request, with an
+        # optional "snapshot first" pre-step.
+
         @app.callback(
+            Output(f"{component_id}-remove-modal", "is_open", allow_duplicate=True),
+            Output(f"{component_id}-remove-modal-body", "children"),
+            Output(f"{component_id}-pending-remove", "data"),
             Output(f"{component_id}-status", "children", allow_duplicate=True),
             Input(f"{component_id}-remove-submit", "n_clicks"),
             State(f"{component_id}-remove-idx", "value"),
             prevent_initial_call=True,
         )
-        def on_remove_unit(n_clicks, idx):
+        def open_remove_modal(n_clicks, idx):
+            """Open the destructive-op modal once the user clicks Delete.
+
+            Validates the idx up-front so we never surface a modal whose
+            Confirm button is doomed to fail; bad input falls through to
+            the status line directly without disturbing the modal.
+            """
             if not n_clicks:
-                return dash.no_update
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update
             if idx is None or idx == "":
-                return self._status_alert(False, "Pick a unit to delete.")
+                return False, dash.no_update, None, self._status_alert(False, "Pick a unit to delete.")
             try:
                 idx_int = int(idx)
             except (TypeError, ValueError):
-                return self._status_alert(False, "Invalid unit index.")
+                return False, dash.no_update, None, self._status_alert(False, "Invalid unit index.")
+
+            body = html.Div(
+                [
+                    "Delete hidden unit ",
+                    html.Strong(f"#{idx_int}"),
+                    "? Subsequent units shift down by one and the cascade " + "is rebuilt so the forward-pass shape invariant still " + "holds. The optimizer is dropped — fresh training will " + "rebuild it.",
+                ],
+                style={"fontSize": "0.9rem"},
+            )
+            return True, body, {"idx": idx_int}, dash.no_update
+
+        @app.callback(
+            Output(f"{component_id}-remove-modal", "is_open", allow_duplicate=True),
+            Input(f"{component_id}-remove-cancel", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def cancel_remove_modal(n_clicks):
+            """Close the modal without firing the DELETE."""
+            if not n_clicks:
+                return dash.no_update
+            return False
+
+        @app.callback(
+            Output(f"{component_id}-remove-modal", "is_open", allow_duplicate=True),
+            Output(f"{component_id}-status", "children", allow_duplicate=True),
+            Output(f"{component_id}-pending-remove", "data", allow_duplicate=True),
+            Input(f"{component_id}-remove-confirm", "n_clicks"),
+            State(f"{component_id}-pending-remove", "data"),
+            State(f"{component_id}-remove-snapshot-first", "value"),
+            prevent_initial_call=True,
+        )
+        def confirm_remove_modal(n_clicks, pending, snapshot_first):
+            """Fire the DELETE (and an optional snapshot beforehand).
+
+            ``pending`` is the dict written by ``open_remove_modal``;
+            we consume it here and clear it so a stale value can't
+            misfire on a follow-up confirm click.
+            """
+            if not n_clicks or not pending:
+                return dash.no_update, dash.no_update, dash.no_update
+            try:
+                idx_int = int(pending.get("idx"))
+            except (TypeError, ValueError):
+                return False, self._status_alert(False, "Invalid pending unit index."), None
+
+            # Snapshot-first prompt — best-effort. If the snapshot
+            # request fails we abort the DELETE and surface the error
+            # so the user can decide whether to retry without the
+            # checkbox or fix the snapshot path. The checkbox is on
+            # by default so the safe path is the default path.
+            wants_snapshot = bool(snapshot_first) and "yes" in (snapshot_first or [])
+            if wants_snapshot:
+                snap_result = self._post_json("POST", "/api/v1/snapshots", {})
+                if not snap_result["success"]:
+                    return (
+                        False,
+                        self._status_alert(False, f"Snapshot-first failed: {snap_result['error']}; DELETE not attempted."),
+                        None,
+                    )
+
             result = self._post_json("DELETE", f"/api/v1/network/hidden-units/{idx_int}")
             if result["success"]:
                 data = result["data"]
                 total = data.get("num_hidden_units")
-                return self._status_alert(True, f"Removed unit {idx_int} (now {total} hidden units).")
-            return self._status_alert(False, f"Remove failed: {result['error']}")
+                msg = f"Removed unit {idx_int} (now {total} hidden units)."
+                if wants_snapshot:
+                    msg = "Snapshot taken; " + msg
+                return False, self._status_alert(True, msg), None
+            return False, self._status_alert(False, f"Remove failed: {result['error']}"), None
 
         @app.callback(
             Output(f"{component_id}-status", "children", allow_duplicate=True),
