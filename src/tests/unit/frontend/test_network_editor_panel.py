@@ -422,6 +422,10 @@ class TestPatchWeightsCallback:
         assert "hidden_unit_index" in str(result)
 
     def test_output_target_omits_idx(self, panel, callbacks):
+        # Wire-shape regression: cascor's PATCH /v1/network/weights
+        # validates ``target ∈ {"output", "hidden_unit"}``. The panel
+        # dropdown stores the legacy ``output_weights`` value but the
+        # body must carry the cascor-side two-axis pair.
         captured = {}
 
         def fake_post(method, path, body=None):
@@ -433,7 +437,7 @@ class TestPatchWeightsCallback:
 
         body = captured["body"]
         assert "hidden_unit_index" not in body
-        assert body["target"] == "output_weights"
+        assert body["target"] == "output"
         assert body["field"] == "weights"
         assert body["values"] == [0.1, 0.2]
         assert body["dtype"] == "float32"
@@ -449,13 +453,14 @@ class TestPatchWeightsCallback:
             callbacks["on_patch_weights"](1, "hidden_unit_bias", 3, "0.5")
 
         body = captured["body"]
-        assert body["target"] == "hidden_unit_bias"
+        assert body["target"] == "hidden_unit"
         assert body["field"] == "bias"
         assert body["hidden_unit_index"] == 3
 
     def test_field_mapped_per_target(self, panel, callbacks):
         # output_bias and hidden_unit_bias map to field "bias"; the
-        # other two targets map to "weights".
+        # other two targets map to "weights". target axis collapses
+        # to "output"/"hidden_unit" — checked alongside.
         captured_bodies = []
 
         def fake_post(method, path, body=None):
@@ -466,8 +471,59 @@ class TestPatchWeightsCallback:
             callbacks["on_patch_weights"](1, "output_bias", None, "0.1")
             callbacks["on_patch_weights"](1, "hidden_unit_weights", 0, "0.1, 0.2")
 
+        assert captured_bodies[0]["target"] == "output"
         assert captured_bodies[0]["field"] == "bias"
+        assert captured_bodies[1]["target"] == "hidden_unit"
         assert captured_bodies[1]["field"] == "weights"
+
+
+class TestPatchWeightsWireSchemaConformance:
+    """Wire-shape regression coverage for the cascor PATCH schema.
+
+    The cascor side enforces ``Literal["output", "hidden_unit"]`` for
+    ``target`` and ``Literal["weights", "bias"]`` for ``field``. These
+    cases parametrize across all four dropdown values and assert the
+    body conforms to the cascor schema verbatim — drift in either the
+    dropdown values or the wire mapping trips the test before reaching
+    a 422 from cascor.
+    """
+
+    @pytest.mark.parametrize(
+        "dropdown_value, expected_target, expected_field",
+        [
+            ("output_weights", "output", "weights"),
+            ("output_bias", "output", "bias"),
+            ("hidden_unit_weights", "hidden_unit", "weights"),
+            ("hidden_unit_bias", "hidden_unit", "bias"),
+        ],
+    )
+    def test_wire_target_field_pair(self, panel, callbacks, dropdown_value, expected_target, expected_field):
+        captured = {}
+
+        def fake_post(method, path, body=None):
+            captured["body"] = body
+            return {"success": True, "data": {}}
+
+        # Hidden-unit targets need a valid idx; output targets don't.
+        idx = 0 if expected_target == "hidden_unit" else None
+        with patch.object(panel, "_post_json", side_effect=fake_post):
+            callbacks["on_patch_weights"](1, dropdown_value, idx, "0.1, 0.2")
+
+        body = captured["body"]
+        assert body["target"] == expected_target
+        assert body["field"] == expected_field
+        # Cascor's pydantic schema rejects values outside this enum,
+        # so verifying these literally guards against future drift.
+        assert body["target"] in ("output", "hidden_unit")
+        assert body["field"] in ("weights", "bias")
+        assert body["dtype"] == "float32"
+
+    def test_unknown_dropdown_value_surfaces_error(self, panel, callbacks):
+        # Defensive — if the dropdown ever ships with a value not in
+        # ``_PATCH_TARGET_TO_WIRE``, fail loudly at the panel layer
+        # rather than letting cascor reject with a generic 422.
+        result = callbacks["on_patch_weights"](1, "made_up_target", None, "0.1")
+        assert "Unknown patch target" in str(result)
 
 
 # =============================================================================
