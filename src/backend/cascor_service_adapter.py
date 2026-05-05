@@ -318,11 +318,22 @@ class CascorServiceAdapter:
 
             attempt = 0
             relay_enabled = True
+            # OBS-WIRE-02 / Q1 (option a): per-connection sequence
+            # tracker for client-side gap detection on the training
+            # channel. Reset to ``None`` whenever the relay reconnects
+            # (the cascor-side counter restarts at 1 on each new
+            # connection — see juniper-cascor websocket_manager seq
+            # assignment), so a "gap" is only meaningful within one
+            # connected session. Gap detection is inherently client-
+            # side truth (cascor cannot observe whether a frame
+            # actually arrived); see juniper-ml#197 state-analysis.
+            last_training_seq: Optional[int] = None
             while relay_enabled:
                 try:
                     stream = CascorTrainingStream(base_url=self._ws_url, api_key=self._api_key)
                     await stream.connect()
                     attempt = 0
+                    last_training_seq = None
                     async for message in stream.stream():
                         # METRICS-MON R2.2.5 / seed-05: validate the inbound
                         # frame against juniper-cascor-protocol's canonical
@@ -343,6 +354,29 @@ class CascorServiceAdapter:
                                 inc_unrecognized_ws_frame(_envelope.type, "training")
                         except Exception:  # noqa: BLE001 — observability MUST NOT break the relay loop
                             logger.debug("Inbound-frame validation hook errored; relay continues", exc_info=True)
+
+                        # OBS-WIRE-02 / Q1 (option a): client-side WS
+                        # sequence-gap detection. Compares each frame's
+                        # ``seq`` against ``last_training_seq + 1``;
+                        # mismatches bump the new
+                        # ``juniper_canopy_ws_seq_gap_detected_total``
+                        # counter (replaces the deleted cascor-side
+                        # counter, which had no semantically valid
+                        # server-side wire-site). Frames without a
+                        # ``seq`` field — e.g. /ws/control responses
+                        # (D-03) — are skipped. Wrapped in a broad
+                        # try/except so observability NEVER breaks the
+                        # relay loop.
+                        try:
+                            incoming_seq = message.get("seq") if isinstance(message, dict) else None
+                            if isinstance(incoming_seq, int):
+                                if last_training_seq is not None and incoming_seq != last_training_seq + 1:
+                                    from observability import inc_ws_seq_gap_detected
+
+                                    inc_ws_seq_gap_detected("training")
+                                last_training_seq = incoming_seq
+                        except Exception:  # noqa: BLE001 — observability MUST NOT break the relay loop
+                            logger.debug("Inbound-frame seq-gap hook errored; relay continues", exc_info=True)
 
                         msg_type = message.get("type", "")
 

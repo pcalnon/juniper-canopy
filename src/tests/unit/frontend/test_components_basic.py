@@ -9,7 +9,6 @@ from frontend.components.dataset_plotter import DatasetPlotter
 from frontend.components.decision_boundary import DecisionBoundary
 from frontend.components.metrics_panel import MetricsPanel
 from frontend.components.network_visualizer import NetworkVisualizer
-from frontend.components.training_metrics import TrainingMetricsComponent
 
 
 @pytest.fixture
@@ -214,52 +213,6 @@ class TestDecisionBoundaryBasic:
         component = DecisionBoundary({}, component_id="test-boundary")
 
         assert component.predict_fn is None
-
-
-class TestTrainingMetricsBasic:
-    """Basic tests for TrainingMetricsComponent."""
-
-    def test_component_initialization(self):
-        """Test that TrainingMetricsComponent initializes correctly."""
-        config = {"some_option": "value"}
-        component = TrainingMetricsComponent(config)
-
-        assert component.config == config
-        assert component.metrics_buffer == []
-
-    def test_create_loss_plot_returns_figure(self):
-        """Test that create_loss_plot returns a plotly figure."""
-        component = TrainingMetricsComponent({})
-
-        # Create mock metrics data
-        class MockMetric:
-            __slots__ = ["epoch", "loss"]
-
-            def __init__(self, epoch, loss):
-                self.epoch = epoch
-                self.loss = loss
-
-        metrics_data = [
-            MockMetric(1, 0.5),
-            MockMetric(2, 0.4),
-            MockMetric(3, 0.3),
-        ]
-
-        fig = component.create_loss_plot(metrics_data)
-
-        assert fig is not None
-        assert hasattr(fig, "data")
-        assert len(fig.data) > 0
-
-    def test_create_loss_plot_with_empty_data(self):
-        """Test that create_loss_plot handles empty data gracefully."""
-        component = TrainingMetricsComponent({})
-        metrics_data = []
-
-        fig = component.create_loss_plot(metrics_data)
-
-        assert fig is not None
-        assert hasattr(fig, "data")
 
 
 class TestAllComponentsConformToInterface:

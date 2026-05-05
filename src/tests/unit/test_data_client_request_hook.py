@@ -215,3 +215,120 @@ class TestBuildDataClientRequestHook:
         labelsets = [(s.labels.get("method"), s.labels.get("status_class"), s.labels.get("error_type")) for s in samples if s.name.endswith("_total")]
         target = [ls for ls in labelsets if ls == ("GET", "2xx", "none")]
         assert len(target) == 1, f"expected 1 (GET, 2xx, none) labelset, got {labelsets}"
+
+
+class TestErrorTypeClosedSet:
+    """OBS-WIRE-02 / A.8: ``error_type`` label must be closed-set.
+
+    Production must NOT crash on a future juniper-data-client release
+    that adds a new typed exception. Unknown classes collapse to
+    ``"_other"`` (cardinality bound) and a structured WARNING fires so
+    the next allowlist update is flagged.
+    """
+
+    def test_known_error_types_pass_through(self):
+        """All members of :data:`_KNOWN_DATA_CLIENT_ERROR_TYPES` (other
+        than the synthetic ``"none"`` sentinel) flow through unchanged.
+        """
+        from juniper_data_client.exceptions import (
+            JuniperDataClientError,
+            JuniperDataConnectionError,
+            JuniperDataNotFoundError,
+            JuniperDataTimeoutError,
+            JuniperDataValidationError,
+        )
+
+        hook = obs.build_data_client_request_hook()
+        for err_cls in (
+            JuniperDataClientError,
+            JuniperDataConnectionError,
+            JuniperDataNotFoundError,
+            JuniperDataTimeoutError,
+            JuniperDataValidationError,
+        ):
+            err = err_cls("simulated")
+            hook("GET", "http://localhost:8100/v1/health", 500, 1.0, err)
+            metrics = obs._ensure_canopy_metrics()
+            # Verify the label value is the actual class name (not collapsed).
+            expected = type(err).__name__
+            # Increment is 1 per class on the (GET, 5xx, expected) labelset.
+            assert _counter_value(metrics["data_client_requests_total"], method="GET", status_class="5xx", error_type=expected) == 1.0
+
+    def test_unknown_error_type_collapses_to_other_and_warns(self, caplog):
+        """A synthetic exception class not in the allowlist must:
+
+        * Collapse to ``error_type="_other"`` on the metric labelset.
+        * Emit a structured WARNING line with the original raw class
+          name in ``extra`` so the allowlist can be updated.
+        * NOT raise — production must never crash on an unknown class.
+        """
+
+        class _SyntheticUnknownError(Exception):
+            pass
+
+        err = _SyntheticUnknownError("future class")
+        hook = obs.build_data_client_request_hook()
+
+        caplog.clear()
+        with caplog.at_level("WARNING", logger="juniper_canopy.observability"):
+            hook("POST", "http://localhost:8100/v1/datasets", 500, 5.0, err)
+
+        metrics = obs._ensure_canopy_metrics()
+        # Collapsed to "_other".
+        assert _counter_value(metrics["data_client_requests_total"], method="POST", status_class="5xx", error_type="_other") == 1.0
+        # Did NOT emit under the raw class name.
+        raw_name = type(err).__name__
+        assert _counter_value(metrics["data_client_requests_total"], method="POST", status_class="5xx", error_type=raw_name) == 0.0
+        # Structured WARNING fired.
+        assert any(rec.levelname == "WARNING" and "juniper_canopy_data_client_unknown_error_type" in rec.message for rec in caplog.records), f"expected WARNING for unknown error type; got: {[(r.levelname, r.message) for r in caplog.records]}"
+
+    def test_known_error_types_frozenset_membership(self):
+        """Pin the closed-set membership so adding a new member without
+        updating tests is loud rather than silent.
+        """
+        # Verify the documented members are present. Any future addition
+        # to juniper-data-client/exceptions.py must update both the
+        # allowlist AND this test in lockstep.
+        assert obs._KNOWN_DATA_CLIENT_ERROR_TYPES == frozenset(
+            {
+                "none",
+                "JuniperDataClientError",
+                "JuniperDataConfigurationError",
+                "JuniperDataConnectionError",
+                "JuniperDataTimeoutError",
+                "JuniperDataNotFoundError",
+                "JuniperDataValidationError",
+            }
+        )
+
+
+class TestDurationHistogramBucketPin:
+    """OBS-WIRE-02 / D.4: pin the histogram bucket layout.
+
+    Mirrors the cascor-side R5.4-pre boundary-pin tests
+    (``juniper-cascor/src/tests/unit/api/test_metrics_r5_4_pre.py``).
+    Keeps anyone who edits the bucket list honest — bucket changes are
+    SLO-relevant and must be reviewed alongside dashboards / alert
+    rules, not silently merged.
+    """
+
+    def test_data_client_request_duration_ms_buckets(self):
+        from math import inf
+
+        metrics = obs._ensure_canopy_metrics()
+        # ``Histogram._upper_bounds`` includes the implicit +Inf bucket
+        # appended by prometheus_client.
+        assert metrics["data_client_request_duration_ms"]._upper_bounds == [
+            1.0,
+            5.0,
+            10.0,
+            25.0,
+            50.0,
+            100.0,
+            250.0,
+            500.0,
+            1000.0,
+            2500.0,
+            5000.0,
+            inf,
+        ]

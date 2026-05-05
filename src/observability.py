@@ -192,6 +192,27 @@ def _ensure_canopy_metrics() -> dict:
                     buckets=[1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
                 ),
             ),
+            # OBS-WIRE-02 / Q1 (option a): client-side WS sequence-gap
+            # counter. Replaces the cascor-side
+            # ``cascor_ws_seq_gap_detected_total`` (which had no
+            # semantically valid server-side wire-site — gap detection
+            # is inherently client-side truth). Cross-service
+            # correlation labels:
+            # * ``service`` — upstream cascor identity (closed: just
+            #   ``"juniper-cascor"`` today, reserves room for future
+            #   multi-cascor topologies).
+            # * ``channel`` — ``"training"`` or ``"control"`` (mirrors
+            #   the A.4 ``websocket_messages_total`` channel labelset).
+            # See ``notes/observability/A9_AND_3_2_STATE_ANALYSIS_2026-05-03.md``
+            # in juniper-ml (Q1 resolution).
+            "ws_seq_gap_detected_total": _get_or_create(
+                "juniper_canopy_ws_seq_gap_detected_total",
+                lambda: Counter(
+                    "juniper_canopy_ws_seq_gap_detected_total",
+                    "Client-side WS sequence-number gaps detected on inbound frames, by upstream service and channel.",
+                    ["service", "channel"],
+                ),
+            ),
         }
     return _canopy_metrics
 
@@ -247,7 +268,24 @@ def build_data_client_request_hook():
     ) -> None:
         metrics = _ensure_canopy_metrics()
         status_class = _classify_status(status)
-        error_type = type(error).__name__ if error is not None else "none"
+        raw_error_type = type(error).__name__ if error is not None else "none"
+        # OBS-WIRE-02 / A.8: closed-set validation. juniper-data-client
+        # publishes a known set of typed exceptions (see
+        # ``_KNOWN_DATA_CLIENT_ERROR_TYPES``); anything else collapses to
+        # ``"_other"`` to keep cardinality bounded if the client ever
+        # adds a new exception class. Production must NOT crash on the
+        # unknown class — log a structured WARNING so the next allowlist
+        # update gets flagged, but emit the metric either way.
+        if raw_error_type in _KNOWN_DATA_CLIENT_ERROR_TYPES:
+            error_type = raw_error_type
+        else:
+            error_type = "_other"
+            import logging
+
+            logging.getLogger("juniper_canopy.observability").warning(
+                "juniper_canopy_data_client_unknown_error_type",
+                extra={"raw_error_type": raw_error_type, "method": method, "status_class": status_class},
+            )
         metrics["data_client_requests_total"].labels(
             method=method,
             status_class=status_class,
@@ -348,3 +386,86 @@ def inc_unrecognized_ws_frame(type_label: str, endpoint: str) -> None:
         extra={"type": type_label, "endpoint": endpoint},
     )
     _ensure_canopy_metrics()["unrecognized_ws_frames_total"].labels(type=type_label, endpoint=endpoint).inc()
+
+
+# OBS-WIRE-02 / Q1 (option a): closed-set allowlist for the ``error_type``
+# label on ``juniper_canopy_data_client_requests_total``. Mirrors the typed
+# exception surface published by juniper-data-client (see
+# ``juniper_data_client/exceptions.py``). Anything outside this set
+# collapses to ``"_other"`` so a future juniper-data-client release that
+# adds a new exception class can't blow up the timeseries label space
+# (R1.1 closed-set discipline).
+#
+# When juniper-data-client adds a new typed exception, the WARNING log
+# line emitted by ``build_data_client_request_hook`` flags it for an
+# allowlist update here; production must not crash on the unknown class
+# (audit doc A.8).
+_KNOWN_DATA_CLIENT_ERROR_TYPES: frozenset[str] = frozenset(
+    {
+        "none",
+        "JuniperDataClientError",
+        "JuniperDataConfigurationError",
+        "JuniperDataConnectionError",
+        "JuniperDataTimeoutError",
+        "JuniperDataNotFoundError",
+        "JuniperDataValidationError",
+    }
+)
+
+
+# OBS-WIRE-02 / Q1 (option a): closed-set allowlist for the ``channel``
+# label on ``juniper_canopy_ws_seq_gap_detected_total``. Mirrors the A.4
+# wire-up choice for ``juniper_canopy_websocket_messages_total``.
+_SEQ_GAP_CHANNELS: frozenset[str] = frozenset({"training", "control"})
+
+# Static value for the ``service`` label — only one upstream cascor for
+# now; reserves room for future multi-cascor topologies (would become a
+# parameter on the helper at that point).
+_SEQ_GAP_UPSTREAM_SERVICE: str = "juniper-cascor"
+
+
+def inc_ws_seq_gap_detected(channel: str) -> None:
+    """Record a client-side WS sequence gap detected on an inbound frame.
+
+    OBS-WIRE-02 / Q1 (option a): replaces the cascor-side
+    ``cascor_ws_seq_gap_detected_total`` counter, which had no
+    semantically valid server-side wire-site (gap detection is
+    inherently client-side truth). The replacement lives here on canopy
+    with cross-service correlation labels:
+
+    * ``service`` — the upstream cascor service the gap was detected
+      against. Static ``"juniper-cascor"`` for now (one upstream);
+      reserves room for future multi-cascor topologies.
+    * ``channel`` — the WS channel the gap was detected on. Closed
+      set: ``{"training", "control"}``.
+
+    The helper validates ``channel`` against
+    :data:`_SEQ_GAP_CHANNELS` and raises :class:`ValueError` on an
+    unknown value (mirrors the
+    :func:`juniper-cascor.api.observability.inc_training_session_completed`
+    pattern — instrumentation drift surfaces early rather than silently
+    blowing up cardinality).
+
+    Also emits a structured WARNING log line per the R4.7 / R2.2 pattern
+    so operators see the gap on stacks without Prometheus scraping.
+
+    Args:
+        channel: WS channel — must be one of ``"training"`` or
+            ``"control"``.
+
+    Raises:
+        ValueError: If ``channel`` is not in :data:`_SEQ_GAP_CHANNELS`.
+    """
+    if channel not in _SEQ_GAP_CHANNELS:
+        raise ValueError(f"invalid ws seq gap channel {channel!r}; expected one of {sorted(_SEQ_GAP_CHANNELS)!r}")
+
+    import logging
+
+    logging.getLogger("juniper_canopy.observability").warning(
+        "juniper_canopy_ws_seq_gap_detected",
+        extra={"service": _SEQ_GAP_UPSTREAM_SERVICE, "channel": channel},
+    )
+    _ensure_canopy_metrics()["ws_seq_gap_detected_total"].labels(
+        service=_SEQ_GAP_UPSTREAM_SERVICE,
+        channel=channel,
+    ).inc()
