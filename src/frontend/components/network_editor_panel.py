@@ -66,15 +66,27 @@ from ..base_component import BaseComponent
 _ACTIVATION_CHOICES = ["Tanh", "Sigmoid", "ReLU", "Linear"]
 
 # Patch targets accepted by PATCH /v1/network/weights. The cascor
-# layer enforces shape and NaN/Inf validation; we just send the
-# label through. ``hidden_unit_*`` targets require a
-# ``hidden_unit_index``.
+# layer enforces shape and NaN/Inf validation; we map the dropdown
+# value back to cascor's two-axis (target, field) schema before
+# sending. ``hidden_unit_*`` targets require a ``hidden_unit_index``.
+#
+# Dropdown values are kept in the original `<target>_<field>` shape
+# for backward compatibility with any callback graph watching this
+# id; ``_PATCH_TARGET_TO_WIRE`` maps them into the cascor-side
+# ``{"target": "output"|"hidden_unit", "field": "weights"|"bias"}``
+# pair at request-build time.
 _PATCH_TARGETS = [
     {"label": "Output weights", "value": "output_weights"},
     {"label": "Output bias", "value": "output_bias"},
     {"label": "Hidden unit weights", "value": "hidden_unit_weights"},
     {"label": "Hidden unit bias", "value": "hidden_unit_bias"},
 ]
+_PATCH_TARGET_TO_WIRE: Dict[str, Dict[str, str]] = {
+    "output_weights": {"target": "output", "field": "weights"},
+    "output_bias": {"target": "output", "field": "bias"},
+    "hidden_unit_weights": {"target": "hidden_unit", "field": "weights"},
+    "hidden_unit_bias": {"target": "hidden_unit", "field": "bias"},
+}
 
 
 class NetworkEditorPanel(BaseComponent):
@@ -715,20 +727,24 @@ class NetworkEditorPanel(BaseComponent):
             if not values:
                 return self._status_alert(False, "Values are required.")
 
-            field_map = {
-                "output_weights": "weights",
-                "output_bias": "bias",
-                "hidden_unit_weights": "weights",
-                "hidden_unit_bias": "bias",
-            }
-            field = field_map.get(target, "weights")
+            # Map the dropdown's `<target>_<field>` value into cascor's
+            # two-axis schema (`target ∈ {output, hidden_unit}`,
+            # `field ∈ {weights, bias}`). The dropdown's stored value
+            # is preserved in `<target>_<field>` shape for backward
+            # compatibility with any clientside callback graph that
+            # watches this id; the wire body uses the cascor schema.
+            wire = _PATCH_TARGET_TO_WIRE.get(target)
+            if wire is None:
+                return self._status_alert(False, f"Unknown patch target: {target!r}")
+            wire_target = wire["target"]
+            wire_field = wire["field"]
             body: Dict[str, Any] = {
-                "target": target,
-                "field": field,
+                "target": wire_target,
+                "field": wire_field,
                 "values": values,
                 "dtype": "float32",
             }
-            if target.startswith("hidden_unit_"):
+            if wire_target == "hidden_unit":
                 if hidden_idx is None or hidden_idx == "":
                     return self._status_alert(False, "hidden_unit_index is required for hidden_unit_* targets.")
                 try:
@@ -738,5 +754,5 @@ class NetworkEditorPanel(BaseComponent):
 
             result = self._post_json("PATCH", "/api/v1/network/weights", body)
             if result["success"]:
-                return self._status_alert(True, f"Patched {target}.{field} ({len(values)} values).")
+                return self._status_alert(True, f"Patched {wire_target}.{wire_field} ({len(values)} values).")
             return self._status_alert(False, f"Patch failed: {result['error']}")
