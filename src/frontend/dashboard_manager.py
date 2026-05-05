@@ -3316,13 +3316,25 @@ class DashboardManager:
             # Phase B: Track REST polling bandwidth (P0 motivator proof metric)
             if not hasattr(self, "_rest_bytes_gauge"):
                 try:
-                    from prometheus_client import Gauge
+                    from prometheus_client import REGISTRY, Gauge
 
-                    self._rest_bytes_gauge = Gauge(
-                        "canopy_rest_polling_bytes_per_sec",
-                        "REST polling response size in bytes (per endpoint)",
-                        ["endpoint"],
-                    )
+                    metric_name = "canopy_rest_polling_bytes_per_sec"
+                    try:
+                        self._rest_bytes_gauge = Gauge(
+                            metric_name,
+                            "REST polling response size in bytes (per endpoint)",
+                            ["endpoint"],
+                        )
+                    except ValueError:
+                        # Already registered — adopt the existing
+                        # collector. A second ``DashboardManager``
+                        # instance in the same process (test fixture
+                        # rebuilding the app, in-process re-init) would
+                        # otherwise crash here on duplicate registration.
+                        existing = REGISTRY._names_to_collectors.get(metric_name)
+                        if existing is None:
+                            raise
+                        self._rest_bytes_gauge = existing
                 except Exception:
                     self._rest_bytes_gauge = None
             if self._rest_bytes_gauge:
