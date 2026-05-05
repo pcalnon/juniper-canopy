@@ -69,6 +69,8 @@ def dashboard():
     dm.parameters_panel = type("Mock", (), {"get_layout": lambda self: None})()
     dm.tutorial_panel = type("Mock", (), {"get_layout": lambda self: None})()
     dm.worker_panel = type("Mock", (), {"get_layout": lambda self: None})()
+    # Phase 6E CAN-015h-5: surgical network-editor panel for restored snapshots.
+    dm.network_editor_panel = type("Mock", (), {"get_layout": lambda self: None})()
     dm._setup_layout()
     return dm
 
