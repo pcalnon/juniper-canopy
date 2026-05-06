@@ -85,7 +85,7 @@ dependencies = [
     # configure_logging, configure_sentry, get_prometheus_app,
     # set_build_info). Pinned at the first stable release; consumers
     # should never resolve back to the alpha line.
-    "juniper-observability>=0.1.1",
+    "juniper-observability>=0.2.0",
     # METRICS-MON R2.2.5 / seed-05: WS frame schema validation. Pinned
     # at the first stable release; pulled in transitively by
     # juniper-cascor-client too, but pinned explicitly here so the

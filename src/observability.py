@@ -101,48 +101,26 @@ def _ensure_canopy_metrics() -> dict:
     """
     global _canopy_metrics
     if _canopy_metrics is None:
-        from prometheus_client import REGISTRY, Counter, Gauge, Histogram
-
-        # ``Counter`` / ``Gauge`` register themselves with REGISTRY on
-        # construction and raise ``ValueError`` if the timeseries name is
-        # already present. Build the dict element-by-element so we can fall
-        # back to REGISTRY lookup on a per-metric basis.
-        def _get_or_create(metric_name: str, factory):
-            try:
-                return factory()
-            except ValueError as exc:
-                if "Duplicated timeseries" not in str(exc):
-                    raise
-                # Adopt the existing collector. ``REGISTRY._names_to_collectors``
-                # is private but is the supported lookup in test contexts.
-                existing = REGISTRY._names_to_collectors.get(metric_name)
-                if existing is None:
-                    raise
-                return existing
+        from juniper_observability import register_or_reuse
+        from prometheus_client import Counter, Gauge, Histogram
 
         _canopy_metrics = {
-            "websocket_connections_active": _get_or_create(
+            "websocket_connections_active": register_or_reuse(
+                Gauge,
                 "juniper_canopy_websocket_connections_active",
-                lambda: Gauge(
-                    "juniper_canopy_websocket_connections_active",
-                    "Number of active WebSocket connections",
-                    ["channel"],
-                ),
+                "Number of active WebSocket connections",
+                ["channel"],
             ),
-            "websocket_messages_total": _get_or_create(
+            "websocket_messages_total": register_or_reuse(
+                Counter,
                 "juniper_canopy_websocket_messages_total",
-                lambda: Counter(
-                    "juniper_canopy_websocket_messages_total",
-                    "Total WebSocket messages sent",
-                    ["channel", "type"],
-                ),
+                "Total WebSocket messages sent",
+                ["channel", "type"],
             ),
-            "demo_mode_active": _get_or_create(
+            "demo_mode_active": register_or_reuse(
+                Gauge,
                 "juniper_canopy_demo_mode_active",
-                lambda: Gauge(
-                    "juniper_canopy_demo_mode_active",
-                    "Whether demo mode is currently active (0 or 1)",
-                ),
+                "Whether demo mode is currently active (0 or 1)",
             ),
             # METRICS-MON R2.2.5 / seed-05: inbound-frame validation counter.
             # Bumped from cascor_service_adapter._relay_loop when an inbound
@@ -151,13 +129,11 @@ def _ensure_canopy_metrics() -> dict:
             # cardinality-bounded by the protocol package (collapses to
             # ``"_unmatched"`` after UNKNOWN_TYPE_BUDGET=16 distinct unknowns
             # per process), mirroring the R1.1 HTTP cardinality discipline.
-            "unrecognized_ws_frames_total": _get_or_create(
+            "unrecognized_ws_frames_total": register_or_reuse(
+                Counter,
                 "juniper_canopy_unrecognized_ws_frames_total",
-                lambda: Counter(
-                    "juniper_canopy_unrecognized_ws_frames_total",
-                    "WS frames that failed envelope validation, by reported type and endpoint.",
-                    ["type", "endpoint"],
-                ),
+                "WS frames that failed envelope validation, by reported type and endpoint.",
+                ["type", "endpoint"],
             ),
             # METRICS-MON R4.3 / seed-13: outbound juniper-data-client
             # request observability. Populated by the on_request hook
@@ -171,26 +147,22 @@ def _ensure_canopy_metrics() -> dict:
             # * ``error_type`` — exception class name on failure paths,
             #   ``"none"`` on success. Closed by the typed-exception
             #   surface of juniper-data-client (5 known classes + "none").
-            "data_client_requests_total": _get_or_create(
+            "data_client_requests_total": register_or_reuse(
+                Counter,
                 "juniper_canopy_data_client_requests_total",
-                lambda: Counter(
-                    "juniper_canopy_data_client_requests_total",
-                    "Outbound juniper-data-client HTTP requests, by method, status class, and error type",
-                    ["method", "status_class", "error_type"],
-                ),
+                "Outbound juniper-data-client HTTP requests, by method, status class, and error type",
+                ["method", "status_class", "error_type"],
             ),
-            "data_client_request_duration_ms": _get_or_create(
+            "data_client_request_duration_ms": register_or_reuse(
+                Histogram,
                 "juniper_canopy_data_client_request_duration_ms",
-                lambda: Histogram(
-                    "juniper_canopy_data_client_request_duration_ms",
-                    # METRICS-MON R4.1 / R4.3: bucket layout is **tentative
-                    # pending R5.1**. Same human-UX-anchored decade pattern
-                    # as ``canopy_ws_browser_latency_ms`` (covered in
-                    # ``notes/observability/HISTOGRAM_BUCKETS_RATIONALE_2026-05-02.md``).
-                    "Outbound juniper-data-client HTTP request duration in milliseconds (R4.1 buckets tentative pending R5.1)",
-                    ["method", "status_class"],
-                    buckets=[1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
-                ),
+                # METRICS-MON R4.1 / R4.3: bucket layout is **tentative
+                # pending R5.1**. Same human-UX-anchored decade pattern
+                # as ``canopy_ws_browser_latency_ms`` (covered in
+                # ``notes/observability/HISTOGRAM_BUCKETS_RATIONALE_2026-05-02.md``).
+                "Outbound juniper-data-client HTTP request duration in milliseconds (R4.1 buckets tentative pending R5.1)",
+                ["method", "status_class"],
+                buckets=[1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
             ),
             # OBS-WIRE-02 / Q1 (option a): client-side WS sequence-gap
             # counter. Replaces the cascor-side
@@ -205,13 +177,11 @@ def _ensure_canopy_metrics() -> dict:
             #   the A.4 ``websocket_messages_total`` channel labelset).
             # See ``notes/observability/A9_AND_3_2_STATE_ANALYSIS_2026-05-03.md``
             # in juniper-ml (Q1 resolution).
-            "ws_seq_gap_detected_total": _get_or_create(
+            "ws_seq_gap_detected_total": register_or_reuse(
+                Counter,
                 "juniper_canopy_ws_seq_gap_detected_total",
-                lambda: Counter(
-                    "juniper_canopy_ws_seq_gap_detected_total",
-                    "Client-side WS sequence-number gaps detected on inbound frames, by upstream service and channel.",
-                    ["service", "channel"],
-                ),
+                "Client-side WS sequence-number gaps detected on inbound frames, by upstream service and channel.",
+                ["service", "channel"],
             ),
         }
     return _canopy_metrics

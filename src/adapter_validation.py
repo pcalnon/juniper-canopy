@@ -49,22 +49,14 @@ def validate_inbound_frame(raw: dict) -> Optional[CascorServerFrame]:
         logger.warning("Malformed inbound frame from cascor: %s — %s", type(e).__name__, e)
         try:
             if _inbound_invalid_counter is None:
-                from prometheus_client import REGISTRY, Counter
+                from juniper_observability import register_or_reuse
+                from prometheus_client import Counter
 
-                metric_name = "canopy_adapter_inbound_invalid_total"
-                try:
-                    _inbound_invalid_counter = Counter(
-                        metric_name,
-                        "Malformed frames received from cascor",
-                    )
-                except ValueError:
-                    # Already registered (test fixture nulled the
-                    # module-level cache, in-process re-init, etc.).
-                    # Adopt the existing collector instead of raising.
-                    existing = REGISTRY._names_to_collectors.get(metric_name)
-                    if existing is None:
-                        raise
-                    _inbound_invalid_counter = existing
+                _inbound_invalid_counter = register_or_reuse(
+                    Counter,
+                    "canopy_adapter_inbound_invalid_total",
+                    "Malformed frames received from cascor",
+                )
             _inbound_invalid_counter.inc()
         except Exception:  # nosec B110 — graceful degradation when prometheus_client unavailable
             pass
