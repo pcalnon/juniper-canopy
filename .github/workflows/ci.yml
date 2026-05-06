@@ -584,17 +584,16 @@ jobs:
             --cross-repo skip
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
-  # Async-route audit (Phase 2 — soft-fail visibility).
+  # Async-route audit (Phase 4 — enforced).
   # Catches the BUG-JD-10 bug class (sync-blocking calls inside async def
-  # route handlers). `--exit-zero` + `continue-on-error: true` so violations
-  # surface as PR annotations without blocking merge or showing the step
-  # as red. Phase 4 will drop both flags.
+  # route handlers). Hard-fails on any new violation; this repo reached
+  # zero visible violations at end of Phase 3 (PR #247). Per-file-ignores
+  # live in pyproject.toml [tool.ruff.lint.per-file-ignores].
   # See juniper-ml notes/ASYNC_ROUTE_AUDIT_HOOK_MIGRATION_PLAN.md §4.
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   async-route-audit:
-    name: Async-route audit (BUG-JD-10 class, soft-fail)
+    name: Async-route audit (BUG-JD-10 class)
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - name: Checkout Code
@@ -613,10 +612,7 @@ jobs:
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - Async-route audit (BUG-JD-10)      ║"
           echo "╚════════════════════════════════════════════════════════════╝"
-          # --exit-zero + continue-on-error: belt and suspenders so the
-          # step exits 0 (no red indicator) while annotations still
-          # render via --output-format=github. Phase 4 drops both.
-          ruff check --select ASYNC --exit-zero --output-format=github src/
+          ruff check --select ASYNC --output-format=github src/
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   # Docker Build & Smoke Test: Verify Dockerfile builds and container starts
