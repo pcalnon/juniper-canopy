@@ -2963,39 +2963,23 @@ _ws_latency_hist = None
 _ws_error_counter = None
 
 try:
-    from prometheus_client import REGISTRY as _PromRegistry
+    from juniper_observability import register_or_reuse as _register_or_reuse
     from prometheus_client import Counter as _PromCounter
     from prometheus_client import Histogram as _PromHistogram
-
-    def _ws_register_or_reuse(factory, name, *args, **kwargs):
-        # Module-level metric construction is not safe under
-        # ``importlib.reload`` or any in-process re-import path:
-        # ``prometheus_client`` collectors register with the global
-        # REGISTRY on construction and raise ``ValueError: Duplicated
-        # timeseries`` on a second registration with the same name.
-        # Adopt the existing collector on duplicate so reloads (test
-        # fixtures, dev autoreload) keep working.
-        try:
-            return factory(name, *args, **kwargs)
-        except ValueError:
-            existing = _PromRegistry._names_to_collectors.get(name)
-            if existing is None:
-                raise
-            return existing
 
     # METRICS-MON R4.1: bucket layout is **tentative pending R5.1**.
     # Per-boundary SLO rationale lives in
     # ``notes/observability/HISTOGRAM_BUCKETS_RATIONALE_2026-05-02.md``.
     # R5.1's SLO catalog will ratify or reshape; re-bucketing is a
     # metric-version event but not a public-API break.
-    _ws_latency_hist = _ws_register_or_reuse(
+    _ws_latency_hist = _register_or_reuse(
         _PromHistogram,
         "canopy_ws_browser_latency_ms",
         "Browser-reported WebSocket round-trip latency (R4.1 buckets tentative pending R5.1)",
         ["endpoint"],
         buckets=[5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
     )
-    _ws_error_counter = _ws_register_or_reuse(
+    _ws_error_counter = _register_or_reuse(
         _PromCounter,
         "canopy_ws_browser_errors_total",
         "Browser-reported WebSocket errors",
