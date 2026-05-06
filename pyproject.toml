@@ -352,3 +352,52 @@ output = "coverage.xml"
 [tool.coverage.json]
 output = "coverage.json"
 pretty_print = true
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Ruff — async-route audit only (Phase 1 wiring, disabled state).
+# Canopy's primary lint stack stays flake8 + black + isort + bandit + mypy.
+# Ruff is added solely for the ASYNC* ruleset (BUG-JD-10 class prevention),
+# enforced via a manual-stage pre-commit hook. See juniper-ml notes/
+# ASYNC_ROUTE_AUDIT_HOOK_MIGRATION_PLAN.md.
+# ═══════════════════════════════════════════════════════════════════════════
+[tool.ruff]
+# Note: ruff >=0.15 caps line-length at 320. Canopy's ecosystem
+# convention is 512, but since this ruff config is only used for the
+# ASYNC* ruleset (not formatting), the value doesn't affect output;
+# pinned at the 320 cap so the config parses without error.
+line-length = 320
+target-version = "py312"
+
+[tool.ruff.lint]
+# Empty `select` so regular `ruff check` is a no-op. The ASYNC* ruleset is
+# explicitly opted into via the pre-commit hook's `--select ASYNC` arg.
+# Phase 4 may flip this to `select = ["ASYNC"]` if we want the rules
+# applied during regular runs too.
+select = []
+
+[tool.ruff.lint.per-file-ignores]
+# Phase 0 enumeration (juniper-ml notes/ASYNC_ROUTE_VIOLATIONS_2026-05-06.md
+# §2.4) flagged 20 violations across 5 files. The per-file-ignores below
+# silence the **false positives** so Phase 2's CI-annotation lane focuses
+# on real production fixes (the 4 ASYNC230/240 sites in src/main.py for
+# snapshot-history file I/O and pathlib ops).
+#
+# ASYNC109 = "async function definition with a `timeout` parameter".
+# All ignored sites pass `timeout` through to a primitive that handles it
+# correctly (httpx.AsyncClient, asyncio.wait_for, or pytest-async fixtures).
+
+# All ASYNC109 in test files are pytest-async timeout fixtures.
+"src/tests/**/*.py" = ["ASYNC109"]
+
+# Discovery polls remote services with bounded `timeout`; correct pattern.
+"src/discovery.py" = ["ASYNC109"]
+
+# Health probe with timeout; correct pattern.
+"src/health.py" = ["ASYNC109"]
+
+# Adapter method passes `timeout` through to httpx.AsyncClient.
+# Note: the file also has an ASYNC110 violation (asyncio.sleep in while
+# loop) at line 134 — left visible so Phase 3 can review it as a possible
+# `Event.wait()` candidate.
+"src/backend/cascor_service_adapter.py" = ["ASYNC109"]
