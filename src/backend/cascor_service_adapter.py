@@ -130,8 +130,14 @@ class ControlStreamSupervisor:
                 await self._stream.connect()
                 logger.info("Control stream supervisor connected to %s", self._ws_url)
                 attempt = 0
-                # Stay connected until disconnect
-                while not self._shutdown and self.is_connected:
+                # Stay connected until disconnect. ASYNC110 prefers an
+                # ``asyncio.Event`` here; for this supervisor a 1-second
+                # poll is fine because (a) ``self.is_connected`` is updated
+                # by callbacks we don't own, so wiring an Event around it
+                # would require touching the stream class, and (b) the
+                # one-second granularity is well below any reconnect
+                # latency we care about.
+                while not self._shutdown and self.is_connected:  # noqa: ASYNC110
                     await asyncio.sleep(1)
             except asyncio.CancelledError:
                 return

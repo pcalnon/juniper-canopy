@@ -1263,6 +1263,60 @@ if _snapshots_dir is None:
 _SNAPSHOT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Filesystem helpers — synchronous, called via ``asyncio.to_thread`` from
+# async route handlers so the FastAPI event loop stays responsive while disk
+# operations are in flight (Phase 3 of the async-route audit; see
+# juniper-ml notes/ASYNC_ROUTE_AUDIT_HOOK_MIGRATION_PLAN.md).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _load_snapshot_history(history_file: "Path") -> list[dict]:
+    """Read ``snapshot_history.jsonl`` and return parsed entries.
+
+    Returns an empty list when the file is absent or unreadable; logs
+    individual JSON-parse failures at WARNING and a top-level read
+    failure at WARNING. Always returns; the caller treats an empty
+    list as "no history" rather than as an error.
+    """
+    entries: list[dict] = []
+    if not history_file.exists():
+        return entries
+    try:
+        with open(history_file, "r") as f:
+            for line in f:
+                if line := line.strip():
+                    try:
+                        entries.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        system_logger.warning("Invalid JSON in history file: %s...", line[:50])
+    except Exception as e:  # noqa: BLE001 — best-effort read; log and return what we have
+        system_logger.warning("Failed to read snapshot history: %s", e)
+    return entries
+
+
+def _find_snapshot_file(snapshots_dir: str, snapshot_id: str) -> tuple["Path | None", "os.stat_result | None"]:
+    """Find a snapshot file by stem and stat it.
+
+    Returns ``(snapshot_file, stat_result)`` or ``(None, None)`` if the
+    directory is missing or no file matches. Bundles the filesystem
+    walk + ``stat`` syscall so callers take one ``asyncio.to_thread``
+    hop instead of three (``exists`` + ``iterdir`` + ``stat``).
+    """
+    from pathlib import Path
+
+    path = Path(snapshots_dir)
+    if not path.exists():
+        return None, None
+    snapshot_file = next(
+        (f for f in path.iterdir() if f.is_file() and f.suffix.lower() in SNAPSHOT_EXTENSIONS and f.stem == snapshot_id),
+        None,
+    )
+    if snapshot_file is None:
+        return None, None
+    return snapshot_file, snapshot_file.stat()
+
+
 def _sanitize_snapshot_name(name: str) -> str:
     """Validate and sanitize a snapshot name to prevent path traversal.
 
@@ -1402,20 +1456,12 @@ async def get_snapshot_history(limit: int = 50):
 
     history_file = Path(_snapshots_dir) / "snapshot_history.jsonl"
 
-    entries = []
-
-    if history_file.exists():
-        try:
-            with open(history_file, "r") as f:
-                for line in f:
-                    if line := line.strip():
-                        try:
-                            entry = json.loads(line)
-                            entries.append(entry)
-                        except json.JSONDecodeError:
-                            system_logger.warning("Invalid JSON in history file: %s...", line[:50])
-        except Exception as e:
-            system_logger.warning("Failed to read snapshot history: %s", e)
+    # Read off the event loop. The history file can grow large (one line
+    # per snapshot op, no rotation today) and disk I/O on a slow volume
+    # blocks the loop. ``_load_snapshot_history`` returns the parsed
+    # entries; warnings are still routed through the logger inside the
+    # helper so the route stays simple.
+    entries = await asyncio.to_thread(_load_snapshot_history, history_file)
 
     # Return in reverse chronological order (newest first)
     entries.reverse()
@@ -1443,7 +1489,6 @@ async def get_snapshot_detail(snapshot_id: str):
         JSON object with snapshot metadata and optional HDF5 attributes
     """
     from datetime import UTC, datetime
-    from pathlib import Path
 
     from fastapi import HTTPException
 
@@ -1479,21 +1524,14 @@ async def get_snapshot_detail(snapshot_id: str):
 
         raise HTTPException(status_code=404, detail="Snapshot not found")
 
-    # Real mode: find file in snapshots directory
-    path = Path(_snapshots_dir)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="Snapshot directory not found")
+    # Real mode: find file in snapshots directory. The directory walk and
+    # ``stat`` syscall are bundled into ``_find_snapshot_file`` and run on a
+    # worker thread so the FastAPI event loop stays responsive on slow disks.
+    snapshot_file, stat = await asyncio.to_thread(_find_snapshot_file, _snapshots_dir, snapshot_id)
 
-    # Search by file stem
-    snapshot_file = next(
-        (f for f in path.iterdir() if f.is_file() and f.suffix.lower() in SNAPSHOT_EXTENSIONS and f.stem == snapshot_id),
-        None,
-    )
-
-    if not snapshot_file:
+    if snapshot_file is None or stat is None:
         raise HTTPException(status_code=404, detail="Snapshot not found")
 
-    stat = snapshot_file.stat()
     ts = datetime.fromtimestamp(stat.st_mtime, tz=UTC).replace(microsecond=0)
 
     detail = {
@@ -1642,7 +1680,10 @@ async def create_snapshot(
     # Real mode: create actual HDF5 file via backend
     try:
         snapshot_path = Path(_snapshots_dir) / snapshot_name
-        Path(_snapshots_dir).mkdir(parents=True, exist_ok=True)
+        # ``mkdir`` is a sync syscall — push to a worker thread so a slow
+        # disk doesn't stall the event loop. ``exist_ok=True`` keeps the
+        # call idempotent on a hot path that may run frequently.
+        await asyncio.to_thread(Path(_snapshots_dir).mkdir, parents=True, exist_ok=True)
 
         # Attempt to create HDF5 snapshot via CasCor integration
         if hasattr(backend, "_adapter") and hasattr(backend._adapter, "save_snapshot"):
@@ -2923,7 +2964,11 @@ async def api_remote_start_workers(num_workers: int = 1):
 
 
 @app.post("/api/remote/stop_workers")
-async def api_remote_stop_workers(timeout: int = 10):
+# ``timeout`` is a passthrough query/body parameter consumed by the adapter's
+# ``stop_remote_workers`` call, not a deadline for this handler. ASYNC109
+# wants ``asyncio.timeout`` instead, but the parameter never bounds awaitable
+# work in this function — silencing is the correct call.
+async def api_remote_stop_workers(timeout: int = 10):  # noqa: ASYNC109
     """
     Stop remote worker processes (P1-NEW-002).
     Args:
