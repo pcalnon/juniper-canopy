@@ -1295,26 +1295,28 @@ def _load_snapshot_history(history_file: "Path") -> list[dict]:
     return entries
 
 
-def _find_snapshot_file(snapshots_dir: str, snapshot_id: str) -> tuple["Path | None", "os.stat_result | None"]:
+def _find_snapshot_file(snapshots_dir: str, snapshot_id: str) -> tuple["Path | None", "os.stat_result | None", bool]:
     """Find a snapshot file by stem and stat it.
 
-    Returns ``(snapshot_file, stat_result)`` or ``(None, None)`` if the
-    directory is missing or no file matches. Bundles the filesystem
-    walk + ``stat`` syscall so callers take one ``asyncio.to_thread``
-    hop instead of three (``exists`` + ``iterdir`` + ``stat``).
+    Returns ``(snapshot_file, stat_result, directory_missing)``. The first two
+    elements are ``None`` when no file matches; ``directory_missing`` is
+    ``True`` only when the snapshots directory itself does not exist, so the
+    route handler can surface a more specific 404 message to API consumers.
+    Bundles the filesystem walk + ``stat`` syscall so callers take one
+    ``asyncio.to_thread`` hop instead of three.
     """
     from pathlib import Path
 
     path = Path(snapshots_dir)
     if not path.exists():
-        return None, None
+        return None, None, True
     snapshot_file = next(
         (f for f in path.iterdir() if f.is_file() and f.suffix.lower() in SNAPSHOT_EXTENSIONS and f.stem == snapshot_id),
         None,
     )
     if snapshot_file is None:
-        return None, None
-    return snapshot_file, snapshot_file.stat()
+        return None, None, False
+    return snapshot_file, snapshot_file.stat(), False
 
 
 def _sanitize_snapshot_name(name: str) -> str:
@@ -1527,8 +1529,10 @@ async def get_snapshot_detail(snapshot_id: str):
     # Real mode: find file in snapshots directory. The directory walk and
     # ``stat`` syscall are bundled into ``_find_snapshot_file`` and run on a
     # worker thread so the FastAPI event loop stays responsive on slow disks.
-    snapshot_file, stat = await asyncio.to_thread(_find_snapshot_file, _snapshots_dir, snapshot_id)
+    snapshot_file, stat, directory_missing = await asyncio.to_thread(_find_snapshot_file, _snapshots_dir, snapshot_id)
 
+    if directory_missing:
+        raise HTTPException(status_code=404, detail="Snapshot directory not found")
     if snapshot_file is None or stat is None:
         raise HTTPException(status_code=404, detail="Snapshot not found")
 
