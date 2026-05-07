@@ -14,24 +14,35 @@
 # Copyright:     Copyright (c) 2024-2026 Paul Calnon
 #
 # Description:
-#    Automatically updates requirements.lock when Dependabot pushes a dependency
-#    update to a dependabot/pip/** branch. Runs uv pip compile to regenerate
-#    the lockfile and commits the result so Docker builds stay in sync.
+#    Automatically regenerates requirements.lock when:
+#      - Dependabot pushes a dependency update to a dependabot/pip/** branch, OR
+#      - A pull request modifies pyproject.toml (covers manual min-version bumps
+#        like the 2026-05-07 juniper-observability>=0.2.0 floor change that
+#        otherwise leaves main red until a manual regen).
+#
+#    Runs uv pip compile to regenerate the lockfile and commits the result back
+#    to the source branch so Docker builds and the Lockfile Freshness gate stay
+#    in sync without engineer intervention.
 #
 #    Uses CROSS_REPO_DISPATCH_TOKEN (not GITHUB_TOKEN) so the push re-triggers CI.
-#
-#    /tmp/requirements.lock.check
+#    main and develop are excluded from the pull_request trigger by branch
+#    targeting (PRs targeting these branches still trigger; the regen pushes to
+#    the PR head branch, never to main/develop directly).
 #
 # References:
 #    - Step 7.5.2: Dependency Update Workflow (POLYREPO_MIGRATION_PLAN.md)
+#    - notes/LOCKFILE_FRESHNESS_REDESIGN_2026-05-04.md (juniper-ml)
 #####################################################################################################################################################################################################
 
-name: Update Lockfile (Dependabot)
+name: Update Lockfile
 
 on:
   push:
     branches:
       - dependabot/pip/**
+  pull_request:
+    paths:
+      - pyproject.toml
 
 permissions:
   contents: write
@@ -40,14 +51,20 @@ jobs:
   update-lockfile:
     name: Update requirements.lock
     runs-on: ubuntu-latest
-    # if: github.actor == 'dependabot[bot]'
+    # Skip PRs from forks — they cannot push back to the head branch with our
+    # token, and we do not accept third-party PRs in this single-author repo.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           token: ${{ secrets.CROSS_REPO_DISPATCH_TOKEN }}
-          ref: ${{ github.ref }}
+          # On pull_request, check out the PR head branch (not the merge ref)
+          # so we can push the regen commit back. ${{ github.head_ref }} is set
+          # for pull_request events; ${{ github.ref }} is the canonical fallback
+          # for push events.
+          ref: ${{ github.head_ref || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
@@ -82,6 +99,14 @@ jobs:
           if git diff --cached --quiet; then
             echo "::notice::Lockfile already up to date — no commit needed"
           else
-            git commit -m "[dependabot skip] Update requirements.lock"
+            # Pick a commit message tag that matches the trigger so the audit
+            # trail reads naturally. The "[dependabot skip]" tag also keeps
+            # Dependabot from rebasing on top of our regen.
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              MSG="chore(deps): auto-regenerate requirements.lock after pyproject change"
+            else
+              MSG="[dependabot skip] Update requirements.lock"
+            fi
+            git commit -m "$MSG"
             git push
           fi

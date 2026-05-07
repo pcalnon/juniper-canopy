@@ -64,7 +64,7 @@ juniper-cascor-protocol==0.1.0
     # via juniper-canopy (pyproject.toml)
 juniper-data-client==0.4.1
     # via juniper-canopy (pyproject.toml)
-juniper-observability==0.1.1
+juniper-observability==0.2.0
     # via juniper-canopy (pyproject.toml)
 markupsafe==3.0.3
     # via
@@ -95,14 +95,14 @@ prometheus-client==0.25.0
     # via juniper-canopy (pyproject.toml)
 psutil==7.2.2
     # via juniper-canopy (pyproject.toml)
-pydantic==2.13.3
+pydantic==2.13.4
     # via
     #   juniper-canopy (pyproject.toml)
     #   fastapi
     #   juniper-cascor-protocol
     #   juniper-observability
     #   pydantic-settings
-pydantic-core==2.46.3
+pydantic-core==2.46.4
     # via pydantic
 pydantic-settings==2.14.0
     # via juniper-canopy (pyproject.toml)
@@ -127,7 +127,7 @@ retrying==1.4.2
     # via dash
 scipy==1.17.1
     # via juniper-canopy (pyproject.toml)
-sentry-sdk==2.58.0
+sentry-sdk==2.59.0
     # via juniper-canopy (pyproject.toml)
 setuptools==82.0.1
     # via dash
@@ -147,7 +147,7 @@ typing-inspection==0.4.2
     #   fastapi
     #   pydantic
     #   pydantic-settings
-urllib3==2.6.3
+urllib3==2.7.0
     # via
     #   juniper-cascor-client
     #   juniper-data-client
