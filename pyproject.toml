@@ -296,6 +296,11 @@ filterwarnings = [
   # 'error::RuntimeWarning' rule above would otherwise promote into a
   # hard failure for any test whose fixture chain pulls in the test client.
   "ignore:The global interpreter lock \\(GIL\\) has been enabled to load module:RuntimeWarning",
+  # ``_generate_spiral_dataset_local`` is the deprecated local fallback used
+  # when the JuniperData service is unreachable. Several tests intentionally
+  # exercise that fallback path; one test (``test_juniper_data_integration``)
+  # asserts the warning is emitted via ``pytest.warns`` and is unaffected.
+  "ignore:DemoMode\\._generate_spiral_dataset_local\\(\\) is deprecated:DeprecationWarning",
 ]
 
 # ==========================================
