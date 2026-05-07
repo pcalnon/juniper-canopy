@@ -482,23 +482,24 @@ class TestObservabilityShim:
         rr = ReadinessResponse(status="ready", version="0.4.0", service="juniper-canopy")
         assert abs(time.time() - rr.timestamp) < 60.0
 
-    def test_async_probe_dependency_delegates_to_shared(self):
-        """canopy's async ``probe_dependency`` wraps the shared sync version.
+    def test_async_probe_dependency_uses_native_httpx(self):
+        """canopy's async ``probe_dependency`` is native httpx (R4.2).
 
-        ``health.py`` imports the shared probe as
-        ``_probe_dependency_sync``; patches must target that local
-        binding (patching ``juniper_observability.probe_dependency``
-        directly would not affect the already-bound reference).
+        Pre-R4.2 the function wrapped the shared sync probe via
+        ``asyncio.to_thread(_probe_dependency_sync, ...)``; R4.2
+        (canopy#215) replaced that with a native ``httpx.AsyncClient``
+        path. The leftover test patching ``health._probe_dependency_sync``
+        was missed during the R4.2 merge — this update brings it in
+        line with the post-R4.2 surface.
         """
         import asyncio
-
-        from juniper_observability import DependencyStatus as Shared
+        from unittest.mock import AsyncMock, MagicMock
 
         from health import probe_dependency as canopy_probe
 
-        with patch("health._probe_dependency_sync") as mock_probe:
-            mock_probe.return_value = Shared(name="x", status="healthy", latency_ms=1.0, message="ok")
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response):
             result = asyncio.run(canopy_probe("x", "http://example/health", timeout=1.0))
-            mock_probe.assert_called_once_with("x", "http://example/health", 1.0)
             assert result.name == "x"
             assert result.status == "healthy"

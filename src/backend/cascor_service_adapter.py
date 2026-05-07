@@ -39,7 +39,7 @@ import contextlib
 import json
 import logging
 import time
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union, cast
 
 from juniper_cascor_client import CascorControlStream, CascorTrainingStream, JuniperCascorClient, JuniperCascorClientError
 from juniper_cascor_client.exceptions import JuniperCascorConnectionError
@@ -130,8 +130,14 @@ class ControlStreamSupervisor:
                 await self._stream.connect()
                 logger.info("Control stream supervisor connected to %s", self._ws_url)
                 attempt = 0
-                # Stay connected until disconnect
-                while not self._shutdown and self.is_connected:
+                # Stay connected until disconnect. ASYNC110 prefers an
+                # ``asyncio.Event`` here; for this supervisor a 1-second
+                # poll is fine because (a) ``self.is_connected`` is updated
+                # by callbacks we don't own, so wiring an Event around it
+                # would require touching the stream class, and (b) the
+                # one-second granularity is well below any reconnect
+                # latency we care about.
+                while not self._shutdown and self.is_connected:  # noqa: ASYNC110
                     await asyncio.sleep(1)
             except asyncio.CancelledError:
                 return
@@ -318,11 +324,22 @@ class CascorServiceAdapter:
 
             attempt = 0
             relay_enabled = True
+            # OBS-WIRE-02 / Q1 (option a): per-connection sequence
+            # tracker for client-side gap detection on the training
+            # channel. Reset to ``None`` whenever the relay reconnects
+            # (the cascor-side counter restarts at 1 on each new
+            # connection — see juniper-cascor websocket_manager seq
+            # assignment), so a "gap" is only meaningful within one
+            # connected session. Gap detection is inherently client-
+            # side truth (cascor cannot observe whether a frame
+            # actually arrived); see juniper-ml#197 state-analysis.
+            last_training_seq: Optional[int] = None
             while relay_enabled:
                 try:
                     stream = CascorTrainingStream(base_url=self._ws_url, api_key=self._api_key)
                     await stream.connect()
                     attempt = 0
+                    last_training_seq = None
                     async for message in stream.stream():
                         # METRICS-MON R2.2.5 / seed-05: validate the inbound
                         # frame against juniper-cascor-protocol's canonical
@@ -343,6 +360,29 @@ class CascorServiceAdapter:
                                 inc_unrecognized_ws_frame(_envelope.type, "training")
                         except Exception:  # noqa: BLE001 — observability MUST NOT break the relay loop
                             logger.debug("Inbound-frame validation hook errored; relay continues", exc_info=True)
+
+                        # OBS-WIRE-02 / Q1 (option a): client-side WS
+                        # sequence-gap detection. Compares each frame's
+                        # ``seq`` against ``last_training_seq + 1``;
+                        # mismatches bump the new
+                        # ``juniper_canopy_ws_seq_gap_detected_total``
+                        # counter (replaces the deleted cascor-side
+                        # counter, which had no semantically valid
+                        # server-side wire-site). Frames without a
+                        # ``seq`` field — e.g. /ws/control responses
+                        # (D-03) — are skipped. Wrapped in a broad
+                        # try/except so observability NEVER breaks the
+                        # relay loop.
+                        try:
+                            incoming_seq = message.get("seq") if isinstance(message, dict) else None
+                            if isinstance(incoming_seq, int):
+                                if last_training_seq is not None and incoming_seq != last_training_seq + 1:
+                                    from observability import inc_ws_seq_gap_detected
+
+                                    inc_ws_seq_gap_detected("training")
+                                last_training_seq = incoming_seq
+                        except Exception:  # noqa: BLE001 — observability MUST NOT break the relay loop
+                            logger.debug("Inbound-frame seq-gap hook errored; relay continues", exc_info=True)
 
                         msg_type = message.get("type", "")
 
@@ -1136,6 +1176,168 @@ class CascorServiceAdapter:
             logger.info("Snapshot restored via CasCor service (id=%s)", snapshot_id)
         except JuniperCascorClientError as e:
             logger.error("Failed to load snapshot %s: %s", snapshot_id, e)
+            raise
+
+    # ──────────────────────────────────────────────────────────────────
+    # CAN-015 (Phase 6E Sprint B) snapshot operation endpoints
+    # ──────────────────────────────────────────────────────────────────
+    # Restore (above) is the original snapshot operation. B-1..B-4 added
+    # three more semantically-distinct operations on the cascor side:
+    # ``replay`` (read-only playback), ``resume`` (continue training),
+    # and ``retrain`` (fresh training using snapshot weights). The
+    # cascor client wrapper hasn't been extended for these yet — when
+    # it is (cross-repo follow-up tracked separately), these adapter
+    # methods can switch to the typed wrappers. Until then we drive
+    # the underlying ``_post`` directly, which is what
+    # ``client.load_snapshot`` does internally anyway.
+
+    def replay_snapshot(self, snapshot_id: str) -> Dict[str, Any]:
+        """Start a read-only replay session via /v1/snapshots/{id}/replay.
+
+        Returns the unified response payload from cascor including the
+        ``operation``, ``fsm_state``, ``time_index``, and a ``session``
+        block describing the playback state. The caller (canopy
+        backend route) forwards this to the frontend so canopy can
+        wire the replay player UI to the returned ``length`` and
+        initial ``time_index``.
+
+        Raises ``JuniperCascorClientError`` on HTTP failure.
+        """
+        try:
+            data = self._client._post(f"/v1/snapshots/{snapshot_id}/replay")
+            logger.info("Snapshot replay started via CasCor service (id=%s)", snapshot_id)
+            return cast(Dict[str, Any], data)
+        except JuniperCascorClientError as e:
+            logger.error("Failed to start replay for %s: %s", snapshot_id, e)
+            raise
+
+    def replay_control(self, snapshot_id: str, action: str, **params: Any) -> Dict[str, Any]:
+        """Send a playback control command to /v1/snapshots/{id}/replay/control.
+
+        ``action`` is one of ``play`` / ``pause`` / ``seek`` / ``speed``
+        / ``range`` / ``stop``. Per-action parameters (``time_index``
+        for seek, ``value`` for speed, ``start`` and ``end`` for range)
+        are passed through unchanged via ``**params``.
+        """
+        body: Dict[str, Any] = {"action": action}
+        body.update({k: v for k, v in params.items() if v is not None})
+        try:
+            data = self._client._post(f"/v1/snapshots/{snapshot_id}/replay/control", json=body)
+            logger.info("Snapshot replay control via CasCor service (id=%s, action=%s)", snapshot_id, action)
+            return cast(Dict[str, Any], data)
+        except JuniperCascorClientError as e:
+            logger.error("Failed replay control for %s (action=%s): %s", snapshot_id, action, e)
+            raise
+
+    def resume_snapshot(self, snapshot_id: str) -> Dict[str, Any]:
+        """Continue training from a snapshot via /v1/snapshots/{id}/resume.
+
+        Returns the unified response payload including
+        ``resume_point_epoch`` so canopy can render the visual boundary
+        in the metrics-curve component.
+        """
+        try:
+            data = self._client._post(f"/v1/snapshots/{snapshot_id}/resume")
+            logger.info("Snapshot resume started via CasCor service (id=%s)", snapshot_id)
+            return cast(Dict[str, Any], data)
+        except JuniperCascorClientError as e:
+            logger.error("Failed to resume snapshot %s: %s", snapshot_id, e)
+            raise
+
+    def retrain_snapshot(self, snapshot_id: str) -> Dict[str, Any]:
+        """Reset training history and prepare a fresh run via /v1/snapshots/{id}/retrain."""
+        try:
+            data = self._client._post(f"/v1/snapshots/{snapshot_id}/retrain")
+            logger.info("Snapshot retrain started via CasCor service (id=%s)", snapshot_id)
+            return cast(Dict[str, Any], data)
+        except JuniperCascorClientError as e:
+            logger.error("Failed to retrain snapshot %s: %s", snapshot_id, e)
+            raise
+
+    # ------------------------------------------------------------------
+    # CAN-015h: network mutation endpoints (h-1 / h-2 / h-3)
+    # ------------------------------------------------------------------
+    # All three are FSM-gated to ``Investigating`` on the cascor side
+    # — the service returns 409 from any other state. The adapter is
+    # transport-only: validation and shape checks live in the cascor
+    # lifecycle, surfaced as JuniperCascorClientError → re-raise so
+    # canopy callers can map to UI feedback. Demo mode handling
+    # follows the B-5 pattern: the canopy backend route layer
+    # short-circuits to 501 before reaching the adapter.
+
+    def patch_weights(
+        self,
+        target: str,
+        field: str,
+        values: Any,
+        hidden_unit_index: Optional[int] = None,
+        dtype: str = "float32",
+    ) -> Dict[str, Any]:
+        """CAN-015h-1: surgical weight rewrite via PATCH /v1/network/weights.
+
+        ``target`` ∈ {"output", "hidden_unit"}, ``field`` ∈ {"weights", "bias"}.
+        ``hidden_unit_index`` is required iff ``target == "hidden_unit"``.
+        Mirrors the Pydantic model on the cascor side; the body is
+        passed through as-is so the cascor route's exact-shape /
+        NaN-Inf / FSM-gate validation runs unchanged.
+        """
+        body: Dict[str, Any] = {
+            "target": target,
+            "field": field,
+            "values": values,
+            "dtype": dtype,
+        }
+        if hidden_unit_index is not None:
+            body["hidden_unit_index"] = hidden_unit_index
+        try:
+            data = self._client._patch("/v1/network/weights", json=body)
+            logger.info("Weights patched via CasCor service (target=%s, field=%s)", target, field)
+            return cast(Dict[str, Any], data)
+        except JuniperCascorClientError as e:
+            logger.error("patch_weights failed (target=%s, field=%s): %s", target, field, e)
+            raise
+
+    def add_hidden_unit(
+        self,
+        weights: Any,
+        bias: float = 0.0,
+        activation: str = "Tanh",
+    ) -> Dict[str, Any]:
+        """CAN-015h-2: append a hidden unit at the cascade tail.
+
+        V1 is tail-only — the cascor route's Pydantic body forces
+        ``position="tail"``. New unit's output column is initialized
+        to zero by the cascor side regardless of the network's
+        ``init_output_weights`` config.
+        """
+        body: Dict[str, Any] = {
+            "weights": weights,
+            "bias": bias,
+            "activation": activation,
+            "position": "tail",
+        }
+        try:
+            data = self._client._post("/v1/network/hidden-units", json=body)
+            logger.info("Hidden unit appended via CasCor service (activation=%s)", activation)
+            return cast(Dict[str, Any], data)
+        except JuniperCascorClientError as e:
+            logger.error("add_hidden_unit failed: %s", e)
+            raise
+
+    def remove_hidden_unit(self, idx: int) -> Dict[str, Any]:
+        """CAN-015h-3: remove the hidden unit at ``idx`` with cascade rebuild.
+
+        Cascade-rebuild semantics live in cascor's lifecycle —
+        subsequent units' weights at the deleted column are dropped
+        so the forward-pass shape invariant holds. The adapter is
+        purely transport.
+        """
+        try:
+            data = self._client._delete(f"/v1/network/hidden-units/{idx}")
+            logger.info("Hidden unit removed via CasCor service (idx=%d)", idx)
+            return cast(Dict[str, Any], data)
+        except JuniperCascorClientError as e:
+            logger.error("remove_hidden_unit(idx=%d) failed: %s", idx, e)
             raise
 
     # ------------------------------------------------------------------

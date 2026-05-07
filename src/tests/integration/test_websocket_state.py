@@ -27,10 +27,18 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def test_client():
-    """Create test client for FastAPI app."""
+    """Create test client for FastAPI app.
+
+    Enters the TestClient as a context manager so FastAPI's lifespan runs and
+    initializes the module-level `backend` global in main.py. Without the
+    context-manager entry, the /ws/training handler's `backend.get_status()`
+    call hits a None and every test in this file fails with
+    `AttributeError: 'NoneType' object has no attribute 'get_status'`.
+    """
     from main import app
 
-    return TestClient(app)
+    with TestClient(app) as client:
+        yield client
 
 
 def _receive_state_message(websocket):

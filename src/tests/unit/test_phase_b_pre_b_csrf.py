@@ -49,15 +49,23 @@ class TestCsrfTokenStore:
         assert store.validate(token) is False
 
     def test_validate_refreshes_ttl(self):
-        """Valid token gets sliding TTL refresh."""
+        """Valid token gets sliding TTL refresh.
+
+        Bumped the TTL and sleep durations 5x off the original 0.1/0.05/0.07s
+        budget. macOS CI runners under load see ~30-50ms scheduling jitter
+        on `time.sleep`, so the original margins (refresh at 0.05, expire
+        at 0.15, second check at 0.12) flipped into the expired window
+        intermittently. The 0.5/0.25/0.35s budget here keeps the same
+        sliding-refresh shape with a comfortable >100ms slack to either side.
+        """
         from csrf import CsrfTokenStore
 
-        store = CsrfTokenStore(ttl_seconds=0.1)
+        store = CsrfTokenStore(ttl_seconds=0.5)
         token = store.mint()
-        time.sleep(0.05)
+        time.sleep(0.25)
         assert store.validate(token) is True  # refresh
-        time.sleep(0.07)
-        # Should still be valid (refreshed at 0.05, expires at 0.15)
+        time.sleep(0.35)
+        # Should still be valid (refreshed at 0.25, expires at 0.75)
         assert store.validate(token) is True
 
     def test_revoke_removes_token(self):

@@ -89,23 +89,36 @@ _canopy_metrics: dict | None = None
 
 
 def _ensure_canopy_metrics() -> dict:
-    """Create canopy-related Prometheus metrics on first access."""
+    """Create canopy-related Prometheus metrics on first access.
+
+    In production this runs exactly once per process. In test contexts the
+    module-level ``_canopy_metrics`` cache may be reset (e.g. by a fixture
+    nulling it for re-init coverage) while the underlying Prometheus REGISTRY
+    still holds the prior collectors. We catch the resulting
+    ``Duplicated timeseries`` ``ValueError`` and adopt the already-registered
+    collectors instead of rebuilding them, which keeps test isolation cheap
+    without forcing every fixture to scrub REGISTRY by hand.
+    """
     global _canopy_metrics
     if _canopy_metrics is None:
-        from prometheus_client import Counter, Gauge
+        from juniper_observability import register_or_reuse
+        from prometheus_client import Counter, Gauge, Histogram
 
         _canopy_metrics = {
-            "websocket_connections_active": Gauge(
+            "websocket_connections_active": register_or_reuse(
+                Gauge,
                 "juniper_canopy_websocket_connections_active",
                 "Number of active WebSocket connections",
                 ["channel"],
             ),
-            "websocket_messages_total": Counter(
+            "websocket_messages_total": register_or_reuse(
+                Counter,
                 "juniper_canopy_websocket_messages_total",
                 "Total WebSocket messages sent",
                 ["channel", "type"],
             ),
-            "demo_mode_active": Gauge(
+            "demo_mode_active": register_or_reuse(
+                Gauge,
                 "juniper_canopy_demo_mode_active",
                 "Whether demo mode is currently active (0 or 1)",
             ),
@@ -116,13 +129,144 @@ def _ensure_canopy_metrics() -> dict:
             # cardinality-bounded by the protocol package (collapses to
             # ``"_unmatched"`` after UNKNOWN_TYPE_BUDGET=16 distinct unknowns
             # per process), mirroring the R1.1 HTTP cardinality discipline.
-            "unrecognized_ws_frames_total": Counter(
+            "unrecognized_ws_frames_total": register_or_reuse(
+                Counter,
                 "juniper_canopy_unrecognized_ws_frames_total",
                 "WS frames that failed envelope validation, by reported type and endpoint.",
                 ["type", "endpoint"],
             ),
+            # METRICS-MON R4.3 / seed-13: outbound juniper-data-client
+            # request observability. Populated by the on_request hook
+            # closure built in :func:`build_data_client_request_hook`,
+            # which is passed to ``JuniperDataClient(on_request=...)``
+            # at construction time. Labels:
+            # * ``method`` — HTTP method ("GET" / "POST" / ...).
+            # * ``status_class`` — closed bucket: "2xx" / "4xx" / "5xx"
+            #   / "transport_error". Closed-set labels keep cardinality
+            #   bounded vs. raw status codes (R1.1 discipline).
+            # * ``error_type`` — exception class name on failure paths,
+            #   ``"none"`` on success. Closed by the typed-exception
+            #   surface of juniper-data-client (5 known classes + "none").
+            "data_client_requests_total": register_or_reuse(
+                Counter,
+                "juniper_canopy_data_client_requests_total",
+                "Outbound juniper-data-client HTTP requests, by method, status class, and error type",
+                ["method", "status_class", "error_type"],
+            ),
+            "data_client_request_duration_ms": register_or_reuse(
+                Histogram,
+                "juniper_canopy_data_client_request_duration_ms",
+                # METRICS-MON R4.1 / R4.3: bucket layout is **tentative
+                # pending R5.1**. Same human-UX-anchored decade pattern
+                # as ``canopy_ws_browser_latency_ms`` (covered in
+                # ``notes/observability/HISTOGRAM_BUCKETS_RATIONALE_2026-05-02.md``).
+                "Outbound juniper-data-client HTTP request duration in milliseconds (R4.1 buckets tentative pending R5.1)",
+                ["method", "status_class"],
+                buckets=[1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
+            ),
+            # OBS-WIRE-02 / Q1 (option a): client-side WS sequence-gap
+            # counter. Replaces the cascor-side
+            # ``cascor_ws_seq_gap_detected_total`` (which had no
+            # semantically valid server-side wire-site — gap detection
+            # is inherently client-side truth). Cross-service
+            # correlation labels:
+            # * ``service`` — upstream cascor identity (closed: just
+            #   ``"juniper-cascor"`` today, reserves room for future
+            #   multi-cascor topologies).
+            # * ``channel`` — ``"training"`` or ``"control"`` (mirrors
+            #   the A.4 ``websocket_messages_total`` channel labelset).
+            # See ``notes/observability/A9_AND_3_2_STATE_ANALYSIS_2026-05-03.md``
+            # in juniper-ml (Q1 resolution).
+            "ws_seq_gap_detected_total": register_or_reuse(
+                Counter,
+                "juniper_canopy_ws_seq_gap_detected_total",
+                "Client-side WS sequence-number gaps detected on inbound frames, by upstream service and channel.",
+                ["service", "channel"],
+            ),
         }
     return _canopy_metrics
+
+
+def _classify_status(status: int | None) -> str:
+    """METRICS-MON R4.3: bucket an HTTP status code (or ``None`` on
+    transport failure) into a closed-set ``status_class`` label.
+
+    Returning closed-set strings instead of raw status codes keeps the
+    Counter cardinality bounded — a misbehaving server returning
+    arbitrary 4xx/5xx codes can't blow up the label space.
+    """
+    if status is None:
+        return "transport_error"
+    if 200 <= status < 300:
+        return "2xx"
+    if 400 <= status < 500:
+        return "4xx"
+    if 500 <= status < 600:
+        return "5xx"
+    # 1xx / 3xx are not expected on this surface (data-client follows
+    # redirects via requests' default; 1xx never reaches user code).
+    # Bucket as transport_error so anomalies show up.
+    return "transport_error"
+
+
+def build_data_client_request_hook():
+    """METRICS-MON R4.3: Prometheus-emitting closure for
+    :class:`juniper_data_client.JuniperDataClient`'s ``on_request``
+    instrumentation hook.
+
+    Returned closure matches the :data:`juniper_data_client.RequestHook`
+    signature ``(method, url, status, duration_ms, error)``. It bumps:
+
+    * ``juniper_canopy_data_client_requests_total{method, status_class,
+      error_type}`` — once per call.
+    * ``juniper_canopy_data_client_request_duration_ms{method,
+      status_class}`` — once per call (timing).
+
+    The hook is built once and passed to ``JuniperDataClient(on_request=
+    build_data_client_request_hook())`` at construction time. Building
+    it lazily (rather than as a module-level singleton) means tests
+    that null ``_canopy_metrics`` see a fresh closure on the next
+    construction.
+    """
+
+    def _hook(
+        method: str,
+        url: str,  # noqa: ARG001 — accepted to match RequestHook signature; not labeled (cardinality)
+        status: int | None,
+        duration_ms: float,
+        error: BaseException | None,
+    ) -> None:
+        metrics = _ensure_canopy_metrics()
+        status_class = _classify_status(status)
+        raw_error_type = type(error).__name__ if error is not None else "none"
+        # OBS-WIRE-02 / A.8: closed-set validation. juniper-data-client
+        # publishes a known set of typed exceptions (see
+        # ``_KNOWN_DATA_CLIENT_ERROR_TYPES``); anything else collapses to
+        # ``"_other"`` to keep cardinality bounded if the client ever
+        # adds a new exception class. Production must NOT crash on the
+        # unknown class — log a structured WARNING so the next allowlist
+        # update gets flagged, but emit the metric either way.
+        if raw_error_type in _KNOWN_DATA_CLIENT_ERROR_TYPES:
+            error_type = raw_error_type
+        else:
+            error_type = "_other"
+            import logging
+
+            logging.getLogger("juniper_canopy.observability").warning(
+                "juniper_canopy_data_client_unknown_error_type",
+                extra={"raw_error_type": raw_error_type, "method": method, "status_class": status_class},
+            )
+        metrics["data_client_requests_total"].labels(
+            method=method,
+            status_class=status_class,
+            error_type=error_type,
+        ).inc()
+        metrics["data_client_request_duration_ms"].labels(
+            method=method,
+            status_class=status_class,
+        ).observe(duration_ms)
+
+    return _hook
 
 
 def set_websocket_connections(channel: str, count: int) -> None:
@@ -135,14 +279,48 @@ def set_websocket_connections(channel: str, count: int) -> None:
     _ensure_canopy_metrics()["websocket_connections_active"].labels(channel=channel).set(count)
 
 
+# OBS-WIRE A.4 / messages_total: closed-set allowlist for the ``type`` label
+# on ``juniper_canopy_websocket_messages_total``. Production message types
+# emitted by the WebSocketManager dispatch sites and the create_*_message()
+# helpers in :mod:`communication.websocket_manager`. Anything outside this
+# set collapses to ``"_other"`` so a misbehaving caller — or a future code
+# path that introduces a new type without thinking about cardinality —
+# cannot blow up the timeseries label space (R1.1 closed-set discipline,
+# same posture as ``unrecognized_ws_frames_total``).
+_WS_MESSAGE_TYPE_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "state",
+        "metrics",
+        "topology",
+        "event",
+        "control_ack",
+        "command_response",
+        "ping",
+        "pong",
+        "connection_established",
+        "server_shutdown",
+        "initial_status",
+        "initial_metrics",
+        "params_updated",
+        "candidate_progress",
+        "network_stats",
+        "state_change",
+        "error",
+    }
+)
+
+
 def inc_websocket_messages(channel: str, msg_type: str) -> None:
     """Increment the WebSocket messages counter.
 
     Args:
         channel: WebSocket channel — "training" or "control".
-        msg_type: Message type — "metrics", "state", "topology", "event", "control_ack", etc.
+        msg_type: Message type — collapsed to ``"_other"`` when outside the
+            closed allowlist :data:`_WS_MESSAGE_TYPE_ALLOWLIST` to keep the
+            counter cardinality bounded (R1.1).
     """
-    _ensure_canopy_metrics()["websocket_messages_total"].labels(channel=channel, type=msg_type).inc()
+    bucketed = msg_type if msg_type in _WS_MESSAGE_TYPE_ALLOWLIST else "_other"
+    _ensure_canopy_metrics()["websocket_messages_total"].labels(channel=channel, type=bucketed).inc()
 
 
 def set_demo_mode_active(active: bool) -> None:
@@ -178,3 +356,86 @@ def inc_unrecognized_ws_frame(type_label: str, endpoint: str) -> None:
         extra={"type": type_label, "endpoint": endpoint},
     )
     _ensure_canopy_metrics()["unrecognized_ws_frames_total"].labels(type=type_label, endpoint=endpoint).inc()
+
+
+# OBS-WIRE-02 / Q1 (option a): closed-set allowlist for the ``error_type``
+# label on ``juniper_canopy_data_client_requests_total``. Mirrors the typed
+# exception surface published by juniper-data-client (see
+# ``juniper_data_client/exceptions.py``). Anything outside this set
+# collapses to ``"_other"`` so a future juniper-data-client release that
+# adds a new exception class can't blow up the timeseries label space
+# (R1.1 closed-set discipline).
+#
+# When juniper-data-client adds a new typed exception, the WARNING log
+# line emitted by ``build_data_client_request_hook`` flags it for an
+# allowlist update here; production must not crash on the unknown class
+# (audit doc A.8).
+_KNOWN_DATA_CLIENT_ERROR_TYPES: frozenset[str] = frozenset(
+    {
+        "none",
+        "JuniperDataClientError",
+        "JuniperDataConfigurationError",
+        "JuniperDataConnectionError",
+        "JuniperDataTimeoutError",
+        "JuniperDataNotFoundError",
+        "JuniperDataValidationError",
+    }
+)
+
+
+# OBS-WIRE-02 / Q1 (option a): closed-set allowlist for the ``channel``
+# label on ``juniper_canopy_ws_seq_gap_detected_total``. Mirrors the A.4
+# wire-up choice for ``juniper_canopy_websocket_messages_total``.
+_SEQ_GAP_CHANNELS: frozenset[str] = frozenset({"training", "control"})
+
+# Static value for the ``service`` label — only one upstream cascor for
+# now; reserves room for future multi-cascor topologies (would become a
+# parameter on the helper at that point).
+_SEQ_GAP_UPSTREAM_SERVICE: str = "juniper-cascor"
+
+
+def inc_ws_seq_gap_detected(channel: str) -> None:
+    """Record a client-side WS sequence gap detected on an inbound frame.
+
+    OBS-WIRE-02 / Q1 (option a): replaces the cascor-side
+    ``cascor_ws_seq_gap_detected_total`` counter, which had no
+    semantically valid server-side wire-site (gap detection is
+    inherently client-side truth). The replacement lives here on canopy
+    with cross-service correlation labels:
+
+    * ``service`` — the upstream cascor service the gap was detected
+      against. Static ``"juniper-cascor"`` for now (one upstream);
+      reserves room for future multi-cascor topologies.
+    * ``channel`` — the WS channel the gap was detected on. Closed
+      set: ``{"training", "control"}``.
+
+    The helper validates ``channel`` against
+    :data:`_SEQ_GAP_CHANNELS` and raises :class:`ValueError` on an
+    unknown value (mirrors the
+    :func:`juniper-cascor.api.observability.inc_training_session_completed`
+    pattern — instrumentation drift surfaces early rather than silently
+    blowing up cardinality).
+
+    Also emits a structured WARNING log line per the R4.7 / R2.2 pattern
+    so operators see the gap on stacks without Prometheus scraping.
+
+    Args:
+        channel: WS channel — must be one of ``"training"`` or
+            ``"control"``.
+
+    Raises:
+        ValueError: If ``channel`` is not in :data:`_SEQ_GAP_CHANNELS`.
+    """
+    if channel not in _SEQ_GAP_CHANNELS:
+        raise ValueError(f"invalid ws seq gap channel {channel!r}; expected one of {sorted(_SEQ_GAP_CHANNELS)!r}")
+
+    import logging
+
+    logging.getLogger("juniper_canopy.observability").warning(
+        "juniper_canopy_ws_seq_gap_detected",
+        extra={"service": _SEQ_GAP_UPSTREAM_SERVICE, "channel": channel},
+    )
+    _ensure_canopy_metrics()["ws_seq_gap_detected_total"].labels(
+        service=_SEQ_GAP_UPSTREAM_SERVICE,
+        channel=channel,
+    ).inc()

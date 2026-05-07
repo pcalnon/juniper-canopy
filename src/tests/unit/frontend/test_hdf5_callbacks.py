@@ -414,62 +414,83 @@ class TestOpenRestoreModalCallback:
     """Test open_restore_modal callback function (P3-2)."""
 
     def test_no_clicks_returns_closed(self, registered_panel):
-        """Should return closed modal when no button clicked."""
-        result = registered_panel._cb_open_restore_modal(None, [], False)
+        """Should return closed modal when no button clicked.
+
+        Updated for B-5: callback now reads ``callback_context.triggered``
+        unconditionally, so we patch it to an empty-trigger ctx.
+        """
+        import frontend.components.hdf5_snapshots_panel as panel_module
+
+        empty_ctx = type("EmptyCtx", (), {"triggered": []})()
+        with patch.object(panel_module, "callback_context", empty_ctx):
+            result = registered_panel._cb_open_restore_modal(None, None, False)
 
         assert result[0] is False  # Modal closed
         assert result[1] == ""  # Empty body
         assert result[2] is None  # No pending ID
 
     def test_all_zeros_returns_closed(self, registered_panel):
-        """Should return closed modal when all click counts are zero."""
-        n_clicks_list = [0, 0]
-        ids = [
-            {"type": "test-hdf5-snapshots-restore-btn", "index": "snap_001"},
-            {"type": "test-hdf5-snapshots-restore-btn", "index": "snap_002"},
-        ]
+        """Should return closed modal when triggered value is zero."""
+        import frontend.components.hdf5_snapshots_panel as panel_module
 
-        result = registered_panel._cb_open_restore_modal(n_clicks_list, ids, False)
+        # CAN-015e: ids now include an ``op`` discriminator.
+        n_clicks_list = [0, 0]
+        # No actual click happened — emulate an empty triggered list.
+        empty_ctx = type("EmptyCtx", (), {"triggered": []})()
+        with patch.object(panel_module, "callback_context", empty_ctx):
+            result = registered_panel._cb_open_restore_modal(n_clicks_list, None, False)
 
         assert result[0] is False
         assert result[1] == ""
         assert result[2] is None
 
     def test_opens_modal_with_snapshot_id(self, registered_panel):
-        """Should open modal with correct snapshot ID."""
+        """Should open modal with correct snapshot ID + operation (B-5)."""
         import frontend.components.hdf5_snapshots_panel as panel_module
 
         n_clicks_list = [1, 0]
-        ids = [
-            {"type": "test-hdf5-snapshots-restore-btn", "index": "snap_restore"},
-            {"type": "test-hdf5-snapshots-restore-btn", "index": "snap_002"},
-        ]
-
-        triggered_id = '{"index":"snap_restore","type":"test-hdf5-snapshots-restore-btn"}.n_clicks'
+        # CAN-015e dropdown items carry an ``op`` field.
+        triggered_id = '{"index":"snap_restore","op":"restore",' '"type":"test-hdf5-snapshots-snapshot-op-btn"}.n_clicks'
         fake_ctx = FakeCtx(triggered_id, 1)
 
         with patch.object(panel_module, "callback_context", fake_ctx):
-            result = registered_panel._cb_open_restore_modal(n_clicks_list, ids, False)
+            result = registered_panel._cb_open_restore_modal(n_clicks_list, None, False)
 
         assert result[0] is True  # Modal open
         assert isinstance(result[1], html.Div)  # Modal body has content
         body_str = str(result[1])
         assert "snap_restore" in body_str
-        assert result[2] == "snap_restore"  # Pending ID set
+        # Pending now carries both id and operation.
+        assert result[2] == {"id": "snap_restore", "operation": "restore"}
 
     def test_modal_shows_warning_message(self, registered_panel):
         """Should show warning about training state in modal."""
         import frontend.components.hdf5_snapshots_panel as panel_module
 
         n_clicks_list = [1]
-        ids = [{"type": "test-hdf5-snapshots-restore-btn", "index": "test_snap"}]
-        triggered_id = '{"index":"test_snap","type":"test-hdf5-snapshots-restore-btn"}.n_clicks'
+        triggered_id = '{"index":"test_snap","op":"restore",' '"type":"test-hdf5-snapshots-snapshot-op-btn"}.n_clicks'
 
         with patch.object(panel_module, "callback_context", FakeCtx(triggered_id, 1)):
-            result = registered_panel._cb_open_restore_modal(n_clicks_list, ids, False)
+            result = registered_panel._cb_open_restore_modal(n_clicks_list, None, False)
 
         body_str = str(result[1])
         assert "paused or stopped" in body_str.lower() or "training" in body_str.lower()
+
+    def test_context_menu_trigger_opens_modal(self, registered_panel):
+        """Right-click context-menu Store payload should open the modal (B-5)."""
+        import frontend.components.hdf5_snapshots_panel as panel_module
+
+        ctx_payload = {"snapshot_id": "snap_replay", "operation": "replay", "ts": 1234}
+        fake_ctx = FakeCtx(
+            "test-hdf5-snapshots-context-menu-trigger.data",
+            ctx_payload,
+        )
+        with patch.object(panel_module, "callback_context", fake_ctx):
+            result = registered_panel._cb_open_restore_modal(None, ctx_payload, False)
+
+        assert result[0] is True
+        assert "snap_replay" in str(result[1])
+        assert result[2] == {"id": "snap_replay", "operation": "replay"}
 
 
 # =============================================================================
@@ -530,16 +551,20 @@ class TestConfirmRestoreCallback:
 
     def test_success_closes_modal_and_increments_trigger(self, registered_panel):
         """Should close modal and increment trigger on success."""
+        # CAN-015e: ``confirm_snapshot_op`` dispatches via
+        # ``_invoke_snapshot_op_handler`` rather than the legacy
+        # ``_restore_snapshot_handler``. Patch the underlying invoker so
+        # the test is independent of the legacy shim.
         with patch.object(
             registered_panel,
-            "_restore_snapshot_handler",
+            "_invoke_snapshot_op_handler",
             return_value={
                 "success": True,
                 "message": "Restored successfully",
                 "data": {"snapshot_id": "snap_restore"},
             },
         ):
-            result = registered_panel._cb_confirm_restore(1, "snap_restore", 5)
+            result = registered_panel._cb_confirm_restore(1, {"id": "snap_restore", "operation": "restore"}, 5)
 
         # Modal closed
         assert result[0] is False
@@ -558,13 +583,13 @@ class TestConfirmRestoreCallback:
         """Should close modal and show error on failure."""
         with patch.object(
             registered_panel,
-            "_restore_snapshot_handler",
+            "_invoke_snapshot_op_handler",
             return_value={
                 "success": False,
                 "error": "Training is running",
             },
         ):
-            result = registered_panel._cb_confirm_restore(1, "snap_id", 3)
+            result = registered_panel._cb_confirm_restore(1, {"id": "snap_id", "operation": "restore"}, 3)
 
         # Modal closed
         assert result[0] is False
@@ -580,13 +605,13 @@ class TestConfirmRestoreCallback:
         assert result[2] == 3
 
     def test_handler_called_with_correct_id(self, registered_panel):
-        """Should call handler with correct snapshot ID."""
+        """Should call handler with correct snapshot ID and operation (B-5)."""
         mock_handler = MagicMock(return_value={"success": False, "error": "test"})
 
-        with patch.object(registered_panel, "_restore_snapshot_handler", mock_handler):
-            registered_panel._cb_confirm_restore(1, "specific_snap_id", 0)
+        with patch.object(registered_panel, "_invoke_snapshot_op_handler", mock_handler):
+            registered_panel._cb_confirm_restore(1, {"id": "specific_snap_id", "operation": "restore"}, 0)
 
-        mock_handler.assert_called_once_with("specific_snap_id")
+        mock_handler.assert_called_once_with("specific_snap_id", "restore")
 
 
 # =============================================================================
@@ -718,10 +743,10 @@ class TestCallbackEdgeCases:
         """Should handle None current_trigger gracefully."""
         with patch.object(
             registered_panel,
-            "_restore_snapshot_handler",
+            "_invoke_snapshot_op_handler",
             return_value={"success": True, "message": "ok"},
         ):
-            result = registered_panel._cb_confirm_restore(1, "snap", None)
+            result = registered_panel._cb_confirm_restore(1, {"id": "snap", "operation": "restore"}, None)
 
         # None + 1 = 1
         assert result[2] == 1

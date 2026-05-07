@@ -73,12 +73,37 @@ class TestDashboardManagerComponents:
         """Should have components attribute."""
         assert hasattr(dashboard, "components") or hasattr(dashboard, "_components")
 
-    @pytest.mark.skip(reason="Method _create_metrics_panel not exposed as public API")
-    def test_create_metrics_panel(self, dashboard):
-        """Should create metrics panel component."""
-        assert hasattr(dashboard, "_create_metrics_panel"), "DashboardManager should have _create_metrics_panel method"
-        panel = dashboard._create_metrics_panel()
-        assert panel is not None
+    def test_metrics_panel_appears_in_rendered_layout(self, dashboard):
+        """METRICS-MON R3.3 / seed-12: metrics panel renders into the dashboard layout.
+
+        Black-box replacement for the historically-skipped
+        ``test_create_metrics_panel`` (the original asserted on a
+        ``_create_metrics_panel`` method that does not exist —
+        ``DashboardManager`` instantiates ``MetricsPanel`` directly at
+        ``component_id="metrics-panel"``). The layout endpoint is the
+        actual integration seam Dash uses to ship component trees to the
+        browser, so asserting against it pins the contract that
+        regressions in any of the metrics-panel construction callers
+        (not just a single helper method) would surface.
+        """
+        # Dash exposes the rendered layout as JSON at ``/_dash-layout`` on
+        # its embedded Flask server. Going through ``server.test_client()``
+        # exercises the same wire format that the FastAPI WSGIMiddleware
+        # mount at ``/dashboard/_dash-layout`` proxies to.
+        client = dashboard.app.server.test_client()
+        response = client.get("/_dash-layout")
+        assert response.status_code == 200
+        body = response.get_data(as_text=True)
+        # The panel's component_id is the user-visible attachment point —
+        # any callback that writes into it (e.g. metrics history → graph
+        # data) must address it by this id, so the layout JSON must list
+        # it. Also assert on the panel-internal IDs to pin the panel was
+        # actually rendered (not just a stub div using the same id).
+        assert "metrics-panel" in body, "MetricsPanel root id missing from /dashboard/_dash-layout"
+        # MetricsPanel.get_layout() emits sub-elements named like
+        # ``metrics-store``, ``metrics-graph``. At least one must show up
+        # for the panel to be useful at runtime.
+        assert "metrics-store" in body, "MetricsPanel inner state element missing from rendered layout"
 
     @pytest.mark.skip(reason="Method _create_network_visualizer not exposed as public API")
     def test_create_network_visualizer(self, dashboard):

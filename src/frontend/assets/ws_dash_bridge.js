@@ -22,6 +22,13 @@
     var MAX_METRICS = 1000;
     var MAX_CASCADE_ADD = 500;
     var MAX_CANDIDATE_PROGRESS = 500;
+    // CAN-015g (g-4): weight payloads piggyback on metrics events
+    // emitted by g-3's replay session. Each carries base64-encoded
+    // float32 tensors (output + per-unit) so the per-event payload
+    // can be tens of MB on large networks. Cap aggressively so the
+    // browser doesn't OOM on a long replay session — 100 events
+    // covers most playback windows; older entries fall off LRU-style.
+    var MAX_REPLAY_WEIGHTS = 100;
 
     window._juniperWsDrain = {
         // Bounded ring buffers
@@ -30,6 +37,7 @@
         _topologyBuffer: null,        // latest only
         _cascadeAddBuffer: [],        // max MAX_CASCADE_ADD
         _candidateProgressBuffer: [], // max MAX_CANDIDATE_PROGRESS
+        _replayWeightBuffer: [],      // CAN-015g (g-4): max MAX_REPLAY_WEIGHTS
         _connectionStatus: {connected: false, reconnecting: false, mode: "live"},
         // GAP-WS-16: metricsReceived flips true when initial_metrics or the
         // first metrics frame is delivered, so the REST /api/metrics/history
@@ -76,6 +84,21 @@
         drainCandidateProgress: function() {
             var events = this._candidateProgressBuffer;
             this._candidateProgressBuffer = [];
+            return events;
+        },
+
+        // CAN-015g (g-4): Drain replay weight payloads. Each entry is
+        // a Phase 6E V2 ``weights`` block extracted from a replay
+        // ``epoch_end`` event (see g-3 emitter):
+        //   { sample_index, epoch, output_weights, output_bias,
+        //     hidden_units }
+        // Tensors are still base64-encoded float32 envelopes
+        // ({dtype, shape, data}); the consumer side decodes only what
+        // it needs to render (e.g. compute a Frobenius norm without
+        // decoding all hidden units).
+        drainReplayWeights: function() {
+            var events = this._replayWeightBuffer;
+            this._replayWeightBuffer = [];
             return events;
         },
 
@@ -142,6 +165,27 @@
         var drain = window._juniperWsDrain;
 
         window.cascorWS.on("metrics", function(data) {
+            // CAN-015g (g-4): replay V2 events carry an extra
+            // ``weights`` block on sample-boundary epochs (set by
+            // g-3's _ReplaySession._emit_frame). Split it off into
+            // the dedicated weight buffer so the metrics ring stays
+            // light — a 1000-event metrics buffer with multi-MB
+            // weight payloads attached to each entry would balloon
+            // the browser's memory footprint into GB territory on
+            // long replays. The slim metric event still flows
+            // through ``_metricsBuffer`` so existing consumers
+            // (curve plotter, history store) see the same shape.
+            if (data && typeof data === "object" && data.weights) {
+                if (drain._replayWeightBuffer.length >= MAX_REPLAY_WEIGHTS) {
+                    drain._replayWeightBuffer.shift();
+                }
+                drain._replayWeightBuffer.push(data.weights);
+                // Strip the weights block from the metric event sent
+                // to the metrics ring. Mutating ``data`` in place is
+                // safe because cascorWS gives each handler a fresh
+                // reference per dispatch.
+                delete data.weights;
+            }
             // C-19: ring bound enforced in handler
             if (drain._metricsBuffer.length >= MAX_METRICS) {
                 drain._metricsBuffer.shift(); // drop oldest

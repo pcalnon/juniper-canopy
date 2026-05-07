@@ -206,8 +206,8 @@ class TestPhaseC:
     # ------------------------------------------------------------------
 
     def test_hot_param_count(self):
-        """Exactly 11 hot params per §S9."""
-        assert len(CascorServiceAdapter._HOT_CASCOR_PARAMS) == 11
+        """Hot-param count: §S9 baseline (11) + `output_epochs` (Phase 6E A-1, `1542600`) = 12."""
+        assert len(CascorServiceAdapter._HOT_CASCOR_PARAMS) == 12
 
     # ------------------------------------------------------------------
     # 10. Supervisor reconnects with backoff

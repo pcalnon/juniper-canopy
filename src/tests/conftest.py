@@ -58,23 +58,38 @@ except ImportError:
     import types
     from unittest.mock import MagicMock
 
-    class _JuniperDataClientError(Exception):
+    # OBS-WIRE-02 / A.8: stub classes use the public production class
+    # names (no leading underscore) so ``type(err).__name__`` matches
+    # the closed-set allowlist in
+    # ``observability._KNOWN_DATA_CLIENT_ERROR_TYPES``. Previously these
+    # were ``_``-prefixed, which made the ``error_type`` label collapse
+    # to ``"_other"`` under the new closed-set validation. Local
+    # identifiers retain the ``_`` prefix to avoid shadowing real
+    # package names if anything ever does both.
+    class JuniperDataClientError(Exception):
         pass
 
-    class _JuniperDataConfigurationError(_JuniperDataClientError):
+    class JuniperDataConfigurationError(JuniperDataClientError):
         pass
 
-    class _JuniperDataConnectionError(_JuniperDataClientError):
+    class JuniperDataConnectionError(JuniperDataClientError):
         pass
 
-    class _JuniperDataTimeoutError(_JuniperDataClientError):
+    class JuniperDataTimeoutError(JuniperDataClientError):
         pass
 
-    class _JuniperDataNotFoundError(_JuniperDataClientError):
+    class JuniperDataNotFoundError(JuniperDataClientError):
         pass
 
-    class _JuniperDataValidationError(_JuniperDataClientError):
+    class JuniperDataValidationError(JuniperDataClientError):
         pass
+
+    _JuniperDataClientError = JuniperDataClientError
+    _JuniperDataConfigurationError = JuniperDataConfigurationError
+    _JuniperDataConnectionError = JuniperDataConnectionError
+    _JuniperDataTimeoutError = JuniperDataTimeoutError
+    _JuniperDataNotFoundError = JuniperDataNotFoundError
+    _JuniperDataValidationError = JuniperDataValidationError
 
     # Use types.ModuleType so __all__ and other module attributes work correctly
     _mock_jdc_exceptions = types.ModuleType("juniper_data_client.exceptions")

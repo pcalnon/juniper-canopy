@@ -676,3 +676,56 @@ class TestSnapshotHistoryEndpoint:
         # Find the restore entry
         restore_entries = [e for e in data["history"] if e["action"] == "restore" and e["snapshot_id"] == unique_name]
         assert len(restore_entries) > 0
+
+
+# =============================================================================
+# Phase 6E Sprint B (B-5, CAN-015e): replay / resume / retrain proxies
+# =============================================================================
+
+
+class TestSnapshotOpRoutesB5DemoMode:
+    """In demo mode the new B-1..B-3 endpoints must return 501.
+
+    The full happy-path is covered by the cascor-side service tests; the
+    canopy proxies here just need to exercise (a) the demo-mode short
+    circuit and (b) basic 409 / shape semantics that don't require a
+    live cascor backend.
+    """
+
+    @pytest.fixture(autouse=True)
+    def stop_training(self, client):
+        client.post("/api/train/stop")
+        yield
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("operation", ["replay", "resume", "retrain"])
+    def test_demo_mode_returns_501(self, client, operation):
+        """Replay/resume/retrain return 501 in demo mode."""
+        list_response = client.get("/api/v1/snapshots")
+        snapshot_id = list_response.json()["snapshots"][0]["id"]
+        response = client.post(f"/api/v1/snapshots/{snapshot_id}/{operation}")
+        assert response.status_code == 501
+        detail = response.json().get("detail", "")
+        assert "cascor" in detail.lower()
+
+    @pytest.mark.integration
+    def test_replay_control_demo_mode_returns_501(self, client):
+        list_response = client.get("/api/v1/snapshots")
+        snapshot_id = list_response.json()["snapshots"][0]["id"]
+        response = client.post(
+            f"/api/v1/snapshots/{snapshot_id}/replay/control",
+            json={"action": "play"},
+        )
+        assert response.status_code == 501
+
+    @pytest.mark.integration
+    def test_replay_control_validates_body(self, client):
+        """Missing 'action' field is a 422 from FastAPI body validation,
+        which fires before the demo-mode check."""
+        list_response = client.get("/api/v1/snapshots")
+        snapshot_id = list_response.json()["snapshots"][0]["id"]
+        response = client.post(
+            f"/api/v1/snapshots/{snapshot_id}/replay/control",
+            json={},
+        )
+        assert response.status_code == 422

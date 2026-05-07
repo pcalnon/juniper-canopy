@@ -36,13 +36,15 @@
 #####################################################################################################################################################################################################
 from typing import Any, Callable, Dict, Optional
 
+import dash
 import dash_bootstrap_components as dbc
 import numpy as np
 import plotly.graph_objects as go
 from dash import dcc, html
-from dash.dependencies import Input, Output
+from dash.dependencies import Input, Output, State
 
 from ..base_component import BaseComponent, create_empty_plot
+from ..replay_forward import cascade_forward, decode_weight_payload
 
 
 class DecisionBoundary(BaseComponent):
@@ -222,7 +224,88 @@ class DecisionBoundary(BaseComponent):
 
             return fig, status
 
+        # CAN-015g (g-7): replay-aware boundary computation. Whenever
+        # the replay-weight-buffer Store gains a new sample (via the
+        # ws-bridge → drain pipeline added in g-4) AND a replay
+        # session is active, recompute the decision boundary against
+        # the most recent sample's tensors and push it to the same
+        # ``-boundary-data`` Store the live path uses. Callback
+        # short-circuits when no buffer/session/dataset is present so
+        # the live path stays in charge during normal training.
+        @app.callback(
+            Output(f"{self.component_id}-boundary-data", "data", allow_duplicate=True),
+            Input("replay-weight-buffer", "data"),
+            State("replay-player-session", "data"),
+            State(f"{self.component_id}-dataset-data", "data"),
+            prevent_initial_call=True,
+        )
+        def update_boundary_from_replay(buffer, session, dataset):
+            if not buffer or not session or not session.get("snapshot_id"):
+                return dash.no_update
+            if not dataset:
+                return dash.no_update
+            payload = decode_weight_payload(buffer[-1])
+            if payload is None:
+                return dash.no_update
+            return self._compute_replay_boundary(dataset, payload)
+
         self.logger.debug(f"Callbacks registered for {self.component_id}")
+
+    def _compute_replay_boundary(self, dataset: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+        """CAN-015g (g-7): compute the decision-boundary grid against a
+        decoded V2 weight payload (rather than the live network's
+        ``predict_fn``).
+
+        Layout-compatible with ``_compute_decision_boundary``'s output
+        — the same ``boundary-data`` Store and the same
+        ``_create_boundary_plot`` consumer handle both paths
+        identically. Returns ``{}`` on shape mismatch / decode
+        failure so the renderer falls back to its empty state
+        without raising.
+        """
+        inputs = np.asarray(dataset.get("inputs", []), dtype=np.float32)
+        if inputs.ndim != 2 or inputs.shape[1] < 2:
+            return {}
+
+        x_min, x_max = inputs[:, 0].min() - 1, inputs[:, 0].max() + 1
+        y_min, y_max = inputs[:, 1].min() - 1, inputs[:, 1].max() + 1
+        xx, yy = np.meshgrid(
+            np.linspace(x_min, x_max, self.resolution),
+            np.linspace(y_min, y_max, self.resolution),
+        )
+        grid_points = np.c_[xx.ravel(), yy.ravel()].astype(np.float32, copy=False)
+
+        predictions = cascade_forward(
+            grid_points,
+            payload.get("output_weights"),
+            payload.get("output_bias"),
+            payload.get("hidden_units", []),
+        )
+        if predictions is None:
+            return {}
+
+        if predictions.ndim > 1:
+            if predictions.shape[1] > 1:
+                z_grid = np.argmax(predictions, axis=1)
+            else:
+                z_grid = predictions[:, 0]
+        else:
+            z_grid = predictions
+        z_grid = z_grid.reshape(xx.shape)
+
+        return {
+            "xx": xx.tolist(),
+            "yy": yy.tolist(),
+            "Z": z_grid.tolist(),
+            "bounds": {"x_min": float(x_min), "x_max": float(x_max), "y_min": float(y_min), "y_max": float(y_max)},
+            # Diagnostic: subscribers can show "Replay sample @ epoch N"
+            # in the status line. Not consumed by the existing live
+            # path so it's safely ignored when present.
+            "replay_sample": {
+                "sample_index": int(payload.get("sample_index", 0)),
+                "epoch": int(payload.get("epoch", 0)),
+            },
+        }
 
     def _compute_decision_boundary(self, dataset: Dict[str, Any]) -> Dict[str, Any]:
         """

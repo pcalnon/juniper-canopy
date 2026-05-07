@@ -49,9 +49,11 @@ def validate_inbound_frame(raw: dict) -> Optional[CascorServerFrame]:
         logger.warning("Malformed inbound frame from cascor: %s — %s", type(e).__name__, e)
         try:
             if _inbound_invalid_counter is None:
+                from juniper_observability import register_or_reuse
                 from prometheus_client import Counter
 
-                _inbound_invalid_counter = Counter(
+                _inbound_invalid_counter = register_or_reuse(
+                    Counter,
                     "canopy_adapter_inbound_invalid_total",
                     "Malformed frames received from cascor",
                 )

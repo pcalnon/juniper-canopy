@@ -1,133 +1,119 @@
 """Extended coverage tests for cascor auto-discovery logic.
 
-Covers _probe_url_sync directly, timeout behavior, malformed responses,
-default parameter handling, and edge cases not in test_cascor_discovery.py.
+Covers ``probe_cascor_url`` directly, timeout behavior, malformed
+responses, default parameter handling, and edge cases not in
+test_cascor_discovery.py.
+
+METRICS-MON R4.2 / seed-10: ``_probe_url_sync`` was removed when the
+discovery probe migrated from ``urllib.request.urlopen`` (offloaded via
+``run_in_executor``) to native async ``httpx.AsyncClient``. The
+TestProbeUrlSync class below tested the now-deleted helper; it has been
+replaced by ``TestProbeCascorUrlEdgeCases`` which targets the live
+async path with the same coverage intent (URL-path correctness, timeout
+pass-through, JSON edge cases, error mapping).
 """
 
-import json
-import urllib.error
-import urllib.request
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from discovery import (
     _DEFAULT_HOST,
     _DEFAULT_PORTS,
     _DEFAULT_TIMEOUT,
-    _probe_url_sync,
     discover_cascor,
     probe_cascor_url,
 )
 
 
 @pytest.mark.unit
-class TestProbeUrlSync:
-    """Direct tests for _probe_url_sync (synchronous probe)."""
+class TestProbeCascorUrlEdgeCases:
+    """Edge-case coverage for the native-async probe.
 
-    def test_returns_true_on_valid_health_response(self):
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-        mock_resp.read.return_value = b'{"status": "alive"}'
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
+    Mirrors the coverage intent of the pre-R4.2 ``TestProbeUrlSync``
+    class against the new ``httpx.AsyncClient``-based implementation.
+    """
 
-        with patch("urllib.request.urlopen", return_value=mock_resp):
-            assert _probe_url_sync("http://localhost:8200", timeout=2.0) is True
+    async def test_returns_true_on_valid_health_response(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "alive"}
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response):
+            assert await probe_cascor_url("http://localhost:8200", timeout=2.0) is True
 
-    def test_returns_false_on_non_200_status(self):
-        mock_resp = MagicMock()
-        mock_resp.status = 503
-        mock_resp.read.return_value = b'{"status": "alive"}'
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
+    async def test_returns_false_on_non_200_status(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 503
+        mock_response.json.return_value = {"status": "alive"}
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response):
+            assert await probe_cascor_url("http://localhost:8200", timeout=2.0) is False
 
-        with patch("urllib.request.urlopen", return_value=mock_resp):
-            assert _probe_url_sync("http://localhost:8200", timeout=2.0) is False
+    async def test_returns_false_on_non_json_body(self):
+        """``response.json()`` raises on invalid JSON; broad-except → False."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.side_effect = ValueError("Expecting value")
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response):
+            assert await probe_cascor_url("http://localhost:8200", timeout=2.0) is False
 
-    def test_returns_false_on_non_json_body(self):
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-        mock_resp.read.return_value = b"<html>Not JSON</html>"
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
+    async def test_returns_false_on_empty_body(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.side_effect = ValueError("empty body")
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response):
+            assert await probe_cascor_url("http://localhost:8200", timeout=2.0) is False
 
-        with patch("urllib.request.urlopen", return_value=mock_resp):
-            assert _probe_url_sync("http://localhost:8200", timeout=2.0) is False
+    async def test_returns_false_on_missing_status_key(self):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"healthy": True}  # wrong key
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response):
+            assert await probe_cascor_url("http://localhost:8200", timeout=2.0) is False
 
-    def test_returns_false_on_empty_body(self):
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-        mock_resp.read.return_value = b""
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
+    async def test_returns_false_on_connection_refused(self):
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=httpx.ConnectError("Connection refused")):
+            assert await probe_cascor_url("http://localhost:9999", timeout=1.0) is False
 
-        with patch("urllib.request.urlopen", return_value=mock_resp):
-            assert _probe_url_sync("http://localhost:8200", timeout=2.0) is False
+    async def test_returns_false_on_timeout(self):
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=httpx.ReadTimeout("timed out")):
+            assert await probe_cascor_url("http://localhost:8200", timeout=0.001) is False
 
-    def test_returns_false_on_missing_status_key(self):
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-        mock_resp.read.return_value = b'{"healthy": true}'
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
+    async def test_returns_false_on_http_status_error(self):
+        """HTTP 4xx/5xx with intact JSON body still maps to False (non-200 path)."""
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        mock_response.json.return_value = {"status": "alive"}
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response):
+            assert await probe_cascor_url("http://localhost:8200", timeout=2.0) is False
 
-        with patch("urllib.request.urlopen", return_value=mock_resp):
-            assert _probe_url_sync("http://localhost:8200", timeout=2.0) is False
+    async def test_probes_correct_url_path(self):
+        """Verify the probe hits ``/v1/health/live``."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "alive"}
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response) as mock_get:
+            await probe_cascor_url("http://myhost:8200", timeout=2.0)
+            # First positional arg is the URL passed to AsyncClient.get
+            assert mock_get.call_args[0][0] == "http://myhost:8200/v1/health/live"
 
-    def test_returns_false_on_connection_refused(self):
-        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Connection refused")):
-            assert _probe_url_sync("http://localhost:9999", timeout=1.0) is False
+    async def test_default_timeout_used(self):
+        """Default timeout matches _DEFAULT_TIMEOUT (no kwarg passed)."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "alive"}
+        # Patch AsyncClient.__init__ to capture the timeout it was constructed with.
+        captured = {}
+        original_init = httpx.AsyncClient.__init__
 
-    def test_returns_false_on_timeout(self):
-        with patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")):
-            assert _probe_url_sync("http://localhost:8200", timeout=0.001) is False
+        def capture_init(self, *args, timeout=None, **kwargs):
+            captured["timeout"] = timeout
+            original_init(self, *args, timeout=timeout, **kwargs)
 
-    def test_returns_false_on_http_error(self):
-        with patch("urllib.request.urlopen", side_effect=urllib.error.HTTPError("http://localhost:8200/v1/health/live", 404, "Not Found", {}, None)):
-            assert _probe_url_sync("http://localhost:8200", timeout=2.0) is False
-
-    def test_probes_correct_url_path(self):
-        """Verify the probe hits /v1/health/live endpoint."""
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-        mock_resp.read.return_value = b'{"status": "alive"}'
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
-
-        with patch("urllib.request.urlopen", return_value=mock_resp) as mock_open:
-            _probe_url_sync("http://myhost:8200", timeout=2.0)
-            req_arg = mock_open.call_args[0][0]
-            assert req_arg.full_url == "http://myhost:8200/v1/health/live"
-
-    def test_passes_timeout_to_urlopen(self):
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-        mock_resp.read.return_value = b'{"status": "alive"}'
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
-
-        with patch("urllib.request.urlopen", return_value=mock_resp) as mock_open:
-            _probe_url_sync("http://localhost:8200", timeout=5.0)
-            assert mock_open.call_args[1]["timeout"] == 5.0
-
-
-@pytest.mark.unit
-class TestProbeCascorUrlCoverage:
-    """Additional coverage for probe_cascor_url async wrapper."""
-
-    async def test_uses_executor_for_sync_call(self):
-        """Verify the async wrapper delegates to executor (not blocking event loop)."""
-        with patch("discovery._probe_url_sync", return_value=True) as mock_sync:
-            result = await probe_cascor_url("http://localhost:8200", timeout=3.0)
-            assert result is True
-            mock_sync.assert_called_once_with("http://localhost:8200", 3.0)
-
-    async def test_default_timeout_value(self):
-        """Verify default timeout matches _DEFAULT_TIMEOUT."""
-        with patch("discovery._probe_url_sync", return_value=False) as mock_sync:
-            await probe_cascor_url("http://localhost:8200")
-            mock_sync.assert_called_once_with("http://localhost:8200", _DEFAULT_TIMEOUT)
+        with patch("httpx.AsyncClient.__init__", capture_init):
+            with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response):
+                await probe_cascor_url("http://localhost:8200")
+        assert captured["timeout"] == _DEFAULT_TIMEOUT
 
 
 @pytest.mark.unit

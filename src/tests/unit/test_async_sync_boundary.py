@@ -1,19 +1,25 @@
 """
 Async/Sync Boundary Tests
 
-Consolidates and verifies the three async/sync boundary patterns in juniper-canopy:
+Verifies the two remaining async/sync boundary patterns in juniper-canopy:
 
-1. discovery.py: run_in_executor — sync HTTP probes from async context
-2. main.py: schedule_broadcast — run_coroutine_threadsafe from sync threads
-3. websocket_manager.py: broadcast_sync / broadcast_from_thread — bridge sync
+1. main.py: schedule_broadcast — run_coroutine_threadsafe from sync threads
+2. websocket_manager.py: broadcast_sync / broadcast_from_thread — bridge sync
    training threads to async WebSocket broadcasts
 
 Focuses on patterns NOT covered by existing unit tests:
-- Real (not mocked) executor delegation end-to-end
-- Error propagation through run_in_executor
 - Thread-safety of broadcast_from_thread with actual message delivery
 - broadcast_sync vs broadcast_from_thread guard differences (is_running vs is_closed)
 - Edge cases: closed loop, None loop, exception during scheduled coroutine
+
+Note (P-15): the original file also exercised a run_in_executor pattern
+in ``discovery.py`` (offloading sync HTTP probes from async context).
+Commit ``a04aafd`` (METRICS-MON R4.2) replaced that with native
+``httpx.AsyncClient`` and removed the ``_probe_url_sync`` helper, so the
+``TestRunInExecutorBoundary`` class is no longer applicable. The new
+async-native discovery path is exercised by ``test_health.py``'s
+concurrency assertion (``test_probe_runs_concurrently_not_serially_under_fanout``)
+and by ``test_discovery_*`` end-to-end coverage.
 """
 
 import asyncio
@@ -24,84 +30,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from communication.websocket_manager import WebSocketManager
-from discovery import _probe_url_sync, probe_cascor_url
-
-# =========================================================================
-# Pattern 1: run_in_executor (discovery.py)
-# =========================================================================
-
-
-@pytest.mark.unit
-class TestRunInExecutorBoundary:
-    """Tests for the run_in_executor pattern used in probe_cascor_url."""
-
-    async def test_executor_delegates_to_sync_function_end_to_end(self):
-        """run_in_executor actually calls _probe_url_sync in the default executor."""
-        mock_response = MagicMock()
-        mock_response.status = 200
-        mock_response.read.return_value = b'{"status": "alive"}'
-        mock_response.__enter__ = lambda s: s
-        mock_response.__exit__ = MagicMock(return_value=False)
-
-        call_thread_ids = []
-        original_probe = _probe_url_sync
-
-        def tracking_probe(url, timeout):
-            call_thread_ids.append(threading.current_thread().ident)
-            with patch("urllib.request.urlopen", return_value=mock_response):
-                return original_probe(url, timeout)
-
-        main_thread_id = threading.current_thread().ident
-
-        with patch("discovery._probe_url_sync", side_effect=tracking_probe):
-            result = await probe_cascor_url("http://localhost:8200", timeout=1.0)
-
-        assert result is True
-        assert len(call_thread_ids) == 1
-        # The executor runs the function in a different thread
-        assert call_thread_ids[0] != main_thread_id
-
-    async def test_executor_propagates_exception_from_sync_function(self):
-        """If _probe_url_sync raises, the exception propagates to the async caller."""
-
-        def exploding_probe(url, timeout):
-            raise ConnectionError("Network unreachable")
-
-        with patch("discovery._probe_url_sync", side_effect=exploding_probe):
-            with pytest.raises(ConnectionError, match="Network unreachable"):
-                await probe_cascor_url("http://localhost:8200")
-
-    async def test_executor_returns_false_without_raising(self):
-        """_probe_url_sync returns False on HTTP errors (no exception propagation)."""
-        import urllib.error
-
-        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("refused")):
-            result = await probe_cascor_url("http://localhost:8200")
-        assert result is False
-
-    async def test_executor_concurrent_probes(self):
-        """Multiple concurrent run_in_executor probes execute in parallel."""
-        call_order = []
-
-        def slow_probe(url, timeout):
-            call_order.append(("start", url))
-            time.sleep(0.05)
-            call_order.append(("end", url))
-            return False
-
-        with patch("discovery._probe_url_sync", side_effect=slow_probe):
-            results = await asyncio.gather(
-                probe_cascor_url("http://host:8200"),
-                probe_cascor_url("http://host:8201"),
-            )
-
-        assert results == [False, False]
-        # Both should start before either ends (parallel execution in executor)
-        starts = [i for i, (action, _) in enumerate(call_order) if action == "start"]
-        ends = [i for i, (action, _) in enumerate(call_order) if action == "end"]
-        assert len(starts) == 2
-        assert len(ends) == 2
-
 
 # =========================================================================
 # Pattern 2: schedule_broadcast (main.py loop_holder pattern)

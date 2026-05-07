@@ -1,0 +1,18 @@
+# Gitleaks configuration for JuniperCanopy
+# See: https://github.com/gitleaks/gitleaks#configuration
+
+[allowlist]
+  description = "Allowlist for known historical false positives"
+
+  # Conda environment files contain `<package>=<version>=<build_hash>` triples.
+  # The build_hash component is high-entropy (3.5–3.7) and trips the
+  # generic-api-key rule, but it is a conda package build hash, not a secret.
+  # Example: ``fastapi-core=0.122.0=pyh1bdc77b_0`` ⇒ build hash ``pyh1bdc77b_0``.
+  # Documentation files under ``notes/mcp/`` contain example API request snippets
+  # using placeholder strings (e.g. ``x-api-key: <YOUR_KEY>``) that gitleaks
+  # mis-classifies; these are illustrative only and do not contain real secrets.
+  paths = [
+    '''conf/conda_environment.*\.ya?ml''',
+    '''conf/.*\.lock''',
+    '''notes/mcp/.*''',
+  ]

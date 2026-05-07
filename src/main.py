@@ -48,6 +48,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 from a2wsgi import WSGIMiddleware
@@ -79,6 +80,7 @@ from observability import (
     configure_sentry,
     get_prometheus_app,
     set_build_info,
+    set_demo_mode_active,
 )
 from secrets_util import get_secret
 from settings import get_settings
@@ -233,6 +235,12 @@ async def lifespan(app: FastAPI):
         backend.set_state_update_callback(training_state.update_state)
 
     system_logger.info("Backend initialized: %s", backend.backend_type)
+    # METRICS-MON R3.2 / seed-11: reflect the post-fallback backend type in
+    # the ``juniper_canopy_demo_mode_active`` gauge. This is the single
+    # source of truth — the cascor-unreachable fallback above may flip the
+    # backend from "service" to "demo" before we get here, so reading
+    # ``settings.demo_mode`` directly would lie about the live state.
+    set_demo_mode_active(backend.backend_type == "demo")
     system_logger.info("Application startup complete")
 
     yield
@@ -297,13 +305,21 @@ app.add_middleware(
     path="/",
 )
 
-# Observability middleware (LIFO: last added runs first)
-app.add_middleware(RequestIdMiddleware)
+# Observability middleware (LIFO: last added runs OUTERMOST).
+#
+# OBS-WIRE C.1: order matters — starlette is LIFO, so whatever is added
+# LAST runs OUTERMOST. ``RequestIdMiddleware`` MUST be added LAST so it
+# runs OUTERMOST and the ``request_id`` contextvar is set BEFORE
+# ``PrometheusMiddleware`` records the request (otherwise structured
+# logs emitted from inside the metrics path see request_id=None).
+# Matches the canonical pattern in juniper-data
+# (juniper_data/api/app.py) and juniper-cascor (src/api/app.py).
 if settings.metrics_enabled:
     from observability import PrometheusMiddleware
 
     app.add_middleware(PrometheusMiddleware, service_name="juniper-canopy", namespace="juniper_canopy")
     app.mount("/metrics", get_prometheus_app())
+app.add_middleware(RequestIdMiddleware)
 
 
 # Global exception handler for unhandled errors — returns standardized ErrorResponse.
@@ -473,7 +489,10 @@ async def websocket_training_endpoint(websocket: WebSocket):
         return
 
     client_id = f"training-client-{id(websocket)}"
-    await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol)
+    # OBS-WIRE A.4: pass channel="training" so connect/disconnect updates
+    # juniper_canopy_websocket_connections_active{channel="training"} and
+    # outbound dispatch labels juniper_canopy_websocket_messages_total{...}.
+    await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol, channel="training")
 
     idle_timeout = ws_settings.idle_timeout_seconds
     max_msg_size = ws_settings.max_message_size_training
@@ -563,7 +582,10 @@ async def websocket_control_endpoint(websocket: WebSocket):
         return
 
     client_id = f"control-client-{id(websocket)}"
-    await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol)
+    # OBS-WIRE A.4: pass channel="control" so connect/disconnect updates
+    # juniper_canopy_websocket_connections_active{channel="control"} and
+    # outbound dispatch labels juniper_canopy_websocket_messages_total{...}.
+    await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol, channel="control")
 
     # Phase B-pre-b: CSRF first-frame authentication (M-SEC-02)
     if settings.csrf_enabled:
@@ -1241,6 +1263,62 @@ if _snapshots_dir is None:
 _SNAPSHOT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Filesystem helpers — synchronous, called via ``asyncio.to_thread`` from
+# async route handlers so the FastAPI event loop stays responsive while disk
+# operations are in flight (Phase 3 of the async-route audit; see
+# juniper-ml notes/ASYNC_ROUTE_AUDIT_HOOK_MIGRATION_PLAN.md).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _load_snapshot_history(history_file: "Path") -> list[dict]:
+    """Read ``snapshot_history.jsonl`` and return parsed entries.
+
+    Returns an empty list when the file is absent or unreadable; logs
+    individual JSON-parse failures at WARNING and a top-level read
+    failure at WARNING. Always returns; the caller treats an empty
+    list as "no history" rather than as an error.
+    """
+    entries: list[dict] = []
+    if not history_file.exists():
+        return entries
+    try:
+        with open(history_file, "r") as f:
+            for line in f:
+                if line := line.strip():
+                    try:
+                        entries.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        system_logger.warning("Invalid JSON in history file: %s...", line[:50])
+    except Exception as e:  # noqa: BLE001 — best-effort read; log and return what we have
+        system_logger.warning("Failed to read snapshot history: %s", e)
+    return entries
+
+
+def _find_snapshot_file(snapshots_dir: str, snapshot_id: str) -> tuple["Path | None", "os.stat_result | None", bool]:
+    """Find a snapshot file by stem and stat it.
+
+    Returns ``(snapshot_file, stat_result, directory_missing)``. The first two
+    elements are ``None`` when no file matches; ``directory_missing`` is
+    ``True`` only when the snapshots directory itself does not exist, so the
+    route handler can surface a more specific 404 message to API consumers.
+    Bundles the filesystem walk + ``stat`` syscall so callers take one
+    ``asyncio.to_thread`` hop instead of three.
+    """
+    from pathlib import Path
+
+    path = Path(snapshots_dir)
+    if not path.exists():
+        return None, None, True
+    snapshot_file = next(
+        (f for f in path.iterdir() if f.is_file() and f.suffix.lower() in SNAPSHOT_EXTENSIONS and f.stem == snapshot_id),
+        None,
+    )
+    if snapshot_file is None:
+        return None, None, False
+    return snapshot_file, snapshot_file.stat(), False
+
+
 def _sanitize_snapshot_name(name: str) -> str:
     """Validate and sanitize a snapshot name to prevent path traversal.
 
@@ -1260,7 +1338,10 @@ def _sanitize_snapshot_name(name: str) -> str:
 
     # Path confinement: resolve and verify the resulting path stays inside _snapshots_dir
     base = Path(_snapshots_dir).resolve()
-    candidate = (base / name).resolve()
+    # Verify with normalised version of path
+    # candidate = (base / name).resolve()  ## This line is the borked version
+    candidate = os.path.normpath(os.path.join(base, name))
+
     if not str(candidate).startswith(str(base) + os.sep) and candidate != base:
         raise HTTPException(status_code=400, detail="Invalid snapshot name.")
 
@@ -1377,20 +1458,12 @@ async def get_snapshot_history(limit: int = 50):
 
     history_file = Path(_snapshots_dir) / "snapshot_history.jsonl"
 
-    entries = []
-
-    if history_file.exists():
-        try:
-            with open(history_file, "r") as f:
-                for line in f:
-                    if line := line.strip():
-                        try:
-                            entry = json.loads(line)
-                            entries.append(entry)
-                        except json.JSONDecodeError:
-                            system_logger.warning("Invalid JSON in history file: %s...", line[:50])
-        except Exception as e:
-            system_logger.warning("Failed to read snapshot history: %s", e)
+    # Read off the event loop. The history file can grow large (one line
+    # per snapshot op, no rotation today) and disk I/O on a slow volume
+    # blocks the loop. ``_load_snapshot_history`` returns the parsed
+    # entries; warnings are still routed through the logger inside the
+    # helper so the route stays simple.
+    entries = await asyncio.to_thread(_load_snapshot_history, history_file)
 
     # Return in reverse chronological order (newest first)
     entries.reverse()
@@ -1418,7 +1491,6 @@ async def get_snapshot_detail(snapshot_id: str):
         JSON object with snapshot metadata and optional HDF5 attributes
     """
     from datetime import UTC, datetime
-    from pathlib import Path
 
     from fastapi import HTTPException
 
@@ -1454,21 +1526,16 @@ async def get_snapshot_detail(snapshot_id: str):
 
         raise HTTPException(status_code=404, detail="Snapshot not found")
 
-    # Real mode: find file in snapshots directory
-    path = Path(_snapshots_dir)
-    if not path.exists():
+    # Real mode: find file in snapshots directory. The directory walk and
+    # ``stat`` syscall are bundled into ``_find_snapshot_file`` and run on a
+    # worker thread so the FastAPI event loop stays responsive on slow disks.
+    snapshot_file, stat, directory_missing = await asyncio.to_thread(_find_snapshot_file, _snapshots_dir, snapshot_id)
+
+    if directory_missing:
         raise HTTPException(status_code=404, detail="Snapshot directory not found")
-
-    # Search by file stem
-    snapshot_file = next(
-        (f for f in path.iterdir() if f.is_file() and f.suffix.lower() in SNAPSHOT_EXTENSIONS and f.stem == snapshot_id),
-        None,
-    )
-
-    if not snapshot_file:
+    if snapshot_file is None or stat is None:
         raise HTTPException(status_code=404, detail="Snapshot not found")
 
-    stat = snapshot_file.stat()
     ts = datetime.fromtimestamp(stat.st_mtime, tz=UTC).replace(microsecond=0)
 
     detail = {
@@ -1617,7 +1684,10 @@ async def create_snapshot(
     # Real mode: create actual HDF5 file via backend
     try:
         snapshot_path = Path(_snapshots_dir) / snapshot_name
-        Path(_snapshots_dir).mkdir(parents=True, exist_ok=True)
+        # ``mkdir`` is a sync syscall — push to a worker thread so a slow
+        # disk doesn't stall the event loop. ``exist_ok=True`` keeps the
+        # call idempotent on a hot path that may run frequently.
+        await asyncio.to_thread(Path(_snapshots_dir).mkdir, parents=True, exist_ok=True)
 
         # Attempt to create HDF5 snapshot via CasCor integration
         if hasattr(backend, "_adapter") and hasattr(backend._adapter, "save_snapshot"):
@@ -1915,6 +1985,250 @@ async def restore_snapshot(snapshot_id: str):
             status_code=500,
             detail="Failed to restore snapshot",
         ) from e
+
+
+# ============================================================================
+# CAN-015 (Phase 6E Sprint B B-5): Replay / Resume / Retrain proxy routes
+# ============================================================================
+# These three endpoints proxy to the cascor /v1/snapshots/{id}/{op} endpoints
+# added in Sprint B B-1 (retrain), B-2 (resume), and B-3 (replay). Unlike
+# the existing /restore route which carries significant demo-mode +
+# legacy-mode compatibility logic, these new endpoints are thin proxies:
+# they delegate to the cascor adapter, surface the unified response shape,
+# and broadcast a state-change event for canopy clients on the WS stream.
+#
+# In demo mode the operations are not supported (cascor isn't running) —
+# the proxies return 501 Not Implemented with a helpful message rather
+# than silently no-op'ing. Demo-mode coverage is a follow-up if the
+# product wants Replay/Resume/Retrain available without a live backend.
+
+
+def _broadcast_snapshot_op(action: str, snapshot_id: str, payload: dict | None = None) -> None:
+    """Broadcast a snapshot-operation state event to all WS subscribers.
+    Mirrors the pre-existing snapshot_restored broadcast in
+    ``restore_snapshot`` but parameterized over the operation name."""
+    import asyncio as _asyncio
+    from typing import Any as _Any
+
+    data: dict[str, _Any] = {
+        "action": f"snapshot_{action}",
+        "snapshot_id": snapshot_id,
+        "training_state": training_state.get_state() if training_state else {},
+    }
+    if payload is not None:
+        data["payload"] = payload
+    msg: dict[str, _Any] = {"type": "state", "data": data}
+    # Fire-and-forget — broadcast is best-effort.
+    try:
+        loop = _asyncio.get_event_loop()
+        loop.create_task(websocket_manager.broadcast(msg))
+    except Exception as exc:
+        system_logger.debug("snapshot_op broadcast skipped: %s", exc)
+
+
+def _require_service_adapter():
+    """Snapshot operations beyond /restore require a live cascor backend.
+    Returns the adapter; raises HTTPException(501) when unavailable."""
+    from fastapi import HTTPException
+
+    if backend.backend_type != "service" or not hasattr(backend, "_adapter"):
+        raise HTTPException(
+            status_code=501,
+            detail="Snapshot replay/resume/retrain operations require a live cascor backend (service mode). Demo mode is not supported.",
+        )
+    return backend._adapter
+
+
+@app.post("/api/v1/snapshots/{snapshot_id}/replay")
+async def replay_snapshot_route(snapshot_id: str):
+    """Start a read-only replay session for a snapshot (CAN-015c).
+
+    Proxies to cascor's ``POST /v1/snapshots/{id}/replay``. Returns the
+    unified payload from cascor including ``operation``, ``fsm_state``,
+    ``time_index``, and a ``session`` block describing the playback
+    state. Canopy uses the ``session.length`` to wire the replay
+    player UI scrubber.
+    """
+    from fastapi import HTTPException
+
+    snapshot_id = _sanitize_snapshot_name(snapshot_id)
+    if backend.is_training_active():
+        raise HTTPException(status_code=409, detail="Cannot start replay while training is running. Pause or stop training first.")
+    adapter = _require_service_adapter()
+    try:
+        result = adapter.replay_snapshot(snapshot_id)
+        _log_snapshot_activity(action="replay", snapshot_id=snapshot_id, details={"mode": "service"}, message=f"Started replay of snapshot {snapshot_id}")
+        _broadcast_snapshot_op("replay_started", snapshot_id, payload=result)
+        return result
+    except Exception as e:
+        system_logger.error("Failed to start replay for %s: %s", snapshot_id, e)
+        raise HTTPException(status_code=500, detail=f"Failed to start replay: {e}") from e
+
+
+class _ReplayControlBody(BaseModel):
+    """Body schema for /replay/control. Mirrors the cascor route's
+    ReplayControlRequest — ``action`` discriminator + per-action params."""
+
+    action: str
+    time_index: int | None = None
+    value: float | None = None
+    start: int | None = None
+    end: int | None = None
+
+
+@app.post("/api/v1/snapshots/{snapshot_id}/replay/control")
+async def replay_control_route(snapshot_id: str, body: _ReplayControlBody):
+    """Send a playback control command to the active replay session
+    (CAN-015c). Proxies to cascor's ``/replay/control`` endpoint."""
+    from fastapi import HTTPException
+
+    snapshot_id = _sanitize_snapshot_name(snapshot_id)
+    adapter = _require_service_adapter()
+    params = body.model_dump(exclude_none=True, exclude={"action"})
+    try:
+        result = adapter.replay_control(snapshot_id, body.action, **params)
+        # Don't log/broadcast every play/pause/seek tick — too noisy. The
+        # ``stop`` action is the meaningful one to surface.
+        if body.action.lower() == "stop":
+            _log_snapshot_activity(action="replay_stopped", snapshot_id=snapshot_id, details={"mode": "service"}, message=f"Stopped replay of snapshot {snapshot_id}")
+            _broadcast_snapshot_op("replay_stopped", snapshot_id, payload=result)
+        return result
+    except Exception as e:
+        system_logger.error("Replay control failed for %s (action=%s): %s", snapshot_id, body.action, e)
+        # The cascor side maps bad params to 400 and missing-session to 409;
+        # we don't get to see the underlying status here without parsing
+        # JuniperCascorClientError. Map all to 500 for now and let the
+        # message carry the cascor detail.
+        raise HTTPException(status_code=500, detail=f"Replay control failed: {e}") from e
+
+
+@app.post("/api/v1/snapshots/{snapshot_id}/resume")
+async def resume_snapshot_route(snapshot_id: str):
+    """Continue training from a snapshot (CAN-015b).
+
+    Proxies to cascor's ``POST /v1/snapshots/{id}/resume``. Returns the
+    unified payload including ``resume_point_epoch`` so canopy can
+    render the visual boundary in the metrics-curve component.
+    """
+    from fastapi import HTTPException
+
+    snapshot_id = _sanitize_snapshot_name(snapshot_id)
+    if backend.is_training_active():
+        raise HTTPException(status_code=409, detail="Cannot resume while training is running. Pause or stop training first.")
+    adapter = _require_service_adapter()
+    try:
+        result = adapter.resume_snapshot(snapshot_id)
+        _log_snapshot_activity(action="resume", snapshot_id=snapshot_id, details={"mode": "service"}, message=f"Resumed snapshot {snapshot_id}")
+        _broadcast_snapshot_op("resumed", snapshot_id, payload=result)
+        return result
+    except Exception as e:
+        system_logger.error("Failed to resume %s: %s", snapshot_id, e)
+        raise HTTPException(status_code=500, detail=f"Failed to resume: {e}") from e
+
+
+@app.post("/api/v1/snapshots/{snapshot_id}/retrain")
+async def retrain_snapshot_route(snapshot_id: str):
+    """Reset training history and prepare a fresh run from a snapshot (CAN-015a).
+
+    Proxies to cascor's ``POST /v1/snapshots/{id}/retrain``."""
+    from fastapi import HTTPException
+
+    snapshot_id = _sanitize_snapshot_name(snapshot_id)
+    if backend.is_training_active():
+        raise HTTPException(status_code=409, detail="Cannot retrain while training is running. Pause or stop training first.")
+    adapter = _require_service_adapter()
+    try:
+        result = adapter.retrain_snapshot(snapshot_id)
+        _log_snapshot_activity(action="retrain", snapshot_id=snapshot_id, details={"mode": "service"}, message=f"Retrain prepared from snapshot {snapshot_id}")
+        _broadcast_snapshot_op("retrain_ready", snapshot_id, payload=result)
+        return result
+    except Exception as e:
+        system_logger.error("Failed to retrain from %s: %s", snapshot_id, e)
+        raise HTTPException(status_code=500, detail=f"Failed to retrain: {e}") from e
+
+
+# ============================================================================
+# Network mutation proxies (Phase 6E CAN-015h, h-5)
+# ----------------------------------------------------------------------------
+# Forward the canopy Network Editor's submit actions to the cascor
+# mutation endpoints landed in CAN-015h-1/h-2/h-3. The cascor side is
+# the source of truth for FSM gating (rejects with 409 unless
+# Investigating), shape/NaN validation (400/422), and out-of-range
+# index handling (404). We surface the cascor detail verbatim.
+# ============================================================================
+
+
+class _PatchWeightsBody(BaseModel):
+    """Body schema for PATCH /api/v1/network/weights. Mirrors the
+    cascor-side ``PatchWeightsRequest`` — see juniper-cascor
+    ``src/api/models/network.py``.
+    """
+
+    target: str
+    field: str
+    values: Any
+    hidden_unit_index: int | None = None
+    dtype: str = "float32"
+
+
+@app.patch("/api/v1/network/weights")
+async def patch_weights_route(body: _PatchWeightsBody):
+    """Surgical weight rewrite — forwards to cascor's PATCH route."""
+    from fastapi import HTTPException
+
+    adapter = _require_service_adapter()
+    try:
+        return adapter.patch_weights(
+            target=body.target,
+            field=body.field,
+            values=body.values,
+            hidden_unit_index=body.hidden_unit_index,
+            dtype=body.dtype,
+        )
+    except Exception as e:
+        system_logger.error("patch_weights failed (target=%s, field=%s): %s", body.target, body.field, e)
+        raise HTTPException(status_code=500, detail=f"patch_weights failed: {e}") from e
+
+
+class _AddHiddenUnitBody(BaseModel):
+    """Body schema for POST /api/v1/network/hidden-units. Mirrors the
+    cascor-side ``AddHiddenUnitRequest`` — see juniper-cascor
+    ``src/api/models/network.py``.
+    """
+
+    weights: Any
+    bias: float = 0.0
+    activation: str = "Tanh"
+
+
+@app.post("/api/v1/network/hidden-units")
+async def add_hidden_unit_route(body: _AddHiddenUnitBody):
+    """Append a hidden unit at the cascade tail — forwards to cascor."""
+    from fastapi import HTTPException
+
+    adapter = _require_service_adapter()
+    try:
+        return adapter.add_hidden_unit(
+            weights=body.weights,
+            bias=body.bias,
+            activation=body.activation,
+        )
+    except Exception as e:
+        system_logger.error("add_hidden_unit failed (activation=%s): %s", body.activation, e)
+        raise HTTPException(status_code=500, detail=f"add_hidden_unit failed: {e}") from e
+
+
+@app.delete("/api/v1/network/hidden-units/{idx}")
+async def remove_hidden_unit_route(idx: int):
+    """Delete the hidden unit at ``idx`` — forwards to cascor."""
+    from fastapi import HTTPException
+
+    adapter = _require_service_adapter()
+    try:
+        return adapter.remove_hidden_unit(idx=idx)
+    except Exception as e:
+        system_logger.error("remove_hidden_unit(idx=%d) failed: %s", idx, e)
+        raise HTTPException(status_code=500, detail=f"remove_hidden_unit failed: {e}") from e
 
 
 # ============================================================================
@@ -2654,7 +2968,11 @@ async def api_remote_start_workers(num_workers: int = 1):
 
 
 @app.post("/api/remote/stop_workers")
-async def api_remote_stop_workers(timeout: int = 10):
+# ``timeout`` is a passthrough query/body parameter consumed by the adapter's
+# ``stop_remote_workers`` call, not a deadline for this handler. ASYNC109
+# wants ``asyncio.timeout`` instead, but the parameter never bounds awaitable
+# work in this function — silencing is the correct call.
+async def api_remote_stop_workers(timeout: int = 10):  # noqa: ASYNC109
     """
     Stop remote worker processes (P1-NEW-002).
     Args:
@@ -2694,16 +3012,24 @@ _ws_latency_hist = None
 _ws_error_counter = None
 
 try:
+    from juniper_observability import register_or_reuse as _register_or_reuse
     from prometheus_client import Counter as _PromCounter
     from prometheus_client import Histogram as _PromHistogram
 
-    _ws_latency_hist = _PromHistogram(
+    # METRICS-MON R4.1: bucket layout is **tentative pending R5.1**.
+    # Per-boundary SLO rationale lives in
+    # ``notes/observability/HISTOGRAM_BUCKETS_RATIONALE_2026-05-02.md``.
+    # R5.1's SLO catalog will ratify or reshape; re-bucketing is a
+    # metric-version event but not a public-API break.
+    _ws_latency_hist = _register_or_reuse(
+        _PromHistogram,
         "canopy_ws_browser_latency_ms",
-        "Browser-reported WebSocket round-trip latency",
+        "Browser-reported WebSocket round-trip latency (R4.1 buckets tentative pending R5.1)",
         ["endpoint"],
         buckets=[5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
     )
-    _ws_error_counter = _PromCounter(
+    _ws_error_counter = _register_or_reuse(
+        _PromCounter,
         "canopy_ws_browser_errors_total",
         "Browser-reported WebSocket errors",
         ["endpoint"],

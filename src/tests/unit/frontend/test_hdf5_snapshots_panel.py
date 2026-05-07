@@ -847,3 +847,105 @@ class TestModuleConstants:
     def test_default_refresh_interval_is_integer(self):
         """Default refresh interval should be an integer."""
         assert isinstance(DEFAULT_REFRESH_INTERVAL_MS, int)
+
+
+# =============================================================================
+# Phase 6E Sprint B (B-5, CAN-015e): snapshot UX entry points
+# =============================================================================
+
+
+class TestSnapshotOpHandlerB5:
+    """Tests for ``_invoke_snapshot_op_handler`` covering all four operations."""
+
+    @pytest.mark.parametrize("operation", ["restore", "replay", "resume", "retrain"])
+    def test_invokes_correct_endpoint(self, panel, operation):
+        captured = {}
+
+        def fake_post(url, timeout=None):
+            captured["url"] = url
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "snapshot_id": "demo_001",
+                "operation": operation,
+                "fsm_state": "idle",
+                "time_index": 0,
+                "training_params": {},
+                "message": f"{operation} ok",
+            }
+            return mock_response
+
+        with patch("requests.post", side_effect=fake_post):
+            result = panel._invoke_snapshot_op_handler("demo_001", operation)
+
+        assert result["success"] is True
+        assert captured["url"].endswith(f"/api/v1/snapshots/demo_001/{operation}")
+        assert result["data"]["operation"] == operation
+
+    def test_unknown_operation_rejected(self, panel):
+        result = panel._invoke_snapshot_op_handler("demo_001", "delete")
+        assert result["success"] is False
+        assert "delete" in result["error"]
+
+    def test_empty_snapshot_id_rejected(self, panel):
+        result = panel._invoke_snapshot_op_handler("", "replay")
+        assert result["success"] is False
+        assert "no snapshot" in result["error"].lower()
+
+    def test_409_conflict_returns_friendly_error(self, panel):
+        mock_response = MagicMock()
+        mock_response.status_code = 409
+        mock_response.json.return_value = {"detail": "Training is running"}
+        with patch("requests.post", return_value=mock_response):
+            result = panel._invoke_snapshot_op_handler("demo_001", "resume")
+        assert result["success"] is False
+        assert "running" in result["error"].lower()
+
+    def test_404_returns_not_found(self, panel):
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        mock_response.json.return_value = {"detail": "Snapshot not found"}
+        with patch("requests.post", return_value=mock_response):
+            result = panel._invoke_snapshot_op_handler("nope", "retrain")
+        assert result["success"] is False
+        assert "not found" in result["error"].lower()
+
+    def test_501_demo_mode_returns_friendly_error(self, panel):
+        mock_response = MagicMock()
+        mock_response.status_code = 501
+        mock_response.json.return_value = {"detail": "Live cascor backend required"}
+        with patch("requests.post", return_value=mock_response):
+            result = panel._invoke_snapshot_op_handler("demo_001", "replay")
+        assert result["success"] is False
+        assert "cascor" in result["error"].lower()
+
+    def test_legacy_restore_handler_forwards_to_invoke(self, panel):
+        with patch.object(panel, "_invoke_snapshot_op_handler") as mock_invoke:
+            mock_invoke.return_value = {"success": True}
+            panel._restore_snapshot_handler("demo_001")
+            mock_invoke.assert_called_once_with("demo_001", "restore")
+
+
+class TestSnapshotPanelB5Layout:
+    """Layout-level assertions for the new UX surfaces."""
+
+    def test_layout_has_context_menu_trigger_store(self, panel):
+        layout_str = str(panel.get_layout())
+        assert "context-menu-trigger" in layout_str
+
+    def test_op_descriptions_cover_all_four(self, panel):
+        for op in ("restore", "replay", "resume", "retrain"):
+            assert op in panel._OP_DESCRIPTIONS
+            assert panel._OP_DESCRIPTIONS[op]
+
+    def test_op_confirm_labels_cover_all_four(self, panel):
+        for op in ("restore", "replay", "resume", "retrain"):
+            assert op in panel._OP_CONFIRM_LABELS
+
+    def test_build_op_confirm_body_includes_snapshot_id(self, panel):
+        body = panel._build_op_confirm_body("demo_001", "replay")
+        assert "demo_001" in str(body)
+
+    def test_build_op_confirm_body_includes_operation_description(self, panel):
+        body = panel._build_op_confirm_body("demo_001", "retrain")
+        assert "fresh training" in str(body).lower() or "starting point" in str(body).lower()

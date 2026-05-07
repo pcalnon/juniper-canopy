@@ -1,7 +1,15 @@
-"""Tests for cascor auto-discovery logic."""
+"""Tests for cascor auto-discovery logic.
+
+METRICS-MON R4.2: ``probe_cascor_url`` is now native async via
+``httpx.AsyncClient`` (replaced the previous
+``asyncio.get_running_loop().run_in_executor(...)`` offload of
+``urllib.request.urlopen``). Tests patch ``httpx.AsyncClient.get``
+accordingly.
+"""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from discovery import discover_cascor, probe_cascor_url
@@ -12,40 +20,39 @@ class TestProbeCascorUrl:
 
     async def test_probe_returns_true_on_healthy_response(self):
         mock_response = MagicMock()
-        mock_response.status = 200
-        mock_response.read.return_value = b'{"status": "alive"}'
-        mock_response.__enter__ = lambda s: s
-        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "alive"}
 
-        with patch("urllib.request.urlopen", return_value=mock_response):
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response):
             result = await probe_cascor_url("http://localhost:8200")
         assert result is True
 
     async def test_probe_returns_false_on_connection_error(self):
-        import urllib.error
-
-        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("refused")):
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=httpx.ConnectError("refused")):
             result = await probe_cascor_url("http://localhost:8200")
         assert result is False
 
     async def test_probe_returns_false_on_wrong_status(self):
         mock_response = MagicMock()
-        mock_response.status = 503
-        mock_response.read.return_value = b'{"status": "down"}'
-        mock_response.__enter__ = lambda s: s
-        mock_response.__exit__ = MagicMock(return_value=False)
-        with patch("urllib.request.urlopen", return_value=mock_response):
+        mock_response.status_code = 503
+        mock_response.json.return_value = {"status": "down"}
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response):
             result = await probe_cascor_url("http://localhost:8200")
         assert result is False
 
     async def test_probe_returns_false_on_wrong_body(self):
         mock_response = MagicMock()
-        mock_response.status = 200
-        mock_response.read.return_value = b'{"status": "not-cascor"}'
-        mock_response.__enter__ = lambda s: s
-        mock_response.__exit__ = MagicMock(return_value=False)
-        with patch("urllib.request.urlopen", return_value=mock_response):
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"status": "not-cascor"}
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_response):
             result = await probe_cascor_url("http://localhost:8200")
+        assert result is False
+
+    async def test_probe_returns_false_on_timeout(self):
+        """R4.2: ``httpx.ReadTimeout`` (and its parent ``TimeoutException``)
+        falls through to the broad-except path; result is False."""
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=httpx.ReadTimeout("timeout")):
+            result = await probe_cascor_url("http://localhost:8200", timeout=0.05)
         assert result is False
 
 

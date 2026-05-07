@@ -181,6 +181,15 @@ class WebSocketManager:
         self.logger = self._setup_logger()
         self.message_count = 0
         self.event_loop: Optional[asyncio.AbstractEventLoop] = None
+        # OBS-WIRE A.4: per-channel active-connection counts driving the
+        # ``juniper_canopy_websocket_connections_active{channel=...}`` Gauge
+        # via :func:`observability.set_websocket_connections`. Mutated under
+        # ``_connections_lock`` so the count cannot race with connect /
+        # disconnect on a different channel. Channel set is closed: only
+        # ``"training"`` and ``"control"`` are emitted; the legacy ``/ws``
+        # compat endpoint passes ``channel=None`` and skips the gauge to
+        # preserve closed-set label discipline (R1.1).
+        self._channel_counts: Dict[str, int] = {}
         # BUG-CN-09 / BUG-CN-10 (Phase 3C): `active_connections`,
         # `connection_metadata`, and `message_count` are touched from at least
         # three execution contexts: the asyncio event loop (FastAPI websocket
@@ -253,6 +262,7 @@ class WebSocketManager:
         websocket: WebSocket,
         client_id: Optional[str] = None,
         subprotocol: Optional[str] = None,
+        channel: Optional[str] = None,
     ):
         """
         Accept new WebSocket connection.
@@ -264,6 +274,15 @@ class WebSocketManager:
                 endpoint negotiated a bearer token via the
                 ``Sec-WebSocket-Protocol`` header (SEC-06) so the server
                 response acknowledges the chosen subprotocol.
+            channel: OBS-WIRE A.4: closed-set channel label (``"training"``
+                or ``"control"``). When provided, the
+                ``juniper_canopy_websocket_connections_active{channel}``
+                Gauge is updated with the post-connect count for that
+                channel, and outbound ``send_personal_message`` /
+                ``broadcast`` calls bump
+                ``juniper_canopy_websocket_messages_total{channel, type}``.
+                Pass ``None`` (default) on the legacy ``/ws`` compat route
+                to skip metric emission and preserve closed-set discipline.
 
         Example:
             await websocket_manager.connect(websocket, client_id='dashboard-1')
@@ -286,6 +305,12 @@ class WebSocketManager:
 
         await websocket.accept(subprotocol=subprotocol)
 
+        # OBS-WIRE A.4: snapshot the post-connect per-channel count under the
+        # same critical section that mutates active_connections so the gauge
+        # update below sees a self-consistent value (no torn reads if a
+        # concurrent disconnect removes the next connection on the same
+        # channel before we publish).
+        channel_count_after: Optional[int] = None
         with self._connections_lock:
             self.active_connections.add(websocket)
             self.connection_metadata[websocket] = {
@@ -293,11 +318,32 @@ class WebSocketManager:
                 "connected_at": datetime.now().isoformat(),
                 "messages_sent": 0,
                 "last_message_at": None,
+                # OBS-WIRE A.4 / messages_total: stash the channel so
+                # outbound dispatch sites (send_personal_message, broadcast)
+                # can label per-channel message counters without plumbing
+                # the channel through every call site.
+                "channel": channel,
             }
             client_label = self.connection_metadata[websocket]["client_id"]
             total_after = len(self.active_connections)
+            if channel is not None:
+                self._channel_counts[channel] = self._channel_counts.get(channel, 0) + 1
+                channel_count_after = self._channel_counts[channel]
 
         self.logger.info(f"Client connected: {client_label} " f"(Total: {total_after})")
+
+        # OBS-WIRE A.4: publish gauge OUTSIDE the lock — observability is a
+        # best-effort side effect; we never want a Prometheus client error
+        # to surface as a WS connect failure or hold _connections_lock
+        # across an arbitrary collector call. Failures are logged and
+        # swallowed so connect() remains semantically pure.
+        if channel is not None and channel_count_after is not None:
+            try:
+                from observability import set_websocket_connections
+
+                set_websocket_connections(channel, channel_count_after)
+            except Exception as exc:  # pragma: no cover — defensive
+                self.logger.debug(f"set_websocket_connections({channel}) failed: {exc}")
 
         # Send initial connection acknowledgment
         await self.send_personal_message(
@@ -356,17 +402,47 @@ class WebSocketManager:
         # atomic relative to broadcast snapshots and concurrent disconnects.
         # _decrement_ip_count is intentionally invoked outside this lock so
         # we don't nest _ip_lock under _connections_lock (lock-order rule).
+        # OBS-WIRE A.4: snapshot post-disconnect channel count under the
+        # same critical section so the gauge update below cannot be reordered
+        # behind a racing connect().
+        channel: Optional[str] = None
+        channel_count_after: Optional[int] = None
         with self._connections_lock:
             if websocket not in self.active_connections:
                 return
             client_info = self.connection_metadata.get(websocket, {})
             client_id = client_info.get("client_id", "unknown")
+            channel = client_info.get("channel")
             self.active_connections.discard(websocket)
             self.connection_metadata.pop(websocket, None)
             remaining = len(self.active_connections)
+            if channel is not None:
+                # Floor at 0 — defensive against double-disconnect; we
+                # already early-returned if websocket wasn't in the set,
+                # but the dict.get default keeps us safe even if the
+                # metadata entry was somehow missing.
+                current = self._channel_counts.get(channel, 0)
+                new_count = max(current - 1, 0)
+                if new_count == 0:
+                    self._channel_counts.pop(channel, None)
+                else:
+                    self._channel_counts[channel] = new_count
+                channel_count_after = new_count
 
         self._decrement_ip_count(websocket)
         self.logger.info(f"Client disconnected: {client_id} " f"(Remaining: {remaining})")
+
+        # OBS-WIRE A.4: publish gauge outside the lock (same rationale as
+        # connect()). When the channel drains to zero we still publish 0
+        # rather than deleting the timeseries — Prometheus/Grafana panels
+        # behave better with an explicit "0" than with a vanishing series.
+        if channel is not None and channel_count_after is not None:
+            try:
+                from observability import set_websocket_connections
+
+                set_websocket_connections(channel, channel_count_after)
+            except Exception as exc:  # pragma: no cover — defensive
+                self.logger.debug(f"set_websocket_connections({channel}) failed: {exc}")
 
     async def send_personal_message(self, message: dict, websocket: WebSocket):
         """
@@ -398,12 +474,29 @@ class WebSocketManager:
             # mutated from any context that calls send_personal_message —
             # protect under _connections_lock so the increment composes with
             # broadcast() and disconnect().
+            # OBS-WIRE A.4 / messages_total: snapshot the channel under the
+            # same lock so we can label the Counter outside the critical
+            # section without racing disconnect().
             now_iso = datetime.now().isoformat()
+            channel: Optional[str] = None
             with self._connections_lock:
                 meta = self.connection_metadata.get(websocket)
                 if meta is not None:
                     meta["messages_sent"] += 1
                     meta["last_message_at"] = now_iso
+                    channel = meta.get("channel")
+
+            # OBS-WIRE A.4 / messages_total: bump
+            # ``juniper_canopy_websocket_messages_total{channel, type}``.
+            # Skipped when the connection has no channel (legacy ``/ws``
+            # compat route) to preserve closed-set discipline.
+            if channel is not None:
+                try:
+                    from observability import inc_websocket_messages
+
+                    inc_websocket_messages(channel, message.get("type", "_other"))
+                except Exception as exc:  # pragma: no cover — defensive
+                    self.logger.debug(f"inc_websocket_messages({channel}) failed: {exc}")
 
         except Exception as e:
             self.logger.warning(f"Failed to send message to client: {e}")
@@ -446,6 +539,13 @@ class WebSocketManager:
 
         # Send to all connections in the snapshot.
         disconnected = set()
+        # OBS-WIRE A.4 / messages_total: aggregate per-channel counts for a
+        # single bulk emit after the loop. Doing one Counter.inc() per
+        # successful delivery is correct, but accumulating per-channel and
+        # emitting once at the end keeps the prometheus_client overhead off
+        # the per-connection hot path during large fan-outs.
+        per_channel_delivered: Dict[str, int] = {}
+        msg_type = message.get("type", "_other")
         for connection in connections:
             try:
                 await connection.send_json(message)
@@ -462,6 +562,21 @@ class WebSocketManager:
                 if meta is not None:
                     meta["messages_sent"] += 1
                     meta["last_message_at"] = now_iso
+                    ch = meta.get("channel")
+                    if ch is not None:
+                        per_channel_delivered[ch] = per_channel_delivered.get(ch, 0) + 1
+
+        # OBS-WIRE A.4 / messages_total: emit one Counter increment per
+        # (channel, type) bucket touched, with the aggregated count.
+        if per_channel_delivered:
+            try:
+                from observability import inc_websocket_messages
+
+                for ch, n in per_channel_delivered.items():
+                    for _ in range(n):
+                        inc_websocket_messages(ch, msg_type)
+            except Exception as exc:  # pragma: no cover — defensive
+                self.logger.debug(f"inc_websocket_messages (broadcast) failed: {exc}")
 
         # Remove disconnected clients (disconnect() reacquires the lock).
         for connection in disconnected:

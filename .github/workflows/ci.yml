@@ -80,7 +80,7 @@ jobs:
 
       - name: Install pre-commit
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade "pip>=26.1.1"
           pip install pre-commit
 
       - name: Cache pre-commit hooks
@@ -103,13 +103,27 @@ jobs:
   # Migrated from conda to pip for CI portability (polyrepo Phase 5)
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   unit-tests:
-    name: Unit Tests + Coverage (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: Unit Tests + Coverage (Python ${{ matrix.python-version }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # METRICS-MON R3.7 / seed-(R1.3 design): macOS leg runs in
+    # continue-on-error mode for the initial 2-week soak (started
+    # 2026-04-30). The Linux legs remain required; the macOS leg
+    # surfaces platform-divergence failures (POSIX-only assumptions
+    # in the WS / dashboard / dataset paths) without blocking PRs
+    # while we identify environment-specific issues. After the soak,
+    # flip the include block's ``experimental`` flag to false to make
+    # the macOS leg required.
+    continue-on-error: ${{ matrix.experimental == true }}
     needs: [pre-commit]
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ["3.12", "3.13", "3.14"]
+        include:
+          - os: macos-latest
+            python-version: "3.12"
+            experimental: false
 
     steps:
       - name: Checkout Code
@@ -127,11 +141,18 @@ jobs:
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - Install Dependencies                ║"
-          echo "║       Python ${{ matrix.python-version }}                                        ║"
+          echo "║       Python ${{ matrix.python-version }} on ${{ matrix.os }}              ║"
           echo "╚════════════════════════════════════════════════════════════╝"
-          python -m pip install --upgrade pip
-          # Install CPU-only PyTorch (CI doesn't need CUDA)
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install --upgrade "pip>=26.1.1"
+          # METRICS-MON R3.7: torch wheel resolution differs by OS.
+          # Linux uses the CPU-only PyTorch index to avoid pulling CUDA
+          # wheels; macOS finds its native wheels via the default PyPI
+          # index — the CPU-only Linux index has no macOS-arm64 wheels.
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            pip install torch
+          else
+            pip install torch --index-url https://download.pytorch.org/whl/cpu
+          fi
           # Install all other CI dependencies
           pip install -r conf/requirements_ci.txt
           # Install project as editable so source-tree path resolution works
@@ -228,7 +249,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade "pip>=26.1.1"
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r conf/requirements_ci.txt
           pip install -e .
@@ -283,7 +304,7 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade "pip>=26.1.1"
           pip install build
 
       - name: Build distribution packages
@@ -327,11 +348,23 @@ jobs:
           fetch-depth: 0
 
       - name: Run Gitleaks (Secrets Detection)
+        # Skip on repository_dispatch: gitleaks-action does not yet
+        # support that event ("ERROR: The [repository_dispatch]
+        # event is not yet supported"), so the action errors out
+        # before any scanning happens. Other event types still scan.
+        if: github.event_name != 'repository_dispatch'
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          fail: true
+          # gitleaks-action v2.3.9 ships as a Node.js 20 action.
+          # GitHub forces Node 24 on 2026-06-02; opt in now to eliminate
+          # the deprecation warning and ensure continued operation past
+          # the cutover. Drop this once gitleaks-action publishes a
+          # release pinned to node24 (upstream PR #215).
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+        # gitleaks-action v2.3.9 has no `fail` input — passing it triggers
+        # "Unexpected input(s) 'fail'" warnings in CI. The action exits
+        # non-zero on leaks by default, which is the behavior we want.
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
@@ -342,7 +375,7 @@ jobs:
 
       - name: Install security tools
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade "pip>=26.1.1"
           pip install bandit pip-audit
 
       - name: Create reports directory
@@ -365,7 +398,7 @@ jobs:
           fi
 
       - name: Upload Bandit SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@95e58e9a2cdfd71adc6e0353d5c52f41a045d225  # v4.35.2
+        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7  # v4.35.3
         if: always()
         with:
           sarif_file: reports/security/bandit.sarif
@@ -426,7 +459,7 @@ jobs:
       - name: Install project dependencies
         shell: bash -l {0}
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade "pip>=26.1.1"
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r conf/requirements_ci.txt
           pip install -e .
@@ -481,7 +514,7 @@ jobs:
           python-version: "3.14"
 
       - name: Install uv
-        run: pip install uv
+        run: pip install uv==0.11.8
 
       - name: Check lockfile freshness
         run: |
@@ -549,6 +582,37 @@ jobs:
             --exclude analysis --exclude fixes --exclude development \
             --exclude CHANGELOG.md \
             --cross-repo skip
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # Async-route audit (Phase 4 — enforced).
+  # Catches the BUG-JD-10 bug class (sync-blocking calls inside async def
+  # route handlers). Hard-fails on any new violation; this repo reached
+  # zero visible violations at end of Phase 3 (PR #247). Per-file-ignores
+  # live in pyproject.toml [tool.ruff.lint.per-file-ignores].
+  # See juniper-ml notes/ASYNC_ROUTE_AUDIT_HOOK_MIGRATION_PLAN.md §4.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  async-route-audit:
+    name: Async-route audit (BUG-JD-10 class)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: "3.14"
+
+      - name: Install ruff
+        run: pip install "ruff==0.15.6"
+
+      - name: Run async-route audit
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Async-route audit (BUG-JD-10)      ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          ruff check --select ASYNC --output-format=github src/
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   # Docker Build & Smoke Test: Verify Dockerfile builds and container starts
