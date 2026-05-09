@@ -36,6 +36,9 @@
 #####################################################################################################################################################################################################
 # Source script config file
 #####################################################################################################################################################################################################
+DEBUG=0
+[[ "${DEBUG}" == "${TRUE}" ]] && set -x || true
+
 set -o functrace
 # shellcheck disable=SC2155
 export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")" && INIT_CONF="$(dirname "$(dirname "${PARENT_PATH_PARAM}")")/conf/init.conf"
@@ -62,15 +65,16 @@ log_verbose "Current Directory: $(pwd)"
 export CASSANDRA_INTEGRATION_TEST=1
 export JUNIPER_DATA_E2E_TEST=1
 export REDIS_INTEGRATION_TEST=1
+SUCCESS=0
 
 log_trace "Run Tests with designated reports"
 if [[ "${COVERAGE_REPORT}" == "${FALSE}" ]]; then
-    RUN_TESTS_NO_COV_RPT="pytest -vv ./src/tests"
+    RUN_TESTS_NO_COV_RPT="pytest -vvv ./src/tests"
     log_verbose "RUN_TESTS_NO_COV_RPT: ${RUN_TESTS_NO_COV_RPT}"
     eval "${RUN_TESTS_NO_COV_RPT}"; SUCCESS="$?"
 elif [[ "${COVERAGE_REPORT}" == "${TRUE}" ]]; then
     # RUN_TESTS_WITH_COV_RPT="pytest --check-untyped-defs \
-    RUN_TESTS_WITH_COV_RPT="pytest -vv ./src/tests \
+    RUN_TESTS_WITH_COV_RPT="pytest -vvv ./src/tests \
         --cov=src \
         --cov-report=xml:src/tests/reports/coverage.xml \
         --cov-report=term-missing \
