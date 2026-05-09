@@ -2206,6 +2206,16 @@ class DashboardManager:
             if "ws-topology-buffer" in trigger and ws_topology:
                 from backend.cascor_service_adapter import CascorServiceAdapter
 
+                # Defense against pre-fix cascor servers that broadcast a
+                # count-only stub on cascade_add (``hidden_units`` as int).
+                # Passing such a payload to ``_transform_topology`` collapses
+                # the topology to inputs+outputs and zero hidden nodes (the
+                # transform's ``isinstance(int, list) is False`` path drops
+                # every hidden node and every cascade connection). When we
+                # detect a stub, fall through to REST so we get a
+                # structurally complete payload from /api/topology.
+                if not CascorServiceAdapter._is_complete_topology(ws_topology):
+                    return self._update_topology_store_handler(n=n, active_tab=active_tab)
                 return CascorServiceAdapter._transform_topology(ws_topology)
 
             # Phase B: skip REST poll when WS bridge is connected.

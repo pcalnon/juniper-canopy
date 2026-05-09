@@ -686,3 +686,145 @@ class TestNetworkMutationsH4:
         mock_client._delete.side_effect = JuniperCascorClientError("404 out of range")
         with pytest.raises(JuniperCascorClientError):
             adapter.remove_hidden_unit(idx=99)
+
+
+# =========================================================================
+# Topology completeness — defense against count-only WS stubs
+# =========================================================================
+
+
+class TestIsCompleteTopology:
+    """Regression for the cascade_add stub-payload bug.
+
+    Pre-fix cascor servers broadcast a count-only stub on cascade_add
+    (``hidden_units`` as an int). Passing such a payload to
+    ``_transform_topology`` collapses the topology to inputs+outputs only —
+    the transform's ``isinstance(int, list) is False`` path drops every
+    hidden node and every cascade connection. ``_is_complete_topology``
+    is the gate the dashboard callback uses to fall through to REST when
+    a stub is detected.
+    """
+
+    def test_cascor_format_with_list_hidden_units_is_complete(self):
+        raw = {
+            "input_size": 2,
+            "output_size": 2,
+            "hidden_units": [{"id": 0, "weights": [0.1, 0.2, 0.3], "bias": 0.0, "activation": "sigmoid"}],
+            "output_weights": [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]],
+            "output_bias": [0.0, 0.0],
+        }
+        assert CascorServiceAdapter._is_complete_topology(raw) is True
+
+    def test_cascor_format_with_empty_list_hidden_units_is_complete(self):
+        # Untrained network — list is empty, but still structurally complete.
+        raw = {
+            "input_size": 2,
+            "output_size": 2,
+            "hidden_units": [],
+            "output_weights": [[0.1, 0.2], [0.3, 0.4]],
+            "output_bias": [0.0, 0.0],
+        }
+        assert CascorServiceAdapter._is_complete_topology(raw) is True
+
+    def test_graph_format_with_nodes_is_complete(self):
+        raw = {
+            "input_units": 2,
+            "output_units": 2,
+            "hidden_units": 1,  # Graph format uses an int count here, by design.
+            "nodes": [{"id": "input_0", "type": "input", "layer": 0}],
+            "connections": [],
+        }
+        assert CascorServiceAdapter._is_complete_topology(raw) is True
+
+    def test_count_only_stub_is_incomplete(self):
+        # The exact stub shape pre-fix cascor was broadcasting on cascade_add.
+        stub = {
+            "hidden_units": 1,
+            "input_size": 2,
+            "output_size": 2,
+            "event": "cascade_add",
+        }
+        assert CascorServiceAdapter._is_complete_topology(stub) is False
+
+    def test_graph_format_without_nodes_is_incomplete(self):
+        # input_units present but nodes missing/non-list → cannot trust as graph format.
+        raw = {"input_units": 2, "output_units": 2, "hidden_units": 1}
+        assert CascorServiceAdapter._is_complete_topology(raw) is False
+
+    def test_non_dict_payload_is_incomplete(self):
+        assert CascorServiceAdapter._is_complete_topology(None) is False
+        assert CascorServiceAdapter._is_complete_topology([]) is False
+        assert CascorServiceAdapter._is_complete_topology("topology") is False
+        assert CascorServiceAdapter._is_complete_topology(42) is False
+
+    def test_empty_dict_is_incomplete(self):
+        assert CascorServiceAdapter._is_complete_topology({}) is False
+
+
+class TestTransformTopologyHiddenUnits:
+    """Verify ``_transform_topology`` produces non-zero hidden nodes when the
+    cascor payload carries a list-shaped ``hidden_units``. Regression
+    for the canopy-side symptom of the cascade_add stub bug.
+    """
+
+    def test_transform_produces_hidden_nodes_and_cascade_connections(self):
+        # 2 inputs, 2 outputs, 1 hidden unit. Cascade-correlation weights for
+        # the hidden unit cover [bias_proxy, input_0, input_1] = 3 values.
+        # output_weights is shape (input_size + num_hidden, output_size) =
+        # (3, 2), so 3 rows × 2 cols.
+        raw = {
+            "input_size": 2,
+            "output_size": 2,
+            "hidden_units": [
+                {"id": 0, "weights": [0.1, 0.2, 0.3], "bias": 0.0, "activation": "sigmoid"},
+            ],
+            "output_weights": [
+                [0.5, 0.6],  # row for input_0
+                [0.7, 0.8],  # row for input_1
+                [0.9, 1.0],  # row for hidden_0
+            ],
+            "output_bias": [0.0, 0.0],
+        }
+
+        out = CascorServiceAdapter._transform_topology(raw)
+
+        assert out["input_units"] == 2
+        assert out["output_units"] == 2
+        assert out["hidden_units"] == 1
+        # Node accounting: 2 input + 1 hidden + 2 output = 5
+        node_types = [n["type"] for n in out["nodes"]]
+        assert node_types.count("input") == 2
+        assert node_types.count("hidden") == 1
+        assert node_types.count("output") == 2
+        # Connection accounting:
+        # - 2 input→hidden_0 (from hidden unit's input weights)
+        # - 2 input→output_X (per output) × 2 outputs = 4
+        # - 1 hidden_0→output_X × 2 outputs = 2
+        # Total = 8
+        connections = out["connections"]
+        assert any(c["from"] == "input_0" and c["to"] == "hidden_0" for c in connections)
+        assert any(c["from"] == "input_1" and c["to"] == "hidden_0" for c in connections)
+        assert any(c["from"] == "hidden_0" and c["to"] == "output_0" for c in connections)
+        assert any(c["from"] == "hidden_0" and c["to"] == "output_1" for c in connections)
+        assert len(connections) == 8
+
+    def test_transform_count_only_stub_collapses_to_zero_hidden(self):
+        """Documents the silent corruption the new gate guards against.
+
+        This is the failure mode without ``_is_complete_topology`` upstream:
+        the transform produces a structurally-valid but semantically-wrong
+        topology with 0 hidden nodes and only input→output connections.
+        """
+        stub = {
+            "hidden_units": 1,
+            "input_size": 2,
+            "output_size": 2,
+            "event": "cascade_add",
+        }
+        out = CascorServiceAdapter._transform_topology(stub)
+        # Demonstrate the collapse: hidden_units becomes 0 despite the stub
+        # claiming 1. Callers must use ``_is_complete_topology`` to refuse
+        # this payload before it reaches the transform.
+        assert out["hidden_units"] == 0
+        assert all(n["type"] != "hidden" for n in out["nodes"])
+        assert all("hidden" not in c["from"] and "hidden" not in c["to"] for c in out["connections"])

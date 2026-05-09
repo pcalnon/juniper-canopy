@@ -420,6 +420,56 @@ class TestGapWs25TopologyRestGate:
 
 
 @pytest.mark.unit
+class TestTopologyStubGuard:
+    """Defense against count-only ``topology`` WS frames from pre-fix cascor.
+
+    Pre-fix cascor broadcast a stub on cascade_add (``hidden_units`` as int).
+    Without these guards, the topology view collapsed to inputs+outputs
+    only and stayed stuck for the rest of the session because
+    ``_topologyReceived`` was set on the stub frame, suppressing REST.
+    """
+
+    @pytest.fixture
+    def bridge_js(self):
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[2] / "frontend" / "assets" / "ws_dash_bridge.js"
+        return path.read_text(encoding="utf-8")
+
+    @pytest.fixture
+    def dashboard_manager_source(self):
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[2] / "frontend" / "dashboard_manager.py"
+        return path.read_text(encoding="utf-8")
+
+    def test_js_bridge_only_sets_topology_received_for_complete_payloads(self, bridge_js):
+        # The bridge must Array-check hidden_units (or graph-format nodes)
+        # before flipping the gate flag.
+        assert "Array.isArray(hu)" in bridge_js or "Array.isArray(data.hidden_units)" in bridge_js
+        # And the flag-set must be guarded — not unconditional.
+        # Look for the conditional wrapping the assignment.
+        assert "isComplete" in bridge_js or "if (Array.isArray" in bridge_js
+
+    def test_dashboard_callback_falls_through_to_rest_on_stub(self, dashboard_manager_source):
+        # The WS-branch must consult ``_is_complete_topology`` before
+        # transforming, and fall back to the REST handler on a stub.
+        assert "_is_complete_topology" in dashboard_manager_source
+        # The fallback is a call to the REST handler with the ws_topology trigger.
+        assert "_update_topology_store_handler" in dashboard_manager_source
+
+    def test_adapter_exposes_is_complete_topology_helper(self):
+        # The Python helper the JS gate mirrors. Public-by-convention static
+        # method on the adapter so dashboard_manager and tests can call it.
+        from backend.cascor_service_adapter import CascorServiceAdapter
+
+        assert hasattr(CascorServiceAdapter, "_is_complete_topology")
+        # Spot-check: the documented stub form must be flagged incomplete.
+        stub = {"hidden_units": 1, "input_size": 2, "output_size": 2, "event": "cascade_add"}
+        assert CascorServiceAdapter._is_complete_topology(stub) is False
+
+
+@pytest.mark.unit
 class TestGapWs18ChunkedMessageReassembler:
     """GAP-WS-18: client reassembles chunked_message envelopes from cascor.
 
