@@ -924,6 +924,32 @@ class CascorServiceAdapter:
             return {}
 
     @staticmethod
+    def _is_complete_topology(raw: Any) -> bool:
+        """Return True iff ``raw`` is a structurally-complete topology snapshot.
+
+        A complete payload is one of:
+        - Graph-format: a dict with ``input_units`` AND ``nodes`` already
+          populated (the post-transform shape).
+        - Cascor-format: a dict with ``input_size``/``output_size`` AND a
+          list-shaped ``hidden_units`` (the get_topology() shape; the list may
+          legitimately be empty for an untrained network).
+
+        Returns False for count-only stubs (e.g., a pre-fix cascade_add WS
+        broadcast where ``hidden_units`` was an integer count). Such payloads
+        must not be passed to :meth:`_transform_topology` — the transform
+        coerces ``isinstance(int, list) is False`` into ``num_hidden = 0``,
+        producing a topology that drops every hidden node and every cascade
+        connection.
+        """
+        if not isinstance(raw, dict):
+            return False
+        # Graph-format passthrough: must have nodes too, not just input_units.
+        if "input_units" in raw and isinstance(raw.get("nodes"), list):
+            return True
+        # Cascor-format: hidden_units must be a list (possibly empty).
+        return isinstance(raw.get("hidden_units"), list)
+
+    @staticmethod
     def _transform_topology(raw: dict) -> dict:
         """Transform CasCor weight-oriented topology to graph-oriented format.
 
