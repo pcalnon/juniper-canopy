@@ -222,7 +222,23 @@
             // Latest only — overwrites previous
             drain._topologyBuffer = data;
             // GAP-WS-25: first topology frame arrives — REST poll can quiet down.
-            drain._topologyReceived = true;
+            //
+            // Only flag completeness for structurally-complete payloads. A
+            // count-only stub from a pre-fix cascor cascade_add broadcast
+            // (where data.hidden_units is an integer count) must NOT
+            // suppress the REST fallback — otherwise the topology view
+            // freezes on the initial 0-hidden snapshot for the rest of the
+            // session. Mirrors CascorServiceAdapter._is_complete_topology
+            // on the Python side.
+            var hu = data && data.hidden_units;
+            var nodes = data && data.nodes;
+            var isComplete = data && (
+                Array.isArray(hu) ||
+                (data.input_units !== undefined && Array.isArray(nodes))
+            );
+            if (isComplete) {
+                drain._topologyReceived = true;
+            }
         });
 
         window.cascorWS.on("cascade_add", function(data) {
