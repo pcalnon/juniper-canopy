@@ -237,7 +237,7 @@ class NetworkVisualizer(BaseComponent):
                     style={
                         "marginBottom": "10px",
                         "padding": "10px",
-                        "backgroundColor": "#e3f2fd",
+                        "backgroundColor": "var(--bs-info-bg-subtle, #e3f2fd)",
                         "borderRadius": "4px",
                         "display": "none",
                     },

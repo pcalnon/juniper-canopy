@@ -602,11 +602,11 @@ class ReplayPlayerPanel(BaseComponent):
     @staticmethod
     def _error_status(message: str):
         return html.Div(
-            [html.Span("❌ ", style={"color": "#dc3545"}), html.Span(message)],
+            [html.Span("❌ ", style={"color": "var(--danger-color, #dc3545)"}), html.Span(message)],
             style={
-                "color": "#dc3545",
+                "color": "var(--danger-color, #dc3545)",
                 "padding": "8px 12px",
-                "backgroundColor": "#f8d7da",
+                "backgroundColor": "var(--bs-danger-bg-subtle, #f8d7da)",
                 "borderRadius": "4px",
                 "fontSize": "0.85rem",
             },

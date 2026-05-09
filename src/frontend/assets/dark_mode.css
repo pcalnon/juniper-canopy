@@ -40,6 +40,24 @@
     --border-color: #404040;
     --header-color: #4a9eff;
     --shadow: rgba(0, 0, 0, 0.5);
+
+    /* Bootstrap subtle-bg variables — Bootstrap 5.3 ships these for the
+       data-bs-theme switcher, but Juniper uses its own .dark-mode class on
+       <html>, so we override them explicitly here. Inline styles using
+       var(--bs-success-bg-subtle, #d4edda) etc. will then re-theme correctly. */
+    --bs-primary-bg-subtle: rgba(74, 158, 255, 0.18);
+    --bs-secondary-bg-subtle: rgba(173, 181, 189, 0.15);
+    --bs-success-bg-subtle: rgba(81, 207, 102, 0.18);
+    --bs-warning-bg-subtle: rgba(255, 212, 59, 0.18);
+    --bs-danger-bg-subtle: rgba(255, 107, 107, 0.18);
+    --bs-info-bg-subtle: rgba(74, 158, 255, 0.18);
+
+    --bs-primary-text-emphasis: #6cb2ff;
+    --bs-secondary-text-emphasis: #d3d8dd;
+    --bs-success-text-emphasis: #74dc88;
+    --bs-warning-text-emphasis: #ffe169;
+    --bs-danger-text-emphasis: #ff8a8a;
+    --bs-info-text-emphasis: #6cb2ff;
 }
 
 /* Apply theme variables to page elements */
@@ -187,25 +205,214 @@ hr {
     color: var(--primary-color) !important;
 }
 
-/* Dropdown menus */
-.Select-control {
+/* Dropdown menus
+   Dash 3 retired the legacy react-select v1 .Select-* classes and now ships its
+   own dash-dropdown-* classes that read from --Dash-* CSS custom properties.
+   The cleanest theming hook is to override those variables under .dark-mode so
+   every Dash 3 component (dropdown, datepicker, etc.) re-themes automatically.
+   The .dash-dropdown-* selectors below are belt-and-suspenders for any rule
+   that wins via inline style or higher specificity. */
+.dark-mode {
+    --Dash-Fill-Inverse-Strong: var(--bg-card);
+    --Dash-Fill-Interactive-Weak: rgba(255, 255, 255, 0.06);
+    --Dash-Fill-Interactive-Strong: var(--primary-color);
+    --Dash-Fill-Primary-Hover: rgba(255, 255, 255, 0.06);
+    --Dash-Fill-Primary-Active: rgba(255, 255, 255, 0.1);
+    --Dash-Fill-Disabled: rgba(255, 255, 255, 0.08);
+    --Dash-Stroke-Strong: rgba(233, 236, 239, 0.45);
+    --Dash-Stroke-Weak: rgba(233, 236, 239, 0.15);
+    --Dash-Text-Primary: var(--text-color);
+    --Dash-Text-Strong: var(--text-color);
+    --Dash-Text-Weak: var(--text-muted);
+    --Dash-Text-Disabled: var(--text-muted);
+    --Dash-Shading-Strong: rgba(0, 0, 0, 0.6);
+    --Dash-Shading-Weak: rgba(0, 0, 0, 0.4);
+}
+
+.dark-mode .dash-dropdown-content,
+.dark-mode .dash-dropdown-options,
+.dark-mode .dash-dropdown-wrapper {
     background-color: var(--bg-card) !important;
+    color: var(--text-color) !important;
     border-color: var(--border-color) !important;
+}
+
+.dark-mode .dash-dropdown-option {
+    background-color: var(--bg-card) !important;
     color: var(--text-color) !important;
 }
 
-.Select-menu-outer {
-    background-color: var(--bg-card) !important;
-    border-color: var(--border-color) !important;
-}
-
-.Select-option {
-    background-color: var(--bg-card) !important;
-    color: var(--text-color) !important;
-}
-
-.Select-option.is-focused {
+.dark-mode .dash-dropdown-option:hover,
+.dark-mode .dash-dropdown-option[aria-selected="true"],
+.dark-mode .dash-dropdown-option.is-focused {
     background-color: var(--bg-secondary) !important;
+    color: var(--text-color) !important;
+}
+
+.dark-mode .dash-dropdown-search,
+.dark-mode .dash-dropdown-value,
+.dark-mode .dash-dropdown-value-item {
+    background-color: var(--bg-card) !important;
+    color: var(--text-color) !important;
+}
+
+/* Bootstrap-flavoured selects (dbc.Select renders a native <select> with
+   class .form-select). Native <option> elements inherit from the OS theme on
+   some browsers; we still override what we can. */
+.form-select {
+    background-color: var(--bg-card);
+    border-color: var(--border-color);
+    color: var(--text-color);
+}
+
+.dark-mode .form-select,
+.dark-mode select.form-select,
+.dark-mode select {
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+    /* Bootstrap embeds a dark chevron SVG; replace with a light one so it stays visible. */
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23e9ecef' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e") !important;
+}
+
+.dark-mode .form-select:focus {
+    background-color: var(--bg-card) !important;
+    border-color: var(--primary-color) !important;
+    color: var(--text-color) !important;
+    box-shadow: 0 0 0 0.2rem rgba(74, 158, 255, 0.25);
+}
+
+.dark-mode .form-select option,
+.dark-mode select option {
+    background-color: var(--bg-card);
+    color: var(--text-color);
+}
+
+/* Bootstrap dropdown menus (dbc.DropdownMenu, navbar dropdowns, etc.) */
+.dark-mode .dropdown-menu {
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+    --bs-dropdown-bg: var(--bg-card);
+    --bs-dropdown-link-color: var(--text-color);
+    --bs-dropdown-link-hover-color: var(--text-color);
+    --bs-dropdown-link-hover-bg: var(--bg-secondary);
+    --bs-dropdown-link-active-color: var(--text-color);
+    --bs-dropdown-link-active-bg: var(--bg-secondary);
+    --bs-dropdown-divider-bg: var(--border-color);
+    --bs-dropdown-header-color: var(--text-muted);
+}
+
+.dark-mode .dropdown-item {
+    color: var(--text-color) !important;
+}
+
+.dark-mode .dropdown-item:hover,
+.dark-mode .dropdown-item:focus {
+    background-color: var(--bg-secondary) !important;
+    color: var(--text-color) !important;
+}
+
+.dark-mode .dropdown-divider {
+    border-color: var(--border-color) !important;
+}
+
+/* Modals (dbc.Modal) */
+.dark-mode .modal-content {
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+.dark-mode .modal-header,
+.dark-mode .modal-footer {
+    background-color: var(--bg-secondary) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+.dark-mode .modal-body {
+    background-color: var(--bg-card) !important;
+    color: var(--text-color) !important;
+}
+
+.dark-mode .modal-title {
+    color: var(--text-color) !important;
+}
+
+.dark-mode .modal-backdrop {
+    background-color: #000;
+}
+
+/* Bootstrap close button (×) used in modals/alerts is a dark SVG by default;
+   invert it so it remains visible on dark surfaces. */
+.dark-mode .btn-close {
+    filter: invert(1) grayscale(100%) brightness(200%);
+}
+
+/* Popovers and tooltips */
+.dark-mode .popover {
+    background-color: var(--bg-card) !important;
+    border-color: var(--border-color) !important;
+    --bs-popover-bg: var(--bg-card);
+    --bs-popover-border-color: var(--border-color);
+    --bs-popover-header-bg: var(--bg-secondary);
+    --bs-popover-header-color: var(--text-color);
+    --bs-popover-body-color: var(--text-color);
+}
+
+.dark-mode .popover-header {
+    background-color: var(--bg-secondary) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+.dark-mode .popover-body {
+    color: var(--text-color) !important;
+}
+
+.dark-mode .tooltip-inner {
+    background-color: var(--bg-secondary) !important;
+    color: var(--text-color) !important;
+    border: 1px solid var(--border-color);
+}
+
+/* Alerts: dim the bright Bootstrap pastel backgrounds for dark mode while
+   preserving the semantic colour cue on the left border. */
+.dark-mode .alert {
+    background-color: var(--bg-secondary) !important;
+    color: var(--text-color) !important;
+    border-color: var(--border-color) !important;
+}
+
+.dark-mode .alert-primary  { border-left: 4px solid var(--primary-color) !important; }
+.dark-mode .alert-success  { border-left: 4px solid var(--success-color) !important; }
+.dark-mode .alert-warning  { border-left: 4px solid var(--warning-color) !important; }
+.dark-mode .alert-danger   { border-left: 4px solid var(--danger-color)  !important; }
+.dark-mode .alert-info     { border-left: 4px solid var(--primary-color) !important; }
+.dark-mode .alert-secondary{ border-left: 4px solid var(--text-muted)    !important; }
+
+/* Input groups (e.g. label add-ons next to .form-control) */
+.dark-mode .input-group-text {
+    background-color: var(--bg-secondary) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-color) !important;
+}
+
+/* Form check / switch / radio */
+.dark-mode .form-check-input {
+    background-color: var(--bg-card);
+    border-color: var(--border-color);
+}
+
+.dark-mode .form-check-input:checked {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.dark-mode .form-check-label,
+.dark-mode .form-label {
+    color: var(--text-color);
 }
 
 /* Status indicators - maintain visibility in dark mode */
