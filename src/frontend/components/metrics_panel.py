@@ -289,7 +289,7 @@ class MetricsPanel(BaseComponent):
                                     className="me-1",
                                     title="Go to end",
                                 ),
-                                html.Span("|", style={"margin": "0 10px", "color": "#ccc"}),
+                                html.Span("|", style={"margin": "0 10px", "color": "var(--border-color)"}),
                                 dbc.ButtonGroup(
                                     [
                                         dbc.Button(
@@ -1824,7 +1824,7 @@ class MetricsPanel(BaseComponent):
             Dash Div with formatted table
         """
         if not stats:
-            return html.Div("Loading network information...", style={"color": "#888", "fontSize": "14px"})
+            return html.Div("Loading network information...", style={"color": "var(--text-muted)", "fontSize": "14px"})
 
         weight_stats = stats.get("weight_statistics", {})
         z_dist = weight_stats.get("z_score_distribution", {})
@@ -1864,7 +1864,7 @@ class MetricsPanel(BaseComponent):
                 table_rows.append(
                     html.Tr(
                         [html.Td("", colSpan=2, style={"height": "5px", "padding": "0"})],
-                        style={"borderBottom": "1px solid #e0e0e0"},
+                        style={"borderBottom": "1px solid var(--border-color)"},
                     )
                 )
             else:

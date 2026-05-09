@@ -512,7 +512,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 html.P(self._OP_DESCRIPTIONS.get(operation, ""), style={"fontSize": "0.9rem"}),
                 html.P(
                     "⚠️ Training must be paused or stopped before any snapshot operation.",
-                    style={"color": "#856404", "fontSize": "0.85rem"},
+                    style={"color": "var(--bs-warning-text-emphasis, #856404)", "fontSize": "0.85rem"},
                 ),
             ]
         )
@@ -1093,7 +1093,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                         html.Span("✅ ", style={"color": "#28a745"}),
                         html.Span(f"{message}"),
                     ],
-                    style={"color": "#28a745", "padding": "10px", "backgroundColor": "#d4edda", "borderRadius": "5px"},
+                    style={"color": "var(--success-color, #28a745)", "padding": "10px", "backgroundColor": "var(--bs-success-bg-subtle, #d4edda)", "borderRadius": "5px"},
                 )
                 # CAN-015f: hand off to the replay player on a successful
                 # ``replay`` op. The cascor /replay response contains the
@@ -1119,7 +1119,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                     html.Span("❌ ", style={"color": "#dc3545"}),
                     html.Span(f"Failed ({operation}): {error}"),
                 ],
-                style={"color": "#dc3545", "padding": "10px", "backgroundColor": "#f8d7da", "borderRadius": "5px"},
+                style={"color": "var(--danger-color, #dc3545)", "padding": "10px", "backgroundColor": "var(--bs-danger-bg-subtle, #f8d7da)", "borderRadius": "5px"},
             )
             return False, status_content, current_trigger or 0, dash.no_update, dash.no_update
 

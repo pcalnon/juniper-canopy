@@ -72,7 +72,7 @@ class WorkerPanel(BaseComponent):
                     [
                         html.H3(
                             "Remote Workers",
-                            style={"display": "inline-block", "marginRight": "15px", "color": "#2c3e50"},
+                            style={"display": "inline-block", "marginRight": "15px", "color": "var(--header-color)"},
                         ),
                         dbc.Badge(
                             id=f"{self.component_id}-status-badge",
@@ -97,42 +97,42 @@ class WorkerPanel(BaseComponent):
                                 [
                                     dbc.Col(
                                         [
-                                            html.Div("Total", style={"fontWeight": "bold", "fontSize": "12px", "color": "#6c757d"}),
+                                            html.Div("Total", style={"fontWeight": "bold", "fontSize": "12px", "color": "var(--text-muted)"}),
                                             html.Div(id=f"{self.component_id}-total", children="--", style={"fontSize": "24px", "fontWeight": "bold"}),
                                         ],
                                         width=2,
                                     ),
                                     dbc.Col(
                                         [
-                                            html.Div("Idle", style={"fontWeight": "bold", "fontSize": "12px", "color": "#6c757d"}),
+                                            html.Div("Idle", style={"fontWeight": "bold", "fontSize": "12px", "color": "var(--text-muted)"}),
                                             html.Div(id=f"{self.component_id}-idle", children="--", style={"fontSize": "24px", "fontWeight": "bold", "color": "#28a745"}),
                                         ],
                                         width=2,
                                     ),
                                     dbc.Col(
                                         [
-                                            html.Div("Busy", style={"fontWeight": "bold", "fontSize": "12px", "color": "#6c757d"}),
+                                            html.Div("Busy", style={"fontWeight": "bold", "fontSize": "12px", "color": "var(--text-muted)"}),
                                             html.Div(id=f"{self.component_id}-busy", children="--", style={"fontSize": "24px", "fontWeight": "bold", "color": "#007bff"}),
                                         ],
                                         width=2,
                                     ),
                                     dbc.Col(
                                         [
-                                            html.Div("Stale", style={"fontWeight": "bold", "fontSize": "12px", "color": "#6c757d"}),
+                                            html.Div("Stale", style={"fontWeight": "bold", "fontSize": "12px", "color": "var(--text-muted)"}),
                                             html.Div(id=f"{self.component_id}-stale", children="--", style={"fontSize": "24px", "fontWeight": "bold", "color": "#dc3545"}),
                                         ],
                                         width=2,
                                     ),
                                     dbc.Col(
                                         [
-                                            html.Div("Tasks Done", style={"fontWeight": "bold", "fontSize": "12px", "color": "#6c757d"}),
+                                            html.Div("Tasks Done", style={"fontWeight": "bold", "fontSize": "12px", "color": "var(--text-muted)"}),
                                             html.Div(id=f"{self.component_id}-tasks-done", children="--", style={"fontSize": "24px", "fontWeight": "bold"}),
                                         ],
                                         width=2,
                                     ),
                                     dbc.Col(
                                         [
-                                            html.Div("Avg Health", style={"fontWeight": "bold", "fontSize": "12px", "color": "#6c757d"}),
+                                            html.Div("Avg Health", style={"fontWeight": "bold", "fontSize": "12px", "color": "var(--text-muted)"}),
                                             html.Div(id=f"{self.component_id}-avg-health", children="--", style={"fontSize": "24px", "fontWeight": "bold"}),
                                         ],
                                         width=2,
@@ -189,7 +189,7 @@ class WorkerPanel(BaseComponent):
             stale = "--"
             tasks_done = "--"
             avg_health = "--"
-            worker_list = html.Div("No data available", style={"color": "#6c757d", "fontStyle": "italic"})
+            worker_list = html.Div("No data available", style={"color": "var(--text-muted)", "fontStyle": "italic"})
 
             try:
                 stats_resp = requests.get(
@@ -305,7 +305,7 @@ class WorkerPanel(BaseComponent):
         body_rows = [
             dbc.Row(
                 [
-                    dbc.Col(html.Small(f"Capabilities: {cap_text}", style={"color": "#6c757d"}), width=12),
+                    dbc.Col(html.Small(f"Capabilities: {cap_text}", style={"color": "var(--text-muted)"}), width=12),
                 ],
                 className="mb-1",
             ),
@@ -313,21 +313,21 @@ class WorkerPanel(BaseComponent):
                 [
                     dbc.Col(
                         [
-                            html.Small("Tasks: ", style={"fontWeight": "bold", "color": "#6c757d"}),
+                            html.Small("Tasks: ", style={"fontWeight": "bold", "color": "var(--text-muted)"}),
                             html.Small(f"{completed} done, {failed} failed"),
                         ],
                         width=4,
                     ),
                     dbc.Col(
                         [
-                            html.Small("Health: ", style={"fontWeight": "bold", "color": "#6c757d"}),
+                            html.Small("Health: ", style={"fontWeight": "bold", "color": "var(--text-muted)"}),
                             dbc.Badge(f"{health:.0%}", color=health_color, style={"fontSize": "11px"}),
                         ],
                         width=4,
                     ),
                     dbc.Col(
                         [
-                            html.Small("Connected: ", style={"fontWeight": "bold", "color": "#6c757d"}),
+                            html.Small("Connected: ", style={"fontWeight": "bold", "color": "var(--text-muted)"}),
                             html.Small(connected_str),
                         ],
                         width=4,
@@ -341,7 +341,7 @@ class WorkerPanel(BaseComponent):
                 dbc.Row(
                     dbc.Col(
                         [
-                            html.Small("Active task: ", style={"fontWeight": "bold", "color": "#6c757d"}),
+                            html.Small("Active task: ", style={"fontWeight": "bold", "color": "var(--text-muted)"}),
                             html.Code(active_task, style={"fontSize": "11px"}),
                         ],
                         width=12,

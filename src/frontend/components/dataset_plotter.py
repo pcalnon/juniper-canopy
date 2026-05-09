@@ -180,7 +180,7 @@ class DatasetPlotter(BaseComponent):
                                                         className="mb-3",
                                                     ),
                                                     dbc.Button("Generate", id=f"{self.component_id}-gen-confirm", color="primary"),
-                                                    html.Div(id=f"{self.component_id}-gen-status", style={"color": "#6c757d", "fontSize": "0.85em", "marginTop": "10px"}),
+                                                    html.Div(id=f"{self.component_id}-gen-status", style={"color": "var(--text-muted)", "fontSize": "0.85em", "marginTop": "10px"}),
                                                 ],
                                                 style={"paddingTop": "15px"},
                                             ),
@@ -192,7 +192,7 @@ class DatasetPlotter(BaseComponent):
                                                 [
                                                     html.Small(
                                                         "Upload a CSV file. Last column = integer class label; preceding columns = numeric features. Header row auto-detected. Limits: 10 MB, 50,000 rows, 100 features.",
-                                                        style={"color": "#6c757d", "display": "block", "marginBottom": "10px"},
+                                                        style={"color": "var(--text-muted)", "display": "block", "marginBottom": "10px"},
                                                     ),
                                                     dcc.Upload(
                                                         id=f"{self.component_id}-import-file-upload",
@@ -212,10 +212,10 @@ class DatasetPlotter(BaseComponent):
                                                     ),
                                                     html.Div(
                                                         id=f"{self.component_id}-import-file-name",
-                                                        style={"color": "#6c757d", "fontSize": "0.85em", "marginBottom": "10px"},
+                                                        style={"color": "var(--text-muted)", "fontSize": "0.85em", "marginBottom": "10px"},
                                                     ),
                                                     dbc.Button("Import File", id=f"{self.component_id}-import-file-confirm", color="primary", disabled=True),
-                                                    html.Div(id=f"{self.component_id}-import-file-status", style={"color": "#6c757d", "fontSize": "0.85em", "marginTop": "10px"}),
+                                                    html.Div(id=f"{self.component_id}-import-file-status", style={"color": "var(--text-muted)", "fontSize": "0.85em", "marginTop": "10px"}),
                                                 ],
                                                 style={"paddingTop": "15px"},
                                             ),
@@ -227,7 +227,7 @@ class DatasetPlotter(BaseComponent):
                                                 [
                                                     html.Small(
                                                         "Fetch a CSV from an http(s) URL. Same format and limits as Upload File. The canopy server performs the fetch — confirm the URL is reachable from the server's network.",
-                                                        style={"color": "#6c757d", "display": "block", "marginBottom": "10px"},
+                                                        style={"color": "var(--text-muted)", "display": "block", "marginBottom": "10px"},
                                                     ),
                                                     dbc.Input(
                                                         id=f"{self.component_id}-import-url-input",
@@ -236,7 +236,7 @@ class DatasetPlotter(BaseComponent):
                                                         style={"marginBottom": "10px"},
                                                     ),
                                                     dbc.Button("Fetch & Import", id=f"{self.component_id}-import-url-confirm", color="primary"),
-                                                    html.Div(id=f"{self.component_id}-import-url-status", style={"color": "#6c757d", "fontSize": "0.85em", "marginTop": "10px"}),
+                                                    html.Div(id=f"{self.component_id}-import-url-status", style={"color": "var(--text-muted)", "fontSize": "0.85em", "marginTop": "10px"}),
                                                 ],
                                                 style={"paddingTop": "15px"},
                                             ),

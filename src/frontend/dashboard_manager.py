@@ -571,45 +571,45 @@ class DashboardManager:
                                                             [
                                                                 html.Span(
                                                                     "Status: ",
-                                                                    style={"color": "#6c757d"},
+                                                                    style={"color": "var(--text-muted)"},
                                                                 ),
                                                                 html.Span(
                                                                     id="top-status-display",
                                                                     children="Stopped",
-                                                                    style={"fontWeight": "bold", "color": "#6c757d"},
+                                                                    style={"fontWeight": "bold", "color": "var(--text-muted)"},
                                                                 ),
                                                             ],
                                                             style={"marginRight": "8px"},
                                                         ),
                                                         html.Span(
                                                             " | ",
-                                                            style={"color": "#6c757d", "marginRight": "8px"},
+                                                            style={"color": "var(--text-muted)", "marginRight": "8px"},
                                                         ),
                                                         # Phase with label
                                                         html.Span(
                                                             [
                                                                 html.Span(
                                                                     "Phase: ",
-                                                                    style={"color": "#6c757d"},
+                                                                    style={"color": "var(--text-muted)"},
                                                                 ),
                                                                 html.Span(
                                                                     id="top-phase-display",
                                                                     children="Idle",
-                                                                    style={"fontWeight": "bold", "color": "#6c757d"},
+                                                                    style={"fontWeight": "bold", "color": "var(--text-muted)"},
                                                                 ),
                                                             ],
                                                             style={"marginRight": "8px"},
                                                         ),
                                                         html.Span(
                                                             " | ",
-                                                            style={"color": "#6c757d", "marginRight": "8px"},
+                                                            style={"color": "var(--text-muted)", "marginRight": "8px"},
                                                         ),
                                                         # Epoch display
                                                         html.Span(
                                                             [
                                                                 html.Span(
                                                                     "Epoch: ",
-                                                                    style={"color": "#6c757d"},
+                                                                    style={"color": "var(--text-muted)"},
                                                                 ),
                                                                 html.Span(
                                                                     id="top-epoch-display",
@@ -621,14 +621,14 @@ class DashboardManager:
                                                         ),
                                                         html.Span(
                                                             " | ",
-                                                            style={"color": "#6c757d", "marginRight": "8px"},
+                                                            style={"color": "var(--text-muted)", "marginRight": "8px"},
                                                         ),
                                                         # Iteration (Hidden Units) display
                                                         html.Span(
                                                             [
                                                                 html.Span(
                                                                     "Iteration: ",
-                                                                    style={"color": "#6c757d"},
+                                                                    style={"color": "var(--text-muted)"},
                                                                 ),
                                                                 html.Span(
                                                                     id="top-hidden-units-display",
@@ -644,7 +644,7 @@ class DashboardManager:
                                                             children="",
                                                             style={
                                                                 "marginLeft": "auto",
-                                                                "color": "#6c757d",
+                                                                "color": "var(--text-muted)",
                                                                 "fontSize": "0.9em",
                                                             },
                                                         ),
@@ -1250,7 +1250,7 @@ class DashboardManager:
                                                             children="",
                                                             style={
                                                                 "fontSize": "0.85em",
-                                                                "color": "#6c757d",
+                                                                "color": "var(--text-muted)",
                                                                 "textAlign": "center",
                                                             },
                                                         ),

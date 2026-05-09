@@ -493,7 +493,7 @@ class CandidateMetricsPanel(BaseComponent):
                                     html.Td(
                                         "No candidates",
                                         colSpan=3,
-                                        style={"padding": "10px", "textAlign": "center", "color": "#888"},
+                                        style={"padding": "10px", "textAlign": "center", "color": "var(--text-muted)"},
                                     )
                                 ]
                             )

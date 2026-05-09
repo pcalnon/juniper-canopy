@@ -60,7 +60,7 @@ class NetworkEvolution(BaseComponent):
                         html.H3("Network Evolution", style={"display": "inline-block", "marginRight": "20px"}),
                         html.Span(
                             "Cascade growth timeline — one snapshot per grow event.",
-                            style={"color": "#6c757d", "fontSize": "0.9em", "marginRight": "20px"},
+                            style={"color": "var(--text-muted)", "fontSize": "0.9em", "marginRight": "20px"},
                         ),
                         dbc.Button(
                             "Clear snapshots",
@@ -76,7 +76,7 @@ class NetworkEvolution(BaseComponent):
                 html.Div(
                     id=f"{self.component_id}-stats",
                     children="No snapshots yet",
-                    style={"color": "#6c757d", "fontSize": "0.85em", "marginBottom": "15px"},
+                    style={"color": "var(--text-muted)", "fontSize": "0.85em", "marginBottom": "15px"},
                 ),
                 html.Div(
                     id=f"{self.component_id}-grid-container",
@@ -102,7 +102,7 @@ class NetworkEvolution(BaseComponent):
                         html.H4("Replay weight evolution", style={"marginTop": "20px"}),
                         html.Span(
                             "Per-unit weight-norm trace across replay samples.",
-                            style={"color": "#6c757d", "fontSize": "0.85em"},
+                            style={"color": "var(--text-muted)", "fontSize": "0.85em"},
                         ),
                         dcc.Graph(
                             id=f"{self.component_id}-weight-norms",
@@ -127,7 +127,7 @@ class NetworkEvolution(BaseComponent):
                 ),
                 html.Div(
                     "No snapshots yet — start training to record cascade growth.",
-                    style={"textAlign": "center", "color": "#6c757d"},
+                    style={"textAlign": "center", "color": "var(--text-muted)"},
                 ),
             ],
             id=f"{self.component_id}-empty-state",
@@ -303,7 +303,7 @@ class NetworkEvolution(BaseComponent):
                             delta,
                             style={
                                 "fontSize": "0.75em",
-                                "color": "#1976d2" if delta and "+" in delta else "#6c757d",
+                                "color": "#1976d2" if delta and "+" in delta else "var(--text-muted)",
                                 "float": "right",
                             },
                         ),
@@ -317,7 +317,7 @@ class NetworkEvolution(BaseComponent):
                 ),
                 html.Div(
                     [
-                        html.Span("Hidden: ", style={"color": "#6c757d", "fontSize": "0.8em"}),
+                        html.Span("Hidden: ", style={"color": "var(--text-muted)", "fontSize": "0.8em"}),
                         html.Strong(str(snap.get("hidden_units", 0)), style={"color": fg, "fontSize": "0.85em"}),
                     ],
                     style={"textAlign": "center", "marginTop": "4px"},

@@ -114,7 +114,7 @@ class RedisPanel(BaseComponent):
                     [
                         html.H3(
                             "Redis Monitoring",
-                            style={"display": "inline-block", "marginRight": "15px", "color": "#2c3e50"},
+                            style={"display": "inline-block", "marginRight": "15px", "color": "var(--header-color)"},
                         ),
                         dbc.Badge(
                             id=f"{self.component_id}-status-badge",
@@ -153,7 +153,7 @@ class RedisPanel(BaseComponent):
                                                     style={
                                                         "fontWeight": "bold",
                                                         "fontSize": "12px",
-                                                        "color": "#6c757d",
+                                                        "color": "var(--text-muted)",
                                                     },
                                                 ),
                                                 html.Div(
@@ -171,7 +171,7 @@ class RedisPanel(BaseComponent):
                                                     style={
                                                         "fontWeight": "bold",
                                                         "fontSize": "12px",
-                                                        "color": "#6c757d",
+                                                        "color": "var(--text-muted)",
                                                     },
                                                 ),
                                                 html.Div(
@@ -189,7 +189,7 @@ class RedisPanel(BaseComponent):
                                                     style={
                                                         "fontWeight": "bold",
                                                         "fontSize": "12px",
-                                                        "color": "#6c757d",
+                                                        "color": "var(--text-muted)",
                                                     },
                                                 ),
                                                 html.Div(
@@ -207,7 +207,7 @@ class RedisPanel(BaseComponent):
                                                     style={
                                                         "fontWeight": "bold",
                                                         "fontSize": "12px",
-                                                        "color": "#6c757d",
+                                                        "color": "var(--text-muted)",
                                                     },
                                                 ),
                                                 html.Div(
@@ -241,7 +241,7 @@ class RedisPanel(BaseComponent):
                                                     style={
                                                         "fontWeight": "bold",
                                                         "fontSize": "12px",
-                                                        "color": "#6c757d",
+                                                        "color": "var(--text-muted)",
                                                     },
                                                 ),
                                                 html.Div(
@@ -259,7 +259,7 @@ class RedisPanel(BaseComponent):
                                                     style={
                                                         "fontWeight": "bold",
                                                         "fontSize": "12px",
-                                                        "color": "#6c757d",
+                                                        "color": "var(--text-muted)",
                                                     },
                                                 ),
                                                 html.Div(
@@ -277,7 +277,7 @@ class RedisPanel(BaseComponent):
                                                     style={
                                                         "fontWeight": "bold",
                                                         "fontSize": "12px",
-                                                        "color": "#6c757d",
+                                                        "color": "var(--text-muted)",
                                                     },
                                                 ),
                                                 html.Div(
@@ -295,7 +295,7 @@ class RedisPanel(BaseComponent):
                                                     style={
                                                         "fontWeight": "bold",
                                                         "fontSize": "12px",
-                                                        "color": "#6c757d",
+                                                        "color": "var(--text-muted)",
                                                     },
                                                 ),
                                                 html.Div(
