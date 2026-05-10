@@ -124,7 +124,7 @@ class TestInvokeReplayControl:
     def test_play_action_posts_correct_body(self, panel):
         captured = {}
 
-        def fake_post(url, json=None, timeout=None):
+        def fake_post(url, json=None, timeout=None, headers=None):
             captured["url"] = url
             captured["json"] = json
             mock_resp = MagicMock()
@@ -142,7 +142,7 @@ class TestInvokeReplayControl:
     def test_seek_passes_time_index(self, panel):
         captured = {}
 
-        def fake_post(url, json=None, timeout=None):
+        def fake_post(url, json=None, timeout=None, headers=None):
             captured["json"] = json
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -157,7 +157,7 @@ class TestInvokeReplayControl:
     def test_speed_passes_value(self, panel):
         captured = {}
 
-        def fake_post(url, json=None, timeout=None):
+        def fake_post(url, json=None, timeout=None, headers=None):
             captured["json"] = json
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -172,7 +172,7 @@ class TestInvokeReplayControl:
     def test_range_passes_start_end(self, panel):
         captured = {}
 
-        def fake_post(url, json=None, timeout=None):
+        def fake_post(url, json=None, timeout=None, headers=None):
             captured["json"] = json
             mock_resp = MagicMock()
             mock_resp.status_code = 200
@@ -187,7 +187,7 @@ class TestInvokeReplayControl:
     def test_drops_none_params(self, panel):
         captured = {}
 
-        def fake_post(url, json=None, timeout=None):
+        def fake_post(url, json=None, timeout=None, headers=None):
             captured["json"] = json
             mock_resp = MagicMock()
             mock_resp.status_code = 200
