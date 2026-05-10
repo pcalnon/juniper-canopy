@@ -115,6 +115,14 @@ observability = [
     "prometheus-client>=0.20.0",
     "sentry-sdk>=2.0.0",
 ]
+ui-test = [
+    # Issue #4 / FRONTEND_ISSUES_PLAN_2026-05-09.md §5: Playwright-based browser
+    # automation for the UI sub-suite. Skeleton landed in PR-3; full inventory
+    # lands in PR-10. Browser binaries installed via ``playwright install
+    # --with-deps chromium`` (see .github/workflows/ci.yml ui-tests lane).
+    "pytest-playwright>=0.5",
+    "playwright>=1.45",
+]
 dev = [
     "juniper-canopy[juniper-data,juniper-cascor,observability]",
     "pytest>=8.0",
@@ -281,6 +289,7 @@ markers = [
   "requires_display: Tests requiring display for visualization",
   "api: Tests for API endpoints",
   "generators: Tests for data generators",
+  "ui: Browser-automation tests (Playwright; requires `playwright install chromium` and the `ui-test` extra)",
 ]
 asyncio_mode = "auto"
 consider_namespace_packages = false

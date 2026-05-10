@@ -285,6 +285,76 @@ jobs:
           retention-days: 30
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # UI Tests: Playwright browser-automation sub-suite
+  # FRONTEND_ISSUES_PLAN_2026-05-09.md §5 (Issue #4) / Resolution log Q3
+  #   Budget commitment: must add ≤5 min to overall CI wall-clock. Runs in
+  #   parallel with unit-tests so wall-clock cost is max(unit, ui) - unit.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  ui-tests:
+    name: UI Sub-suite (Playwright)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.ref_name == 'main' || github.ref_name == 'develop'
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python ${{ env.PYTHON_TEST_VERSION }}
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: ${{ env.PYTHON_TEST_VERSION }}
+          cache: pip
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('**/pyproject.toml') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade "pip>=26.1.1"
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r conf/requirements_ci.txt
+          pip install -e ".[ui-test]"
+
+      - name: Install Playwright browser
+        run: |
+          playwright install --with-deps chromium
+
+      - name: Create required directories
+        run: |
+          mkdir -p logs src/logs reports/junit
+
+      - name: Run UI Tests
+        env:
+          JUNIPER_CANOPY_DEMO_MODE: "1"
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - UI Sub-suite (Playwright)           ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+
+          python -m pytest \
+            -m "ui and not slow" \
+            src/tests/ui \
+            --verbose \
+            --timeout=120 \
+            --maxfail=3 \
+            --junitxml=reports/junit/junit-ui.xml
+
+      - name: Upload UI Test Results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        if: always()
+        with:
+          name: ui-test-results
+          path: reports/junit/
+          retention-days: 30
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
   # Build: Build distribution packages
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   build:
@@ -678,7 +748,7 @@ jobs:
     name: Quality Gate
     runs-on: ubuntu-latest
     if: always()
-    needs: [pre-commit, unit-tests, integration-tests, security, build, dependency-docs, lockfile-check, docs, docker-build]
+    needs: [pre-commit, unit-tests, integration-tests, ui-tests, security, build, dependency-docs, lockfile-check, docs, docker-build]
 
     steps:
       - name: Check Quality Gate Status
@@ -690,6 +760,7 @@ jobs:
           echo "Pre-commit:        ${{ needs.pre-commit.result }}"
           echo "Unit Tests:        ${{ needs.unit-tests.result }}"
           echo "Integration Tests: ${{ needs.integration-tests.result }}"
+          echo "UI Tests:          ${{ needs.ui-tests.result }}"
           echo "Security:          ${{ needs.security.result }}"
           echo "Build:             ${{ needs.build.result }}"
           echo "Dependency Docs:   ${{ needs.dependency-docs.result }}"
@@ -715,6 +786,12 @@ jobs:
 
           if [[ "${{ needs.integration-tests.result }}" == "failure" ]]; then
             echo "::error::Integration tests failed"
+            exit 1
+          fi
+
+          # UI tests: failure = error, skipped = OK (only runs on PRs and main/develop)
+          if [[ "${{ needs.ui-tests.result }}" == "failure" ]]; then
+            echo "::error::UI sub-suite (Playwright) failed"
             exit 1
           fi
 
