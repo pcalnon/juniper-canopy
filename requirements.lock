@@ -111,7 +111,7 @@ python-dotenv==1.2.2
     #   juniper-canopy (pyproject.toml)
     #   pydantic-settings
     #   uvicorn
-python-multipart==0.0.27
+python-multipart==0.0.28
     # via juniper-canopy (pyproject.toml)
 pyyaml==6.0.3
     # via
