@@ -1998,6 +1998,26 @@ class DemoMode:
         # Update TrainingState if available
         self._update_training_state()
 
+        # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1a + Resolution log Q1: match the
+        # cascor adapter's return shape so the /api/set_params handler can
+        # uniformly extract ``skipped`` regardless of which backend served the
+        # call. Demo recognises every nn_*/cn_* key it knows about (see the
+        # nn_param_map and cn_param_map above), so unrecognised keys are
+        # genuinely unmapped here too — surface them by name for parity with
+        # the real backend.
+        known_demo_keys = {
+            "learning_rate",
+            "max_hidden_units",
+            "max_epochs",
+            "convergence_enabled",
+            "convergence_threshold",
+            "spiral_rotations",
+            *nn_param_map.keys(),
+            *cn_param_map.keys(),
+        }
+        skipped = sorted(k for k in kwargs if k not in known_demo_keys)
+        return {"ok": True, "data": {}, "skipped": skipped}
+
 
 # Global demo mode instance (singleton)
 _demo_instance: Optional[DemoMode] = None

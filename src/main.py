@@ -2864,10 +2864,20 @@ async def api_set_params(body: SetParamsRequest):
             ts_updates["candidate_learning_rate"] = float(backend_updates["cn_candidate_learning_rate"])
         # Forward all params to backend FIRST (offloaded to thread for sync backends)
         result = await asyncio.to_thread(backend.apply_params, **backend_updates)
-        if isinstance(result, dict) and not result.get("ok", True):
-            error_msg = result.get("error", "unknown")
-            system_logger.warning("Backend parameter application failed: %s", error_msg)
-            return JSONResponse({"error": f"Backend rejected parameters: {error_msg}"}, status_code=502)
+        skipped: list = []
+        if isinstance(result, dict):
+            if not result.get("ok", True):
+                error_msg = result.get("error", "unknown")
+                system_logger.warning("Backend parameter application failed: %s", error_msg)
+                # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1a: even on failure, surface
+                # which keys never made it through the adapter map so the user can
+                # tell "backend rejected my values" from "canopy never asked the
+                # backend in the first place".
+                err_payload = {"error": f"Backend rejected parameters: {error_msg}"}
+                if result.get("skipped"):
+                    err_payload["skipped"] = result["skipped"]
+                return JSONResponse(err_payload, status_code=502)
+            skipped = list(result.get("skipped") or [])
 
         # Only update TrainingState AFTER backend confirms success
         if ts_updates:
@@ -2878,7 +2888,14 @@ async def api_set_params(body: SetParamsRequest):
         broadcast_data = {**training_state.get_state(), "applied_params": backend_updates}
         await websocket_manager.broadcast({"type": "params_updated", "data": broadcast_data})
 
-        return {"status": "success", "state": training_state.get_state()}
+        # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1a: thread the adapter's `skipped`
+        # list into the response so the dashboard handler can show
+        # "Applied X of Y; Z not yet supported by the backend: …" instead of the
+        # misleading "Parameters applied" toast for every call.
+        response: dict = {"status": "success", "state": training_state.get_state()}
+        if skipped:
+            response["skipped"] = skipped
+        return response
     except Exception as exc:
         # SEC-14: return an opaque error_id; full traceback goes to logs only.
         error_id = uuid.uuid4().hex[:12]
