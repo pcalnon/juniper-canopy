@@ -246,6 +246,15 @@ class DashboardConstants:
     # Maximum retries for set_params operations.
     DASHBOARD_SET_PARAMS_MAX_RETRIES: Final[int] = 3
 
+    # FRONTEND_ISSUES_PLAN_2026-05-09 §2.5 B / Issue #2 — common debounce for
+    # numeric ``dbc.Input`` widgets. 350 ms balances typing latency against
+    # callback churn — typed values commit ~350 ms after the last keystroke
+    # without requiring blur. Spinner clicks commit immediately regardless.
+    # Pre-PR-8 every numeric input used ``debounce=True`` which only commits
+    # on blur/Enter, producing the "type then click Apply with mouse =
+    # stale value" UX bug.
+    NUMERIC_INPUT_DEBOUNCE_MS: Final[int] = 350
+
 
 class ServerConstants:
     """Server configuration constants.

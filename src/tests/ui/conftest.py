@@ -85,7 +85,42 @@ def dashboard_page(page, canopy_url):
     Pre-seeds ``localStorage`` so the Welcome modal stays closed; otherwise
     every test would have to dismiss it before clicking anything else
     (the modal intercepts pointer events on first visit).
+
+    Waits for the ``params-init-interval`` (one-shot ``Interval(interval=1000,
+    max_intervals=1)``) to fire and ``init_params_from_backend`` to overwrite
+    the input defaults with backend values. Without this wait, any test that
+    fills a numeric input within the first ~1.5 s of page load races the
+    init callback — the fill lands first, then init writes the backend
+    default over it, and the test reads the wrong value.
     """
     page.add_init_script("localStorage.setItem('juniper_canopy_welcomed', '1');")
     page.goto(f"{canopy_url}/dashboard/")
+    # ``params-init-interval`` is a one-shot Interval at 1 s that triggers
+    # ``init_params_from_backend``, which overwrites the input defaults with
+    # backend values. Without an explicit wait, any test that fills a numeric
+    # input within the first ~1.5 s races init — fill lands first, init
+    # writes over it, test reads the wrong value.
+    #
+    # Two-stage gate:
+    #   (1) Hard 1.5 s sleep to guarantee the Interval has fired.
+    #   (2) Poll the learning-rate input until its value has been stable for
+    #       300 ms — confirms the Dash callback chain has finished writing
+    #       backend values to every input.
+    page.wait_for_timeout(1_500)
+    page.wait_for_function(
+        """
+        () => {
+            const el = document.getElementById('nn-learning-rate-input');
+            if (!el) return false;
+            const now = Date.now();
+            if (window.__juniperLastValue !== el.value) {
+                window.__juniperLastValue = el.value;
+                window.__juniperLastChangeAt = now;
+                return false;
+            }
+            return (now - (window.__juniperLastChangeAt || now)) >= 300;
+        }
+        """,
+        timeout=5_000,
+    )
     return page

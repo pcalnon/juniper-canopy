@@ -753,7 +753,7 @@ class DashboardManager:
                                                                                 min=TrainingConstants.MIN_MAX_GROWTH_ITERATIONS,
                                                                                 max=TrainingConstants.MAX_MAX_GROWTH_ITERATIONS,
                                                                                 className="mb-2",
-                                                                                debounce=True,
+                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                             ),
                                                                             html.P("Maximum Total Epochs:", className="mb-1 fw-bold"),
                                                                             dbc.Input(
@@ -764,7 +764,7 @@ class DashboardManager:
                                                                                 min=self._settings.get_training_param_config("epochs")["min"],
                                                                                 max=self._settings.get_training_param_config("epochs")["max"],
                                                                                 className="mb-2",
-                                                                                debounce=True,
+                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                             ),
                                                                             html.P("Output Epochs (per pass):", className="mb-1 fw-bold"),
                                                                             dbc.Input(
@@ -775,7 +775,7 @@ class DashboardManager:
                                                                                 min=TrainingConstants.MIN_OUTPUT_EPOCHS,
                                                                                 max=TrainingConstants.MAX_OUTPUT_EPOCHS,
                                                                                 className="mb-2",
-                                                                                debounce=True,
+                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                             ),
                                                                             html.P("Output Weight Init:", className="mb-1 fw-bold"),
                                                                             dcc.Dropdown(
@@ -810,7 +810,7 @@ class DashboardManager:
                                                                                 min=self._settings.get_training_param_config("learning_rate")["min"],
                                                                                 max=self._settings.get_training_param_config("learning_rate")["max"],
                                                                                 className="mb-2",
-                                                                                debounce=True,
+                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                             ),
                                                                             html.P("Maximum Hidden Units:", className="mb-1 fw-bold"),
                                                                             dbc.Input(
@@ -821,7 +821,7 @@ class DashboardManager:
                                                                                 min=self._settings.get_training_param_config("hidden_units")["min"],
                                                                                 max=self._settings.get_training_param_config("hidden_units")["max"],
                                                                                 className="mb-2",
-                                                                                debounce=True,
+                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                             ),
                                                                         ],
                                                                         id="sidebar-nn-top-params",
@@ -889,7 +889,7 @@ class DashboardManager:
                                                                                                     min=TrainingConstants.MIN_PRESET_EPOCHS,
                                                                                                     max=TrainingConstants.MAX_PRESET_EPOCHS,
                                                                                                     className="mb-2 ms-4",
-                                                                                                    debounce=True,
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                                     disabled=True,
                                                                                                     style={"width": "calc(100% - 1.5rem)"},
                                                                                                 ),
@@ -907,7 +907,7 @@ class DashboardManager:
                                                                                                     min=TrainingConstants.MIN_CONVERGENCE_THRESHOLD,
                                                                                                     max=TrainingConstants.MAX_CONVERGENCE_THRESHOLD,
                                                                                                     className="mb-2 ms-4",
-                                                                                                    debounce=True,
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                                     disabled=False,
                                                                                                     style={"width": "calc(100% - 1.5rem)"},
                                                                                                 ),
@@ -925,7 +925,7 @@ class DashboardManager:
                                                                                                     min=TrainingConstants.MIN_PATIENCE,
                                                                                                     max=TrainingConstants.MAX_PATIENCE,
                                                                                                     className="mb-2 ms-4",
-                                                                                                    debounce=True,
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                                     disabled=False,
                                                                                                     style={"width": "calc(100% - 1.5rem)"},
                                                                                                 ),
@@ -965,7 +965,7 @@ class DashboardManager:
                                                                                             min=TrainingConstants.MIN_SPIRAL_ROTATIONS,
                                                                                             max=TrainingConstants.MAX_SPIRAL_ROTATIONS,
                                                                                             className="mb-2 ms-3",
-                                                                                            debounce=True,
+                                                                                            debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                             style={"width": "calc(100% - 1rem)"},
                                                                                         ),
                                                                                         html.P("Number:", className="mb-1 ms-3"),
@@ -977,7 +977,7 @@ class DashboardManager:
                                                                                             min=TrainingConstants.MIN_SPIRAL_NUMBER,
                                                                                             max=TrainingConstants.MAX_SPIRAL_NUMBER,
                                                                                             className="mb-2 ms-3",
-                                                                                            debounce=True,
+                                                                                            debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                             style={"width": "calc(100% - 1rem)"},
                                                                                         ),
                                                                                         html.P("Dataset:", className="mb-1 fw-bold mt-2"),
@@ -990,7 +990,7 @@ class DashboardManager:
                                                                                             min=TrainingConstants.MIN_DATASET_ELEMENTS,
                                                                                             max=TrainingConstants.MAX_DATASET_ELEMENTS,
                                                                                             className="mb-2 ms-3",
-                                                                                            debounce=True,
+                                                                                            debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                             style={"width": "calc(100% - 1rem)"},
                                                                                         ),
                                                                                         html.P("Noise:", className="mb-1 ms-3"),
@@ -1002,7 +1002,7 @@ class DashboardManager:
                                                                                             min=TrainingConstants.MIN_DATASET_NOISE,
                                                                                             max=TrainingConstants.MAX_DATASET_NOISE,
                                                                                             className="mb-2 ms-3",
-                                                                                            debounce=True,
+                                                                                            debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                             style={"width": "calc(100% - 1rem)"},
                                                                                         ),
                                                                                         # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1
@@ -1077,7 +1077,7 @@ class DashboardManager:
                                                                                 min=TrainingConstants.MIN_CANDIDATE_POOL_SIZE,
                                                                                 max=TrainingConstants.MAX_CANDIDATE_POOL_SIZE,
                                                                                 className="mb-2",
-                                                                                debounce=True,
+                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                             ),
                                                                             html.P("Correlation Threshold:", className="mb-1 fw-bold"),
                                                                             dbc.Input(
@@ -1088,7 +1088,7 @@ class DashboardManager:
                                                                                 min=TrainingConstants.MIN_CANDIDATE_CORRELATION_THRESHOLD,
                                                                                 max=TrainingConstants.MAX_CANDIDATE_CORRELATION_THRESHOLD,
                                                                                 className="mb-2",
-                                                                                debounce=True,
+                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                             ),
                                                                             html.P("Selected Candidates:", className="mb-1 fw-bold"),
                                                                             dbc.Input(
@@ -1099,7 +1099,7 @@ class DashboardManager:
                                                                                 min=TrainingConstants.MIN_SELECTED_CANDIDATES,
                                                                                 max=TrainingConstants.MAX_SELECTED_CANDIDATES,
                                                                                 className="mb-2",
-                                                                                debounce=True,
+                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                             ),
                                                                             # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C2.2 — fast-feedback
                                                                             # validator for the (S, T, R, P) candidate-pool triple. The
@@ -1150,7 +1150,7 @@ class DashboardManager:
                                                                                                     min=TrainingConstants.MIN_CANDIDATE_TRAINING_ITERATIONS,
                                                                                                     max=TrainingConstants.MAX_CANDIDATE_TRAINING_ITERATIONS,
                                                                                                     className="mb-2 ms-4",
-                                                                                                    debounce=True,
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                                     disabled=False,
                                                                                                     style={"width": "calc(100% - 1.5rem)"},
                                                                                                 ),
@@ -1168,7 +1168,7 @@ class DashboardManager:
                                                                                                     min=TrainingConstants.MIN_CANDIDATE_CONVERGENCE_THRESHOLD,
                                                                                                     max=TrainingConstants.MAX_CANDIDATE_CONVERGENCE_THRESHOLD,
                                                                                                     className="mb-2 ms-4",
-                                                                                                    debounce=True,
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                                     disabled=True,
                                                                                                     style={"width": "calc(100% - 1.5rem)"},
                                                                                                 ),
@@ -1186,7 +1186,7 @@ class DashboardManager:
                                                                                                     min=TrainingConstants.MIN_CN_PATIENCE,
                                                                                                     max=TrainingConstants.MAX_CN_PATIENCE,
                                                                                                     className="mb-2 ms-4",
-                                                                                                    debounce=True,
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                                     disabled=False,
                                                                                                     style={"width": "calc(100% - 1.5rem)"},
                                                                                                 ),
@@ -1235,7 +1235,7 @@ class DashboardManager:
                                                                                                 min=TrainingConstants.MIN_TOP_CANDIDATES_COUNT,
                                                                                                 max=TrainingConstants.MAX_TOP_CANDIDATES_COUNT,
                                                                                                 className="mb-2 ms-4",
-                                                                                                debounce=True,
+                                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                                 disabled=True,
                                                                                                 style={"width": "calc(100% - 1.5rem)"},
                                                                                             ),
@@ -1253,7 +1253,7 @@ class DashboardManager:
                                                                                                 min=TrainingConstants.MIN_RANDOM_CANDIDATES_COUNT,
                                                                                                 max=TrainingConstants.MAX_RANDOM_CANDIDATES_COUNT,
                                                                                                 className="mb-2 ms-4",
-                                                                                                debounce=True,
+                                                                                                debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                                                                                 disabled=True,
                                                                                                 style={"width": "calc(100% - 1.5rem)"},
                                                                                             ),
@@ -1528,6 +1528,12 @@ class DashboardManager:
                 # button is in flight, so a server roundtrip isn't racing against
                 # interval-driven REST polls / clientside drains.
                 dcc.Store(id="apply-in-flight", data=False),
+                # FRONTEND_ISSUES_PLAN_2026-05-09 §2.5 C / Issue #2 — write-only
+                # sink for the force-blur clientside callback. Dash requires
+                # an Output target on every callback; this Store exists solely
+                # to satisfy that contract without colliding with another
+                # callback's output.
+                dcc.Store(id="apply-blur-sink", data=None),
                 # Phase B: WebSocket drain stores (structured objects, D-07)
                 dcc.Store(id="ws-metrics-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
                 dcc.Store(id="ws-topology-buffer", data=None),
@@ -1728,6 +1734,29 @@ class DashboardManager:
             """,
             Output("welcome-modal", "is_open", allow_duplicate=True),
             Input("welcome-modal-close", "n_clicks"),
+            prevent_initial_call=True,
+        )
+
+        # ── FRONTEND_ISSUES_PLAN_2026-05-09 §2.5 C / Issue #2 ──
+        # Force-blur the focused input on Apply-Parameters click so any pending
+        # debounced numeric value commits BEFORE the server-side State() reads.
+        # Closes the "type into a numeric input, click Apply with the mouse
+        # without ever leaving the field, get the OLD value POSTed" race that
+        # was the most-reported facet of Issue #2. Pairs with §2.5 B (the
+        # debounce=350 sweep) which moves the commit from "blur only" to
+        # "blur OR ~350 ms after last keystroke".
+        self.app.clientside_callback(
+            """
+            function(n_clicks) {
+                if (n_clicks && document.activeElement
+                        && typeof document.activeElement.blur === 'function') {
+                    document.activeElement.blur();
+                }
+                return null;
+            }
+            """,
+            Output("apply-blur-sink", "data"),
+            Input("apply-params-button", "n_clicks"),
             prevent_initial_call=True,
         )
 

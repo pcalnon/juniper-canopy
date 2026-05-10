@@ -376,7 +376,7 @@ class MetricsPanel(BaseComponent):
                                     step=10,
                                     size="sm",
                                     style={"width": "80px", "display": "inline-block"},
-                                    debounce=True,
+                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
                                 ),
                             ],
                             id=f"{self.component_id}-window-size-container",
