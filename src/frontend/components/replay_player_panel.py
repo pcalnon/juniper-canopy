@@ -42,6 +42,8 @@ import dash_bootstrap_components as dbc
 import requests
 from dash import Input, Output, State, dcc, html
 
+from frontend.internal_api import internal_api_headers
+
 from ..base_component import BaseComponent
 
 # Speed slider config — bidirectional 0.1x .. 10x with 0 == pause.
@@ -325,6 +327,7 @@ class ReplayPlayerPanel(BaseComponent):
                 f"{self._api_base_url}/api/v1/snapshots/{snapshot_id}/replay/control",
                 json=body,
                 timeout=self.api_timeout + 5,
+                headers=internal_api_headers(),
             )
             if resp.status_code == 200:
                 return {"success": True, "data": resp.json()}

@@ -25,6 +25,7 @@ import dash_bootstrap_components as dbc
 import requests
 from dash import dcc, html
 
+from frontend.internal_api import internal_api_headers
 from settings import get_settings
 
 from ..base_component import BaseComponent
@@ -195,6 +196,7 @@ class WorkerPanel(BaseComponent):
                 stats_resp = requests.get(
                     self._api_url("/api/v1/workers/stats"),
                     timeout=self.api_timeout,
+                    headers=internal_api_headers(),
                 )
                 if stats_resp.status_code == 200:
                     data = stats_resp.json().get("data", {})
@@ -231,6 +233,7 @@ class WorkerPanel(BaseComponent):
                 list_resp = requests.get(
                     self._api_url("/api/v1/workers/list"),
                     timeout=self.api_timeout,
+                    headers=internal_api_headers(),
                 )
                 if list_resp.status_code == 200:
                     data = list_resp.json().get("data", {})

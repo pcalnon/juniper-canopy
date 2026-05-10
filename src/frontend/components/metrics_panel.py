@@ -47,6 +47,7 @@ from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
 from canopy_constants import DashboardConstants
+from frontend.internal_api import internal_api_headers
 from settings import get_settings
 
 from ..base_component import BaseComponent, create_empty_plot
@@ -1071,7 +1072,7 @@ class MetricsPanel(BaseComponent):
         import requests
 
         try:
-            response = requests.get(f"{self._api_base_url}/api/network/stats", timeout=2)
+            response = requests.get(f"{self._api_base_url}/api/network/stats", timeout=2, headers=internal_api_headers())
             if response.status_code == 200:
                 return response.json()
         except Exception as e:
@@ -1092,7 +1093,7 @@ class MetricsPanel(BaseComponent):
         import requests
 
         try:
-            response = requests.get(f"{self._api_base_url}/api/state", timeout=2)
+            response = requests.get(f"{self._api_base_url}/api/state", timeout=2, headers=internal_api_headers())
             if response.status_code == 200:
                 return response.json()
         except Exception as e:
@@ -1319,7 +1320,7 @@ class MetricsPanel(BaseComponent):
         import requests
 
         try:
-            response = requests.get(f"{self._api_base_url}/api/v1/metrics/layouts", timeout=2)
+            response = requests.get(f"{self._api_base_url}/api/v1/metrics/layouts", timeout=2, headers=internal_api_headers())
             if response.status_code == 200:
                 data = response.json()
                 layouts = data.get("layouts", [])
@@ -1360,6 +1361,7 @@ class MetricsPanel(BaseComponent):
                     "zoom_ranges": view_state or {},
                 },
                 timeout=5,
+                headers=internal_api_headers(),
             )
 
             if response.status_code == 201:
@@ -1397,6 +1399,7 @@ class MetricsPanel(BaseComponent):
             response = requests.get(
                 f"{self._api_base_url}/api/v1/metrics/layouts/{layout_name}",
                 timeout=2,
+                headers=internal_api_headers(),
             )
 
             if response.status_code == 200:
@@ -1440,6 +1443,7 @@ class MetricsPanel(BaseComponent):
             response = requests.delete(
                 f"{self._api_base_url}/api/v1/metrics/layouts/{layout_name}",
                 timeout=5,
+                headers=internal_api_headers(),
             )
 
             if response.status_code == 200:

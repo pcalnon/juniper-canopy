@@ -44,6 +44,7 @@ from dash.dependencies import Input, Output
 from plotly.subplots import make_subplots
 
 from canopy_constants import DashboardConstants, SecurityConstants
+from frontend.internal_api import internal_api_headers
 
 from ..base_component import BaseComponent, create_empty_plot
 
@@ -396,7 +397,7 @@ class DatasetPlotter(BaseComponent):
             options = []
             current_value = None
             try:
-                resp = _requests.get(f"{origin}/api/dataset/generators", timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT)
+                resp = _requests.get(f"{origin}/api/dataset/generators", timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT, headers=internal_api_headers())
                 if resp.ok:
                     data = resp.json()
                     generators = data.get("generators", [])

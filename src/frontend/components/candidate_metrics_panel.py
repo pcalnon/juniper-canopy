@@ -46,6 +46,7 @@ import plotly.graph_objects as go
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
+from frontend.internal_api import internal_api_headers
 from settings import get_settings
 
 from ..base_component import BaseComponent, create_empty_plot
@@ -410,7 +411,7 @@ class CandidateMetricsPanel(BaseComponent):
         import requests
 
         try:
-            response = requests.get(self._api_url("/api/state"), timeout=2)
+            response = requests.get(self._api_url("/api/state"), timeout=2, headers=internal_api_headers())
             if response.status_code == 200:
                 data: Dict[str, Any] = response.json()
                 return data

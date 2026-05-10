@@ -42,6 +42,7 @@ import dash_bootstrap_components as dbc
 import requests
 from dash import dcc, html
 
+from frontend.internal_api import internal_api_headers
 from settings import get_settings
 
 from ..base_component import BaseComponent
@@ -373,6 +374,7 @@ class RedisPanel(BaseComponent):
                 status_resp = requests.get(
                     self._api_url("/api/v1/redis/status"),
                     timeout=self.api_timeout,
+                    headers=internal_api_headers(),
                 )
                 if status_resp.status_code == 200:
                     status_data = status_resp.json()
@@ -425,6 +427,7 @@ class RedisPanel(BaseComponent):
                 metrics_resp = requests.get(
                     self._api_url("/api/v1/redis/metrics"),
                     timeout=self.api_timeout,
+                    headers=internal_api_headers(),
                 )
                 if metrics_resp.status_code == 200:
                     metrics_data = metrics_resp.json()
