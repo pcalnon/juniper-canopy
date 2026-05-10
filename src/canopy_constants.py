@@ -327,8 +327,19 @@ class SecurityConstants:
     MAX_REQUEST_BODY_BYTES: Final[int] = 10 * 1024 * 1024  # 10 MB
 
     # ── Path-based exemption from API key + rate limiter middleware ──
-    # Prefix-based exemptions (Dash app + its static assets).
-    EXEMPT_PATH_PREFIXES: Final[tuple[str, ...]] = ("/dashboard",)
+    # Prefix-based exemptions (Dash app + its static assets, Prometheus
+    # /metrics sub-app). /metrics is mounted as an ASGI sub-app via
+    # ``app.mount("/metrics", get_prometheus_app())``; FastAPI's mount
+    # behaviour issues a 307 from ``/metrics`` -> ``/metrics/`` (and
+    # any sub-paths under the sub-app would be ``/metrics/...``), so a
+    # prefix-form exemption is required to keep the whole sub-app
+    # anonymously scrape-able. This matches the convention in
+    # juniper-cascor (no auth on /metrics) and complements
+    # juniper-data's IP-allowlisted variant. The trailing-slash form
+    # is intentional: ``startswith("/metrics")`` covers ``/metrics``,
+    # ``/metrics/``, and any future sub-paths the prometheus_client
+    # ASGI app may add.
+    EXEMPT_PATH_PREFIXES: Final[tuple[str, ...]] = ("/dashboard", "/metrics")
     # Exact path exemptions (health checks, OpenAPI docs).
     EXEMPT_PATHS: Final[frozenset[str]] = frozenset(
         {

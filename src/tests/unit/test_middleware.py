@@ -134,3 +134,10 @@ class TestSecurityMiddleware:
     def test_exempt_path_prefixes(self):
         """Verify the exempt path prefixes contain expected entries."""
         assert "/dashboard" in EXEMPT_PATH_PREFIXES
+        # Bug 3 (2026-05-10, juniper-ml IMAGE_BUILD_BUGS): /metrics must be
+        # exempt as a prefix so the deploy stack's Prometheus can scrape it
+        # without an API key. Prefix-form is required because the metrics
+        # ASGI sub-app is mounted at /metrics, which 307-redirects to
+        # /metrics/ (and may add sub-paths in future prometheus_client
+        # versions). Matches cascor + data conventions.
+        assert "/metrics" in EXEMPT_PATH_PREFIXES
