@@ -47,6 +47,7 @@ from dash.dependencies import Input, Output, State
 from canopy_constants import DashboardConstants, TrainingConstants
 from settings import get_settings
 
+from . import ui_standards
 from .base_component import BaseComponent
 from .callback_context import get_callback_context
 from .components.about_panel import AboutPanel
@@ -1397,7 +1398,14 @@ class DashboardManager:
                                     style={"display": "none"},
                                 ),
                             ],
-                            width=3,
+                            id="sidebar-col",
+                            # FRONTEND_ISSUES_PLAN_2026-05-09 §6.4 / Issue #6 —
+                            # initial value matches the metrics tab (the default
+                            # ``active_tab``); the per-tab callback below adjusts
+                            # this on every tab change. Width values come from
+                            # ``frontend.ui_standards`` — the single source of
+                            # truth pinned by tests/regression/test_tab_sidebar_widths.py.
+                            width=ui_standards.TAB_SIDEBAR_WIDTH["metrics"],
                         ),
                         # Right panel - Visualizations with tabs
                         dbc.Col(
@@ -1484,7 +1492,11 @@ class DashboardManager:
                                     active_tab="metrics",
                                 )
                             ],
-                            width=9,
+                            id="visualization-col",
+                            # FRONTEND_ISSUES_PLAN_2026-05-09 §6.4 / Issue #6 —
+                            # complement of the sidebar width; the per-tab
+                            # callback keeps the sum at GRID_COLUMNS=12.
+                            width=ui_standards.visualization_width_for("metrics"),
                         ),
                     ]
                 ),
@@ -1663,6 +1675,20 @@ class DashboardManager:
             # Dynamic card header text
             header_text = TAB_HEADER_MAP.get(active_tab, "Meta Parameters")
             return styles + [nn_open, cn_open, header_text]
+
+        # FRONTEND_ISSUES_PLAN_2026-05-09 §6.4 + §6.5 / Issue #6 — per-tab
+        # sidebar width. Wide tabs (3/9) carry Network Parameters; narrow
+        # tabs (2/10) reclaim viewport for content-dense visualisations or
+        # mostly-static content. Widths come from ``frontend.ui_standards``;
+        # the test suite pins both ends.
+        @self.app.callback(
+            [Output("sidebar-col", "width"), Output("visualization-col", "width")],
+            Input("visualization-tabs", "active_tab"),
+            prevent_initial_call=True,
+        )
+        def resize_sidebar_for_tab(active_tab: str):
+            sidebar = ui_standards.TAB_SIDEBAR_WIDTH.get(active_tab, ui_standards.WIDE_SIDEBAR)
+            return sidebar, ui_standards.GRID_COLUMNS - sidebar
 
     # Define theme callbacks
     def _setup_theme_callbacks(self):

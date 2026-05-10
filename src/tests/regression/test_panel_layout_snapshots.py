@@ -43,8 +43,14 @@ def test_panel_layout_snapshot(dashboard_manager: DashboardManager, panel_attr: 
 
     baseline = SNAP_DIR / f"{panel_attr}.txt"
     if not baseline.exists():
-        baseline.write_text(serialised)
+        # Always write with a trailing newline so the pre-commit
+        # ``end-of-file-fixer`` hook is a no-op on the freshly-seeded baseline.
+        baseline.write_text(serialised + "\n")
         pytest.skip(f"baseline written for {panel_attr}; commit and re-run")
 
-    expected = baseline.read_text()
-    assert expected == serialised, f"layout drift for {panel_attr}; review the diff and regenerate the " f"baseline at {baseline} if intentional."
+    # Newline-tolerant compare: the pre-commit ``end-of-file-fixer`` hook will
+    # always append a trailing newline to the committed baseline file, but
+    # ``repr(panel.get_layout())`` never produces one. Strip both ends so the
+    # test pins layout structure, not file-trailer punctuation.
+    expected = baseline.read_text().rstrip("\n")
+    assert expected == serialised.rstrip("\n"), f"layout drift for {panel_attr}; review the diff and regenerate the " f"baseline at {baseline} if intentional."
