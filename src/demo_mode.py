@@ -1912,14 +1912,27 @@ class DemoMode:
                 # Update Adam optimizer's learning rate to take effect immediately
                 for param_group in self.network.output_optimizer.param_groups:
                     param_group["lr"] = learning_rate
+                # FRONTEND_ISSUES_PLAN_2026-05-09 §2.5 / Issue #2 — also seed the
+                # ``nn_*``-aliased attribute so ``/api/state``'s
+                # ``getattr(demo, 'nn_learning_rate', …)`` reflects the user's
+                # value. The earlier kwargs.pop folds the prefixed name into
+                # the positional, but the ``setattr(self, name, value)`` loop
+                # below only iterates over the keys still in ``kwargs`` — so
+                # without this line the prefixed read-back path returns the
+                # default forever after a successful Apply.
+                self.nn_learning_rate = float(learning_rate)
                 self.logger.info("Demo mode: learning_rate set to %s", learning_rate)
 
             if max_hidden_units is not None:
                 self.max_hidden_units = max_hidden_units
+                # Mirror to the nn_*-aliased attr (see learning_rate above).
+                self.nn_max_hidden_units = int(max_hidden_units)
                 self.logger.info("Demo mode: max_hidden_units set to %s", max_hidden_units)
 
             if max_epochs is not None:
                 self.max_epochs = int(max_epochs)
+                # Mirror to the nn_*-aliased attr.
+                self.nn_max_total_epochs = int(max_epochs)
                 self.logger.info("Demo mode: max_epochs set to %s", max_epochs)
 
             if convergence_enabled is not None:
@@ -1931,6 +1944,8 @@ class DemoMode:
                     TrainingConstants.MIN_CONVERGENCE_THRESHOLD,
                     min(float(convergence_threshold), TrainingConstants.MAX_CONVERGENCE_THRESHOLD),
                 )
+                # Mirror to the nn_*-aliased attr.
+                self.nn_growth_convergence_threshold = float(self.convergence_threshold)
                 self.logger.info("Demo mode: convergence_threshold set to %s", self.convergence_threshold)
 
             if spiral_rotations is not None:
@@ -1938,6 +1953,8 @@ class DemoMode:
                     TrainingConstants.MIN_SPIRAL_ROTATIONS,
                     min(float(spiral_rotations), TrainingConstants.MAX_SPIRAL_ROTATIONS),
                 )
+                # Mirror to the nn_*-aliased attr (regardless of regen-needed).
+                self.nn_spiral_rotations = float(new_rotations)
                 if new_rotations != self.spiral_rotations:
                     self.spiral_rotations = new_rotations
                     self.logger.info("Demo mode: spiral_rotations set to %s — regenerating dataset", self.spiral_rotations)
