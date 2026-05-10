@@ -3,19 +3,38 @@
 Pre-fix this would silently drop newly-added params; the post-fix adapter
 surfaces the value on ``GET /api/state``. We don't intercept the
 server-side ``POST /api/set_params`` from the Dash callback because that
-request is server-internal — instead we read back through ``/api/state``,
-which is what the user actually observes.
+request is server-internal (Dash callback runs in the canopy process and
+``requests.post`` to ``/api/set_params`` from there never crosses the
+browser network) — instead we read back through ``/api/state``, which
+is what the user actually observes.
 
-Diagnostic note (PR-8): this test was xfail-pinned to PR-4/PR-5 (Issue #1
-silent-drop). PR-5 closed the silent-drop and PR-8 closed the typing
-debounce race, but a separate harness-level bug remains: clicking
-``#apply-params-button`` in headless Playwright doesn't trigger the
-apply callback's ``POST /api/set_params`` at all (network capture in
-the PR-8 investigation showed only an unrelated ``metrics-panel-stats-
-update-interval`` tick). Manual verification: filling the input then
-clicking Apply in a real browser does fire the POST and the value
-round-trips. Track-and-fix the harness gap separately; for now keep
-the xfail with the corrected reason.
+PR-10 root-cause note. The xfail below pins a real harness-level
+incompatibility, not a Dash callback bug:
+
+  * The Apply click DOES fire the Dash apply callback (verified via
+    ``_dash-update-component`` request capture).
+  * BUT the State payload sent to the callback contains
+    ``"nn-learning-rate-input": null`` even when the DOM input element
+    shows ``"0.0123"`` after Playwright's ``fill()``.
+
+Tried fixes (none worked):
+
+  * ``page.fill()`` + Tab
+  * ``page.type()`` with per-keystroke delay + Tab
+  * React-friendly ``HTMLInputElement.prototype.value`` setter +
+    ``input``/``change`` event dispatch
+  * Slow keystroke typing with 2 s post-typing settle
+  * ``Locator.click(force=True)`` / ``dispatch_event('click')`` /
+    ``evaluate('el.click()')``
+
+Inputs that aren't touched by Playwright show their initial values in
+the State block, so the bug is specifically "Playwright value-set
+does not propagate to Dash's React-controlled ``dbc.Input(type=number)``
+internal state". Manual browser sessions work end-to-end.
+
+Track-and-fix separately (likely needs Dash component-level work or a
+``pytest-dash`` style harness that drives Dash's own clientside
+callbacks). For now this xfail documents the harness gap.
 """
 
 import time
@@ -27,7 +46,13 @@ import requests
 @pytest.mark.ui
 @pytest.mark.xfail(
     strict=True,
-    reason="Harness-level: ``page.click('#apply-params-button')`` doesn't fire the " "Dash apply callback in headless chromium (no POST /api/set_params observed); " "manual browser sessions work. Separate from PR-8's debounce/blur fix. " "Investigate the Dash _dash-update-component dispatch for click-driven callbacks " "in Playwright; remove this xfail when fixed.",
+    reason="Harness-level: Playwright fills DOM but Dash dbc.Input(type=number) never "
+    "sees the React onChange — apply callback receives State value=null. PR-10 "
+    "investigation confirmed: Apply click DOES fire the callback (visible in "
+    "_dash-update-component requests); the State payload itself is wrong. "
+    "Tried fill/type/React-setter/long-wait — none propagate. Manual browser "
+    "sessions work. Remove xfail when the harness can drive React-controlled "
+    "Dash inputs (likely via dash[testing] / pytest-dash).",
 )
 def test_apply_pushes_typed_learning_rate_into_backend(dashboard_page, canopy_url):
     typed = 0.0123
