@@ -48,7 +48,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import uvicorn
 from a2wsgi import WSGIMiddleware
@@ -2904,6 +2904,67 @@ async def api_set_params(body: SetParamsRequest):
             {"error": "Internal server error", "error_id": error_id},
             status_code=500,
         )
+
+
+# =========================================================================
+# FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 + §3.5.2 Phase 1 — Issue #3
+# Pending dataset stage / cancel endpoints. Mirrors cascor #242.
+# =========================================================================
+
+
+class StageDatasetRequest(BaseModel):
+    """Body for POST /api/stage_dataset.
+
+    All fields optional so the dashboard can build the body from whatever
+    subset of dataset inputs the user touched. The cascor side
+    (StageDatasetRequest) is the authoritative validator; we forward
+    blindly via the adapter.
+    """
+
+    nn_dataset_type: Optional[str] = None
+    nn_dataset_elements: Optional[int] = None
+    nn_dataset_noise: Optional[float] = None
+    nn_spiral_rotations: Optional[float] = None
+    nn_spiral_number: Optional[int] = None
+
+
+@app.post("/api/stage_dataset")
+async def api_stage_dataset(body: StageDatasetRequest):
+    """Stage a dataset-config change for the next start_training.
+
+    Returns the staged config + the adapter's ``ok`` flag. On backend
+    rejection (e.g. unknown dataset_type) returns 502 with the cascor
+    error string.
+    """
+    try:
+        params = body.model_dump(exclude_none=True)
+        result = await asyncio.to_thread(backend.stage_dataset, **params)
+        if isinstance(result, dict) and not result.get("ok", True):
+            error_msg = result.get("error", "unknown")
+            system_logger.warning("Backend rejected dataset staging: %s", error_msg)
+            return JSONResponse({"error": f"Backend rejected dataset: {error_msg}"}, status_code=502)
+        return {"status": "success", "data": (result or {}).get("data", {})}
+    except Exception as exc:
+        # SEC-14: opaque error_id; full traceback to logs only.
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Failed to stage dataset [error_id=%s]", error_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
+
+@app.delete("/api/cancel_pending_dataset")
+async def api_cancel_pending_dataset():
+    """Cancel any staged dataset change — Phase 1 Cancel button target."""
+    try:
+        result = await asyncio.to_thread(backend.cancel_pending_dataset)
+        if isinstance(result, dict) and not result.get("ok", True):
+            error_msg = result.get("error", "unknown")
+            system_logger.warning("Backend rejected dataset cancel: %s", error_msg)
+            return JSONResponse({"error": f"Backend rejected cancel: {error_msg}"}, status_code=502)
+        return {"status": "success", "data": (result or {}).get("data", {})}
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Failed to cancel pending dataset [error_id=%s]", error_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
 
 
 # =========================================================================

@@ -39,7 +39,7 @@
 #####################################################################################################################################################################################################
 
 import logging
-from typing import Any, List, Optional, cast
+from typing import Any, Dict, List, Optional, cast
 
 import numpy as np
 import torch
@@ -113,6 +113,10 @@ class DemoBackend:
                 "monitoring_active": status_name == "STARTED",
                 "input_size": network.input_size if network else 0,
                 "output_size": network.output_size if network else 0,
+                # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 / Issue #3 Phase 1 —
+                # demo parity for the cascor pending-dataset surface; drives
+                # the canopy banner without a dedicated poll.
+                "pending_dataset": getattr(self._demo, "_pending_dataset_config", None),
             }
         )
         # Include training params from training_state if available
@@ -313,8 +317,24 @@ class DemoBackend:
     # --- Parameters ---
 
     def apply_params(self, **params: Any) -> ApplyParamsResult:
-        self._demo.apply_params(**params)
+        result = self._demo.apply_params(**params)
+        if isinstance(result, dict):
+            return cast(ApplyParamsResult, result)
         return cast(ApplyParamsResult, {"ok": True, "data": params})
+
+    # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 / Issue #3 Phase 1 — demo parity for
+    # the cascor pending-dataset surface (cascor #242). Same wire shape as the
+    # service adapter so main.py's /api/stage_dataset and /api/cancel_pending_dataset
+    # routes don't need to special-case demo.
+
+    def stage_dataset(self, **canopy_params: Any) -> Dict[str, Any]:
+        return self._demo.stage_dataset(**canopy_params)
+
+    def cancel_pending_dataset(self) -> Dict[str, Any]:
+        return self._demo.cancel_pending_dataset()
+
+    def get_pending_dataset(self) -> Dict[str, Any]:
+        return self._demo.get_pending_dataset()
 
     # --- Lifecycle ---
 

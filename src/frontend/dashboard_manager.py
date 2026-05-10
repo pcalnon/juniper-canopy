@@ -1005,6 +1005,35 @@ class DashboardManager:
                                                                                             debounce=True,
                                                                                             style={"width": "calc(100% - 1rem)"},
                                                                                         ),
+                                                                                        # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1
+                                                                                        # Issue #3 Phase 1 — dataset_type selector
+                                                                                        # routed through the new POST /v1/training/dataset
+                                                                                        # endpoint (cascor #242). Apply Dataset stages
+                                                                                        # the change; restart applies it (cold-swap).
+                                                                                        html.P("Type:", className="mb-1 ms-3"),
+                                                                                        dcc.Dropdown(
+                                                                                            id="nn-dataset-type-dropdown",
+                                                                                            options=[
+                                                                                                {"label": "Spirals", "value": "spirals"},
+                                                                                                {"label": "XOR", "value": "xor"},
+                                                                                                {"label": "MNIST", "value": "mnist"},
+                                                                                                {"label": "Circles", "value": "circles"},
+                                                                                                {"label": "Moons", "value": "moons"},
+                                                                                            ],
+                                                                                            value="spirals",
+                                                                                            clearable=False,
+                                                                                            className="mb-2 ms-3",
+                                                                                            style={"width": "calc(100% - 1rem)"},
+                                                                                        ),
+                                                                                        dbc.Button(
+                                                                                            "Apply Dataset",
+                                                                                            id="apply-dataset-button",
+                                                                                            color="secondary",
+                                                                                            outline=True,
+                                                                                            size="sm",
+                                                                                            className="mb-2 ms-3",
+                                                                                            style={"width": "calc(100% - 1rem)"},
+                                                                                        ),
                                                                                     ]
                                                                                 ),
                                                                                 id="ctx-spiral-dataset-collapse",
@@ -1246,6 +1275,40 @@ class DashboardManager:
                                                     id="sidebar-cn-section",
                                                 ),
                                                 html.Hr(id="sidebar-params-divider"),
+                                                # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.2 P1
+                                                # Issue #3 Phase 1 — pending dataset banner.
+                                                # Visibility is driven by the status-bar
+                                                # interval reading the cascor-side
+                                                # `pending_dataset` field (cascor #242);
+                                                # buttons offer the user the explicit
+                                                # cold-swap restart or a Cancel out.
+                                                dbc.Alert(
+                                                    [
+                                                        html.Span("Dataset change pending — restart training to apply.", className="me-2"),
+                                                        html.Br(),
+                                                        dbc.ButtonGroup(
+                                                            [
+                                                                dbc.Button(
+                                                                    "Stop & Restart with new dataset",
+                                                                    id="restart-with-new-dataset-button",
+                                                                    color="primary",
+                                                                    size="sm",
+                                                                ),
+                                                                dbc.Button(
+                                                                    "Cancel pending change",
+                                                                    id="cancel-pending-dataset-button",
+                                                                    color="secondary",
+                                                                    outline=True,
+                                                                    size="sm",
+                                                                ),
+                                                            ],
+                                                            className="mt-2",
+                                                        ),
+                                                    ],
+                                                    id="pending-dataset-banner",
+                                                    color="warning",
+                                                    is_open=False,
+                                                ),
                                                 # ── Shared Apply Button ──
                                                 html.Div(
                                                     [
@@ -3101,6 +3164,96 @@ class DashboardManager:
         def init_params_from_backend(n, current_applied):
             """Initialize input values and applied params from backend on first load."""
             return self._init_params_from_backend_handler(n, current_applied)
+
+        # ── FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 + §3.5.2 P1 — Issue #3 Phase 1 ──
+        # Apply Dataset / Cancel pending dataset change / banner visibility.
+
+        @self.app.callback(
+            Output("pending-dataset-banner", "is_open", allow_duplicate=True),
+            Input("apply-dataset-button", "n_clicks"),
+            [
+                dash.dependencies.State("nn-dataset-type-dropdown", "value"),
+                dash.dependencies.State("nn-dataset-elements-input", "value"),
+                dash.dependencies.State("nn-dataset-noise-input", "value"),
+                dash.dependencies.State("nn-spiral-rotations-input", "value"),
+                dash.dependencies.State("nn-spiral-number-input", "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def apply_dataset(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals):
+            """POST /api/stage_dataset with the current dataset-form values."""
+            if not n_clicks:
+                return dash.no_update
+            payload = {
+                "nn_dataset_type": dataset_type,
+                "nn_dataset_elements": n_samples,
+                "nn_dataset_noise": noise,
+                "nn_spiral_rotations": rotations,
+                "nn_spiral_number": n_spirals,
+            }
+            payload = {k: v for k, v in payload.items() if v is not None}
+            try:
+                resp = requests.post(
+                    self._api_url("/api/stage_dataset"),
+                    json=payload,
+                    timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
+                )
+                if resp.status_code == 200:
+                    self.logger.info("Dataset staged: %s", payload)
+                    return True  # open banner
+                self.logger.warning("Stage dataset failed: %s %s", resp.status_code, resp.text[:200])
+                return dash.no_update
+            except requests.RequestException as exc:
+                self.logger.warning("Stage dataset exception: %s", exc)
+                return dash.no_update
+
+        @self.app.callback(
+            Output("pending-dataset-banner", "is_open", allow_duplicate=True),
+            Input("cancel-pending-dataset-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def cancel_pending_dataset(n_clicks):
+            """DELETE /api/cancel_pending_dataset; close the banner on success."""
+            if not n_clicks:
+                return dash.no_update
+            try:
+                resp = requests.delete(
+                    self._api_url("/api/cancel_pending_dataset"),
+                    timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
+                )
+                if resp.status_code == 200:
+                    self.logger.info("Pending dataset change discarded")
+                    return False  # close banner
+                self.logger.warning("Cancel pending dataset failed: %s %s", resp.status_code, resp.text[:200])
+                return dash.no_update
+            except requests.RequestException as exc:
+                self.logger.warning("Cancel pending dataset exception: %s", exc)
+                return dash.no_update
+
+        @self.app.callback(
+            Output("pending-dataset-banner", "is_open", allow_duplicate=True),
+            Input("slow-update-interval", "n_intervals"),
+            prevent_initial_call=True,
+        )
+        def reconcile_pending_dataset_banner(n_intervals):
+            """Poll /api/status; reflect cascor-side pending_dataset state.
+
+            Catches the case where the staged config was cleared by a successful
+            ``start_training`` (cold-swap completed) or by another tab — keeps
+            the banner in sync with the source of truth without us having to
+            also wire it from the start/stop callbacks.
+            """
+            try:
+                resp = requests.get(
+                    self._api_url("/api/status"),
+                    timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
+                )
+                if resp.status_code != 200:
+                    return dash.no_update
+                pending = resp.json().get("pending_dataset")
+                return bool(pending)
+            except requests.RequestException:
+                return dash.no_update
 
     # Define event handlers for callbacks
     def _toggle_dark_mode_handler(self, current_dark_mode=None):

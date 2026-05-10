@@ -567,6 +567,12 @@ class DemoMode:
         self._stop = threading.Event()
         self._pause = threading.Event()
 
+        # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 / Issue #3 Phase 1 — staged
+        # dataset config (cascor parity). Set by stage_dataset, cleared by
+        # cancel_pending_dataset; the canopy banner reads this via the status
+        # payload's pending_dataset field.
+        self._pending_dataset_config: Optional[Dict[str, Any]] = None
+
         self.max_epochs = int(training_defaults.get("epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS))
         self.max_hidden_units = int(training_defaults.get("hidden_units", TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS))
         # DEPRECATED: cascade_every, convergence_enabled, convergence_threshold, and
@@ -2017,6 +2023,31 @@ class DemoMode:
         }
         skipped = sorted(k for k in kwargs if k not in known_demo_keys)
         return {"ok": True, "data": {}, "skipped": skipped}
+
+    # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 + §3.5.2 P1 / Resolution log Q1 —
+    # demo mirrors of the cascor pending-dataset surface added in cascor #242.
+    # The actual dataset regen happens at restart_dataset / _generate_spiral_dataset
+    # time; staging just records the intent so the canopy banner stays in
+    # parity between demo and real backends.
+
+    def stage_dataset(self, **canopy_params: Any) -> Dict[str, Any]:
+        with self._lock:
+            cfg = {k: v for k, v in canopy_params.items() if v is not None}
+            if not cfg:
+                self._pending_dataset_config = None
+                return {"ok": True, "data": {"status": "cleared", "config": None}}
+            self._pending_dataset_config = dict(cfg)
+            return {"ok": True, "data": {"status": "staged", "config": dict(cfg)}}
+
+    def cancel_pending_dataset(self) -> Dict[str, Any]:
+        with self._lock:
+            prior = getattr(self, "_pending_dataset_config", None)
+            self._pending_dataset_config = None
+        return {"ok": True, "data": {"status": "cleared", "discarded": dict(prior) if prior else None}}
+
+    def get_pending_dataset(self) -> Dict[str, Any]:
+        cfg = getattr(self, "_pending_dataset_config", None)
+        return {"ok": True, "pending": dict(cfg) if cfg else None}
 
 
 # Global demo mode instance (singleton)

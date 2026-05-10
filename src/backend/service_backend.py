@@ -40,7 +40,7 @@
 #####################################################################################################################################################################################################
 
 import logging
-from typing import Any, Callable, List, Optional, cast
+from typing import Any, Callable, Dict, List, Optional, cast
 
 from backend.cascor_service_adapter import CascorServiceAdapter, _first_defined
 from backend.protocol import (
@@ -146,6 +146,12 @@ class ServiceBackend:
                 "learning_rate": ts.get("learning_rate", 0.0),
                 "max_hidden_units": ts.get("max_hidden_units", 0),
                 "max_epochs": ts.get("max_epochs", 0),
+                # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 / Issue #3 Phase 1 —
+                # surface the cascor-side staged dataset config so the canopy
+                # banner can react without a separate poll. Cascor #242 added
+                # this field to the /v1/training/status payload; carry it
+                # through unchanged.
+                "pending_dataset": raw.get("pending_dataset"),
             },
         )
 
@@ -206,6 +212,18 @@ class ServiceBackend:
 
     def apply_params(self, **params: Any) -> ApplyParamsResult:
         return cast(ApplyParamsResult, self._adapter.apply_params(**params))
+
+    # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 / Issue #3 Phase 1 — pass-through
+    # to the cascor pending-dataset surface (cascor #242).
+
+    def stage_dataset(self, **canopy_params: Any) -> Dict[str, Any]:
+        return self._adapter.stage_dataset(**canopy_params)
+
+    def cancel_pending_dataset(self) -> Dict[str, Any]:
+        return self._adapter.cancel_pending_dataset()
+
+    def get_pending_dataset(self) -> Dict[str, Any]:
+        return self._adapter.get_pending_dataset()
 
     # --- Lifecycle ---
 

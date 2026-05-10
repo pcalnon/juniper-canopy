@@ -875,6 +875,51 @@ class CascorServiceAdapter:
                 mismatches[key] = {"requested": requested, "applied": applied}
         return mismatches or None
 
+    # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 + §3.5.2 P1 — Issue #3 Phase 1
+    # dataset staging. Three pass-through methods that hit the cascor PR-6
+    # endpoints. juniper-cascor-client doesn't yet expose dedicated methods
+    # for these (see cascor #242), so we use the public-but-private ``_request``
+    # escape hatch — a follow-up will lift these into the client when it ships
+    # 0.4.0+ with first-class methods.
+
+    # Maps canopy nn_* dataset-form keys → cascor StageDatasetRequest keys.
+    # Keys not in this map are silently dropped from the staging payload.
+    _DATASET_PARAM_MAP = {
+        "nn_dataset_type": "dataset_type",
+        "nn_dataset_elements": "n_samples",
+        "nn_dataset_noise": "noise",
+        "nn_spiral_rotations": "rotations",
+        "nn_spiral_number": "n_spirals",
+    }
+
+    def stage_dataset(self, **canopy_params: Any) -> Dict[str, Any]:
+        """POST /v1/training/dataset — stage a dataset change for next start_training."""
+        cascor_cfg = {self._DATASET_PARAM_MAP[k]: v for k, v in canopy_params.items() if k in self._DATASET_PARAM_MAP and v is not None}
+        try:
+            result = self._client._request("POST", "/v1/training/dataset", json=cascor_cfg)
+            return {"ok": True, "data": (result or {}).get("data", {}), "config": cascor_cfg}
+        except JuniperCascorClientError as e:
+            logger.error("stage_dataset failed: %s", e)
+            return {"ok": False, "error": str(e)}
+
+    def cancel_pending_dataset(self) -> Dict[str, Any]:
+        """DELETE /v1/training/dataset — Phase 1 Cancel button target."""
+        try:
+            result = self._client._request("DELETE", "/v1/training/dataset")
+            return {"ok": True, "data": (result or {}).get("data", {})}
+        except JuniperCascorClientError as e:
+            logger.error("cancel_pending_dataset failed: %s", e)
+            return {"ok": False, "error": str(e)}
+
+    def get_pending_dataset(self) -> Dict[str, Any]:
+        """GET /v1/training/dataset/pending — peek for the canopy banner."""
+        try:
+            result = self._client._request("GET", "/v1/training/dataset/pending")
+            return {"ok": True, "pending": ((result or {}).get("data", {}) or {}).get("pending")}
+        except JuniperCascorClientError as e:
+            logger.error("get_pending_dataset failed: %s", e)
+            return {"ok": False, "error": str(e), "pending": None}
+
     def _apply_params_hot(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Send hot params via /ws/control set_params with command_id.
 
