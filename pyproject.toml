@@ -91,6 +91,15 @@ dependencies = [
     # juniper-cascor-client too, but pinned explicitly here so the
     # dependency edge is visible to anyone reading canopy's pyproject.
     "juniper-cascor-protocol>=0.1.0",
+    # 2026-05-10: promoted from the [observability] extra into required
+    # deps. ``src/observability.py:152`` unconditionally imports
+    # ``prometheus_client`` whenever ``CANOPY_METRICS_ENABLED=true``, and
+    # the deploy stack always sets that env (via .env.observability) under
+    # the observability profile. Keeping it as an extra meant
+    # ``pip install juniper-canopy`` (no extra) silently produced an
+    # image that crashed at import. The runtime cost is identical
+    # because the production lockfile already pins it via the extra.
+    "prometheus-client>=0.20.0",
 ]
 
 [project.urls]
@@ -112,7 +121,9 @@ juniper-cascor = [
     "juniper-cascor-client>=0.1.0",
 ]
 observability = [
-    "prometheus-client>=0.20.0",
+    # prometheus-client moved to [project] dependencies on 2026-05-10
+    # (see comment near juniper-cascor-protocol). Kept here is sentry,
+    # which is genuinely opt-in.
     "sentry-sdk>=2.0.0",
 ]
 ui-test = [
