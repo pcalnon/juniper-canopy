@@ -71,7 +71,7 @@ markupsafe==3.0.3
     #   flask
     #   jinja2
     #   werkzeug
-narwhals==2.20.0
+narwhals==2.21.0
     # via plotly
 nest-asyncio==1.6.0
     # via
@@ -104,7 +104,7 @@ pydantic==2.13.4
     #   pydantic-settings
 pydantic-core==2.46.4
     # via pydantic
-pydantic-settings==2.14.0
+pydantic-settings==2.14.1
     # via juniper-canopy (pyproject.toml)
 python-dotenv==1.2.2
     # via
