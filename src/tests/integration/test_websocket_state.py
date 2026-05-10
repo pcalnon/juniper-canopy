@@ -41,29 +41,35 @@ def test_client():
         yield client
 
 
-def _receive_state_message(websocket):
-    """Receive the state message from the /ws/training connect sequence.
+def _receive_state_message(websocket, max_messages: int = 10):
+    """Receive the first ``state`` message from the /ws/training connect sequence.
 
-    The connect sequence sends 3 messages:
-    1. connection_established (from websocket_manager.connect)
-    2. initial_status (from handler)
-    3. state (from handler, TrainingState format)
-
-    Returns the state message (message #3).
+    The connect handler unicasts three messages in order
+    (connection_established → initial_status → state), but the demo backend's
+    broadcast loop runs concurrently and can interleave ``metrics`` and
+    ``state`` broadcasts at any ``await`` boundary in the handler. We therefore
+    drain messages until we see both ``connection_established`` and
+    ``initial_status`` and then return the next ``state`` message — silently
+    skipping any interleaved ``metrics`` broadcasts. The required-message set
+    is still asserted so a regression that drops one of them is surfaced.
     """
-    # Message 1: connection_established
-    msg1 = websocket.receive_json()
-    assert msg1["type"] == "connection_established"
-
-    # Message 2: initial_status
-    msg2 = websocket.receive_json()
-    assert msg2["type"] == "initial_status"
-
-    # Message 3: state (the one we want)
-    msg3 = websocket.receive_json()
-    assert msg3["type"] == "state"
-
-    return msg3
+    saw_connection_established = False
+    saw_initial_status = False
+    for _ in range(max_messages):
+        msg = websocket.receive_json()
+        msg_type = msg.get("type")
+        if msg_type == "connection_established":
+            saw_connection_established = True
+            continue
+        if msg_type == "initial_status":
+            saw_initial_status = True
+            continue
+        if msg_type == "state":
+            assert saw_connection_established, "connection_established was not received before state"
+            assert saw_initial_status, "initial_status was not received before state"
+            return msg
+        # Other types (e.g. demo broadcast 'metrics') are tolerated — keep draining.
+    raise AssertionError(f"No 'state' message received within {max_messages} messages on /ws/training connect")
 
 
 @pytest.mark.integration
@@ -167,3 +173,89 @@ class TestWebSocketStateMessageContent:
             # Both timestamps should be recent
             assert abs(msg_timestamp - current_time) < 10.0
             assert abs(data_timestamp - current_time) < 10.0
+
+
+class TestReceiveStateMessageHelper:
+    """Regression coverage for the ``_receive_state_message`` drain logic.
+
+    The helper used to require the connect-time messages to land in a strict
+    1-2-3 sequence (``connection_established`` → ``initial_status`` → ``state``).
+    Demo broadcasts (``metrics``, periodic ``state``) interleave at the
+    handler's ``await`` boundaries and would arrive in slot 2 or 3, which
+    surfaced as flaky failures under load. The helper now drains intervening
+    types until it sees the connect-time ``state`` message; these tests pin
+    that contract.
+    """
+
+    def _make_fake_ws(self, scripted_messages):
+        class _FakeWS:
+            def __init__(self, msgs):
+                self._msgs = list(msgs)
+
+            def receive_json(self):
+                if not self._msgs:
+                    raise AssertionError("Test ran out of scripted messages")
+                return self._msgs.pop(0)
+
+        return _FakeWS(scripted_messages)
+
+    def test_helper_returns_state_when_messages_arrive_in_order(self):
+        ws = self._make_fake_ws(
+            [
+                {"type": "connection_established"},
+                {"type": "initial_status", "data": {}},
+                {"type": "state", "data": {"status": "Stopped"}},
+            ]
+        )
+        msg = _receive_state_message(ws)
+        assert msg["type"] == "state"
+
+    def test_helper_skips_interleaved_metrics_broadcast(self):
+        ws = self._make_fake_ws(
+            [
+                {"type": "connection_established"},
+                {"type": "metrics", "data": {}},  # broadcast lands in slot 2
+                {"type": "initial_status", "data": {}},
+                {"type": "state", "data": {"status": "Started"}},
+            ]
+        )
+        msg = _receive_state_message(ws)
+        assert msg["type"] == "state"
+        assert msg["data"]["status"] == "Started"
+
+    def test_helper_skips_metrics_broadcast_in_slot_3(self):
+        ws = self._make_fake_ws(
+            [
+                {"type": "connection_established"},
+                {"type": "initial_status", "data": {}},
+                {"type": "metrics", "data": {}},  # broadcast preempts the connect-time state
+                {"type": "state", "data": {"status": "Started"}},
+            ]
+        )
+        msg = _receive_state_message(ws)
+        assert msg["type"] == "state"
+
+    def test_helper_raises_when_state_never_arrives(self):
+        ws = self._make_fake_ws(
+            [
+                {"type": "connection_established"},
+                {"type": "initial_status", "data": {}},
+                {"type": "metrics", "data": {}},
+                {"type": "metrics", "data": {}},
+            ]
+        )
+        with pytest.raises(AssertionError, match="No 'state' message received"):
+            _receive_state_message(ws, max_messages=4)
+
+    def test_helper_asserts_connect_message_was_seen(self):
+        ws = self._make_fake_ws(
+            [
+                # connection_established is missing — the helper should still
+                # raise rather than silently returning the state message,
+                # because that would mask a real handler regression.
+                {"type": "initial_status", "data": {}},
+                {"type": "state", "data": {"status": "Stopped"}},
+            ]
+        )
+        with pytest.raises(AssertionError, match="connection_established"):
+            _receive_state_message(ws)

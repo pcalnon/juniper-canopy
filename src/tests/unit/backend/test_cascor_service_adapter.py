@@ -287,12 +287,38 @@ class TestCanopyParamsMapping:
                 "candidate_pool_size": 9,
             }
         )
-        assert result == {"ok": True, "data": {"ok": True}}
+        # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1a — apply_params now always
+        # surfaces dropped (canopy-only) keys via the ``skipped`` field so the
+        # toast can flag them. canopy_only_param has no cascor mapping.
+        assert result == {
+            "ok": True,
+            "data": {"ok": True},
+            "skipped": ["canopy_only_param"],
+        }
 
     def test_param_map_values_are_unique(self):
         """Forward map values must be unique to avoid reverse-map collisions."""
         cascor_param_names = list(CascorServiceAdapter._CANOPY_TO_CASCOR_PARAM_MAP.values())
         assert len(cascor_param_names) == len(set(cascor_param_names))
+
+    def test_apply_params_returns_skipped_empty_list_when_all_mapped(self, adapter, mock_client):
+        """``skipped`` is always present in the return value, even when empty.
+
+        Locks in the canopy toast contract: callers can read ``result["skipped"]``
+        unconditionally without falling back through ``.get()``.
+        """
+        mock_client.update_params.return_value = {"ok": True}
+        result = adapter.apply_params(cn_patience=10)
+        assert "skipped" in result
+        assert result["skipped"] == []
+
+    def test_apply_params_skipped_only_no_rest_call(self, adapter, mock_client):
+        """When every key is canopy-only, no REST call is made and skipped lists them all."""
+        result = adapter.apply_params(canopy_a=1, canopy_b=2)
+        mock_client.update_params.assert_not_called()
+        assert result["ok"] is True
+        # sorted for deterministic toast ordering (FRONTEND_ISSUES_PLAN §1.5 C1a)
+        assert result["skipped"] == ["canopy_a", "canopy_b"]
 
 
 # =========================================================================
