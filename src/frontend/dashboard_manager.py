@@ -1072,6 +1072,17 @@ class DashboardManager:
                                                                                 className="mb-2",
                                                                                 debounce=True,
                                                                             ),
+                                                                            # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C2.2 — fast-feedback
+                                                                            # validator for the (S, T, R, P) candidate-pool triple. The
+                                                                            # cascor server's _validate_candidate_pool_triple stays
+                                                                            # authoritative; this just mirrors the truth table client-side
+                                                                            # so the user sees violations on input change instead of on
+                                                                            # Apply-click.
+                                                                            html.Div(
+                                                                                id="cn-pool-triple-feedback",
+                                                                                className="text-danger small mb-2",
+                                                                                children="",
+                                                                            ),
                                                                         ],
                                                                         id="sidebar-cn-pool-params",
                                                                     ),
@@ -1654,6 +1665,70 @@ class DashboardManager:
             """,
             Output("welcome-modal", "is_open", allow_duplicate=True),
             Input("welcome-modal-close", "n_clicks"),
+            prevent_initial_call=True,
+        )
+
+        # ── FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C2.2 ──
+        # Candidate-pool (S, T, R, P) triple fast-feedback validator. Mirrors
+        # the truth table from cascor's _validate_candidate_pool_triple so the
+        # user sees violations on input-change instead of on Apply-click.
+        # Returns ("invalid_S", "invalid_T", "invalid_R", "feedback text").
+        # Server stays authoritative; this is purely UX.
+        self.app.clientside_callback(
+            """
+            function(s_raw, t_raw, r_raw, p_raw) {
+                var s = (s_raw === null || s_raw === undefined || s_raw === '') ? null : Number(s_raw);
+                var t = (t_raw === null || t_raw === undefined || t_raw === '') ? null : Number(t_raw);
+                var r = (r_raw === null || r_raw === undefined || r_raw === '') ? null : Number(r_raw);
+                var p = (p_raw === null || p_raw === undefined || p_raw === '') ? null : Number(p_raw);
+                if (s === null || t === null || r === null || p === null
+                    || isNaN(s) || isNaN(t) || isNaN(r) || isNaN(p)) {
+                    return [false, false, false, ''];
+                }
+                if (!(s >= 1 && s <= p)) {
+                    return [true, false, false,
+                        'selected_candidates ' + s + ' not in [1, candidate_pool_size=' + p + ']'];
+                }
+                if (t < 0 || r < 0) {
+                    return [false, t < 0, r < 0,
+                        'top_candidates and random_candidates must be >= 0 (got T=' + t + ', R=' + r + ')'];
+                }
+                if (t > s || r > s) {
+                    return [false, t > s, r > s,
+                        'each component must be <= selected_candidates (S=' + s + ', T=' + t + ', R=' + r + ')'];
+                }
+                if (t === 0 && r === 0) {
+                    return [false, true, true,
+                        'top_candidates and random_candidates cannot both be 0'];
+                }
+                if (t === 0 && r !== s) {
+                    return [false, false, true,
+                        'with top_candidates=0, random_candidates must equal S=' + s + ' (got R=' + r + ')'];
+                }
+                if (r === 0 && t !== s) {
+                    return [false, true, false,
+                        'with random_candidates=0, top_candidates must equal S=' + s + ' (got T=' + t + ')'];
+                }
+                if (t > 0 && r > 0 && (t + r) !== s) {
+                    return [false, true, true,
+                        'top_candidates+random_candidates must equal S=' + s
+                        + ' (got ' + t + '+' + r + '=' + (t + r) + ')'];
+                }
+                return [false, false, false, ''];
+            }
+            """,
+            [
+                Output("cn-selected-candidates-input", "invalid", allow_duplicate=True),
+                Output("cn-top-candidates-input", "invalid", allow_duplicate=True),
+                Output("cn-random-candidates-input", "invalid", allow_duplicate=True),
+                Output("cn-pool-triple-feedback", "children", allow_duplicate=True),
+            ],
+            [
+                Input("cn-selected-candidates-input", "value"),
+                Input("cn-top-candidates-input", "value"),
+                Input("cn-random-candidates-input", "value"),
+                Input("cn-pool-size-input", "value"),
+            ],
             prevent_initial_call=True,
         )
 
