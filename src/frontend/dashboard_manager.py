@@ -3789,6 +3789,27 @@ class DashboardManager:
                     except Exception as ve:
                         self.logger.debug(f"Parameter verification skipped: {ve}")
                     self.logger.info(f"Parameters applied (attempt {attempt + 1}): {params}")
+                    # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1a: if the adapter
+                    # silently dropped any keys, the response now carries a
+                    # ``skipped`` list — surface it in the toast instead of the
+                    # blanket "Parameters applied" lie. Defensive: existing tests
+                    # patch ``requests.post`` with a bare MagicMock, so ``.json()``
+                    # may return a Mock; only treat the value as a list of strings
+                    # if it actually is one.
+                    skipped: list[str] = []
+                    try:
+                        body = response.json()
+                    except (ValueError, AttributeError):
+                        body = None
+                    if isinstance(body, dict):
+                        candidate = body.get("skipped")
+                        if isinstance(candidate, list) and all(isinstance(k, str) for k in candidate):
+                            skipped = candidate
+                    if skipped:
+                        applied_count = max(len(params) - len(skipped), 0)
+                        preview = ", ".join(skipped[:5]) + ("…" if len(skipped) > 5 else "")
+                        msg = f"Applied {applied_count} of {len(params)} parameter(s); {len(skipped)} not yet supported by the backend: {preview}"
+                        return params, msg
                     return params, "Parameters applied"
                 elif response.status_code == 429:
                     self.logger.warning("Rate limited (429) — returning error to client")

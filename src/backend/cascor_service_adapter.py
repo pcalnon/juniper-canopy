@@ -705,11 +705,19 @@ class CascorServiceAdapter:
         hot params fall back to REST unconditionally.
         """
         mapped = {self._CANOPY_TO_CASCOR_PARAM_MAP[k]: v for k, v in params.items() if k in self._CANOPY_TO_CASCOR_PARAM_MAP}
-        skipped = [k for k in params if k not in self._CANOPY_TO_CASCOR_PARAM_MAP]
+        # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1a (Issue #1): users were not
+        # seeing that ~half the form was being silently dropped. Sort for
+        # deterministic toast text + warn-level log so it surfaces in the
+        # default ops dashboard view.
+        skipped = sorted(k for k in params if k not in self._CANOPY_TO_CASCOR_PARAM_MAP)
         if skipped:
-            logger.debug(f"Canopy-only params (no cascor mapping): {skipped}")
+            logger.warning(
+                "apply_params dropped %d unmapped key(s) — add to _CANOPY_TO_CASCOR_PARAM_MAP " "or document as canopy-only: %s",
+                len(skipped),
+                skipped,
+            )
         if not mapped:
-            return {"ok": True, "data": {}, "message": "No cascor-mappable params provided"}
+            return {"ok": True, "data": {}, "skipped": skipped, "message": "No cascor-mappable params provided"}
 
         from settings import get_settings
 
@@ -748,10 +756,10 @@ class CascorServiceAdapter:
                 logger.info(f"Cascor params updated via REST: {list(cold.keys())}")
             except JuniperCascorClientError as e:
                 logger.error(f"Failed to update cascor params via REST: {e}")
-                return {"ok": False, "error": str(e)}
+                return {"ok": False, "error": str(e), "skipped": skipped}
 
         logger.info(f"Cascor params updated: {list(mapped.keys())}")
-        return {"ok": True, "data": result_data}
+        return {"ok": True, "data": result_data, "skipped": skipped}
 
     def _apply_params_hot(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Send hot params via /ws/control set_params with command_id.
