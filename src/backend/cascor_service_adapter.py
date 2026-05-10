@@ -652,7 +652,35 @@ class CascorServiceAdapter:
         "cn_pool_size": "candidate_pool_size",
         "cn_correlation_threshold": "correlation_threshold",
         "cn_candidate_learning_rate": "candidate_learning_rate",
+        # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1b / Issue #1 — candidate-pool
+        # selection knobs. Schema landed in cascor #241 (PR-4a) with the
+        # post-merge invariant validator (_validate_candidate_pool_triple).
+        # Canopy adds a clientside C2.2 fast-feedback validator (see
+        # dashboard_manager); the server remains authoritative.
+        "cn_multi_candidate": "multi_candidate",
+        "cn_candidate_selection": "candidate_selection",
+        "cn_selected_candidates": "selected_candidates",
+        "cn_top_candidates": "top_candidates",
+        "cn_random_candidates": "random_candidates",
     }
+
+    # FRONTEND_ISSUES_PLAN_2026-05-09 §1.6 — params that are conceptually
+    # canopy-only (drive demo-side dataset generation, UI behavior, etc.) and
+    # should never be reported as "skipped" in the toast. Used by the
+    # test_param_map_completeness contract test to allow-list intentionally-
+    # local fields without weakening the check.
+    _CANOPY_LOCAL_PARAMS: frozenset = frozenset(
+        {
+            "nn_spiral_rotations",
+            "nn_spiral_number",
+            "nn_dataset_elements",
+            "nn_dataset_noise",
+            "nn_multi_node_layers",
+            "nn_growth_trigger",
+            "nn_growth_preset_epochs",
+            "cn_training_complete",
+        }
+    )
 
     _CASCOR_TO_CANOPY_PARAM_MAP = {v: k for k, v in _CANOPY_TO_CASCOR_PARAM_MAP.items()}
 
@@ -671,6 +699,14 @@ class CascorServiceAdapter:
             "convergence_threshold",
             "candidate_convergence_threshold",
             "candidate_patience",
+            # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1b — pool resize knobs are
+            # safe mid-training; the cascade-correlation outer loop reads them
+            # at the next growth iteration boundary (PR-4b will wire the
+            # selection logic; today they're storage-only but still hot since
+            # the read is fully snapshot at iteration start).
+            "selected_candidates",
+            "top_candidates",
+            "random_candidates",
         }
     )
 
@@ -689,6 +725,26 @@ class CascorServiceAdapter:
             # _init_activation_function on PATCH so activation_fn /
             # activation_fn_no_diff actually refresh from the registry.
             "activation_function_name",
+            # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1b — selection-strategy
+            # changes (multi-candidate flag + top/random/mixed mode) need a
+            # next-iteration boundary to take effect cleanly; classifying as
+            # cold avoids racing the in-flight candidate-training pass.
+            "multi_candidate",
+            "candidate_selection",
+        }
+    )
+
+    # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C3 — params whose verify step uses
+    # math.isclose(rel_tol=1e-6) instead of equality. Float round-trips through
+    # JSON / pydantic / numpy lose enough precision that exact equality is the
+    # wrong test for these.
+    _FLOAT_TOLERANT_PARAMS: frozenset = frozenset(
+        {
+            "learning_rate",
+            "candidate_learning_rate",
+            "correlation_threshold",
+            "convergence_threshold",
+            "candidate_convergence_threshold",
         }
     )
 
@@ -758,8 +814,66 @@ class CascorServiceAdapter:
                 logger.error(f"Failed to update cascor params via REST: {e}")
                 return {"ok": False, "error": str(e), "skipped": skipped}
 
+        # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C3 — roundtrip verify. Confirm
+        # the running cascor config moved to the requested values; surface any
+        # divergence via ``mismatches`` so the canopy toast can route it
+        # through the same machinery as ``skipped``. Failures of the verify
+        # call itself are logged but never silently swallow the original
+        # write — the PATCH already returned 200; if cascor's GET broke we
+        # still want the user to see "applied", just without the second-line
+        # confirmation.
+        verify = self._verify_apply_roundtrip(mapped)
+        if verify is not None:
+            logger.warning("apply_params verify mismatch: %s", verify)
+            return {
+                "ok": False,
+                "error": "verification_failed",
+                "mismatches": verify,
+                "skipped": skipped,
+            }
+
         logger.info(f"Cascor params updated: {list(mapped.keys())}")
         return {"ok": True, "data": result_data, "skipped": skipped}
+
+    def _verify_apply_roundtrip(self, mapped: Dict[str, Any]) -> Optional[Dict[str, Dict[str, Any]]]:
+        """Confirm the cascor running config matches the values just PATCHed.
+
+        Returns ``None`` on full match (or when the verify call itself fails —
+        we don't want a flaky GET to invalidate a successful PATCH). Returns
+        a ``{cascor_key: {requested, applied}}`` dict on real divergence.
+
+        Float-tolerant comparison (``math.isclose(rel_tol=1e-6)``) for the
+        params in ``_FLOAT_TOLERANT_PARAMS``; everything else uses ``!=``.
+        """
+        try:
+            # juniper-cascor-client returns ``{"data": {...}}``; the inner
+            # dict is the same shape ``get_canopy_params`` consumes above.
+            response = self._client.get_training_params() or {}
+        except JuniperCascorClientError as exc:
+            logger.warning("apply_params verify call failed (continuing): %s", exc)
+            return None
+        applied_raw = response.get("data") if isinstance(response, dict) else None
+        if not isinstance(applied_raw, dict):
+            return None
+
+        import math
+
+        mismatches: Dict[str, Dict[str, Any]] = {}
+        for key, requested in mapped.items():
+            if key not in applied_raw:
+                # Not all PATCH targets are echoed by GET; absence means the
+                # server didn't surface it, not that it was rejected. Skip.
+                continue
+            applied = applied_raw[key]
+            if key in self._FLOAT_TOLERANT_PARAMS:
+                try:
+                    if math.isclose(float(requested), float(applied), rel_tol=1e-6, abs_tol=1e-9):
+                        continue
+                except (TypeError, ValueError):
+                    pass  # fall through to strict compare on coercion failure
+            if applied != requested:
+                mismatches[key] = {"requested": requested, "applied": applied}
+        return mismatches or None
 
     def _apply_params_hot(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Send hot params via /ws/control set_params with command_id.
