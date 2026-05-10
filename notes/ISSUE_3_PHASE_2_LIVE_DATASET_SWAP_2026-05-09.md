@@ -6,32 +6,24 @@
 * **Authoritative source for**: in-flight (live) dataset swap, experimental-functions gate, two-step warning modal, History / Snapshots / Replay persistence of dataset-swap events.
 * **Out of scope here**: cold-swap dataset behavior (Phase 1 — already covered by parent plan PR-6/PR-7), generic param map work (parent plan §1).
 
-> **Source-of-truth precedence (per parent §3.4.2):** the underlying functional
-> requirements from §3.4.2 are authoritative. Specific endpoint shapes,
-> persistence schemas, and UI mechanics in this document are starting points
-> and may be adjusted during review without invalidating the plan.
+> **Source-of-truth precedence (per parent §3.4.2):** the underlying functional requirements from §3.4.2 are authoritative.
+> Specific endpoint shapes, persistence schemas, and UI mechanics in this document are starting points and may be adjusted during review without invalidating the plan.
 
 ---
 
 ## 1. Why a Phase 2
 
-Phase 1 (parent plan PR-6/PR-7 + the §3.5.2 Cancel button) resolves the
-user-visible Issue #3 bug: "Dataset View tab edits don't change the training
-dataset". That fix follows the cold-swap path — apply, restart, train on the
-new dataset.
+Phase 1 (parent plan PR-6/PR-7 + the §3.5.2 Cancel button) resolves the user-visible Issue #3 bug: "Dataset View tab edits don't change the training dataset".
+That fix follows the cold-swap path — apply, restart, train on the new dataset.
 
-The §3.4.2 alternate approach explicitly calls out a second requirement:
-**CasCor cross-training experiments** need the ability to switch the dataset
-*mid-training* without tearing down the network, and to have the resulting
-History / Snapshots / Replay reflect the swap. That is Phase 2.
+The §3.4.2 alternate approach explicitly calls out a second requirement: **CasCor cross-training experiments** need the ability to switch the dataset *mid-training* without tearing down the network, and to have the resulting History / Snapshots / Replay reflect the swap.
+That is Phase 2.
 
 The two phases ship independently because:
 
-1. The cascor surface area for live swap touches lifecycle, persistence, and
-   candidate-pool reconstruction — too large to land alongside Phase 1.
+1. The cascor surface area for live swap touches lifecycle, persistence, and candidate-pool reconstruction — too large to land alongside Phase 1.
 2. Phase 1 alone resolves the reported bug.
-3. The experimental flag and warning copy benefit from a UX review pass that
-   shouldn't block the Phase 1 cold-swap fix.
+3. The experimental flag and warning copy benefit from a UX review pass that shouldn't block the Phase 1 cold-swap fix.
 
 ---
 
@@ -182,27 +174,20 @@ Specifics are an implementation detail per §3.4.2.
 +    return manager.set_experimental_functions(body.enabled)
 ```
 
-The admin route is access-controlled separately (existing `JUNIPER_DATA_API_KEY`
-mechanism or equivalent). Setting it from the canopy UI is **also** behind the
-client-side experimental toggle, so the user-facing path is two-gated by
-construction.
+The admin route is access-controlled separately (existing `JUNIPER_DATA_API_KEY` mechanism or equivalent).
+Setting it from the canopy UI is **also** behind the client-side experimental toggle, so the user-facing path is two-gated by construction.
 
 ### 3.4 History / Snapshots / Replay (F2.7 / F2.8 / F2.9)
 
-* **History**: `training_history.record_event(event_type="dataset_swap", ...)`
-  needs a new `event_type` value plus a payload schema entry. The history
-  serializer (JSON / Cassandra row, depending on backend) must round-trip the
-  payload unchanged.
-* **Snapshots**: `snapshot_manager.capture(reason="pre_dataset_swap")` is the
-  same path used elsewhere; the only Phase-2 work is to plumb the returned
-  `snapshot_id` into the history event so replay can find it.
-* **Replay**: the replay engine iterates history events. Add a handler for
-  `dataset_swap` that:
+* **History**: `training_history.record_event(event_type="dataset_swap", ...)` needs a new `event_type` value plus a payload schema entry.
+  * The history serializer (JSON / Cassandra row, depending on backend) must round-trip the payload unchanged.
+* **Snapshots**: `snapshot_manager.capture(reason="pre_dataset_swap")` is the same path used elsewhere; the only Phase-2 work is to plumb the returned `snapshot_id` into the history event so replay can find it.
+* **Replay**: the replay engine iterates history events. Add a handler for `dataset_swap` that:
   1. Loads the `pre_swap_snapshot_id` snapshot.
   2. Plays forward to the swap timestamp.
   3. Applies the same `_reload_dataset(**after)` + `architecture_manager.adapt_to_dataset(...)` calls.
   4. Continues replay from the post-swap state.
-  This makes playback reproducible across swaps.
+  * This makes playback reproducible across swaps.
 
 ---
 
@@ -210,8 +195,7 @@ construction.
 
 ### 4.1 Experimental Functions toggle
 
-Add to the sidebar (under Network Information, since it affects the whole
-session, not a single tab):
+Add to the sidebar (under Network Information, since it affects the whole session, not a single tab):
 
 ```python
 dbc.Switch(
@@ -222,11 +206,8 @@ dbc.Switch(
 )
 ```
 
-A clientside callback writes the value to a `dcc.Store(id="experimental-flags-store",
-storage_type="local")`. A server-side callback POSTs the change to
-`/v1/admin/experimental_functions` so cascor's gate stays in sync — but the
-server's gate is the authority (F2.10): if the server says no, the UI shows a
-toast and reverts the toggle.
+A clientside callback writes the value to a `dcc.Store(id="experimental-flags-store", storage_type="local")`.
+A server-side callback POSTs the change to `/v1/admin/experimental_functions` so cascor's gate stays in sync — but the server's gate is the authority (F2.10): if the server says no, the UI shows a toast and reverts the toggle.
 
 ### 4.2 Live Dataset Switch button (gated)
 
@@ -292,20 +273,16 @@ dbc.Modal(
 )
 ```
 
-* "Return to Stop & Restart" closes the modal and routes the user to the
-  Phase 1 cold-swap path (the pending-banner UI from parent §3.5.1 / §3.5.2).
-  This satisfies F2.5.
-* "Accept and proceed" POSTs to `/api/live_dataset_swap` (which forwards to
-  cascor's `/v1/training/dataset/live`). Success flashes a toast naming the
-  pre-swap snapshot id; failure shows the server error verbatim.
+* "Return to Stop & Restart" closes the modal and routes the user to the Phase 1 cold-swap path (the pending-banner UI from parent §3.5.1 / §3.5.2).
+  * This satisfies F2.5.
+* "Accept and proceed" POSTs to `/api/live_dataset_swap` (which forwards to cascor's `/v1/training/dataset/live`).
+  * Success flashes a toast naming the pre-swap snapshot id; failure shows the server error verbatim.
 
 ### 4.4 Replay UI annotations (F2.9)
 
-The Training Replay tab gains a swap marker on the timeline at each
-`dataset_swap` event. Hovering shows the before/after dataset config; clicking
-seeks to the pre-swap snapshot. Implementation detail: the existing replay
-component renders the history event stream — add a renderer for the new
-`dataset_swap` event type.
+The Training Replay tab gains a swap marker on the timeline at each `dataset_swap` event.
+Hovering shows the before/after dataset config; clicking seeks to the pre-swap snapshot.
+Implementation detail: the existing replay component renders the history event stream — add a renderer for the new `dataset_swap` event type.
 
 ---
 
@@ -313,12 +290,10 @@ component renders the history event stream — add a renderer for the new
 
 `src/demo_mode.py` must mirror:
 
-* `swap_dataset_live(**cfg)` → regenerates the synthetic dataset and emits a
-  fake history event.
+* `swap_dataset_live(**cfg)` → regenerates the synthetic dataset and emits a fake history event.
 * `get_experimental_functions()` / `set_experimental_functions()` toggle.
 
-Without the mirror, every `JUNIPER_CANOPY_DEMO_MODE=1` Phase-2 test silently
-skips (cf. parent §7.3).
+Without the mirror, every `JUNIPER_CANOPY_DEMO_MODE=1` Phase-2 test silently skips (cf. parent §7.3).
 
 ---
 
@@ -326,28 +301,28 @@ skips (cf. parent §7.3).
 
 ### 6.1 Cascor
 
-| File                                                    | What it asserts                                                                              |
-|---------------------------------------------------------|----------------------------------------------------------------------------------------------|
-| `tests/integration/test_live_swap_basic.py`             | Start training, swap to a different generator, assert post-swap iteration uses new dataset   |
-| `tests/integration/test_live_swap_gated.py`             | With experimental disabled, the route returns 403 and training is unchanged                  |
-| `tests/integration/test_live_swap_not_running.py`       | When training isn't running, route returns 422                                               |
-| `tests/integration/test_live_swap_history_event.py`     | After swap, training history contains a `dataset_swap` event with before/after cfg          |
-| `tests/integration/test_live_swap_snapshot_captured.py` | Pre-swap snapshot exists and can be loaded via `snapshot_manager.load(snapshot_id)`         |
-| `tests/integration/test_live_swap_replay.py`            | Run a session with a swap, replay it, assert iteration N produces the same loss both times  |
-| `tests/integration/test_live_swap_arch_change.py`       | Swap from spirals (2-class) to a 3-class dataset, assert output head is reset accordingly   |
+| File                                                    | What it asserts                                                                            |
+|---------------------------------------------------------|--------------------------------------------------------------------------------------------|
+| `tests/integration/test_live_swap_basic.py`             | Start training, swap to a different generator, assert post-swap iteration uses new dataset |
+| `tests/integration/test_live_swap_gated.py`             | With experimental disabled, the route returns 403 and training is unchanged                |
+| `tests/integration/test_live_swap_not_running.py`       | When training isn't running, route returns 422                                             |
+| `tests/integration/test_live_swap_history_event.py`     | After swap, training history contains a `dataset_swap` event with before/after cfg         |
+| `tests/integration/test_live_swap_snapshot_captured.py` | Pre-swap snapshot exists and can be loaded via `snapshot_manager.load(snapshot_id)`        |
+| `tests/integration/test_live_swap_replay.py`            | Run a session with a swap, replay it, assert iteration N produces the same loss both times |
+| `tests/integration/test_live_swap_arch_change.py`       | Swap from spirals (2-class) to a 3-class dataset, assert output head is reset accordingly  |
 
 ### 6.2 Canopy
 
 | File                                                    | What it asserts                                                                              |
 |---------------------------------------------------------|----------------------------------------------------------------------------------------------|
-| `tests/ui/test_experimental_toggle_persists.py`         | Toggle on, reload page, toggle is still on (`persistence_type="local"` works)               |
-| `tests/ui/test_live_switch_disabled_default.py`         | Without experimental on, the Live Dataset Switch button is `disabled`                       |
-| `tests/ui/test_live_switch_disabled_when_idle.py`       | With experimental on but training not running, button is still disabled                     |
-| `tests/ui/test_live_switch_modal_two_step.py`           | Click Live Dataset Switch → modal opens with backdrop=static, backdrop click does nothing  |
+| `tests/ui/test_experimental_toggle_persists.py`         | Toggle on, reload page, toggle is still on (`persistence_type="local"` works)                |
+| `tests/ui/test_live_switch_disabled_default.py`         | Without experimental on, the Live Dataset Switch button is `disabled`                        |
+| `tests/ui/test_live_switch_disabled_when_idle.py`       | With experimental on but training not running, button is still disabled                      |
+| `tests/ui/test_live_switch_modal_two_step.py`           | Click Live Dataset Switch → modal opens with backdrop=static, backdrop click does nothing    |
 | `tests/ui/test_live_switch_fallback_to_cold.py`         | Modal → Return to Stop & Restart → modal closes, pending-dataset banner from Phase 1 visible |
-| `tests/ui/test_live_switch_accept_posts.py`             | Modal → Accept → POST to `/api/live_dataset_swap` observed; toast shows snapshot id         |
-| `tests/ui/test_replay_swap_marker.py`                   | Replay tab shows a marker at the swap timestamp; hover shows before/after cfg               |
-| `tests/regression/test_server_gate_overrides_client.py` | If server reports `experimental: false`, client toggle reverts to off within one poll cycle |
+| `tests/ui/test_live_switch_accept_posts.py`             | Modal → Accept → POST to `/api/live_dataset_swap` observed; toast shows snapshot id          |
+| `tests/ui/test_replay_swap_marker.py`                   | Replay tab shows a marker at the swap timestamp; hover shows before/after cfg                |
+| `tests/regression/test_server_gate_overrides_client.py` | If server reports `experimental: false`, client toggle reverts to off within one poll cycle  |
 
 ### 6.3 Cross-cutting
 
@@ -359,18 +334,17 @@ skips (cf. parent §7.3).
 
 ## 7. Phase 2 PR series
 
-| PR    | Repo    | Scope                                                                                              | Depends on        |
-|-------|---------|----------------------------------------------------------------------------------------------------|-------------------|
-| P2-1  | cascor  | `swap_dataset_live()` + `POST /v1/training/dataset/live` (no persistence yet, gate enforced)       | Parent PR-6       |
-| P2-2  | cascor  | History persistence: `dataset_swap` event in `TrainingHistory` + serializer                        | P2-1              |
-| P2-3  | cascor  | Snapshot at swap point + Replay reconstruction handler                                              | P2-2              |
-| P2-4  | canopy  | Experimental Functions toggle + persistent `dcc.Store` + admin-route plumbing                       | Parent PR-7       |
-| P2-5  | canopy  | "Live Dataset Switch" button (gated) + two-step warning modal                                       | P2-4              |
-| P2-6  | canopy  | `cancel_pending_dataset` Phase-1 already shipped; here we wire Live Switch adapter + UI tests        | P2-5, P2-1        |
-| P2-7  | canopy  | Replay UI swap markers + History / Snapshots view annotations                                       | P2-3, P2-6        |
+| PR   | Repo   | Scope                                                                                         | Depends on  |
+|------|--------|-----------------------------------------------------------------------------------------------|-------------|
+| P2-1 | cascor | `swap_dataset_live()` + `POST /v1/training/dataset/live` (no persistence yet, gate enforced)  | Parent PR-6 |
+| P2-2 | cascor | History persistence: `dataset_swap` event in `TrainingHistory` + serializer                   | P2-1        |
+| P2-3 | cascor | Snapshot at swap point + Replay reconstruction handler                                        | P2-2        |
+| P2-4 | canopy | Experimental Functions toggle + persistent `dcc.Store` + admin-route plumbing                 | Parent PR-7 |
+| P2-5 | canopy | "Live Dataset Switch" button (gated) + two-step warning modal                                 | P2-4        |
+| P2-6 | canopy | `cancel_pending_dataset` Phase-1 already shipped; here we wire Live Switch adapter + UI tests | P2-5, P2-1  |
+| P2-7 | canopy | Replay UI swap markers + History / Snapshots view annotations                                 | P2-3, P2-6  |
 
-Suggested ordering: `P2-1 → P2-2 → P2-3` ship in parallel with
-`P2-4 → P2-5`; both branches converge at `P2-6`; `P2-7` lands last.
+Suggested ordering: `P2-1 → P2-2 → P2-3` ship in parallel with `P2-4 → P2-5`; both branches converge at `P2-6`; `P2-7` lands last.
 
 ---
 
@@ -378,34 +352,20 @@ Suggested ordering: `P2-1 → P2-2 → P2-3` ship in parallel with
 
 These are questions to resolve before P2-5 (UI) lands. None block Phase 1.
 
-1. Should the experimental-functions toggle persist *per user* (current plan,
-   via `dcc.Store(persistence_type="local")`) or *globally on the server*
-   (env var only)? Current plan: both — local UX persistence + server gate
-   that authoritatively overrides the client.
-2. When a swap triggers an architecture change, should the Snapshots tab
-   show the pre- and post-swap snapshots as a paired diff, or as two
-   independent entries?
-3. For Replay: do we play back the architecture change as an instantaneous
-   transformation, or do we animate it (the latter is much more work)?
-4. Should the warning copy from §3.4.2 ("Warning, in-flight dataset
-   migration will potentially alter Network Architecture and will permanently
-   affect History, Snapshots, and Training Replay.") be the final wording, or
-   should it go through a UX copy review? Current plan: ship verbatim, mark
-   for follow-up review post-launch.
+1. Should the experimental-functions toggle persist *per user* (current plan, via `dcc.Store(persistence_type="local")`) or *globally on the server* (env var only)? Current plan: both — local UX persistence + server gate that authoritatively overrides the client.
+2. When a swap triggers an architecture change, should the Snapshots tab show the pre- and post-swap snapshots as a paired diff, or as two independent entries?
+3. For Replay: do we play back the architecture change as an instantaneous transformation, or do we animate it (the latter is much more work)?
+4. Should the warning copy from §3.4.2 ("Warning, in-flight dataset migration will potentially alter Network Architecture and will permanently affect History, Snapshots, and Training Replay.") be the final wording, or should it go through a UX copy review? Current plan: ship verbatim, mark for follow-up review post-launch.
 
 ---
 
 ## 9. Validation / self-review checklist
 
-* [x] Each functional requirement (F2.1–F2.10) is traced to at least one
-      cascor or canopy implementation point above.
+* [x] Each functional requirement (F2.1–F2.10) is traced to at least one cascor or canopy implementation point above.
 * [x] Server-side gate (F2.10) is independent of the client toggle.
 * [x] Fallback path (F2.5) routes back to Phase 1 cold-swap, not a dead end.
-* [x] History / Snapshots / Replay each have a dedicated PR (P2-2 / P2-3) so
-      no requirement is silently bundled.
+* [x] History / Snapshots / Replay each have a dedicated PR (P2-2 / P2-3) so no requirement is silently bundled.
 * [x] Demo-mode parity (parent §7.3) addressed in §5.
-* [x] Tests are split between fix-verification (cascor §6.1, canopy §6.2)
-      and regression (§6.3).
-* [x] PR series has explicit dependency edges and converges before the
-      Replay UI lands.
+* [x] Tests are split between fix-verification (cascor §6.1, canopy §6.2) and regression (§6.3).
+* [x] PR series has explicit dependency edges and converges before the Replay UI lands.
 * [x] Open questions are non-blocking for Phase 1.

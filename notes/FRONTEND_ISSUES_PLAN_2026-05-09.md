@@ -7,23 +7,23 @@
 
 ## Revisions
 
-| Date       | Rev  | Change                                                                                       |
-|------------|------|----------------------------------------------------------------------------------------------|
-| 2026-05-09 | v1.0 | Initial plan (six issues, ten-PR series).                                                    |
-| 2026-05-09 | v1.1 | All four open questions resolved. Material updates:                                          |
-|            |      | * §1.5 C2.1: candidate-pool invariants added as a hard PR-4 acceptance criterion (Q2).       |
-|            |      | * §5 CI lane: ≤5 min wall-clock budget + parallel job + cache + `slow` marker (Q3).          |
-|            |      | * §6 + §6.4.1 + §6.5.1: sidebar work seeds `ui_standards.py` + `notes/UI_STANDARDS.md` (Q4). |
-|            |      | * §7.3: demo mode confirmed staying; reuse-refactor filed as out-of-scope follow-up (Q1).    |
-|            |      | * §8: PR series gains PR-9.5 (UI_STANDARDS doc + Training-Metrics narrowing experiment).     |
-|            |      | * §10: Open questions converted to a Resolution log marked CLOSED.                           |
-| 2026-05-09 | v1.2 | Issue #3 Recommendation superseded by §3.4.2 alternate approach. Material updates:           |
-|            |      | * §3.4.2 (user-authored) becomes the Selected Approach; §3.4.1 retained as historical context. |
-|            |      | * §3.5.2 / §3.6.2: Phase 1 (cold-swap + Cancel button) diff-ready code + tests filled in.    |
+| Date       | Rev  | Change                                                                                               |
+|------------|------|------------------------------------------------------------------------------------------------------|
+| 2026-05-09 | v1.0 | Initial plan (six issues, ten-PR series).                                                            |
+| 2026-05-09 | v1.1 | All four open questions resolved. Material updates:                                                  |
+|            |      | * §1.5 C2.1: candidate-pool invariants added as a hard PR-4 acceptance criterion (Q2).               |
+|            |      | * §5 CI lane: ≤5 min wall-clock budget + parallel job + cache + `slow` marker (Q3).                  |
+|            |      | * §6 + §6.4.1 + §6.5.1: sidebar work seeds `ui_standards.py` + `notes/UI_STANDARDS.md` (Q4).         |
+|            |      | * §7.3: demo mode confirmed staying; reuse-refactor filed as out-of-scope follow-up (Q1).            |
+|            |      | * §8: PR series gains PR-9.5 (UI_STANDARDS doc + Training-Metrics narrowing experiment).             |
+|            |      | * §10: Open questions converted to a Resolution log marked CLOSED.                                   |
+| 2026-05-09 | v1.2 | Issue #3 Recommendation superseded by §3.4.2 alternate approach. Material updates:                   |
+|            |      | * §3.4.2 (user-authored) becomes the Selected Approach; §3.4.1 retained as historical context.       |
+|            |      | * §3.5.2 / §3.6.2: Phase 1 (cold-swap + Cancel button) diff-ready code + tests filled in.            |
 |            |      | * §3.7: regression tests extended; new `test_phase2_off_by_default.py` guards the experimental gate. |
-|            |      | * §3.8: Phase 2 (live dataset swap) summarized with PR table; full spec in separate doc.    |
-|            |      | * New file: `notes/ISSUE_3_PHASE_2_LIVE_DATASET_SWAP_2026-05-09.md` — authoritative Phase 2 spec. |
-|            |      | * §0 / §8 / §9: PR-7 scope expanded with Cancel; Phase 2 PR series (P2-1 … P2-7) added separately. |
+|            |      | * §3.8: Phase 2 (live dataset swap) summarized with PR table; full spec in separate doc.             |
+|            |      | * New file: `notes/ISSUE_3_PHASE_2_LIVE_DATASET_SWAP_2026-05-09.md` — authoritative Phase 2 spec.    |
+|            |      | * §0 / §8 / §9: PR-7 scope expanded with Cancel; Phase 2 PR series (P2-1 … P2-7) added separately.   |
 
 ---
 
@@ -33,14 +33,18 @@ Six independent UX/correctness bugs in the canopy frontend, ranging from a silen
 Three of the six share a **common root cause**: the canopy ↔ cascor parameter contract is incomplete and asymmetric.
 Fixing that contract first unblocks the other parameter-related work and avoids re-touching the same files twice.
 
-| # | Issue                                        | Severity             | Root cause family                                                | Fix scope                                                          |
-|---|----------------------------------------------|----------------------|------------------------------------------------------------------|--------------------------------------------------------------------|
-| 1 | Metaparam edits never reach cascor           | **P0 — correctness** | Param-map gap + no roundtrip verification                        | canopy adapter + cascor PATCH                                      |
-| 3 | Dataset-tab edits don't change training data | **P0 — correctness** | Same param-map gap + no dataset-swap endpoint                    | **Phase 1**: canopy adapter + cascor + Cancel button. **Phase 2** (separate doc): live in-flight swap behind experimental-functions gate, two-step warning modal, History/Snapshots/Replay persistence. |
-| 5 | Single-iteration auto-pause after stop+reset | **P0 — correctness** | `reset()` leaves `_pause_event` cleared                          | cascor lifecycle manager (1 line)                                  |
-| 2 | Numeric input typing vs spinner mismatch     | P1 — UX              | Universal `debounce=True` confuses Apply-button enable indicator | canopy frontend (component refactor)                               |
-| 4 | No real UI test sub-suite                    | P1 — quality gate    | No browser-automation harness exists                             | new pytest sub-suite + CI lane                                     |
-| 6 | Left sidebar too wide on Training Metrics    | P3 — cosmetic        | Hardcoded `dbc.Col(width=3)` for all tabs                        | per-tab width via `ui_standards.py` + seed `notes/UI_STANDARDS.md` |
+| # | Issue                                        | Severity             | Root cause family                             | Fix scope                                                          |
+|---|----------------------------------------------|----------------------|-----------------------------------------------|--------------------------------------------------------------------|
+| 1 | Metaparam edits never reach cascor           | **P0 — correctness** | Param-map gap + no roundtrip verification     | canopy adapter + cascor PATCH                                      |
+| 3 | Dataset-tab edits don't change training data | **P0 — correctness** | Same param-map gap + no dataset-swap endpoint | **Phase 1**: canopy adapter + cascor + Cancel button.              |
+|   |                                              |                      |                                               | -- **Phase 2** (separate doc): live in-flight swap behind          |
+|   |                                              |                      |                                               | -- experimental-functions gate, two-step warning modal,            |
+|   |                                              |                      |                                               | -- History/Snapshots/Replay persistence.                           |
+| 5 | Single-iteration auto-pause after stop+reset | **P0 — correctness** | `reset()` leaves `_pause_event` cleared       | cascor lifecycle manager (1 line)                                  |
+| 2 | Numeric input typing vs spinner mismatch     | P1 — UX              | Universal `debounce=True` confuses            | canopy frontend (component refactor)                               |
+|   |                                              |                      | -- Apply-button enable indicator              |                                                                    |
+| 4 | No real UI test sub-suite                    | P1 — quality gate    | No browser-automation harness exists          | new pytest sub-suite + CI lane                                     |
+| 6 | Left sidebar too wide on Training Metrics    | P3 — cosmetic        | Hardcoded `dbc.Col(width=3)` for all tabs     | per-tab width via `ui_standards.py` + seed `notes/UI_STANDARDS.md` |
 
 **Recommended ordering** (justified in §10):
 
@@ -857,15 +861,15 @@ experimental-functions gate. It is filed in a separate document because:
 
 **Phase 2 PR series at a glance** (full detail in the separate doc):
 
-| PR    | Repo    | Scope                                                                                              |
-|-------|---------|----------------------------------------------------------------------------------------------------|
-| P2-1  | cascor  | `POST /v1/training/dataset/live` + `swap_dataset_live()` lifecycle method (no persistence yet)     |
-| P2-2  | cascor  | History persistence: `dataset_swap` event in `TrainingHistory`                                     |
-| P2-3  | cascor  | Snapshot at swap point + Replay reconstruction support                                              |
-| P2-4  | canopy  | Experimental Functions toggle + persistent `dcc.Store`                                             |
-| P2-5  | canopy  | "Live Dataset Switch" button (gated) + two-step warning modal                                       |
-| P2-6  | canopy  | Adapter wiring + UI tests for the experimental path                                                 |
-| P2-7  | canopy  | Replay UI shows dataset-swap markers + History/Snapshots view annotations                          |
+| PR   | Repo   | Scope                                                                                          |
+|------|--------|------------------------------------------------------------------------------------------------|
+| P2-1 | cascor | `POST /v1/training/dataset/live` + `swap_dataset_live()` lifecycle method (no persistence yet) |
+| P2-2 | cascor | History persistence: `dataset_swap` event in `TrainingHistory`                                 |
+| P2-3 | cascor | Snapshot at swap point + Replay reconstruction support                                         |
+| P2-4 | canopy | Experimental Functions toggle + persistent `dcc.Store`                                         |
+| P2-5 | canopy | "Live Dataset Switch" button (gated) + two-step warning modal                                  |
+| P2-6 | canopy | Adapter wiring + UI tests for the experimental path                                            |
+| P2-7 | canopy | Replay UI shows dataset-swap markers + History/Snapshots view annotations                      |
 
 Each PR carries a hard `experimental_functions_enabled` boolean check on the
 server side so a stale frontend cannot bypass the gate.
@@ -1321,12 +1325,12 @@ Larger UX change; orthogonal to the user's question.
 
 Recommended widths (initial UI_STANDARDS.md entries — Bootstrap 12-col):
 
-| Tab class                                                                | Sidebar | Right | Rationale                                                        |
-|--------------------------------------------------------------------------|--------:|------:|------------------------------------------------------------------|
-| **wide-sidebar**: metrics, candidates, network-editor                    |       3 |     9 | Need Training Controls + Network Parameters + Network Info       |
-| **medium-sidebar**: topology, dataset                                    |       3 |     9 | Need Network Parameters; right col is content-dense              |
-| **narrow-sidebar**: boundaries, evolution, parameters, snapshots, replay, workers |       2 |    10 | Network Info only (or no params); reclaim viewport for viz       |
-| **minimal-sidebar**: about, tutorial, redis, cassandra                   |       2 |    10 | Mostly static / log content                                      |
+| Tab class                                                                         | Sidebar | Right | Rationale                                                  |
+|-----------------------------------------------------------------------------------|--------:|------:|------------------------------------------------------------|
+| **wide-sidebar**: metrics, candidates, network-editor                             |       3 |     9 | Need Training Controls + Network Parameters + Network Info |
+| **medium-sidebar**: topology, dataset                                             |       3 |     9 | Need Network Parameters; right col is content-dense        |
+| **narrow-sidebar**: boundaries, evolution, parameters, snapshots, replay, workers |       2 |    10 | Network Info only (or no params); reclaim viewport for viz |
+| **minimal-sidebar**: about, tutorial, redis, cassandra                            |       2 |    10 | Mostly static / log content                                |
 
 The user's specific ask was to narrow the **Training Metrics** tab itself.
 That tab carries the longest labels ("Maximum Hidden Units:" ~22ch) and risks
@@ -1617,22 +1621,22 @@ fallback-to-cold-swap path.
 
 ### Time estimate (optimistic / realistic)
 
-| PR        | Optimistic | Realistic                        |
-|-----------|------------|----------------------------------|
-| PR-1      | 1h         | 2h (tests are extensive)         |
-| PR-2      | 1h         | 2h                               |
-| PR-3      | 4h         | 8h (CI playbook tuning)          |
-| PR-4      | 4h         | 8h                               |
-| PR-5      | 2h         | 4h                               |
-| PR-6      | 4h         | 12h (juniper-data integration; +cancel route is small) |
-| PR-7      | 4h         | 8h (+cancel button UI + tests)   |
-| **Phase 2** (separate doc, optional for v1.x of Issue #3) |            |                                  |
-| P2-1…P2-7 | ~20h       | ~50h (lifecycle + persistence + replay + UI gating) |
-| PR-8      | 2h         | 6h (clientside callback testing) |
-| PR-9      | 1h         | 2h                               |
-| PR-9.5    | 2h         | 6h (Playwright width experiment + spec doc) |
-| PR-10     | 8h         | 24h                              |
-| **Total** | ~33h       | ~82h                             |
+| PR                                                        | Optimistic | Realistic                                              |
+|-----------------------------------------------------------|------------|--------------------------------------------------------|
+| PR-1                                                      | 1h         | 2h (tests are extensive)                               |
+| PR-2                                                      | 1h         | 2h                                                     |
+| PR-3                                                      | 4h         | 8h (CI playbook tuning)                                |
+| PR-4                                                      | 4h         | 8h                                                     |
+| PR-5                                                      | 2h         | 4h                                                     |
+| PR-6                                                      | 4h         | 12h (juniper-data integration; +cancel route is small) |
+| PR-7                                                      | 4h         | 8h (+cancel button UI + tests)                         |
+| **Phase 2** (separate doc, optional for v1.x of Issue #3) |            |                                                        |
+| P2-1…P2-7                                                 | ~20h       | ~50h (lifecycle + persistence + replay + UI gating)    |
+| PR-8                                                      | 2h         | 6h (clientside callback testing)                       |
+| PR-9                                                      | 1h         | 2h                                                     |
+| PR-9.5                                                    | 2h         | 6h (Playwright width experiment + spec doc)            |
+| PR-10                                                     | 8h         | 24h                                                    |
+| **Total**                                                 | ~33h       | ~82h                                                   |
 
 ---
 
@@ -1737,61 +1741,47 @@ Each "fix" diff is anchored to a real line number observed in those files.
 ### Resolution log (all questions CLOSED 2026-05-09)
 
 **Q1. Demo mode deprecation status — closed 2026-05-09.**
-Demo mode is **not** being deprecated. PR-6/7 must continue to mirror new
-endpoints in `src/demo_mode.py`. Paul is open to a future refactor that has
-demo mode reuse the actual cascor/canopy machinery instead of a parallel
-backend. Filed as a follow-up in §7.3 ("DEMO_MODE_REUSE_REFACTOR" note),
-**out of scope for this plan**.
+Demo mode is **not** being deprecated. PR-6/7 must continue to mirror new endpoints in `src/demo_mode.py`.
+Paul is open to a future refactor that has demo mode reuse the actual cascor/canopy machinery instead of a parallel backend.
+Filed as a follow-up in §7.3 ("DEMO_MODE_REUSE_REFACTOR" note), **out of scope for this plan**.
 
 **Q2. Candidate-pool selection knobs status — closed 2026-05-09.**
-All three (`cn_selected_candidates`, `cn_top_candidates`, `cn_random_candidates`)
-are intentional product surface for the multi-candidate / network-layer growth
-mode. They form a constrained triple with these invariants:
+All three (`cn_selected_candidates`, `cn_top_candidates`, `cn_random_candidates`) are intentional product surface for the multi-candidate / network-layer growth mode.
+They form a constrained triple with these invariants:
 
-* `cn_selected_candidates` (S): number of candidate nodes promoted from the
-  pool after each pool training pass.
-* `cn_top_candidates` (T): top-N by correlation included in S. If
-  `cn_random_candidates == 0`, then `T == S`.
-* `cn_random_candidates` (R): randomly drawn pool members included in S. If
-  `cn_top_candidates == 0`, then `R == S`.
+* `cn_selected_candidates` (S): number of candidate nodes promoted from the pool after each pool training pass.
+* `cn_top_candidates` (T): top-N by correlation included in S. If `cn_random_candidates == 0`, then `T == S`.
+* `cn_random_candidates` (R): randomly drawn pool members included in S. If `cn_top_candidates == 0`, then `R == S`.
 * Both nonzero ⇒ `T + R == S`.
 * `T == 0 and R == 0` is illegal when `S > 0`.
 
-These invariants are now spec'd in §1.5 C2.1 and become PR-4's required
-acceptance criteria (atomic post-merge validation, 422 on violation).
+These invariants are now spec'd in §1.5 C2.1 and become PR-4's required acceptance criteria (atomic post-merge validation, 422 on violation).
 
 **Q3. CI minutes budget — closed 2026-05-09.**
-Wall-clock budget cap: **+5 min** for the new UI lane. Accuracy beats speed —
-flakiness is the worst outcome, so escalate rather than silently dropping
-coverage if the cap is exceeded. Implementation specifics in §5 CI lane:
-parallel job, browser cache keyed on pyproject hash, `--maxfail=3`, `slow`
-marker on heavy snapshot tests, `paths`-gated slow lane.
+Wall-clock budget cap: **+5 min** for the new UI lane. Accuracy beats speed — flakiness is the worst outcome, so escalate rather than silently dropping coverage if the cap is exceeded.
+Implementation specifics in §5 CI lane: parallel job, browser cache keyed on pyproject hash, `--maxfail=3`, `slow` marker on heavy snapshot tests, `paths`-gated slow lane.
 
 **Q4. Sidebar brand-spec — closed 2026-05-09.**
-No brand-spec exists. This work seeds one. PR-9 introduces
-`src/frontend/ui_standards.py` (constants), PR-9.5 introduces
-`notes/UI_STANDARDS.md` (human-readable doc) plus a Playwright
-width-experiment that determines whether Training Metrics itself can move
-from `WIDE_SIDEBAR=3` to `NARROW_SIDEBAR=2`. The UI test suite reads from the
-constants module so the spec, the code, and the rendered DOM are pinned to a
-single source of truth.
+No brand-spec exists. This work seeds one.
+PR-9 introduces `src/frontend/ui_standards.py` (constants), PR-9.5 introduces `notes/UI_STANDARDS.md` (human-readable doc) plus a Playwright width-experiment that determines whether Training Metrics itself can move from `WIDE_SIDEBAR=3` to `NARROW_SIDEBAR=2`.
+The UI test suite reads from the constants module so the spec, the code, and the rendered DOM are pinned to a single source of truth.
 
 ---
 
 ## Appendix A — File Paths Quick Reference
 
-| Path                                                                      | Purpose                       |
-|---------------------------------------------------------------------------|-------------------------------|
-| `juniper-canopy/src/backend/cascor_service_adapter.py:638-755`            | Param map + apply pipeline    |
-| `juniper-canopy/src/frontend/dashboard_manager.py:228-317`                | TAB_SIDEBAR_CONFIG            |
-| `juniper-canopy/src/frontend/dashboard_manager.py:740-1237`               | Numeric input definitions     |
-| `juniper-canopy/src/frontend/dashboard_manager.py:1315-1416`              | Sidebar / right-col grid      |
-| `juniper-canopy/src/frontend/dashboard_manager.py:2759-2865`              | Param change-tracker callback |
-| `juniper-canopy/src/frontend/dashboard_manager.py:2911-2971`              | Apply-params callback         |
-| `juniper-canopy/src/frontend/dashboard_manager.py:3441-3494`              | Train button handler          |
-| `juniper-canopy/src/frontend/dashboard_manager.py:3743-3782`              | Apply handler → POST          |
-| `juniper-canopy/src/main.py:2771-2889`                                    | `/api/set_params` route       |
-| `juniper-canopy/src/demo_mode.py:1930-1984`                               | Demo backend param sink       |
+| Path                                                                      | Purpose                                       |
+|---------------------------------------------------------------------------|-----------------------------------------------|
+| `juniper-canopy/src/backend/cascor_service_adapter.py:638-755`            | Param map + apply pipeline                    |
+| `juniper-canopy/src/frontend/dashboard_manager.py:228-317`                | TAB_SIDEBAR_CONFIG                            |
+| `juniper-canopy/src/frontend/dashboard_manager.py:740-1237`               | Numeric input definitions                     |
+| `juniper-canopy/src/frontend/dashboard_manager.py:1315-1416`              | Sidebar / right-col grid                      |
+| `juniper-canopy/src/frontend/dashboard_manager.py:2759-2865`              | Param change-tracker callback                 |
+| `juniper-canopy/src/frontend/dashboard_manager.py:2911-2971`              | Apply-params callback                         |
+| `juniper-canopy/src/frontend/dashboard_manager.py:3441-3494`              | Train button handler                          |
+| `juniper-canopy/src/frontend/dashboard_manager.py:3743-3782`              | Apply handler → POST                          |
+| `juniper-canopy/src/main.py:2771-2889`                                    | `/api/set_params` route                       |
+| `juniper-canopy/src/demo_mode.py:1930-1984`                               | Demo backend param sink                       |
 | `juniper-canopy/notes/ISSUE_3_PHASE_2_LIVE_DATASET_SWAP_2026-05-09.md`    | Phase 2 — Live Dataset Switch (separate spec) |
-| `juniper-cascor/src/api/lifecycle/manager.py:1860-1921`                   | start/stop/pause/resume/reset |
-| `juniper-cascor/src/cascade_correlation/cascade_correlation.py:3822-3925` | grow_network outer loop       |
+| `juniper-cascor/src/api/lifecycle/manager.py:1860-1921`                   | start/stop/pause/resume/reset                 |
+| `juniper-cascor/src/cascade_correlation/cascade_correlation.py:3822-3925` | grow_network outer loop                       |
