@@ -44,6 +44,7 @@ import requests
 from dash import callback_context, dcc, html
 from dash.dependencies import ALL, Input, Output, State
 
+from frontend.internal_api import internal_api_headers
 from settings import get_settings
 
 from ..base_component import BaseComponent
@@ -388,7 +389,7 @@ class HDF5SnapshotsPanel(BaseComponent):
             resp = requests.post(
                 f"{self._api_base_url}/api/v1/snapshots",
                 params=params,
-                timeout=self.api_timeout + 3,  # Allow extra time for creation
+                timeout=self.api_timeout + 3,  # Allow extra time for creation, headers=internal_api_headers()
             )
 
             if resp.status_code == 201:
@@ -443,6 +444,7 @@ class HDF5SnapshotsPanel(BaseComponent):
         resp = requests.get(
             f"{self._api_base_url}/api/v1/snapshots",
             timeout=self.api_timeout,
+            headers=internal_api_headers(),
         )
         if resp.status_code != 200:
             self.logger.warning(f"Snapshots API returned status {resp.status_code}")
@@ -469,6 +471,7 @@ class HDF5SnapshotsPanel(BaseComponent):
             resp = requests.get(
                 f"{self._api_base_url}/api/v1/snapshots/{snapshot_id}",
                 timeout=self.api_timeout,
+                headers=internal_api_headers(),
             )
             if resp.status_code != 200:
                 self.logger.warning(f"Snapshot detail API returned status {resp.status_code}")
@@ -534,6 +537,7 @@ class HDF5SnapshotsPanel(BaseComponent):
             resp = requests.post(
                 f"{self._api_base_url}/api/v1/snapshots/{snapshot_id}/{operation}",
                 timeout=self.api_timeout + 5,
+                headers=internal_api_headers(),
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -584,6 +588,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 f"{self._api_base_url}/api/v1/snapshots/history",
                 params={"limit": limit},
                 timeout=self.api_timeout,
+                headers=internal_api_headers(),
             )
 
             if resp.status_code != 200:

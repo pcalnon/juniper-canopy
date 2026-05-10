@@ -45,6 +45,7 @@ from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
 from canopy_constants import DashboardConstants, TrainingConstants
+from frontend.internal_api import internal_api_headers
 from settings import get_settings
 
 from . import ui_standards
@@ -2655,7 +2656,7 @@ class DashboardManager:
                 "n_rotations": float(n_rotations or 1.5),
                 "noise": float(noise or 0.1),
             }
-            response = requests.post(url, json=payload, timeout=DashboardConstants.API_TIMEOUT_SECONDS + 5)
+            response = requests.post(url, json=payload, timeout=DashboardConstants.API_TIMEOUT_SECONDS + 5, headers=internal_api_headers())
             if response.ok:
                 return "✅ Dataset generated", response.json()
             return f"❌ {response.json().get('error', 'Failed')}", dash.no_update
@@ -2686,7 +2687,7 @@ class DashboardManager:
 
             url = self._api_url("/api/dataset/import-file")
             files = {"file": (filename or "upload.csv", file_bytes, "text/csv")}
-            response = requests.post(url, files=files, timeout=DashboardConstants.API_TIMEOUT_SECONDS + 10)
+            response = requests.post(url, files=files, timeout=DashboardConstants.API_TIMEOUT_SECONDS + 10, headers=internal_api_headers())
             if response.ok:
                 return f"✅ Imported {filename or 'file'}", response.json()
             try:
@@ -2710,7 +2711,7 @@ class DashboardManager:
             return "❌ Enter a URL", dash.no_update
         try:
             url = self._api_url("/api/dataset/import-url")
-            response = requests.post(url, json={"url": url_value.strip()}, timeout=DashboardConstants.API_TIMEOUT_SECONDS + 15)
+            response = requests.post(url, json={"url": url_value.strip()}, timeout=DashboardConstants.API_TIMEOUT_SECONDS + 15, headers=internal_api_headers())
             if response.ok:
                 return f"✅ Imported from {url_value.strip()}", response.json()
             try:
@@ -3252,6 +3253,7 @@ class DashboardManager:
                     self._api_url("/api/stage_dataset"),
                     json=payload,
                     timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
+                    headers=internal_api_headers(),
                 )
                 if resp.status_code == 200:
                     self.logger.info("Dataset staged: %s", payload)
@@ -3275,6 +3277,7 @@ class DashboardManager:
                 resp = requests.delete(
                     self._api_url("/api/cancel_pending_dataset"),
                     timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
+                    headers=internal_api_headers(),
                 )
                 if resp.status_code == 200:
                     self.logger.info("Pending dataset change discarded")
@@ -3302,6 +3305,7 @@ class DashboardManager:
                 resp = requests.get(
                     self._api_url("/api/status"),
                     timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
+                    headers=internal_api_headers(),
                 )
                 if resp.status_code != 200:
                     return dash.no_update
@@ -3343,7 +3347,7 @@ class DashboardManager:
             # Single request: /api/status provides all needed info and doubles as health check.
             # Use fast timeout since this fires every tick.
             start_time = time.time()
-            status_response = requests.get(self._api_url("/api/status"), timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS)
+            status_response = requests.get(self._api_url("/api/status"), timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS, headers=internal_api_headers())
             latency_ms = (time.time() - start_time) * 1000
 
             if status_response.status_code == 200:
@@ -3461,7 +3465,7 @@ class DashboardManager:
         """Update network information panel from API."""
         try:
             url = self._api_url("/api/status")
-            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Status API returned {response.status_code}")
                 return html.Div("Unable to fetch network info", style={"color": "orange"})
@@ -3542,7 +3546,7 @@ class DashboardManager:
         """Update detailed network information panel from API."""
         try:
             url = self._api_url("/api/network/stats")
-            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Network stats API returned {response.status_code}")
                 return html.Div("Unable to fetch network stats", style={"color": "orange"})
@@ -3585,7 +3589,7 @@ class DashboardManager:
             else:
                 limit = mode_state.get("window_size", 100)
             url = self._api_url(f"/api/metrics/history?limit={limit}")
-            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Metrics history API returned {response.status_code}")
                 return []
@@ -3640,7 +3644,7 @@ class DashboardManager:
 
         try:
             url = self._api_url("/api/topology")
-            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Topology API returned {response.status_code}")
                 return dash.no_update
@@ -3665,7 +3669,7 @@ class DashboardManager:
 
         try:
             url = self._api_url("/api/topology/raw")
-            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Raw topology API returned {response.status_code}")
                 return dash.no_update
@@ -3682,7 +3686,7 @@ class DashboardManager:
 
         try:
             url = self._api_url("/api/dataset")
-            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Dataset API returned {response.status_code}")
                 return dash.no_update
@@ -3703,7 +3707,7 @@ class DashboardManager:
             url = self._api_url("/api/decision_boundary")
             if resolution is not None:
                 url = f"{url}?resolution={resolution}"
-            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Decision boundary API returned {response.status_code}")
                 return dash.no_update
@@ -3722,7 +3726,7 @@ class DashboardManager:
 
         try:
             url = self._api_url("/api/dataset")
-            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Boundary dataset API returned {response.status_code}")
                 return dash.no_update
@@ -3776,7 +3780,7 @@ class DashboardManager:
 
         try:
             url = self._api_url(f"/api/train/{command}")
-            response = requests.post(url, timeout=DashboardConstants.DASHBOARD_POST_TIMEOUT)
+            response = requests.post(url, timeout=DashboardConstants.DASHBOARD_POST_TIMEOUT, headers=internal_api_headers())
             response.raise_for_status()
             success = True
         except Exception as e:
@@ -4055,11 +4059,11 @@ class DashboardManager:
         last_error = None
         for attempt in range(max_retries):
             try:
-                response = requests.post(self._api_url("/api/set_params"), json=params, timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT)
+                response = requests.post(self._api_url("/api/set_params"), json=params, timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT, headers=internal_api_headers())
                 if response.status_code == 200:
                     # Verify parameters were applied by reading back state
                     try:
-                        verify_resp = requests.get(self._api_url("/api/state"), timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT)
+                        verify_resp = requests.get(self._api_url("/api/state"), timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT, headers=internal_api_headers())
                         if verify_resp.status_code == 200:
                             backend_state = verify_resp.json()
                             mismatched = []
@@ -4117,7 +4121,7 @@ class DashboardManager:
         if current_applied:
             return (dash.no_update,) * NUM_OUTPUTS
         try:
-            response = requests.get(self._api_url("/api/state"), timeout=DashboardConstants.API_TIMEOUT_SECONDS)
+            response = requests.get(self._api_url("/api/state"), timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if response.status_code == 200:
                 state = response.json()
                 nn_max_iter = state.get("nn_max_iterations", TrainingConstants.DEFAULT_MAX_GROWTH_ITERATIONS)

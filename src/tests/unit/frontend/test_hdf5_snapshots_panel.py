@@ -861,7 +861,7 @@ class TestSnapshotOpHandlerB5:
     def test_invokes_correct_endpoint(self, panel, operation):
         captured = {}
 
-        def fake_post(url, timeout=None):
+        def fake_post(url, timeout=None, headers=None):
             captured["url"] = url
             mock_response = MagicMock()
             mock_response.status_code = 200

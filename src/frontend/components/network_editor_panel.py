@@ -55,6 +55,7 @@ import dash_bootstrap_components as dbc
 import requests
 from dash import Input, Output, State, dcc, html
 
+from frontend.internal_api import internal_api_headers
 from settings import get_settings
 
 from ..base_component import BaseComponent
@@ -438,11 +439,11 @@ class NetworkEditorPanel(BaseComponent):
         url = f"{self._api_base_url}{path}"
         try:
             if method == "POST":
-                resp = requests.post(url, json=body or {}, timeout=self.api_timeout + 5)
+                resp = requests.post(url, json=body or {}, timeout=self.api_timeout + 5, headers=internal_api_headers())
             elif method == "PATCH":
-                resp = requests.patch(url, json=body or {}, timeout=self.api_timeout + 5)
+                resp = requests.patch(url, json=body or {}, timeout=self.api_timeout + 5, headers=internal_api_headers())
             elif method == "DELETE":
-                resp = requests.delete(url, timeout=self.api_timeout + 5)
+                resp = requests.delete(url, timeout=self.api_timeout + 5, headers=internal_api_headers())
             else:
                 return {"success": False, "error": f"Unsupported method {method!r}"}
         except requests.exceptions.Timeout:
@@ -491,6 +492,7 @@ class NetworkEditorPanel(BaseComponent):
                 status_resp = requests.get(
                     f"{self._api_base_url}/api/status",
                     timeout=self.api_timeout,
+                    headers=internal_api_headers(),
                 )
                 status = status_resp.json() if status_resp.status_code == 200 else {}
             except Exception:  # noqa: BLE001
@@ -514,6 +516,7 @@ class NetworkEditorPanel(BaseComponent):
                 topo_resp = requests.get(
                     f"{self._api_base_url}/api/network/topology",
                     timeout=self.api_timeout,
+                    headers=internal_api_headers(),
                 )
                 if topo_resp.status_code == 200:
                     topology = topo_resp.json()
