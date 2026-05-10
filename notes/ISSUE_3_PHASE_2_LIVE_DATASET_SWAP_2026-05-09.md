@@ -112,25 +112,28 @@ is "controlled stop + restart with preserved network state (weights + cascade st
        c. Current dataset_cfg (the canonical dict used by _reload_dataset).
        d. Current network input_size / output_size.
  5. Pause: _pause_event.clear(); _wait_until_paused(timeout_s=10) → 504 on timeout.
+    REQUIRES P2-PRE-1 (pause is non-functional in cascor today; see §3.4 audit).
  6. Stop the training future (signal _stop_requested; await future.result()).
- 7. RELEASE _training_lock for juniper-data fetch I/O (§3.7 guardrail; see §3.4 fetch-lock note).
- 8. Fetch new dataset via _reload_dataset (mutates _train_x/_y/_val_x/_val_y).
- 9. REACQUIRE _training_lock.
-10. Compute architecture delta vs. current network I/O dim:
+    REQUIRES P2-PRE-1 (stop is similarly non-functional; see §3.4 audit).
+ 7. Fetch new dataset via _reload_dataset (mutates _train_x/_y/_val_x/_val_y).
+    Lock is held throughout — Audit #2 confirmed read-side routes do not contend
+    on _training_lock, so a 5–30s fetch under the lock does not freeze the
+    canopy status panel. (Earlier draft proposed release/reacquire; unnecessary.)
+ 8. Compute architecture delta vs. current network I/O dim:
        - Equal-dim: no architecture work.
        - Grow only: append nodes to outermost input/output layer (P2-1c).
        - Shrink (any dim): prepend new dataset-side adapter layer (P2-1d).
-11. Invoke architecture_adapter.adapt_for_dataset_swap(network, before, after) (§3.6).
-12. Reset _auto_snap_best_metric (§3.7 guardrail #6).
-13. Drop the candidate pool (§3.5 — Option C: abandon all candidates).
-14. Submit a new training future with mode="output_training_first" forcing immediate
+ 9. Invoke architecture_adapter.adapt_for_dataset_swap(network, before, after) (§3.6).
+10. Reset _auto_snap_best_metric (§3.7 guardrail #6).
+11. Drop the candidate pool (§3.5 — Option C: abandon all candidates).
+12. Submit a new training future with mode="output_training_first" forcing immediate
     output training on the new dataset before any new candidate-pool training.
-15. Resume: _pause_event.set().
-16. Force topology rebroadcast via the existing WebSocket path (§3.7 guardrail #7).
-17. Clear _swap_in_progress.
-18. Return structured response (§3.3).
+13. Resume: _pause_event.set().
+14. Force topology rebroadcast via the existing WebSocket path (§3.7 guardrail #7).
+15. Clear _swap_in_progress.
+16. Return structured response (§3.3).
 
-On ANY failure between steps 4 and 16: restore from step-4 snapshot, resume training on
+On ANY failure between steps 4 and 14: restore from step-4 snapshot, resume training on
 the OLD dataset, clear _swap_in_progress, return 5xx with the original error wrapped.
 See §3.8 for the failure-handling contract.
 ```
@@ -178,21 +181,38 @@ The admin route is access-controlled separately (existing `JUNIPER_DATA_API_KEY`
 equivalent). Setting it from the canopy UI is **also** behind the client-side experimental
 toggle, so the user-facing path is two-gated by construction.
 
-### 3.4 Pre-implementation investigations
+### 3.4 Pre-implementation investigations — RESOLVED 2026-05-10
 
-Two investigations gate the P2-1a implementation. Findings should be appended to this section
-as PR-attached notes; if either reveals a defect in pre-existing code, file as a high-priority
-bug fix in its own PR (per Appendix A design discussion item 1).
+Both audits ran 2026-05-10 against `juniper-cascor` HEAD `2069930`. Findings:
 
-* **Pause-boundary audit**: locate every check of `_pause_event` inside `cascade_correlation.fit()`
-  (output training loop AND candidate training loop). Confirm the boundary is at a clean point
-  (epoch boundary, not mid-batch with partial gradient applied). If the boundary is too coarse
-  (e.g., between full cascade iterations), pause latency could be many seconds; document the
-  observed worst-case. If mid-batch, classify as a defect.
-* **Lock-during-fetch impact**: verify whether `get_status()` (and other read-side routes)
-  acquires `_training_lock`. If they do, a 5–30s juniper-data fetch under the lock will freeze
-  the canopy status panel during swap. The lock-drop pattern at step 7 of §3.2 depends on this
-  audit; if reads do not take the lock, step 7 can be simplified.
+* **Pause-boundary audit — DEFECT FOUND.** `_pause_event` is set/cleared by manager-layer
+  routes (`manager.py:985, 1887, 1953, 1963, 1997`) but is **never `.wait()`-ed inside
+  `cascade_correlation.fit()` or any inner training loop**. There are zero references to
+  `Event` / `wait` / `pause` / `threading` in `cascade_correlation.py`. `_stop_requested.is_set()`
+  is checked only **after** `original_fit()` returns (`manager.py:1457`), by which point fit
+  has run to natural completion. The two callbacks wired into the training loop
+  (`_output_training_callback` at `manager.py:1373`, `_grow_iteration_callback` at
+  `manager.py:1577`) are pure metric-emission sinks — they never raise or block on signals.
+
+  **Result**: clicking Pause or Stop in the UI updates the FSM and broadcasts the new state,
+  but training continues to natural completion. **`pause_training` and `stop_training` REST
+  endpoints are functionally non-operative.** This is a separate production defect affecting
+  every user.
+
+  **Fix**: shipped as **P2-PRE-1** (cascor PR — `fix/pause-stop-noop-defect-2026-05-10`).
+  Threads `_stop_requested` and `_pause_event` checks into `_output_training_callback` and
+  `_grow_iteration_callback`; defines a `TrainingInterrupted` sentinel that `monitored_fit`
+  catches as a clean termination. P2-1a depends on P2-PRE-1.
+
+* **Lock-during-fetch audit — NOT AN ISSUE.** Verified that **none** of the read-side routes
+  (`get_status`, `get_metrics`, `get_metrics_history`, `get_dataset`, `get_dataset_data`,
+  `get_topology`, `get_training_params`, `get_pending_dataset_config`, `get_network_info`,
+  `has_training_data`) acquire `_training_lock`. A 5–30 s juniper-data fetch under the lock
+  does **not** freeze the canopy status panel.
+
+  **Design implication**: the original §3.2 release/reacquire pattern (steps 7–9 in the
+  pre-2026-05-10 draft) is unnecessary. The lock is held for the entire swap. P2-1b's
+  scope is reduced — the "lock-during-fetch fix" line item is dropped (see §7).
 
 ### 3.5 Mode-aware swap semantics
 
@@ -272,7 +292,7 @@ All implementations of `swap_dataset_live` must satisfy:
 
 ### 3.8 Failure handling
 
-If any step between snapshot capture (§3.2 step 4) and topology rebroadcast (§3.2 step 16)
+If any step between snapshot capture (§3.2 step 4) and topology rebroadcast (§3.2 step 14)
 raises:
 
 1. **Restore** `_train_x/_y/_val_x/_val_y` refs from the pre-swap snapshot.
@@ -463,11 +483,12 @@ P2-1 was split into four sub-PRs at the 2026-05-10 design review (Appendix A) on
 adapter (§3.6) and lock-during-fetch concerns (§3.4) became clear. P2-1a is the smallest landable
 unit; P2-1d is the largest and likely needs its own design doc before implementation.
 
-| PR    | Repo   | Scope                                                                                                                                                                  | Depends on   |
-|-------|--------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------|
-| P2-0  | canopy | This spec doc update — captures locked-in design decisions before any code lands                                                                                       | (none)       |
-| P2-1a | cascor | Experimental-functions gate + bare `swap_dataset_live` skeleton (pause → reload → restart fit in output-mode → resume); rejects any dim change with 422; demo mirror   | Parent PR-6  |
-| P2-1b | cascor | Cancel mechanism (`DELETE /v1/training/dataset/live`) + lock-during-fetch fix + structured log + auto-snap reset + topology rebroadcast plumbing (no-op for equal-dim) | P2-1a        |
+| PR       | Repo   | Scope                                                                                                                                                                | Depends on   |
+|----------|--------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------|
+| P2-0     | canopy | This spec doc update — captures locked-in design decisions before any code lands                                                                                     | (none)       |
+| P2-PRE-1 | cascor | **Defect fix** (discovered by §3.4 pause-boundary audit): make `pause_training` and `stop_training` actually interrupt the training loop. Wires signal checks into `_output_training_callback` + `_grow_iteration_callback` via a `TrainingInterrupted` sentinel that `monitored_fit` catches | (none)       |
+| P2-1a    | cascor | Experimental-functions gate + bare `swap_dataset_live` skeleton (pause → reload → restart fit in output-mode → resume); rejects any dim change with 422; demo mirror | P2-PRE-1     |
+| P2-1b    | cascor | Cancel mechanism (`DELETE /v1/training/dataset/live`) + structured log + auto-snap reset + topology rebroadcast plumbing (no-op for equal-dim)                       | P2-1a        |
 | P2-1c | cascor | Additive-only architecture adapter (grow input/output via in-place expansion, zero-init); rejects shrink with 422                                                      | P2-1b        |
 | P2-1d | cascor | Shrink via prepend-adapter-layers (sequential composition rule, §3.6); needs own design doc; updates topology serializer to express layered adapters                   | P2-1c        |
 | P2-2  | cascor | History persistence: `dataset_swap` event in `TrainingHistory` + serializer (must round-trip layered topology from §3.6)                                               | P2-1d        |
@@ -480,12 +501,13 @@ unit; P2-1d is the largest and likely needs its own design doc before implementa
 **Suggested ordering**:
 
 1. `P2-0` first (this doc; docs-only).
-2. `P2-1a → P2-1b` ship before any canopy work that consumes the live endpoint — both small and reviewable.
-3. `P2-1c` and `P2-4 → P2-5` can ship in parallel once `P2-1b` is in.
-4. `P2-1d` is the architectural change; deserves its own design doc + extra review time.
-5. `P2-2 → P2-3` follow once `P2-1d`'s adapter topology is settled.
-6. `P2-6` converges the cascor + canopy branches.
-7. `P2-7` lands last and consumes everything before it.
+2. `P2-PRE-1` next (defect fix; benefits every user, not just Phase 2). Stand-alone bug fix.
+3. `P2-1a → P2-1b` once P2-PRE-1 is merged — both small and reviewable, ship before any canopy work consumes the live endpoint.
+4. `P2-1c` and `P2-4 → P2-5` can ship in parallel once `P2-1b` is in.
+5. `P2-1d` is the architectural change; deserves its own design doc + extra review time.
+6. `P2-2 → P2-3` follow once `P2-1d`'s adapter topology is settled.
+7. `P2-6` converges the cascor + canopy branches.
+8. `P2-7` lands last and consumes everything before it.
 
 ---
 
