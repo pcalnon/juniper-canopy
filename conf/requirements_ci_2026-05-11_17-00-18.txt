@@ -1,42 +1,45 @@
 #####################################################################################################################################################################################################
 # Project:       Juniper
-# Application:   juniper-canopy
-# Purpose:       Real-time CasCor Neural Network Web Dashboard
+# Application:   <Repo Name>
+# Purpose:       <<Repo Name> Application Description>
 #
 # Author:        Paul Calnon
-# Version:       0.4.0
+# Version:       <X.Y.Z  Major, Minor, Point Version for Repo>
 # File Name:     requirements_ci.txt
-# File Path:     Juniper/juniper-canopy/conf/
+# File Path:     Juniper/<Repo Name>/conf/
 #
 # Date:          2025-12-06
-# Last Modified: `2026-05-11`
+# Last Modified: <YYYY-MM-dd for Current date>
 #
 # License:       MIT License
-# Copyright:     Copyright (c) 2024-`2026` Paul Calnon
+# Copyright:     Copyright (c) 2024-<YYYY for Current Year> Paul Calnon
 #
-# Description
-# This file lists python requirements that can be installed via pip
-#
-#####################################################################################################################################################################################################
-# Notes
-#
-# created-by: pip `26.1.1`
-# platform: linux-64
-# python: `3.13.13`
-#
-# This file may be used to create the Juniper Project, juniper-canopy Application environment with pip using
-# create:  $ pip list --format=freeze >requirements_ci.txt
-# install: $ pip install -r requirements_ci.txt
-#
-# Juniper Project - CI/CD Requirements (No CUDA)
-# This is a lightweight requirements file for GitHub Actions testing
-# NVIDIA CUDA packages are excluded since GPU testing is not available on runners
+# Description:
+#     This file lists python requirements that can be installed via pip
 #
 #####################################################################################################################################################################################################
-# References
+# Notes:
+#
+#     created-by: pip <Pip Version>
+#     platform: linux-64
+#     python: <Python Version>
+#
+#     This file may be used to create the Juniper Project, <Repo Name> Application environment with pip using:
+#         create:  $ pip list --format=freeze >requirements_ci.txt
+#         install: $ pip install -r requirements_ci.txt
+#
+#     Juniper Project - CI/CD Requirements (No CUDA)
+#     This is a lightweight requirements file for GitHub Actions testing.
+#     NVIDIA CUDA packages are excluded since GPU testing is not available on runners.
+#
+########################################################################################################)#############################################################################################
+# References:
 #
 #####################################################################################################################################################################################################
-# TODO
+# TODO :
+#
+#####################################################################################################################################################################################################
+# COMPLETED:
 #
 #####################################################################################################################################################################################################
 
@@ -116,7 +119,7 @@ six>=1.16
 starlette>=0.40
 sympy>=1.14
 typing_extensions>=4.0
-urllib3>=2.7.0
+urllib3>=2.0
 uvicorn>=0.30
 websockets>=15.0
 Werkzeug>=3.0
