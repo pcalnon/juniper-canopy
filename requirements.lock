@@ -47,7 +47,7 @@ httptools==0.7.1
     # via uvicorn
 httpx==0.28.1
     # via juniper-canopy (pyproject.toml)
-idna==3.13
+idna==3.14
     # via
     #   anyio
     #   httpx
@@ -117,7 +117,7 @@ pyyaml==6.0.3
     # via
     #   juniper-canopy (pyproject.toml)
     #   uvicorn
-requests==2.33.1
+requests==2.34.0
     # via
     #   juniper-canopy (pyproject.toml)
     #   dash
