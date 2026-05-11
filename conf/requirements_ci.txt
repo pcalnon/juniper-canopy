@@ -139,7 +139,7 @@ tomli_w==1.2.0
 torch==2.11.0+cpu
 typing_extensions==4.15.0
 typing-inspection==0.4.2
-urllib3==2.6.3
+urllib3==2.7.0
 uvicorn==0.46.0
 uvloop==0.22.1
 watchfiles==1.1.1
