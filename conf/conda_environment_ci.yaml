@@ -1,516 +1,185 @@
 #####################################################################################################################################################################################################
 # Project:       Juniper
-# Sub-Project:   JuniperCanopy
-# Application:   juniper_canopy
-# Purpose:       Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
+# Application:   juniper-canopy
+# Purpose:       Real-time CasCor Neural Network Web Dashboard
 #
 # Author:        Paul Calnon
-# Version:       1.0.0
-# Script Name:   setup-miniconda-patched-conda_environment.yaml
-# Script Path:   <Project>/<Sub-Project>/<Application>/conf/
+# Version:       0.4.0
+# Config Name:   conda_environment_ci.yaml
+# Config Path:   Juniper/juniper-canopy/conf/
 #
 # Date:          2025-12-06
-# Last Modified: 2026-01-27
+# Last Modified: `2026-05-11`
 #
 # License:       MIT License
-# Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
+# Copyright:     Copyright (c) 2024-`2026` Paul Calnon
 #
-# Description:
-#     This script pulls together a report on the source files in the current Application.
-#     This is a lightweight environment for GitHub Actions testing.
-#     GPU testing is not performed on CI runners; CUDA-related packages may still be present for compatibility.
+# Description
+# This config file contains an automatically generated list of environment dependencies managed by conda / mamba for the juniper-canopy application
 #
 #####################################################################################################################################################################################################
-# Notes:
-#     created-by: conda 25.11.0
-#     platform: linux-64
-#     python: 3.14
-#
-#     Longest File(s):  (1999 lines) --  NeuralNetwork.py
-#     Methods File(s):  (76 methods) --  EvolveState.py
-#     Largest File(s):  (108 KB)     --  NeuralNetwork.py
-#     Roughest File(s): (24 TODOs)   --  DNA.py
+# Notes
+# created-by: conda 2026.05.11
+# platform: linux-64
+# python: `3.13.13`
 #
 #####################################################################################################################################################################################################
-# References:
+# References
 #
-#     This file may be used to create the Juniper Canopy environment
-#         with conda and miniforge3 using:
-#     create env: conda create --name <env> --file <file>
-#         e.g., $ conda create --name juniper-canopy --file juniper_canopy/conf/conda_environment.yaml
-#     Update env: conda env update --name <env> --file <file>
-#         e.g., $ conda env update --name juniper-canopy --file juniper_canopy/conf/conda_environment.yaml
-#     Generate deps: conda list --explicit > <file>
-#         e.g., $ conda list -e >> juniper_canopy/conf/conda_environment.yaml
-#
-#####################################################################################################################################################################################################
-# TODO :
-#     1. Add parent project dir
+# This file may be used to create the Juniper Project, juniper-canopy Application environment
+# with conda and miniforge3 using
+# create env: conda create --name [env] --file [filename]
+# e.g., $ conda create --name JuniperCanopy --file juniper-canopy/conf/conda_environment_ci.yaml
+# Update env: conda env update --name [env] --file [filename]
+# e.g., $ conda env update --name JuniperCanopy --file juniper-canopy/conf/conda_environment_ci.yaml
+# Generate deps: conda env export --no-builds (via generate_dep_docs.sh)
+# e.g., $ bash scripts/generate_dep_docs.sh
 #
 #####################################################################################################################################################################################################
-# COMPLETED:
+# TODO
 #
 #####################################################################################################################################################################################################
-name: juniper-canopy
+# COMPLETED
+#
+#####################################################################################################################################################################################################
+name: JuniperCanopy
 channels:
-  - conda-forge
-  # - conda-forge/label/python_rc  # Optional: enable only if RC builds are explicitly required
-  - pytorch
-  - plotly
-  - RMG
-  - numba
-  - jasonb857
-  - ehmoussi
-  - konstantin-orangeqs
 
+- conda-forge
+- pytorch
+- nvidia
+- plotly
+- RMG
+- numba
+- jasonb857
+- ehmoussi
+- konstantin-orangeqs
 dependencies:
-  - python=3.14
-
-  # Core dependencies
-  - pip
-  - numpy
-  - scipy
-  - networkx
-  - sympy
-  - mpmath
-
-  # Web framework
-  - fastapi
-  - uvicorn
-  - starlette
-  - websockets
-  - httpx
-  - anyio
-
-  # Dash/Plotly
-  - dash
-  - dash-bootstrap-components
-  - plotly
-
-  # Testing
-  - pytest
-  - pytest-asyncio
-  - pytest-cov
-  - pytest-html
-  - pytest-metadata
-  - pytest-mock
-  - coverage
-
-  # Linting/Formatting
-  - black
-  - isort
-  - flake8
-  - flake8-bugbear
-  - flake8-comprehensions
-  - flake8-simplify
-  - mypy
-  - pre-commit
-
-  # Utilities
-  - pyyaml
-  - python-dotenv
-  - requests
-  - certifi
-  - urllib3
-  - packaging
-  - pydantic
-  - click
-  - rich
-  - colorama
-  - astor
-
-  # Visualization dependencies
-  - matplotlib
-  - pillow
-  - contourpy
-  - cycler
-  - fonttools
-  - kiwisolver
-  - pyparsing
-  - python-dateutil
-  - six
-
-  # Full Conda package list:
-  - _libgcc_mutex
-  - _openmp_mutex
-  - a2wsgi
-  - alsa-lib
-  - annotated-doc
-  - annotated-types
-  - anyio
-  - astor
-  - attr
-  - attrs
-  - backports.asyncio.runner
-  - backports.zstd
-  - bandit
-  - binutils
-  - binutils_impl_linux-64
-  - binutils_linux-64
-  - black
-  - blinker
-  - boolean-py
-  - brotli-python
-  - bzip2
-  - c-ares
-  - c-compiler
-  - ca-certificates
-  - cachecontrol
-  - cached-property
-  - cached_property
-  - certifi
-  - cffi
-  - cfgv
-  - charset-normalizer
-  - click
-  - colorama
-  - conda-gcc-specs
-  - contourpy
-  - coverage
-  - cpython>=3.14.2
-  - cryptography
-  - cuda
-  - cuda-cccl_linux-64
-  - cuda-command-line-tools
-  - cuda-compiler
-  - cuda-crt-dev_linux-64
-  - cuda-crt-tools
-  - cuda-ctadvisor
-  - cuda-cudart
-  - cuda-cudart-dev
-  - cuda-cudart-dev_linux-64
-  - cuda-cudart-static
-  - cuda-cudart-static_linux-64
-  - cuda-cudart_linux-64
-  - cuda-cuobjdump
-  - cuda-cupti
-  - cuda-cupti-dev
-  - cuda-cuxxfilt
-  - cuda-driver-dev
-  - cuda-driver-dev_linux-64
-  - cuda-gdb
-  - cuda-libraries
-  - cuda-libraries-dev
-  - cuda-nsight
-  - cuda-nvcc
-  - cuda-nvcc-dev_linux-64
-  - cuda-nvcc-impl
-  - cuda-nvcc-tools
-  - cuda-nvcc_linux-64
-  - cuda-nvdisasm
-  - cuda-nvml-dev
-  - cuda-nvprune
-  - cuda-nvrtc
-  - cuda-nvrtc-dev
-  - cuda-nvtx
-  - cuda-nvvm-dev_linux-64
-  - cuda-nvvm-impl
-  - cuda-nvvm-tools
-  - cuda-opencl
-  - cuda-opencl-dev
-  - cuda-profiler-api
-  - cuda-runtime
-  - cuda-sanitizer-api
-  - cuda-libraries
-  - cuda-toolkit
-  - cuda-tools
-  - cuda-version
-  - cuda-visual-tools
-  - cxx-compiler
-  - cycler
-  - cyclonedx-python-lib
-  - dash
-  - dash-bootstrap-components
-  - dbus
-  - defusedxml
-  - distlib
-  - distro
-  - dnspython
-  - email-validator
-  - email_validator
-  - exceptiongroup
-  - fastapi
-  - fastapi-cli
-  - fastapi-core
-  - filelock
-  - flake8
-  - flake8-bugbear
-  - flake8-comprehensions
-  - flake8-simplify
-  - flask
-  - font-ttf-dejavu-sans-mono
-  - font-ttf-inconsolata
-  - font-ttf-source-code-pro
-  - font-ttf-ubuntu
-  - fontconfig
-  - fonts-conda-ecosystem
-  - fonts-conda-forge
-  - fonttools
-  - freetype
-  - fsspec
-  - gcc
-  - gcc_impl_linux-64
-  - gcc_linux-64
-  - gds-tools
-  - gmp
-  - gmpy2
-  - gxx
-  - gxx_impl_linux-64
-  - gxx_linux-64
-  - h11
-  - h2
-  - h5py
-  - hdf5
-  - hpack
-  - httpcore
-  - httptools
-  - httpx
-  - hyperframe
-  - icu
-  - identify
-  - idna
-  - importlib-metadata
-  - iniconfig
-  - isort
-  - itsdangerous
-  - jinja2
-  - juniper-data
-  - kernel-headers_linux-64
-  - keyutils
-  - kiwisolver
-  - krb5
-  - ld_impl_linux-64
-  - libaec
-  - libblas
-  - libcap
-  - libcblas
-  - libcublas
-  - libcublas-dev
-  - libcufft
-  - libcufft-dev
-  - libcufile
-  - libcufile-dev
-  - libcurand
-  - libcurand-dev
-  - libcurl
-  - libcusolver
-  - libcusolver-dev
-  - libcusparse
-  - libcusparse-dev
-  - libedit
-  - libev
-  - libexpat
-  - libffi
-  - libfreetype
-  - libfreetype6
-  - libgcc
-  - libgcc-devel_linux-64
-  - libgcc-ng
-  - libgfortran
-  - libgfortran5
-  - libglib
-  - libglvnd
-  - libgomp
-  - libiconv
-  - liblapack
-  - liblzma
-  - libmpdec
-  - libnghttp2
-  - libnl
-  - libnpp
-  - libnpp-dev
-  - libnuma
-  - libnvfatbin
-  - libnvfatbin-dev
-  - libnvjitlink
-  - libnvjitlink-dev
-  - libnvjpeg
-  - libnvjpeg-dev
-  - libnvptxcompiler-dev
-  - libnvptxcompiler-dev_linux-64
-  - libopenblas
-  - libopengl
-  - libpng
-  - libsanitizer
-  - libsqlite
-  - libssh2
-  - libstdcxx
-  - libstdcxx-devel_linux-64
-  - libstdcxx-ng
-  - libsystemd0
-  - libudev1
-  - libuuid
-  - libuv
-  - libxcb
-  - libxkbcommon
-  - libxkbfile
-  - libxml2
-  - libxml2-16
-  - libzlib
-  - license-expression
-  - maison
-  - markdown-it-py
-  - markupsafe
-  - matplotlib
-  - mccabe
-  - mdurl
-  - mpc
-  - mpfr
-  - mpmath
-  - msgpack
-  - mypy
-  - mypy_extensions
-  - narwhals
-  - ncurses
-  - nest-asyncio
-  - networkx
-  - nodeenv
-  - nodejs
-  - nsight-compute
-  - nspr
-  - nss
-  - numpy
-  - nvidia-cublas-cu12
-  - nvidia-cuda-cupti-cu12
-  - nvidia-cuda-nvrtc-cu12
-  - nvidia-cuda-runtime-cu12
-  - nvidia-cudnn-cu12
-  - nvidia-cufft-cu12
-  - nvidia-cufile-cu12
-  - nvidia-curand-cu12
-  - nvidia-cusolver-cu12
-  - nvidia-cusparse-cu12
-  - nvidia-cusparselt-cu12
-  - nvidia-nccl-cu12
-  - nvidia-nvjitlink-cu12
-  - nvidia-nvshmem-cu12
-  - nvidia-nvtx-cu12
-  - ocl-icd
-  - opencl-headers
-  - openssl
-  - packageurl-python
-  - packaging
-  - pathspec
-  - pcre2
-  - pillow
-  - pip
-  - pip-api
-  - pip-audit
-  - pip-requirements-parser
-  - platformdirs
-  - plotly
-  - pluggy
-  - pre-commit
-  - prettier
-  - psutil
-  - pthread-stubs
-  - py-serializable
-  - pycodestyle
-  - pycparser
-  - pydantic
-  - pydantic-core
-  - pydantic-settings
-  - pyflakes
-  - pygments
-  - pyparsing
-  - pysocks
-  - pytest
-  - pytest-asyncio
-  - pytest-cov
-  - pytest-html
-  - pytest-metadata
-  - pytest-mock
-  - pytest-timeout
-  - python
-  - python-dateutil
-  - python-dotenv
-  - python-librt
-  - python-multipart
-  - python_abi
-  - pytokens
-  - pyyaml
-  - rdma-core
-  - readline
-  - requests
-  - retrying
-  - rich
-  - rich-toolkit
-  - ruyaml
-  - scipy
-  - setuptools
-  - shellcheck
-  - shellingham
-  - six
-  - sniffio
-  - sortedcontainers
-  - starlette
-  - stevedore
-  - sympy
-  - sysroot_linux-64
-  - tk
-  - toml
-  - tomli
-  - tomli-w
-  - torch
-  - triton
-  - typer
-  - typer-slim
-  - typer-slim-standard
-  - types-cffi
-  - types-pyopenssl
-  - types-pyyaml
-  - types-redis
-  - types-requests
-  - types-setuptools
-  - types-tabulate
-  - types-ujson
-  - typing-extensions
-  - typing-inspection
-  - typing_extensions
-  - tzdata
-  - ukkonen
-  - urllib3
-  - uv
-  - uvicorn
-  - uvicorn-standard
-  - uvloop
-  - virtualenv
-  - watchfiles
-  - wayland
-  - websockets
-  - werkzeug
-  - xcb-util
-  - xcb-util-cursor
-  - xcb-util-image
-  - xcb-util-keysyms
-  - xcb-util-renderutil
-  - xcb-util-wm
-  - xclip
-  - xkeyboard-config
-  - xorg-libice
-  - xorg-libsm
-  - xorg-libx11
-  - xorg-libxau
-  - xorg-libxcomposite
-  - xorg-libxdamage
-  - xorg-libxdmcp
-  - xorg-libxext
-  - xorg-libxfixes
-  - xorg-libxi
-  - xorg-libxmu
-  - xorg-libxrandr
-  - xorg-libxrender
-  - xorg-libxt
-  - xorg-libxtst
-  - yaml
-  - yamlfix
-  - yamllint
-  - zipp
-  - zstd
-
-  # Packages not available on conda-forge (install via pip)
+  - _openmp_mutex=4.5
+  - bzip2=1.0.8
+  - ca-certificates=2026.4.22
+  - icu=78.3
+  - ld_impl_linux-64=2.45.1
+  - libexpat=2.7.5
+  - libffi=3.5.2
+  - libgcc=15.2.0
+  - libgomp=15.2.0
+  - liblzma=5.8.3
+  - libmpdec=4.0.0
+  - libsqlite=3.53.0
+  - libstdcxx=15.2.0
+  - libuuid=2.42
+  - libzlib=1.3.2
+  - ncurses=6.6
+  - openssl=3.6.2
+  - python=3.13.13
+  - python_abi=3.13
+  - readline=8.3
+  - tk=8.6.13
+  - tzdata=2025c
+  - zstd=1.5.7
   - pip:
-      - a2wsgi
-      # - anyio
-      - torch
-      - triton
+      - a2wsgi==1.10.10
+      - annotated-doc==0.0.4
+      - annotated-types==0.7.0
+      - anyio==4.13.0
+      - attrs==26.1.0
+      - bandit==1.9.4
+      - blinker==1.9.0
+      - boolean-py==5.0
+      - cachecontrol==0.14.4
+      - certifi==2026.4.22
+      - charset-normalizer==3.4.7
+      - click==8.3.3
+      - colorama==0.4.6
+      - coverage==7.13.5
+      - cyclonedx-python-lib==11.7.0
+      - dash==4.1.0
+      - dash-bootstrap-components==2.0.4
+      - defusedxml==0.7.1
+      - fastapi==0.136.1
+      - filelock==3.29.0
+      - flask==3.1.3
+      - fsspec==2026.2.0
+      - greenlet==3.5.0
+      - h11==0.16.0
+      - httpcore==1.0.9
+      - httptools==0.7.1
+      - httpx==0.28.1
+      - idna==3.13
+      - importlib-metadata==9.0.0
+      - iniconfig==2.3.0
+      - itsdangerous==2.2.0
+      - jinja2==3.1.6
+      - jschema-to-python==1.2.3
+      - jsonpickle==4.1.1
+      - juniper-canopy==0.4.0
+      - juniper-cascor-client==0.3.0
+      - juniper-cascor-protocol==0.1.0
+      - juniper-data-client==0.4.0
+      - juniper-observability==0.2.0
+      - license-expression==30.4.4
+      - markdown-it-py==4.0.0
+      - markupsafe==3.0.3
+      - mdurl==0.1.2
+      - mpmath==1.3.0
+      - msgpack==1.1.2
+      - narwhals==2.20.0
+      - nest-asyncio==1.6.0
+      - networkx==3.6.1
+      - numpy==2.4.4
+      - packageurl-python==0.17.6
+      - packaging==26.2
+      - pbr==7.0.3
+      - pip==26.1.1
+      - pip-api==0.0.34
+      - pip-audit==2.10.0
+      - pip-requirements-parser==32.0.1
+      - platformdirs==4.9.6
+      - playwright==1.59.0
+      - plotly==6.7.0
+      - pluggy==1.6.0
+      - prometheus-client==0.25.0
+      - psutil==7.2.2
+      - py-serializable==2.1.0
+      - pydantic==2.13.3
+      - pydantic-core==2.46.3
+      - pydantic-settings==2.14.0
+      - pyee==13.0.1
+      - pygments==2.20.0
+      - pyparsing==3.3.2
+      - pytest==9.0.3
+      - pytest-asyncio==1.3.0
+      - pytest-base-url==2.1.0
+      - pytest-cov==7.1.0
+      - pytest-mock==3.15.1
+      - pytest-playwright==0.7.2
+      - pytest-timeout==2.4.0
+      - python-dotenv==1.2.2
+      - python-multipart==0.0.27
+      - python-slugify==8.0.4
+      - pyyaml==6.0.3
+      - requests==2.33.1
+      - retrying==1.4.2
+      - rich==15.0.0
+      - sarif-om==1.0.4
+      - scipy==1.17.1
+      - sentry-sdk==2.58.0
+      - setuptools==70.2.0
+      - sortedcontainers==2.4.0
+      - starlette==1.0.0
+      - stevedore==5.7.0
+      - sympy==1.14.0
+      - text-unidecode==1.3
+      - tomli==2.4.1
+      - tomli-w==1.2.0
+      - torch==2.11.0+cpu
+      - typing-extensions==4.15.0
+      - typing-inspection==0.4.2
+      - urllib3==2.6.3
+      - uvicorn==0.46.0
+      - uvloop==0.22.1
+      - watchfiles==1.1.1
+      - websockets==16.0
+      - werkzeug==3.1.8
+      - zipp==3.23.1
