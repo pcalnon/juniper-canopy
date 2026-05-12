@@ -138,7 +138,15 @@ dev = [
     "juniper-canopy[juniper-data,juniper-cascor,observability]",
     "pytest>=8.0",
     "pytest-cov>=5.0",
-    "pytest-asyncio>=0.23",
+    # Pinned <1.0: pytest-asyncio 1.x rewrote its Runner and (with
+    # asyncio_mode = "auto" + session-scoped autouse fixtures in
+    # src/tests/conftest.py) leaves the session loop registered as
+    # running, so per-test Runner.run() raises
+    # "Runner.run() cannot be called from a running event loop" on every
+    # async test. Fallback if 0.x ever stops being maintained: flip
+    # asyncio_mode to "strict" in [tool.pytest.ini_options] and decorate
+    # every async test with @pytest.mark.asyncio.
+    "pytest-asyncio>=0.23,<1.0",
     "bandit[sarif]>=1.7",
     "pip-audit>=2.7",
 ]

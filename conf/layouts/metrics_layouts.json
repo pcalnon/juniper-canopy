@@ -1,7 +1,7 @@
 {
   "test_layout": {
     "name": "test_layout",
-    "created": "2026-05-08T01:13:08.392353+00:00Z",
+    "created": "2026-05-12T15:54:02.743098+00:00Z",
     "description": "Test layout",
     "selected_metrics": [
       "loss",
@@ -13,7 +13,7 @@
   },
   "metrics_test_layout": {
     "name": "metrics_test_layout",
-    "created": "2026-05-08T01:13:08.445498+00:00Z",
+    "created": "2026-05-12T15:54:02.776958+00:00Z",
     "description": "",
     "selected_metrics": [
       "loss",
@@ -25,7 +25,67 @@
   },
   "get_test_layout": {
     "name": "get_test_layout",
-    "created": "2026-05-08T01:13:08.497881+00:00Z",
+    "created": "2026-05-12T15:54:02.809745+00:00Z",
+    "description": "",
+    "selected_metrics": [
+      "loss",
+      "accuracy"
+    ],
+    "zoom_ranges": {},
+    "smoothing_window": 10,
+    "hyperparameters": {}
+  },
+  "hyper_layout": {
+    "name": "hyper_layout",
+    "created": "2026-05-12T15:54:05.257210+00:00Z",
+    "description": "",
+    "selected_metrics": [
+      "loss",
+      "accuracy"
+    ],
+    "zoom_ranges": {},
+    "smoothing_window": 15,
+    "hyperparameters": {}
+  },
+  "smoothing_test_layout": {
+    "name": "smoothing_test_layout",
+    "created": "2026-05-12T15:54:05.288814+00:00Z",
+    "description": "",
+    "selected_metrics": [
+      "loss",
+      "accuracy"
+    ],
+    "zoom_ranges": {},
+    "smoothing_window": 25,
+    "hyperparameters": {}
+  },
+  "first_layout": {
+    "name": "first_layout",
+    "created": "2026-05-12T15:54:05.983453+00:00Z",
+    "description": "",
+    "selected_metrics": [
+      "loss",
+      "accuracy"
+    ],
+    "zoom_ranges": {},
+    "smoothing_window": 10,
+    "hyperparameters": {}
+  },
+  "second_layout": {
+    "name": "second_layout",
+    "created": "2026-05-12T15:54:05.986543+00:00Z",
+    "description": "",
+    "selected_metrics": [
+      "loss",
+      "accuracy"
+    ],
+    "zoom_ranges": {},
+    "smoothing_window": 10,
+    "hyperparameters": {}
+  },
+  "default_metrics_layout": {
+    "name": "default_metrics_layout",
+    "created": "2026-05-12T15:54:06.018077+00:00Z",
     "description": "",
     "selected_metrics": [
       "loss",
