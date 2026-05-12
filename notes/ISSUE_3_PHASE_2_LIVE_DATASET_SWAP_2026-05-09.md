@@ -438,23 +438,23 @@ Without the mirror, every `JUNIPER_CANOPY_DEMO_MODE=1` Phase-2 test silently ski
 
 ### 6.1 Cascor
 
-| File                                                    | What it asserts                                                                            |
-|---------------------------------------------------------|--------------------------------------------------------------------------------------------|
-| `tests/integration/test_live_swap_basic.py`             | Start training, swap to a different generator, assert post-swap iteration uses new dataset |
-| `tests/integration/test_live_swap_gated.py`             | With experimental disabled, the route returns 403 and training is unchanged                |
-| `tests/integration/test_live_swap_not_running.py`       | When training isn't running, route returns 422                                             |
-| `tests/integration/test_live_swap_history_event.py`     | After swap, training history contains a `dataset_swap` event with before/after cfg         |
-| `tests/integration/test_live_swap_snapshot_captured.py` | Pre-swap snapshot exists and can be loaded via `snapshot_manager.load(snapshot_id)`        |
-| `tests/integration/test_live_swap_replay.py`            | Run a session with a swap, replay it, assert iteration N produces the same loss both times |
-| `tests/integration/test_live_swap_grow_output.py`       | Swap from 2-class to 3-class — assert output layer expanded in place (zero-init), hidden preserved (P2-1c) |
-| `tests/integration/test_live_swap_shrink_input.py`      | Swap from 5-input to 3-input — assert prepended 3-node input adapter, original 5-input layer retained (P2-1d) |
-| `tests/integration/test_live_swap_shrink_sequential.py` | 5-N-4 → 3-5-N-4-2 → 7-5-N-4-9 sequential composition matches §3.6 worked example (P2-1d)   |
-| `tests/integration/test_live_swap_abandons_candidates.py` | Swap during candidate-training mode — assert pool is dropped, response includes abandoned_candidate_pool_size, restart enters output mode (§3.5) |
-| `tests/integration/test_live_swap_swap_in_progress_409.py` | Concurrent swap requests get 409; flag clears in `finally` (§3.7 #3)                    |
-| `tests/integration/test_live_swap_pause_timeout_504.py` | If pause boundary not reached in 10s, swap aborts with 504; training continues (§3.7 #2)   |
-| `tests/integration/test_live_swap_failure_restore.py`   | Inject juniper-data fetch failure → assert old tensors restored, training resumes on old dataset, 5xx response (§3.8) |
-| `tests/integration/test_live_swap_dim_unsupported.py`   | P2-1a/1b: dim change → 422 `dim_change_unsupported`. P2-1c: shrink → 422 `shrink_unsupported` |
-| `tests/integration/test_live_swap_cancel.py`            | DELETE during in-flight swap → swap aborts cleanly, training resumes on old dataset (P2-1b) |
+| File                                                       | What it asserts                                                                                                                                  |
+|------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
+| `tests/integration/test_live_swap_basic.py`                | Start training, swap to a different generator, assert post-swap iteration uses new dataset                                                       |
+| `tests/integration/test_live_swap_gated.py`                | With experimental disabled, the route returns 403 and training is unchanged                                                                      |
+| `tests/integration/test_live_swap_not_running.py`          | When training isn't running, route returns 422                                                                                                   |
+| `tests/integration/test_live_swap_history_event.py`        | After swap, training history contains a `dataset_swap` event with before/after cfg                                                               |
+| `tests/integration/test_live_swap_snapshot_captured.py`    | Pre-swap snapshot exists and can be loaded via `snapshot_manager.load(snapshot_id)`                                                              |
+| `tests/integration/test_live_swap_replay.py`               | Run a session with a swap, replay it, assert iteration N produces the same loss both times                                                       |
+| `tests/integration/test_live_swap_grow_output.py`          | Swap from 2-class to 3-class — assert output layer expanded in place (zero-init), hidden preserved (P2-1c)                                       |
+| `tests/integration/test_live_swap_shrink_input.py`         | Swap from 5-input to 3-input — assert prepended 3-node input adapter, original 5-input layer retained (P2-1d)                                    |
+| `tests/integration/test_live_swap_shrink_sequential.py`    | 5-N-4 → 3-5-N-4-2 → 7-5-N-4-9 sequential composition matches §3.6 worked example (P2-1d)                                                         |
+| `tests/integration/test_live_swap_abandons_candidates.py`  | Swap during candidate-training mode — assert pool is dropped, response includes abandoned_candidate_pool_size, restart enters output mode (§3.5) |
+| `tests/integration/test_live_swap_swap_in_progress_409.py` | Concurrent swap requests get 409; flag clears in `finally` (§3.7 #3)                                                                             |
+| `tests/integration/test_live_swap_pause_timeout_504.py`    | If pause boundary not reached in 10s, swap aborts with 504; training continues (§3.7 #2)                                                         |
+| `tests/integration/test_live_swap_failure_restore.py`      | Inject juniper-data fetch failure → assert old tensors restored, training resumes on old dataset, 5xx response (§3.8)                            |
+| `tests/integration/test_live_swap_dim_unsupported.py`      | P2-1a/1b: dim change → 422 `dim_change_unsupported`. P2-1c: shrink → 422 `shrink_unsupported`                                                    |
+| `tests/integration/test_live_swap_cancel.py`               | DELETE during in-flight swap → swap aborts cleanly, training resumes on old dataset (P2-1b)                                                      |
 
 ### 6.2 Canopy
 
@@ -483,20 +483,20 @@ P2-1 was split into four sub-PRs at the 2026-05-10 design review (Appendix A) on
 adapter (§3.6) and lock-during-fetch concerns (§3.4) became clear. P2-1a is the smallest landable
 unit; P2-1d is the largest and likely needs its own design doc before implementation.
 
-| PR       | Repo   | Scope                                                                                                                                                                | Depends on   |
-|----------|--------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------|
-| P2-0     | canopy | This spec doc update — captures locked-in design decisions before any code lands                                                                                     | (none)       |
-| P2-PRE-1 | cascor | **Defect fix** (discovered by §3.4 pause-boundary audit): make `pause_training` and `stop_training` actually interrupt the training loop. Wires signal checks into `_output_training_callback` + `_grow_iteration_callback` via a `TrainingInterrupted` sentinel that `monitored_fit` catches | (none)       |
-| P2-1a    | cascor | Experimental-functions gate + bare `swap_dataset_live` skeleton (pause → reload → restart fit in output-mode → resume); rejects any dim change with 422; demo mirror | P2-PRE-1     |
-| P2-1b    | cascor | Cancel mechanism (`DELETE /v1/training/dataset/live`) + structured log + auto-snap reset + topology rebroadcast plumbing (no-op for equal-dim)                       | P2-1a        |
-| P2-1c | cascor | Additive-only architecture adapter (grow input/output via in-place expansion, zero-init); rejects shrink with 422                                                      | P2-1b        |
-| P2-1d | cascor | Shrink via prepend-adapter-layers (sequential composition rule, §3.6); needs own design doc; updates topology serializer to express layered adapters                   | P2-1c        |
-| P2-2  | cascor | History persistence: `dataset_swap` event in `TrainingHistory` + serializer (must round-trip layered topology from §3.6)                                               | P2-1d        |
-| P2-3  | cascor | Pre- AND post-swap snapshots + Replay reconstruction handler (instantaneous transformation, per §8 Answer 3)                                                           | P2-2         |
-| P2-4  | canopy | Experimental Functions toggle + persistent `dcc.Store` + admin-route plumbing                                                                                          | Parent PR-7  |
-| P2-5  | canopy | "Live Dataset Switch" button (gated) + two-step warning modal + dataset-loading toast with progress + cancel button                                                    | P2-4, P2-1b  |
-| P2-6  | canopy | Wire Live Switch adapter to cascor `/v1/training/dataset/live` + UI tests (POST /api/state pattern per Playwright limitation memory)                                   | P2-5, P2-1a  |
-| P2-7  | canopy | Replay UI swap markers + History paired-diff (per §8 Answer 2) + Snapshots view annotations                                                                            | P2-3, P2-6   |
+| PR | Repo | Scope | Depends on |
+| :--- | :--- | :--- | :--- |
+| P2-0 | canopy | This spec doc update — captures locked-in design decisions before any code lands | (none) |
+| P2-PRE-1 | cascor | **Defect fix** (discovered by §3.4 pause-boundary audit): make `pause_training` and `stop_training` actually interrupt the training loop. Wires signal checks into `_output_training_callback` + `_grow_iteration_callback` via a `TrainingInterrupted` sentinel that `monitored_fit` catches | (none) |
+| P2-1a | cascor | Experimental-functions gate + bare `swap_dataset_live` skeleton (pause → reload → restart fit in output-mode → resume); rejects any dim change with 422; demo mirror | P2-PRE-1 |
+| P2-1b | cascor | Cancel mechanism (`DELETE /v1/training/dataset/live`) + structured log + auto-snap reset + topology rebroadcast plumbing (no-op for equal-dim) | P2-1a |
+| P2-1c | cascor | Additive-only architecture adapter (grow input/output via in-place expansion, zero-init); rejects shrink with 422 | P2-1b |
+| P2-1d | cascor | Shrink via prepend-adapter-layers (sequential composition rule, §3.6); needs own design doc; updates topology serializer to express layered adapters | P2-1c |
+| P2-2 | cascor | History persistence: `dataset_swap` event in `TrainingHistory` + serializer (must round-trip layered topology from §3.6) | P2-1d |
+| P2-3 | cascor | Pre- AND post-swap snapshots + Replay reconstruction handler (instantaneous transformation, per §8 Answer 3) | P2-2 |
+| P2-4 | canopy | Experimental Functions toggle + persistent `dcc.Store` + admin-route plumbing | Parent PR-7 |
+| P2-5 | canopy | "Live Dataset Switch" button (gated) + two-step warning modal + dataset-loading toast with progress + cancel button | P2-4, P2-1b |
+| P2-6 | canopy | Wire Live Switch adapter to cascor `/v1/training/dataset/live` + UI tests (POST /api/state pattern per Playwright limitation memory) | P2-5, P2-1a |
+| P2-7 | canopy | Replay UI swap markers + History paired-diff (per §8 Answer 2) + Snapshots view annotations | P2-3, P2-6 |
 
 **Suggested ordering**:
 
@@ -533,7 +533,7 @@ verbatim below; consumed by §3, §4, §5 and §7 of this document.
    should it go through a UX copy review?
    * **Answer**: Ship verbatim, mark for post-launch UX review. See §4.3.
 
-**New open question** (introduced by 2026-05-10 design review, not yet resolved):
+    **New open question** (introduced by 2026-05-10 design review, not yet resolved):
 
 5. **OPEN** — How exactly does `_run_training` accept the `mode="output_training_first"` flag
    from §3.2 step 14? Two candidates: (a) a new kwarg threaded through `_run_training` →
