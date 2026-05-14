@@ -171,11 +171,29 @@ POST   /v1/admin/experimental_functions    — toggle gate (server is authoritat
     "hidden_preserved": 5,
     "abandoned_candidate_pool_size": 8,
     "appended_nodes": {"input": 0, "output": 0},
-    "prepended_layers": []
+    "prepended_layers": [],
+    "active_output_dim": 2
   },
   "mode": "output_training_first"
 }
 ```
+
+> **REDESIGNED 2026-05-13 (P2-1d)** — the `arch_changes` block reflects the resize+pad
+> design that replaced §3.6's prepend-adapter approach.
+>
+> * `input_delta` / `output_delta` are the *dataset-vs-pre-swap* deltas and may be
+>   **negative** on a shrink (the dataset is smaller than the pre-swap network).
+> * `appended_nodes.input` / `appended_nodes.output` are the *network-side* growth
+>   counts. Zero on a pure shrink (network never shrinks; dataset is zero-padded).
+> * `prepended_layers` is a stable **empty list** — no adapter layers are ever
+>   prepended in the new design. Preserved as a forward-compatible no-op field
+>   so canopy P2-5/P2-6 consumers can rely on the shape.
+> * `active_output_dim` is new in P2-1d: the live count of "real" output dims
+>   after a dataset shrink. The training loop uses it to mask loss to those
+>   dims, avoiding zero-target drift on the padded tail. Equals
+>   `network.output_size` when no shrink is active.
+>
+> See [`juniper-cascor/notes/PHASE_2_P2_1D_DESIGN_2026-05-13.md`](../../juniper-cascor/notes/PHASE_2_P2_1D_DESIGN_2026-05-13.md) for the full implementation contract.
 
 The admin route is access-controlled separately (existing `JUNIPER_DATA_API_KEY` mechanism or
 equivalent). Setting it from the canopy UI is **also** behind the client-side experimental
@@ -231,46 +249,75 @@ The swap policy depends on the training mode at swap time:
 The number of abandoned candidates is reported in the response (`abandoned_candidate_pool_size`)
 for observability — UI can surface "Swap discarded N in-flight candidates."
 
-### 3.6 Architecture adapter pattern
+### 3.6 Resize + dataset-pad (REDESIGNED 2026-05-13 — supersedes the prepend-adapter approach)
 
-When the new dataset's input or output dimension differs from the current network, the
-architecture adapter modifies only the boundary (input and output) layers. **All hidden nodes
-and inter-hidden cascade connections are preserved unchanged.**
+> **REDESIGN NOTICE (2026-05-13).** The prepend-input-adapter / append-output-adapter design
+> originally captured in this section was abandoned during P2-1d implementation. The accumulated
+> complexity (new layer type plumbed through forward pass + snapshots + replay + history;
+> day-1 zero-init signal-flow collapse on shrink; sequential-composition bookkeeping) was
+> moving the network model away from Paul's long-term goals at every step. **The current
+> design is the "resize + pad" approach below, locked-in 2026-05-13.** The original
+> adapter-layer text is preserved verbatim as **Appendix B** for historical context.
+>
+> Full implementation contract: [`juniper-cascor/notes/PHASE_2_P2_1D_DESIGN_2026-05-13.md`](../../juniper-cascor/notes/PHASE_2_P2_1D_DESIGN_2026-05-13.md).
 
-**Sequential composition rule** (chosen 2026-05-10):
+**Core principle**: the network is **monotonically non-decreasing** on both `input_size` and
+`output_size`. It never shrinks.
 
-* **Grow** — expand the current outermost input and/or output layer **in place** to the new
-  dimension. New connections are zero-initialized (preserves overlapping-input behavior; the
-  post-swap network's output on the still-present input subset is unchanged at swap-time).
-  No new layers are created.
-* **Shrink** — **prepend** a new input-side adapter layer at the new (smaller) input dim, and
-  **append** a new output-side adapter layer at the new (smaller) output dim. Connections from
-  the new adapter into the next layer are zero-initialized. The original layers are retained;
-  the network monotonically deepens by one input-adapter + one output-adapter on each shrink swap.
-* **Mixed** — apply each side independently per its own delta (e.g. input grows + output shrinks).
+| Dataset dim vs network dim | Action | Initialization |
+| :--- | :--- | :--- |
+| `dataset == network` | No-op | — |
+| `dataset > network` | **Grow** the network's dim in place | Random × `random_value_scale` (matches construction-time pattern) |
+| `dataset < network` | **Zero-pad the dataset** up to network's dim | — (training-side masking handles the dead slots) |
 
-The outermost input/output layers are **always** the live-dataset boundary, regardless of how
-many adapter layers have accumulated.
+**Grow** is implemented as a single in-place tensor expansion:
 
-**Worked example** (sequential swaps, starting topology `5-N-4`):
+* `output_weights` row-insertion at index `self.input_size` for input grow (preserves the
+  `[raw_inputs | hidden_outputs]` layout consumed by `forward()`); column-append for output
+  grow.
+* `output_bias` element-append for output grow.
+* Each `hidden_units[i]["weights"]` mirrors the row-insertion at index `self.input_size`.
+  Hidden-unit biases (per-unit scalars) are untouched.
+* All new entries random-init × `self.random_value_scale`.
+* No new layers; the cascade topology is unchanged. Hidden units and their inter-cascade
+  connections are preserved unchanged (same guarantee as the original §3.6 text).
 
-| Step | Operation                | Topology after          | Notes                                                                        |
-|------|--------------------------|-------------------------|------------------------------------------------------------------------------|
-| 0    | initial                  | `5-N-4`                 | hidden = N cascade-grown units                                               |
-| 1    | shrink to (3 in / 2 out) | `3-5-N-4-2`             | prepend 3-input adapter; append 2-output adapter                             |
-| 2    | grow to (7 in / 9 out)   | `7-5-N-4-9`             | expand outermost input adapter 3→7; expand outermost output adapter 2→9      |
-| 3    | shrink to (1 in / 1 out) | `1-7-5-N-4-9-1`         | prepend new 1-input adapter; append new 1-output adapter                     |
-| 4    | grow to (4 in / 6 out)   | `4-7-5-N-4-9-6`         | expand outermost input adapter 1→4; expand outermost output adapter 1→6      |
+**Shrink** is handled at the dataset boundary, not the network:
 
-This rule is implemented in `architecture_adapter.adapt_for_dataset_swap`. The full layered
-topology must be captured in snapshots and reconstructed on replay (§3.4 history/snapshots).
+* `_train_x` / `_val_x` get zero columns appended up to `network.input_size`.
+* `_train_y` / `_val_y` get zero columns appended up to `network.output_size`.
+* The lifecycle sets `network.active_output_dim` to the dataset's real output dim so
+  `train_output_layer` masks loss to `output[:, :active_output_dim]` and
+  `calculate_residual_error` zeroes residual columns past that boundary (preventing
+  candidate-training from correlating against zero-padded target signal).
+
+**Mixed** swaps (input grows AND output shrinks, or any other combination) are supported by
+side-independent composition: grow on the side that exceeds capacity, pad on the side that
+falls short. The two sides do not interact.
+
+**Sides**: the "active" input/output dims that the network learns from at any given moment
+are the smaller of (dataset dim, network dim). The network's structural capacity may exceed
+the active dims after a shrink — that latent capacity is preserved and made meaningful again
+the next time a swap brings a larger dataset.
+
+The trade-off vs the original adapter-layer design:
+
+* **Lost**: exact preservation of the pre-swap forward pass under a grow (P2-1c's zero-init
+  invariant). Gradient descent immediately perturbs the new random-init connections.
+* **Gained**: no new layer types; cascade architecture stays as-is; snapshot / replay /
+  history layers see no topology changes; forward pass adds zero new code paths; the failure
+  mode "model produces literal zeros on day 1 after shrink" is eliminated.
 
 ### 3.7 Guardrails
 
 All implementations of `swap_dataset_live` must satisfy:
 
-1. **Pre-swap snapshot of mutable state** — copy refs to `_train_x/_y/_val_x/_val_y`,
-   `network.state_dict()`, and the current dataset cfg before any mutation. Used for rollback (§3.8).
+1. **Pre-swap snapshot of mutable state** — copy refs to `_train_x/_y/_val_x/_val_y` and
+   the current dataset cfg, plus **clones of the network's parameter tensors**
+   (`output_weights`, `output_bias`, each `hidden_units[i]["weights"]`) and the live
+   `input_size`, `output_size`, `active_output_dim` bookkeeping. The cascade-correlation
+   network has no `state_dict()` (it doesn't inherit from `nn.Module`), so the
+   snapshot captures each tensor directly. Used for rollback (§3.8).
 2. **Hard timeout on pause** — if `_wait_until_paused` does not return within 10 s, abort the
    swap, release `_swap_in_progress`, return 504. Never block forever.
 3. **Idempotency / concurrent-swap guard** — `_swap_in_progress` flag rejects competing
@@ -296,7 +343,13 @@ If any step between snapshot capture (§3.2 step 4) and topology rebroadcast (§
 raises:
 
 1. **Restore** `_train_x/_y/_val_x/_val_y` refs from the pre-swap snapshot.
-2. **Restore** `network.state_dict()` (weights + buffers) from the pre-swap snapshot.
+2. **Restore** the network's parameter tensors from the pre-swap snapshot clones —
+   `output_weights`, `output_bias`, each `hidden_units[i]["weights"]` — plus the
+   `input_size`, `output_size`, `active_output_dim` bookkeeping. (Cascade-correlation
+   has no `state_dict()`; the snapshot owns per-tensor clones.) `requires_grad_(True)`
+   is re-enabled on `output_weights` and `output_bias` so the next `train_output_layer`
+   call rebuilds an optimizer on a leaf tensor; hidden-unit weights stay detached per
+   the cascade-correlation freeze convention.
 3. **Resume training** on the OLD dataset by submitting a new training future (mode preserved
    from pre-swap). The user's session continues uninterrupted from training's perspective.
 4. **Clear `_swap_in_progress`** in a `finally` block so subsequent swaps are not blocked.
@@ -481,7 +534,10 @@ Without the mirror, every `JUNIPER_CANOPY_DEMO_MODE=1` Phase-2 test silently ski
 
 P2-1 was split into four sub-PRs at the 2026-05-10 design review (Appendix A) once the architecture
 adapter (§3.6) and lock-during-fetch concerns (§3.4) became clear. P2-1a is the smallest landable
-unit; P2-1d is the largest and likely needs its own design doc before implementation.
+unit; P2-1d was originally planned as the largest (the prepend-adapter approach below). The
+2026-05-13 redesign (§3.6) reduced P2-1d's scope substantially — the design doc is now in
+[`juniper-cascor/notes/PHASE_2_P2_1D_DESIGN_2026-05-13.md`](../../juniper-cascor/notes/PHASE_2_P2_1D_DESIGN_2026-05-13.md)
+and the implementation shipped as cascor #252.
 
 | PR | Repo | Scope | Depends on |
 | :--- | :--- | :--- | :--- |
@@ -490,8 +546,8 @@ unit; P2-1d is the largest and likely needs its own design doc before implementa
 | P2-1a | cascor | Experimental-functions gate + bare `swap_dataset_live` skeleton (pause → reload → restart fit in output-mode → resume); rejects any dim change with 422; demo mirror | P2-PRE-1 |
 | P2-1b | cascor | Cancel mechanism (`DELETE /v1/training/dataset/live`) + structured log + auto-snap reset + topology rebroadcast plumbing (no-op for equal-dim) | P2-1a |
 | P2-1c | cascor | Additive-only architecture adapter (grow input/output via in-place expansion, zero-init); rejects shrink with 422 | P2-1b |
-| P2-1d | cascor | Shrink via prepend-adapter-layers (sequential composition rule, §3.6); needs own design doc; updates topology serializer to express layered adapters | P2-1c |
-| P2-2 | cascor | History persistence: `dataset_swap` event in `TrainingHistory` + serializer (must round-trip layered topology from §3.6) | P2-1d |
+| P2-1d | cascor | **Redesigned 2026-05-13.** Shrink + grow via the network's `_resize_network_for_dataset` (monotonic-growth, random-init new connections) + lifecycle `_pad_dataset_for_network` (zero-pad dataset up to network capacity) + loss masking on `active_output_dim`. Replaces the §3.6 prepend-adapter approach. Design doc: [`juniper-cascor/notes/PHASE_2_P2_1D_DESIGN_2026-05-13.md`](../../juniper-cascor/notes/PHASE_2_P2_1D_DESIGN_2026-05-13.md). | P2-1c |
+| P2-2 | cascor | History persistence: `dataset_swap` event in `TrainingHistory` + serializer. Post-redesign the topology is structurally unchanged across swaps (no adapter chain to round-trip) — the event just records the dim deltas. | P2-1d |
 | P2-3 | cascor | Pre- AND post-swap snapshots + Replay reconstruction handler (instantaneous transformation, per §8 Answer 3) | P2-2 |
 | P2-4 | canopy | Experimental Functions toggle + persistent `dcc.Store` + admin-route plumbing | Parent PR-7 |
 | P2-5 | canopy | "Live Dataset Switch" button (gated) + two-step warning modal + dataset-loading toast with progress + cancel button | P2-4, P2-1b |
@@ -504,8 +560,14 @@ unit; P2-1d is the largest and likely needs its own design doc before implementa
 2. `P2-PRE-1` next (defect fix; benefits every user, not just Phase 2). Stand-alone bug fix.
 3. `P2-1a → P2-1b` once P2-PRE-1 is merged — both small and reviewable, ship before any canopy work consumes the live endpoint.
 4. `P2-1c` and `P2-4 → P2-5` can ship in parallel once `P2-1b` is in.
-5. `P2-1d` is the architectural change; deserves its own design doc + extra review time.
-6. `P2-2 → P2-3` follow once `P2-1d`'s adapter topology is settled.
+5. `P2-1d` was originally planned as the architectural change requiring its own design doc.
+   The 2026-05-13 redesign collapsed that scope significantly — the design doc still exists at
+   [`juniper-cascor/notes/PHASE_2_P2_1D_DESIGN_2026-05-13.md`](../../juniper-cascor/notes/PHASE_2_P2_1D_DESIGN_2026-05-13.md),
+   but it documents a much smaller surface (in-place tensor resize + dataset pad) than the
+   original §3.6 adapter chain would have required.
+6. `P2-2 → P2-3` follow once `P2-1d` is settled. Post-redesign the cascade topology is
+   structurally unchanged across swaps, so the snapshot serializer + replay reconstructor
+   inherit no new layer types.
 7. `P2-6` converges the cascor + canopy branches.
 8. `P2-7` lands last and consumes everything before it.
 
@@ -685,3 +747,71 @@ P2-1a is small enough to land safely in a day; P2-1b carries the real risk and d
 Open question for you: split P2-1 into 1a/1b as above, or keep it monolithic? And do you want Option C (abandon candidates) confirmed for the candidate-pool policy, or is one of the others worth more discussion?
 
 **Response**: Yeah, let's split P2-1 as described.  The I agree that the abandon candidates approach is the best option.
+
+---
+
+## Appendix B — §3.6 prepend-adapter design (RETIRED 2026-05-13)
+
+The text below is the **original** §3.6 architecture-adapter pattern as locked-in at the
+2026-05-10 design review. It is **retired and not implemented**. Preserved verbatim here as
+historical record of how the design evolved; do not consult it for current implementation
+guidance. The replacement design lives in §3.6 above and is fully specified in
+[`juniper-cascor/notes/PHASE_2_P2_1D_DESIGN_2026-05-13.md`](../../juniper-cascor/notes/PHASE_2_P2_1D_DESIGN_2026-05-13.md).
+
+The retirement happened mid-P2-1d implementation: P2-1c (cascor #251) had shipped the grow
+side with zero-init connections. When P2-1d kicked off, two tensions in this §3.6 design
+surfaced during the design check-in and could not be resolved without further deviation from
+Paul's long-term modelling goals:
+
+1. **Zero-init signal-flow collapse on shrink.** With a pure-linear input adapter `Linear(I_new→I_old)`
+   zero-init, the original network sees zero input. Hidden activations collapse to bias-only
+   constants. The output adapter (also zero-init) maps those constants to literal zeros for
+   every prediction. Day 1 after a shrink the model produces zero across the board until
+   retraining catches up — qualitatively different from P2-1c's zero-init invariant where
+   the forward pass was *preserved* exactly on the still-present input subset.
+
+2. **Grow-after-shrink semantics required rewriting P2-1c.** Once an adapter is prepended,
+   the "outermost layer" is the adapter, not the network. P2-1c's grow code mutated
+   `network.input_size` directly; grow-after-shrink with that code would silently corrupt
+   the network. The fix would have required threading "is there an adapter? grow that
+   instead" into every dim-management path.
+
+The 2026-05-13 redesign (current §3.6) avoids both issues by never shrinking the network at
+all. Dataset shrink becomes dataset zero-padding; the cascade topology stays structurally
+unchanged across every swap. The original adapter design's intended preservation of
+structural memory is achieved trivially (the network was never modified) without the
+adapter-layer apparatus.
+
+### Original §3.6 text (verbatim, retired)
+
+> When the new dataset's input or output dimension differs from the current network, the
+> architecture adapter modifies only the boundary (input and output) layers. **All hidden nodes
+> and inter-hidden cascade connections are preserved unchanged.**
+>
+> **Sequential composition rule** (chosen 2026-05-10):
+>
+> * **Grow** — expand the current outermost input and/or output layer **in place** to the new
+>   dimension. New connections are zero-initialized (preserves overlapping-input behavior; the
+>   post-swap network's output on the still-present input subset is unchanged at swap-time).
+>   No new layers are created.
+> * **Shrink** — **prepend** a new input-side adapter layer at the new (smaller) input dim, and
+>   **append** a new output-side adapter layer at the new (smaller) output dim. Connections from
+>   the new adapter into the next layer are zero-initialized. The original layers are retained;
+>   the network monotonically deepens by one input-adapter + one output-adapter on each shrink swap.
+> * **Mixed** — apply each side independently per its own delta (e.g. input grows + output shrinks).
+>
+> The outermost input/output layers are **always** the live-dataset boundary, regardless of how
+> many adapter layers have accumulated.
+>
+> **Worked example** (sequential swaps, starting topology `5-N-4`):
+>
+> | Step | Operation                | Topology after          | Notes                                                                        |
+> |------|--------------------------|-------------------------|------------------------------------------------------------------------------|
+> | 0    | initial                  | `5-N-4`                 | hidden = N cascade-grown units                                               |
+> | 1    | shrink to (3 in / 2 out) | `3-5-N-4-2`             | prepend 3-input adapter; append 2-output adapter                             |
+> | 2    | grow to (7 in / 9 out)   | `7-5-N-4-9`             | expand outermost input adapter 3→7; expand outermost output adapter 2→9      |
+> | 3    | shrink to (1 in / 1 out) | `1-7-5-N-4-9-1`         | prepend new 1-input adapter; append new 1-output adapter                     |
+> | 4    | grow to (4 in / 6 out)   | `4-7-5-N-4-9-6`         | expand outermost input adapter 1→4; expand outermost output adapter 1→6      |
+>
+> This rule is implemented in `architecture_adapter.adapt_for_dataset_swap`. The full layered
+> topology must be captured in snapshots and reconstructed on replay (§3.4 history/snapshots).
