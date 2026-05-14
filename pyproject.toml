@@ -138,15 +138,7 @@ dev = [
     "juniper-canopy[juniper-data,juniper-cascor,observability]",
     "pytest>=8.0",
     "pytest-cov>=5.0",
-    # Pinned <1.0: pytest-asyncio 1.x rewrote its Runner and (with
-    # asyncio_mode = "auto" + session-scoped autouse fixtures in
-    # src/tests/conftest.py) leaves the session loop registered as
-    # running, so per-test Runner.run() raises
-    # "Runner.run() cannot be called from a running event loop" on every
-    # async test. Fallback if 0.x ever stops being maintained: flip
-    # asyncio_mode to "strict" in [tool.pytest.ini_options] and decorate
-    # every async test with @pytest.mark.asyncio.
-    "pytest-asyncio>=0.23,<1.0",
+    "pytest-asyncio>=0.23",
     "bandit[sarif]>=1.7",
     "pip-audit>=2.7",
 ]
@@ -293,6 +285,13 @@ addopts = [
     "--strict-config",
     "--continue-on-collection-errors",
     "--tb=short",
+    # Exclude the Playwright UI subsuite from the default invocation.
+    # pytest-playwright's session-level browser fixture leaks an event loop
+    # that breaks every async test that runs after a UI test in the same
+    # pytest session (180 async failures with UI included → 0 without).
+    # Run UI tests via a separate invocation: `make test-ui` (or
+    # `pytest src/tests/ui --override-ini=addopts=`).
+    "--ignore=src/tests/ui",
 ]
 markers = [
   "unit: Unit tests (fast, no external dependencies)",
