@@ -2080,6 +2080,54 @@ class DemoMode:
             self._experimental_functions_enabled = bool(enabled)
             return {"ok": True, "enabled": self._experimental_functions_enabled}
 
+    # Phase 2 P2-5 (Issue #3): demo parity for the Live Dataset Switch.
+    # Demo doesn't actually carry a cascade-correlation network to resize,
+    # so the swap is purely UI-state: we update the active dataset config
+    # and return a fabricated §3.3-shaped response so the canopy callback
+    # layer can render the full success flow without cascor.
+    #
+    # Cancel is a no-op in demo (there's no real in-flight HTTP request to
+    # interrupt) — returns ``ok=False`` with a "no swap in progress" error
+    # mirroring cascor's 404 response when nothing is live.
+
+    def swap_dataset_live(self, **canopy_params: Any) -> Dict[str, Any]:
+        with self._lock:
+            cfg = {k: v for k, v in canopy_params.items() if v is not None}
+            if not cfg:
+                return {"ok": False, "error": "no dataset config provided"}
+            # Mirror the cold-swap effect on the demo simulator: clear any
+            # pending staged config (the live swap supersedes it) and
+            # adopt the new config as the active one. Demo's simulator
+            # doesn't carry an input/output dim concept worth resizing,
+            # so arch_changes is reported as zero-delta.
+            self._pending_dataset_config = None
+            return {
+                "ok": True,
+                "data": {
+                    "status": "swapped",
+                    "before_cfg": {"dataset_type": "demo-prior"},
+                    "after_cfg": dict(cfg),
+                    "arch_changes": {
+                        "input_delta": 0,
+                        "output_delta": 0,
+                        "hidden_preserved": 0,
+                        "appended_nodes": {"input": 0, "output": 0},
+                        "prepended_layers": [],
+                        "abandoned_candidate_pool_size": 0,
+                        "active_output_dim": 0,
+                    },
+                    "pre_swap_snapshot_id": "demo_snapshot_pre",
+                    "post_swap_snapshot_id": "demo_snapshot_post",
+                    "mode": "output_training_first",
+                },
+                "config": dict(cfg),
+            }
+
+    def cancel_swap_dataset_live(self) -> Dict[str, Any]:
+        # Demo has no real in-flight HTTP; nothing to cancel. Surface as
+        # ok=False to mirror cascor's 404 response for the same scenario.
+        return {"ok": False, "error": "no_swap_in_progress"}
+
 
 # Global demo mode instance (singleton)
 _demo_instance: Optional[DemoMode] = None
