@@ -225,6 +225,15 @@ class ServiceBackend:
     def get_pending_dataset(self) -> Dict[str, Any]:
         return self._adapter.get_pending_dataset()
 
+    # Phase 2 P2-4 (Issue #3): pass-through to cascor's experimental-functions
+    # gate (cascor #245 P2-1a — see ISSUE_3_PHASE_2_LIVE_DATASET_SWAP_2026-05-09 §3.1).
+
+    def get_experimental_functions(self) -> Dict[str, Any]:
+        return self._adapter.get_experimental_functions()
+
+    def set_experimental_functions(self, enabled: bool) -> Dict[str, Any]:
+        return self._adapter.set_experimental_functions(enabled)
+
     # --- Lifecycle ---
 
     async def initialize(self) -> bool:

@@ -2968,6 +2968,67 @@ async def api_cancel_pending_dataset():
 
 
 # =========================================================================
+# Phase 2 P2-4 (Issue #3): Experimental Functions gate proxy.
+# Canopy proxies cascor's /v1/admin/experimental_functions through its own
+# backend so the Dash callback layer keeps a single HTTP target convention
+# and inherits canopy's X-API-Key auth boundary. F2.10 in
+# ISSUE_3_PHASE_2_LIVE_DATASET_SWAP_2026-05-09 makes the cascor side the
+# authoritative source of truth — these routes faithfully forward whatever
+# state cascor reports back.
+# =========================================================================
+
+
+class ExperimentalFunctionsRequest(BaseModel):
+    """Body for POST /api/admin/experimental_functions."""
+
+    enabled: bool
+
+
+@app.get("/api/admin/experimental_functions")
+async def api_get_experimental_functions():
+    """Read the server-side experimental-functions gate state.
+
+    Returns ``{"status": "success", "data": {"enabled": bool}}`` on success.
+    On backend rejection / cascor unreachable: 502 with the error string,
+    and the dash callback layer treats that as "gate is closed" (F2.10
+    safe default — no Live Switch affordance until we can confirm).
+    """
+    try:
+        result = await asyncio.to_thread(backend.get_experimental_functions)
+        if isinstance(result, dict) and not result.get("ok", True):
+            error_msg = result.get("error", "unknown")
+            system_logger.warning("Backend rejected experimental_functions read: %s", error_msg)
+            return JSONResponse({"error": f"Backend rejected: {error_msg}"}, status_code=502)
+        return {"status": "success", "data": {"enabled": bool((result or {}).get("enabled", False))}}
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Failed to read experimental_functions [error_id=%s]", error_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
+
+@app.post("/api/admin/experimental_functions")
+async def api_set_experimental_functions(body: ExperimentalFunctionsRequest):
+    """Toggle the server-side experimental-functions gate.
+
+    Returns the gate state AFTER cascor's write completed. F2.10: the
+    returned ``enabled`` may differ from the request body if cascor's
+    policy overrides (e.g., env-var lockdown). The Dash callback layer
+    must trust the returned value and reconcile UI state to it.
+    """
+    try:
+        result = await asyncio.to_thread(backend.set_experimental_functions, body.enabled)
+        if isinstance(result, dict) and not result.get("ok", True):
+            error_msg = result.get("error", "unknown")
+            system_logger.warning("Backend rejected experimental_functions write: %s", error_msg)
+            return JSONResponse({"error": f"Backend rejected: {error_msg}"}, status_code=502)
+        return {"status": "success", "data": {"enabled": bool((result or {}).get("enabled", False))}}
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Failed to set experimental_functions [error_id=%s]", error_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
+
+# =========================================================================
 # P1-NEW-002: Remote Worker Management Endpoints
 # =========================================================================
 

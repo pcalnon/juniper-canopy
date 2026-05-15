@@ -2066,6 +2066,20 @@ class DemoMode:
         cfg = getattr(self, "_pending_dataset_config", None)
         return {"ok": True, "pending": dict(cfg) if cfg else None}
 
+    # Phase 2 P2-4 (Issue #3): demo parity for the experimental-functions
+    # gate. State is kept on the simulator instance so the toggle survives
+    # callback round-trips within a session. Demo mode never actually
+    # honours the gate (no live swap), so the toggle is purely UI-state.
+
+    def get_experimental_functions(self) -> Dict[str, Any]:
+        with self._lock:
+            return {"ok": True, "enabled": bool(getattr(self, "_experimental_functions_enabled", False))}
+
+    def set_experimental_functions(self, enabled: bool) -> Dict[str, Any]:
+        with self._lock:
+            self._experimental_functions_enabled = bool(enabled)
+            return {"ok": True, "enabled": self._experimental_functions_enabled}
+
 
 # Global demo mode instance (singleton)
 _demo_instance: Optional[DemoMode] = None
