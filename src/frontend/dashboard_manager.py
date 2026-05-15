@@ -547,6 +547,20 @@ class DashboardManager:
                 dcc.Store(id="dark-mode-store", storage_type="local", data=False),
                 # Theme state for components (tracks current theme)
                 dcc.Store(id="theme-state", data="light"),
+                # Phase 2 P2-4 (Issue #3): Experimental Functions gate state.
+                # The Switch in the sidebar (Network Information section)
+                # writes here via callback; downstream P2-5 reads here to
+                # decide whether to render the Live Dataset Switch button.
+                # Reconciled to cascor's authoritative state on page load
+                # and on every Switch change (F2.10). Persisted to
+                # localStorage so the toggle survives page reloads — but
+                # the on-load reconciliation overrides stale persistence
+                # if cascor's gate is currently closed.
+                dcc.Store(
+                    id="experimental-flags-store",
+                    storage_type="local",
+                    data={"experimental_functions": False},
+                ),
                 # Unified Top Status Bar - Connection, Status, Phase, Metrics, and Latency
                 dbc.Row(
                     [
@@ -1380,6 +1394,42 @@ class DashboardManager:
                                     ],
                                     id="sidebar-network-info-section",
                                 ),
+                                # Phase 2 P2-4 (Issue #3): Experimental Functions gate.
+                                # Sidebar location (under Network Information) is per
+                                # ISSUE_3_PHASE_2_LIVE_DATASET_SWAP_2026-05-09 §4.1 — the
+                                # toggle affects the whole session, not a single tab.
+                                # F2.10: the cascor server is authoritative; this
+                                # switch's value is reconciled to cascor's state on
+                                # page load and on every change. The companion
+                                # ``experimental-flags-store`` (declared near the
+                                # other ``storage_type='local'`` stores) is what
+                                # P2-5's Live Dataset Switch button reads.
+                                html.Div(
+                                    dbc.Card(
+                                        [
+                                            dbc.CardHeader(
+                                                html.H5("Experimental Functions", className="mb-0"),
+                                            ),
+                                            dbc.CardBody(
+                                                [
+                                                    dbc.Switch(
+                                                        id="experimental-functions-toggle",
+                                                        label="Enable Experimental Functions",
+                                                        value=False,
+                                                        persistence=True,
+                                                        persistence_type="local",
+                                                    ),
+                                                    html.Div(
+                                                        id="experimental-functions-alert",
+                                                        className="mt-2",
+                                                    ),
+                                                ]
+                                            ),
+                                        ],
+                                        className="mb-3",
+                                    ),
+                                    id="sidebar-experimental-functions-section",
+                                ),
                                 # CAN-005: Pinned Parameters mirror.
                                 # Hidden when nothing is pinned; otherwise
                                 # shows name + current value rows for every
@@ -1652,6 +1702,7 @@ class DashboardManager:
         self._setup_datastore_callbacks()  # Component data store updaters
         self._setup_button_action_callbacks()  # Define button action callbacks
         self._setup_backend_callbacks()  # Define backend callbacks
+        self._setup_experimental_functions_callbacks()  # P2-4 (Issue #3)
 
     def _setup_sidebar_visibility_callback(self):
         """Set up sidebar contextual visibility based on active tab."""
@@ -3313,6 +3364,114 @@ class DashboardManager:
                 return bool(pending)
             except requests.RequestException:
                 return dash.no_update
+
+    def _setup_experimental_functions_callbacks(self):
+        """Phase 2 P2-4 (Issue #3): Experimental Functions gate UI <-> cascor.
+
+        Two callbacks:
+
+        1. **Load reconciliation** (fires once on mount via ``params-init-interval``):
+           GETs canopy's ``/api/admin/experimental_functions`` proxy and writes
+           the cascor-authoritative state into the Switch + Store. F2.10 — the
+           Switch's last-session persistence is overridden if cascor's gate is
+           closed (e.g., env-var lockdown).
+
+        2. **User-toggle handler** (fires on Switch change):
+           POSTs the new value to canopy's proxy. If cascor's response
+           ``enabled`` differs from the requested value, the Switch is
+           reverted to the authoritative state and a warning ``dbc.Alert``
+           explains the override. On network / 502 errors the Switch
+           reverts to its last-stored value and a danger alert surfaces.
+        """
+
+        @self.app.callback(
+            [
+                Output("experimental-functions-toggle", "value", allow_duplicate=True),
+                Output("experimental-flags-store", "data", allow_duplicate=True),
+                Output("experimental-functions-alert", "children", allow_duplicate=True),
+            ],
+            Input("params-init-interval", "n_intervals"),
+            prevent_initial_call="initial_duplicate",
+        )
+        def load_reconcile_experimental_functions(n_intervals):
+            """Page-load sync against cascor's authoritative gate state.
+
+            ``params-init-interval`` is the canonical one-shot-on-mount
+            trigger used elsewhere in the dashboard (e.g., params load).
+            Fires once per session; ``max_intervals=1`` on the Interval
+            component caps additional fires.
+            """
+            try:
+                resp = requests.get(
+                    self._api_url("/api/admin/experimental_functions"),
+                    timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
+                    headers=internal_api_headers(),
+                )
+                if resp.status_code != 200:
+                    # Defensive default — if cascor is unreachable on load,
+                    # show the toggle as OFF (F2.10 safe default) and surface
+                    # a soft warning so the user knows the toggle is local-only.
+                    self.logger.warning("Experimental functions load failed: %s %s", resp.status_code, resp.text[:200])
+                    return False, {"experimental_functions": False}, dbc.Alert("Could not reach backend; experimental functions disabled.", color="warning", duration=5000, dismissable=True)
+                authoritative = bool(resp.json().get("data", {}).get("enabled", False))
+                return authoritative, {"experimental_functions": authoritative}, None
+            except requests.RequestException as exc:
+                self.logger.warning("Experimental functions load exception: %s", exc)
+                return False, {"experimental_functions": False}, dbc.Alert("Backend unreachable; experimental functions disabled.", color="warning", duration=5000, dismissable=True)
+
+        @self.app.callback(
+            [
+                Output("experimental-functions-toggle", "value", allow_duplicate=True),
+                Output("experimental-flags-store", "data", allow_duplicate=True),
+                Output("experimental-functions-alert", "children", allow_duplicate=True),
+            ],
+            Input("experimental-functions-toggle", "value"),
+            State("experimental-flags-store", "data"),
+            prevent_initial_call=True,
+        )
+        def handle_experimental_functions_toggle(switch_value, store_data):
+            """POST the new toggle value to cascor and reconcile UI state.
+
+            F2.10 server-authoritative: the response's ``enabled`` value is
+            what the UI must reflect, even if it differs from the request.
+            """
+            requested = bool(switch_value)
+            try:
+                resp = requests.post(
+                    self._api_url("/api/admin/experimental_functions"),
+                    json={"enabled": requested},
+                    timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
+                    headers=internal_api_headers(),
+                )
+                if resp.status_code != 200:
+                    # Revert to last-known-good (from the store) and surface
+                    # a danger alert with cascor's error detail.
+                    last_known = bool((store_data or {}).get("experimental_functions", False))
+                    detail = resp.text[:200] if resp.text else f"HTTP {resp.status_code}"
+                    self.logger.warning("Experimental functions toggle rejected: %s", detail)
+                    return (
+                        last_known,
+                        {"experimental_functions": last_known},
+                        dbc.Alert(f"Backend rejected toggle: {detail}", color="danger", duration=5000, dismissable=True),
+                    )
+                authoritative = bool(resp.json().get("data", {}).get("enabled", False))
+                alert = None
+                if authoritative != requested:
+                    alert = dbc.Alert(
+                        f"Server returned {authoritative!r}; the gate is server-authoritative (F2.10).",
+                        color="warning",
+                        duration=5000,
+                        dismissable=True,
+                    )
+                return authoritative, {"experimental_functions": authoritative}, alert
+            except requests.RequestException as exc:
+                last_known = bool((store_data or {}).get("experimental_functions", False))
+                self.logger.warning("Experimental functions toggle exception: %s", exc)
+                return (
+                    last_known,
+                    {"experimental_functions": last_known},
+                    dbc.Alert(f"Backend unreachable: {exc}", color="danger", duration=5000, dismissable=True),
+                )
 
     # Define event handlers for callbacks
     def _toggle_dark_mode_handler(self, current_dark_mode=None):

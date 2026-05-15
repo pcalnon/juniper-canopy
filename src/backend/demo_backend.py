@@ -336,6 +336,17 @@ class DemoBackend:
     def get_pending_dataset(self) -> Dict[str, Any]:
         return self._demo.get_pending_dataset()
 
+    # Phase 2 P2-4 (Issue #3): demo parity for the experimental-functions gate.
+    # Demo mode tracks the toggle locally so the UI can be exercised without
+    # cascor — but no actual live-swap happens (P2-5 / P2-6 will gate behind
+    # demo-mode awareness).
+
+    def get_experimental_functions(self) -> Dict[str, Any]:
+        return self._demo.get_experimental_functions()
+
+    def set_experimental_functions(self, enabled: bool) -> Dict[str, Any]:
+        return self._demo.set_experimental_functions(enabled)
+
     # --- Lifecycle ---
 
     async def initialize(self) -> bool:

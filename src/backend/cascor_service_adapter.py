@@ -920,6 +920,59 @@ class CascorServiceAdapter:
             logger.error("get_pending_dataset failed: %s", e)
             return {"ok": False, "error": str(e), "pending": None}
 
+    # ------------------------------------------------------------------
+    # Phase 2 P2-4 (Issue #3): Experimental Functions gate.
+    #
+    # Cascor exposes ``GET / POST /v1/admin/experimental_functions`` to
+    # read/write the server-side gate that authorises ``swap_dataset_live``
+    # (cascor shipped P2-1a — see ISSUE_3_PHASE_2_LIVE_DATASET_SWAP_2026-05-09
+    # §3.1 / §3.3). Canopy P2-4 proxies these through its own backend so
+    # the Dash callback layer keeps its single HTTP target convention
+    # (Dash → canopy backend → cascor) and inherits the existing
+    # X-API-Key auth boundary.
+    #
+    # F2.10: the server is authoritative. ``set_experimental_functions``
+    # returns the gate state *after* the cascor write completed — callers
+    # must trust this value rather than the requested value. On any
+    # failure both methods return ``{"ok": False, "error": ...}`` and the
+    # callback layer surfaces a toast + reverts the toggle.
+    # ------------------------------------------------------------------
+
+    def get_experimental_functions(self) -> Dict[str, Any]:
+        """GET /v1/admin/experimental_functions — read the server gate state.
+
+        Returns ``{"ok": True, "enabled": bool}`` on success, or
+        ``{"ok": False, "error": <str>}`` on failure. A failure is treated
+        as "gate is closed" by the callback layer (F2.10 safe default —
+        no Live Switch button if we can't confirm cascor's state).
+        """
+        try:
+            result = self._client._request("GET", "/v1/admin/experimental_functions")
+            data = (result or {}).get("data", {}) or {}
+            return {"ok": True, "enabled": bool(data.get("enabled", False))}
+        except JuniperCascorClientError as e:
+            logger.error("get_experimental_functions failed: %s", e)
+            return {"ok": False, "error": str(e), "enabled": False}
+
+    def set_experimental_functions(self, enabled: bool) -> Dict[str, Any]:
+        """POST /v1/admin/experimental_functions — write the server gate state.
+
+        Returns ``{"ok": True, "enabled": <authoritative bool>}`` on
+        success. The authoritative ``enabled`` may differ from the
+        request if cascor's policy overrides the write (e.g., env-var
+        lockdown); F2.10 makes that ambiguity a feature, not a bug.
+
+        Returns ``{"ok": False, "error": <str>}`` on cascor failure. The
+        callback layer treats this as "revert the toggle to last-known-good".
+        """
+        try:
+            result = self._client._request("POST", "/v1/admin/experimental_functions", json={"enabled": bool(enabled)})
+            data = (result or {}).get("data", {}) or {}
+            return {"ok": True, "enabled": bool(data.get("experimental_functions_enabled", data.get("enabled", enabled)))}
+        except JuniperCascorClientError as e:
+            logger.error("set_experimental_functions failed: %s", e)
+            return {"ok": False, "error": str(e), "enabled": False}
+
     def _apply_params_hot(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Send hot params via /ws/control set_params with command_id.
 
