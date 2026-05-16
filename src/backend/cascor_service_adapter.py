@@ -973,6 +973,69 @@ class CascorServiceAdapter:
             logger.error("set_experimental_functions failed: %s", e)
             return {"ok": False, "error": str(e), "enabled": False}
 
+    # ------------------------------------------------------------------
+    # Phase 2 P2-5 (Issue #3): Live Dataset Switch.
+    #
+    # ``swap_dataset_live`` POSTs the new dataset config to cascor's
+    # ``/v1/training/dataset/live`` (shipped P2-1a + P2-1d + P2-2 + P2-3).
+    # Cascor performs the in-flight swap (stop → reload → resize → restart)
+    # and returns the §3.3 response: ``arch_changes``, ``pre/post_swap_snapshot_id``,
+    # ``mode``, etc. The HTTP request can block for 5–30s for real
+    # juniper-data fetches; the canopy callback layer runs the request on
+    # Dash's worker pool so the Cancel button (a separate callback) can
+    # fire ``cancel_swap_dataset_live`` concurrently.
+    #
+    # ``cancel_swap_dataset_live`` DELETEs the live-swap endpoint (cascor
+    # P2-1b). Cascor sets its internal cancel flag; the in-flight swap
+    # aborts at the next checkpoint and returns ``{"status": "cancelled"}``
+    # to the originating POST. A DELETE with no swap in flight gets 404
+    # from cascor — surfaced here as ``{"ok": False}``.
+    # ------------------------------------------------------------------
+
+    def swap_dataset_live(self, **canopy_params: Any) -> Dict[str, Any]:
+        """POST /v1/training/dataset/live — initiate an in-flight dataset swap.
+
+        Maps canopy keys to cascor keys via ``_DATASET_PARAM_MAP`` so the
+        same sidebar inputs that drive ``stage_dataset`` (cold swap) can
+        drive the live swap with no UI duplication.
+
+        Returns:
+            ``{"ok": True, "data": <§3.3 response dict>}`` on success. The
+            ``data`` carries ``status`` (``"swapped"`` or ``"cancelled"``),
+            ``arch_changes``, ``pre_swap_snapshot_id``,
+            ``post_swap_snapshot_id``, ``mode``, and the before/after configs
+            — everything the canopy UI needs to render the outcome and the
+            P2-7 timeline marker.
+
+            ``{"ok": False, "error": <str>}`` on cascor failure. Distinct
+            cascor status codes (403/409/422/504/502) all collapse to
+            ``ok=False`` here; the callback layer can inspect the
+            ``error`` string for the user-facing message.
+        """
+        cascor_cfg = {self._DATASET_PARAM_MAP[k]: v for k, v in canopy_params.items() if k in self._DATASET_PARAM_MAP and v is not None}
+        try:
+            result = self._client._request("POST", "/v1/training/dataset/live", json=cascor_cfg)
+            return {"ok": True, "data": (result or {}).get("data", {}), "config": cascor_cfg}
+        except JuniperCascorClientError as e:
+            logger.error("swap_dataset_live failed: %s", e)
+            return {"ok": False, "error": str(e)}
+
+    def cancel_swap_dataset_live(self) -> Dict[str, Any]:
+        """DELETE /v1/training/dataset/live — cancel an in-flight live swap.
+
+        Returns ``{"ok": True, "data": {...}}`` on cascor accepting the
+        cancel signal (HTTP 200). Returns ``{"ok": False, "error": ...}``
+        when cascor returns 404 (no swap in flight) or any other error —
+        the callback layer treats both as "Cancel had no effect" without
+        distinguishing.
+        """
+        try:
+            result = self._client._request("DELETE", "/v1/training/dataset/live")
+            return {"ok": True, "data": (result or {}).get("data", {})}
+        except JuniperCascorClientError as e:
+            logger.error("cancel_swap_dataset_live failed: %s", e)
+            return {"ok": False, "error": str(e)}
+
     def _apply_params_hot(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Send hot params via /ws/control set_params with command_id.
 

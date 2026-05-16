@@ -3029,6 +3029,76 @@ async def api_set_experimental_functions(body: ExperimentalFunctionsRequest):
 
 
 # =========================================================================
+# Phase 2 P2-5 (Issue #3): Live Dataset Switch proxy.
+# POST /api/live_dataset_swap → backend.swap_dataset_live → cascor's
+# /v1/training/dataset/live (the P2-1a/P2-1d/P2-2/P2-3 endpoint).
+# DELETE /api/live_dataset_swap → backend.cancel_swap_dataset_live →
+# cascor's DELETE (P2-1b cancel mechanism). The Dash callback fires
+# the POST on Dash's worker pool, so the Cancel button (a separate
+# callback) can fire the DELETE concurrently while the POST is still
+# in flight — cascor's swap aborts at its next checkpoint and the
+# POST returns with ``{"status": "cancelled"}``.
+# =========================================================================
+
+
+@app.post("/api/live_dataset_swap")
+async def api_live_dataset_swap(body: StageDatasetRequest):
+    """Initiate an in-flight live dataset swap.
+
+    Reuses ``StageDatasetRequest`` body shape — same canopy keys cascor
+    accepts for both ``POST /v1/training/dataset`` (cold swap) and
+    ``POST /v1/training/dataset/live`` (live swap). All fields optional;
+    cascor is the authoritative validator.
+
+    Response on success: ``{"status": "success", "data": {<§3.3 dict>}}``
+    carrying ``status`` (``"swapped"`` or ``"cancelled"``), ``arch_changes``,
+    ``pre_swap_snapshot_id``, ``post_swap_snapshot_id``, ``mode``, etc.
+
+    Cascor rejection codes (403 gate, 409 in-flight, 422 validation,
+    504 pause-timeout, 502 fetch failure) all collapse to canopy 502
+    here; the Dash callback layer surfaces the error string in a toast.
+    """
+    try:
+        params = body.model_dump(exclude_none=True)
+        result = await asyncio.to_thread(backend.swap_dataset_live, **params)
+        if isinstance(result, dict) and not result.get("ok", True):
+            error_msg = result.get("error", "unknown")
+            system_logger.warning("Backend rejected live dataset swap: %s", error_msg)
+            return JSONResponse({"error": f"Backend rejected live swap: {error_msg}"}, status_code=502)
+        return {"status": "success", "data": (result or {}).get("data", {})}
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Failed to swap dataset live [error_id=%s]", error_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
+
+@app.delete("/api/live_dataset_swap")
+async def api_cancel_live_dataset_swap():
+    """Cancel an in-flight live dataset swap.
+
+    Fires cascor's ``DELETE /v1/training/dataset/live`` (P2-1b). Cascor
+    sets its internal cancel flag; the in-flight swap aborts at the
+    next checkpoint and the originating POST returns with
+    ``{"status": "cancelled"}``.
+
+    Returns 502 when cascor returns 404 (no swap in flight) — the Dash
+    callback layer treats that as "Cancel had no effect, swap already
+    finished" and leaves the UI alone.
+    """
+    try:
+        result = await asyncio.to_thread(backend.cancel_swap_dataset_live)
+        if isinstance(result, dict) and not result.get("ok", True):
+            error_msg = result.get("error", "unknown")
+            system_logger.warning("Backend rejected live swap cancel: %s", error_msg)
+            return JSONResponse({"error": f"Backend rejected cancel: {error_msg}"}, status_code=502)
+        return {"status": "success", "data": (result or {}).get("data", {})}
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Failed to cancel live dataset swap [error_id=%s]", error_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
+
+# =========================================================================
 # P1-NEW-002: Remote Worker Management Endpoints
 # =========================================================================
 

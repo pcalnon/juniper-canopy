@@ -234,6 +234,15 @@ class ServiceBackend:
     def set_experimental_functions(self, enabled: bool) -> Dict[str, Any]:
         return self._adapter.set_experimental_functions(enabled)
 
+    # Phase 2 P2-5 (Issue #3): Live Dataset Switch — passthroughs to
+    # cascor's /v1/training/dataset/live (POST + DELETE).
+
+    def swap_dataset_live(self, **canopy_params: Any) -> Dict[str, Any]:
+        return self._adapter.swap_dataset_live(**canopy_params)
+
+    def cancel_swap_dataset_live(self) -> Dict[str, Any]:
+        return self._adapter.cancel_swap_dataset_live()
+
     # --- Lifecycle ---
 
     async def initialize(self) -> bool:

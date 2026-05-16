@@ -401,7 +401,10 @@ A server-side callback POSTs the change to `/v1/admin/experimental_functions` so
 
 ### 4.2 Live Dataset Switch button (gated)
 
-Adjacent to the existing "Apply Dataset" button on the Dataset View tab:
+Adjacent to the existing "Apply Dataset" button in the sidebar's NN section
+(spiral-dataset collapse). Corrected during P2-5 implementation: the Apply
+Dataset button has always lived in the sidebar, not on the Dataset View tab
+as this section originally stated.
 
 ```python
 dbc.Button(
