@@ -155,3 +155,62 @@ class TestLiveDatasetSwapRoutes:
             resp = client.delete("/api/live_dataset_swap")
         assert resp.status_code == 502
         assert "no swap in progress" in resp.json()["error"]
+
+
+# ---------------------------------------------------------------------------
+# P2-6 (Issue #3) — cascor error-code passthrough fidelity. Confirms that
+# distinct cascor failure modes (403 gate closed, 409 already in flight,
+# 422 dim validation, 504 pause timeout) all collapse to canopy HTTP 502
+# with the cascor detail intact in the response body so the Dash callback
+# can surface the verbatim error per spec §4.3.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestCascorErrorCodePassthrough:
+    def _get_client(self):
+        from fastapi.testclient import TestClient
+
+        from main import app
+
+        return TestClient(app)
+
+    def test_403_experimental_functions_disabled_collapses_to_502_with_detail(self):
+        """Cascor 403 — gate closed at the cascor side. The Dash outcome
+        alert surfaces "experimental_functions_disabled" verbatim."""
+        client = self._get_client()
+        with patch("main.backend") as mock_backend:
+            mock_backend.swap_dataset_live.return_value = {"ok": False, "error": "HTTP 403 — experimental_functions_disabled"}
+            resp = client.post("/api/live_dataset_swap", json={"nn_dataset_type": "moons"})
+        assert resp.status_code == 502
+        assert "experimental_functions_disabled" in resp.json()["error"]
+
+    def test_409_swap_already_in_progress_collapses_to_502_with_detail(self):
+        """Cascor P2-1b's idempotency guard. The user clicked Accept while
+        a swap was already in flight (perhaps from a different tab)."""
+        client = self._get_client()
+        with patch("main.backend") as mock_backend:
+            mock_backend.swap_dataset_live.return_value = {"ok": False, "error": "HTTP 409 — swap_already_in_progress"}
+            resp = client.post("/api/live_dataset_swap", json={"nn_dataset_type": "moons"})
+        assert resp.status_code == 502
+        assert "swap_already_in_progress" in resp.json()["error"]
+
+    def test_422_dim_validation_failure_collapses_to_502_with_detail(self):
+        """Cascor P2-1d rejects nonsensical dim changes. The cascor
+        message comes through verbatim."""
+        client = self._get_client()
+        with patch("main.backend") as mock_backend:
+            mock_backend.swap_dataset_live.return_value = {"ok": False, "error": "HTTP 422 — dim_shrink_requires_pad"}
+            resp = client.post("/api/live_dataset_swap", json={"nn_dataset_type": "spirals"})
+        assert resp.status_code == 502
+        assert "dim_shrink_requires_pad" in resp.json()["error"]
+
+    def test_504_pause_timeout_collapses_to_502_with_detail(self):
+        """Cascor P2-1a's pause-timeout. The Dash callback shows
+        "pause_timeout" in the danger alert."""
+        client = self._get_client()
+        with patch("main.backend") as mock_backend:
+            mock_backend.swap_dataset_live.return_value = {"ok": False, "error": "HTTP 504 — pause_timeout"}
+            resp = client.post("/api/live_dataset_swap", json={"nn_dataset_type": "moons"})
+        assert resp.status_code == 502
+        assert "pause_timeout" in resp.json()["error"]

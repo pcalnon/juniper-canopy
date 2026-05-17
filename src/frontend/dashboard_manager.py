@@ -3598,66 +3598,36 @@ class DashboardManager:
                     dbc.Alert(f"Backend unreachable: {exc}", color="danger", duration=5000, dismissable=True),
                 )
 
-    def _setup_live_dataset_switch_callbacks(self):  # noqa: C901
+    def _setup_live_dataset_switch_callbacks(self):
         """Phase 2 P2-5 (Issue #3): Live Dataset Switch flow.
 
-        Five callbacks:
+        Seven callbacks, each a thin wrapper around a class-level
+        ``_*_handler`` method (P2-6 refactor — handlers are unit-tested
+        in ``tests/unit/frontend/test_live_dataset_switch_handlers.py``):
 
-        1. **Training status mirror** — every ``fast-update-interval`` tick,
-           refresh ``training-status-store`` from ``/api/status`` so the
-           gate callback below has fresh data without re-polling. Cheap;
-           the poller already runs.
+        1. Training status mirror — refresh ``training-status-store``
+           from ``/api/status`` each ``fast-update-interval`` tick.
+        2. Gate — disable Live Switch button unless experimental flag
+           AND training is running.
+        3. Open warning modal + populate dataset summary.
+        3b. Stop & Restart fallback closes modal (minimal interpretation).
+        4. Accept → POST /api/live_dataset_swap → outcome alert.
+        4b. Open progress alert immediately on Accept (split so spinner
+            shows before the 5–30 s POST returns).
+        5. Cancel during swap → DELETE /api/live_dataset_swap.
 
-        2. **Gate** — the Live Dataset Switch button is disabled unless
-           BOTH ``experimental-flags-store.experimental_functions`` is True
-           AND ``training-status-store.is_running`` is True. F2.3 default
-           is disabled; F2.5 says live swap only makes sense while
-           training is running.
-
-        3. **Open / close modal** — click the Live Switch button → open
-           the two-step warning modal with a read-only summary of the
-           current sidebar dataset config (Q3 hybrid). "Return to Stop
-           & Restart" closes the modal (minimal — Q2 deferred items
-           land in PHASE_2_P2_5_FOLLOWUPS).
-
-        4. **Accept → POST → reconcile** — click Accept → close modal,
-           open progress alert, POST /api/live_dataset_swap with the
-           sidebar State values. On response, close the progress alert
-           and surface the outcome (success / cancelled / error).
-
-        5. **Cancel during swap** — click the Cancel button on the
-           progress alert → DELETE /api/live_dataset_swap. Cascor's
-           swap aborts at its next checkpoint and the originating POST
-           returns with ``{"status": "cancelled"}`` — the Accept
-           callback handles that branch and surfaces the cancelled
-           outcome alert.
+        Full design rationale lives in the §4.2 / §4.3 spec sections
+        and the P2-5 PR (#275).
         """
 
-        # (1) Training status mirror — populate the store from /api/status
-        # response each fast-update tick.
         @self.app.callback(
             Output("training-status-store", "data"),
             Input("fast-update-interval", "n_intervals"),
             prevent_initial_call=False,
         )
-        def update_training_status_store(_n_intervals):
-            try:
-                resp = requests.get(
-                    self._api_url("/api/status"),
-                    timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
-                    headers=internal_api_headers(),
-                )
-                if resp.status_code != 200:
-                    return dash.no_update
-                payload = resp.json() or {}
-                # The status endpoint exposes ``is_running`` (bool) +
-                # ``phase`` (string). Mirror both — gate callback uses
-                # is_running; future P2-7 timeline may want phase.
-                return {"is_running": bool(payload.get("is_running", False)), "phase": str(payload.get("phase", "idle"))}
-            except requests.RequestException:
-                return dash.no_update
+        def update_training_status_store(n_intervals):
+            return self._update_training_status_store_handler(n_intervals=n_intervals)
 
-        # (2) Gate — enable Live Switch button only when both stores agree.
         @self.app.callback(
             Output("live-dataset-switch-button", "disabled"),
             Input("experimental-flags-store", "data"),
@@ -3665,12 +3635,8 @@ class DashboardManager:
             prevent_initial_call=False,
         )
         def gate_live_switch_button(flags, status):
-            flags_ok = bool(flags and flags.get("experimental_functions"))
-            running = bool(status and status.get("is_running"))
-            return not (flags_ok and running)
+            return self._gate_live_switch_button_handler(flags=flags, status=status)
 
-        # (3) Open the warning modal on Live Switch button click + populate
-        # the read-only dataset summary from sidebar State refs.
         @self.app.callback(
             [
                 Output("live-switch-modal", "is_open", allow_duplicate=True),
@@ -3685,35 +3651,16 @@ class DashboardManager:
             prevent_initial_call=True,
         )
         def open_live_switch_modal(n_clicks, dataset_type, n_samples, noise, n_spirals, rotations):
-            if not n_clicks:
-                return dash.no_update, dash.no_update
-            # Build the summary list — only include populated values so
-            # the modal isn't cluttered with "None" rows for fields the
-            # user didn't touch.
-            rows = []
-            for label, value in (("Dataset type", dataset_type), ("Samples", n_samples), ("Noise", noise), ("Spirals", n_spirals), ("Spiral rotations", rotations)):
-                if value is None:
-                    continue
-                rows.append(dbc.ListGroupItem([html.Strong(f"{label}: "), html.Span(str(value))]))
-            if not rows:
-                rows = [dbc.ListGroupItem(html.Em("No dataset config selected in the sidebar."), color="warning")]
-            return True, rows
+            return self._open_live_switch_modal_handler(n_clicks=n_clicks, dataset_type=dataset_type, n_samples=n_samples, noise=noise, n_spirals=n_spirals, rotations=rotations)
 
-        # (3b) Close the modal on Stop & Restart fallback click. Minimal
-        # interpretation per Q2 — modal closes; user has the Apply Dataset
-        # button right beside the Live Switch button for the cold path.
         @self.app.callback(
             Output("live-switch-modal", "is_open", allow_duplicate=True),
             Input("live-switch-fallback-button", "n_clicks"),
             prevent_initial_call=True,
         )
         def close_live_switch_modal_on_fallback(n_clicks):
-            if not n_clicks:
-                return dash.no_update
-            return False
+            return self._close_live_switch_modal_on_fallback_handler(n_clicks=n_clicks)
 
-        # (4) Accept → POST → reconcile. The progress alert opens for
-        # the duration of the POST; the outcome alert opens after.
         @self.app.callback(
             [
                 Output("live-switch-modal", "is_open", allow_duplicate=True),
@@ -3730,49 +3677,8 @@ class DashboardManager:
             prevent_initial_call=True,
         )
         def accept_live_switch(n_clicks, dataset_type, n_samples, noise, n_spirals, rotations):
-            if not n_clicks:
-                return dash.no_update, dash.no_update, dash.no_update, dash.no_update
-            payload = {"nn_dataset_type": dataset_type, "nn_dataset_elements": n_samples, "nn_dataset_noise": noise, "nn_spiral_number": n_spirals, "nn_spiral_rotations": rotations}
-            payload = {k: v for k, v in payload.items() if v is not None}
-            try:
-                # The Cancel-button callback (5) fires concurrently on
-                # Dash's worker pool; cascor receives the DELETE while
-                # this POST is still in flight and aborts the swap at
-                # its next checkpoint (cascor P2-1b).
-                resp = requests.post(
-                    self._api_url("/api/live_dataset_swap"),
-                    json=payload,
-                    timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
-                    headers=internal_api_headers(),
-                )
-                if resp.status_code == 200:
-                    data = (resp.json() or {}).get("data", {}) or {}
-                    swap_status = data.get("status")
-                    if swap_status == "cancelled":
-                        outcome = dbc.Alert("Live dataset swap cancelled.", color="info", duration=5000, dismissable=True)
-                    else:
-                        # Success — surface the pre-swap snapshot id so
-                        # the user can navigate back to it via the
-                        # Snapshots tab if they regret the swap.
-                        pre_snap = data.get("pre_swap_snapshot_id") or "n/a"
-                        outcome = dbc.Alert(["Live dataset swap complete. Pre-swap snapshot: ", html.Code(pre_snap)], color="success", duration=5000, dismissable=True)
-                    return False, False, outcome, {"in_flight": False}
-                # Cascor / backend rejection — surface the error verbatim
-                # per spec §4.3 ("failure shows the server error verbatim").
-                detail = resp.text[:300] if resp.text else f"HTTP {resp.status_code}"
-                self.logger.warning("Live dataset swap rejected: %s", detail)
-                outcome = dbc.Alert(f"Live dataset swap failed: {detail}", color="danger", duration=5000, dismissable=True)
-                return False, False, outcome, {"in_flight": False}
-            except requests.RequestException as exc:
-                self.logger.warning("Live dataset swap exception: %s", exc)
-                outcome = dbc.Alert(f"Backend unreachable: {exc}", color="danger", duration=5000, dismissable=True)
-                return False, False, outcome, {"in_flight": False}
+            return self._accept_live_switch_handler(n_clicks=n_clicks, dataset_type=dataset_type, n_samples=n_samples, noise=noise, n_spirals=n_spirals, rotations=rotations)
 
-        # (4b) Open the progress alert + set in_flight=True the moment
-        # Accept is clicked. Split from (4) so the user sees the spinner
-        # immediately rather than waiting for the POST to return. Dash
-        # runs both callbacks on the worker pool; this one returns
-        # near-instantly while (4) blocks on the HTTP.
         @self.app.callback(
             [
                 Output("live-switch-progress-alert", "is_open", allow_duplicate=True),
@@ -3782,40 +3688,184 @@ class DashboardManager:
             prevent_initial_call=True,
         )
         def open_progress_alert_on_accept(n_clicks):
-            if not n_clicks:
-                return dash.no_update, dash.no_update
-            return True, {"in_flight": True}
+            return self._open_progress_alert_on_accept_handler(n_clicks=n_clicks)
 
-        # (5) Cancel during swap → DELETE /api/live_dataset_swap. Fires
-        # while (4)'s POST is still in flight; Dash runs both on its
-        # worker pool so the DELETE reaches cascor before the POST
-        # response returns. Cascor's P2-1b cancel flag aborts the swap.
         @self.app.callback(
             Output("live-switch-outcome-alert", "children", allow_duplicate=True),
             Input("live-switch-cancel-button", "n_clicks"),
             prevent_initial_call=True,
         )
         def cancel_live_switch(n_clicks):
-            if not n_clicks:
+            return self._cancel_live_switch_handler(n_clicks=n_clicks)
+
+    # ------------------------------------------------------------------
+    # P2-5 (Issue #3) Live Dataset Switch handlers — extracted from
+    # ``_setup_live_dataset_switch_callbacks`` closures in P2-6 so each
+    # branch is unit-testable via direct invocation. Behaviour preserved
+    # bit-for-bit from P2-5 (#275); only the call site changed.
+    # See ``tests/unit/frontend/test_live_dataset_switch_handlers.py``.
+    # ------------------------------------------------------------------
+
+    def _update_training_status_store_handler(self, n_intervals=None):
+        """Populate ``training-status-store`` from ``/api/status``.
+
+        Returns ``{"is_running": bool, "phase": str}`` on success,
+        ``dash.no_update`` on non-200 / network error so a transient
+        backend hiccup doesn't blow away the prior store value.
+        """
+        try:
+            resp = requests.get(
+                self._api_url("/api/status"),
+                timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
+                headers=internal_api_headers(),
+            )
+            if resp.status_code != 200:
                 return dash.no_update
-            try:
-                resp = requests.delete(
-                    self._api_url("/api/live_dataset_swap"),
-                    timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
-                    headers=internal_api_headers(),
-                )
-                if resp.status_code == 200:
-                    # The actual "swap cancelled" alert is rendered by (4)
-                    # when the POST returns with status=cancelled; this
-                    # callback's outcome is suppressed to avoid double-rendering.
-                    self.logger.info("Live swap cancel signal sent")
-                    return dash.no_update
-                detail = resp.text[:200] if resp.text else f"HTTP {resp.status_code}"
-                self.logger.warning("Live swap cancel rejected: %s", detail)
-                return dbc.Alert(f"Cancel had no effect: {detail}", color="warning", duration=5000, dismissable=True)
-            except requests.RequestException as exc:
-                self.logger.warning("Live swap cancel exception: %s", exc)
-                return dbc.Alert(f"Cancel failed: {exc}", color="warning", duration=5000, dismissable=True)
+            payload = resp.json() or {}
+            return {
+                "is_running": bool(payload.get("is_running", False)),
+                "phase": str(payload.get("phase", "idle")),
+            }
+        except requests.RequestException:
+            return dash.no_update
+
+    def _gate_live_switch_button_handler(self, flags=None, status=None):
+        """Gate the Live Dataset Switch button.
+
+        Returns ``disabled=True`` unless BOTH stores agree:
+        ``experimental-flags-store.experimental_functions`` is True AND
+        ``training-status-store.is_running`` is True (F2.3 + F2.5).
+        """
+        flags_ok = bool(flags and flags.get("experimental_functions"))
+        running = bool(status and status.get("is_running"))
+        return not (flags_ok and running)
+
+    def _open_live_switch_modal_handler(self, n_clicks=None, dataset_type=None, n_samples=None, noise=None, n_spirals=None, rotations=None):
+        """Open the warning modal + populate the read-only dataset summary.
+
+        Returns ``(is_open, summary_rows)``. The summary is built from
+        the State values of the sidebar dataset inputs at click time —
+        Q3 hybrid: "here's what we're about to swap to" so the user
+        sees the exact config before confirming.
+        """
+        if not n_clicks:
+            return dash.no_update, dash.no_update
+        rows = []
+        for label, value in (
+            ("Dataset type", dataset_type),
+            ("Samples", n_samples),
+            ("Noise", noise),
+            ("Spirals", n_spirals),
+            ("Spiral rotations", rotations),
+        ):
+            if value is None:
+                continue
+            rows.append(dbc.ListGroupItem([html.Strong(f"{label}: "), html.Span(str(value))]))
+        if not rows:
+            rows = [dbc.ListGroupItem(html.Em("No dataset config selected in the sidebar."), color="warning")]
+        return True, rows
+
+    def _close_live_switch_modal_on_fallback_handler(self, n_clicks=None):
+        """Close the modal on "Return to Stop & Restart" click.
+
+        Minimal interpretation per Q2 — see PHASE_2_P2_5_FOLLOWUPS for
+        the three deferred active-interpretation polish items.
+        """
+        if not n_clicks:
+            return dash.no_update
+        return False
+
+    def _accept_live_switch_handler(self, n_clicks=None, dataset_type=None, n_samples=None, noise=None, n_spirals=None, rotations=None):  # noqa: C901
+        """POST ``/api/live_dataset_swap`` and reconcile the UI to the response.
+
+        Returns ``(modal_open, progress_open, outcome_alert, in_flight)``.
+
+        Three response branches:
+          * 200 + ``status == "cancelled"`` → info alert "swap cancelled"
+          * 200 + other status → success alert with the pre-swap snapshot id
+          * non-200 → danger alert with cascor's error string verbatim
+            (spec §4.3: "failure shows the server error verbatim")
+          * RequestException → danger alert with the exception detail
+
+        On every branch the modal + progress alert close and in_flight=False.
+        """
+        if not n_clicks:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        payload = {
+            "nn_dataset_type": dataset_type,
+            "nn_dataset_elements": n_samples,
+            "nn_dataset_noise": noise,
+            "nn_spiral_number": n_spirals,
+            "nn_spiral_rotations": rotations,
+        }
+        payload = {k: v for k, v in payload.items() if v is not None}
+        try:
+            resp = requests.post(
+                self._api_url("/api/live_dataset_swap"),
+                json=payload,
+                timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
+                headers=internal_api_headers(),
+            )
+            if resp.status_code == 200:
+                data = (resp.json() or {}).get("data", {}) or {}
+                swap_status = data.get("status")
+                if swap_status == "cancelled":
+                    outcome = dbc.Alert("Live dataset swap cancelled.", color="info", duration=5000, dismissable=True)
+                else:
+                    pre_snap = data.get("pre_swap_snapshot_id") or "n/a"
+                    outcome = dbc.Alert(["Live dataset swap complete. Pre-swap snapshot: ", html.Code(pre_snap)], color="success", duration=5000, dismissable=True)
+                return False, False, outcome, {"in_flight": False}
+            detail = resp.text[:300] if resp.text else f"HTTP {resp.status_code}"
+            self.logger.warning("Live dataset swap rejected: %s", detail)
+            outcome = dbc.Alert(f"Live dataset swap failed: {detail}", color="danger", duration=5000, dismissable=True)
+            return False, False, outcome, {"in_flight": False}
+        except requests.RequestException as exc:
+            self.logger.warning("Live dataset swap exception: %s", exc)
+            outcome = dbc.Alert(f"Backend unreachable: {exc}", color="danger", duration=5000, dismissable=True)
+            return False, False, outcome, {"in_flight": False}
+
+    def _open_progress_alert_on_accept_handler(self, n_clicks=None):
+        """Open the progress alert + flip in_flight=True the moment Accept
+        is clicked.
+
+        Returns ``(progress_open, in_flight)``. Split from the Accept POST
+        handler so the user sees the spinner immediately rather than
+        waiting for the (5–30 s) POST to return. Dash runs both callbacks
+        on the worker pool; this one returns near-instantly.
+        """
+        if not n_clicks:
+            return dash.no_update, dash.no_update
+        return True, {"in_flight": True}
+
+    def _cancel_live_switch_handler(self, n_clicks=None):
+        """DELETE ``/api/live_dataset_swap`` to cancel an in-flight swap.
+
+        Returns ``dash.no_update`` on success — the "cancelled" outcome
+        alert is rendered by ``_accept_live_switch_handler`` when its
+        POST returns with ``status="cancelled"``. Suppressing this
+        callback's outcome avoids double-rendering the alert.
+
+        Non-200 / RequestException → warning alert ("cancel had no
+        effect" / "cancel failed: ..."). Cascor 404 (no swap in
+        progress) is the common case and surfaces here as a warning.
+        """
+        if not n_clicks:
+            return dash.no_update
+        try:
+            resp = requests.delete(
+                self._api_url("/api/live_dataset_swap"),
+                timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
+                headers=internal_api_headers(),
+            )
+            if resp.status_code == 200:
+                self.logger.info("Live swap cancel signal sent")
+                return dash.no_update
+            detail = resp.text[:200] if resp.text else f"HTTP {resp.status_code}"
+            self.logger.warning("Live swap cancel rejected: %s", detail)
+            return dbc.Alert(f"Cancel had no effect: {detail}", color="warning", duration=5000, dismissable=True)
+        except requests.RequestException as exc:
+            self.logger.warning("Live swap cancel exception: %s", exc)
+            return dbc.Alert(f"Cancel failed: {exc}", color="warning", duration=5000, dismissable=True)
 
     # Define event handlers for callbacks
     def _toggle_dark_mode_handler(self, current_dark_mode=None):
