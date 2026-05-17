@@ -587,6 +587,19 @@ class DashboardManager:
                     storage_type="memory",
                     data={"in_flight": False},
                 ),
+                # Phase 2 P2-7 (Issue #3): dataset_swap event feed for
+                # the three P2-7 panels (replay timeline marker, History
+                # paired-diff, Snapshots tab badges). Populated each
+                # slow-update-interval tick from /api/history/dataset_swaps
+                # (proxies cascor follow-up B). Shared across panels so
+                # they all render against a single source of truth.
+                # ``memory`` storage — rebuilt from the route on each
+                # page load.
+                dcc.Store(
+                    id="dataset-swap-events-store",
+                    storage_type="memory",
+                    data={"events": []},
+                ),
                 # Unified Top Status Bar - Connection, Status, Phase, Metrics, and Latency
                 dbc.Row(
                     [
@@ -1828,6 +1841,7 @@ class DashboardManager:
         self._setup_backend_callbacks()  # Define backend callbacks
         self._setup_experimental_functions_callbacks()  # P2-4 (Issue #3)
         self._setup_live_dataset_switch_callbacks()  # P2-5 (Issue #3)
+        self._setup_dataset_swap_observers_callbacks()  # P2-7 (Issue #3)
 
     def _setup_sidebar_visibility_callback(self):
         """Set up sidebar contextual visibility based on active tab."""
@@ -3698,6 +3712,27 @@ class DashboardManager:
         def cancel_live_switch(n_clicks):
             return self._cancel_live_switch_handler(n_clicks=n_clicks)
 
+    def _setup_dataset_swap_observers_callbacks(self):
+        """Phase 2 P2-7 (Issue #3): poll ``dataset-swap-events-store``.
+
+        Single polling callback that fires each ``slow-update-interval``
+        tick to hydrate the events store from ``/api/history/dataset_swaps``.
+        The three P2-7 consumer panels (replay timeline marker, History
+        paired-diff, Snapshots tab badges) all read from this store —
+        none re-issue the HTTP call themselves.
+
+        Delegates to ``_poll_dataset_swap_events_handler`` so the branch
+        logic is unit-testable.
+        """
+
+        @self.app.callback(
+            Output("dataset-swap-events-store", "data"),
+            Input("slow-update-interval", "n_intervals"),
+            prevent_initial_call=False,
+        )
+        def poll_dataset_swap_events(n_intervals):
+            return self._poll_dataset_swap_events_handler(n_intervals=n_intervals)
+
     # ------------------------------------------------------------------
     # P2-5 (Issue #3) Live Dataset Switch handlers — extracted from
     # ``_setup_live_dataset_switch_callbacks`` closures in P2-6 so each
@@ -3705,6 +3740,27 @@ class DashboardManager:
     # bit-for-bit from P2-5 (#275); only the call site changed.
     # See ``tests/unit/frontend/test_live_dataset_switch_handlers.py``.
     # ------------------------------------------------------------------
+
+    def _poll_dataset_swap_events_handler(self, n_intervals=None):
+        """Hydrate the ``dataset-swap-events-store`` from the canopy proxy.
+
+        Returns ``{"events": [...]}`` on success — list always present,
+        empty when no swaps yet. ``dash.no_update`` on backend hiccup so
+        the prior store value (typically the same events) stays put.
+        """
+        try:
+            resp = requests.get(
+                self._api_url("/api/history/dataset_swaps"),
+                timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
+                headers=internal_api_headers(),
+            )
+            if resp.status_code != 200:
+                return dash.no_update
+            data = (resp.json() or {}).get("data", {}) or {}
+            events = data.get("events", []) or []
+            return {"events": list(events)}
+        except requests.RequestException:
+            return dash.no_update
 
     def _update_training_status_store_handler(self, n_intervals=None):
         """Populate ``training-status-store`` from ``/api/status``.

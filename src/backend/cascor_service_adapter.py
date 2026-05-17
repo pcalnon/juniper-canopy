@@ -1036,6 +1036,44 @@ class CascorServiceAdapter:
             logger.error("cancel_swap_dataset_live failed: %s", e)
             return {"ok": False, "error": str(e)}
 
+    # ------------------------------------------------------------------
+    # Phase 2 P2-7 (Issue #3): live ``dataset_swap`` event feed.
+    #
+    # Cascor's follow-up B (#255) ships ``GET /v1/history/dataset_swaps``
+    # which returns the LIVE network's recorded swap events
+    # (``network.history["dataset_swaps"]`` — P2-2 #253 storage). Canopy
+    # P2-7's three UI deliverables (replay timeline marker, History
+    # paired-diff, Snapshots tab badges) all consume this list. Polled
+    # every ``slow-update-interval`` tick into a single
+    # ``dataset-swap-events-store`` so the three panels share state.
+    #
+    # The ``since`` filter lets the canopy poller pass its last-seen
+    # timestamp and pull only new events on subsequent ticks — useful
+    # when the list grows large.
+    # ------------------------------------------------------------------
+
+    def get_dataset_swap_events(self, since: Optional[str] = None) -> Dict[str, Any]:
+        """GET /v1/history/dataset_swaps — read the dataset_swap event list.
+
+        Returns ``{"ok": True, "events": [<event_dict>, ...]}`` on success.
+        Each event has the §3.9 schema:
+        ``{timestamp, before_cfg, after_cfg, arch_changes,
+           pre_swap_snapshot_id, post_swap_snapshot_id}``.
+
+        Returns ``{"ok": False, "error": <str>}`` on cascor failure. The
+        callback layer treats a failure as "no events known" (empty list)
+        rather than as a UI error — the three panels degrade gracefully.
+        """
+        params = {"since": since} if since else None
+        try:
+            result = self._client._request("GET", "/v1/history/dataset_swaps", params=params)
+            data = (result or {}).get("data", {}) or {}
+            events = data.get("events", []) or []
+            return {"ok": True, "events": list(events)}
+        except JuniperCascorClientError as e:
+            logger.error("get_dataset_swap_events failed: %s", e)
+            return {"ok": False, "error": str(e), "events": []}
+
     def _apply_params_hot(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Send hot params via /ws/control set_params with command_id.
 

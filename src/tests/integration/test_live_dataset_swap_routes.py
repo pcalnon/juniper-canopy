@@ -52,12 +52,16 @@ class TestDemoSwapDatasetLive:
             assert key in arch, f"demo response missing arch_changes field {key!r}"
 
     def test_swap_returns_demo_snapshot_ids(self):
+        """Demo snapshot IDs use a per-event index suffix (P2-7) so the
+        Snapshots-tab badge cross-reference works as it would against
+        real cascor (where each swap gets distinct pre/post IDs)."""
         from demo_mode import DemoMode
 
         demo = DemoMode()
         result = demo.swap_dataset_live(dataset_type="moons")
-        assert result["data"]["pre_swap_snapshot_id"] == "demo_snapshot_pre"
-        assert result["data"]["post_swap_snapshot_id"] == "demo_snapshot_post"
+        # First demo swap → event index 0 → ``..._000`` suffix.
+        assert result["data"]["pre_swap_snapshot_id"] == "demo_snapshot_pre_000"
+        assert result["data"]["post_swap_snapshot_id"] == "demo_snapshot_post_000"
 
     def test_swap_with_no_config_rejects(self):
         """Demo refuses an empty config — mirrors cascor's behaviour

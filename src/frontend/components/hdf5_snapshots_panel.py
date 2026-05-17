@@ -331,6 +331,23 @@ class HDF5SnapshotsPanel(BaseComponent):
                                         id=f"{self.component_id}-history-content",
                                         children="Loading history...",
                                     ),
+                                    # Phase 2 P2-7 (Issue #3): Dataset Swap
+                                    # paired-diff section. Each event from
+                                    # the live dataset_swap event feed
+                                    # (P2-2 storage / follow-up B route /
+                                    # P2-7 store) renders as a card with
+                                    # before-cfg + after-cfg side-by-side,
+                                    # arch_changes badge ribbon, and
+                                    # "Restore from pre-swap snapshot" /
+                                    # "Restore from post-swap snapshot"
+                                    # buttons that reuse the existing
+                                    # snapshot-restore plumbing.
+                                    html.Hr(),
+                                    html.H6("Dataset Swap Events", className="mb-2"),
+                                    html.Div(
+                                        id=f"{self.component_id}-dataset-swaps-content",
+                                        children=html.Div("No dataset swaps recorded yet.", className="text-muted small"),
+                                    ),
                                 ]
                             ),
                             id=f"{self.component_id}-history-collapse",
@@ -608,6 +625,135 @@ class HDF5SnapshotsPanel(BaseComponent):
             self.logger.warning(f"Failed to fetch history: {e}")
             return {"history": [], "message": "History service unavailable"}
 
+    def _compute_swap_snapshot_roles(self, events):
+        """Map snapshot_id → ordered tuple of role labels.
+
+        Used by ``update_snapshots_table`` to inject "Pre-swap" /
+        "Post-swap" badges next to the snapshot name in the table.
+
+        A single snapshot may appear as both pre-swap (one event) and
+        post-swap (a different event) — the badges render in stable
+        order ("Pre-swap" before "Post-swap") so the table looks
+        deterministic across renders.
+
+        Returns a dict ``{snapshot_id: ("Pre-swap",), ...}`` etc. Empty
+        dict when the event list is empty.
+        """
+        roles: Dict[str, set] = {}
+        for ev in events or []:
+            if not isinstance(ev, dict):
+                continue
+            pre_id = ev.get("pre_swap_snapshot_id")
+            post_id = ev.get("post_swap_snapshot_id")
+            if pre_id:
+                roles.setdefault(str(pre_id), set()).add("Pre-swap")
+            if post_id:
+                roles.setdefault(str(post_id), set()).add("Post-swap")
+        # Deterministic role ordering: Pre-swap before Post-swap.
+        return {sid: tuple(r for r in ("Pre-swap", "Post-swap") if r in role_set) for sid, role_set in roles.items()}
+
+    def _render_dataset_swap_diffs_handler(self, store_data=None):
+        """Render the dataset_swap event list as paired-diff cards.
+
+        Each card shows:
+          * Header: timestamp + abbreviated before→after dataset_type.
+          * Body: two columns (before_cfg / after_cfg) side-by-side +
+            arch_changes badge ribbon (input_delta, output_delta,
+            hidden_preserved, abandoned_candidates, snapshot IDs).
+          * Footer: "Restore from pre-swap snapshot" / "Restore from
+            post-swap snapshot" buttons that reuse the existing
+            snapshot-restore plumbing via pattern-matched IDs.
+
+        Returns a list of ``dbc.Card`` components in chronological order.
+        Empty list → "No dataset swaps recorded yet." muted placeholder.
+        """
+        events = []
+        if isinstance(store_data, dict):
+            events = list(store_data.get("events") or [])
+        if not events:
+            return html.Div("No dataset swaps recorded yet.", className="text-muted small")
+
+        def _cfg_block(title, cfg):
+            """Render a single before/after column as a bullet list."""
+            if not cfg:
+                return html.Div([html.Strong(title), html.Div(html.Em("(none)"), className="text-muted small")], className="me-3")
+            rows = [html.Li([html.Strong(f"{k}: "), html.Span(str(v))]) for k, v in cfg.items()]
+            return html.Div([html.Strong(title), html.Ul(rows, className="mb-0 small")], className="me-3")
+
+        cards = []
+        for i, ev in enumerate(events):
+            timestamp = ev.get("timestamp") or "unknown"
+            before_cfg = ev.get("before_cfg") or {}
+            after_cfg = ev.get("after_cfg") or {}
+            arch = ev.get("arch_changes") or {}
+            pre_id = ev.get("pre_swap_snapshot_id")
+            post_id = ev.get("post_swap_snapshot_id")
+            before_type = before_cfg.get("dataset_type") or "?"
+            after_type = after_cfg.get("dataset_type") or "?"
+
+            arch_badges = [
+                dbc.Badge(f"input Δ {arch.get('input_delta', 0):+d}", color="info", className="me-1"),
+                dbc.Badge(f"output Δ {arch.get('output_delta', 0):+d}", color="info", className="me-1"),
+                dbc.Badge(f"{arch.get('hidden_preserved', 0)} hidden preserved", color="secondary", className="me-1"),
+            ]
+            abandoned = arch.get("abandoned_candidate_pool_size", 0)
+            if abandoned:
+                arch_badges.append(dbc.Badge(f"{abandoned} candidates abandoned", color="warning", className="me-1"))
+
+            footer_buttons = []
+            if pre_id:
+                footer_buttons.append(
+                    dbc.Button(
+                        ["Restore from pre-swap snapshot ", html.Code(pre_id, className="small")],
+                        id={"type": f"{self.component_id}-swap-restore-pre-btn", "index": i},
+                        color="secondary",
+                        outline=True,
+                        size="sm",
+                        className="me-2",
+                    )
+                )
+            if post_id:
+                footer_buttons.append(
+                    dbc.Button(
+                        ["Restore from post-swap snapshot ", html.Code(post_id, className="small")],
+                        id={"type": f"{self.component_id}-swap-restore-post-btn", "index": i},
+                        color="secondary",
+                        outline=True,
+                        size="sm",
+                    )
+                )
+
+            card = dbc.Card(
+                [
+                    dbc.CardHeader(
+                        html.Div(
+                            [
+                                html.Code(timestamp, className="small me-2"),
+                                html.Strong(f"{before_type} → {after_type}"),
+                            ]
+                        )
+                    ),
+                    dbc.CardBody(
+                        [
+                            dbc.Row(
+                                [
+                                    dbc.Col(_cfg_block("Before", before_cfg), md=6),
+                                    dbc.Col(_cfg_block("After", after_cfg), md=6),
+                                ],
+                                className="mb-2",
+                            ),
+                            html.Div(arch_badges, className="mb-2"),
+                            html.Div(footer_buttons) if footer_buttons else html.Div(),
+                        ]
+                    ),
+                ],
+                className="mb-3",
+                outline=True,
+                color="light",
+            )
+            cards.append(card)
+        return cards
+
     def _format_size(self, size_bytes: int) -> str:
         """
         Format byte size to human-readable string.
@@ -704,6 +850,9 @@ class HDF5SnapshotsPanel(BaseComponent):
                 return status_content, current_trigger or 0, name, description
 
         # Callback: Refresh / auto-refresh → update snapshots table
+        # P2-7 (Issue #3): also re-renders on dataset_swap-events-store
+        # changes so newly-recorded swap events get their pre/post-swap
+        # badges painted in.
         @app.callback(
             Output(f"{self.component_id}-table-body", "children"),
             Output(f"{self.component_id}-status", "children"),
@@ -712,13 +861,24 @@ class HDF5SnapshotsPanel(BaseComponent):
             Input(f"{self.component_id}-refresh-interval", "n_intervals"),
             Input(f"{self.component_id}-refresh-button", "n_clicks"),
             Input(f"{self.component_id}-refresh-trigger", "data"),
+            Input("dataset-swap-events-store", "data"),
             prevent_initial_call=False,
         )
-        def update_snapshots_table(n_intervals, n_clicks, refresh_trigger):
+        def update_snapshots_table(n_intervals, n_clicks, refresh_trigger, swap_events_store):
             """Update the snapshots table with current data."""
             result = self._fetch_snapshots_handler(n_intervals)
             snapshots = result.get("snapshots", [])
             message = result.get("message")
+
+            # P2-7: build the snapshot-id → role map from the dataset_swap
+            # events. A snapshot may be tagged "Pre-swap" (matched a
+            # ``pre_swap_snapshot_id``), "Post-swap", or both. The badge
+            # in the row header surfaces this so the user can spot
+            # swap-related snapshots at a glance.
+            swap_event_list = []
+            if isinstance(swap_events_store, dict):
+                swap_event_list = list(swap_events_store.get("events") or [])
+            swap_roles = self._compute_swap_snapshot_roles(swap_event_list)
 
             # Build table rows
             rows: List[html.Tr] = []
@@ -727,6 +887,12 @@ class HDF5SnapshotsPanel(BaseComponent):
                 name = snapshot.get("name") or snapshot_id
                 timestamp = self._format_timestamp(snapshot.get("timestamp", ""))
                 size = self._format_size(snapshot.get("size_bytes", 0))
+                # P2-7 swap-role badges (zero, one, or two per snapshot).
+                role_badges = []
+                for role in swap_roles.get(snapshot_id, ()):
+                    color = "info" if role == "Pre-swap" else "success"
+                    role_badges.append(dbc.Badge(role, color=color, className="ms-1"))
+                name_cell = html.Div([html.Span(name), *role_badges]) if role_badges else name
 
                 # CAN-015e (Phase 6E Sprint B B-5): the per-row "Restore"
                 # button is replaced with a dropdown exposing all four
@@ -744,7 +910,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                 rows.append(
                     html.Tr(
                         [
-                            html.Td(name, style={"padding": "10px", "borderBottom": "1px solid var(--border-color, #dee2e6)"}),
+                            html.Td(name_cell, style={"padding": "10px", "borderBottom": "1px solid var(--border-color, #dee2e6)"}),
                             html.Td(timestamp, style={"padding": "10px", "borderBottom": "1px solid var(--border-color, #dee2e6)"}),
                             html.Td(size, style={"padding": "10px", "borderBottom": "1px solid var(--border-color, #dee2e6)"}),
                             html.Td(
@@ -1218,6 +1384,19 @@ class HDF5SnapshotsPanel(BaseComponent):
         self._cb_create_snapshot = create_snapshot
         self._cb_update_snapshots_table = update_snapshots_table
         self._cb_select_snapshot = select_snapshot
+
+        # Phase 2 P2-7 (Issue #3): render dataset_swap events as paired-diff
+        # cards in the History collapse. Listens to the shared
+        # dataset-swap-events-store (populated by DashboardManager's
+        # slow-update-interval polling callback) so the rendering
+        # refreshes whenever new events arrive.
+        @app.callback(
+            Output(f"{self.component_id}-dataset-swaps-content", "children"),
+            Input("dataset-swap-events-store", "data"),
+        )
+        def render_dataset_swap_diffs(store_data):
+            return self._render_dataset_swap_diffs_handler(store_data=store_data)
+
         self._cb_update_detail_panel = update_detail_panel
         self._cb_open_restore_modal = open_snapshot_op_modal
         self._cb_open_snapshot_op_modal = open_snapshot_op_modal
@@ -1225,5 +1404,6 @@ class HDF5SnapshotsPanel(BaseComponent):
         self._cb_confirm_restore = confirm_snapshot_op
         self._cb_confirm_snapshot_op = confirm_snapshot_op
         self._cb_toggle_history = toggle_history
+        self._cb_render_dataset_swap_diffs = render_dataset_swap_diffs
 
         self.logger.debug(f"Callbacks registered for {self.component_id}")

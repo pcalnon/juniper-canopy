@@ -191,7 +191,7 @@ class TestUpdateSnapshotsTableCallback:
         }
 
         with patch.object(registered_panel, "_fetch_snapshots_handler", return_value=mock_data):
-            rows, status, empty_style, store = registered_panel._cb_update_snapshots_table(0, 0, 0)
+            rows, status, empty_style, store = registered_panel._cb_update_snapshots_table(0, 0, 0, {"events": []})
 
         # Should have 2 rows
         assert len(rows) == 2
@@ -214,7 +214,7 @@ class TestUpdateSnapshotsTableCallback:
             "_fetch_snapshots_handler",
             return_value={"snapshots": [], "message": "No data available"},
         ):
-            rows, status, empty_style, store = registered_panel._cb_update_snapshots_table(0, 0, 0)
+            rows, status, empty_style, store = registered_panel._cb_update_snapshots_table(0, 0, 0, {"events": []})
 
         assert len(rows) == 0
         assert "No data available" in status
@@ -229,7 +229,7 @@ class TestUpdateSnapshotsTableCallback:
         }
 
         with patch.object(registered_panel, "_fetch_snapshots_handler", return_value=mock_data):
-            rows, _, _, _ = registered_panel._cb_update_snapshots_table(1, 0, 0)
+            rows, _, _, _ = registered_panel._cb_update_snapshots_table(1, 0, 0, {"events": []})
 
         # The name should appear in the first cell
         row_str = str(rows[0])
@@ -243,7 +243,7 @@ class TestUpdateSnapshotsTableCallback:
         }
 
         with patch.object(registered_panel, "_fetch_snapshots_handler", return_value=mock_data):
-            rows, _, _, _ = registered_panel._cb_update_snapshots_table(1, 0, 0)
+            rows, _, _, _ = registered_panel._cb_update_snapshots_table(1, 0, 0, {"events": []})
 
         row_str = str(rows[0])
         assert "fallback_id" in row_str

@@ -297,6 +297,35 @@ class ReplayPlayerPanel(BaseComponent):
                     ],
                     style={"marginBottom": "10px"},
                 ),
+                # Phase 2 P2-7 (Issue #3): dataset_swap events timeline.
+                # Each event recorded for the live cascor session (P2-2
+                # storage, exposed via cascor follow-up B / canopy
+                # /api/history/dataset_swaps) renders as a vertical
+                # marker on a wall-clock time axis. Hover shows
+                # before→after dataset_type + arch_changes summary.
+                # Click navigation (jump to pre/post-swap snapshot)
+                # lives in the History panel's paired-diff cards —
+                # this figure is hover-only.
+                html.Div(
+                    [
+                        html.Label("Dataset swap events", style={"fontWeight": "500", "marginRight": "10px"}),
+                        html.Span(
+                            id=f"{self.component_id}-swap-events-count",
+                            style={"fontFamily": "monospace", "color": "var(--text-muted)"},
+                        ),
+                        dcc.Graph(
+                            id=f"{self.component_id}-swap-events-graph",
+                            figure={"data": [], "layout": {"height": 110, "margin": {"l": 30, "r": 20, "t": 20, "b": 30}, "xaxis": {"title": "", "showgrid": False}, "yaxis": {"visible": False, "fixedrange": True}, "showlegend": False, "plot_bgcolor": "rgba(0,0,0,0)", "paper_bgcolor": "rgba(0,0,0,0)"}},
+                            config={"displayModeBar": False, "staticPlot": False},
+                            style={"height": "110px"},
+                        ),
+                        html.Small(
+                            "Each marker is a recorded swap. Hover for before→after detail. Use the History panel to seek to the pre-/post-swap snapshot.",
+                            style={"color": "var(--text-muted)"},
+                        ),
+                    ],
+                    style={"marginBottom": "10px"},
+                ),
             ]
         )
 
@@ -592,11 +621,83 @@ class ReplayPlayerPanel(BaseComponent):
             new_session = self._merge_session(session, action, params, result.get("data"))
             return self._success_status(action), new_session
 
+        # Phase 2 P2-7 (Issue #3): dataset_swap events timeline figure.
+        # Hover-only — click navigation lives in the History panel's
+        # paired-diff cards. The events store is populated by the polling
+        # callback in DashboardManager (slow-update-interval tick).
+        @app.callback(
+            [
+                Output(f"{component_id}-swap-events-graph", "figure"),
+                Output(f"{component_id}-swap-events-count", "children"),
+            ],
+            Input("dataset-swap-events-store", "data"),
+        )
+        def render_swap_events_graph(store_data):
+            return self._render_swap_events_graph_handler(store_data=store_data)
+
         # Expose for unit tests.
         self._cb_render_session = render_session
         self._cb_queue_control = queue_control
         self._cb_dispatch_control = dispatch_control
+        self._cb_render_swap_events_graph = render_swap_events_graph
         self.logger.debug("Callbacks registered for %s", component_id)
+
+    def _render_swap_events_graph_handler(self, store_data=None):
+        """Build the dataset_swap events Plotly figure + the count label.
+
+        Returns ``(figure, count_label)``. With no events, returns a
+        minimal "no swaps recorded" figure + ``"0 events"``. Each event
+        renders as a scatter marker on a wall-clock x-axis with a hover
+        tooltip showing before→after dataset_type + arch_changes summary.
+
+        Read-only — click events are NOT wired here (the History panel's
+        paired-diff cards own the seek-to-snapshot interaction).
+        """
+        events = []
+        if isinstance(store_data, dict):
+            events = list(store_data.get("events") or [])
+        empty_layout = {
+            "height": 110,
+            "margin": {"l": 30, "r": 20, "t": 20, "b": 30},
+            "xaxis": {"title": "", "showgrid": False},
+            "yaxis": {"visible": False, "fixedrange": True},
+            "showlegend": False,
+            "plot_bgcolor": "rgba(0,0,0,0)",
+            "paper_bgcolor": "rgba(0,0,0,0)",
+        }
+        if not events:
+            return {"data": [], "layout": {**empty_layout, "annotations": [{"text": "No dataset swaps recorded yet", "xref": "paper", "yref": "paper", "x": 0.5, "y": 0.5, "showarrow": False, "font": {"size": 12, "color": "#888"}}]}}, "0 events"
+        # Build hover text per event — keep concise; the History panel
+        # paired-diff shows the full payload.
+        xs = []
+        hovers = []
+        for ev in events:
+            ts = ev.get("timestamp") or "unknown"
+            xs.append(ts)
+            before = (ev.get("before_cfg") or {}).get("dataset_type") or "?"
+            after = (ev.get("after_cfg") or {}).get("dataset_type") or "?"
+            arch = ev.get("arch_changes") or {}
+            input_delta = arch.get("input_delta", 0)
+            output_delta = arch.get("output_delta", 0)
+            hidden = arch.get("hidden_preserved", 0)
+            hovers.append(f"<b>{before} → {after}</b><br>" f"timestamp: {ts}<br>" f"input Δ {input_delta:+d}, output Δ {output_delta:+d}, hidden {hidden} preserved")
+        marker_color = "#f0ad4e"  # bootstrap warning
+        figure = {
+            "data": [
+                {
+                    "type": "scatter",
+                    "mode": "markers",
+                    "x": xs,
+                    "y": [0] * len(xs),
+                    "marker": {"size": 14, "symbol": "diamond", "color": marker_color, "line": {"color": "#222", "width": 1}},
+                    "hovertext": hovers,
+                    "hovertemplate": "%{hovertext}<extra></extra>",
+                }
+            ],
+            "layout": empty_layout,
+        }
+        count_label = f"{len(events)} event{'s' if len(events) != 1 else ''}"
+        return figure, count_label
 
     # ------------------------------------------------------------------
     # Status helpers

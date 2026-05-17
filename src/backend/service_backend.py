@@ -243,6 +243,12 @@ class ServiceBackend:
     def cancel_swap_dataset_live(self) -> Dict[str, Any]:
         return self._adapter.cancel_swap_dataset_live()
 
+    # Phase 2 P2-7 (Issue #3): dataset_swap event feed (cascor follow-up
+    # B / #255). Polled by canopy's three swap-aware panels.
+
+    def get_dataset_swap_events(self, since: Optional[str] = None) -> Dict[str, Any]:
+        return self._adapter.get_dataset_swap_events(since=since)
+
     # --- Lifecycle ---
 
     async def initialize(self) -> bool:
