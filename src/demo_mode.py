@@ -2101,32 +2101,62 @@ class DemoMode:
             # doesn't carry an input/output dim concept worth resizing,
             # so arch_changes is reported as zero-delta.
             self._pending_dataset_config = None
-            return {
-                "ok": True,
-                "data": {
-                    "status": "swapped",
-                    "before_cfg": {"dataset_type": "demo-prior"},
-                    "after_cfg": dict(cfg),
-                    "arch_changes": {
-                        "input_delta": 0,
-                        "output_delta": 0,
-                        "hidden_preserved": 0,
-                        "appended_nodes": {"input": 0, "output": 0},
-                        "prepended_layers": [],
-                        "abandoned_candidate_pool_size": 0,
-                        "active_output_dim": 0,
-                    },
-                    "pre_swap_snapshot_id": "demo_snapshot_pre",
-                    "post_swap_snapshot_id": "demo_snapshot_post",
-                    "mode": "output_training_first",
+            # Phase 2 P2-7: each successful demo swap appends a fabricated
+            # ``dataset_swap`` event to ``self._dataset_swap_events`` so
+            # the canopy panels (replay markers / paired-diff / snapshot
+            # badges) can render the demo's swap history without cascor.
+            # Unique snapshot IDs per call so the Snapshots tab badge
+            # cross-reference works as it would against real cascor.
+            from datetime import datetime, timezone
+
+            event_index = len(getattr(self, "_dataset_swap_events", []))
+            timestamp = datetime.now(timezone.utc).isoformat()
+            pre_id = f"demo_snapshot_pre_{event_index:03d}"
+            post_id = f"demo_snapshot_post_{event_index:03d}"
+            data = {
+                "status": "swapped",
+                "before_cfg": {"dataset_type": "demo-prior"},
+                "after_cfg": dict(cfg),
+                "arch_changes": {
+                    "input_delta": 0,
+                    "output_delta": 0,
+                    "hidden_preserved": 0,
+                    "appended_nodes": {"input": 0, "output": 0},
+                    "prepended_layers": [],
+                    "abandoned_candidate_pool_size": 0,
+                    "active_output_dim": 0,
                 },
-                "config": dict(cfg),
+                "pre_swap_snapshot_id": pre_id,
+                "post_swap_snapshot_id": post_id,
+                "mode": "output_training_first",
             }
+            if not hasattr(self, "_dataset_swap_events"):
+                self._dataset_swap_events = []
+            self._dataset_swap_events.append(
+                {
+                    "timestamp": timestamp,
+                    "before_cfg": data["before_cfg"],
+                    "after_cfg": data["after_cfg"],
+                    "arch_changes": data["arch_changes"],
+                    "pre_swap_snapshot_id": pre_id,
+                    "post_swap_snapshot_id": post_id,
+                }
+            )
+            return {"ok": True, "data": data, "config": dict(cfg)}
 
     def cancel_swap_dataset_live(self) -> Dict[str, Any]:
         # Demo has no real in-flight HTTP; nothing to cancel. Surface as
         # ok=False to mirror cascor's 404 response for the same scenario.
         return {"ok": False, "error": "no_swap_in_progress"}
+
+    # Phase 2 P2-7 (Issue #3): demo parity for the dataset_swap event feed.
+
+    def get_dataset_swap_events(self, since: Optional[str] = None) -> Dict[str, Any]:
+        with self._lock:
+            events = list(getattr(self, "_dataset_swap_events", []))
+        if since is not None:
+            events = [e for e in events if isinstance(e.get("timestamp"), str) and e["timestamp"] > since]
+        return {"ok": True, "events": events}
 
 
 # Global demo mode instance (singleton)

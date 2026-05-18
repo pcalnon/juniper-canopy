@@ -394,11 +394,12 @@ class TestHDF5SnapshotsPanelCallbacks:
 
         panel.register_callbacks(mock_app)
 
-        # Should have 8 callbacks:
+        # Should have 9 callbacks:
         # P3-1: create_snapshot, update_snapshots_table, select_snapshot, update_detail_panel
         # P3-2: open_restore_modal, close_restore_modal, confirm_restore
         # P3-3: toggle_history
-        assert callback_count == 8
+        # P2-7: render_dataset_swap_diffs (Issue #3)
+        assert callback_count == 9
 
 
 # =============================================================================

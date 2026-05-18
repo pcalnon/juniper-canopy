@@ -3099,6 +3099,44 @@ async def api_cancel_live_dataset_swap():
 
 
 # =========================================================================
+# Phase 2 P2-7 (Issue #3): dataset_swap event feed for canopy timeline /
+# paired-diff / snapshot-badge consumers. Proxies cascor's follow-up B
+# (#255) — ``GET /v1/history/dataset_swaps`` — so the canopy callback
+# layer keeps its single-HTTP-target convention.
+#
+# ``since`` query param is forwarded verbatim so a poller can pass its
+# last-seen timestamp and get only strictly-newer events on subsequent
+# ticks. Empty-list response is normal (no swaps yet) and not an error.
+# =========================================================================
+
+
+@app.get("/api/history/dataset_swaps")
+async def api_get_dataset_swap_events(since: Optional[str] = None):
+    """Read the canopy session's live dataset_swap event list.
+
+    Returns ``{"status": "success", "data": {"events": [...]}}`` on
+    success. Each event has the §3.9 schema (``timestamp``, ``before_cfg``,
+    ``after_cfg``, ``arch_changes``, ``pre_swap_snapshot_id``,
+    ``post_swap_snapshot_id``).
+
+    Cascor / backend failure → 502 with the error string. The canopy
+    panels treat a 502 as "no events known yet" and render empty state.
+    """
+    try:
+        result = await asyncio.to_thread(backend.get_dataset_swap_events, since=since)
+        if isinstance(result, dict) and not result.get("ok", True):
+            error_msg = result.get("error", "unknown")
+            system_logger.warning("Backend rejected dataset_swap events fetch: %s", error_msg)
+            return JSONResponse({"error": f"Backend rejected: {error_msg}"}, status_code=502)
+        events = (result or {}).get("events", []) or []
+        return {"status": "success", "data": {"events": events}}
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Failed to fetch dataset_swap events [error_id=%s]", error_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
+
+# =========================================================================
 # P1-NEW-002: Remote Worker Management Endpoints
 # =========================================================================
 
