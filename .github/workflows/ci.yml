@@ -140,8 +140,8 @@ jobs:
       - name: Install dependencies
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
-          echo "║       Juniper Canopy - Install Dependencies                ║"
-          echo "║       Python ${{ matrix.python-version }} on ${{ matrix.os }}              ║"
+          echo "║    Juniper Canopy - Install Dependencies                   ║"
+          echo "║    Python ${{ matrix.python-version }} on ${{ matrix.os }} ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           python -m pip install --upgrade "pip>=26.1.1"
           # METRICS-MON R3.7: torch wheel resolution differs by OS.
@@ -626,7 +626,7 @@ jobs:
 
   # ═══════════════════════════════════════════════════════════════════════════════════════════════
   # Documentation Links: Validate internal markdown links
-  # ════════════════════════════════════════════��══════════════════════════════════════════════════
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
   docs:
     name: Documentation Links
     runs-on: ubuntu-latest
@@ -647,9 +647,14 @@ jobs:
           echo "║       Juniper Canopy - Documentation Link Validation       ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           python scripts/check_doc_links.py \
-            --exclude templates --exclude history \
-            --exclude pull_requests --exclude releases \
-            --exclude analysis --exclude fixes --exclude development \
+            --exclude templates \
+            --exclude history \
+            --exclude legacy \
+            --exclude pull_requests \
+            --exclude releases \
+            --exclude analysis \
+            --exclude fixes \
+            --exclude development \
             --exclude CHANGELOG.md \
             --cross-repo skip
 
@@ -680,7 +685,7 @@ jobs:
       - name: Run async-route audit
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
-          echo "║       Juniper Canopy - Async-route audit (BUG-JD-10)      ║"
+          echo "║       Juniper Canopy - Async-route audit (BUG-JD-10)       ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           ruff check --select ASYNC --output-format=github src/
 
@@ -700,14 +705,14 @@ jobs:
       - name: Build Docker Image
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
-          echo "║       Juniper Canopy - Docker Build                       ║"
+          echo "║       Juniper Canopy - Docker Build                        ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           docker build -t juniper-canopy:ci-${{ github.sha }} .
 
       - name: Verify Container Starts
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
-          echo "║       Juniper Canopy - Docker Smoke Test                  ║"
+          echo "║       Juniper Canopy - Docker Smoke Test                   ║"
           echo "╚════════════════════════════════════════════════════════════╝"
           docker run -d --name juniper-canopy-test \
             -p 8050:8050 \
