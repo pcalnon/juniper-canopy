@@ -150,6 +150,136 @@ class TestRenderSwapEventsGraphHandler:
         assert "input Δ +2" in hover
         assert "hidden 5 preserved" in hover
 
+    # P2-7 follow-up: augment-render with the loaded snapshot's own
+    # history. Both stores are independent; either group may be empty.
+    def test_snapshot_store_only_renders_snapshot_trace(self, replay_panel):
+        """No live events but a loaded snapshot with swaps → one
+        snapshot trace, count label tallies snapshot side only."""
+        figure, count_label = replay_panel._render_swap_events_graph_handler(
+            store_data={"events": []},
+            snapshot_store_data={"events": [_make_event(0), _make_event(1)]},
+        )
+        assert len(figure["data"]) == 1
+        assert figure["data"][0]["name"] == "Snapshot"
+        assert count_label == "2 events"
+
+    def test_both_stores_render_two_traces_with_breakdown(self, replay_panel):
+        """When both groups have events the figure shows two traces and
+        the count label breaks down live vs snapshot — matters because
+        a user reviewing a stored snapshot wants to know which markers
+        come from the snapshot's own training run vs the live feed."""
+        figure, count_label = replay_panel._render_swap_events_graph_handler(
+            store_data={"events": [_make_event(0)]},
+            snapshot_store_data={"events": [_make_event(1), _make_event(2)]},
+        )
+        assert len(figure["data"]) == 2
+        names = {t["name"] for t in figure["data"]}
+        assert names == {"Live", "Snapshot"}
+        assert count_label == "3 events (1 live + 2 snapshot)"
+
+    def test_snapshot_marker_uses_distinct_symbol_and_y(self, replay_panel):
+        """Live + snapshot traces must render distinguishably — live as
+        diamond on y=0.5, snapshot as circle on y=-0.5 so overlapping
+        timestamps stay legible."""
+        figure, _ = replay_panel._render_swap_events_graph_handler(
+            store_data={"events": [_make_event(0)]},
+            snapshot_store_data={"events": [_make_event(0)]},
+        )
+        by_name = {t["name"]: t for t in figure["data"]}
+        assert by_name["Live"]["marker"]["symbol"] == "diamond"
+        assert by_name["Snapshot"]["marker"]["symbol"] == "circle"
+        assert by_name["Live"]["y"] == [0.5]
+        assert by_name["Snapshot"]["y"] == [-0.5]
+
+    def test_empty_in_both_renders_no_swaps_annotation(self, replay_panel):
+        """Both stores empty (or None) → annotation, not a stale partial figure."""
+        figure, count_label = replay_panel._render_swap_events_graph_handler(
+            store_data=None,
+            snapshot_store_data={"events": []},
+        )
+        assert count_label == "0 events"
+        assert figure["data"] == []
+
+    def test_snapshot_hover_text_labelled(self, replay_panel):
+        """Snapshot hover text must include the ``Snapshot`` label so
+        users can tell snapshot-history markers from live ones at the
+        hover level even without consulting the legend."""
+        figure, _ = replay_panel._render_swap_events_graph_handler(
+            store_data={"events": []},
+            snapshot_store_data={"events": [_make_event(0)]},
+        )
+        hover = figure["data"][0]["hovertext"][0]
+        assert "Snapshot ·" in hover
+
+
+# ---------------------------------------------------------------------------
+# DashboardManager._hydrate_loaded_snapshot_swap_events_handler (P2-7 follow-up)
+# ---------------------------------------------------------------------------
+
+
+class TestHydrateLoadedSnapshotSwapEventsHandler:
+    def test_no_session_with_no_prior_returns_no_update(self, dm):
+        """Initial render: no active snapshot loaded → leave the store
+        at its construction-time default rather than producing an
+        empty-events payload that disrupts cache equality."""
+        result = dm._hydrate_loaded_snapshot_swap_events_handler(session=None, prior={"events": [], "snapshot_id": None})
+        assert result is dash.no_update
+
+    def test_session_with_snapshot_id_fetches_events(self, dm):
+        """A new active snapshot triggers a GET against
+        ``/api/snapshots/{id}/history/dataset_swaps`` and the store
+        captures both the events list and the snapshot_id."""
+        events_payload = [_make_event(0), _make_event(1)]
+        with patch("frontend.dashboard_manager.requests.get") as mock_get:
+            mock_get.return_value.status_code = 200
+            mock_get.return_value.json.return_value = {"data": {"events": events_payload}}
+            result = dm._hydrate_loaded_snapshot_swap_events_handler(
+                session={"snapshot_id": "snap_a", "fsm_state": "Replaying"},
+                prior={"events": [], "snapshot_id": None},
+            )
+        assert result == {"events": events_payload, "snapshot_id": "snap_a"}
+
+    def test_same_snapshot_id_is_a_noop(self, dm):
+        """Speed / seek / play-state mutations on the same active
+        snapshot leave the store untouched — without this guard the
+        snapshot history would re-fetch on every replay control click."""
+        result = dm._hydrate_loaded_snapshot_swap_events_handler(
+            session={"snapshot_id": "snap_a", "fsm_state": "Replaying", "speed": 2.0},
+            prior={"events": [_make_event(0)], "snapshot_id": "snap_a"},
+        )
+        assert result is dash.no_update
+
+    def test_cleared_session_resets_store_when_prior_loaded(self, dm):
+        """When the replay session clears (snapshot_id → None) the
+        store flushes to the empty-default so the timeline drops the
+        snapshot trace group cleanly."""
+        result = dm._hydrate_loaded_snapshot_swap_events_handler(
+            session=None,
+            prior={"events": [_make_event(0)], "snapshot_id": "snap_a"},
+        )
+        assert result == {"events": [], "snapshot_id": None}
+
+    def test_non_200_returns_empty_pinned_to_snapshot(self, dm):
+        """Backend error (cascor 404, canopy 502, ...) — keep the new
+        snapshot_id but record an empty event list. The timeline
+        degrades to the live-event-only render rather than displaying
+        a stale snapshot's history under the new snapshot's label."""
+        with patch("frontend.dashboard_manager.requests.get") as mock_get:
+            mock_get.return_value.status_code = 502
+            result = dm._hydrate_loaded_snapshot_swap_events_handler(
+                session={"snapshot_id": "snap_missing"},
+                prior={"events": [_make_event(0)], "snapshot_id": "snap_old"},
+            )
+        assert result == {"events": [], "snapshot_id": "snap_missing"}
+
+    def test_request_exception_returns_empty_pinned_to_snapshot(self, dm):
+        with patch("frontend.dashboard_manager.requests.get", side_effect=requests.RequestException("net down")):
+            result = dm._hydrate_loaded_snapshot_swap_events_handler(
+                session={"snapshot_id": "snap_a"},
+                prior={"events": [], "snapshot_id": None},
+            )
+        assert result == {"events": [], "snapshot_id": "snap_a"}
+
 
 # ---------------------------------------------------------------------------
 # HDF5SnapshotsPanel._compute_swap_snapshot_roles

@@ -3136,6 +3136,35 @@ async def api_get_dataset_swap_events(since: Optional[str] = None):
         return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
 
 
+@app.get("/api/snapshots/{snapshot_id}/history/dataset_swaps")
+async def api_get_snapshot_dataset_swaps(snapshot_id: str):
+    """Read a stored snapshot's own dataset_swap event list.
+
+    P2-7 follow-up (Issue #3) — proxies cascor's
+    ``GET /v1/snapshots/{id}/history/dataset_swaps`` (cascor #259). The
+    Replay timeline reads this when a snapshot is loaded so markers
+    reflect the snapshot's own history (parent spec §4.4 full flavor)
+    rather than the live event feed.
+
+    Backend failure (including cascor 404 for a missing snapshot) → 502
+    with the error string. The timeline treats a 502 as "no markers for
+    this snapshot" and degrades to the live-event-only render so a
+    missing or unreadable snapshot never produces a hard UI error.
+    """
+    try:
+        result = await asyncio.to_thread(backend.get_snapshot_dataset_swaps, snapshot_id=snapshot_id)
+        if isinstance(result, dict) and not result.get("ok", True):
+            error_msg = result.get("error", "unknown")
+            system_logger.warning("Backend rejected snapshot dataset_swap events fetch (%s): %s", snapshot_id, error_msg)
+            return JSONResponse({"error": f"Backend rejected: {error_msg}"}, status_code=502)
+        events = (result or {}).get("events", []) or []
+        return {"status": "success", "data": {"events": events}}
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:12]
+        system_logger.error("Failed to fetch snapshot dataset_swap events [error_id=%s, snapshot_id=%s]", error_id, snapshot_id, exception=exc)
+        return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
+
 # =========================================================================
 # P1-NEW-002: Remote Worker Management Endpoints
 # =========================================================================

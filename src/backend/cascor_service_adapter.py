@@ -1074,6 +1074,33 @@ class CascorServiceAdapter:
             logger.error("get_dataset_swap_events failed: %s", e)
             return {"ok": False, "error": str(e), "events": []}
 
+    def get_snapshot_dataset_swaps(self, snapshot_id: str) -> Dict[str, Any]:
+        """GET /v1/snapshots/{id}/history/dataset_swaps — read a stored
+        snapshot's own dataset_swap event list (cascor P2-7 follow-up).
+
+        Used by the Replay timeline to render markers tied to the *loaded
+        snapshot's* history (spec §4.4 full flavor), separate from the
+        live event feed surfaced by :meth:`get_dataset_swap_events`.
+
+        Returns ``{"ok": True, "events": [...]}`` on success. Events have
+        the same §3.9 schema as the live feed; an empty list is a
+        legitimate response (pre-P2-2 snapshot or training run with no
+        live swaps).
+
+        Returns ``{"ok": False, "error": <str>, "events": []}`` on cascor
+        failure — including 404 (snapshot not present). Callers treat
+        this as "no markers for this snapshot" rather than a UI error
+        so the timeline degrades to the live-event-only behaviour.
+        """
+        try:
+            result = self._client._request("GET", f"/v1/snapshots/{snapshot_id}/history/dataset_swaps")
+            data = (result or {}).get("data", {}) or {}
+            events = data.get("events", []) or []
+            return {"ok": True, "events": list(events)}
+        except JuniperCascorClientError as e:
+            logger.error("get_snapshot_dataset_swaps(%s) failed: %s", snapshot_id, e)
+            return {"ok": False, "error": str(e), "events": []}
+
     def _apply_params_hot(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Send hot params via /ws/control set_params with command_id.
 

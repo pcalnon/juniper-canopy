@@ -600,6 +600,18 @@ class DashboardManager:
                     storage_type="memory",
                     data={"events": []},
                 ),
+                # P2-7 follow-up (Issue #3): per-snapshot swap history,
+                # hydrated when the active replay session loads a
+                # snapshot. Separate from the live store above so the
+                # ReplayPlayerPanel can render two trace groups (live
+                # markers AND snapshot-history markers) without one
+                # source clobbering the other. Cleared when no snapshot
+                # is loaded.
+                dcc.Store(
+                    id="loaded-snapshot-swap-events-store",
+                    storage_type="memory",
+                    data={"events": [], "snapshot_id": None},
+                ),
                 # Unified Top Status Bar - Connection, Status, Phase, Metrics, and Latency
                 dbc.Row(
                     [
@@ -3733,6 +3745,20 @@ class DashboardManager:
         def poll_dataset_swap_events(n_intervals):
             return self._poll_dataset_swap_events_handler(n_intervals=n_intervals)
 
+        # P2-7 follow-up: hydrate the per-snapshot swap history store on
+        # ``replay-player-session`` changes. We only fetch when the
+        # active snapshot_id transitions — not on every speed/seek tick —
+        # so the snapshot's swap history is held against the loaded
+        # session, not re-fetched on minor session mutations.
+        @self.app.callback(
+            Output("loaded-snapshot-swap-events-store", "data"),
+            Input("replay-player-session", "data"),
+            State("loaded-snapshot-swap-events-store", "data"),
+            prevent_initial_call=False,
+        )
+        def hydrate_loaded_snapshot_swap_events(session, prior):
+            return self._hydrate_loaded_snapshot_swap_events_handler(session=session, prior=prior)
+
     # ------------------------------------------------------------------
     # P2-5 (Issue #3) Live Dataset Switch handlers — extracted from
     # ``_setup_live_dataset_switch_callbacks`` closures in P2-6 so each
@@ -3761,6 +3787,55 @@ class DashboardManager:
             return {"events": list(events)}
         except requests.RequestException:
             return dash.no_update
+
+    def _hydrate_loaded_snapshot_swap_events_handler(self, session=None, prior=None):
+        """Hydrate ``loaded-snapshot-swap-events-store`` (P2-7 follow-up).
+
+        Fires when ``replay-player-session`` changes. We only touch the
+        backend when the active ``snapshot_id`` actually transitions —
+        speed / seek / play-state changes leave the store alone so the
+        same loaded snapshot's history doesn't get re-fetched on every
+        control button click.
+
+        Returns:
+          * ``{"events": [], "snapshot_id": None}`` when no session is
+            active (cleared replay).
+          * ``{"events": [...], "snapshot_id": <id>}`` after a successful
+            fetch.
+          * ``dash.no_update`` when the snapshot_id hasn't changed (keeps
+            the previously-loaded history in place across session ticks).
+          * ``{"events": [], "snapshot_id": <id>}`` on a non-200 / network
+            error so the timeline degrades to live-event-only rendering
+            rather than surfacing a UI error.
+        """
+        prior = prior if isinstance(prior, dict) else {}
+        prior_snapshot_id = prior.get("snapshot_id")
+
+        snapshot_id = None
+        if isinstance(session, dict):
+            snapshot_id = session.get("snapshot_id")
+
+        if snapshot_id is None:
+            if prior_snapshot_id is None:
+                return dash.no_update
+            return {"events": [], "snapshot_id": None}
+
+        if snapshot_id == prior_snapshot_id:
+            return dash.no_update
+
+        try:
+            resp = requests.get(
+                self._api_url(f"/api/snapshots/{snapshot_id}/history/dataset_swaps"),
+                timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
+                headers=internal_api_headers(),
+            )
+            if resp.status_code != 200:
+                return {"events": [], "snapshot_id": snapshot_id}
+            data = (resp.json() or {}).get("data", {}) or {}
+            events = data.get("events", []) or []
+            return {"events": list(events), "snapshot_id": snapshot_id}
+        except requests.RequestException:
+            return {"events": [], "snapshot_id": snapshot_id}
 
     def _update_training_status_store_handler(self, n_intervals=None):
         """Populate ``training-status-store`` from ``/api/status``.
