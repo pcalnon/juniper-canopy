@@ -2158,6 +2158,37 @@ class DemoMode:
             events = [e for e in events if isinstance(e.get("timestamp"), str) and e["timestamp"] > since]
         return {"ok": True, "events": events}
 
+    # Phase 2 P2-7 follow-up (Issue #3): per-snapshot history slice for the
+    # canopy Replay timeline (mirrors cascor's GET /v1/snapshots/{id}/history/dataset_swaps).
+    # Demo snapshot IDs are emitted by :meth:`swap_dataset_live` as
+    # ``demo_snapshot_pre_<NNN>`` and ``demo_snapshot_post_<NNN>`` where
+    # ``NNN`` is the zero-padded index of the swap that produced them.
+    # The slice we return matches what a real cascor snapshot of the same
+    # role would carry:
+    #   * pre-swap snapshot id ``..._pre_NNN`` → events ``[0:NNN]``
+    #     (the snapshot is taken **before** swap NNN appends itself).
+    #   * post-swap snapshot id ``..._post_NNN`` → events ``[0:NNN+1]``
+    #     (the snapshot is taken **after** swap NNN appends itself).
+    # Any other ID returns ``ok=False`` to mirror cascor's 404.
+
+    def get_snapshot_dataset_swaps(self, snapshot_id: str) -> Dict[str, Any]:
+        with self._lock:
+            events = list(getattr(self, "_dataset_swap_events", []))
+
+        if isinstance(snapshot_id, str) and snapshot_id.startswith("demo_snapshot_pre_"):
+            try:
+                idx = int(snapshot_id[len("demo_snapshot_pre_") :])
+                return {"ok": True, "events": events[:idx]}
+            except ValueError:
+                pass
+        if isinstance(snapshot_id, str) and snapshot_id.startswith("demo_snapshot_post_"):
+            try:
+                idx = int(snapshot_id[len("demo_snapshot_post_") :])
+                return {"ok": True, "events": events[: idx + 1]}
+            except ValueError:
+                pass
+        return {"ok": False, "error": f"Snapshot '{snapshot_id}' not found", "events": []}
+
 
 # Global demo mode instance (singleton)
 _demo_instance: Optional[DemoMode] = None

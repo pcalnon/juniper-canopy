@@ -623,17 +623,24 @@ class ReplayPlayerPanel(BaseComponent):
 
         # Phase 2 P2-7 (Issue #3): dataset_swap events timeline figure.
         # Hover-only — click navigation lives in the History panel's
-        # paired-diff cards. The events store is populated by the polling
-        # callback in DashboardManager (slow-update-interval tick).
+        # paired-diff cards. The live events store is populated by the
+        # slow-update-interval polling callback in DashboardManager.
+        # P2-7 follow-up: the timeline also reads the *loaded snapshot's*
+        # own swap history so a user reviewing a stored snapshot sees
+        # markers tied to that snapshot's training run (spec §4.4),
+        # rendered as a second trace group alongside the live feed.
         @app.callback(
             [
                 Output(f"{component_id}-swap-events-graph", "figure"),
                 Output(f"{component_id}-swap-events-count", "children"),
             ],
-            Input("dataset-swap-events-store", "data"),
+            [
+                Input("dataset-swap-events-store", "data"),
+                Input("loaded-snapshot-swap-events-store", "data"),
+            ],
         )
-        def render_swap_events_graph(store_data):
-            return self._render_swap_events_graph_handler(store_data=store_data)
+        def render_swap_events_graph(live_store, snapshot_store):
+            return self._render_swap_events_graph_handler(store_data=live_store, snapshot_store_data=snapshot_store)
 
         # Expose for unit tests.
         self._cb_render_session = render_session
@@ -642,33 +649,69 @@ class ReplayPlayerPanel(BaseComponent):
         self._cb_render_swap_events_graph = render_swap_events_graph
         self.logger.debug("Callbacks registered for %s", component_id)
 
-    def _render_swap_events_graph_handler(self, store_data=None):
+    def _render_swap_events_graph_handler(self, store_data=None, snapshot_store_data=None):
         """Build the dataset_swap events Plotly figure + the count label.
 
-        Returns ``(figure, count_label)``. With no events, returns a
-        minimal "no swaps recorded" figure + ``"0 events"``. Each event
-        renders as a scatter marker on a wall-clock x-axis with a hover
-        tooltip showing before→after dataset_type + arch_changes summary.
+        Returns ``(figure, count_label)``. The figure carries up to two
+        scatter trace groups:
+
+        * **Live** — events from the slow-update-interval polling of
+          ``GET /api/history/dataset_swaps`` (live training history).
+          Renders as orange diamond markers.
+        * **Snapshot** — events from the currently-loaded replay
+          snapshot's own history, fetched lazily when the active
+          ``replay-player-session`` snapshot_id changes (P2-7 follow-up,
+          spec §4.4 full flavor). Renders as blue circle markers, on a
+          separate y-row so overlap with live markers stays legible.
+
+        Empty in both → minimal "no swaps recorded" annotation. Otherwise
+        the count label tallies each group.
 
         Read-only — click events are NOT wired here (the History panel's
         paired-diff cards own the seek-to-snapshot interaction).
         """
-        events = []
+        live_events = []
         if isinstance(store_data, dict):
-            events = list(store_data.get("events") or [])
+            live_events = list(store_data.get("events") or [])
+        snapshot_events = []
+        if isinstance(snapshot_store_data, dict):
+            snapshot_events = list(snapshot_store_data.get("events") or [])
+
         empty_layout = {
-            "height": 110,
+            "height": 130,
             "margin": {"l": 30, "r": 20, "t": 20, "b": 30},
             "xaxis": {"title": "", "showgrid": False},
-            "yaxis": {"visible": False, "fixedrange": True},
-            "showlegend": False,
+            "yaxis": {"visible": False, "fixedrange": True, "range": [-1, 1]},
+            "showlegend": bool(live_events) and bool(snapshot_events),
+            "legend": {"orientation": "h", "yanchor": "bottom", "y": 1.02, "x": 0},
             "plot_bgcolor": "rgba(0,0,0,0)",
             "paper_bgcolor": "rgba(0,0,0,0)",
         }
-        if not events:
+        if not live_events and not snapshot_events:
             return {"data": [], "layout": {**empty_layout, "annotations": [{"text": "No dataset swaps recorded yet", "xref": "paper", "yref": "paper", "x": 0.5, "y": 0.5, "showarrow": False, "font": {"size": 12, "color": "#888"}}]}}, "0 events"
-        # Build hover text per event — keep concise; the History panel
-        # paired-diff shows the full payload.
+
+        traces = []
+        if live_events:
+            traces.append(self._build_swap_trace(live_events, label="Live", y=0.5, color="#f0ad4e", symbol="diamond"))
+        if snapshot_events:
+            traces.append(self._build_swap_trace(snapshot_events, label="Snapshot", y=-0.5, color="#5bc0de", symbol="circle"))
+
+        figure = {"data": traces, "layout": empty_layout}
+
+        parts = []
+        if live_events:
+            parts.append(f"{len(live_events)} live")
+        if snapshot_events:
+            parts.append(f"{len(snapshot_events)} snapshot")
+        total = len(live_events) + len(snapshot_events)
+        count_label = f"{total} event{'s' if total != 1 else ''}"
+        if len(parts) > 1:
+            count_label = f"{count_label} ({' + '.join(parts)})"
+        return figure, count_label
+
+    @staticmethod
+    def _build_swap_trace(events, *, label, y, color, symbol):
+        """Build one scatter trace for the swap-events timeline figure."""
         xs = []
         hovers = []
         for ev in events:
@@ -680,24 +723,17 @@ class ReplayPlayerPanel(BaseComponent):
             input_delta = arch.get("input_delta", 0)
             output_delta = arch.get("output_delta", 0)
             hidden = arch.get("hidden_preserved", 0)
-            hovers.append(f"<b>{before} → {after}</b><br>" f"timestamp: {ts}<br>" f"input Δ {input_delta:+d}, output Δ {output_delta:+d}, hidden {hidden} preserved")
-        marker_color = "#f0ad4e"  # bootstrap warning
-        figure = {
-            "data": [
-                {
-                    "type": "scatter",
-                    "mode": "markers",
-                    "x": xs,
-                    "y": [0] * len(xs),
-                    "marker": {"size": 14, "symbol": "diamond", "color": marker_color, "line": {"color": "#222", "width": 1}},
-                    "hovertext": hovers,
-                    "hovertemplate": "%{hovertext}<extra></extra>",
-                }
-            ],
-            "layout": empty_layout,
+            hovers.append(f"<b>{before} → {after}</b><br>" f"{label} · timestamp: {ts}<br>" f"input Δ {input_delta:+d}, output Δ {output_delta:+d}, hidden {hidden} preserved")
+        return {
+            "type": "scatter",
+            "mode": "markers",
+            "name": label,
+            "x": xs,
+            "y": [y] * len(xs),
+            "marker": {"size": 14, "symbol": symbol, "color": color, "line": {"color": "#222", "width": 1}},
+            "hovertext": hovers,
+            "hovertemplate": "%{hovertext}<extra></extra>",
         }
-        count_label = f"{len(events)} event{'s' if len(events) != 1 else ''}"
-        return figure, count_label
 
     # ------------------------------------------------------------------
     # Status helpers

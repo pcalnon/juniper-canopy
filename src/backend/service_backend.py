@@ -249,6 +249,10 @@ class ServiceBackend:
     def get_dataset_swap_events(self, since: Optional[str] = None) -> Dict[str, Any]:
         return self._adapter.get_dataset_swap_events(since=since)
 
+    def get_snapshot_dataset_swaps(self, snapshot_id: str) -> Dict[str, Any]:
+        """P2-7 follow-up: per-snapshot swap history (cascor #259)."""
+        return self._adapter.get_snapshot_dataset_swaps(snapshot_id=snapshot_id)
+
     # --- Lifecycle ---
 
     async def initialize(self) -> bool:
