@@ -26,8 +26,8 @@ JuniperCanopy is the **monitoring dashboard** of the Juniper ecosystem. It depen
 │   Dashboard  ◄─here │                  │    Training Svc      │
 │   Port 8050         │                  │    Port 8200         │
 └──────────┬──────────┘                  └──────────┬───────────┘
-           │ REST                                    │ REST
-           ▼                                         ▼
+           │ REST                                   │ REST
+           ▼                                        ▼
 ┌──────────────────────────────────────────────────────────────┐
 │                      JuniperData                             │
 │                   Dataset Service  ·  Port 8100              │
