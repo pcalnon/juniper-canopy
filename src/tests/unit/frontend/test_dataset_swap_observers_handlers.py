@@ -282,6 +282,98 @@ class TestHydrateLoadedSnapshotSwapEventsHandler:
 
 
 # ---------------------------------------------------------------------------
+# DashboardManager._merge_ws_dataset_swap_events_handler (P2-7 WS push)
+# ---------------------------------------------------------------------------
+
+
+class TestMergeWsDatasetSwapEventsHandler:
+    def test_empty_buffer_returns_no_update(self):
+        """Idle fast-update-interval tick — buffer is empty. Returning
+        ``dash.no_update`` avoids cache churn and a needless store
+        rewrite when there's nothing to merge."""
+        result = DashboardManager._merge_ws_dataset_swap_events_handler(
+            ws_buffer={"events": []},
+            current_store={"events": []},
+        )
+        assert result is dash.no_update
+
+    def test_buffer_none_returns_no_update(self):
+        """Defensive — initial-state buffer dict can be None / missing."""
+        result = DashboardManager._merge_ws_dataset_swap_events_handler(ws_buffer=None, current_store=None)
+        assert result is dash.no_update
+
+    def test_first_ws_event_appended_to_empty_store(self):
+        """WS-push arriving before the first slow-poll completes →
+        store gains the event so the timeline / paired-diff / badges
+        update inside one fast-update-interval tick."""
+        ev = _make_event(0, pre_id="snap_pre_0")
+        result = DashboardManager._merge_ws_dataset_swap_events_handler(
+            ws_buffer={"events": [ev]},
+            current_store={"events": []},
+        )
+        assert result == {"events": [ev]}
+
+    def test_dedupe_keys_off_timestamp_and_pre_swap_id(self):
+        """The slow-poll wrote the event first; the WS push arrives
+        immediately after with the same payload. Result must be one
+        event, not two."""
+        ev = _make_event(0, pre_id="snap_pre_0")
+        result = DashboardManager._merge_ws_dataset_swap_events_handler(
+            ws_buffer={"events": [ev]},
+            current_store={"events": [ev]},
+        )
+        assert result == {"events": [ev]}
+
+    def test_distinct_events_with_same_timestamp_are_both_kept(self):
+        """Synthetic-timestamp edge case: two events sharing a
+        timestamp but differing on ``pre_swap_snapshot_id`` are
+        distinct swaps and must both survive the merge."""
+        ev_a = _make_event(0, pre_id="snap_pre_A")
+        ev_b = _make_event(0, pre_id="snap_pre_B")
+        result = DashboardManager._merge_ws_dataset_swap_events_handler(
+            ws_buffer={"events": [ev_b]},
+            current_store={"events": [ev_a]},
+        )
+        assert result["events"] == [ev_a, ev_b]
+
+    def test_result_sorted_by_timestamp(self):
+        """A WS-push event that pre-dates an existing store entry (e.g.
+        a delayed broadcast) lands in the right chronological slot so
+        the timeline figure renders markers left-to-right correctly."""
+        early = _make_event(0, pre_id="snap_pre_early")
+        early["timestamp"] = "2026-05-15T10:00:00+00:00"
+        late = _make_event(0, pre_id="snap_pre_late")
+        late["timestamp"] = "2026-05-15T12:00:00+00:00"
+        result = DashboardManager._merge_ws_dataset_swap_events_handler(
+            ws_buffer={"events": [early]},
+            current_store={"events": [late]},
+        )
+        timestamps = [e["timestamp"] for e in result["events"]]
+        assert timestamps == sorted(timestamps)
+
+    def test_event_without_timestamp_falls_back_to_append(self):
+        """Defensive — a malformed event without ``timestamp`` would
+        otherwise key off ``(None, pre_id)`` which would alias different
+        events. Append unconditionally so a single bad frame doesn't
+        suppress real subsequent ones."""
+        bad = {"timestamp": None, "pre_swap_snapshot_id": "snap_pre_X", "before_cfg": {}, "after_cfg": {}, "arch_changes": {}}
+        result = DashboardManager._merge_ws_dataset_swap_events_handler(
+            ws_buffer={"events": [bad]},
+            current_store={"events": []},
+        )
+        assert result == {"events": [bad]}
+
+    def test_non_dict_buffer_entries_skipped_silently(self):
+        """Defensive — pathological buffer shouldn't crash the merger."""
+        ev = _make_event(0, pre_id="snap_pre_0")
+        result = DashboardManager._merge_ws_dataset_swap_events_handler(
+            ws_buffer={"events": ["garbage", None, ev]},
+            current_store={"events": []},
+        )
+        assert result == {"events": [ev]}
+
+
+# ---------------------------------------------------------------------------
 # HDF5SnapshotsPanel._compute_swap_snapshot_roles
 # ---------------------------------------------------------------------------
 

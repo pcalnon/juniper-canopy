@@ -1672,6 +1672,19 @@ class DashboardManager:
                 dcc.Store(id="ws-state-buffer", data=None),
                 dcc.Store(id="ws-cascade-add-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
                 dcc.Store(id="ws-candidate-progress-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
+                # P2-7 follow-up: WS push buffer for dataset_swap events.
+                # Hydrated by a clientside drain of
+                # ``window._juniperWsDrain._datasetSwapBuffer``; a
+                # server-side merger then folds the events into
+                # ``dataset-swap-events-store`` with dedupe.
+                dcc.Store(id="ws-dataset-swap-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
+                # P2-5 follow-up A+B: no-op sink for the clientside
+                # callback that scrolls + pulses the Apply Dataset
+                # button when the user dismisses the Live Switch modal
+                # via "Return to Stop & Restart". The callback mutates
+                # the DOM directly; this Store exists only to satisfy
+                # Dash's "every clientside callback needs an Output".
+                dcc.Store(id="live-switch-fallback-sink", data=None),
                 dcc.Store(id="ws-connection-status", data={"connected": False, "reconnecting": False, "mode": "demo" if get_settings().demo_mode else "live"}),
                 # GAP-WS-15: bridge for `settings.enable_raf_coalescer` → JS `window._juniperRafCoalescerEnabled`
                 dcc.Store(id="ws-config-init", data=None),
@@ -2422,6 +2435,25 @@ class DashboardManager:
             }
             """,
             Output("ws-candidate-progress-buffer", "data"),
+            Input("fast-update-interval", "n_intervals"),
+            prevent_initial_call=True,
+        )
+
+        # P2-7 follow-up: drain dataset_swap buffer → ws-dataset-swap-buffer store.
+        # The server-side merger in _setup_dataset_swap_observers_callbacks
+        # then folds these into dataset-swap-events-store with dedupe so
+        # WS-push and slow-poll converge to the same authoritative list.
+        self.app.clientside_callback(
+            """
+            function(n) {
+                if (!window._juniperWsDrain) return window.dash_clientside.no_update;
+                var events = window._juniperWsDrain.drainDatasetSwaps();
+                if (!events || events.length === 0) return window.dash_clientside.no_update;
+                window._juniperWsDrain._gen++;
+                return {events: events, gen: window._juniperWsDrain._gen, last_drain_ms: Date.now()};
+            }
+            """,
+            Output("ws-dataset-swap-buffer", "data"),
             Input("fast-update-interval", "n_intervals"),
             prevent_initial_call=True,
         )
@@ -3687,6 +3719,37 @@ class DashboardManager:
         def close_live_switch_modal_on_fallback(n_clicks):
             return self._close_live_switch_modal_on_fallback_handler(n_clicks=n_clicks)
 
+        # P2-5 follow-up A+B: when the user dismisses the Live Switch
+        # modal with "Return to Stop & Restart", scroll the Apply
+        # Dataset button into view (A) and briefly pulse it (B) so the
+        # cold-swap affordance is visually surfaced. Pure client-side —
+        # DOM mutation + setTimeout, no server round-trip. Removing
+        # then re-adding the class restarts the CSS animation, so a
+        # second cancel-click within the animation window re-triggers
+        # the pulse cleanly.
+        self.app.clientside_callback(
+            """
+            function(n_clicks) {
+                if (!n_clicks) return window.dash_clientside.no_update;
+                var btn = document.getElementById('apply-dataset-button');
+                if (!btn) return window.dash_clientside.no_update;
+                btn.classList.remove('attention-pulse');
+                // Force a reflow so the class re-add restarts the animation
+                // even if the user clicks cancel twice in quick succession.
+                void btn.offsetWidth;
+                btn.scrollIntoView({behavior: 'smooth', block: 'center'});
+                btn.classList.add('attention-pulse');
+                setTimeout(function() {
+                    btn.classList.remove('attention-pulse');
+                }, 1100);
+                return window.dash_clientside.no_update;
+            }
+            """,
+            Output("live-switch-fallback-sink", "data"),
+            Input("live-switch-fallback-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+
         @self.app.callback(
             [
                 Output("live-switch-modal", "is_open", allow_duplicate=True),
@@ -3759,6 +3822,24 @@ class DashboardManager:
         def hydrate_loaded_snapshot_swap_events(session, prior):
             return self._hydrate_loaded_snapshot_swap_events_handler(session=session, prior=prior)
 
+        # P2-7 follow-up: WS-push merger for dataset_swap events.
+        # The slow-poll above is the authoritative source — runs every
+        # slow-update-interval tick and overwrites the store with the
+        # full event list from cascor's REST endpoint. This merger
+        # layered on top is a latency-shortener: when a swap arrives
+        # over WS, the new event lands in the store within one
+        # fast-update-interval tick instead of waiting for the next
+        # slow poll. Dedupe keys off (timestamp, pre_swap_snapshot_id)
+        # so a swap that arrives via both paths is held exactly once.
+        @self.app.callback(
+            Output("dataset-swap-events-store", "data", allow_duplicate=True),
+            Input("ws-dataset-swap-buffer", "data"),
+            State("dataset-swap-events-store", "data"),
+            prevent_initial_call=True,
+        )
+        def merge_ws_dataset_swap_events(ws_buffer, current_store):
+            return self._merge_ws_dataset_swap_events_handler(ws_buffer=ws_buffer, current_store=current_store)
+
     # ------------------------------------------------------------------
     # P2-5 (Issue #3) Live Dataset Switch handlers — extracted from
     # ``_setup_live_dataset_switch_callbacks`` closures in P2-6 so each
@@ -3787,6 +3868,66 @@ class DashboardManager:
             return {"events": list(events)}
         except requests.RequestException:
             return dash.no_update
+
+    @staticmethod
+    def _merge_ws_dataset_swap_events_handler(ws_buffer=None, current_store=None):
+        """Merge WS-pushed dataset_swap events into the live store.
+
+        P2-7 follow-up. Dedupe key is
+        ``(timestamp, pre_swap_snapshot_id)`` — together these uniquely
+        identify a swap event:
+
+        * ``timestamp`` is set by cascor at swap time (ISO-8601 UTC,
+          one per `swap_dataset_live` call).
+        * ``pre_swap_snapshot_id`` is the *exact* HDF5 file id captured
+          before the swap; cascor's collision-suffix loop guarantees
+          this is unique per snapshot.
+
+        If both fields are present the pair is the dedupe key. If
+        ``timestamp`` is missing on a pushed event (defensive — should
+        never happen on a well-formed cascor frame), it is appended
+        unconditionally and dedupe falls back to identity.
+
+        Returns ``dash.no_update`` when the buffer is empty / unset —
+        keeps callback cache stable and avoids touching the store on
+        trivial buffer churn.
+        """
+        if not isinstance(ws_buffer, dict):
+            return dash.no_update
+        ws_events = ws_buffer.get("events") or []
+        if not ws_events:
+            return dash.no_update
+
+        existing = []
+        if isinstance(current_store, dict):
+            existing = list(current_store.get("events") or [])
+
+        seen = set()
+        for ev in existing:
+            if not isinstance(ev, dict):
+                continue
+            ts = ev.get("timestamp")
+            pre_id = ev.get("pre_swap_snapshot_id")
+            if ts is not None:
+                seen.add((ts, pre_id))
+
+        merged = list(existing)
+        for ev in ws_events:
+            if not isinstance(ev, dict):
+                continue
+            ts = ev.get("timestamp")
+            pre_id = ev.get("pre_swap_snapshot_id")
+            if ts is None:
+                merged.append(ev)
+                continue
+            key = (ts, pre_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(ev)
+
+        merged.sort(key=lambda e: e.get("timestamp") or "")
+        return {"events": merged}
 
     def _hydrate_loaded_snapshot_swap_events_handler(self, session=None, prior=None):
         """Hydrate ``loaded-snapshot-swap-events-store`` (P2-7 follow-up).
