@@ -241,6 +241,54 @@ class TestConfigManager:
         config.reload()
         assert config.get("test_value") == "modified"  # trunk-ignore(bandit/B101)
 
+    # BUG-CN-12: ``_load_config`` previously caught bare ``Exception`` and
+    # returned ``{}``, masking real bugs as "no config". The fix narrows
+    # the except clause to ``(OSError, yaml.YAMLError)`` so unexpected
+    # programming / runtime errors surface to the caller.
+
+    def test_load_config_returns_empty_on_malformed_yaml(self, tmp_path):
+        """BUG-CN-12: a malformed YAML file is a recoverable error — return
+        ``{}`` so the validator can populate defaults rather than crashing.
+        Asserts the contract of ``_load_config`` directly (it returns the
+        raw load result before validator-seeded defaults are merged in)."""
+        bad = tmp_path / "bad.yaml"
+        bad.write_text("not: [valid: yaml: at: all")
+        config = ConfigManager(config_path=str(bad))
+        assert config._load_config() == {}  # trunk-ignore(bandit/B101)
+
+    def test_load_config_returns_empty_on_os_error(self, tmp_path, monkeypatch):
+        """BUG-CN-12: a filesystem error (e.g. permissions / device error)
+        is also recoverable — return ``{}`` rather than crashing."""
+        good = tmp_path / "good.yaml"
+        good.write_text("foo: bar")
+        config = ConfigManager(config_path=str(good))  # construct on the readable file
+
+        # Now monkeypatch open so a re-load via _load_config trips OSError.
+        original_open = open
+
+        def _raise_oserror(path, *args, **kwargs):
+            if str(path) == str(good):
+                raise OSError("simulated read failure")
+            return original_open(path, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.open", _raise_oserror)
+        assert config._load_config() == {}  # trunk-ignore(bandit/B101)
+
+    def test_load_config_propagates_unexpected_exceptions(self, tmp_path, monkeypatch):
+        """BUG-CN-12: an unexpected error (programming bug, RuntimeError,
+        etc.) must NOT be silently masked as ``{}``. The narrow except
+        clause only catches the two recoverable error classes; everything
+        else propagates so the operator notices the defect."""
+        good = tmp_path / "good.yaml"
+        good.write_text("foo: bar")
+        config = ConfigManager(config_path=str(good))
+
+        # Make yaml.safe_load explode with a RuntimeError on a re-load —
+        # should propagate, not be swallowed.
+        monkeypatch.setattr("yaml.safe_load", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("simulated bug")))
+        with pytest.raises(RuntimeError, match="simulated bug"):
+            config._load_config()
+
 
 @pytest.mark.unit
 class TestConfigManagerSingleton:
