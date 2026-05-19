@@ -29,8 +29,8 @@ JuniperCanopy is the **monitoring dashboard** of the Juniper ecosystem. It depen
            │ REST                                    │ REST
            ▼                                         ▼
 ┌──────────────────────────────────────────────────────────────┐
-│                      JuniperData                              │
-│                   Dataset Service  ·  Port 8100               │
+│                      JuniperData                             │
+│                   Dataset Service  ·  Port 8100              │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -78,7 +78,7 @@ docker run --rm -p 8050:8050 \
   juniper-canopy:latest
 ```
 
-In demo mode, dataset generation first attempts JuniperData and falls back to local spiral generation if JuniperData is unavailable (warning logged in `demo_mode`).
+In demo mode, dataset generation first attempts to connect to a running juniper-data service and falls back to local spiral dataset generation if JuniperData is unavailable (warning logged in `demo_mode`).
 
 ## Dependency Lockfile
 
@@ -91,7 +91,7 @@ uv pip compile pyproject.toml --extra juniper-data --extra juniper-cascor --extr
 ```
 
 The `observability` extra includes optional runtime integrations used by `src/observability.py` (`prometheus-client`, `sentry-sdk`).
-All dependencies including `juniper-data-client` and `juniper-cascor-client` are resolved from PyPI.
+All dependencies, including `juniper-data-client` and `juniper-cascor-client,` are resolved from PyPI.
 
 ## Active Research Components
 
@@ -199,7 +199,7 @@ For complete setup instructions, see [docs/QUICK_START.md](docs/QUICK_START.md).
 - [CHANGELOG.md](CHANGELOG.md) - Version history and release notes
 - [Constants Guide](docs/cascor/CONSTANTS_GUIDE.md) - Application constants reference
 
-### Install and Configuration
+### Installation and Configuration
 
 - [Quick Start Guide](docs/QUICK_START.md) - Get running in 5 minutes
 - [Environment Setup Guide](docs/ENVIRONMENT_SETUP.md) - Complete environment configuration
