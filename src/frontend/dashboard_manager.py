@@ -1678,6 +1678,13 @@ class DashboardManager:
                 # server-side merger then folds the events into
                 # ``dataset-swap-events-store`` with dedupe.
                 dcc.Store(id="ws-dataset-swap-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
+                # P2-5 follow-up A+B: no-op sink for the clientside
+                # callback that scrolls + pulses the Apply Dataset
+                # button when the user dismisses the Live Switch modal
+                # via "Return to Stop & Restart". The callback mutates
+                # the DOM directly; this Store exists only to satisfy
+                # Dash's "every clientside callback needs an Output".
+                dcc.Store(id="live-switch-fallback-sink", data=None),
                 dcc.Store(id="ws-connection-status", data={"connected": False, "reconnecting": False, "mode": "demo" if get_settings().demo_mode else "live"}),
                 # GAP-WS-15: bridge for `settings.enable_raf_coalescer` → JS `window._juniperRafCoalescerEnabled`
                 dcc.Store(id="ws-config-init", data=None),
@@ -3711,6 +3718,37 @@ class DashboardManager:
         )
         def close_live_switch_modal_on_fallback(n_clicks):
             return self._close_live_switch_modal_on_fallback_handler(n_clicks=n_clicks)
+
+        # P2-5 follow-up A+B: when the user dismisses the Live Switch
+        # modal with "Return to Stop & Restart", scroll the Apply
+        # Dataset button into view (A) and briefly pulse it (B) so the
+        # cold-swap affordance is visually surfaced. Pure client-side —
+        # DOM mutation + setTimeout, no server round-trip. Removing
+        # then re-adding the class restarts the CSS animation, so a
+        # second cancel-click within the animation window re-triggers
+        # the pulse cleanly.
+        self.app.clientside_callback(
+            """
+            function(n_clicks) {
+                if (!n_clicks) return window.dash_clientside.no_update;
+                var btn = document.getElementById('apply-dataset-button');
+                if (!btn) return window.dash_clientside.no_update;
+                btn.classList.remove('attention-pulse');
+                // Force a reflow so the class re-add restarts the animation
+                // even if the user clicks cancel twice in quick succession.
+                void btn.offsetWidth;
+                btn.scrollIntoView({behavior: 'smooth', block: 'center'});
+                btn.classList.add('attention-pulse');
+                setTimeout(function() {
+                    btn.classList.remove('attention-pulse');
+                }, 1100);
+                return window.dash_clientside.no_update;
+            }
+            """,
+            Output("live-switch-fallback-sink", "data"),
+            Input("live-switch-fallback-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
 
         @self.app.callback(
             [

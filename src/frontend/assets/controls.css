@@ -267,6 +267,19 @@
     }
 }
 
+/*
+ * P2-5 follow-up B: transient "look here next" highlight applied to
+ * the Apply Dataset button when the user dismisses the Live Switch
+ * modal via "Return to Stop & Restart". 3 iterations × 330ms ≈ 1s,
+ * matching the spec's "~1 second" goal. The class is added by a
+ * clientside callback and removed by a setTimeout so the animation
+ * runs exactly once per cancel — re-clicking cancel re-triggers it
+ * because removing then re-adding the class restarts the animation.
+ */
+.attention-pulse {
+    animation: pulse 0.33s ease-in-out 3;
+}
+
 /* Smooth color transitions */
 .training-control-btn {
     transition: background-color 0.2s ease-in-out,
