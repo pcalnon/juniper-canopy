@@ -1327,16 +1327,23 @@ export JUNIPER_CANOPY_BACKEND_PATH=/path/to/cascor  # Default: ../juniper-cascor
 
 Organize files according to their purpose:
 
-| File Type     | Location                                    | Examples                            |
-| ------------- | ------------------------------------------- | ----------------------------------- |
-| Source code   | `src/` and logical subdirs                  | `src/demo_mode.py`, `src/frontend/` |
-| Tests         | `src/tests/{unit,integration,performance}/` | `src/tests/unit/test_demo_mode.py`  |
-| Documentation | `notes/`                                    | `notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md`      |
-| Configuration | `conf/`                                     | `conf/app_config.yaml`              |
-| Datasets      | `data/`                                     | `data/spiral_dataset.csv`           |
-| Logs          | `logs/`                                     | `logs/system.log`                   |
-| Images        | `images/`                                   | `images/network_topology.png`       |
-| Scripts       | `util/`                                     | `util/juniper_canopy-demo.bash`     |
+| File Type                         | Location                                    | Examples                                                   |
+| --------------------------------- | ------------------------------------------- | ---------------------------------------------------------- |
+| Source code                       | `src/` and logical subdirs                  | `src/demo_mode.py`, `src/frontend/`                        |
+| Tests                             | `src/tests/{unit,integration,performance}/` | `src/tests/unit/test_demo_mode.py`                         |
+| Documentation                     | `notes/`                                    | `notes/JUNIPER-CANOPY_POST-RELEASE_DEVELOPMENT-ROADMAP.md` |
+| Configuration                     | `conf/`                                     | `conf/app_config.yaml`                                     |
+| Datasets                          | `data/`                                     | `data/spiral_dataset.csv`                                  |
+| Logs                              | `logs/`                                     | `logs/system.log`                                          |
+| Images                            | `images/`                                   | `images/network_topology.png`                              |
+| Scripts (permanent utilities)     | `util/`                                     | `util/juniper_canopy-demo.bash`                            |
+| Scripts (single-use / temp / WIP) | `util/ad-hoc/` (create on first use)        | `util/ad-hoc/YYYY-MM-DD_one-off-cleanup.bash`              |
+
+**Script placement (mandatory)** — `/tmp/` is **prohibited** as the home for any script that produces, modifies, or analyzes repository content. `/tmp/` is reaped when sessions / sandboxes / containers end, and scripts placed there are lost (irrecoverable).
+
+`/tmp/` is still fine as a scratch *workspace* for intermediate artifacts that the script itself creates and reads — the prohibition is on script *source files*, not on transient data.
+
+This is an ecosystem-wide rule restated in the parent `Juniper/AGENTS.md` "Cross-Project Conventions" section. See [`util/ad-hoc/README.md`](util/ad-hoc/README.md) for the per-script convention (file-header requirements, graduation lifecycle). Motivating incident: irrecoverable loss of `phase4_consolidate.py` and `v2_citation_validate.py` from the juniper-ml requirements-snapshot effort.
 
 **Mirror package structure in tests:**
 
