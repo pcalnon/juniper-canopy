@@ -3,7 +3,7 @@ extends: default
 
 rules:
   line-length:
-    max: 120
+    max: 320
     level: warning
   document-start: disable
   comments-indentation: disable
