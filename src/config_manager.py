@@ -132,6 +132,13 @@ class ConfigManager:
         """
         Load configuration from YAML file.
 
+        Returns an empty dict on the two recoverable failure modes —
+        unreadable file (``OSError``) and malformed YAML
+        (``yaml.YAMLError``). Other exceptions (programming bugs,
+        unexpected runtime errors) propagate so they aren't silently
+        masked as "no config" — that mask hid a real defect class
+        described in v7 roadmap §5.2 BUG-CN-12.
+
         Returns:
             Configuration dictionary
         """
@@ -144,7 +151,7 @@ class ConfigManager:
                 config = yaml.safe_load(f)
                 self.logger.info(f"Configuration loaded from {self.config_path}")
                 return config or {}
-        except Exception as e:
+        except (OSError, yaml.YAMLError) as e:
             self.logger.error(f"Failed to load configuration: {e}")
             return {}
 
