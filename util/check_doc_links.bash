@@ -1,1 +1,0 @@
-../../juniper-ml/util/check_doc_links.bash
