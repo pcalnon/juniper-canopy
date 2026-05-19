@@ -190,6 +190,39 @@ class TestSnapshotDetailDemoMode:
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()
 
+    @pytest.mark.unit
+    def test_demo_snapshots_bounded_by_maxlen(self):
+        """BUG-CN-08: ``_demo_snapshots`` must be a bounded ``deque`` so a
+        long demo session can't leak memory by accumulating every snapshot
+        created. ``appendleft`` past the cap evicts the oldest entry.
+        Pins the deque-with-maxlen contract — a future regression to a
+        plain ``list`` would silently re-open the leak."""
+        from collections import deque
+
+        import main
+
+        # Construction-time contract: a deque with a positive maxlen.
+        assert isinstance(main._demo_snapshots, deque), "_demo_snapshots must be a deque (BUG-CN-08)"
+        assert main._demo_snapshots.maxlen is not None, "_demo_snapshots must have a maxlen cap (BUG-CN-08)"
+        assert main._demo_snapshots.maxlen > 0
+
+        original = list(main._demo_snapshots)
+        try:
+            main._demo_snapshots.clear()
+            # Append maxlen+5 entries and confirm the cap holds + oldest fell off.
+            cap = main._demo_snapshots.maxlen
+            for i in range(cap + 5):
+                main._demo_snapshots.appendleft({"id": f"snap_{i}", "name": f"Snap {i}"})
+            assert len(main._demo_snapshots) == cap, f"deque should be capped at maxlen={cap}"
+            # Newest is at index 0 (we appendleft); oldest-still-present is the
+            # one that was inserted ``cap-1`` ticks before the final insert.
+            ids_in = [s["id"] for s in main._demo_snapshots]
+            assert ids_in[0] == f"snap_{cap + 4}"
+            assert ids_in[-1] == "snap_5"  # snap_0..snap_4 evicted by the cap
+        finally:
+            main._demo_snapshots.clear()
+            main._demo_snapshots.extend(original)
+
 
 class TestSnapshotDetailRealMode:
     """Tests for GET /api/v1/snapshots/{snapshot_id} in real mode (lines 963-999)."""

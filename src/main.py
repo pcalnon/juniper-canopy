@@ -46,6 +46,7 @@ import secrets
 # import sys
 import time
 import uuid
+from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
@@ -1564,8 +1565,14 @@ async def get_snapshot_detail(snapshot_id: str):
     return detail
 
 
-# Session-persistent storage for demo mode snapshots (P3-1)
-_demo_snapshots: list = []
+# Session-persistent storage for demo mode snapshots (P3-1).
+# BUG-CN-08: bounded by ``maxlen`` so the list can't grow unbounded across
+# a long demo session — older snapshots fall off the tail LRU-style. 100
+# is enough for any realistic demo run; existing callers iterate the
+# whole collection and don't depend on list-specific methods beyond
+# ``insert(0, ...)`` (now ``.appendleft(...)``).
+_DEMO_SNAPSHOTS_MAX = 100
+_demo_snapshots: deque = deque(maxlen=_DEMO_SNAPSHOTS_MAX)
 
 # Meta parameter key prefixes captured in snapshots
 _META_PARAM_PREFIXES = ("nn_", "cn_")
@@ -1663,8 +1670,10 @@ async def create_snapshot(
         if "dataset_version" in status:
             snapshot["dataset_version"] = status["dataset_version"]
 
-        # Add to session-persistent demo snapshots list
-        _demo_snapshots.insert(0, snapshot)
+        # Add to session-persistent demo snapshots list (deque appendleft is
+        # the O(1) equivalent of list.insert(0, ...); maxlen drops the oldest
+        # entry when the cap is reached — see BUG-CN-08).
+        _demo_snapshots.appendleft(snapshot)
 
         # Log the activity
         _log_snapshot_activity(
