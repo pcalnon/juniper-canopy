@@ -29,6 +29,15 @@
     // browser doesn't OOM on a long replay session — 100 events
     // covers most playback windows; older entries fall off LRU-style.
     var MAX_REPLAY_WEIGHTS = 100;
+    // P2-7 follow-up: live dataset-swap events from cascor's
+    // EventEnvelope(type="event", data.event="dataset_swap"). Swaps
+    // are user-initiated and seconds-apart at most; the bound here
+    // is for pathological edge cases (replay storm, stuck drain).
+    // The slow-poll fallback still populates dataset-swap-events-store
+    // every slow-update-interval tick, so a dropped frame here is
+    // recoverable within a few seconds — push is a latency win, not
+    // a correctness contract.
+    var MAX_DATASET_SWAPS = 100;
 
     window._juniperWsDrain = {
         // Bounded ring buffers
@@ -38,6 +47,7 @@
         _cascadeAddBuffer: [],        // max MAX_CASCADE_ADD
         _candidateProgressBuffer: [], // max MAX_CANDIDATE_PROGRESS
         _replayWeightBuffer: [],      // CAN-015g (g-4): max MAX_REPLAY_WEIGHTS
+        _datasetSwapBuffer: [],       // P2-7 follow-up: max MAX_DATASET_SWAPS
         _connectionStatus: {connected: false, reconnecting: false, mode: "live"},
         // GAP-WS-16: metricsReceived flips true when initial_metrics or the
         // first metrics frame is delivered, so the REST /api/metrics/history
@@ -99,6 +109,18 @@
         drainReplayWeights: function() {
             var events = this._replayWeightBuffer;
             this._replayWeightBuffer = [];
+            return events;
+        },
+
+        // P2-7 follow-up: drain WS-pushed dataset_swap events. Each
+        // entry is the §3.9-shaped swap dict (timestamp, before_cfg,
+        // after_cfg, arch_changes, pre/post_swap_snapshot_id) pulled
+        // off cascor's EventEnvelope(event="dataset_swap"). Consumer
+        // (server-side dash callback) merges into the existing
+        // dataset-swap-events-store with dedupe.
+        drainDatasetSwaps: function() {
+            var events = this._datasetSwapBuffer;
+            this._datasetSwapBuffer = [];
             return events;
         },
 
@@ -246,6 +268,21 @@
                 drain._cascadeAddBuffer.shift();
             }
             drain._cascadeAddBuffer.push(data);
+        });
+
+        // P2-7 follow-up: cascor broadcasts dataset_swap events under
+        // the generic "event" envelope type with a discriminator on
+        // data.event. We split here so the swap path can pivot the
+        // payload (data.swap) into the dedicated dataset_swap buffer
+        // without competing with other future event subtypes.
+        window.cascorWS.on("event", function(data) {
+            if (!data || data.event !== "dataset_swap" || !data.swap) {
+                return;
+            }
+            if (drain._datasetSwapBuffer.length >= MAX_DATASET_SWAPS) {
+                drain._datasetSwapBuffer.shift();
+            }
+            drain._datasetSwapBuffer.push(data.swap);
         });
 
         window.cascorWS.on("candidate_progress", function(data) {
