@@ -90,10 +90,6 @@ from settings import get_settings
 # from dash import html, dcc
 
 
-# src_dir = Path(__file__).parent
-# sys.path.insert(0, str(src_dir))
-
-
 # Initialize configuration
 settings = get_settings()
 
