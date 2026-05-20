@@ -56,7 +56,7 @@ class TestMainEndpointsIntegration:
         assert response.status_code == 200
         data = response.json()
 
-        assert data["status"] == "healthy"
+        assert data["status"] == "ok"  # API-01: normalized across services
         assert "timestamp" in data
         assert "version" in data
         assert "active_connections" in data

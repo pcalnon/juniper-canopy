@@ -159,7 +159,7 @@ class TestDashboardManagerCallbacks:
 
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"status": "healthy", "latency_ms": 10}
+        mock_response.json.return_value = {"status": "ok", "latency_ms": 10}  # API-01: canopy now returns "ok"
         mock_get.return_value = mock_response
 
         config = {}
