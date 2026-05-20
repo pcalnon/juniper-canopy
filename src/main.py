@@ -743,7 +743,11 @@ async def health_check_deprecated(request: Request):
     """Health check endpoint (deprecated — use /v1/health instead)."""
     system_logger.warning("Deprecated health endpoint %s called — use /v1/health, /v1/health/live, or /v1/health/ready instead", request.url.path)
     return {
-        "status": "healthy",
+        # API-01: align with cascor + juniper-data ("ok"). Canopy was the
+        # only service returning "healthy"; the field is still present so
+        # legacy clients see a non-empty status, just with the
+        # ecosystem-standard value.
+        "status": "ok",
         "timestamp": time.time(),
         "version": APP_VERSION,
         "active_connections": websocket_manager.get_connection_count(),
@@ -757,7 +761,8 @@ async def health_check_deprecated(request: Request):
 async def health_check():
     """Combined health check endpoint."""
     return {
-        "status": "healthy",
+        # API-01: align with cascor + juniper-data ("ok").
+        "status": "ok",
         "timestamp": time.time(),
         "version": APP_VERSION,
         "active_connections": websocket_manager.get_connection_count(),

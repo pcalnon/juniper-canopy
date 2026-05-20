@@ -67,7 +67,7 @@ class TestHealthCheckEndpoint:
         assert "status" in data
         assert "timestamp" in data
         assert "version" in data
-        assert data["status"] == "healthy"
+        assert data["status"] == "ok"  # API-01: normalized across services
 
     def test_health_check_includes_connections(self, app_client):
         """Health check should include active connections."""
@@ -95,7 +95,7 @@ class TestHealthCheckEndpoint:
         response = app_client.get("/api/health")
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "healthy"
+        assert data["status"] == "ok"  # API-01: normalized across services
 
 
 class TestStateEndpoint:
