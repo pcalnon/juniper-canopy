@@ -748,6 +748,14 @@ async def health_check_deprecated(request: Request):
         # legacy clients see a non-empty status, just with the
         # ecosystem-standard value.
         "status": "ok",
+        # API-02: shared {status, version, service} base across the three
+        # Juniper services so cross-service monitoring tools can tell
+        # health responses apart without inspecting the URL. The canopy-
+        # specific fields below (timestamp, active_connections,
+        # training_active, demo_mode, juniper_data_available) are
+        # documented optional extras per Approach A guardrails and
+        # remain unchanged for backward compat.
+        "service": "juniper-canopy",
         "timestamp": time.time(),
         "version": APP_VERSION,
         "active_connections": websocket_manager.get_connection_count(),
@@ -759,10 +767,21 @@ async def health_check_deprecated(request: Request):
 
 @app.get("/v1/health")
 async def health_check():
-    """Combined health check endpoint."""
+    """Combined health check endpoint.
+
+    Response schema:
+
+    - Shared API-02 base: ``status``, ``version``, ``service``
+      (``"juniper-canopy"``) — matches juniper-data and juniper-cascor.
+    - Canopy-specific optional extras (Approach A guardrails): ``timestamp``,
+      ``active_connections``, ``training_active``, ``demo_mode``,
+      ``juniper_data_available``.
+    """
     return {
         # API-01: align with cascor + juniper-data ("ok").
         "status": "ok",
+        # API-02: shared {status, version, service} base across services.
+        "service": "juniper-canopy",
         "timestamp": time.time(),
         "version": APP_VERSION,
         "active_connections": websocket_manager.get_connection_count(),

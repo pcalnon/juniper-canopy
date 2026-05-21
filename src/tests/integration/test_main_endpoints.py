@@ -63,6 +63,23 @@ class TestMainEndpointsIntegration:
         assert "training_active" in data
         assert data["demo_mode"] is True  # Demo mode should be active
 
+    def test_health_includes_service_identifier(self, client):
+        """API-02: both /api/health (deprecated) and /v1/health (canonical) include the
+        ``service`` field naming this service.
+
+        Part of the shared ``{status, version, service}`` base schema across
+        juniper-data, juniper-cascor, and juniper-canopy so cross-service
+        monitoring tools can tell health responses apart without parsing
+        the URL. The canopy-specific extras (timestamp, active_connections,
+        training_active, demo_mode, juniper_data_available) remain as
+        documented optional fields.
+        """
+        for path in ("/api/health", "/v1/health"):
+            response = client.get(path)
+            assert response.status_code == 200, path
+            data = response.json()
+            assert data["service"] == "juniper-canopy", path
+
     # ========== Status Endpoint ==========
 
     def test_get_status_demo_mode(self, client):
