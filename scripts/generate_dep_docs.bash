@@ -1,1 +1,0 @@
-../util/generate_dep_docs.bash

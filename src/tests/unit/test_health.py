@@ -176,11 +176,11 @@ class TestCanopyHealthEndpoints:
     """Test canopy health endpoints via TestClient."""
 
     def test_v1_health(self, client):
-        """Test /v1/health returns healthy status."""
+        """Test /v1/health returns the API-01-normalized "ok" status (see PR #299)."""
         response = client.get("/v1/health")
         assert response.status_code == 200
         body = response.json()
-        assert body["status"] == "healthy"
+        assert body["status"] == "ok"
         assert "version" in body
         assert "training_active" in body
 
@@ -320,15 +320,15 @@ class TestDeprecatedEndpoints:
     """Test deprecated health endpoint aliases."""
 
     def test_health_deprecated(self, client):
-        """Test /health still works but is deprecated."""
+        """Test /health still works but is deprecated (status now "ok" — API-01, PR #299)."""
         response = client.get("/health")
         assert response.status_code == 200
         body = response.json()
-        assert body["status"] == "healthy"
+        assert body["status"] == "ok"
 
     def test_api_health_deprecated(self, client):
-        """Test /api/health still works but is deprecated."""
+        """Test /api/health still works but is deprecated (status now "ok" — API-01, PR #299)."""
         response = client.get("/api/health")
         assert response.status_code == 200
         body = response.json()
-        assert body["status"] == "healthy"
+        assert body["status"] == "ok"

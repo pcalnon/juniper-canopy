@@ -1038,11 +1038,11 @@ class TestHealthEndpointComprehensive:
     """Test /api/health endpoint comprehensively."""
 
     @pytest.mark.integration
-    def test_health_status_healthy(self, client):
-        """Health should report healthy status."""
+    def test_health_status_ok(self, client):
+        """Health should report ok status (API-01: normalized across services)."""
         response = client.get("/api/health")
         data = response.json()
-        assert data["status"] == "healthy"
+        assert data["status"] == "ok"
 
     @pytest.mark.integration
     def test_health_has_timestamp(self, client):

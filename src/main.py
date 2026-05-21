@@ -46,6 +46,7 @@ import secrets
 # import sys
 import time
 import uuid
+from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
@@ -87,10 +88,6 @@ from settings import get_settings
 
 # import dash
 # from dash import html, dcc
-
-
-# src_dir = Path(__file__).parent
-# sys.path.insert(0, str(src_dir))
 
 
 # Initialize configuration
@@ -746,7 +743,19 @@ async def health_check_deprecated(request: Request):
     """Health check endpoint (deprecated — use /v1/health instead)."""
     system_logger.warning("Deprecated health endpoint %s called — use /v1/health, /v1/health/live, or /v1/health/ready instead", request.url.path)
     return {
-        "status": "healthy",
+        # API-01: align with cascor + juniper-data ("ok"). Canopy was the
+        # only service returning "healthy"; the field is still present so
+        # legacy clients see a non-empty status, just with the
+        # ecosystem-standard value.
+        "status": "ok",
+        # API-02: shared {status, version, service} base across the three
+        # Juniper services so cross-service monitoring tools can tell
+        # health responses apart without inspecting the URL. The canopy-
+        # specific fields below (timestamp, active_connections,
+        # training_active, demo_mode, juniper_data_available) are
+        # documented optional extras per Approach A guardrails and
+        # remain unchanged for backward compat.
+        "service": "juniper-canopy",
         "timestamp": time.time(),
         "version": APP_VERSION,
         "active_connections": websocket_manager.get_connection_count(),
@@ -758,9 +767,21 @@ async def health_check_deprecated(request: Request):
 
 @app.get("/v1/health")
 async def health_check():
-    """Combined health check endpoint."""
+    """Combined health check endpoint.
+
+    Response schema:
+
+    - Shared API-02 base: ``status``, ``version``, ``service``
+      (``"juniper-canopy"``) — matches juniper-data and juniper-cascor.
+    - Canopy-specific optional extras (Approach A guardrails): ``timestamp``,
+      ``active_connections``, ``training_active``, ``demo_mode``,
+      ``juniper_data_available``.
+    """
     return {
-        "status": "healthy",
+        # API-01: align with cascor + juniper-data ("ok").
+        "status": "ok",
+        # API-02: shared {status, version, service} base across services.
+        "service": "juniper-canopy",
         "timestamp": time.time(),
         "version": APP_VERSION,
         "active_connections": websocket_manager.get_connection_count(),
@@ -1564,8 +1585,14 @@ async def get_snapshot_detail(snapshot_id: str):
     return detail
 
 
-# Session-persistent storage for demo mode snapshots (P3-1)
-_demo_snapshots: list = []
+# Session-persistent storage for demo mode snapshots (P3-1).
+# BUG-CN-08: bounded by ``maxlen`` so the list can't grow unbounded across
+# a long demo session — older snapshots fall off the tail LRU-style. 100
+# is enough for any realistic demo run; existing callers iterate the
+# whole collection and don't depend on list-specific methods beyond
+# ``insert(0, ...)`` (now ``.appendleft(...)``).
+_DEMO_SNAPSHOTS_MAX = 100
+_demo_snapshots: deque = deque(maxlen=_DEMO_SNAPSHOTS_MAX)
 
 # Meta parameter key prefixes captured in snapshots
 _META_PARAM_PREFIXES = ("nn_", "cn_")
@@ -1663,8 +1690,10 @@ async def create_snapshot(
         if "dataset_version" in status:
             snapshot["dataset_version"] = status["dataset_version"]
 
-        # Add to session-persistent demo snapshots list
-        _demo_snapshots.insert(0, snapshot)
+        # Add to session-persistent demo snapshots list (deque appendleft is
+        # the O(1) equivalent of list.insert(0, ...); maxlen drops the oldest
+        # entry when the cap is reached — see BUG-CN-08).
+        _demo_snapshots.appendleft(snapshot)
 
         # Log the activity
         _log_snapshot_activity(

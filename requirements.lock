@@ -13,7 +13,7 @@ anyio==4.13.0
     #   watchfiles
 blinker==1.9.0
     # via flask
-certifi==2026.4.22
+certifi==2026.5.20
     # via
     #   httpcore
     #   httpx
@@ -21,7 +21,7 @@ certifi==2026.4.22
     #   sentry-sdk
 charset-normalizer==3.4.7
     # via requests
-click==8.3.3
+click==8.4.0
     # via
     #   flask
     #   uvicorn
@@ -71,7 +71,7 @@ markupsafe==3.0.3
     #   flask
     #   jinja2
     #   werkzeug
-narwhals==2.21.0
+narwhals==2.21.2
     # via plotly
 nest-asyncio==1.6.0
     # via
@@ -79,7 +79,7 @@ nest-asyncio==1.6.0
     #   dash
 networkx==3.6.1
     # via juniper-canopy (pyproject.toml)
-numpy==2.4.4
+numpy==2.4.6
     # via
     #   juniper-canopy (pyproject.toml)
     #   juniper-cascor-protocol
@@ -108,16 +108,15 @@ pydantic-settings==2.14.1
     # via juniper-canopy (pyproject.toml)
 python-dotenv==1.2.2
     # via
-    #   juniper-canopy (pyproject.toml)
     #   pydantic-settings
     #   uvicorn
-python-multipart==0.0.28
+python-multipart==0.0.29
     # via juniper-canopy (pyproject.toml)
 pyyaml==6.0.3
     # via
     #   juniper-canopy (pyproject.toml)
     #   uvicorn
-requests==2.34.1
+requests==2.34.2
     # via
     #   juniper-canopy (pyproject.toml)
     #   dash
@@ -153,11 +152,11 @@ urllib3==2.7.0
     #   juniper-data-client
     #   requests
     #   sentry-sdk
-uvicorn==0.46.0
+uvicorn==0.47.0
     # via juniper-canopy (pyproject.toml)
 uvloop==0.22.1
     # via uvicorn
-watchfiles==1.1.1
+watchfiles==1.2.0
     # via uvicorn
 websockets==16.0
     # via
@@ -168,5 +167,5 @@ werkzeug==3.1.8
     # via
     #   dash
     #   flask
-zipp==3.23.1
+zipp==4.1.0
     # via importlib-metadata
