@@ -13,7 +13,6 @@ Provides:
 from __future__ import annotations
 
 import logging
-import os
 from typing import TYPE_CHECKING
 
 from backend.protocol import BackendProtocol
@@ -44,11 +43,14 @@ def create_backend(
     Selection logic (first match wins):
         1. demo_mode=True (explicit)           -> DemoBackend
         2. settings.demo_mode=True             -> DemoBackend
-        3. CASCOR_DEMO_MODE=1/true/yes         -> DemoBackend (legacy fallback)
-        4. service_url provided                -> ServiceBackend
-        5. settings.cascor_service_url set     -> ServiceBackend
-        6. CASCOR_SERVICE_URL set              -> ServiceBackend (legacy fallback)
-        7. Otherwise                           -> DemoBackend (fallback)
+        3. service_url provided                -> ServiceBackend
+        4. settings.cascor_service_url set     -> ServiceBackend
+        5. Otherwise                           -> DemoBackend (fallback)
+
+    Legacy ``CASCOR_DEMO_MODE`` and ``CASCOR_SERVICE_URL`` env vars are
+    handled transparently by ``Settings._check_legacy_demo_mode`` and
+    ``Settings._check_cascor_service_url`` (which emit DeprecationWarning),
+    so they flow through the corresponding Settings fields above.
 
     Returns:
         A BackendProtocol-conforming backend instance.
@@ -61,16 +63,13 @@ def create_backend(
 
     # Resolve demo mode
     force_demo = demo_mode if demo_mode is not None else settings.demo_mode
-    if not force_demo:
-        # Legacy fallback
-        force_demo = os.getenv("CASCOR_DEMO_MODE", "0").lower() in ("1", "true", "yes")
 
     if force_demo:
         logger.info("Demo mode explicitly enabled")
         return DemoBackend(get_demo_mode(update_interval=1.0))
 
     # Resolve service URL
-    resolved_url = service_url or settings.cascor_service_url or os.getenv("CASCOR_SERVICE_URL")
+    resolved_url = service_url or settings.cascor_service_url
 
     if resolved_url:
         from backend.cascor_service_adapter import CascorServiceAdapter
