@@ -64,7 +64,23 @@ dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "websockets>=12.0",
-    "python-dotenv>=1.0.0",
+    # CFG-13: ``python-dotenv`` was previously declared explicitly here.
+    # Removed because:
+    #   1. No canopy code in ``src/`` imports ``dotenv`` directly
+    #      (``grep -rn 'from dotenv\|import dotenv' src/`` returns zero
+    #      hits outside test reports).
+    #   2. ``src/settings.py:124`` uses ``env_file=".env"`` on the
+    #      pydantic-settings ``Settings`` class. pydantic-settings
+    #      declares ``python-dotenv>=0.21.0`` as a **required (non-optional)**
+    #      runtime dep (verified via ``importlib.metadata.metadata
+    #      ('pydantic-settings').get_all('Requires-Dist')``), so it
+    #      transitively installs whenever canopy is installed.
+    #   3. The lockfile correctly resolves ``python-dotenv==1.2.2`` via
+    #      the pydantic-settings edge; this PR does not require a lock
+    #      regen.
+    # Sibling repos juniper-data and juniper-cascor DO have direct
+    # ``from dotenv import load_dotenv`` calls and correctly keep the
+    # explicit dep; canopy is the only repo where it was dead.
     "nest-asyncio>=1.5.0",
     "requests>=2.28.0",
     # METRICS-MON R4.2 / seed-10: native async HTTP for health-probe
