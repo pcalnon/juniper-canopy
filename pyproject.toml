@@ -118,7 +118,14 @@ juniper-data = [
     "requests>=2.28.0",
 ]
 juniper-cascor = [
-    "juniper-cascor-client>=0.1.0",
+    # CFG-14: floor matches the juniper-ml meta-package
+    # (juniper-ml/pyproject.toml ``[clients]`` pins ``juniper-cascor-client>=0.3.0``).
+    # The previous ``>=0.1.0`` admitted three minor versions of incompatible
+    # behavior; bumping aligns canopy's installable set with what users get
+    # transitively via ``pip install juniper-ml[clients]`` and removes the
+    # gap. Tightening further to the current release floor (0.4.0) is a
+    # separate decision once canopy adopts post-0.3.x APIs.
+    "juniper-cascor-client>=0.3.0",
 ]
 observability = [
     # prometheus-client moved to [project] dependencies on 2026-05-10
