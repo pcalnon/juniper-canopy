@@ -1648,7 +1648,6 @@ class NetworkVisualizer(BaseComponent):
             "opacity": opacity,
         }
 
-    # TODO: this is throwing a logging error
     def _create_new_node_highlight_traces(
         self,
         G: "nx.DiGraph",
@@ -1682,8 +1681,17 @@ class NetworkVisualizer(BaseComponent):
 
         # Edge highlights (draw first, behind node)
         edge_opacity = 0.5 * opacity  # More muted than node
-        for from_node, to_node, _data in G.edges(data=True):
-            # self.logger.verbose(f"Edge Data: {data}")
+        # CLN-CN-12: previously iterated ``G.edges(data=True)`` so that a
+        # per-edge ``self.log_verbose(f"Edge Data: {data}")`` developer-trace
+        # could log every edge dict. That call was an attribute error
+        # (``log_verbose`` does not exist on this class; the correct API is
+        # ``self.logger.verbose(...)``) and was commented out with a TODO
+        # during the b47d55a refactor. Removed entirely because (a) the
+        # commented form was dead code, (b) re-enabling per-edge per-frame
+        # verbose logging from a visualizer hot path is the wrong
+        # ergonomics, and (c) the edge ``data`` dict is not used here —
+        # only the endpoint node IDs matter for hit-testing.
+        for from_node, to_node in G.edges():
             if (from_node == node_id or to_node == node_id) and from_node in pos and to_node in pos:
                 x0, y0 = pos[from_node]
                 x1, y1 = pos[to_node]
