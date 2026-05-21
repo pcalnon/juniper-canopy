@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`util/test_agents_md_version_drift.py`** -- portable port of juniper-ml's lint test pinning `AGENTS.md`'s `**Version**:` header to `pyproject.toml`'s `[project].version`. Catches the failure class where a `pyproject.toml` bump leaves the agent-facing contract stale. Preventive-only here: canopy's `AGENTS.md` and `pyproject.toml` are already in sync at `0.4.0`. Wired into the CI tests job next to the existing `test_workflow_script_paths.py` lint.
+
 - Added documentation for the Network Editor service-mode investigation workflow and its network mutation proxy endpoints:
   - `docs/USER_MANUAL.md` now covers the `Investigating`-state gated Network Editor tab, append/remove/patch operations, service-mode constraints, and common failure modes.
   - `docs/api/API_REFERENCE.md` now documents `PATCH /api/v1/network/weights`, `POST /api/v1/network/hidden-units`, and `DELETE /api/v1/network/hidden-units/{idx}` with request examples and status-code expectations.
