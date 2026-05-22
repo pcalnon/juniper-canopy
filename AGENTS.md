@@ -1,6 +1,13 @@
 # Juniper Canopy - Agent Development Guide
 
+**Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
+**Repository**: pcalnon/juniper-canopy
+**Author**: Paul Calnon
+**License**: MIT License
 **Version**: 0.4.0
+**Last Updated**: 2026-05-22
+
+---
 
 ## Project Overview
 
