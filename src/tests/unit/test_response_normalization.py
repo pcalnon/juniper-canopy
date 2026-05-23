@@ -755,7 +755,7 @@ class TestDatasetTargetConversion:
                 "train_x": [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]],
                 "train_y": [[0.0], [1.0], [0.0]],
             },
-            "meta": {"timestamp": 0, "version": "0.4.0"},
+            "meta": {"timestamp": 0, "version": "0.5.0"},
         }
         result = adapter.get_dataset_data()
         assert result["targets"] == [0, 1, 0]
@@ -771,7 +771,7 @@ class TestDatasetTargetConversion:
                 "train_x": [[0.1, 0.2], [0.3, 0.4]],
                 "train_y": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
             },
-            "meta": {"timestamp": 0, "version": "0.4.0"},
+            "meta": {"timestamp": 0, "version": "0.5.0"},
         }
         result = adapter.get_dataset_data()
         assert result["targets"] == [0, 1]
@@ -798,7 +798,7 @@ class TestDatasetTargetConversion:
                 "train_x": [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]],
                 "train_y": [0, 1, 0],
             },
-            "meta": {"timestamp": 0, "version": "0.4.0"},
+            "meta": {"timestamp": 0, "version": "0.5.0"},
         }
         result = adapter.get_dataset_data()
         assert result["targets"] == [0, 1, 0]

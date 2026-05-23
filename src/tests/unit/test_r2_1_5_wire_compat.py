@@ -123,7 +123,7 @@ class TestSentryBeforeSendHook:
         from observability import configure_sentry
 
         with patch("sentry_sdk.init") as mock_init:
-            configure_sentry("https://k@o0.ingest.sentry.io/0", "juniper-canopy", "0.4.0")
+            configure_sentry("https://k@o0.ingest.sentry.io/0", "juniper-canopy", "0.5.0")
             kw = mock_init.call_args.kwargs
             assert kw["before_send"] is shared_strip
 
