@@ -157,8 +157,23 @@ ui-test = [
     "pytest-playwright>=0.5",
     "playwright>=1.45",
 ]
+demo = [
+    # CFG-01 (v7 roadmap §13439): ``torch`` is imported unconditionally at
+    # module level by ``src/demo_mode.py:63`` and ``src/backend/demo_backend.py:45``.
+    # ``pip install juniper-canopy`` without this extra cannot import the
+    # demo modules. Kept out of ``[project] dependencies`` to avoid the
+    # ~2GB install footprint on production deployments that drive a remote
+    # cascor service via ``[juniper-cascor]`` and never load demo mode
+    # (matches the lazy-import convention in ``src/backend/data_adapter.py:363,406``
+    # whose existing comments call out the size cost explicitly).
+    # The standalone demo runner ``util/juniper_canopy-demo.bash`` continues
+    # to install torch via ``conf/requirements.txt`` + the PyTorch CPU index
+    # URL for size-optimised bash-script installs; this extra is the
+    # canonical path for ``pip install juniper-canopy[demo]``.
+    "torch>=2.0.0",
+]
 dev = [
-    "juniper-canopy[juniper-data,juniper-cascor,observability]",
+    "juniper-canopy[juniper-data,juniper-cascor,observability,demo]",
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "pytest-asyncio>=0.23",

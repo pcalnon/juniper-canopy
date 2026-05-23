@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **CFG-01** (v7 roadmap §13439): new `[demo]` optional-dependencies extra declaring `torch>=2.0.0`. Closes the missing-declaration where `src/demo_mode.py:63` and `src/backend/demo_backend.py:45` `import torch` unconditionally at module level but `pyproject.toml` had no `torch` entry — `pip install juniper-canopy` (no extra) silently produced a wheel that crashed on demo import. Kept out of `[project] dependencies` per the roadmap recommendation to avoid the ~2GB install footprint on production deployments that drive a remote cascor service via `[juniper-cascor]` and never load demo mode (matches the lazy-import convention in `src/backend/data_adapter.py:363,406` whose existing `noqa: F811` comments call out the size cost explicitly). The standalone demo runner `util/juniper_canopy-demo.bash` continues to install torch via `conf/requirements.txt` + the PyTorch CPU index URL for size-optimised bash-script installs; this extra is the canonical path for `pip install juniper-canopy[demo]`. `[dev]` aggregator updated to include `[demo]` so the test suite (`src/tests/unit/test_demo_mode_comprehensive.py:22` etc. import torch unconditionally) resolves under `pip install juniper-canopy[dev]`. No code changes — declaration only.
+
 ## [0.5.0] - 2026-05-23
 
 **Note on version history**: `pyproject.toml` was bumped 0.3.0 → 0.4.0 on 2026-03-03 in preparation for a 0.4.0 release that was never cut to PyPI (the `[0.4.0]` section below documents the work that *would have* shipped). This 0.5.0 release rolls up both that work and the subsequent ~2.5 months of changes (983 commits since `v0.3.0`) into a single PyPI release. Subsequent entries in this section list the additional work landed since 2026-03-03.

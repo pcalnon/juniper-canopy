@@ -21,7 +21,7 @@ certifi==2026.5.20
     #   sentry-sdk
 charset-normalizer==3.4.7
     # via requests
-click==8.4.0
+click==8.4.1
     # via
     #   flask
     #   uvicorn
@@ -47,7 +47,7 @@ httptools==0.7.1
     # via uvicorn
 httpx==0.28.1
     # via juniper-canopy (pyproject.toml)
-idna==3.15
+idna==3.16
     # via
     #   anyio
     #   httpx
@@ -58,10 +58,12 @@ itsdangerous==2.2.0
     # via flask
 jinja2==3.1.6
     # via flask
-juniper-cascor-client==0.3.0
+juniper-cascor-client==0.4.0
     # via juniper-canopy (pyproject.toml)
 juniper-cascor-protocol==0.1.0
-    # via juniper-canopy (pyproject.toml)
+    # via
+    #   juniper-canopy (pyproject.toml)
+    #   juniper-cascor-client
 juniper-data-client==0.4.1
     # via juniper-canopy (pyproject.toml)
 juniper-observability==0.2.0
@@ -130,7 +132,7 @@ sentry-sdk==2.60.0
     # via juniper-canopy (pyproject.toml)
 setuptools==82.0.1
     # via dash
-starlette==1.0.0
+starlette==1.1.0
     # via
     #   fastapi
     #   juniper-observability
