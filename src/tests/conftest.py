@@ -31,6 +31,15 @@ os.environ.setdefault("JUNIPER_CANOPY_LOG_LEVEL", os.environ.get("CASCOR_LOG_LEV
 os.environ.setdefault("JUNIPER_CANOPY_BACKEND_PATH", os.environ.get("CASCOR_BACKEND_PATH", "../juniper-cascor"))
 os.environ.setdefault("JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL", os.environ.get("CASCOR_DEMO_UPDATE_INTERVAL", "1.0"))
 
+# Capture ``CANOPY_API_KEY`` from the inherited environment for the
+# ``auth_headers`` fixture, then remove it from ``os.environ`` BEFORE any
+# import of ``main`` so the in-process FastAPI test app loads with API key
+# authentication disabled. Otherwise the in-process WebSocket tests that use
+# ``TestClient.websocket_connect`` get closed with code 4001 "Authentication
+# required" whenever the developer happens to have ``CANOPY_API_KEY`` set in
+# their shell (e.g., to talk to a real running canopy server).
+_CAPTURED_CANOPY_API_KEY: str = os.environ.pop("CANOPY_API_KEY", "").strip()
+
 # Add src directory to Python path IMMEDIATELY (before pytest rewrites imports)
 # This MUST happen at module load time, not in fixtures
 # Go up 3 levels: conftest.py → tests/ → src/ → project_root/
@@ -529,6 +538,23 @@ def client():
 
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture(scope="session")
+def auth_headers() -> dict:
+    """Return an ``X-API-Key`` header dict when ``CANOPY_API_KEY`` was set, else ``{}``.
+
+    Used by ``@pytest.mark.requires_server`` tests so they pass against both
+    demo-mode servers (auth disabled, no key needed) and production-config
+    servers (auth enabled via ``CANOPY_API_KEY``) without changing the test
+    assertions.
+
+    The value is captured at conftest load time (see ``_CAPTURED_CANOPY_API_KEY``)
+    because the in-process FastAPI ``TestClient`` requires ``CANOPY_API_KEY`` to
+    be absent from ``os.environ`` (otherwise auth turns on and WebSocket tests
+    are rejected with code 4001).
+    """
+    return {"X-API-Key": _CAPTURED_CANOPY_API_KEY} if _CAPTURED_CANOPY_API_KEY else {}
 
 
 @pytest.fixture

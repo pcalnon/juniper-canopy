@@ -37,14 +37,14 @@ class TestCandidateVisibility:
         health_data = response.json()
         assert "status" in health_data or health_data is not None, "Health response should contain data"
 
-    def test_state_endpoint_returns_data(self):
+    def test_state_endpoint_returns_data(self, auth_headers):
         """Test that the state endpoint returns valid data."""
-        response = requests.get(f"{self.BASE_URL}/api/state", timeout=2)
+        response = requests.get(f"{self.BASE_URL}/api/state", timeout=2, headers=auth_headers)
         assert response.status_code == 200, f"State endpoint failed: {response.status_code}"
         data = response.json()
         assert "current_epoch" in data or "epoch" in data or data is not None, "State should contain epoch data"
 
-    def test_candidate_pool_becomes_active(self):
+    def test_candidate_pool_becomes_active(self, auth_headers):
         """Test that candidate pool becomes active during candidate phases.
 
         This test monitors the training state and verifies that the candidate
@@ -55,7 +55,7 @@ class TestCandidateVisibility:
         max_checks = 30  # Check for up to 30 seconds
 
         for _ in range(max_checks):
-            response = requests.get(f"{self.BASE_URL}/api/state", timeout=2)
+            response = requests.get(f"{self.BASE_URL}/api/state", timeout=2, headers=auth_headers)
             assert response.status_code == 200, f"State endpoint failed: {response.status_code}"
             data = response.json()
 
@@ -75,7 +75,7 @@ class TestCandidateVisibility:
         if not seen_candidate_phase:
             pytest.skip(f"Candidate pool not activated within {max_checks}s (candidate phases occur every 5 epochs)")
 
-    def test_pool_metrics_available_when_active(self):
+    def test_pool_metrics_available_when_active(self, auth_headers):
         """Test that pool metrics are available when candidate pool is active.
 
         This test waits for an active candidate phase and verifies that
@@ -84,7 +84,7 @@ class TestCandidateVisibility:
         max_checks = 30
 
         for _ in range(max_checks):
-            response = requests.get(f"{self.BASE_URL}/api/state", timeout=2)
+            response = requests.get(f"{self.BASE_URL}/api/state", timeout=2, headers=auth_headers)
             assert response.status_code == 200
             data = response.json()
 

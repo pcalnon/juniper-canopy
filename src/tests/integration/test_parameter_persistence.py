@@ -226,7 +226,7 @@ class TestParameterPersistence:
 @pytest.mark.e2e
 @pytest.mark.requires_server
 @pytest.mark.asyncio
-async def test_api_set_params_integration():
+async def test_api_set_params_integration(auth_headers):
     """Integration test for /api/set_params endpoint (requires running server)."""
 
     import httpx
@@ -239,7 +239,11 @@ async def test_api_set_params_integration():
             pytest.skip("Server not reachable at localhost:8050 (start with ./demo)")
 
         # Set parameters via API
-        response = await client.post("http://localhost:8050/api/set_params", json={"learning_rate": 0.08, "max_hidden_units": 6})
+        response = await client.post(
+            "http://localhost:8050/api/set_params",
+            json={"learning_rate": 0.08, "max_hidden_units": 6},
+            headers=auth_headers,
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -248,7 +252,7 @@ async def test_api_set_params_integration():
         # Verify parameters persisted
         await asyncio.sleep(1)
 
-        state_response = await client.get("http://localhost:8050/api/state")
+        state_response = await client.get("http://localhost:8050/api/state", headers=auth_headers)
         state_data = state_response.json()
 
         assert state_data["learning_rate"] == 0.08
