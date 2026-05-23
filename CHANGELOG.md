@@ -9,9 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-23
+
+**Note on version history**: `pyproject.toml` was bumped 0.3.0 → 0.4.0 on 2026-03-03 in preparation for a 0.4.0 release that was never cut to PyPI (the `[0.4.0]` section below documents the work that *would have* shipped). This 0.5.0 release rolls up both that work and the subsequent ~2.5 months of changes (983 commits since `v0.3.0`) into a single PyPI release. Subsequent entries in this section list the additional work landed since 2026-03-03.
+
 ### Added
 
-- **`util/test_agents_md_version_drift.py`** -- portable port of juniper-ml's lint test pinning `AGENTS.md`'s `**Version**:` header to `pyproject.toml`'s `[project].version`. Catches the failure class where a `pyproject.toml` bump leaves the agent-facing contract stale. Preventive-only here: canopy's `AGENTS.md` and `pyproject.toml` are already in sync at `0.4.0`. Wired into the CI tests job next to the existing `test_workflow_script_paths.py` lint.
+- **`util/test_agents_md_version_drift.py`** -- portable port of juniper-ml's lint test pinning `AGENTS.md`'s `**Version**:` header to `pyproject.toml`'s `[project].version`. Catches the failure class where a `pyproject.toml` bump leaves the agent-facing contract stale. Preventive-only here: canopy's `AGENTS.md` and `pyproject.toml` are already in sync at `0.5.0`. Wired into the CI tests job next to the existing `test_workflow_script_paths.py` lint.
 
 - Added documentation for the Network Editor service-mode investigation workflow and its network mutation proxy endpoints:
   - `docs/USER_MANUAL.md` now covers the `Investigating`-state gated Network Editor tab, append/remove/patch operations, service-mode constraints, and common failure modes.
