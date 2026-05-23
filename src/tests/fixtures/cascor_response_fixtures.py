@@ -16,7 +16,7 @@ Fixture functions returning real cascor ResponseEnvelope-formatted responses.
 
 Real cascor wraps ALL responses in::
 
-    {"status": "success", "data": <payload>, "meta": {"timestamp": <float>, "version": "0.4.0"}}
+    {"status": "success", "data": <payload>, "meta": {"timestamp": <float>, "version": "0.5.0"}}
 
 These are plain functions (not pytest fixtures) that return dicts.
 """
@@ -29,7 +29,7 @@ def _envelope(data):
     return {
         "status": "success",
         "data": data,
-        "meta": {"timestamp": time.time(), "version": "0.4.0"},
+        "meta": {"timestamp": time.time(), "version": "0.5.0"},
     }
 
 

@@ -97,7 +97,7 @@ settings = get_settings()
 try:
     APP_VERSION = importlib.metadata.version("juniper-canopy")
 except importlib.metadata.PackageNotFoundError:
-    APP_VERSION = "0.4.0"
+    APP_VERSION = "0.5.0"
 
 # Initialize loggers
 system_logger = get_system_logger()
