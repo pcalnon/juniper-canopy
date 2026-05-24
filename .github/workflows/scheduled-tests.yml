@@ -56,7 +56,19 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade "pip>=26.1.1"
-          pip install -e ".[test]" || pip install -e ".[dev]" || pip install -e .
+          # Match the main ci.yml unit-tests job: torch from the CPU index
+          # (canopy's demo_mode.py and demo_backend.py import torch at
+          # module load), then conf/requirements_ci.txt (the pinned CI
+          # surface incl. pytest>=9.0 + pytest-* siblings), then the repo
+          # itself in editable mode. The earlier ``.[test]`` shape silently
+          # no-op'd because canopy has no ``[test]`` extra in pyproject —
+          # pip warned but exit-0'd so the ``||`` fallback chain never
+          # fired, leaving pytest itself uninstalled. Every scheduled run
+          # since the workflow was added has failed with
+          # ``No module named pytest``.
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r conf/requirements_ci.txt
+          pip install -e .
 
       - name: Run slow / integration tests
         run: |
