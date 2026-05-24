@@ -169,7 +169,17 @@ class Settings(BaseSettings):
 
     # Phase B-pre-a: Audit logging (M-SEC-07)
     audit_log_enabled: bool = True
-    audit_log_path: str = "/var/log/canopy/audit.log"
+    # CFG-09 (v7 roadmap §13896): default was previously
+    # ``/var/log/canopy/audit.log`` which requires root to create the
+    # parent dir and crashes non-root deployments at startup
+    # (``audit_log.py:51`` mkdir or :53 ``TimedRotatingFileHandler`` open).
+    # Switched to a CWD-relative default that works out-of-the-box on a
+    # fresh non-root install. Production deployments continue to override
+    # via the ``JUNIPER_CANOPY_AUDIT_LOG_PATH`` env var (pydantic
+    # auto-derives via ``env_prefix='JUNIPER_CANOPY_'``); a deferred
+    # follow-up may switch to ``$XDG_STATE_HOME/canopy/audit.log`` for
+    # XDG-spec correctness once an XDG helper exists in canopy.
+    audit_log_path: str = "logs/audit.log"
     audit_log_retention_days: int = 90
 
     # Phase B: Browser WebSocket bridge (D-17, D-18, D-04)
