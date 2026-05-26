@@ -132,33 +132,69 @@ class TestNetworkVisualizerCallbacks:
         visualizer.register_callbacks(app)
 
 
-@pytest.mark.skip(reason="Method _parse_topology not exposed as public API")
 class TestNetworkVisualizerTopologyParsing:
-    """Test topology parsing methods."""
+    """Test topology parsing via the observable graph-creation path.
+
+    Black-box replacement for the historically-skipped
+    ``TestNetworkVisualizerTopologyParsing`` (asserted on a
+    ``_parse_topology`` method that does not exist — topology parsing
+    happens inline inside ``_create_network_graph``, the actual
+    observable seam). The expected schema is the one
+    ``_create_network_graph`` consumes:
+    ``{"input_units": N, "hidden_units": N, "output_units": N,
+    "connections": [...]}``. The skipped tests used ``input_size`` /
+    ``output_size`` — names that no caller actually produces.
+    """
 
     def test_parse_simple_topology(self, visualizer):
-        """Should parse simple topology."""
-        assert hasattr(visualizer, "_parse_topology"), "NetworkVisualizer should have _parse_topology method"
-        topology = {"input_size": 2, "output_size": 1, "hidden_units": 0}
-
-        result = visualizer._parse_topology(topology)
-        assert result is not None
+        """Topology with no hidden units → graph has at least input + output traces."""
+        topology = {"input_units": 2, "output_units": 1, "hidden_units": 0, "connections": []}
+        fig = visualizer._create_network_graph(topology, "hierarchical", True)
+        assert fig is not None
+        # `_create_network_graph` produces edge_traces + node_traces.
+        # Even with 0 hidden units and 0 connections, node traces for
+        # input/output still appear.
+        assert len(fig.data) > 0
 
     def test_parse_topology_with_hidden_units(self, visualizer):
-        """Should parse topology with hidden units."""
-        assert hasattr(visualizer, "_parse_topology"), "NetworkVisualizer should have _parse_topology method"
-        topology = {"input_size": 2, "output_size": 1, "hidden_units": 3}
+        """Topology with hidden units → graph honours the hidden count.
 
-        result = visualizer._parse_topology(topology)
-        assert result is not None
+        ``_create_node_trace`` derives display labels via
+        ``node_id.replace("_", " ").title()``, so ``hidden_0`` →
+        ``"Hidden 0"``. We assert on the display form (what a user
+        actually sees in the rendered figure).
+        """
+        topology = {
+            "input_units": 2,
+            "output_units": 1,
+            "hidden_units": 3,
+            "connections": [
+                {"from": "input_0", "to": "hidden_0", "weight": 0.1},
+                {"from": "hidden_2", "to": "output_0", "weight": 0.2},
+            ],
+        }
+        fig = visualizer._create_network_graph(topology, "hierarchical", True)
+        assert fig is not None
+        all_text = " ".join(str(trace.text or "") + " " + str(trace.hovertext or "") for trace in fig.data)
+        for i in range(3):
+            assert f"Hidden {i}" in all_text, f"Hidden {i} missing from rendered figure"
+        # Also pin the input/output rendering so accidental layer
+        # mis-bucketing surfaces.
+        for i in range(2):
+            assert f"Input {i}" in all_text
+        assert "Output 0" in all_text
 
     def test_parse_empty_topology(self, visualizer):
-        """Should handle empty topology."""
-        assert hasattr(visualizer, "_parse_topology"), "NetworkVisualizer should have _parse_topology method"
-        topology = {}
+        """Empty topology returns the documented empty-graph figure, does not raise.
 
-        with pytest.raises((KeyError, ValueError)):
-            visualizer._parse_topology(topology)
+        ``_create_network_graph`` treats missing keys as zero-counts and
+        renders a degenerate figure rather than raising — the dashboard
+        survives early-load states. The skipped test asserted
+        ``pytest.raises`` which assumed a different contract.
+        """
+        topology = {}
+        fig = visualizer._create_network_graph(topology, "hierarchical", True)
+        assert fig is not None
 
 
 class TestNetworkVisualizerGraphGeneration:
@@ -170,21 +206,63 @@ class TestNetworkVisualizerGraphGeneration:
         graph = visualizer._create_network_graph(topology, "hierarchical", True)
         assert graph is not None
 
-    @pytest.mark.skip(reason="Method _create_node_layout not exposed as public API")
     def test_create_node_layout(self, visualizer):
-        """Should create node layout."""
-        assert hasattr(visualizer, "_create_node_layout"), "NetworkVisualizer should have _create_node_layout method"
-        nodes = [{"id": 0, "layer": 0}, {"id": 1, "layer": 1}]
-        layout = visualizer._create_node_layout(nodes)
-        assert layout is not None
+        """Node positions must be computed for every node in the topology.
 
-    @pytest.mark.skip(reason="Method _create_edges not exposed as public API")
+        Black-box replacement for the historically-skipped
+        ``test_create_node_layout`` (asserted on a ``_create_node_layout``
+        method that does not exist — node positioning lives in
+        ``_calculate_layout(G, layout_type, n_input, n_hidden, n_output)``
+        which returns ``Dict[str, Tuple[float, float]]``).
+        """
+        import networkx as nx
+
+        # Build the topology graph the same way ``_create_network_graph``
+        # does, then drive ``_calculate_layout`` directly.
+        G = nx.DiGraph()
+        G.add_node("input_0", layer="input")
+        G.add_node("hidden_0", layer="hidden")
+        G.add_node("output_0", layer="output")
+        pos = visualizer._calculate_layout(G, "hierarchical", n_input=1, n_hidden=1, n_output=1)
+        assert isinstance(pos, dict)
+        # Every node must have a 2D position.
+        for node_id in ("input_0", "hidden_0", "output_0"):
+            assert node_id in pos, f"layout missing position for {node_id}"
+            x, y = pos[node_id]
+            assert isinstance(x, (int, float))
+            assert isinstance(y, (int, float))
+
     def test_create_edges(self, visualizer):
-        """Should create edges between nodes."""
-        assert hasattr(visualizer, "_create_edges"), "NetworkVisualizer should have _create_edges method"
-        nodes = [{"id": 0}, {"id": 1}]
-        edges = visualizer._create_edges(nodes)
-        assert edges is not None
+        """Edge traces must be emitted for each connection in the topology.
+
+        Black-box replacement for the historically-skipped
+        ``test_create_edges`` (asserted on a ``_create_edges`` method
+        that does not exist — edge trace creation lives in
+        ``_create_edge_traces(G, pos, show_weights)`` which returns a
+        list of plotly ``Scatter`` traces).
+        """
+        import networkx as nx
+
+        G = nx.DiGraph()
+        G.add_node("input_0", layer="input")
+        G.add_node("output_0", layer="output")
+        G.add_edge("input_0", "output_0", weight=0.42)
+        pos = {"input_0": (0.0, 0.0), "output_0": (1.0, 0.0)}
+        edges = visualizer._create_edge_traces(G, pos, show_weights=True)
+        assert isinstance(edges, list)
+        assert len(edges) >= 1
+        # The single connection in the test topology must produce at
+        # least one edge trace carrying the endpoints.
+        # Plotly Scatter ``x``/``y`` are tuples of numbers (with possible
+        # ``None`` separators for multi-edge traces).
+        edge_xs = []
+        edge_ys = []
+        for trace in edges:
+            edge_xs.extend([v for v in trace.x if v is not None])
+            edge_ys.extend([v for v in trace.y if v is not None])
+        # Endpoints must appear among the trace coordinates.
+        assert 0.0 in edge_xs and 1.0 in edge_xs
+        assert 0.0 in edge_ys
 
 
 class TestNetworkVisualizerInheritance:
@@ -227,26 +305,41 @@ class TestNetworkVisualizerConfiguration:
         assert viz.show_weights is False
 
 
-@pytest.mark.skip(reason="Method _parse_topology not exposed as public API")
 class TestNetworkVisualizerEdgeCases:
-    """Test edge cases."""
+    """Test edge cases via ``_create_network_graph`` — the real seam.
+
+    Black-box replacement for the historically-skipped
+    ``TestNetworkVisualizerEdgeCases`` (asserted on a ``_parse_topology``
+    method that does not exist). The schema used here matches the one
+    ``_create_network_graph`` consumes:
+    ``input_units``/``output_units``/``hidden_units`` (not
+    ``input_size``/``output_size``).
+    """
 
     def test_very_large_network(self, visualizer):
-        """Should handle very large network topology."""
-        assert hasattr(visualizer, "_parse_topology"), "NetworkVisualizer should have _parse_topology method"
-        topology = {"input_size": 100, "output_size": 50, "hidden_units": 200}
-
-        # Should not crash with large topology
-        result = visualizer._parse_topology(topology)
-        assert result is not None
+        """Large topology renders without crashing."""
+        topology = {
+            "input_units": 100,
+            "output_units": 50,
+            "hidden_units": 200,
+            "connections": [],
+        }
+        fig = visualizer._create_network_graph(topology, "hierarchical", False)
+        assert fig is not None
+        # Sanity: rendered figure has traces.
+        assert len(fig.data) > 0
 
     def test_zero_size_network(self, visualizer):
-        """Should handle zero-size network."""
-        assert hasattr(visualizer, "_parse_topology"), "NetworkVisualizer should have _parse_topology method"
-        topology = {"input_size": 0, "output_size": 0, "hidden_units": 0}
+        """All-zero topology returns the documented empty-graph figure, does not raise.
 
-        with pytest.raises((ValueError, KeyError)):
-            visualizer._parse_topology(topology)
+        Treats zero counts as the no-network state the dashboard renders
+        before any training has started. The skipped test asserted
+        ``pytest.raises`` which assumed a different contract than the
+        one that actually exists.
+        """
+        topology = {"input_units": 0, "output_units": 0, "hidden_units": 0, "connections": []}
+        fig = visualizer._create_network_graph(topology, "hierarchical", False)
+        assert fig is not None
 
 
 class TestHierarchyDepthFilter:

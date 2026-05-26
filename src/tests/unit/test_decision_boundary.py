@@ -117,81 +117,140 @@ class TestDecisionBoundaryCallbacks:
         boundary.register_callbacks(app)
 
 
-@pytest.mark.skip(reason="Method _create_grid not exposed as public API")
 class TestDecisionBoundaryGridGeneration:
-    """Test grid generation methods."""
+    """Test grid generation via the observable boundary-compute path.
 
-    def test_create_grid(self, boundary):
-        """Should create mesh grid."""
-        assert hasattr(boundary, "_create_grid"), "DecisionBoundary should have _create_grid method"
-        x_range = (-1, 1)
-        y_range = (-1, 1)
-        grid = boundary._create_grid(x_range, y_range)
-        assert grid is not None
+    Black-box replacement for the historically-skipped
+    ``TestDecisionBoundaryGridGeneration`` (asserted on a ``_create_grid``
+    method that does not exist — grid creation is inline inside
+    ``_compute_decision_boundary`` via ``np.meshgrid``). The observable
+    contract is that the returned dict carries an ``xx``/``yy`` mesh
+    whose shape matches ``boundary.resolution × boundary.resolution``.
+    """
 
-    def test_grid_resolution(self, boundary):
-        """Grid should respect resolution setting."""
-        assert hasattr(boundary, "_create_grid"), "DecisionBoundary should have _create_grid method"
-        x_range = (-1, 1)
-        y_range = (-1, 1)
-        grid = boundary._create_grid(x_range, y_range)
-        # Grid should have resolution^2 points
-        if isinstance(grid, tuple) and len(grid) >= 2:
-            assert grid[0].shape == (boundary.resolution, boundary.resolution)
+    @staticmethod
+    def _identity_predict(grid_points):
+        """Tiny predict_fn for grid-shape testing — output not inspected."""
+        return np.zeros(len(grid_points))
 
-    def test_create_grid_with_different_ranges(self, boundary):
-        """Should handle different x and y ranges."""
-        assert hasattr(boundary, "_create_grid"), "DecisionBoundary should have _create_grid method"
-        x_range = (-2, 2)
-        y_range = (-3, 3)
-        grid = boundary._create_grid(x_range, y_range)
-        assert grid is not None
+    def test_compute_decision_boundary_produces_mesh(self, boundary):
+        """Should produce ``xx``/``yy`` mesh with resolution × resolution shape."""
+        boundary.predict_fn = self._identity_predict
+        dataset = {"inputs": [[-1, -1], [1, 1]], "targets": [0, 1]}
+        result = boundary._compute_decision_boundary(dataset)
+        assert result, "boundary dict must be populated when predict_fn is set"
+        xx = np.array(result["xx"])
+        yy = np.array(result["yy"])
+        assert xx.shape == (boundary.resolution, boundary.resolution)
+        assert yy.shape == (boundary.resolution, boundary.resolution)
+
+    def test_compute_decision_boundary_honours_resolution(self):
+        """Resolution config flows through to the mesh shape.
+
+        Verifies the same configuration knob the skipped
+        ``test_grid_resolution`` was probing.
+        """
+        for resolution in (50, 100):
+            b = DecisionBoundary({"boundary_resolution": resolution})
+            b.predict_fn = TestDecisionBoundaryGridGeneration._identity_predict
+            result = b._compute_decision_boundary({"inputs": [[-1, -1], [1, 1]], "targets": [0, 1]})
+            xx = np.array(result["xx"])
+            assert xx.shape == (resolution, resolution), f"resolution={resolution} mesh mismatch"
+
+    def test_compute_decision_boundary_with_different_ranges(self, boundary):
+        """Mesh bounds expand to enclose the input dataset (plus 1-unit padding)."""
+        boundary.predict_fn = self._identity_predict
+        dataset = {"inputs": [[-2, -3], [2, 3]], "targets": [0, 1]}
+        result = boundary._compute_decision_boundary(dataset)
+        bounds = result["bounds"]
+        assert bounds["x_min"] <= -2 and bounds["x_max"] >= 2
+        assert bounds["y_min"] <= -3 and bounds["y_max"] >= 3
 
 
-@pytest.mark.skip(reason="Method _create_contour_plot not exposed as public API")
 class TestDecisionBoundaryPlotting:
-    """Test plotting methods."""
+    """Test plotting via ``_create_boundary_plot`` — the real observable seam.
 
-    def test_create_contour_plot(self, boundary):
-        """Should create contour plot."""
-        assert hasattr(boundary, "_create_contour_plot"), "DecisionBoundary should have _create_contour_plot method"
-        X = np.random.randn(100, 2)
-        y = np.random.randint(0, 2, 100)
-        plot = boundary._create_contour_plot(X, y)
-        assert plot is not None
+    Black-box replacement for the historically-skipped
+    ``TestDecisionBoundaryPlotting`` (asserted on ``_create_contour_plot``
+    and ``_plot_dataset_overlay`` methods that do not exist — both
+    behaviors live inside ``_create_boundary_plot(boundary_data, dataset,
+    show_confidence, theme)``).
+    """
 
-    def test_plot_dataset_overlay(self, boundary):
-        """Should overlay dataset points."""
-        assert hasattr(boundary, "_plot_dataset_overlay"), "DecisionBoundary should have _plot_dataset_overlay method"
-        X = np.random.randn(100, 2)
-        y = np.random.randint(0, 2, 100)
-        overlay = boundary._plot_dataset_overlay(X, y)
-        assert overlay is not None
+    @staticmethod
+    def _make_boundary_data():
+        """Synthetic boundary-data dict matching ``_compute_decision_boundary`` output."""
+        xx, yy = np.meshgrid(np.linspace(-1, 1, 10), np.linspace(-1, 1, 10))
+        Z = (xx + yy > 0).astype(float)
+        return {"xx": xx.tolist(), "yy": yy.tolist(), "Z": Z.tolist()}
 
-    def test_create_empty_plot(self, boundary):
-        """Should handle empty data."""
-        assert hasattr(boundary, "_create_contour_plot"), "DecisionBoundary should have _create_contour_plot method"
-        with pytest.raises((ValueError, IndexError)):
-            boundary._create_contour_plot([], [])
+    def test_create_boundary_plot_returns_figure_with_contour(self, boundary):
+        """Boundary plot must contain at least one Contour trace."""
+        fig = boundary._create_boundary_plot(self._make_boundary_data(), None, True, "light")
+        assert fig is not None
+        from plotly.graph_objs import Contour
+
+        assert any(isinstance(trace, Contour) for trace in fig.data), "boundary plot must include a Contour trace"
+
+    def test_plot_dataset_overlay_adds_scatter_traces(self, boundary):
+        """Dataset overlay adds one scatter trace per class on top of the contour."""
+        boundary_data = self._make_boundary_data()
+        dataset = {"inputs": [[-0.5, -0.5], [0.5, 0.5], [-0.3, 0.3]], "targets": [0, 1, 0]}
+        fig = boundary._create_boundary_plot(boundary_data, dataset, True, "light")
+        from plotly.graph_objs import Contour, Scatter
+
+        scatters = [t for t in fig.data if isinstance(t, Scatter)]
+        contours = [t for t in fig.data if isinstance(t, Contour)]
+        assert len(contours) >= 1
+        # Two unique classes ↦ two scatter overlays.
+        assert len(scatters) == 2
+
+    def test_create_boundary_plot_with_empty_data_returns_empty_plot(self, boundary):
+        """Empty boundary data returns the documented empty plot, does not raise.
+
+        ``_create_boundary_plot`` calls ``create_empty_plot`` when
+        xx / yy / Z are empty so the dashboard survives pre-training
+        renders. The skipped test asserted ``pytest.raises`` which
+        assumed a different contract.
+        """
+        fig = boundary._create_boundary_plot({"xx": [], "yy": [], "Z": []}, None, True, "light")
+        assert fig is not None
 
 
-@pytest.mark.skip(reason="Method _prepare_boundary_data not exposed as public API")
 class TestDecisionBoundaryDataHandling:
-    """Test data handling methods."""
+    """Test data handling via ``_compute_decision_boundary``.
 
-    def test_prepare_boundary_data(self, boundary):
-        """Should prepare boundary data."""
-        assert hasattr(boundary, "_prepare_boundary_data"), "DecisionBoundary should have _prepare_boundary_data method"
-        data = {"X_grid": [[0, 0], [1, 1]], "y_grid": [[0, 0], [1, 1]], "Z": [[0.5, 0.5], [0.5, 0.5]]}
-        prepared = boundary._prepare_boundary_data(data)
-        assert prepared is not None
+    Black-box replacement for the historically-skipped
+    ``TestDecisionBoundaryDataHandling`` (asserted on
+    ``_prepare_boundary_data`` and ``_extract_ranges`` methods that do
+    not exist — both responsibilities live inside
+    ``_compute_decision_boundary`` which returns a single dict carrying
+    both the mesh and the data-range bounds).
+    """
 
-    def test_extract_data_ranges(self, boundary):
-        """Should extract data ranges."""
-        assert hasattr(boundary, "_extract_ranges"), "DecisionBoundary should have _extract_ranges method"
-        X = np.array([[-1, -1], [1, 1], [0, 0]])
-        ranges = boundary._extract_ranges(X)
-        assert ranges is not None
+    @staticmethod
+    def _identity_predict(grid_points):
+        return np.zeros(len(grid_points))
+
+    def test_compute_boundary_returns_serialisable_dict(self, boundary):
+        """Result is a JSON-friendly dict (lists, not ndarrays) ready for dcc.Store."""
+        boundary.predict_fn = self._identity_predict
+        result = boundary._compute_decision_boundary({"inputs": [[0, 0], [1, 1]], "targets": [0, 1]})
+        assert isinstance(result["xx"], list)
+        assert isinstance(result["yy"], list)
+        assert isinstance(result["Z"], list)
+        assert isinstance(result["bounds"], dict)
+
+    def test_compute_boundary_extracts_bounds(self, boundary):
+        """``bounds`` carries x_min/x_max/y_min/y_max as floats."""
+        boundary.predict_fn = self._identity_predict
+        result = boundary._compute_decision_boundary({"inputs": [[-1, -1], [1, 1], [0, 0]], "targets": [0, 1, 0]})
+        bounds = result["bounds"]
+        for key in ("x_min", "x_max", "y_min", "y_max"):
+            assert key in bounds
+            assert isinstance(bounds[key], float)
+        assert bounds["x_min"] < bounds["x_max"]
+        assert bounds["y_min"] < bounds["y_max"]
 
 
 class TestDecisionBoundaryInheritance:
@@ -259,23 +318,42 @@ class TestDecisionBoundaryEdgeCases:
         boundary = DecisionBoundary(config)
         assert boundary.resolution == 10
 
-    @pytest.mark.skip(reason="Method _create_contour_plot not exposed as public API")
     def test_single_class_data(self, boundary):
-        """Should handle single-class data."""
-        assert hasattr(boundary, "_create_contour_plot"), "DecisionBoundary should have _create_contour_plot method"
-        X = np.random.randn(100, 2)
-        y = np.zeros(100)  # All same class
-        result = boundary._create_contour_plot(X, y)
-        assert result is not None
+        """Single-class dataset must not crash the boundary-plot path.
 
-    @pytest.mark.skip(reason="Method _create_contour_plot not exposed as public API")
+        Black-box replacement for the historically-skipped test
+        (referenced a ``_create_contour_plot`` method that does not
+        exist). With a single-class dataset the overlay produces just
+        one scatter trace; the contour itself comes from the
+        boundary-data dict.
+        """
+        boundary_data = {
+            "xx": [[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]],
+            "yy": [[-1, -1, -1], [0, 0, 0], [1, 1, 1]],
+            "Z": [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
+        }
+        dataset = {"inputs": [[0.1, 0.1], [0.2, 0.2]], "targets": [0, 0]}
+        fig = boundary._create_boundary_plot(boundary_data, dataset, True, "light")
+        assert fig is not None
+        from plotly.graph_objs import Scatter
+
+        scatters = [t for t in fig.data if isinstance(t, Scatter)]
+        assert len(scatters) == 1, "single-class data should produce exactly one scatter overlay"
+
     def test_collinear_data(self, boundary):
-        """Should handle collinear data."""
-        assert hasattr(boundary, "_create_contour_plot"), "DecisionBoundary should have _create_contour_plot method"
-        X = np.array([[i, i] for i in range(100)])  # All on diagonal
-        y = np.random.randint(0, 2, 100)
-        result = boundary._create_contour_plot(X, y)
-        assert result is not None
+        """Collinear dataset must not crash the boundary-plot path."""
+        boundary_data = {
+            "xx": [[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]],
+            "yy": [[-1, -1, -1], [0, 0, 0], [1, 1, 1]],
+            "Z": [[0, 1, 0], [1, 0, 1], [0, 1, 0]],
+        }
+        # All points on y=x diagonal (collinear), with two classes.
+        dataset = {
+            "inputs": [[float(i), float(i)] for i in range(5)],
+            "targets": [0, 1, 0, 1, 0],
+        }
+        fig = boundary._create_boundary_plot(boundary_data, dataset, True, "light")
+        assert fig is not None
 
 
 if __name__ == "__main__":
