@@ -105,37 +105,82 @@ class TestDashboardManagerComponents:
         # for the panel to be useful at runtime.
         assert "metrics-store" in body, "MetricsPanel inner state element missing from rendered layout"
 
-    @pytest.mark.skip(reason="Method _create_network_visualizer not exposed as public API")
-    def test_create_network_visualizer(self, dashboard):
-        """Should create network visualizer component."""
-        assert hasattr(dashboard, "_create_network_visualizer"), "DashboardManager should have _create_network_visualizer method"
-        viz = dashboard._create_network_visualizer()
-        assert viz is not None
+    def test_network_visualizer_component_instantiated(self, dashboard):
+        """``DashboardManager.network_visualizer`` must be a ``NetworkVisualizer``.
 
-    @pytest.mark.skip(reason="Method _create_decision_boundary not exposed as public API")
-    def test_create_decision_boundary(self, dashboard):
-        """Should create decision boundary component."""
-        assert hasattr(dashboard, "_create_decision_boundary"), "DashboardManager should have _create_decision_boundary method"
-        boundary = dashboard._create_decision_boundary()
-        assert boundary is not None
+        Black-box replacement for the historically-skipped
+        ``test_create_network_visualizer`` (asserted a
+        ``_create_network_visualizer`` method that does not exist).
+        ``_initialize_components()`` instantiates ``NetworkVisualizer``
+        directly and assigns to ``self.network_visualizer`` — that
+        attribute is the actual observable seam (callbacks register
+        against it; layout embeds its ``get_layout()``).
+        """
+        from frontend.components.network_visualizer import NetworkVisualizer
 
-    @pytest.mark.skip(reason="Method _create_dataset_plotter not exposed as public API")
-    def test_create_dataset_plotter(self, dashboard):
-        """Should create dataset plotter component."""
-        assert hasattr(dashboard, "_create_dataset_plotter"), "DashboardManager should have _create_dataset_plotter method"
-        plotter = dashboard._create_dataset_plotter()
-        assert plotter is not None
+        assert hasattr(dashboard, "network_visualizer"), "DashboardManager must expose network_visualizer attribute"
+        assert isinstance(dashboard.network_visualizer, NetworkVisualizer)
+        # The component's id is the layout attachment point — any callback
+        # writing into it (topology updates, graph re-renders) addresses
+        # it by this id, so the rendered layout JSON must list it.
+        client = dashboard.app.server.test_client()
+        body = client.get("/_dash-layout").get_data(as_text=True)
+        assert "network-visualizer" in body, "NetworkVisualizer root id missing from rendered layout"
+
+    def test_decision_boundary_component_instantiated(self, dashboard):
+        """``DashboardManager.decision_boundary`` must be a ``DecisionBoundary``.
+
+        Black-box replacement for the historically-skipped
+        ``test_create_decision_boundary``. ``_initialize_components()``
+        wires ``DecisionBoundary`` at ``component_id="decision-boundary"``.
+        """
+        from frontend.components.decision_boundary import DecisionBoundary
+
+        assert hasattr(dashboard, "decision_boundary"), "DashboardManager must expose decision_boundary attribute"
+        assert isinstance(dashboard.decision_boundary, DecisionBoundary)
+        client = dashboard.app.server.test_client()
+        body = client.get("/_dash-layout").get_data(as_text=True)
+        assert "decision-boundary" in body, "DecisionBoundary root id missing from rendered layout"
+
+    def test_dataset_plotter_component_instantiated(self, dashboard):
+        """``DashboardManager.dataset_plotter`` must be a ``DatasetPlotter``.
+
+        Black-box replacement for the historically-skipped
+        ``test_create_dataset_plotter``. ``_initialize_components()``
+        wires ``DatasetPlotter`` at ``component_id="dataset-plotter"``.
+        """
+        from frontend.components.dataset_plotter import DatasetPlotter
+
+        assert hasattr(dashboard, "dataset_plotter"), "DashboardManager must expose dataset_plotter attribute"
+        assert isinstance(dashboard.dataset_plotter, DatasetPlotter)
+        client = dashboard.app.server.test_client()
+        body = client.get("/_dash-layout").get_data(as_text=True)
+        assert "dataset-plotter" in body, "DatasetPlotter root id missing from rendered layout"
 
 
 class TestDashboardManagerLayout:
     """Test layout creation."""
 
-    @pytest.mark.skip(reason="Method _create_layout not exposed as public API; layout is set up via _setup_layout")
-    def test_create_layout(self, dashboard):
-        """Should create layout."""
-        assert hasattr(dashboard, "_create_layout"), "DashboardManager should have _create_layout method"
-        layout = dashboard._create_layout()
-        assert layout is not None
+    def test_setup_layout_assigns_app_layout(self, dashboard):
+        """``_setup_layout`` must have populated ``app.layout``.
+
+        Black-box replacement for the historically-skipped
+        ``test_create_layout`` (asserted a ``_create_layout`` method
+        that does not exist — ``DashboardManager`` uses
+        ``_setup_layout`` which mutates ``self.app.layout`` rather than
+        returning a layout). The observable post-condition is that the
+        Dash app has a non-None layout that renders correctly via the
+        ``/_dash-layout`` endpoint.
+        """
+        # The method itself is invoked at __init__ time so we assert on
+        # the post-condition, not by re-running it.
+        assert hasattr(dashboard, "_setup_layout"), "DashboardManager must expose _setup_layout method"
+        assert dashboard.app.layout is not None
+        # Render via Dash's own layout endpoint to confirm it serializes
+        # (catches structural breakages that ``is not None`` alone misses).
+        client = dashboard.app.server.test_client()
+        response = client.get("/_dash-layout")
+        assert response.status_code == 200
 
     def test_layout_assigned_to_app(self, dashboard):
         """Layout should be assigned to app."""
@@ -243,17 +288,35 @@ class TestDashboardManagerTabNavigation:
 class TestDashboardManagerAssets:
     """Test asset handling."""
 
-    @pytest.mark.skip(reason="Dash app does not expose assets_folder as a public attribute")
     def test_assets_folder_set(self, dashboard):
-        """Should have assets folder configured."""
-        assert hasattr(dashboard.app, "assets_folder"), "Dash app should have assets_folder attribute"
-        assert dashboard.app.assets_folder is not None
+        """Dash app should expose its configured assets folder.
 
-    @pytest.mark.skip(reason="Dash app does not expose assets_url_path as a public attribute")
+        Dash stores ``assets_folder`` under ``app.config`` rather than as
+        a direct app attribute, so the historically-skipped test asserted
+        on the wrong path. The observable contract — "the Dash app knows
+        where its assets live" — is what we actually want to pin.
+        """
+        # ``app.config`` is the documented Dash API for reading the
+        # assets directory.
+        assert hasattr(dashboard.app, "config"), "Dash app should expose config namespace"
+        assert hasattr(dashboard.app.config, "assets_folder"), "Dash app config should have assets_folder"
+        assert dashboard.app.config.assets_folder is not None
+        assert dashboard.app.config.assets_folder != ""
+
     def test_assets_url_path(self, dashboard):
-        """Should have assets URL path."""
-        assert hasattr(dashboard.app, "assets_url_path"), "Dash app should have assets_url_path attribute"
-        assert dashboard.app.assets_url_path is not None
+        """Dash app should expose its configured assets URL path.
+
+        Same situation as ``assets_folder``: lives under
+        ``app.config.assets_url_path``, not ``app.assets_url_path``.
+        Also verify ``get_asset_url`` — the documented public API
+        for resolving a file inside ``assets/`` — works end-to-end.
+        """
+        assert hasattr(dashboard.app.config, "assets_url_path"), "Dash app config should have assets_url_path"
+        assert dashboard.app.config.assets_url_path is not None
+        # ``get_asset_url`` is the documented Dash API; if the URL path
+        # is wired correctly, an asset reference must contain it.
+        url = dashboard.app.get_asset_url("style.css")
+        assert dashboard.app.config.assets_url_path in url
 
 
 class TestDashboardManagerEdgeCases:
