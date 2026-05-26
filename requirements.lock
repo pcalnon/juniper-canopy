@@ -43,7 +43,7 @@ h11==0.16.0
     #   uvicorn
 httpcore==1.0.9
     # via httpx
-httptools==0.7.1
+httptools==0.8.0
     # via uvicorn
 httpx==0.28.1
     # via juniper-canopy (pyproject.toml)
@@ -154,7 +154,7 @@ urllib3==2.7.0
     #   juniper-data-client
     #   requests
     #   sentry-sdk
-uvicorn==0.47.0
+uvicorn==0.48.0
     # via juniper-canopy (pyproject.toml)
 uvloop==0.22.1
     # via uvicorn
