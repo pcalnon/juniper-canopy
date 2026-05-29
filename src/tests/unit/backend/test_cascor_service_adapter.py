@@ -583,7 +583,7 @@ class TestSnapshotOperationsB5:
     def test_replay_snapshot_calls_replay_endpoint(self, adapter, mock_client):
         mock_client._post.return_value = {"snapshot_id": "demo_001", "operation": "replay"}
         result = adapter.replay_snapshot("demo_001")
-        mock_client._post.assert_called_once_with("/v1/snapshots/demo_001/replay")
+        mock_client._post.assert_called_once_with("/snapshots/demo_001/replay")
         assert result["operation"] == "replay"
 
     def test_replay_control_passes_action_and_params(self, adapter, mock_client):
@@ -591,7 +591,7 @@ class TestSnapshotOperationsB5:
         adapter.replay_control("demo_001", "seek", time_index=42)
         mock_client._post.assert_called_once()
         args, kwargs = mock_client._post.call_args
-        assert args[0] == "/v1/snapshots/demo_001/replay/control"
+        assert args[0] == "/snapshots/demo_001/replay/control"
         assert kwargs["json"] == {"action": "seek", "time_index": 42}
 
     def test_replay_control_drops_none_params(self, adapter, mock_client):
@@ -603,12 +603,12 @@ class TestSnapshotOperationsB5:
     def test_resume_snapshot_calls_resume_endpoint(self, adapter, mock_client):
         mock_client._post.return_value = {"snapshot_id": "demo_001", "operation": "resume"}
         adapter.resume_snapshot("demo_001")
-        mock_client._post.assert_called_once_with("/v1/snapshots/demo_001/resume")
+        mock_client._post.assert_called_once_with("/snapshots/demo_001/resume")
 
     def test_retrain_snapshot_calls_retrain_endpoint(self, adapter, mock_client):
         mock_client._post.return_value = {"snapshot_id": "demo_001", "operation": "retrain"}
         adapter.retrain_snapshot("demo_001")
-        mock_client._post.assert_called_once_with("/v1/snapshots/demo_001/retrain")
+        mock_client._post.assert_called_once_with("/snapshots/demo_001/retrain")
 
     def test_replay_snapshot_propagates_client_error(self, adapter, mock_client):
         from juniper_cascor_client import JuniperCascorClientError
@@ -632,7 +632,7 @@ class TestNetworkMutationsH4:
         result = adapter.patch_weights(target="output", field="weights", values=[[0.1], [0.2]])
         mock_client._patch.assert_called_once()
         args, kwargs = mock_client._patch.call_args
-        assert args[0] == "/v1/network/weights"
+        assert args[0] == "/network/weights"
         assert kwargs["json"] == {
             "target": "output",
             "field": "weights",
@@ -676,7 +676,7 @@ class TestNetworkMutationsH4:
         result = adapter.add_hidden_unit(weights=[0.1, 0.2, 0.3], bias=0.0, activation="Tanh")
         mock_client._post.assert_called_once()
         args, kwargs = mock_client._post.call_args
-        assert args[0] == "/v1/network/hidden-units"
+        assert args[0] == "/network/hidden-units"
         assert kwargs["json"] == {
             "weights": [0.1, 0.2, 0.3],
             "bias": 0.0,
@@ -702,7 +702,7 @@ class TestNetworkMutationsH4:
     def test_remove_hidden_unit_calls_delete(self, adapter, mock_client):
         mock_client._delete.return_value = {"operation": "remove_hidden_unit", "removed_index": 1, "num_hidden_units": 2}
         result = adapter.remove_hidden_unit(idx=1)
-        mock_client._delete.assert_called_once_with("/v1/network/hidden-units/1")
+        mock_client._delete.assert_called_once_with("/network/hidden-units/1")
         assert result["removed_index"] == 1
         assert result["num_hidden_units"] == 2
 
