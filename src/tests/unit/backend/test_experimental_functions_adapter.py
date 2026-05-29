@@ -34,7 +34,7 @@ class TestGetExperimentalFunctions:
         adapter._client._request.return_value = {"data": {"enabled": True}}
         result = adapter.get_experimental_functions()
         assert result == {"ok": True, "enabled": True}
-        adapter._client._request.assert_called_once_with("GET", "/v1/admin/experimental_functions")
+        adapter._client._request.assert_called_once_with("GET", "/admin/experimental_functions")
 
     def test_returns_enabled_false_when_cascor_says_false(self, adapter):
         adapter._client._request.return_value = {"data": {"enabled": False}}
@@ -65,7 +65,7 @@ class TestSetExperimentalFunctions:
         adapter._client._request.return_value = {"data": {"experimental_functions_enabled": True}}
         result = adapter.set_experimental_functions(True)
         assert result == {"ok": True, "enabled": True}
-        adapter._client._request.assert_called_once_with("POST", "/v1/admin/experimental_functions", json={"enabled": True})
+        adapter._client._request.assert_called_once_with("POST", "/admin/experimental_functions", json={"enabled": True})
 
     def test_writes_false_and_returns_authoritative_value(self, adapter):
         adapter._client._request.return_value = {"data": {"experimental_functions_enabled": False}}

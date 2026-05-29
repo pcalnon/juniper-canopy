@@ -37,7 +37,7 @@ class TestGetDatasetSwapEvents:
         adapter._client._request.return_value = {"data": {"events": events_payload}}
         result = adapter.get_dataset_swap_events()
         assert result == {"ok": True, "events": events_payload}
-        adapter._client._request.assert_called_once_with("GET", "/v1/history/dataset_swaps", params=None)
+        adapter._client._request.assert_called_once_with("GET", "/history/dataset_swaps", params=None)
 
     def test_returns_empty_list_when_no_events(self, adapter):
         """No swaps yet → empty events list (not an error)."""
@@ -57,7 +57,7 @@ class TestGetDatasetSwapEvents:
         long-running pollers can pull only newer events."""
         adapter._client._request.return_value = {"data": {"events": []}}
         adapter.get_dataset_swap_events(since="2026-05-15T11:00:00+00:00")
-        adapter._client._request.assert_called_once_with("GET", "/v1/history/dataset_swaps", params={"since": "2026-05-15T11:00:00+00:00"})
+        adapter._client._request.assert_called_once_with("GET", "/history/dataset_swaps", params={"since": "2026-05-15T11:00:00+00:00"})
 
     def test_returns_error_on_cascor_failure(self, adapter):
         """Cascor unreachable / 5xx surfaces as ok=False with the error
@@ -83,7 +83,7 @@ class TestGetSnapshotDatasetSwaps:
         adapter._client._request.return_value = {"data": {"events": events_payload}}
         result = adapter.get_snapshot_dataset_swaps("snap_a")
         assert result == {"ok": True, "events": events_payload}
-        adapter._client._request.assert_called_once_with("GET", "/v1/snapshots/snap_a/history/dataset_swaps")
+        adapter._client._request.assert_called_once_with("GET", "/snapshots/snap_a/history/dataset_swaps")
 
     def test_returns_empty_list_when_no_events(self, adapter):
         """Snapshot exists but has no swaps in its history (pre-P2-2 or
@@ -114,4 +114,4 @@ class TestGetSnapshotDatasetSwaps:
         pre-encode; this test pins that contract."""
         adapter._client._request.return_value = {"data": {"events": []}}
         adapter.get_snapshot_dataset_swaps("snapshot_20260515T120000Z")
-        adapter._client._request.assert_called_once_with("GET", "/v1/snapshots/snapshot_20260515T120000Z/history/dataset_swaps")
+        adapter._client._request.assert_called_once_with("GET", "/snapshots/snapshot_20260515T120000Z/history/dataset_swaps")

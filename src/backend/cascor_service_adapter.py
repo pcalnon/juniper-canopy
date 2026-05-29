@@ -896,7 +896,7 @@ class CascorServiceAdapter:
         """POST /v1/training/dataset — stage a dataset change for next start_training."""
         cascor_cfg = {self._DATASET_PARAM_MAP[k]: v for k, v in canopy_params.items() if k in self._DATASET_PARAM_MAP and v is not None}
         try:
-            result = self._client._request("POST", "/v1/training/dataset", json=cascor_cfg)
+            result = self._client._request("POST", "/training/dataset", json=cascor_cfg)
             return {"ok": True, "data": (result or {}).get("data", {}), "config": cascor_cfg}
         except JuniperCascorClientError as e:
             logger.error("stage_dataset failed: %s", e)
@@ -905,7 +905,7 @@ class CascorServiceAdapter:
     def cancel_pending_dataset(self) -> Dict[str, Any]:
         """DELETE /v1/training/dataset — Phase 1 Cancel button target."""
         try:
-            result = self._client._request("DELETE", "/v1/training/dataset")
+            result = self._client._request("DELETE", "/training/dataset")
             return {"ok": True, "data": (result or {}).get("data", {})}
         except JuniperCascorClientError as e:
             logger.error("cancel_pending_dataset failed: %s", e)
@@ -914,7 +914,7 @@ class CascorServiceAdapter:
     def get_pending_dataset(self) -> Dict[str, Any]:
         """GET /v1/training/dataset/pending — peek for the canopy banner."""
         try:
-            result = self._client._request("GET", "/v1/training/dataset/pending")
+            result = self._client._request("GET", "/training/dataset/pending")
             return {"ok": True, "pending": ((result or {}).get("data", {}) or {}).get("pending")}
         except JuniperCascorClientError as e:
             logger.error("get_pending_dataset failed: %s", e)
@@ -947,7 +947,7 @@ class CascorServiceAdapter:
         no Live Switch button if we can't confirm cascor's state).
         """
         try:
-            result = self._client._request("GET", "/v1/admin/experimental_functions")
+            result = self._client._request("GET", "/admin/experimental_functions")
             data = (result or {}).get("data", {}) or {}
             return {"ok": True, "enabled": bool(data.get("enabled", False))}
         except JuniperCascorClientError as e:
@@ -966,7 +966,7 @@ class CascorServiceAdapter:
         callback layer treats this as "revert the toggle to last-known-good".
         """
         try:
-            result = self._client._request("POST", "/v1/admin/experimental_functions", json={"enabled": bool(enabled)})
+            result = self._client._request("POST", "/admin/experimental_functions", json={"enabled": bool(enabled)})
             data = (result or {}).get("data", {}) or {}
             return {"ok": True, "enabled": bool(data.get("experimental_functions_enabled", data.get("enabled", enabled)))}
         except JuniperCascorClientError as e:
@@ -1014,7 +1014,7 @@ class CascorServiceAdapter:
         """
         cascor_cfg = {self._DATASET_PARAM_MAP[k]: v for k, v in canopy_params.items() if k in self._DATASET_PARAM_MAP and v is not None}
         try:
-            result = self._client._request("POST", "/v1/training/dataset/live", json=cascor_cfg)
+            result = self._client._request("POST", "/training/dataset/live", json=cascor_cfg)
             return {"ok": True, "data": (result or {}).get("data", {}), "config": cascor_cfg}
         except JuniperCascorClientError as e:
             logger.error("swap_dataset_live failed: %s", e)
@@ -1030,7 +1030,7 @@ class CascorServiceAdapter:
         distinguishing.
         """
         try:
-            result = self._client._request("DELETE", "/v1/training/dataset/live")
+            result = self._client._request("DELETE", "/training/dataset/live")
             return {"ok": True, "data": (result or {}).get("data", {})}
         except JuniperCascorClientError as e:
             logger.error("cancel_swap_dataset_live failed: %s", e)
@@ -1066,7 +1066,7 @@ class CascorServiceAdapter:
         """
         params = {"since": since} if since else None
         try:
-            result = self._client._request("GET", "/v1/history/dataset_swaps", params=params)
+            result = self._client._request("GET", "/history/dataset_swaps", params=params)
             data = (result or {}).get("data", {}) or {}
             events = data.get("events", []) or []
             return {"ok": True, "events": list(events)}
@@ -1093,7 +1093,7 @@ class CascorServiceAdapter:
         so the timeline degrades to the live-event-only behaviour.
         """
         try:
-            result = self._client._request("GET", f"/v1/snapshots/{snapshot_id}/history/dataset_swaps")
+            result = self._client._request("GET", f"/snapshots/{snapshot_id}/history/dataset_swaps")
             data = (result or {}).get("data", {}) or {}
             events = data.get("events", []) or []
             return {"ok": True, "events": list(events)}
@@ -1578,7 +1578,7 @@ class CascorServiceAdapter:
         Raises ``JuniperCascorClientError`` on HTTP failure.
         """
         try:
-            data = self._client._post(f"/v1/snapshots/{snapshot_id}/replay")
+            data = self._client._post(f"/snapshots/{snapshot_id}/replay")
             logger.info("Snapshot replay started via CasCor service (id=%s)", snapshot_id)
             return cast(Dict[str, Any], data)
         except JuniperCascorClientError as e:
@@ -1596,7 +1596,7 @@ class CascorServiceAdapter:
         body: Dict[str, Any] = {"action": action}
         body.update({k: v for k, v in params.items() if v is not None})
         try:
-            data = self._client._post(f"/v1/snapshots/{snapshot_id}/replay/control", json=body)
+            data = self._client._post(f"/snapshots/{snapshot_id}/replay/control", json=body)
             logger.info("Snapshot replay control via CasCor service (id=%s, action=%s)", snapshot_id, action)
             return cast(Dict[str, Any], data)
         except JuniperCascorClientError as e:
@@ -1611,7 +1611,7 @@ class CascorServiceAdapter:
         in the metrics-curve component.
         """
         try:
-            data = self._client._post(f"/v1/snapshots/{snapshot_id}/resume")
+            data = self._client._post(f"/snapshots/{snapshot_id}/resume")
             logger.info("Snapshot resume started via CasCor service (id=%s)", snapshot_id)
             return cast(Dict[str, Any], data)
         except JuniperCascorClientError as e:
@@ -1621,7 +1621,7 @@ class CascorServiceAdapter:
     def retrain_snapshot(self, snapshot_id: str) -> Dict[str, Any]:
         """Reset training history and prepare a fresh run via /v1/snapshots/{id}/retrain."""
         try:
-            data = self._client._post(f"/v1/snapshots/{snapshot_id}/retrain")
+            data = self._client._post(f"/snapshots/{snapshot_id}/retrain")
             logger.info("Snapshot retrain started via CasCor service (id=%s)", snapshot_id)
             return cast(Dict[str, Any], data)
         except JuniperCascorClientError as e:
@@ -1664,7 +1664,7 @@ class CascorServiceAdapter:
         if hidden_unit_index is not None:
             body["hidden_unit_index"] = hidden_unit_index
         try:
-            data = self._client._patch("/v1/network/weights", json=body)
+            data = self._client._patch("/network/weights", json=body)
             logger.info("Weights patched via CasCor service (target=%s, field=%s)", target, field)
             return cast(Dict[str, Any], data)
         except JuniperCascorClientError as e:
@@ -1691,7 +1691,7 @@ class CascorServiceAdapter:
             "position": "tail",
         }
         try:
-            data = self._client._post("/v1/network/hidden-units", json=body)
+            data = self._client._post("/network/hidden-units", json=body)
             logger.info("Hidden unit appended via CasCor service (activation=%s)", activation)
             return cast(Dict[str, Any], data)
         except JuniperCascorClientError as e:
@@ -1707,7 +1707,7 @@ class CascorServiceAdapter:
         purely transport.
         """
         try:
-            data = self._client._delete(f"/v1/network/hidden-units/{idx}")
+            data = self._client._delete(f"/network/hidden-units/{idx}")
             logger.info("Hidden unit removed via CasCor service (idx=%d)", idx)
             return cast(Dict[str, Any], data)
         except JuniperCascorClientError as e:

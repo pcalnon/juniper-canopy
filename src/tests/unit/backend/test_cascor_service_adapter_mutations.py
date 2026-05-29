@@ -54,7 +54,7 @@ def test_patch_weights_preserves_non_default_dtype_and_hidden_unit_index(adapter
     )
 
     mock_client._patch.assert_called_once_with(
-        "/v1/network/weights",
+        "/network/weights",
         json={
             "target": "hidden_unit",
             "field": "weights",

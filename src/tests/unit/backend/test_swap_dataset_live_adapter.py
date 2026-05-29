@@ -44,7 +44,7 @@ class TestSwapDatasetLive:
         )
         assert result["ok"] is True
         call = adapter._client._request.call_args
-        assert call.args[:2] == ("POST", "/v1/training/dataset/live")
+        assert call.args[:2] == ("POST", "/training/dataset/live")
         body = call.kwargs["json"]
         assert body == {
             "dataset_type": "spirals",
@@ -102,7 +102,7 @@ class TestCancelSwapDatasetLive:
         adapter._client._request.return_value = {"data": {"status": "cancel_requested"}}
         result = adapter.cancel_swap_dataset_live()
         assert result["ok"] is True
-        adapter._client._request.assert_called_once_with("DELETE", "/v1/training/dataset/live")
+        adapter._client._request.assert_called_once_with("DELETE", "/training/dataset/live")
 
     def test_returns_error_on_404_no_swap(self, adapter):
         """Cascor returns 404 when no swap is in flight. The client wraps

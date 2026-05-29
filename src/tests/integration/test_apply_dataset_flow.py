@@ -61,7 +61,7 @@ class TestAdapterStageCancelGetPending:
         assert result["ok"] is True
         # Verify the POST body was the cascor-namespace mapping (not canopy keys).
         call = adapter._client._request.call_args
-        assert call.args[:2] == ("POST", "/v1/training/dataset")
+        assert call.args[:2] == ("POST", "/training/dataset")
         body = call.kwargs["json"]
         assert body == {
             "dataset_type": "spirals",
@@ -92,7 +92,7 @@ class TestAdapterStageCancelGetPending:
         adapter._client._request.return_value = {"data": {"status": "cleared", "discarded": {"dataset_type": "spirals"}}}
         result = adapter.cancel_pending_dataset()
         assert result["ok"] is True
-        assert adapter._client._request.call_args.args[:2] == ("DELETE", "/v1/training/dataset")
+        assert adapter._client._request.call_args.args[:2] == ("DELETE", "/training/dataset")
         assert result["data"]["status"] == "cleared"
 
     def test_get_pending_dataset_returns_pending_field(self, adapter):
