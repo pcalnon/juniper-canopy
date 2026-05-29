@@ -43,6 +43,8 @@ from typing import Optional
 from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from secrets_util import get_secret
+
 
 class TrainingParamConfig(BaseModel):
     """Nested model for a single training parameter with validation constraints."""
@@ -141,6 +143,16 @@ class Settings(BaseSettings):
     demo_mode: bool = False
     backend_path: str = "../juniper-cascor"
     juniper_data_url: str = "http://localhost:8100"
+    # Outbound API key canopy sends as ``X-API-Key`` on every juniper-data
+    # request. Resolved by ``_check_juniper_data_api_key`` via ``get_secret``,
+    # which honors ``<NAME>_FILE`` indirection so Docker-secrets / k8s-secrets
+    # mounts work without leaking the value through ``docker inspect`` /
+    # env dumps. Resolution order: prefixed canonical
+    # (``JUNIPER_CANOPY_JUNIPER_DATA_API_KEY[_FILE]``) → cross-service shared
+    # (``JUNIPER_DATA_API_KEY[_FILE]``) → ``None`` (auth omitted). When
+    # ``None`` and juniper-data has auth enabled, calls 401 — by design so
+    # the failure is loud rather than silent.
+    juniper_data_api_key: Optional[str] = None
     cascor_service_url: Optional[str] = None
     # E.2 PR-2-C: explicit Origin header for canopy → cascor /ws/control
     # connections (juniper-cascor-client>=0.5.0 forwards this to
@@ -254,6 +266,31 @@ class Settings(BaseSettings):
             return v
         shared = os.getenv("JUNIPER_DATA_URL")
         if shared is not None:
+            return shared
+        return v
+
+    @field_validator("juniper_data_api_key", mode="before")
+    @classmethod
+    def _check_juniper_data_api_key(cls, v):
+        """Resolve the outbound juniper-data API key, ``_FILE`` form first.
+
+        Order:
+
+          1. ``JUNIPER_CANOPY_JUNIPER_DATA_API_KEY_FILE`` → file content,
+             or ``JUNIPER_CANOPY_JUNIPER_DATA_API_KEY`` direct (prefixed,
+             canopy-specific override — wins so deploy can route a
+             canopy-only key separately from cascor's).
+          2. ``JUNIPER_DATA_API_KEY_FILE`` → file content, or
+             ``JUNIPER_DATA_API_KEY`` direct (shared cross-service env
+             var that cascor / juniper-data-client / canopy all read).
+          3. ``v`` (whatever pydantic-settings already populated; usually
+             ``None`` once we've reached this branch).
+        """
+        prefixed = get_secret("JUNIPER_CANOPY_JUNIPER_DATA_API_KEY")
+        if prefixed:
+            return prefixed
+        shared = get_secret("JUNIPER_DATA_API_KEY")
+        if shared:
             return shared
         return v
 
