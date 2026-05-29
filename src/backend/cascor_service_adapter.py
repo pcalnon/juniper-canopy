@@ -82,9 +82,14 @@ class ControlStreamSupervisor:
 
     _BACKOFF = [1, 2, 5, 10, 30]
 
-    def __init__(self, ws_url: str, api_key: Optional[str] = None) -> None:
+    def __init__(self, ws_url: str, api_key: Optional[str] = None, ws_origin: Optional[str] = None) -> None:
         self._ws_url = ws_url
         self._api_key = api_key
+        # E.2 PR-2-C: forward Origin to ``CascorControlStream(origin=…)``
+        # so cascor's fail-closed ``/ws/control`` allowlist
+        # (juniper-cascor#129) accepts canopy's docker-compose upgrade.
+        # None → preserve pre-0.5.0 behaviour (no Origin header sent).
+        self._ws_origin = ws_origin
         self._stream: Optional[CascorControlStream] = None
         self._connect_task: Optional[asyncio.Task] = None
         self._shutdown = False
@@ -126,6 +131,7 @@ class ControlStreamSupervisor:
                 self._stream = CascorControlStream(
                     base_url=self._ws_url,
                     api_key=self._api_key,
+                    origin=self._ws_origin,
                 )
                 await self._stream.connect()
                 logger.info("Control stream supervisor connected to %s", self._ws_url)
@@ -229,9 +235,13 @@ class CascorServiceAdapter:
         service_url: str = BackendConstants.DEFAULT_CASCOR_SERVICE_URL,
         api_key: Optional[str] = None,
         client: Optional[JuniperCascorClient] = None,
+        ws_origin: Optional[str] = None,
     ):
         self._service_url = service_url
         self._api_key = api_key
+        # E.2 PR-2-C: store + forward to the control-stream supervisor.
+        # See ``settings.cascor_ws_origin`` for the env-binding contract.
+        self._ws_origin = ws_origin
         self._client = client or JuniperCascorClient(base_url=service_url, api_key=api_key)
         self.training_monitor = _ServiceTrainingMonitor(self._client)
         self._training_stream: Optional[CascorTrainingStream] = None
@@ -249,7 +259,7 @@ class CascorServiceAdapter:
         self._ws_url = ws_url
 
         # Phase C: control stream supervisor for hot-param WS routing
-        self._control_supervisor = ControlStreamSupervisor(ws_url=ws_url, api_key=api_key)
+        self._control_supervisor = ControlStreamSupervisor(ws_url=ws_url, api_key=api_key, ws_origin=ws_origin)
 
     @property
     def service_url(self) -> str:

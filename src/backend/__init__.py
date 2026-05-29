@@ -13,7 +13,7 @@ Provides:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from backend.protocol import BackendProtocol
 
@@ -77,8 +77,15 @@ def create_backend(
         from secrets_util import get_secret
 
         api_key = get_secret("JUNIPER_CASCOR_API_KEY") or get_secret("JUNIPER_DATA_API_KEY")
+        # E.2 PR-2-C: forward the configured Origin to the
+        # ``CascorControlStream`` inside the adapter's
+        # ``ControlStreamSupervisor`` so cascor's fail-closed
+        # ``/ws/control`` allowlist (juniper-cascor#129) admits the
+        # docker-compose canopy upgrade. Empty string → opt-out
+        # (pre-0.5.0 behaviour of sending no Origin header).
+        ws_origin: Optional[str] = settings.cascor_ws_origin or None
         logger.info(f"Service mode: connecting to CasCor at {resolved_url}")
-        adapter = CascorServiceAdapter(service_url=resolved_url, api_key=api_key)
+        adapter = CascorServiceAdapter(service_url=resolved_url, api_key=api_key, ws_origin=ws_origin)
         return ServiceBackend(adapter)
 
     logger.info("No CasCor service URL configured — falling back to demo mode")

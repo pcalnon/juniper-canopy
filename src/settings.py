@@ -142,6 +142,20 @@ class Settings(BaseSettings):
     backend_path: str = "../juniper-cascor"
     juniper_data_url: str = "http://localhost:8100"
     cascor_service_url: Optional[str] = None
+    # E.2 PR-2-C: explicit Origin header for canopy → cascor /ws/control
+    # connections (juniper-cascor-client>=0.5.0 forwards this to
+    # ``websockets.connect(..., origin=…)``). Required because cascor's
+    # ``/ws/control`` is fail-closed against missing Origin
+    # (juniper-cascor#129); inside docker compose the Python
+    # ``websockets`` client emits no Origin by default and the upgrade
+    # is rejected with 403. Default value matches the docker-compose
+    # service hostname; juniper-deploy E.2 PR-2-D also adds this Origin
+    # to cascor's ``JUNIPER_CASCOR_WS_CONTROL_ALLOWED_ORIGINS``. For
+    # host-mode dev (canopy running on ``localhost:8050``), override
+    # via ``JUNIPER_CANOPY_CASCOR_WS_ORIGIN=http://localhost:8050``
+    # or set to empty string to opt out (preserves the pre-0.5.0
+    # juniper-cascor-client behaviour of sending no Origin).
+    cascor_ws_origin: str = "http://juniper-canopy:8050"
     cascor_discovery: CascorDiscoverySettings = CascorDiscoverySettings()
 
     # Demo
