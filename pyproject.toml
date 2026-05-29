@@ -141,7 +141,7 @@ juniper-cascor = [
     # transitively via ``pip install juniper-ml[clients]`` and removes the
     # gap. Tightening further to the current release floor (0.4.0) is a
     # separate decision once canopy adopts post-0.3.x APIs.
-    "juniper-cascor-client>=0.3.0",
+    "juniper-cascor-client>=0.5.0",
 ]
 observability = [
     # prometheus-client moved to [project] dependencies on 2026-05-10
