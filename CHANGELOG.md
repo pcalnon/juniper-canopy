@@ -11,6 +11,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Outbound `X-API-Key` for juniper-data calls**: new
+  `Settings.juniper_data_api_key` field plus `_check_juniper_data_api_key`
+  field validator that resolves the value via `secrets_util.get_secret`
+  (Docker-secrets `<NAME>_FILE` indirection). Resolution order:
+  `JUNIPER_CANOPY_JUNIPER_DATA_API_KEY_FILE` → direct prefixed env →
+  `JUNIPER_DATA_API_KEY_FILE` (shared cross-service) → direct shared
+  env → `None`. The resolved value is plumbed through
+  `_generate_spiral_dataset_from_juniper_data` and passed as
+  `JuniperDataClient(api_key=…)` so every outbound juniper-data call
+  carries `X-API-Key`. Closes the gap where canopy never sent an
+  outbound key and silently 401'd against juniper-data once
+  juniper-deploy#100 enabled juniper-data auth (canopy's own
+  `/v1/health` had remained misleading because juniper-data's
+  `/v1/health` is auth-exempt). When both prefixed and shared env vars
+  are unset the field defaults to `None` and `JuniperDataClient` omits
+  the header — preserving the pre-this-PR behaviour for stacks where
+  juniper-data auth is disabled. New regression suite at
+  `src/tests/unit/test_juniper_data_api_key_resolution.py` (8 cases)
+  pins prefixed direct, prefixed `_FILE`, prefixed `_FILE` precedence
+  over direct, prefixed `_FILE` missing-file fallthrough to shared,
+  shared direct, shared `_FILE`, prefixed-wins-over-shared, and the
+  no-env-vars `None` default.
+
 - **CFG-01** (v7 roadmap §13439): new `[demo]` optional-dependencies extra declaring `torch>=2.0.0`. Closes the missing-declaration where `src/demo_mode.py:63` and `src/backend/demo_backend.py:45` `import torch` unconditionally at module level but `pyproject.toml` had no `torch` entry — `pip install juniper-canopy` (no extra) silently produced a wheel that crashed on demo import. Kept out of `[project] dependencies` per the roadmap recommendation to avoid the ~2GB install footprint on production deployments that drive a remote cascor service via `[juniper-cascor]` and never load demo mode (matches the lazy-import convention in `src/backend/data_adapter.py:363,406` whose existing `noqa: F811` comments call out the size cost explicitly). The standalone demo runner `util/juniper_canopy-demo.bash` continues to install torch via `conf/requirements.txt` + the PyTorch CPU index URL for size-optimised bash-script installs; this extra is the canonical path for `pip install juniper-canopy[demo]`. `[dev]` aggregator updated to include `[demo]` so the test suite (`src/tests/unit/test_demo_mode_comprehensive.py:22` etc. import torch unconditionally) resolves under `pip install juniper-canopy[dev]`. No code changes — declaration only.
 
 ### Changed

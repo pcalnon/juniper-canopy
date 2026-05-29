@@ -789,7 +789,9 @@ class DemoMode:
         """
         from juniper_data_client.exceptions import JuniperDataConfigurationError
 
-        juniper_data_url = get_settings().juniper_data_url
+        settings = get_settings()
+        juniper_data_url = settings.juniper_data_url
+        juniper_data_api_key = settings.juniper_data_api_key
 
         if not juniper_data_url:
             raise JuniperDataConfigurationError("JUNIPER_DATA_URL environment variable is required. " "All datasets must be fetched from the JuniperData service. " "Set JUNIPER_DATA_URL=http://localhost:8100 to connect to a local instance.")
@@ -798,7 +800,13 @@ class DemoMode:
             n_rotations = getattr(self, "spiral_rotations", TrainingConstants.DEFAULT_SPIRAL_ROTATIONS)
 
         self.logger.info("Fetching dataset from JuniperData at %s (n_rotations=%s)", juniper_data_url, n_rotations)
-        return self._generate_spiral_dataset_from_juniper_data(n_samples, juniper_data_url, algorithm=algorithm, n_rotations=n_rotations)
+        return self._generate_spiral_dataset_from_juniper_data(
+            n_samples,
+            juniper_data_url,
+            algorithm=algorithm,
+            n_rotations=n_rotations,
+            juniper_data_api_key=juniper_data_api_key,
+        )
 
     @staticmethod
     def _validate_npz_arrays(npz_data: Dict[str, Any]) -> None:
@@ -870,6 +878,7 @@ class DemoMode:
         juniper_data_url: str,
         algorithm: Optional[str] = None,
         n_rotations: Optional[float] = None,
+        juniper_data_api_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate spiral dataset using JuniperData service.
@@ -882,6 +891,11 @@ class DemoMode:
             juniper_data_url: URL of the JuniperData service
             algorithm: Optional algorithm parameter for backward compatibility
             n_rotations: Number of spiral rotations
+            juniper_data_api_key: Optional outbound API key sent as the
+                ``X-API-Key`` header on every juniper-data call. When ``None``
+                (default), ``JuniperDataClient`` falls back to its own
+                ``JUNIPER_DATA_API_KEY`` env-var lookup; when ``""``,
+                ``JuniperDataClient`` omits the header entirely.
 
         Returns:
             Dataset dictionary
@@ -903,6 +917,7 @@ class DemoMode:
         # ``_canopy_metrics`` see a usable closure on the next call.
         client = JuniperDataClient(
             base_url=juniper_data_url,
+            api_key=juniper_data_api_key,
             on_request=build_data_client_request_hook(),
         )
 
