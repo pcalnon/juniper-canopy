@@ -11,6 +11,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **SEC-16 parity — `/metrics` IP allowlist via
+  `juniper_observability.MetricsAuthMiddleware`**: canopy now wraps its
+  Prometheus `/metrics` ASGI mount in the shared
+  `MetricsAuthMiddleware` (promoted from juniper-data #157 and
+  juniper-cascor #313 to `juniper-observability` 0.3.0 — see
+  juniper-ml #335). The middleware enforces a configurable bare-IP /
+  CIDR allowlist with IPv6 zone-id strip and IPv4-mapped IPv6 unwrap,
+  so a Docker container appearing as `::ffff:172.18.0.5` matches an
+  IPv4 `172.18.0.0/16` allowlist entry; unparseable allowlist entries
+  raise a `ValueError` at `Settings()` construction (fail-loud).
+  Concrete changes: `src/settings.py` adds
+  `Settings.metrics_trusted_ips: list[str] = ["127.0.0.1", "::1"]`
+  with a `_validate_metrics_trusted_ips` field validator that
+  delegates to `juniper_observability.parse_trusted_networks`;
+  `src/main.py` rewraps the existing
+  `app.mount("/metrics", get_prometheus_app())` as
+  `app.mount("/metrics", MetricsAuthMiddleware(get_prometheus_app(), settings.metrics_trusted_ips))`;
+  `pyproject.toml` bumps `juniper-observability>=0.2.0` to `>=0.3.0`
+  (first release that exports the middleware). No `EXEMPT_PATHS`
+  change required because `SecurityConstants.EXEMPT_PATH_PREFIXES`
+  already contained `"/metrics"`, so canopy's `SecurityMiddleware`
+  was already letting the path through — the IP allowlist is the
+  only gate now. New regression test
+  `src/tests/unit/test_metrics_auth_settings_integration.py` (8 cases)
+  pins the canopy-side wiring: default loopback, env-var JSON-list
+  widening to CIDR, bare IPv6 CIDR, fail-loud on `172.18.0.0/164`
+  typos, fail-loud on `"not-an-ip"`, valid mixed CIDR + bare IP
+  accepted, shared `parse_trusted_networks` delegation contract, and
+  the `/metrics in EXEMPT_PATH_PREFIXES` invariant. Middleware
+  behaviour itself is covered by juniper-observability's
+  `tests/test_metrics_auth_middleware.py` (22 cases). Closes the
+  third trigger-conditioned deferred follow-up in
+  juniper-deploy/notes/poc/POC_REMEDIATION_PLAN_2026-05-27.md §6
+  ("Add `MetricsAuthMiddleware` to juniper-canopy"). Companion
+  juniper-deploy PR (wiring `JUNIPER_CANOPY_METRICS_TRUSTED_IPS`
+  into canopy's compose env block + `.env.observability` default)
+  is queued separately.
+
 - **Outbound `X-API-Key` for juniper-data calls**: new
   `Settings.juniper_data_api_key` field plus `_check_juniper_data_api_key`
   field validator that resolves the value via `secrets_util.get_secret`

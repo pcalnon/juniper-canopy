@@ -312,10 +312,19 @@ app.add_middleware(
 # Matches the canonical pattern in juniper-data
 # (juniper_data/api/app.py) and juniper-cascor (src/api/app.py).
 if settings.metrics_enabled:
+    from juniper_observability import MetricsAuthMiddleware
+
     from observability import PrometheusMiddleware
 
     app.add_middleware(PrometheusMiddleware, service_name="juniper-canopy", namespace="juniper_canopy")
-    app.mount("/metrics", get_prometheus_app())
+    # SEC-16 parity with juniper-data + juniper-cascor: wrap the
+    # Prometheus ASGI sub-app in ``MetricsAuthMiddleware`` so untrusted
+    # IPs get 403 instead of an open ``/metrics`` surface. The exempt
+    # path prefix in ``SecurityConstants.EXEMPT_PATH_PREFIXES`` already
+    # bypasses canopy's ``SecurityMiddleware`` for ``/metrics`` — the
+    # allowlist is the only gate, so ``settings.metrics_trusted_ips``
+    # is the source of truth.
+    app.mount("/metrics", MetricsAuthMiddleware(get_prometheus_app(), settings.metrics_trusted_ips))
 app.add_middleware(RequestIdMiddleware)
 
 

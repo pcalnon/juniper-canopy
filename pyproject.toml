@@ -99,9 +99,11 @@ dependencies = [
     # (DependencyStatus, ReadinessResponse, probe_dependency,
     # JuniperJsonFormatter, RequestIdMiddleware, PrometheusMiddleware,
     # configure_logging, configure_sentry, get_prometheus_app,
-    # set_build_info). Pinned at the first stable release; consumers
-    # should never resolve back to the alpha line.
-    "juniper-observability>=0.2.0",
+    # set_build_info). 0.3.0 adds MetricsAuthMiddleware
+    # (POC §6 promotion from data #157 + cascor #313); pinned at the
+    # first version that exports the middleware so the SEC-16 surface
+    # is consistent across services.
+    "juniper-observability>=0.3.0",
     # METRICS-MON R2.2.5 / seed-05: WS frame schema validation. Pinned
     # at the first stable release; pulled in transitively by
     # juniper-cascor-client too, but pinned explicitly here so the

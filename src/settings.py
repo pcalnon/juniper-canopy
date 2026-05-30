@@ -182,6 +182,34 @@ class Settings(BaseSettings):
 
     # Metrics / observability
     metrics_enabled: bool = False
+    # SEC-16 parity with juniper-data + juniper-cascor: loopback-only IP
+    # allowlist for the Prometheus ``/metrics`` mount. Set
+    # ``JUNIPER_CANOPY_METRICS_TRUSTED_IPS='["10.0.0.5","172.18.0.0/16"]'``
+    # (JSON list) or a comma-separated string. Accepts bare IP literals
+    # and CIDR ranges; ``juniper_observability.MetricsAuthMiddleware``
+    # normalises IPv6 zone-ids and IPv4-mapped IPv6 client addresses
+    # before membership check, so a Docker container appearing as
+    # ``::ffff:172.18.0.5`` matches an IPv4 ``172.18.0.0/16`` allowlist
+    # entry. Mirrors
+    # ``juniper-data.api.settings.metrics_trusted_ips`` (SEC-16 promoted
+    # to juniper-observability 0.3.0).
+    metrics_trusted_ips: list[str] = ["127.0.0.1", "::1"]
+
+    @field_validator("metrics_trusted_ips")
+    @classmethod
+    def _validate_metrics_trusted_ips(cls, v: list[str]) -> list[str]:
+        """Fail loud at startup if any allowlist entry is unparseable.
+
+        Without this guard a typo like ``172.18.0.0/164`` would silently
+        compile to a working-but-empty allowlist that 403s every scrape.
+        Delegates to the same ``parse_trusted_networks`` helper that
+        ``MetricsAuthMiddleware`` calls so the failure surfaces at
+        ``Settings()`` construction (before the FastAPI app boots).
+        """
+        from juniper_observability import parse_trusted_networks
+
+        parse_trusted_networks(v)
+        return v
 
     # CORS
     cors_origins: list[str] = []
