@@ -503,7 +503,7 @@ class WebSocketManager:
             # Connection broken, remove it
             self.disconnect(websocket)
 
-    async def broadcast(self, message: dict, exclude: Optional[Set[WebSocket]] = None):
+    async def broadcast(self, message: dict, exclude: Optional[Set[WebSocket]] = None, channel: Optional[str] = None):
         """
         Broadcast message to all active connections (async).
 
@@ -531,6 +531,12 @@ class WebSocketManager:
             self.message_count += 1
             current_count = self.message_count
             connections = self.active_connections - excluded
+            # Channel scoping (keepalive heartbeat): when ``channel`` is given,
+            # send only to connections on that channel. ``/ws/control`` has no
+            # idle timeout and treats an inbound pong as an unknown command, so
+            # the heartbeat ping must never reach it — only ``channel="training"``.
+            if channel is not None:
+                connections = {c for c in connections if self.connection_metadata.get(c, {}).get("channel") == channel}
 
         # Add timestamp if not present (copy to avoid mutating caller's dict).
         # Match the Unix-float schema used by create_*_message() helpers.
@@ -688,19 +694,27 @@ class WebSocketManager:
         except Exception:
             return False
 
-    async def broadcast_ping(self):
+    async def broadcast_ping(self, channel: Optional[str] = None):
         """
-        Send ping to all active connections.
+        Send a heartbeat ping to active connections.
 
-        Useful for connection health monitoring.
+        Useful for connection health monitoring. When ``channel`` is given the
+        ping is scoped to connections on that channel only — the server-side
+        keepalive heartbeat passes ``channel="training"`` so it never reaches
+        ``/ws/control`` (which has no idle timeout and treats an inbound pong
+        as an unknown command).
+
+        Args:
+            channel: Optional channel label (e.g. ``"training"``) to scope the
+                ping to. ``None`` pings every active connection.
 
         Example:
-            # Periodic health check
+            # Periodic health check (server-side keepalive loop)
             while True:
-                await websocket_manager.broadcast_ping()
-                await asyncio.sleep(30)
+                await asyncio.sleep(websocket_manager.heartbeat_interval)
+                await websocket_manager.broadcast_ping(channel="training")
         """
-        await self.broadcast({"type": "ping"})
+        await self.broadcast({"type": "ping"}, channel=channel)
 
     def get_connection_count(self) -> int:
         """

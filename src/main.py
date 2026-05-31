@@ -47,7 +47,7 @@ import secrets
 import time
 import uuid
 from collections import deque
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, Optional
 
@@ -122,6 +122,27 @@ _PHASE_D_CONTROL_TIMEOUTS: dict[str, float] = {
     "reset": settings.ws_control_stop_timeout,
     "set_params": settings.ws_control_set_params_timeout,
 }
+
+
+async def _websocket_keepalive_loop(interval: float, channel: str = "training") -> None:
+    """Server side of the Phase F WebSocket heartbeat.
+
+    The browser client already replies to ``{"type": "ping"}`` with a pong
+    (``assets/websocket_client.js``), and the ``/ws/training`` receive loop
+    resets its idle timer on *any* inbound frame. Nothing, however, ever sent
+    the server ping, so a quiet-but-healthy training stream idled out after
+    ``idle_timeout_seconds`` and the client flapped Connected→Reconnecting.
+
+    This loop pings every ``interval`` seconds (< the idle timeout), scoped to
+    ``channel="training"`` because ``/ws/control`` has no idle timeout and would
+    mis-handle the resulting pong as an unknown command.
+    """
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await websocket_manager.broadcast_ping(channel=channel)
+        except Exception as exc:  # a transient send error must not kill the heartbeat
+            system_logger.debug("WebSocket keepalive ping failed: %s", exc)
 
 
 @asynccontextmanager
@@ -238,12 +259,34 @@ async def lifespan(app: FastAPI):
     # backend from "service" to "demo" before we get here, so reading
     # ``settings.demo_mode`` directly would lie about the live state.
     set_demo_mode_active(backend.backend_type == "demo")
+
+    # Phase F heartbeat (server side): the browser client already pongs to
+    # server pings, but nothing was sending them, so a quiet but healthy
+    # /ws/training stream idled out after idle_timeout_seconds and the client
+    # flapped Connected→Reconnecting. Start the keepalive pinger now and cancel
+    # it on shutdown. Scoped to the training channel (control has no idle
+    # timeout). Interval comes from the existing (previously dormant)
+    # websocket.heartbeat_interval setting.
+    keepalive_interval = websocket_manager.heartbeat_interval
+    keepalive_task: Optional[asyncio.Task] = None
+    if keepalive_interval and keepalive_interval > 0:
+        keepalive_task = asyncio.create_task(_websocket_keepalive_loop(keepalive_interval), name="ws-keepalive")
+        system_logger.info("WebSocket keepalive heartbeat started (interval=%ss, channel=training)", keepalive_interval)
+    else:
+        system_logger.info("WebSocket keepalive heartbeat disabled (heartbeat_interval=%s)", keepalive_interval)
+
     system_logger.info("Application startup complete")
 
     yield
 
     # Shutdown
     system_logger.info("Shutting down Juniper Canopy application")
+
+    # Stop the keepalive heartbeat before tearing down connections.
+    if keepalive_task is not None:
+        keepalive_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await keepalive_task
 
     await backend.shutdown()
 
