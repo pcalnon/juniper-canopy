@@ -397,7 +397,9 @@ class TestUnifiedStatusBarHandler:
         from frontend.dashboard_manager import DashboardManager
 
         mock_response = Mock()
-        mock_response.status_code = 503
+        # #340 maps 5xx -> "Backend Error"; use a generic non-200 (404) so this
+        # test still exercises the "Backend Unavailable" label its name implies.
+        mock_response.status_code = 404
 
         mock_get.return_value = mock_response
 
@@ -414,7 +416,7 @@ class TestUnifiedStatusBarHandler:
             result = manager._update_unified_status_bar_handler(n_intervals=1)
 
         connection_status = result[1]
-        assert "Unavailable" in connection_status
+        assert "Backend unavailable" in connection_status
 
 
 class TestTrainingButtonHandlers:
