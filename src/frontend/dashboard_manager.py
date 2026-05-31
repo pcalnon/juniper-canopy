@@ -2066,36 +2066,15 @@ class DashboardManager:
             prevent_initial_call=True,
         )
 
-        # ── Layout persistence: save active tab to localStorage ──
-        self.app.clientside_callback(
-            """
-            function(active_tab) {
-                if (active_tab) {
-                    localStorage.setItem('juniper_canopy_active_tab', active_tab);
-                }
-                return window.dash_clientside.no_update;
-            }
-            """,
-            Output("visualization-tabs", "active_tab", allow_duplicate=True),
-            Input("visualization-tabs", "active_tab"),
-            prevent_initial_call=True,
-        )
-
-        # ── Layout persistence: restore active tab from localStorage on load ──
-        self.app.clientside_callback(
-            """
-            function(n) {
-                var saved = localStorage.getItem('juniper_canopy_active_tab');
-                if (saved) {
-                    return saved;
-                }
-                return window.dash_clientside.no_update;
-            }
-            """,
-            Output("visualization-tabs", "active_tab", allow_duplicate=True),
-            Input("params-init-interval", "n_intervals"),
-            prevent_initial_call=True,
-        )
+        # ── Layout persistence (active tab) ──
+        # Persisted solely via the `layout-state-store` dcc.Store
+        # (storage_type="local") and its equality-guarded read (CAN-016a
+        # restore) / write (CAN-016a stamp) clientside callbacks defined in the
+        # visualization-callback setup. The earlier hand-rolled
+        # `localStorage['juniper_canopy_active_tab']` pair was removed in the #1
+        # tab-feedback-loop fix: a redundant second persistence system whose
+        # mount restore raced the Store, plus an Input→Output self-edge on
+        # `active_tab`, drove the tab-toggle loop.
 
     # Define Status Bar callbacks
     def _setup_status_bar_callbacks(self):
@@ -2269,13 +2248,20 @@ class DashboardManager:
         # it carries whatever was stamped at the last tab change.
         self.app.clientside_callback(
             """
-            function(state) {
+            function(state, currentTab) {
                 if (!state || !state.active_tab) return window.dash_clientside.no_update;
+                // Equality guard (#1 tab-feedback-loop fix): only restore when
+                // the persisted tab differs from the tab already shown. Without
+                // it, every Writer-A store stamp echoes back through here and
+                // re-asserts active_tab, re-triggering every Input(active_tab)
+                // callback and feeding the tab-toggle race.
+                if (state.active_tab === currentTab) return window.dash_clientside.no_update;
                 return state.active_tab;
             }
             """,
             Output("visualization-tabs", "active_tab", allow_duplicate=True),
             Input("layout-state-store", "data"),
+            State("visualization-tabs", "active_tab"),
             prevent_initial_call="initial_duplicate",
         )
 
