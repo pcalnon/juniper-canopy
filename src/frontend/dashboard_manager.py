@@ -4155,6 +4155,30 @@ class DashboardManager:
         """Update theme state based on dark mode store."""
         return "dark" if is_dark else "light"
 
+    def _status_bar_error_tuple(self, status_label: str, connection_label: str):
+        """Build the 9-element status-bar tuple for a FAILED /api/status poll.
+
+        ``status_label`` is shown (red) in the status display; ``connection_label``
+        is the hidden backward-compat element. Phase/epoch/units collapse to "--".
+        Replaces the previous bare "Error" so the operator can tell a transient
+        rate limit from an auth failure, a 5xx, a timeout, or an unreachable
+        backend (#3 "Error"-label diagnosability).
+        """
+        error_indicator = {"fontSize": "16px", "color": "#dc3545", "marginRight": "12px"}
+        error_style = {"fontWeight": "bold", "color": "#dc3545"}
+        neutral_style = {"fontWeight": "bold", "color": "#6c757d"}
+        return (
+            error_indicator,
+            connection_label,
+            "Latency: --",
+            status_label,
+            error_style,
+            "--",
+            neutral_style,
+            "--",
+            "--",
+        )
+
     def _update_unified_status_bar_handler(self, n_intervals=None):
         """
         Update unified status bar with all state info from /api/status.
@@ -4170,9 +4194,6 @@ class DashboardManager:
         - top_epoch_display children
         - top_hidden_units_display children
         """
-        error_indicator = {"fontSize": "16px", "color": "#dc3545", "marginRight": "12px"}
-        error_style = {"fontWeight": "bold", "color": "#dc3545"}
-
         try:
             # Single request: /api/status provides all needed info and doubles as health check.
             # Use fast timeout since this fires every tick.
@@ -4182,31 +4203,27 @@ class DashboardManager:
 
             if status_response.status_code == 200:
                 return self._build_unified_status_bar_content(status_response, latency_ms)
-            else:
-                return (
-                    error_indicator,
-                    "Backend Unavailable",
-                    "Latency: --",
-                    "Error",
-                    error_style,
-                    "Error",
-                    error_style,
-                    "--",
-                    "--",
-                )
+            # Non-200: surface a specific, actionable label instead of a bare "Error"
+            # so a transient rate limit isn't confused with a real backend outage.
+            code = status_response.status_code
+            if code == 429:
+                # Dominant "Error" cause on the deployed stack: canopy's own rate
+                # limiter throttling the dashboard's own polling (see #2a).
+                return self._status_bar_error_tuple("Rate Limited", f"Rate limited (HTTP {code})")
+            if code in (401, 403):
+                return self._status_bar_error_tuple("Unauthorized", f"Auth failed (HTTP {code})")
+            if code >= 500:
+                return self._status_bar_error_tuple("Backend Error", f"Backend error (HTTP {code})")
+            return self._status_bar_error_tuple("Backend Unavailable", f"Backend unavailable (HTTP {code})")
+        except requests.Timeout:
+            self.logger.warning("Status bar update timed out")
+            return self._status_bar_error_tuple("Backend Timeout", "Backend timed out")
+        except requests.ConnectionError:
+            self.logger.warning("Status bar update: backend unreachable")
+            return self._status_bar_error_tuple("Unreachable", "Backend unreachable")
         except Exception as e:
             self.logger.warning(f"Status bar update failed: {type(e).__name__}: {e}")
-            return (
-                error_indicator,
-                "Connection Error",
-                "Latency: --",
-                "Error",
-                error_style,
-                "Error",
-                error_style,
-                "--",
-                "--",
-            )
+            return self._status_bar_error_tuple("Error", "Connection Error")
 
     def _build_unified_status_bar_content(self, status_response, latency_ms):
         """Build unified status bar content from /api/status response."""
