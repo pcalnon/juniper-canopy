@@ -14,6 +14,7 @@
 | 2026-05-30 | v0.1 | Initial plan. Four issues; lineage to the 2026-05-09 effort; Phase 0 + Phase 1 defined.  |
 | 2026-05-30 | v0.2 | Phase 0 executed on the live deployed stack. **#3 reframed**: primary cause is a cascor dual-path / persistent-pool result-collection bug (`expected 40, got 2` → 0 hidden units), not benign convergence. #2a 429 confirmed and is the dominant source of #3's "Error". See §8.1. |
 | 2026-05-30 | v0.3 | **#3 PRIMARY fix implemented** in cascor worktree `fix/candidate-result-collection`: Defect 1 (inactivity collection deadline + worker-liveness early-exit) + Defect 2 (`_ensure_worker_pool` reentrancy — reuse a larger live pool). 7 new regression tests + worker-pool/dispatch/parallel suites green under JuniperCascor1. Live end-to-end rerun still pending. |
+| 2026-05-30 | v0.4 | cascor #315 pushed + **CI fixed** (Black line-collapse @ ll=512; amended into `4fa606d`). **4 design decisions resolved** (§7): #2a→re-key-by-session + `Retry-After`; #2b/#4→relocate `nn_dataset_*` to dataset surface; #1→keep `layout-state-store`; sequencing→canopy fixes first. Phase 1 execution started. |
 
 ---
 
@@ -179,10 +180,11 @@ Phase 2 (live / cross-repo):
 
 **Sequencing rationale.** PR-D closes #4 and the unfixed half of #2; PR-B references PR-D for the dataset reclassification. PR-C is fully standalone. PR-E/PR-G need the live stack. Merge order within Phase 1 is flexible; recommend A, C first (zero cross-deps), then D, then B.
 
-**Open design decisions (resolve before coding the affected PR):**
-1. **#2a limiter scope** — exempt internal same-origin traffic vs re-key by session/API-key. (Per-IP is wrong for a single-origin dashboard.)
-2. **#2b/#4 dataset fields** — relocate `nn_dataset_*` to the dataset surface entirely, or keep on `set_params` but classify. (`_DATASET_PARAM_MAP` suggests a separate intended channel.)
-3. **#1 tab persistence** — which of the two systems to keep (`layout-state-store` vs legacy localStorage).
+**Open design decisions — RESOLVED 2026-05-30 (Paul, Phase 1 kickoff):**
+1. **#2a limiter scope** — ✅ **Re-key the limiter by session/API-key (not per-IP)** *and* **honor the `Retry-After` header** with backoff in the apply handler (`main.py:4926`). (Chosen: options 2 + 3 — full fix, not the minimal exempt-internal.)
+2. **#2b/#4 dataset fields** — ✅ **Relocate `nn_dataset_*` entirely to the dataset surface** (`/api/stage_dataset`); `set_params` no longer carries or reports them as skipped. (`_DATASET_PARAM_MAP` is the intended channel.)
+3. **#1 tab persistence** — ✅ **Keep `layout-state-store`, delete the legacy localStorage pair** (`:2070`/`:2085`); equality-guard Reader B (`:2270`).
+4. **Sequencing** — ✅ **Canopy Phase-1 fixes first**; the stack-mutating live-verify of cascor #315 runs as a later focused pass.
 
 ---
 
@@ -249,10 +251,10 @@ Interpretation: with `Remote worker coordinator set — dual-path dispatch enabl
 | #2b apply-params honesty | `fix/canopy-apply-params-honesty` | Planned | — | §4. |
 | #3 WS keepalive | `fix/canopy-ws-keepalive` | Planned | — | §5. Standalone. |
 | #4 dataset numeric commit (+#2 force-blur) | `fix/canopy-dataset-apply-numeric-commit` | Planned | — | §6. |
-| **#3 cascor result-collection (PRIMARY)** | `fix/candidate-result-collection` (cascor) | **Implemented — unit tests pass; live rerun pending** | — | §5.1. **TWO defects fixed:** inactivity collection deadline + worker-liveness early-exit (Defect 1); `_ensure_worker_pool` reentrancy/reuse (Defect 2). 7 regression tests added. Uncommitted. |
+| **#3 cascor result-collection (PRIMARY)** | `fix/candidate-result-collection` (cascor) | **PR #315 open — CI green; live rerun pending** | — | §5.1. **TWO defects fixed:** inactivity collection deadline + worker-liveness early-exit (Defect 1); `_ensure_worker_pool` reentrancy/reuse (Defect 2). 7 regression tests added. Pushed @ `4fa606d` (Black-formatting CI fix folded into the commit via amend). |
 | #3 cascor completion-reason (surfacing) | `fix/cascor-completion-reason` | Planned | — | §5. Makes the stall visible; complements the primary fix. |
 | #3 status "Error" UX | `fix/canopy-status-error-diagnosability` | Planned | — | §5. |
-| #2a rate-limit scope | `fix/canopy-ratelimit-internal-traffic` | Planned (design first) | — | §4/§7. |
+| #2a rate-limit scope | `fix/canopy-ratelimit-rekey-session` | Planned — design resolved | — | §4/§7. Re-key limiter by session/API-key (not per-IP) + honor `Retry-After` backoff. |
 | #4 demo parity (optional) | `fix/canopy-demo-staged-dataset` | Backlog | — | §6 Break #1. |
 
 ---
