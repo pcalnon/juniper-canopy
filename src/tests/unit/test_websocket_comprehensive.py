@@ -427,6 +427,42 @@ class TestHeartbeatFunctionality:
         assert bad_ws not in manager.active_connections
 
     @pytest.mark.asyncio
+    async def test_broadcast_ping_channel_scoped_to_training(self, manager):
+        """Keepalive ping with channel='training' must never reach control clients.
+
+        Regression for the WS-keepalive fix: ``/ws/control`` has no idle timeout
+        and treats an inbound pong as an unknown command, so the heartbeat must
+        be scoped to the training channel only.
+        """
+        training_ws = self._create_mock_websocket()
+        control_ws = self._create_mock_websocket()
+        await manager.connect(training_ws, channel="training")
+        await manager.connect(control_ws, channel="control")
+        training_ws.send_json.reset_mock()
+        control_ws.send_json.reset_mock()
+
+        await manager.broadcast_ping(channel="training")
+
+        assert training_ws.send_json.called
+        assert training_ws.send_json.call_args[0][0]["type"] == "ping"
+        assert not control_ws.send_json.called
+
+    @pytest.mark.asyncio
+    async def test_broadcast_ping_no_channel_pings_all(self, manager):
+        """broadcast_ping() without a channel still pings every connection (back-compat)."""
+        training_ws = self._create_mock_websocket()
+        control_ws = self._create_mock_websocket()
+        await manager.connect(training_ws, channel="training")
+        await manager.connect(control_ws, channel="control")
+        training_ws.send_json.reset_mock()
+        control_ws.send_json.reset_mock()
+
+        await manager.broadcast_ping()
+
+        assert training_ws.send_json.called
+        assert control_ws.send_json.called
+
+    @pytest.mark.asyncio
     async def test_send_ping_returns_true_on_success(self, manager):
         """Test send_ping returns True on success."""
         ws = self._create_mock_websocket()

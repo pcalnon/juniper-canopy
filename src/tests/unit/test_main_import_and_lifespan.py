@@ -5,10 +5,11 @@ Tests for main.py import-time branches and endpoint coverage.
 These tests focus on covering code paths reachable in demo mode.
 """
 
+import asyncio
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -317,3 +318,45 @@ class TestRootEndpoint:
         response = app_client.get("/", follow_redirects=False)
         assert response.status_code == 307
         assert "/dashboard/" in response.headers["location"]
+
+
+class TestWebSocketKeepalive:
+    """Server-side Phase F heartbeat loop (``_websocket_keepalive_loop``).
+
+    Regression coverage for the WS-keepalive fix: nothing used to send server
+    pings, so a quiet-but-healthy /ws/training stream idled out after
+    idle_timeout_seconds and the client flapped Connected→Reconnecting.
+    """
+
+    @pytest.mark.asyncio
+    async def test_keepalive_loop_pings_training_channel_periodically(self):
+        """The loop pings channel='training' once per interval until cancelled."""
+        import main
+
+        with patch.object(main.websocket_manager, "broadcast_ping", new=AsyncMock()) as mock_ping:
+            task = asyncio.create_task(main._websocket_keepalive_loop(0.01))
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        assert mock_ping.await_count >= 2
+        # Every ping is scoped to the training channel (never control).
+        for call in mock_ping.await_args_list:
+            assert call.kwargs.get("channel") == "training"
+
+    @pytest.mark.asyncio
+    async def test_keepalive_loop_survives_broadcast_error(self):
+        """A transient broadcast_ping failure must not kill the heartbeat loop."""
+        import main
+
+        mock_ping = AsyncMock(side_effect=RuntimeError("boom"))
+        with patch.object(main.websocket_manager, "broadcast_ping", new=mock_ping):
+            task = asyncio.create_task(main._websocket_keepalive_loop(0.01))
+            await asyncio.sleep(0.05)
+            assert not task.done()  # survived repeated errors
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        assert mock_ping.await_count >= 2
