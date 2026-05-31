@@ -771,11 +771,13 @@ class CascorServiceAdapter:
         hot params fall back to REST unconditionally.
         """
         mapped = {self._CANOPY_TO_CASCOR_PARAM_MAP[k]: v for k, v in params.items() if k in self._CANOPY_TO_CASCOR_PARAM_MAP}
-        # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1a (Issue #1): users were not
-        # seeing that ~half the form was being silently dropped. Sort for
-        # deterministic toast text + warn-level log so it surfaces in the
-        # default ops dashboard view.
-        skipped = sorted(k for k in params if k not in self._CANOPY_TO_CASCOR_PARAM_MAP)
+        # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1a (Issue #1) + #2b: surface
+        # GENUINELY-unsupported keys (neither cascor-mappable nor known
+        # canopy-local) so they aren't silently dropped — but exclude
+        # ``_CANOPY_LOCAL_PARAMS``, which are handled canopy-side and must never
+        # be reported as "skipped" in the apply toast (they were the bogus
+        # "N not supported" entries). Sorted for deterministic toast + warn log.
+        skipped = sorted(k for k in params if k not in self._CANOPY_TO_CASCOR_PARAM_MAP and k not in self._CANOPY_LOCAL_PARAMS)
         if skipped:
             logger.warning(
                 "apply_params dropped %d unmapped key(s) — add to _CANOPY_TO_CASCOR_PARAM_MAP " "or document as canopy-only: %s",

@@ -39,22 +39,27 @@ def adapter():
 
 @pytest.mark.integration
 class TestAdapterSurfacesSkipped:
-    def test_skipped_returned_when_no_mapped_keys(self, adapter):
-        """All-canopy-only params take the no-mapped early-return path; skipped is the full input list."""
+    def test_canopy_local_params_not_surfaced_as_skipped(self, adapter):
+        """#2b: canopy-only params (``_CANOPY_LOCAL_PARAMS``) are handled
+        canopy-side and must NOT be reported as ``skipped`` — they were the
+        bogus "N not supported" entries in the apply toast. An all-local input
+        still takes the no-mapped early-return path, but ``skipped`` is empty."""
         result = adapter.apply_params(nn_spiral_rotations=3.0, nn_dataset_noise=0.05)
         assert result["ok"] is True
-        assert result["skipped"] == ["nn_dataset_noise", "nn_spiral_rotations"], result
+        assert result["skipped"] == [], result
         assert result["data"] == {}
 
-    def test_skipped_returned_alongside_mapped_keys(self, adapter):
-        """Mixed call: some keys map (success path), some don't (skipped)."""
+    def test_genuinely_unknown_key_surfaced_alongside_mapped(self, adapter):
+        """A key that is neither cascor-mappable nor canopy-local is still
+        surfaced in ``skipped`` (a real "not supported"); a canopy-local key in
+        the same call is not (#2b)."""
         result = adapter.apply_params(
-            nn_learning_rate=0.05,
-            nn_spiral_rotations=3.0,  # canopy-only, not in adapter map
+            nn_learning_rate=0.05,  # mapped
+            nn_spiral_rotations=3.0,  # canopy-local -> NOT skipped
+            nn_bogus_param=1,  # genuinely unknown -> skipped
         )
         assert result["ok"] is True
-        # nn_spiral_rotations is canopy-only; nn_learning_rate is mapped.
-        assert result["skipped"] == ["nn_spiral_rotations"], result
+        assert result["skipped"] == ["nn_bogus_param"], result
 
     def test_empty_skipped_when_all_keys_map(self, adapter):
         result = adapter.apply_params(nn_learning_rate=0.05, nn_max_hidden_units=64)
@@ -62,15 +67,17 @@ class TestAdapterSurfacesSkipped:
         assert result["skipped"] == [], result
 
     def test_skipped_returned_on_rest_failure(self, adapter):
-        """Failure path also surfaces skipped — distinguishes 'rejected' from 'never sent'."""
+        """Failure path also surfaces a genuinely-unknown skipped key —
+        distinguishes 'rejected' from 'never sent'. (A canopy-local key would
+        not appear here, per #2b.)"""
         from juniper_cascor_client import JuniperCascorClientError
 
         # Force the underlying client.update_params to raise.
         with patch.object(adapter._client, "update_params", side_effect=JuniperCascorClientError("boom")):
-            result = adapter.apply_params(nn_learning_rate=0.05, nn_spiral_rotations=3.0)
+            result = adapter.apply_params(nn_learning_rate=0.05, nn_bogus_param=1)
         assert result["ok"] is False
         assert result["error"] == "boom"
-        assert result["skipped"] == ["nn_spiral_rotations"], result
+        assert result["skipped"] == ["nn_bogus_param"], result
 
 
 # ---------------------------------------------------------------------------
