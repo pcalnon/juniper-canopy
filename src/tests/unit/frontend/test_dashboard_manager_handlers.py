@@ -232,7 +232,7 @@ class TestStatusBarHandlers:
             result = dashboard_manager._update_unified_status_bar_handler(n_intervals=1)
 
         assert len(result) == 9
-        assert result[3] == "Error"
+        assert result[3] == "Backend Error"
 
     @patch("requests.get")
     def test_update_unified_status_bar_handler_exception(self, mock_get, dashboard_manager):
