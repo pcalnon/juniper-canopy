@@ -7,6 +7,8 @@ import pytest
 from fastapi import HTTPException
 
 from security import (
+    INTERNAL_REQUEST_HEADER,
+    INTERNAL_REQUEST_TOKEN,
     APIKeyAuth,
     RateLimiter,
     get_api_key_auth,
@@ -168,6 +170,58 @@ class TestRateLimiter:
         limiter = RateLimiter(enabled=False)
         request = MagicMock()
         await limiter(request)  # Should not raise
+
+
+class TestInternalRequestRateLimitExemption:
+    """#2a: canopy's own server-side self-calls carry a per-process token that
+    exempts them from rate limiting; external clients cannot forge it."""
+
+    @staticmethod
+    def _request(headers):
+        request = MagicMock()
+        request.headers = headers
+        request.client = MagicMock()
+        request.client.host = "127.0.0.1"
+        request.state = MagicMock()
+        return request
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_valid_internal_token_exempts_from_rate_limit(self):
+        limiter = RateLimiter(requests_per_minute=1, enabled=True)
+        request = self._request({INTERNAL_REQUEST_HEADER: INTERNAL_REQUEST_TOKEN})
+        # Far exceed the limit; the valid internal token keeps every call exempt.
+        for _ in range(5):
+            await limiter(request)  # must not raise
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_forged_internal_token_is_not_exempt(self):
+        limiter = RateLimiter(requests_per_minute=1, enabled=True)
+        request = self._request({INTERNAL_REQUEST_HEADER: "not-the-real-token"})
+        await limiter(request)
+        with pytest.raises(HTTPException) as exc:
+            await limiter(request)
+        assert exc.value.status_code == 429
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_missing_internal_token_is_not_exempt(self):
+        limiter = RateLimiter(requests_per_minute=1, enabled=True)
+        request = self._request({})
+        await limiter(request)
+        with pytest.raises(HTTPException) as exc:
+            await limiter(request)
+        assert exc.value.status_code == 429
+
+    @pytest.mark.unit
+    def test_internal_api_headers_carries_exemption_token(self):
+        """Round-trip: the headers the dashboard attaches to its self-calls
+        carry exactly the token the limiter exempts."""
+        from frontend.internal_api import internal_api_headers
+
+        headers = internal_api_headers()
+        assert headers.get(INTERNAL_REQUEST_HEADER) == INTERNAL_REQUEST_TOKEN
 
 
 class TestSecurityModuleFunctions:
