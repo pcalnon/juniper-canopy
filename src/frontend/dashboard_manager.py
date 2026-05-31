@@ -1979,18 +1979,25 @@ class DashboardManager:
             prevent_initial_call=True,
         )
 
-        # ── FRONTEND_ISSUES_PLAN_2026-05-09 §2.5 C / Issue #2 ──
-        # Force-blur the focused input on Apply-Parameters click so any pending
-        # debounced numeric value commits BEFORE the server-side State() reads.
-        # Closes the "type into a numeric input, click Apply with the mouse
-        # without ever leaving the field, get the OLD value POSTed" race that
-        # was the most-reported facet of Issue #2. Pairs with §2.5 B (the
-        # debounce=350 sweep) which moves the commit from "blur only" to
-        # "blur OR ~350 ms after last keystroke".
+        # ── FRONTEND_ISSUES_PLAN_2026-05-09 §2.5 C / Issue #2 + Issue #4 ──
+        # Force-blur the focused input on Apply-Parameters OR Apply-Dataset
+        # click so any pending debounced numeric value commits BEFORE the
+        # server-side State() reads. Closes the "type into a numeric input,
+        # click Apply with the mouse without ever leaving the field, get the
+        # OLD value POSTed" race. For Apply-Parameters this was the
+        # most-reported facet of Issue #2; for Apply-Dataset the same race
+        # dropped n_samples / noise (committed as null) so only the dataset_type
+        # dropdown survived (Issue #4 — the modified-dataset-never-trains
+        # repro). Pairs with §2.5 B (the debounce=350 sweep) which moves the
+        # commit from "blur only" to "blur OR ~350 ms after last keystroke".
         self.app.clientside_callback(
             """
-            function(n_clicks) {
-                if (n_clicks && document.activeElement
+            function(params_clicks, dataset_clicks) {
+                // Either Apply button blurs the focused element, committing a
+                // pending numeric value before the server State() snapshot.
+                // prevent_initial_call means we only run on a real click, so no
+                // n_clicks guard is needed.
+                if (document.activeElement
                         && typeof document.activeElement.blur === 'function') {
                     document.activeElement.blur();
                 }
@@ -1998,7 +2005,10 @@ class DashboardManager:
             }
             """,
             Output("apply-blur-sink", "data"),
-            Input("apply-params-button", "n_clicks"),
+            [
+                Input("apply-params-button", "n_clicks"),
+                Input("apply-dataset-button", "n_clicks"),
+            ],
             prevent_initial_call=True,
         )
 
@@ -3474,14 +3484,23 @@ class DashboardManager:
             """POST /api/stage_dataset with the current dataset-form values."""
             if not n_clicks:
                 return dash.no_update
-            payload = {
-                "nn_dataset_type": dataset_type,
-                "nn_dataset_elements": n_samples,
-                "nn_dataset_noise": noise,
-                "nn_spiral_rotations": rotations,
-                "nn_spiral_number": n_spirals,
-            }
-            payload = {k: v for k, v in payload.items() if v is not None}
+            # dataset_type is ALWAYS sent — cascor `_reload_dataset` hard-requires
+            # it (RuntimeError otherwise). The optional numeric / spiral fields
+            # are included only when present. Force-blur on the Apply-Dataset
+            # click (clientside callback above) commits the numeric inputs first,
+            # so n_samples / noise now arrive as numbers instead of the
+            # Dash/React `null` that the old blanket None-drop silently discarded
+            # (Issue #4). Spiral fields stay conditional — irrelevant for
+            # non-spiral dataset types.
+            payload = {"nn_dataset_type": dataset_type}
+            for _key, _value in (
+                ("nn_dataset_elements", n_samples),
+                ("nn_dataset_noise", noise),
+                ("nn_spiral_rotations", rotations),
+                ("nn_spiral_number", n_spirals),
+            ):
+                if _value is not None:
+                    payload[_key] = _value
             try:
                 resp = requests.post(
                     self._api_url("/api/stage_dataset"),

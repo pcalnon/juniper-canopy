@@ -562,6 +562,40 @@ class TestContextMenuWiring:
         assert return_idx < prevent_idx
 
 
+class TestDatasetApplyNumericCommit:
+    """#4 modified-dataset-never-trains: Apply-Dataset force-blur + the
+    stage_dataset payload must keep the numeric inputs and always send
+    dataset_type."""
+
+    @pytest.fixture
+    def dashboard_manager_source(self):
+        path = Path(__file__).resolve().parents[2] / "frontend" / "dashboard_manager.py"
+        return path.read_text(encoding="utf-8")
+
+    def test_force_blur_wired_to_apply_dataset_button(self, dashboard_manager_source):
+        """The force-blur clientside callback (Output apply-blur-sink.data) must
+        fire on BOTH apply-params-button and apply-dataset-button so a typed-
+        but-unblurred numeric value commits before the server State() read."""
+        idx = dashboard_manager_source.find('Output("apply-blur-sink", "data")')
+        assert idx != -1
+        window = dashboard_manager_source[idx : idx + 400]
+        assert 'Input("apply-params-button", "n_clicks")' in window
+        assert 'Input("apply-dataset-button", "n_clicks")' in window
+        assert "document.activeElement.blur()" in dashboard_manager_source
+
+    def test_apply_dataset_always_sends_dataset_type(self, dashboard_manager_source):
+        """apply_dataset must seed the stage_dataset payload with
+        nn_dataset_type unconditionally (cascor _reload_dataset requires it) and
+        add optional fields only when present — no blanket None-drop that could
+        strip dataset_type or the (now force-blurred) numerics."""
+        idx = dashboard_manager_source.find("def apply_dataset(")
+        assert idx != -1
+        window = dashboard_manager_source[idx : idx + 1400]
+        assert 'payload = {"nn_dataset_type": dataset_type}' in window
+        assert "if _value is not None:" in window
+        assert "{k: v for k, v in payload.items() if v is not None}" not in window
+
+
 class TestLayoutStatePersistence:
     """CAN-016a: persist dashboard layout state (active tab) to localStorage.
 
