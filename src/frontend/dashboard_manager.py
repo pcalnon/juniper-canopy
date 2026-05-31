@@ -4155,6 +4155,50 @@ class DashboardManager:
         """Update theme state based on dark mode store."""
         return "dark" if is_dark else "light"
 
+    @staticmethod
+    def _classify_response_failure(response) -> tuple[str, str]:
+        """Map a non-OK HTTP response to (status_label, detail_label) pair.
+
+        Used by both the status-bar handler (via ``_status_bar_error_tuple``)
+        and the network-info panel handlers so the labels stay in lockstep —
+        a 429 surfacing on the status bar simultaneously surfaces as the
+        same "Rate Limited" message on the network-info panels.
+        """
+        code = response.status_code
+        if code == 429:
+            return ("Rate Limited", f"Rate limited (HTTP {code})")
+        if code in (401, 403):
+            return ("Unauthorized", f"Auth failed (HTTP {code})")
+        if code >= 500:
+            return ("Backend Error", f"Backend error (HTTP {code})")
+        return ("Backend Unavailable", f"Backend unavailable (HTTP {code})")
+
+    @staticmethod
+    def _classify_exception_failure(exc) -> tuple[str, str]:
+        """Map a request exception to (status_label, detail_label) pair."""
+        if isinstance(exc, requests.Timeout):
+            return ("Backend Timeout", "Backend timed out")
+        if isinstance(exc, requests.ConnectionError):
+            return ("Unreachable", "Backend unreachable")
+        return ("Error", f"Connection Error ({type(exc).__name__})")
+
+    def _network_info_error_div(self, panel_label: str, status_label: str, detail: str):
+        """Build the error placeholder for the network-info panels.
+
+        Mirrors PR #340's status-bar diagnosability so the operator can
+        distinguish a transient rate limit from a real backend outage on
+        the Network Information panel and its Details counterpart. Replaces
+        the previous opaque "Unable to fetch network info" / "Unable to
+        fetch network stats" / "Unable to fetch detailed network info"
+        messages.
+        """
+        return html.Div(
+            [
+                html.P(f"{panel_label}: {status_label}", style={"color": "orange"}),
+                html.P([html.Small(detail)], style={"color": "gray", "fontSize": "12px"}),
+            ]
+        )
+
     def _status_bar_error_tuple(self, status_label: str, connection_label: str):
         """Build the 9-element status-bar tuple for a FAILED /api/status poll.
 
@@ -4205,22 +4249,14 @@ class DashboardManager:
                 return self._build_unified_status_bar_content(status_response, latency_ms)
             # Non-200: surface a specific, actionable label instead of a bare "Error"
             # so a transient rate limit isn't confused with a real backend outage.
-            code = status_response.status_code
-            if code == 429:
-                # Dominant "Error" cause on the deployed stack: canopy's own rate
-                # limiter throttling the dashboard's own polling (see #2a).
-                return self._status_bar_error_tuple("Rate Limited", f"Rate limited (HTTP {code})")
-            if code in (401, 403):
-                return self._status_bar_error_tuple("Unauthorized", f"Auth failed (HTTP {code})")
-            if code >= 500:
-                return self._status_bar_error_tuple("Backend Error", f"Backend error (HTTP {code})")
-            return self._status_bar_error_tuple("Backend Unavailable", f"Backend unavailable (HTTP {code})")
-        except requests.Timeout:
-            self.logger.warning("Status bar update timed out")
-            return self._status_bar_error_tuple("Backend Timeout", "Backend timed out")
-        except requests.ConnectionError:
-            self.logger.warning("Status bar update: backend unreachable")
-            return self._status_bar_error_tuple("Unreachable", "Backend unreachable")
+            # Dominant "Error" cause on the deployed stack: canopy's own rate
+            # limiter throttling the dashboard's own polling (see #2a).
+            status_label, detail = self._classify_response_failure(status_response)
+            return self._status_bar_error_tuple(status_label, detail)
+        except (requests.Timeout, requests.ConnectionError) as e:
+            self.logger.warning(f"Status bar update failed: {type(e).__name__}")
+            status_label, detail = self._classify_exception_failure(e)
+            return self._status_bar_error_tuple(status_label, detail)
         except Exception as e:
             self.logger.warning(f"Status bar update failed: {type(e).__name__}: {e}")
             return self._status_bar_error_tuple("Error", "Connection Error")
@@ -4335,7 +4371,8 @@ class DashboardManager:
             response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Status API returned {response.status_code}")
-                return html.Div("Unable to fetch network info", style={"color": "orange"})
+                status_label, detail = self._classify_response_failure(response)
+                return self._network_info_error_div("Network Info", status_label, detail)
             status = response.json()
 
             return html.Div(
@@ -4400,14 +4437,13 @@ class DashboardManager:
                     else []
                 )
             )
+        except (requests.Timeout, requests.ConnectionError) as e:
+            self.logger.warning(f"Failed to fetch network info: {type(e).__name__}")
+            status_label, detail = self._classify_exception_failure(e)
+            return self._network_info_error_div("Network Info", status_label, detail)
         except Exception as e:
             self.logger.warning(f"Failed to fetch network info: {e}")
-            return html.Div(
-                [
-                    html.P("Unable to fetch network info", style={"color": "orange"}),
-                    html.P([html.Small(f"Error: {str(e)}")], style={"color": "gray"}),
-                ]
-            )
+            return self._network_info_error_div("Network Info", "Error", f"{type(e).__name__}: {e}")
 
     def _update_network_info_details_handler(self, n=None):
         """Update detailed network information panel from API."""
@@ -4416,19 +4452,19 @@ class DashboardManager:
             response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Network stats API returned {response.status_code}")
-                return html.Div("Unable to fetch network stats", style={"color": "orange"})
+                status_label, detail = self._classify_response_failure(response)
+                return self._network_info_error_div("Network Stats", status_label, detail)
             stats = response.json()
 
             # Use the metrics_panel helper to create the detailed table
             return self.metrics_panel._create_network_info_table(stats)
+        except (requests.Timeout, requests.ConnectionError) as e:
+            self.logger.warning(f"Failed to fetch network stats: {type(e).__name__}")
+            status_label, detail = self._classify_exception_failure(e)
+            return self._network_info_error_div("Network Stats", status_label, detail)
         except Exception as e:
             self.logger.warning(f"Failed to fetch network stats: {e}")
-            return html.Div(
-                [
-                    html.P("Unable to fetch detailed network info", style={"color": "orange", "fontSize": "14px"}),
-                    html.P([html.Small(f"Error: {str(e)}")], style={"color": "gray", "fontSize": "12px"}),
-                ]
-            )
+            return self._network_info_error_div("Network Stats", "Error", f"{type(e).__name__}: {e}")
 
     def _update_metrics_store_handler(self, n=None, display_mode_state=None, ws_status=None):
         """Fetch metrics history from API and update metrics panel store.

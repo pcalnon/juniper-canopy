@@ -112,14 +112,22 @@ class TestNetworkInfoHandlers:
 
     @patch("requests.get")
     def test_update_network_info_handler_failure(self, mock_get, dashboard_manager):
-        """Test network info update with API failure."""
+        """A generic exception bubbles up through the diagnosable-error
+        path (PR for B.1) → "Network Info: Error" with the exception
+        type embedded in the gray-text detail line. Pre-PR this was the
+        opaque "Unable to fetch network info" message; consumers should
+        now read the panel-prefixed label so a transient rate limit
+        isn't confused with a real backend outage.
+        """
         mock_get.side_effect = Exception("Connection error")
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_network_info_handler(n=1)
 
         assert result is not None
-        assert "Unable to fetch" in str(result)
+        rendered = str(result)
+        assert "Network Info: Error" in rendered
+        assert "Connection error" in rendered  # detail line carries the exception message
 
     @patch("requests.get")
     def test_update_network_info_details_handler_success(self, mock_get, dashboard_manager):
@@ -139,14 +147,18 @@ class TestNetworkInfoHandlers:
 
     @patch("requests.get")
     def test_update_network_info_details_handler_failure(self, mock_get, dashboard_manager):
-        """Test network info details update with failure."""
+        """Generic-exception path for the Network Stats panel — same
+        diagnosable-label contract as the Network Info panel (panel-
+        prefixed label + exception-message detail line)."""
         mock_get.side_effect = Exception("API error")
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_network_info_details_handler(n=1)
 
         assert result is not None
-        assert "Unable to fetch" in str(result)
+        rendered = str(result)
+        assert "Network Stats: Error" in rendered
+        assert "API error" in rendered
 
 
 # =============================================================================
