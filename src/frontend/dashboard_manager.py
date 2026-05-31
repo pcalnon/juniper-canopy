@@ -4229,6 +4229,26 @@ class DashboardManager:
         """Build unified status bar content from /api/status response."""
         status_data = status_response.json()
 
+        # Adapter-error fall-through: when the canopy → cascor circuit
+        # breaker is OPEN (or the underlying cascor client raised),
+        # ``CascorServiceAdapter.get_training_status`` returns
+        # ``{"is_training": False, "error": <reason>}`` — see
+        # ``src/backend/cascor_service_adapter.py:1264-1272``. The
+        # ``service_backend.get_status`` shim passes that dict through
+        # unchanged because it isn't shaped like a cascor-nested
+        # response (``is_cascor_nested`` is False), so the
+        # ``/api/status`` route returns HTTP 200 with the error marker.
+        # Without this guard every status field falls back to its
+        # ``False`` / ``0`` default and the existing ``elif`` chain
+        # renders "Stopped" — indistinguishable from a legitimate
+        # idle / never-started state, even though the backend is
+        # actually unreachable. This was the deferred follow-up in
+        # PR #340 ("handle the circuit-open 200 explicitly instead
+        # of as Stopped").
+        error_marker = status_data.get("error") if isinstance(status_data, dict) else None
+        if error_marker:
+            return self._status_bar_error_tuple("Unreachable", f"Backend unreachable ({error_marker})")
+
         # Determine latency indicator color
         if latency_ms < 100:
             latency_color = "#28a745"  # Green - excellent
