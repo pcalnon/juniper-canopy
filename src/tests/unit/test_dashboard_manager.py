@@ -15,12 +15,14 @@
 
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 # Add src to path
 src_dir = Path(__file__).parents[2]
 sys.path.insert(0, str(src_dir))
 
 import pytest  # noqa: E402
+import requests  # noqa: E402
 
 from frontend.dashboard_manager import DashboardManager  # noqa: E402
 
@@ -675,6 +677,60 @@ class TestLayoutStatePersistence:
         at mount and nothing races it (the params-init-interval restore is
         gone)."""
         assert dashboard_manager_source.count('Output("visualization-tabs", "active_tab"') == 2
+
+
+class TestStatusBarErrorDiagnosability:
+    """#3 fix: a FAILED /api/status poll must surface a SPECIFIC status label
+    (rate-limited / unauthorized / 5xx / timeout / unreachable) instead of a
+    bare "Error", so a transient 429 isn't confused with a backend outage."""
+
+    @pytest.fixture(scope="class")
+    def dm(self):
+        return DashboardManager({})
+
+    @staticmethod
+    def _resp(status_code):
+        resp = MagicMock()
+        resp.status_code = status_code
+        return resp
+
+    @pytest.mark.parametrize(
+        "code,expected",
+        [
+            (429, "Rate Limited"),
+            (401, "Unauthorized"),
+            (403, "Unauthorized"),
+            (500, "Backend Error"),
+            (503, "Backend Error"),
+            (404, "Backend Unavailable"),
+        ],
+    )
+    def test_non_200_maps_to_specific_status_label(self, dm, code, expected):
+        with patch("frontend.dashboard_manager.requests.get", return_value=self._resp(code)):
+            result = dm._update_unified_status_bar_handler(n_intervals=1)
+        # index 3 == top_status_display children (the visible status label)
+        assert result[3] == expected
+
+    @pytest.mark.parametrize(
+        "exc,expected",
+        [
+            (requests.Timeout(), "Backend Timeout"),
+            (requests.ConnectionError(), "Unreachable"),
+            (ValueError("boom"), "Error"),
+        ],
+    )
+    def test_exception_maps_to_specific_status_label(self, dm, exc, expected):
+        with patch("frontend.dashboard_manager.requests.get", side_effect=exc):
+            result = dm._update_unified_status_bar_handler(n_intervals=1)
+        assert result[3] == expected
+
+    def test_200_ok_still_renders_running(self, dm):
+        """Happy path unchanged: a 200 with is_running renders 'Running'."""
+        resp = self._resp(200)
+        resp.json.return_value = {"is_running": True, "is_paused": False, "phase": "output", "current_epoch": 3, "hidden_units": 1}
+        with patch("frontend.dashboard_manager.requests.get", return_value=resp):
+            result = dm._update_unified_status_bar_handler(n_intervals=1)
+        assert result[3] == "Running"
 
 
 if __name__ == "__main__":
