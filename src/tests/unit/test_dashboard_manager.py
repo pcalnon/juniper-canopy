@@ -612,6 +612,36 @@ class TestLayoutStatePersistence:
         already-persisted one, preventing redundant Store writes."""
         assert "prev.active_tab === activeTab" in dashboard_manager_source
 
+    def test_legacy_localstorage_persistence_removed(self, dashboard_manager_source):
+        """#1 tab-feedback-loop fix: the legacy hand-rolled localStorage
+        persistence is gone — `layout-state-store` is the single source of
+        truth. That second persistence system raced the Store at mount and its
+        Input→Output self-edge on `active_tab` fed the tab-toggle loop. We
+        assert the actual get/setItem call sites are removed (a historical
+        mention in a code comment is fine)."""
+        assert "localStorage.setItem('juniper_canopy_active_tab'" not in dashboard_manager_source
+        assert "localStorage.getItem('juniper_canopy_active_tab'" not in dashboard_manager_source
+
+    def test_read_callback_is_equality_guarded(self, dashboard_manager_source):
+        """#1 fix (read side): the restore callback must short-circuit when the
+        persisted tab already equals the shown tab, so a Store echo doesn't
+        re-assert `active_tab` and re-trigger every Input(active_tab) callback.
+        It takes the current tab as State and compares. Mirrors
+        test_no_self_loop_on_same_tab for the read side."""
+        idx = dashboard_manager_source.find('Input("layout-state-store", "data")')
+        assert idx != -1
+        window = dashboard_manager_source[max(0, idx - 900) : idx + 300]
+        assert 'State("visualization-tabs", "active_tab")' in window
+        assert "state.active_tab === currentTab" in window
+
+    def test_single_mount_time_active_tab_restore(self, dashboard_manager_source):
+        """#1 fix: only two callbacks may write `visualization-tabs.active_tab`
+        — the Store restore (Reader B) and the tutorial-link trigger. The two
+        legacy localStorage outputs were removed, so a single callback restores
+        at mount and nothing races it (the params-init-interval restore is
+        gone)."""
+        assert dashboard_manager_source.count('Output("visualization-tabs", "active_tab"') == 2
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
