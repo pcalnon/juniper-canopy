@@ -732,6 +732,58 @@ class TestStatusBarErrorDiagnosability:
             result = dm._update_unified_status_bar_handler(n_intervals=1)
         assert result[3] == "Running"
 
+    def test_200_with_circuit_open_error_renders_unreachable(self, dm):
+        """PR #340 deferred follow-up: when the canopy → cascor circuit
+        breaker is OPEN, ``CascorServiceAdapter.get_training_status``
+        returns ``{"is_training": False, "error": "circuit open"}``;
+        ``service_backend.get_status`` passes that dict through unchanged
+        because it isn't ``is_cascor_nested``, so ``/api/status`` returns
+        HTTP 200 with the ``error`` marker. Without the
+        ``_build_unified_status_bar_content`` guard added in this fix,
+        the dashboard ``elif`` chain would render "Stopped" (all status
+        fields fall back to their ``False`` / ``0`` defaults) —
+        indistinguishable from a legit idle backend.
+        """
+        resp = self._resp(200)
+        resp.json.return_value = {"is_training": False, "error": "circuit open"}
+        with patch("frontend.dashboard_manager.requests.get", return_value=resp):
+            result = dm._update_unified_status_bar_handler(n_intervals=1)
+        assert result[3] == "Unreachable"
+
+    @pytest.mark.parametrize(
+        "error_value",
+        [
+            "circuit open",
+            "Failed to get training status: timeout",
+            "underlying cascor request raised",
+        ],
+    )
+    def test_200_with_any_truthy_error_renders_unreachable(self, dm, error_value):
+        """Generalizes the circuit-open guard to *any* truthy ``error``
+        field on a 200 response. The adapter has two error paths
+        (``CircuitBreakerOpen`` fallback at
+        ``cascor_service_adapter.py:1268`` + ``JuniperCascorClientError``
+        catch at ``:1272``); both indicate "backend data is not
+        authoritative right now" and should render as "Unreachable",
+        not the "Stopped" idle-mapping.
+        """
+        resp = self._resp(200)
+        resp.json.return_value = {"is_training": False, "error": error_value}
+        with patch("frontend.dashboard_manager.requests.get", return_value=resp):
+            result = dm._update_unified_status_bar_handler(n_intervals=1)
+        assert result[3] == "Unreachable"
+
+    def test_200_with_empty_error_field_still_renders_normally(self, dm):
+        """The guard uses truthiness, so an empty-string ``error`` field
+        (defensive belt-and-suspenders if any future adapter path
+        ever ships one) does NOT trigger "Unreachable" — the normal
+        status-mapping runs."""
+        resp = self._resp(200)
+        resp.json.return_value = {"is_running": True, "is_paused": False, "phase": "output", "current_epoch": 7, "hidden_units": 2, "error": ""}
+        with patch("frontend.dashboard_manager.requests.get", return_value=resp):
+            result = dm._update_unified_status_bar_handler(n_intervals=1)
+        assert result[3] == "Running"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
