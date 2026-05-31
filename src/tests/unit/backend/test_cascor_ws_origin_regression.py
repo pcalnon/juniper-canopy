@@ -82,24 +82,50 @@ class TestAdapterOriginForwarding:
 @pytest.mark.unit
 class TestSettingsCascorWsOrigin:
     """The canopy ``Settings.cascor_ws_origin`` field controls the
-    Origin string the adapter receives.  Default matches the docker-
-    compose service hostname; env var
-    ``JUNIPER_CANOPY_CASCOR_WS_ORIGIN`` overrides; empty-string opt-out
-    is handled at the ``create_backend`` layer
-    (``src/backend/__init__.py``) where the empty string is mapped to
-    ``None`` before being passed to the adapter.
+    Origin string the adapter receives.  Default is derived from
+    ``socket.gethostname()`` so it tracks the actual runtime topology
+    (compose service name in docker, pod name in k8s, dev box name
+    under host-mode dev). Env var ``JUNIPER_CANOPY_CASCOR_WS_ORIGIN``
+    overrides; empty-string opt-out is handled at the
+    ``create_backend`` layer (``src/backend/__init__.py``) where the
+    empty string is mapped to ``None`` before being passed to the
+    adapter.
     """
 
-    def test_default_is_juniper_canopy_hostname(self, monkeypatch):
-        """Default value matches the docker-compose service hostname
-        so a fresh ``docker compose up`` works without any operator
-        action on env vars.
+    def test_default_is_runtime_hostname_derived(self, monkeypatch):
+        """Default value is derived from ``socket.gethostname()`` so a
+        fresh ``docker compose up`` works without any operator action
+        on env vars — regardless of which compose service name canopy
+        runs under (``juniper-canopy``, ``juniper-canopy-demo``, etc.).
         """
+        import socket
+
         monkeypatch.delenv("JUNIPER_CANOPY_CASCOR_WS_ORIGIN", raising=False)
         from settings import Settings
 
         settings = Settings()
-        assert settings.cascor_ws_origin == "http://juniper-canopy:8050"
+        expected = f"http://{socket.gethostname()}:8050"
+        assert settings.cascor_ws_origin == expected
+
+    def test_default_uses_factory_not_module_load_value(self, monkeypatch):
+        """The default is wired as a ``Field(default_factory=…)`` so it
+        evaluates per-``Settings()``-instantiation, not once at module
+        load. This lets tests / runtime code monkey-patch
+        ``socket.gethostname`` if they really need to.
+        """
+        import socket
+
+        monkeypatch.delenv("JUNIPER_CANOPY_CASCOR_WS_ORIGIN", raising=False)
+        from settings import Settings, _default_cascor_ws_origin
+
+        # Patch gethostname so a fresh Settings() instance picks up the new value.
+        monkeypatch.setattr(socket, "gethostname", lambda: "test-host-name")
+        # The factory itself reads at call time, so calling it here reflects
+        # the patched value.
+        assert _default_cascor_ws_origin() == "http://test-host-name:8050"
+        # And a freshly-constructed Settings consumes the same factory.
+        settings = Settings()
+        assert settings.cascor_ws_origin == "http://test-host-name:8050"
 
     def test_env_var_override(self, monkeypatch):
         monkeypatch.setenv("JUNIPER_CANOPY_CASCOR_WS_ORIGIN", "http://override:8050")

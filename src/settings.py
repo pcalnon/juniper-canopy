@@ -36,14 +36,54 @@
 #
 #####################################################################################################################################################################################################
 import os
+import socket
 import warnings
 from functools import lru_cache
 from typing import Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from secrets_util import get_secret
+
+# Canopy's canonical bind port. Hardcoded because ``cascor_ws_origin``'s
+# factory needs a port at module-evaluation time, before
+# ``ServerSettings.port`` (the runtime authority) is constructed.
+# Operators who bind canopy on a different port must additionally set
+# ``JUNIPER_CANOPY_CASCOR_WS_ORIGIN`` to the matching value (and add it
+# to cascor's ``JUNIPER_CASCOR_WS_CONTROL_ALLOWED_ORIGINS``).
+_CASCOR_WS_ORIGIN_DEFAULT_PORT = 8050
+
+
+def _default_cascor_ws_origin() -> str:
+    """Derive a sensible default ``cascor_ws_origin`` from the runtime host.
+
+    Returns ``http://{socket.gethostname()}:8050``. ``gethostname()`` resolves to:
+
+    - The compose service name in docker compose (``juniper-canopy``,
+      ``juniper-canopy-demo``, …) — automatically tracks demo / dev /
+      future-profile renames.
+    - The pod name in kubernetes.
+    - The dev box hostname under host-mode dev — wrong for connecting
+      to a cascor on ``localhost:8200``. Set
+      ``JUNIPER_CANOPY_CASCOR_WS_ORIGIN=http://localhost:8050`` in that
+      case (same override that the previous hardcoded default required
+      for host-mode dev).
+
+    Pre-this-commit default was a hardcoded ``http://juniper-canopy:8050``
+    — correct only for the canonical full-profile compose service name;
+    every other topology (demo profile, k8s, …) needed an explicit
+    operator override. The factory removes that need for the common
+    case while keeping the override hook for the dev / unusual-name
+    case.
+
+    Cascor's matching allowlist (``JUNIPER_CASCOR_WS_CONTROL_ALLOWED_ORIGINS``)
+    must contain the value canopy ends up sending. juniper-deploy ships
+    the canonical full-profile compose with both ends pre-aligned;
+    the demo-profile override (juniper-deploy#110) is now redundant for
+    the canopy half but stays as belt-and-suspenders.
+    """
+    return f"http://{socket.gethostname()}:{_CASCOR_WS_ORIGIN_DEFAULT_PORT}"
 
 
 class TrainingParamConfig(BaseModel):
@@ -160,14 +200,28 @@ class Settings(BaseSettings):
     # ``/ws/control`` is fail-closed against missing Origin
     # (juniper-cascor#129); inside docker compose the Python
     # ``websockets`` client emits no Origin by default and the upgrade
-    # is rejected with 403. Default value matches the docker-compose
-    # service hostname; juniper-deploy E.2 PR-2-D also adds this Origin
-    # to cascor's ``JUNIPER_CASCOR_WS_CONTROL_ALLOWED_ORIGINS``. For
-    # host-mode dev (canopy running on ``localhost:8050``), override
-    # via ``JUNIPER_CANOPY_CASCOR_WS_ORIGIN=http://localhost:8050``
-    # or set to empty string to opt out (preserves the pre-0.5.0
-    # juniper-cascor-client behaviour of sending no Origin).
-    cascor_ws_origin: str = "http://juniper-canopy:8050"
+    # is rejected with 403. Cascor's matching allowlist
+    # ``JUNIPER_CASCOR_WS_CONTROL_ALLOWED_ORIGINS`` must contain the
+    # value sent here.
+    #
+    # Default is derived from ``socket.gethostname()`` so the right
+    # Origin tracks the actual runtime topology:
+    #
+    #   - docker compose full profile  → "http://juniper-canopy:8050"
+    #   - docker compose demo profile  → "http://juniper-canopy-demo:8050"
+    #   - kubernetes                   → "http://<pod-name>:8050"
+    #   - host-mode dev                → "http://<dev-host>:8050"  ← wrong;
+    #                                    set JUNIPER_CANOPY_CASCOR_WS_ORIGIN=
+    #                                    http://localhost:8050 explicitly.
+    #
+    # Pre-this-change default was a hardcoded ``http://juniper-canopy:8050``;
+    # every non-canonical topology (demo, k8s, …) needed an explicit
+    # override. The factory removes that for the common case.
+    #
+    # Set to empty string to opt out (preserves the pre-0.5.0
+    # juniper-cascor-client behaviour of sending no Origin — only
+    # safe when cascor is configured to accept missing-Origin upgrades).
+    cascor_ws_origin: str = Field(default_factory=_default_cascor_ws_origin)
     cascor_discovery: CascorDiscoverySettings = CascorDiscoverySettings()
 
     # Demo
