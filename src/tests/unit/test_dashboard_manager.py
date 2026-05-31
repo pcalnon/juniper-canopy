@@ -785,5 +785,112 @@ class TestStatusBarErrorDiagnosability:
         assert result[3] == "Running"
 
 
+class TestNetworkInfoPanelDiagnosability:
+    """Network Info / Network Stats panels mirror the status-bar
+    diagnosability contract from PR #340 (and the circuit-open follow-up
+    in PR #341). When ``/api/status`` or ``/api/network/stats`` returns
+    non-200 or raises, the panel must surface a SPECIFIC, actionable
+    label (rate limit / unauthorized / 5xx / timeout / unreachable)
+    instead of the previous opaque "Unable to fetch network info" /
+    "Unable to fetch detailed network info" messages.
+    """
+
+    @pytest.fixture(scope="class")
+    def dm(self):
+        return DashboardManager({})
+
+    @staticmethod
+    def _resp(status_code):
+        resp = MagicMock()
+        resp.ok = 200 <= status_code < 400
+        resp.status_code = status_code
+        return resp
+
+    # ---------- Network Info (/api/status backed) ----------
+
+    @pytest.mark.parametrize(
+        "code,expected_label",
+        [
+            (429, "Network Info: Rate Limited"),
+            (401, "Network Info: Unauthorized"),
+            (403, "Network Info: Unauthorized"),
+            (500, "Network Info: Backend Error"),
+            (503, "Network Info: Backend Error"),
+            (404, "Network Info: Backend Unavailable"),
+        ],
+    )
+    def test_network_info_non_200_maps_to_specific_label(self, dm, code, expected_label):
+        with patch("frontend.dashboard_manager.requests.get", return_value=self._resp(code)):
+            result = dm._update_network_info_handler(n=1)
+        rendered = str(result)
+        assert expected_label in rendered, f"expected {expected_label!r} in {rendered!r}"
+
+    @pytest.mark.parametrize(
+        "exc,expected_label",
+        [
+            (requests.Timeout(), "Network Info: Backend Timeout"),
+            (requests.ConnectionError(), "Network Info: Unreachable"),
+        ],
+    )
+    def test_network_info_exception_maps_to_specific_label(self, dm, exc, expected_label):
+        with patch("frontend.dashboard_manager.requests.get", side_effect=exc):
+            result = dm._update_network_info_handler(n=1)
+        rendered = str(result)
+        assert expected_label in rendered, f"expected {expected_label!r} in {rendered!r}"
+
+    def test_network_info_unknown_exception_uses_generic_error_label(self, dm):
+        """Non-requests exceptions fall through to the generic "Error"
+        label, with the exception type embedded in the detail line so a
+        sweep through the logs surfaces what actually happened."""
+        with patch("frontend.dashboard_manager.requests.get", side_effect=ValueError("boom")):
+            result = dm._update_network_info_handler(n=1)
+        rendered = str(result)
+        assert "Network Info: Error" in rendered
+        assert "ValueError" in rendered  # exception type in the detail line
+        assert "boom" in rendered  # exception message in the detail line
+
+    def test_network_info_200_ok_still_renders_table(self, dm):
+        """Happy path unchanged: a 200 with normal status data renders
+        the table-of-fields ``html.Div`` (not the error placeholder)."""
+        resp = self._resp(200)
+        resp.json.return_value = {"input_size": 2, "output_size": 2, "hidden_units": 3, "current_epoch": 100, "network_connected": True, "monitoring_active": True, "current_phase": "Output Training"}
+        with patch("frontend.dashboard_manager.requests.get", return_value=resp):
+            result = dm._update_network_info_handler(n=1)
+        rendered = str(result)
+        # Sanity-check a label that ONLY appears in the happy-path render.
+        assert "Network Connected" in rendered
+        # And the error-placeholder label is NOT present.
+        assert "Network Info:" not in rendered
+
+    # ---------- Network Stats (/api/network/stats backed) ----------
+
+    @pytest.mark.parametrize(
+        "code,expected_label",
+        [
+            (429, "Network Stats: Rate Limited"),
+            (500, "Network Stats: Backend Error"),
+            (404, "Network Stats: Backend Unavailable"),
+        ],
+    )
+    def test_network_stats_non_200_maps_to_specific_label(self, dm, code, expected_label):
+        with patch("frontend.dashboard_manager.requests.get", return_value=self._resp(code)):
+            result = dm._update_network_info_details_handler(n=1)
+        rendered = str(result)
+        assert expected_label in rendered, f"expected {expected_label!r} in {rendered!r}"
+
+    @pytest.mark.parametrize(
+        "exc,expected_label",
+        [
+            (requests.Timeout(), "Network Stats: Backend Timeout"),
+            (requests.ConnectionError(), "Network Stats: Unreachable"),
+        ],
+    )
+    def test_network_stats_exception_maps_to_specific_label(self, dm, exc, expected_label):
+        with patch("frontend.dashboard_manager.requests.get", side_effect=exc):
+            result = dm._update_network_info_details_handler(n=1)
+        rendered = str(result)
+        assert expected_label in rendered, f"expected {expected_label!r} in {rendered!r}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
