@@ -32,10 +32,16 @@ def manager() -> DashboardManager:
 @pytest.mark.ui
 def test_apply_blur_clientside_callback_is_registered(manager: DashboardManager):
     """The clientside callback's Output is keyed by ``apply-blur-sink.data``;
-    its sole Input is ``apply-params-button.n_clicks``."""
+    its Inputs are ``apply-params-button.n_clicks`` AND
+    ``apply-dataset-button.n_clicks`` — Issue #4 extended the force-blur to the
+    Apply-Dataset button so its numeric inputs commit before the State() read."""
     cb_keys = list(manager.app.callback_map.keys())
     matching = [k for k in cb_keys if "apply-blur-sink.data" in k]
     assert matching, f"expected a callback writing to apply-blur-sink.data; found keys: {cb_keys[:10]}…"
+    inputs = manager.app.callback_map[matching[0]]["inputs"]
+    input_ids = {f"{i['id']}.{i['property']}" for i in inputs}
+    assert "apply-params-button.n_clicks" in input_ids, input_ids
+    assert "apply-dataset-button.n_clicks" in input_ids, input_ids
 
 
 @pytest.mark.ui
