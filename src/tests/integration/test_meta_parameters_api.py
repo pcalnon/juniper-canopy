@@ -54,6 +54,23 @@ class TestSetParamsNewPayload:
         assert response.status_code == 200
 
     @pytest.mark.asyncio
+    async def test_set_params_accepts_previously_dropped_params(self, client):
+        """#2b: nn_output_epochs / nn_optimizer_type / nn_activation_function_name
+        were silently dropped by SetParamsRequest before reaching the adapter
+        (which maps them). They're now accepted and forwarded — a payload of only
+        these three is recognized (200), not rejected as 'no parameters'."""
+        response = client.post(
+            "/api/set_params",
+            json={
+                "nn_output_epochs": 7,
+                "nn_optimizer_type": "adam",
+                "nn_activation_function_name": "relu",
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "success"
+
+    @pytest.mark.asyncio
     async def test_set_params_full_payload(self, client):
         response = client.post(
             "/api/set_params",

@@ -4940,12 +4940,14 @@ class DashboardManager:
             "nn_patience": int(nn_patience) if nn_patience is not None else TrainingConstants.DEFAULT_PATIENCE,
             "nn_spiral_rotations": float(nn_spiral_rot) if nn_spiral_rot is not None else TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
             "nn_spiral_number": int(nn_spiral_num) if nn_spiral_num is not None else TrainingConstants.DEFAULT_SPIRAL_NUMBER,
-            "nn_dataset_elements": int(nn_dataset_elem) if nn_dataset_elem is not None else TrainingConstants.DEFAULT_DATASET_ELEMENTS,
-            "nn_dataset_noise": float(nn_dataset_noise) if nn_dataset_noise is not None else TrainingConstants.DEFAULT_DATASET_NOISE,
+            # #2b: nn_dataset_* are canopy-local and travel on /api/stage_dataset
+            # (Issue #4 cold-swap), so they're no longer duplicated onto the
+            # set_params payload (they were never mapped to cascor from here).
             "cn_pool_size": int(cn_pool_size) if cn_pool_size is not None else TrainingConstants.DEFAULT_CANDIDATE_POOL_SIZE,
             "cn_correlation_threshold": float(cn_corr_thresh) if cn_corr_thresh is not None else TrainingConstants.DEFAULT_CANDIDATE_CORRELATION_THRESHOLD,
             "cn_selected_candidates": int(cn_selected) if cn_selected is not None else TrainingConstants.DEFAULT_SELECTED_CANDIDATES,
-            "cn_training_complete": cn_training_complete or TrainingConstants.DEFAULT_CN_TRAINING_COMPLETE,
+            # #2b: cn_training_complete is a read-only status flag, not an
+            # editable parameter — dropped from the set_params payload.
             "cn_training_iterations": int(cn_training_iter) if cn_training_iter is not None else TrainingConstants.DEFAULT_CANDIDATE_TRAINING_ITERATIONS,
             "cn_training_convergence_threshold": float(cn_training_conv_thresh) if cn_training_conv_thresh is not None else TrainingConstants.DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD,
             "cn_patience": int(cn_patience) if cn_patience is not None else TrainingConstants.DEFAULT_CN_PATIENCE,

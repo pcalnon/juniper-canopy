@@ -191,6 +191,17 @@ class TestApplyButtonDashboardIntegration:
             assert "nn_max_total_epochs" in json_payload
             assert "hidden_units" not in json_payload
             assert "epochs" not in json_payload
+            # #2b: the 3 previously-dropped mappable params are sent by the
+            # handler (and now wired through SetParamsRequest + the route's nn_keys).
+            assert "nn_output_epochs" in json_payload
+            assert "nn_optimizer_type" in json_payload
+            assert "nn_activation_function_name" in json_payload
+            # #2b: canopy-local params are relocated off the set_params payload —
+            # nn_dataset_* travel on /api/stage_dataset; cn_training_complete is a
+            # read-only status flag.
+            assert "nn_dataset_elements" not in json_payload
+            assert "nn_dataset_noise" not in json_payload
+            assert "cn_training_complete" not in json_payload
 
     def test_track_param_changes_uses_correct_keys(self, reset_singletons):
         """_track_param_changes_handler should compare against correct keys."""
