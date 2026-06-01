@@ -46,6 +46,7 @@ from functools import lru_cache
 from typing import Dict
 
 from secrets_util import get_secret
+from security import INTERNAL_REQUEST_HEADER, INTERNAL_REQUEST_TOKEN
 
 
 @lru_cache(maxsize=1)
@@ -62,12 +63,17 @@ def _canopy_api_key() -> str | None:
 def internal_api_headers() -> Dict[str, str]:
     """Headers required for server-side self-calls into canopy's own API.
 
-    Returns ``{"X-API-Key": <key>}`` when ``CANOPY_API_KEY`` is
-    configured (production / deploy-stack), and an empty dict in
-    open-access mode (``CANOPY_API_KEY`` unset or empty — local
-    development). Merge with any other headers via ``{**headers,
-    **other}`` if a call site already passes a ``headers=`` kwarg
-    (none currently do).
+    Always includes the per-process internal-request token
+    (``INTERNAL_REQUEST_HEADER``) so canopy's own rate limiter exempts these
+    self-calls (#2a) — the dashboard's high-frequency polling must not drain the
+    shared bucket that real user actions depend on. Adds ``X-API-Key`` when
+    ``CANOPY_API_KEY`` is configured (production / deploy-stack); the token is
+    sent in open-access mode too (it's harmless and the rate limiter can be
+    enabled independently of API-key auth). Merge with any other headers via
+    ``{**headers, **other}`` if a call site already passes a ``headers=`` kwarg.
     """
+    headers: Dict[str, str] = {INTERNAL_REQUEST_HEADER: INTERNAL_REQUEST_TOKEN}
     key = _canopy_api_key()
-    return {"X-API-Key": key} if key else {}
+    if key:
+        headers["X-API-Key"] = key
+    return headers

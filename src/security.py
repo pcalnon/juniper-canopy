@@ -8,6 +8,7 @@ Configuration is read from environment variables:
 """
 
 import hmac
+import secrets
 import time
 from collections import defaultdict
 from threading import Lock
@@ -18,6 +19,16 @@ from fastapi.security import APIKeyHeader
 from secrets_util import get_secret
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+# #2a: per-process token marking canopy's OWN server-side self-calls — the Dash
+# dashboard polling its own /api/* routes from callback handlers (localhost →
+# localhost, same process). Generated fresh each process start, so external
+# clients cannot forge it. Requests bearing it skip rate limiting: the
+# dashboard's own high-frequency polling must not drain the shared
+# per-IP/per-API-key bucket that real user actions depend on.
+# ``frontend.internal_api.internal_api_headers()`` attaches it to every self-call.
+INTERNAL_REQUEST_HEADER = "X-Canopy-Internal"
+INTERNAL_REQUEST_TOKEN = secrets.token_urlsafe(32)
 
 
 class APIKeyAuth:
@@ -202,6 +213,15 @@ class RateLimiter:
             HTTPException: 429 if rate limit exceeded.
         """
         if not self._enabled:
+            return
+
+        # #2a: exempt canopy's own server-side self-calls (the dashboard polling
+        # its own /api/* routes). They carry the per-process internal token;
+        # external clients cannot forge it. Constant-time compare. Without this
+        # the dashboard's own polling drains the shared bucket and 429s real
+        # user actions (and surfaces as the "Error" status — see #3).
+        internal = request.headers.get(INTERNAL_REQUEST_HEADER)
+        if isinstance(internal, str) and hmac.compare_digest(internal, INTERNAL_REQUEST_TOKEN):
             return
 
         key = self._get_key(request, api_key)
