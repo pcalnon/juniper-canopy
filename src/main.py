@@ -2824,6 +2824,11 @@ class SetParamsRequest(BaseModel):
     nn_spiral_number: int | None = None
     nn_dataset_elements: int | None = None
     nn_dataset_noise: float | None = None
+    # #2b: previously omitted here, so these three were silently dropped before
+    # reaching the adapter (which DOES map them). The dashboard already sends them.
+    nn_output_epochs: int | None = None
+    nn_optimizer_type: str | None = None
+    nn_activation_function_name: str | None = None
 
     # Candidate parameters
     cn_pool_size: int | None = None
@@ -2892,6 +2897,9 @@ async def api_set_params(body: SetParamsRequest):
             "nn_spiral_number",
             "nn_dataset_elements",
             "nn_dataset_noise",
+            "nn_output_epochs",
+            "nn_optimizer_type",
+            "nn_activation_function_name",
         ]
         cn_keys = [
             "cn_pool_size",
