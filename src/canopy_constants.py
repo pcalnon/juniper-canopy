@@ -245,6 +245,17 @@ class DashboardConstants:
     DASHBOARD_GET_TIMEOUT: Final[int] = 5
     # Maximum retries for set_params operations.
     DASHBOARD_SET_PARAMS_MAX_RETRIES: Final[int] = 3
+    # ── #2a Retry-After backoff (PROVISIONAL — revisit) ──────────────────
+    # On HTTP 429 from set_params, the handler backs off and retries within
+    # the budget above instead of bailing immediately. The sleep runs on a
+    # Dash callback thread, so the server-advertised ``Retry-After`` (which can
+    # be the limiter's full window, tens of seconds) is *capped* — we never
+    # block the callback on the raw value. A missing/non-numeric header (e.g.
+    # the rare RFC 9110 HTTP-date form) uses the fallback delay below.
+    # NOTE: both values are first-cut tuning and should be revisited once
+    # there is real 429-frequency data from the deployed stack.
+    DASHBOARD_RETRY_AFTER_MAX_SLEEP_S: Final[float] = 2.0
+    DASHBOARD_RETRY_AFTER_FALLBACK_S: Final[float] = 0.5
 
     # FRONTEND_ISSUES_PLAN_2026-05-09 §2.5 B / Issue #2 — common debounce for
     # numeric ``dbc.Input`` widgets. 350 ms balances typing latency against

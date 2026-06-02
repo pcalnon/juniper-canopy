@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, Mock, patch
 import dash
 import pytest
 
+from canopy_constants import DashboardConstants
 from frontend.dashboard_manager import DashboardManager
 
 
@@ -1197,6 +1198,97 @@ class TestParameterHandlers:
             assert result[0]["nn_max_total_epochs"] == 1000000  # default (TrainingConstants.DEFAULT_TRAINING_EPOCHS)
             assert result[0]["nn_multi_node_layers"] is False  # None -> empty list -> False
             assert result[0]["nn_growth_convergence_threshold"] == 0.001  # default
+
+    # ── #2a: 429 Retry-After backoff (the half #345 deferred) ────────────
+    # Before #2a the 429 branch returned immediately, ignoring both the retry
+    # budget and the limiter's ``Retry-After`` header. These pin the new
+    # back-off-and-retry behavior and the bounded/fallback sleep.
+    _APPLY_KW = {
+        "n_clicks": 1,
+        "nn_max_iter": 1000,
+        "nn_max_epochs": 300,
+        "nn_lr": 0.02,
+        "nn_max_hu": 15,
+        "nn_multi_node": [],
+        "nn_growth_trigger": "convergence",
+        "nn_growth_epochs": 50,
+        "nn_growth_conv_thresh": 0.001,
+        "nn_patience": 50,
+        "nn_spiral_rot": 1.5,
+        "nn_spiral_num": 2,
+        "nn_dataset_elem": 1000,
+        "nn_dataset_noise": 0.25,
+        "cn_pool_size": 100,
+        "cn_corr_thresh": 0.001,
+        "cn_selected": 1,
+        "cn_training_complete": "preset_epochs",
+        "cn_training_iter": 500,
+        "cn_training_conv_thresh": 0.0001,
+        "cn_patience": 30,
+        "cn_multi_cand": [],
+        "cn_cand_selection": None,
+        "cn_top_cands": 1,
+        "cn_random_cands": 1,
+    }
+
+    @patch("frontend.dashboard_manager.time.sleep")
+    @patch("requests.post")
+    def test_apply_parameters_handler_429_backs_off_then_succeeds(self, mock_post, mock_sleep, dashboard_manager):
+        """A 429 is retried within the budget (not returned immediately); the next 200 succeeds.
+
+        Also pins the safety cap: even with ``Retry-After: 60`` the sleep is
+        capped at ``DASHBOARD_RETRY_AFTER_MAX_SLEEP_S`` (never the raw value, as
+        this runs on a Dash callback thread).
+        """
+        resp_429 = Mock()
+        resp_429.status_code = 429
+        resp_429.headers = {"Retry-After": "60"}  # far above the cap
+        resp_200 = Mock()
+        resp_200.status_code = 200
+        mock_post.side_effect = [resp_429, resp_200]
+
+        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
+            result = dashboard_manager._apply_parameters_handler(**self._APPLY_KW)
+
+        assert mock_post.call_count == 2  # retried — did NOT bail on the first 429
+        assert result[0]["nn_learning_rate"] == 0.02
+        assert "applied" in result[1].lower()
+        mock_sleep.assert_called_once_with(DashboardConstants.DASHBOARD_RETRY_AFTER_MAX_SLEEP_S)
+
+    @patch("frontend.dashboard_manager.time.sleep")
+    @patch("requests.post")
+    def test_apply_parameters_handler_429_exhausts_retries(self, mock_post, mock_sleep, dashboard_manager):
+        """Persistent 429 returns the rate-limited message only AFTER exhausting retries, not immediately."""
+        resp_429 = Mock()
+        resp_429.status_code = 429
+        resp_429.headers = {"Retry-After": "60"}
+        mock_post.return_value = resp_429
+
+        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
+            result = dashboard_manager._apply_parameters_handler(**self._APPLY_KW)
+
+        assert mock_post.call_count == DashboardConstants.DASHBOARD_SET_PARAMS_MAX_RETRIES  # used the full budget
+        assert mock_sleep.call_count == DashboardConstants.DASHBOARD_SET_PARAMS_MAX_RETRIES - 1  # slept between attempts only
+        assert result[0] is dash.no_update
+        assert "rate limited" in result[1].lower()
+
+    @patch("frontend.dashboard_manager.time.sleep")
+    @patch("requests.post")
+    def test_apply_parameters_handler_429_missing_header_uses_fallback(self, mock_post, mock_sleep, dashboard_manager):
+        """A 429 with no ``Retry-After`` header backs off by the fallback delay, then succeeds."""
+        resp_429 = Mock()
+        resp_429.status_code = 429
+        resp_429.headers = {}  # no Retry-After
+        resp_200 = Mock()
+        resp_200.status_code = 200
+        mock_post.side_effect = [resp_429, resp_200]
+
+        with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
+            result = dashboard_manager._apply_parameters_handler(**self._APPLY_KW)
+
+        assert mock_post.call_count == 2
+        assert "applied" in result[1].lower()
+        mock_sleep.assert_called_once_with(DashboardConstants.DASHBOARD_RETRY_AFTER_FALLBACK_S)
 
     @patch("requests.get")
     def test_init_params_from_backend_handler_success(self, mock_get, dashboard_manager):
