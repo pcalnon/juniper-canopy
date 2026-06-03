@@ -67,6 +67,10 @@ class StatusResult(TypedDict, total=False):
     learning_rate: float
     max_hidden_units: int
     max_epochs: int
+    # cascor #320 (Issue #3 follow-up): grow_network completion reason carried
+    # through from /v1/training/status (converged / stalled / etc.). Absent or
+    # None when the connected cascor predates the field.
+    completion_reason: str
 
 
 class MetricsResult(TypedDict, total=False):

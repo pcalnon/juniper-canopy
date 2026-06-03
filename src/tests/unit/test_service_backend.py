@@ -455,6 +455,30 @@ class TestPhase4TypedContract:
         ):
             assert canonical_field in result, f"StatusResult missing {canonical_field}"
 
+    def test_get_status_carries_completion_reason(self, service_backend, mock_adapter):
+        """A top-level completion_reason on the nested cascor response (cascor #320)
+        is carried through unchanged into the flat StatusResult (Issue #3 follow-up)."""
+        mock_adapter.get_training_status.return_value = {
+            "state_machine": {"status": "Completed", "phase": "idle"},
+            "monitor": {"current_epoch": 5, "current_hidden_units": 3},
+            "training_state": {"input_size": 2, "output_size": 1},
+            "training_active": False,
+            "network_loaded": True,
+            "completion_reason": "no_candidate",
+        }
+        assert service_backend.get_status()["completion_reason"] == "no_candidate"
+
+    def test_get_status_completion_reason_absent_is_none(self, service_backend, mock_adapter):
+        """When cascor omits completion_reason (predates #320), the field is None."""
+        mock_adapter.get_training_status.return_value = {
+            "state_machine": {"status": "Stopped", "phase": "idle"},
+            "monitor": {},
+            "training_state": {},
+            "training_active": False,
+            "network_loaded": True,
+        }
+        assert service_backend.get_status()["completion_reason"] is None
+
     def test_get_metrics_returns_dict(self, service_backend):
         """get_metrics() returns a MetricsResult-shaped dict."""
         result = service_backend.get_metrics()

@@ -152,6 +152,11 @@ class ServiceBackend:
                 # this field to the /v1/training/status payload; carry it
                 # through unchanged.
                 "pending_dataset": raw.get("pending_dataset"),
+                # cascor #320 (Issue #3 follow-up): which grow_network exit fired
+                # (converged vs a 0-unit stall, etc.). Carried through unchanged
+                # so the status bar can render "Completed — <reason>". None when
+                # the connected cascor predates the field.
+                "completion_reason": raw.get("completion_reason"),
             },
         )
 
