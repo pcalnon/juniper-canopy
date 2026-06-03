@@ -5004,7 +5004,23 @@ class DashboardManager:
                         return params, msg
                     return params, "Parameters applied"
                 elif response.status_code == 429:
-                    self.logger.warning("Rate limited (429) — returning error to client")
+                    # #2a: rate limited. Back off and retry within the existing
+                    # retry budget instead of returning immediately. Honor the
+                    # limiter's ``Retry-After`` (security.py sets it to the
+                    # window reset in seconds) but cap the sleep — this runs on
+                    # a Dash callback thread and the advertised value may be the
+                    # full limiter window. After #345 exempted canopy's own
+                    # self-calls, a 429 here means a genuine downstream limit,
+                    # so this is a thin resilience net, not a hot path.
+                    if attempt < max_retries - 1:
+                        sleep_s = min(
+                            self._parse_retry_after(response.headers.get("Retry-After")),
+                            DashboardConstants.DASHBOARD_RETRY_AFTER_MAX_SLEEP_S,
+                        )
+                        self.logger.warning(f"Rate limited (429) on attempt {attempt + 1}/{max_retries}; backing off {sleep_s:.2f}s before retry")
+                        time.sleep(sleep_s)
+                        continue
+                    self.logger.warning("Rate limited (429) — retries exhausted")
                     return dash.no_update, "Rate limited — please try again in a few seconds"
                 else:
                     self.logger.warning(f"Failed to apply: {response.status_code} {response.text}")
@@ -5019,6 +5035,26 @@ class DashboardManager:
                 continue
         self.logger.error(f"All {max_retries} parameter apply attempts failed: {last_error}")
         return dash.no_update, f"Error: {str(last_error)[:40]}"
+
+    def _parse_retry_after(self, value):
+        """Parse a ``Retry-After`` header into an (uncapped) sleep in seconds.
+
+        canopy's rate limiter advertises ``Retry-After`` as integer
+        delta-seconds (see ``security.py``). Per RFC 9110 the header may also be
+        an HTTP-date; that form never originates from our own limiter, so we do
+        not honor it and fall back to ``DASHBOARD_RETRY_AFTER_FALLBACK_S``.
+        Missing, negative, or non-numeric values use the same fallback. The
+        caller is responsible for capping the result at
+        ``DASHBOARD_RETRY_AFTER_MAX_SLEEP_S``.
+        """
+        fallback = DashboardConstants.DASHBOARD_RETRY_AFTER_FALLBACK_S
+        if value is None:
+            return fallback
+        try:
+            seconds = float(value)
+        except (TypeError, ValueError):
+            return fallback
+        return seconds if seconds >= 0 else fallback
 
     def _init_params_from_backend_handler(self, n, current_applied):
         """Initialize input values and applied params from backend on first load."""
