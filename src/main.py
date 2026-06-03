@@ -134,8 +134,9 @@ async def _websocket_keepalive_loop(interval: float, channel: str = "training") 
     ``idle_timeout_seconds`` and the client flapped Connected→Reconnecting.
 
     This loop pings every ``interval`` seconds (< the idle timeout), scoped to
-    ``channel="training"`` because ``/ws/control`` has no idle timeout and would
-    mis-handle the resulting pong as an unknown command.
+    ``channel="training"`` because ``/ws/control`` has no idle timeout, so it
+    needs no keepalive. (``/ws/control`` now also accepts an inbound pong as a
+    no-op, so extending the heartbeat to it later would be safe.)
     """
     while True:
         await asyncio.sleep(interval)
@@ -720,6 +721,17 @@ async def websocket_control_endpoint(websocket: WebSocket):
             # Phase F: respond to server heartbeat pings with pong
             if message.get("type") == "ping":
                 await websocket_manager.send_personal_message({"type": "pong"}, websocket)
+                continue
+
+            # A client may send an unsolicited heartbeat pong (e.g. if the
+            # server heartbeat is later extended to this channel — today it
+            # only pings /ws/training). Accept it as a no-op instead of
+            # mis-parsing it as an "Unknown command: " — a pong frame carries
+            # no ``command`` key, so it would otherwise fall through to the
+            # command dispatch below and return an error. Mirrors /ws/training,
+            # which silently ignores non-ping frames.
+            if message.get("type") == "pong":
+                system_logger.debug("Received heartbeat pong on /ws/control")
                 continue
 
             command = message.get("command", "")
