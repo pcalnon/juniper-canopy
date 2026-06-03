@@ -4261,6 +4261,24 @@ class DashboardManager:
             self.logger.warning(f"Status bar update failed: {type(e).__name__}: {e}")
             return self._status_bar_error_tuple("Error", "Connection Error")
 
+    @staticmethod
+    def _completion_reason_label(reason):
+        """Map a cascor grow_network ``completion_reason`` to a status-bar suffix.
+
+        cascor #320 emits one of five reasons on ``/api/status``; collapse them
+        to a short operator-facing phrase. ``residual_collapsed`` /
+        ``below_threshold`` are both genuine convergence; ``no_candidate`` is the
+        0-unit stall. Unknown / missing reasons return ``None`` (no suffix), so a
+        cascor that predates the field degrades gracefully.
+        """
+        return {
+            "residual_collapsed": "converged",
+            "below_threshold": "converged",
+            "no_candidate": "stalled (0 new units)",
+            "early_stopped": "early stopped",
+            "max_iterations": "max iterations",
+        }.get(reason)
+
     def _build_unified_status_bar_content(self, status_response, latency_ms):
         """Build unified status bar content from /api/status response."""
         status_data = status_response.json()
@@ -4336,6 +4354,15 @@ class DashboardManager:
             "Failed": "#dc3545",  # Red
         }
         status_color = status_colors.get(status, "#6c757d")
+
+        # Issue #3 follow-up: on a completed run, append cascor's grow_network
+        # completion_reason so the operator sees *why* it stopped (converged vs a
+        # 0-unit stall) instead of a bare "Completed". Display-only — status_color
+        # above keys off the base "Completed".
+        if status == "Completed":
+            completion_label = self._completion_reason_label(status_data.get("completion_reason"))
+            if completion_label:
+                status = f"{status} — {completion_label}"
 
         # Determine phase color
         phase_colors = {
