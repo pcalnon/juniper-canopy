@@ -24,7 +24,7 @@ email-validator==2.3.0
 exceptiongroup==1.3.1
 fastapi==0.136.3
 fastapi-cli==0.0.24
-filelock==3.29.0
+filelock==3.29.1
 flake8==7.3.0
 flake8-bugbear==25.11.29
 flake8-comprehensions==3.17.0
@@ -54,7 +54,7 @@ matplotlib==3.10.9
 mccabe==0.7.0
 mdurl==0.1.2
 mpmath==1.4.1
-narwhals==2.22.0
+narwhals==2.22.1
 nest_asyncio==1.6.0
 networkx==3.6.1
 nodeenv==1.10.0
@@ -80,7 +80,7 @@ pathspec==1.1.1
 pillow==12.2.0
 pip==26.1.2
 platformdirs==4.10.0
-plotly==6.7.0
+plotly==6.8.0
 pluggy==1.6.0
 pre_commit==4.6.0
 prometheus-client==0.25.0
@@ -101,15 +101,15 @@ pytest-metadata==3.1.1
 pytest-mock==3.15.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
-python-multipart==0.0.30
+python-multipart==0.0.32
 PyYAML==6.0.3
 requests==2.34.2
 retrying==1.4.2
 rich==15.0.0
-rich-toolkit==0.19.10
+rich-toolkit==0.20.1
 ruyaml==0.91.0
 scipy==1.17.1
-sentry-sdk==2.61.1
+sentry-sdk==2.62.0
 setuptools==82.0.1
 shellingham==1.5.4
 six==1.17.0
@@ -122,13 +122,13 @@ tomli==2.4.1
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.12.0+cpu
 triton==3.7.0
-typer==0.26.6
+typer==0.26.7
 typer-slim==0.24.0
 typing_extensions==4.15.0
 typing-inspection==0.4.2
 ukkonen==1.1.0
 urllib3==2.7.0
-uvicorn==0.48.0
+uvicorn==0.49.0
 uvloop==0.22.1
 virtualenv==21.4.2
 watchfiles==1.2.0
