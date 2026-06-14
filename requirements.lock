@@ -66,7 +66,7 @@ juniper-cascor-protocol==0.1.0
     #   juniper-cascor-client
 juniper-data-client==0.4.1
     # via juniper-canopy (pyproject.toml)
-juniper-observability==0.3.0
+juniper-observability==0.4.0
     # via juniper-canopy (pyproject.toml)
 markupsafe==3.0.3
     # via

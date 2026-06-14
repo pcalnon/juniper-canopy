@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Build provenance on `/v1/health` + `/v1/health/ready`.** The dashboard now
+  reports the source `git_sha` and ISO-8601 `build_date` baked into its image
+  at build time. New `GIT_SHA` / `BUILD_DATE` / `APP_VERSION` Dockerfile
+  build-args become OCI labels (`org.opencontainers.image.revision` /
+  `.created` / `.version` — the image previously carried no `revision` /
+  `created` / `version` labels at all) plus `JUNIPER_CANOPY_GIT_SHA` /
+  `_BUILD_DATE` env vars; a new `provenance` accessor (`src/provenance.py`)
+  reads them back (both `null` outside a provenance-stamped image — local dev /
+  a bare `docker build`). The values are also passed into `set_build_info(...)`
+  (Prometheus `juniper_canopy_build` Info metric) and the shared
+  `ReadinessResponse`. Foundation for the ecosystem stale-image-detection
+  effort — see juniper-ml
+  [`notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md).
+  Requires `juniper-observability>=0.4.0`.
+
 - **STATUS BAR — show cascor `completion_reason` (converged vs stalled) on a completed run (Issue #3 diagnosability follow-up, consumes cascor #320)**: a finished training run rendered a bare "Completed" regardless of *why* growth stopped, so a genuine convergence was indistinguishable from a 0-unit stall. cascor #320 now emits a `completion_reason` on `/v1/training/status`; this wires it through canopy end-to-end. `ServiceBackend.get_status` (`src/backend/service_backend.py`) carries the top-level `completion_reason` into the flat `StatusResult` (mirroring the existing `pending_dataset` pass-through; `StatusResult` in `src/backend/protocol.py` gains the field), and `_build_unified_status_bar_content` (`src/frontend/dashboard_manager.py`) appends a short label to the status when `status == "Completed"` via a new `_completion_reason_label` helper: `residual_collapsed`/`below_threshold` → **"Completed — converged"**, `no_candidate` → **"Completed — stalled (0 new units)"**, `early_stopped` → **"Completed — early stopped"**, `max_iterations` → **"Completed — max iterations"**. Display-only (the status color still keys off the base "Completed"); an unknown or missing reason yields a plain "Completed", so a canopy talking to a cascor that predates #320 degrades gracefully. Regression coverage: `src/tests/unit/frontend/test_completion_reason_status_bar.py` (label mapping + the five completed-run suffixes + not-completed / unknown / missing cases) and two `test_service_backend.py` cases (carry-through + `None` when absent).
 - **SEC-16 parity — `/metrics` IP allowlist via
   `juniper_observability.MetricsAuthMiddleware`**: canopy now wraps its

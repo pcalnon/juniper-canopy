@@ -23,8 +23,11 @@ Two keys deliberately differ from the pre-migration snapshot:
 import pytest
 
 # Snapshot captured pre-R2.1.5 (canopy main @ 4d43c0a3). The shared lib
-# migration must preserve every entry below.
-EXPECTED_TOP_LEVEL_KEYS = {"dependencies", "details", "service", "status", "timestamp", "version"}
+# migration must preserve every entry below. ``git_sha`` / ``build_date`` were
+# added additively by the build-provenance effort (obs 0.4.0 / juniper-ml
+# notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md) — optional, default ``None``, so
+# the extension stays wire-compatible with pre-0.4.0 consumers.
+EXPECTED_TOP_LEVEL_KEYS = {"build_date", "dependencies", "details", "git_sha", "service", "status", "timestamp", "version"}
 EXPECTED_DEP_KEYS = {"juniper_data", "juniper_cascor"}
 EXPECTED_DETAILS_KEYS = {"mode", "active_connections", "training_active"}
 
@@ -39,7 +42,8 @@ class TestReadinessWireCompat:
         assert response.status_code == 200
 
     def test_top_level_keys_unchanged(self, client):
-        """No keys added or removed from the standard ReadinessResponse shape."""
+        """The standard ReadinessResponse shape, plus the additive
+        build-provenance ``git_sha`` / ``build_date`` keys (obs 0.4.0)."""
         response = client.get("/v1/health/ready")
         body = response.json()
         assert set(body.keys()) == EXPECTED_TOP_LEVEL_KEYS
