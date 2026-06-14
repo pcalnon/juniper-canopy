@@ -89,6 +89,30 @@ class TestClientsideJsContract:
         assert "disabled: true" in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
         assert "loading: true" in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
 
+    def test_js_reports_failure_via_set_props(self):
+        """The async outcome must be pushed back into ``training-control-action``
+        via ``set_props`` so a rejected command surfaces a UI alert rather than
+        only a console.warn ("dead button" class). See
+        notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md."""
+        from frontend.dashboard_manager import PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+
+        js = PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+        assert "function reportFailure" in js
+        assert "set_props" in js
+        assert "'training-control-action'" in js
+        assert "success: false" in js
+
+    def test_js_report_failure_invoked_from_rest_fallback(self):
+        """``reportFailure`` must actually be wired into the REST-fallback failure
+        branches (non-OK response and network catch), not merely defined."""
+        from frontend.dashboard_manager import PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+
+        js = PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+        # Defined once, invoked at least twice (non-OK body branch + .catch).
+        assert js.count("reportFailure(") >= 3  # 1 definition + >=2 call sites
+        # Surfaces the HTTP status on a non-OK response.
+        assert "'HTTP ' + resp.status" in js
+
 
 # =====================================================================
 # Registration behavior — flag-gated clientside vs server-side.
@@ -146,6 +170,15 @@ class TestCallbackRegistration:
             keys = list(dm.app.callback_map.keys())
             assert any("training-control-action" in k for k in keys), f"flag={flag}: callback_map missing training-control-action"
             assert any("button-states.data" in k for k in keys), f"flag={flag}: callback_map missing button-states"
+
+    def test_outcome_alert_render_callback_registered_either_way(self, monkeypatch):
+        """The outcome-alert render callback is wired regardless of the transport
+        flag — both the server-side handler and the clientside JS feed it via the
+        training-control-action store."""
+        for flag in (False, True):
+            dm = _build_dashboard(monkeypatch, flag=flag)
+            keys = list(dm.app.callback_map.keys())
+            assert any("training-control-outcome-alert.children" in k for k in keys), f"flag={flag}: callback_map missing training-control-outcome-alert render callback"
 
 
 # =====================================================================
