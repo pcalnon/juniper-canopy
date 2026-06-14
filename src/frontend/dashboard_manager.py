@@ -142,6 +142,23 @@ function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, l
     var newStates = Object.assign({}, button_states || {});
     newStates[command] = { disabled: true, loading: true, timestamp: now };
 
+    // Phase D §S10: push the *real* async outcome into the training-control-
+    // action store so the surface_training_control_outcome callback can render a
+    // dismissable danger alert. Without this a rejected command (WS error ack or
+    // REST non-2xx) only ever reached the browser console — the "dead button"
+    // class. See notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md.
+    function reportFailure(detail) {
+        try {
+            if (dc && typeof dc.set_props === 'function') {
+                dc.set_props('training-control-action', {
+                    data: { last: triggerId, ts: Date.now() / 1000.0, success: false, command: command, detail: String(detail || '').slice(0, 300) }
+                });
+            }
+        } catch (e) {
+            console.error('[Phase D] reportFailure failed for ' + command + ':', e);
+        }
+    }
+
     function restFallback(reason) {
         if (reason) {
             console.warn('[Phase D] REST fallback (' + command + '):', reason);
@@ -151,13 +168,27 @@ function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, l
                 .then(function(resp) {
                     if (!resp.ok) {
                         console.warn('[Phase D] REST /api/train/' + command + ' returned ' + resp.status);
+                        resp.text().then(function(body) {
+                            var msg = '';
+                            try {
+                                var parsed = JSON.parse(body);
+                                msg = (parsed && parsed.error && (parsed.error.message || parsed.error.detail)) || (parsed && (parsed.message || parsed.detail)) || '';
+                            } catch (e) {
+                                msg = body || '';
+                            }
+                            reportFailure('HTTP ' + resp.status + (msg ? ': ' + msg : ''));
+                        }).catch(function() {
+                            reportFailure('HTTP ' + resp.status);
+                        });
                     }
                 })
                 .catch(function(err) {
                     console.error('[Phase D] REST /api/train/' + command + ' failed:', err);
+                    reportFailure((err && err.message) || 'request failed');
                 });
         } catch (err) {
             console.error('[Phase D] REST fallback threw for ' + command + ':', err);
+            reportFailure((err && err.message) || 'request error');
         }
     }
 
@@ -1819,6 +1850,13 @@ class DashboardManager:
                 # Hidden div to store WebSocket data
                 html.Div(id="websocket-data", style={"display": "none"}),
                 dcc.Store(id="training-control-action", data=None),
+                # Training-control outcome alert — surfaces a dismissable danger
+                # alert when a Start/Pause/Stop/Resume/Reset command is rejected
+                # (fed by BOTH the server-side handler and the Phase D clientside
+                # JS via set_props). Offset below live-switch-outcome-alert
+                # (top:5rem) so the two fixed surfaces never overlap. See
+                # notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md.
+                html.Div(id="training-control-outcome-alert", style={"position": "fixed", "top": "9rem", "right": "1rem", "zIndex": 1060, "minWidth": "20rem"}),
                 # Button state management stores
                 dcc.Store(
                     id="button-states",
@@ -3027,6 +3065,21 @@ class DashboardManager:
         def update_last_click(action):
             """Update last button click timestamp for debouncing."""
             return self._update_last_click_handler(action=action)
+
+        # Surface a rejected training-control command as a dismissable danger
+        # alert. Registered unconditionally (outside the WS-vs-REST flag branch)
+        # because BOTH transports write the outcome into training-control-action:
+        # the server-side handler directly, the Phase D clientside JS via
+        # set_props once the async WS/REST command resolves. See
+        # notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md.
+        @self.app.callback(
+            Output("training-control-outcome-alert", "children"),
+            Input("training-control-action", "data"),
+            prevent_initial_call=True,
+        )
+        def surface_training_control_outcome(action):
+            """Render the danger alert on failure; clear it on success."""
+            return self._surface_training_control_outcome_handler(action=action)
 
         # PERF-CN-01: prevent_initial_call=False — must apply the initial
         # button-states (disabled/loading flags and labels) on mount so the
@@ -4708,23 +4761,93 @@ class DashboardManager:
         new_button_states = button_states.copy()
         new_button_states[command] = {"disabled": True, "loading": True, "timestamp": current_time}
 
+        detail = ""
         try:
             url = self._api_url(f"/api/train/{command}")
             response = requests.post(url, timeout=DashboardConstants.DASHBOARD_POST_TIMEOUT, headers=internal_api_headers())
             response.raise_for_status()
             success = True
         except Exception as e:
-            self.logger.warning(f"Training control failed: {type(e).__name__}: {e}")
             success = False
+            detail = self._extract_training_error_detail(e)
+            self.logger.warning(f"Training control '{command}' failed: {detail}")
             # Re-enable button on error
             new_button_states[command] = {"disabled": False, "loading": False, "timestamp": 0}
-        return {"last": trigger, "ts": current_time, "success": success}, new_button_states
+        # ``command`` + ``detail`` feed the training-control-outcome-alert render
+        # callback so a rejected command surfaces a dismissable danger alert
+        # instead of silently bouncing the button back. See
+        # notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md.
+        return {"last": trigger, "ts": current_time, "success": success, "command": command, "detail": detail}, new_button_states
+
+    @staticmethod
+    def _extract_training_error_detail(exc: Exception) -> str:
+        """Best-effort human-readable reason for a failed training-control POST.
+
+        Prefers the backend's structured error message (cascor returns
+        ``{"error": {"message": ...}}``; after cascor#332 a rejected Start names
+        the specific reason, e.g. "Training cannot be started: Training data not
+        provided"), then the raw response body, then the exception string. Never
+        raises — error surfacing must not itself fail.
+        """
+        response = getattr(exc, "response", None)
+        if response is not None:
+            status = getattr(response, "status_code", None)
+            message = None
+            try:
+                payload = response.json()
+                if isinstance(payload, dict):
+                    err = payload.get("error")
+                    if isinstance(err, dict):
+                        message = err.get("message") or err.get("detail")
+                    message = message or payload.get("message") or payload.get("detail")
+            except Exception:
+                message = None
+            if not message:
+                try:
+                    body = (response.text or "").strip()
+                    message = body[:300] if body else None
+                except Exception:
+                    message = None
+            if message and status is not None:
+                return f"HTTP {status}: {message}"
+            if message:
+                return str(message)
+            if status is not None:
+                return f"HTTP {status}"
+        return f"{type(exc).__name__}: {exc}"
 
     def _update_last_click_handler(self, action=None):
         """Update last button click timestamp for debouncing."""
         if action and action.get("last"):
             return {"button": action["last"], "timestamp": action.get("ts", 0)}
         return dash.no_update
+
+    # Human-readable labels for the outcome alert (matches the button captions).
+    _TRAINING_COMMAND_LABELS = {"start": "Start", "pause": "Pause", "stop": "Stop", "resume": "Resume", "reset": "Reset"}
+
+    def _surface_training_control_outcome_handler(self, action=None):
+        """Render a dismissable danger alert when a training-control command failed.
+
+        Both transports feed this single callback via the ``training-control-action``
+        store: the server-side REST handler writes ``success``/``command``/``detail``
+        directly, and the Phase D clientside JS writes the real *async* WS/REST
+        outcome into the same store via ``dash_clientside.set_props`` once the command
+        resolves. On success (or no action yet) we clear the surface — a later
+        successful command dismisses any stale error — because the optimistic button
+        state and the status broadcast already convey success. Only *failures* get an
+        alert. See notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md.
+        """
+        if not action or action.get("success", True):
+            return None
+        command = action.get("command") or ""
+        label = self._TRAINING_COMMAND_LABELS.get(command, command.capitalize() or "Command")
+        detail = (action.get("detail") or "").strip() or "the backend rejected the request."
+        return dbc.Alert(
+            [html.Strong(f"{label} failed. "), html.Span(detail)],
+            color="danger",
+            dismissable=True,
+            duration=8000,
+        )
 
     def _update_button_appearance_handler(self, button_states=None):
         """Update button states (disabled/loading) with visual feedback."""
