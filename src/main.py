@@ -83,6 +83,8 @@ from observability import (
     set_build_info,
     set_demo_mode_active,
 )
+from provenance import build_date as provenance_build_date
+from provenance import git_sha as provenance_git_sha
 from secrets_util import get_secret
 from settings import get_settings
 
@@ -153,7 +155,7 @@ async def lifespan(app: FastAPI):
     configure_logging(settings.log_level, settings.log_format, "juniper-canopy")
     configure_sentry(settings.sentry_dsn, "juniper-canopy", APP_VERSION, settings.sentry_traces_sample_rate)
     if settings.metrics_enabled:
-        set_build_info("juniper_canopy", APP_VERSION)
+        set_build_info("juniper_canopy", APP_VERSION, git_sha=provenance_git_sha(), build_date=provenance_build_date())
 
     system_logger.info("Starting Juniper Canopy application")
     system_logger.info("Settings: server=%s:%s, demo=%s", settings.server.host, settings.server.port, settings.demo_mode)
@@ -852,6 +854,11 @@ async def health_check():
         "training_active": backend.is_training_active(),
         "demo_mode": backend.backend_type == "demo",
         "juniper_data_available": juniper_data_available,
+        # Build provenance (juniper-ml notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md):
+        # source git SHA + ISO-8601 build date baked into the image. ``None``
+        # outside a provenance-stamped image; lets ``make doctor`` detect drift.
+        "git_sha": provenance_git_sha(),
+        "build_date": provenance_build_date(),
     }
 
 
@@ -895,6 +902,8 @@ async def readiness_probe() -> ReadinessResponse:
         status=overall,
         version=APP_VERSION,
         service="juniper-canopy",
+        git_sha=provenance_git_sha(),
+        build_date=provenance_build_date(),
         dependencies=dependencies,
         details={
             "mode": backend.backend_type,

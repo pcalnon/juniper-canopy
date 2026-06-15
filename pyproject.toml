@@ -102,8 +102,11 @@ dependencies = [
     # set_build_info). 0.3.0 adds MetricsAuthMiddleware
     # (POC §6 promotion from data #157 + cascor #313); pinned at the
     # first version that exports the middleware so the SEC-16 surface
-    # is consistent across services.
-    "juniper-observability>=0.3.0",
+    # is consistent across services. 0.4.0 adds optional ``git_sha`` /
+    # ``build_date`` passthrough on ``set_build_info`` + the shared
+    # ``ReadinessResponse`` model for build provenance (juniper-ml
+    # notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md).
+    "juniper-observability>=0.4.0",
     # METRICS-MON R2.2.5 / seed-05: WS frame schema validation. Pinned
     # at the first stable release; pulled in transitively by
     # juniper-cascor-client too, but pinned explicitly here so the

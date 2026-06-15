@@ -316,6 +316,75 @@ class TestReadinessDownstreamInjection:
 
 
 @pytest.mark.unit
+class TestBuildProvenance:
+    """Build provenance on /v1/health + /v1/health/ready (stale-image detection).
+
+    juniper-ml notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md — the image stamps
+    ``JUNIPER_CANOPY_GIT_SHA`` / ``JUNIPER_CANOPY_BUILD_DATE`` env vars at build
+    time (from build-args); the health endpoints surface them and the
+    ``provenance`` accessor reads them so ``make doctor`` can detect when a
+    running container has fallen behind its source.
+    """
+
+    def test_health_includes_provenance_null_outside_image(self, client, monkeypatch):
+        """Outside a provenance-stamped image the fields are present but null."""
+        monkeypatch.delenv("JUNIPER_CANOPY_GIT_SHA", raising=False)
+        monkeypatch.delenv("JUNIPER_CANOPY_BUILD_DATE", raising=False)
+        body = client.get("/v1/health").json()
+        assert body["git_sha"] is None
+        assert body["build_date"] is None
+
+    def test_health_surfaces_baked_provenance(self, client, monkeypatch):
+        """When the image baked the env vars, /v1/health reports them."""
+        monkeypatch.setenv("JUNIPER_CANOPY_GIT_SHA", "abc1234")
+        monkeypatch.setenv("JUNIPER_CANOPY_BUILD_DATE", "2026-06-14T00:00:00Z")
+        body = client.get("/v1/health").json()
+        assert body["git_sha"] == "abc1234"
+        assert body["build_date"] == "2026-06-14T00:00:00Z"
+
+    def test_readiness_surfaces_baked_provenance(self, client, monkeypatch):
+        """The shared ReadinessResponse also carries git_sha/build_date."""
+        monkeypatch.setenv("JUNIPER_CANOPY_GIT_SHA", "def5678")
+        monkeypatch.setenv("JUNIPER_CANOPY_BUILD_DATE", "2026-06-14T01:02:03Z")
+        body = client.get("/v1/health/ready").json()
+        assert body["git_sha"] == "def5678"
+        assert body["build_date"] == "2026-06-14T01:02:03Z"
+
+    def test_readiness_provenance_null_outside_image(self, client, monkeypatch):
+        """Readiness fields default to null with no provenance env present."""
+        monkeypatch.delenv("JUNIPER_CANOPY_GIT_SHA", raising=False)
+        monkeypatch.delenv("JUNIPER_CANOPY_BUILD_DATE", raising=False)
+        body = client.get("/v1/health/ready").json()
+        assert body["git_sha"] is None
+        assert body["build_date"] is None
+
+    def test_accessor_returns_none_when_unset(self, monkeypatch):
+        import provenance
+
+        monkeypatch.delenv("JUNIPER_CANOPY_GIT_SHA", raising=False)
+        monkeypatch.delenv("JUNIPER_CANOPY_BUILD_DATE", raising=False)
+        assert provenance.git_sha() is None
+        assert provenance.build_date() is None
+
+    def test_accessor_empty_string_is_none(self, monkeypatch):
+        """A bare ``docker build`` leaves the env var empty-string → None."""
+        import provenance
+
+        monkeypatch.setenv("JUNIPER_CANOPY_GIT_SHA", "")
+        monkeypatch.setenv("JUNIPER_CANOPY_BUILD_DATE", "")
+        assert provenance.git_sha() is None
+        assert provenance.build_date() is None
+
+    def test_accessor_returns_value_when_set(self, monkeypatch):
+        import provenance
+
+        monkeypatch.setenv("JUNIPER_CANOPY_GIT_SHA", "deadbee")
+        monkeypatch.setenv("JUNIPER_CANOPY_BUILD_DATE", "2026-06-14T12:00:00Z")
+        assert provenance.git_sha() == "deadbee"
+        assert provenance.build_date() == "2026-06-14T12:00:00Z"
+
+
+@pytest.mark.unit
 class TestDeprecatedEndpoints:
     """Test deprecated health endpoint aliases."""
 

@@ -36,11 +36,24 @@ RUN pip install --no-cache-dir --no-deps .
 # -----------------------------------------------------------------------------
 FROM python:3.14-slim AS runtime
 
+# Build provenance (juniper-ml notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md):
+# the deploy Makefile passes this repo's own git SHA, an ISO-8601 build
+# timestamp, and the package version at build time. They are stamped as OCI
+# labels and exported as env vars (below) so the running dashboard reports them
+# on /v1/health and `make doctor` can detect stale-image drift. Default empty
+# when the image is built bare (read back as None by the app).
+ARG GIT_SHA=""
+ARG BUILD_DATE=""
+ARG APP_VERSION=""
+
 LABEL org.opencontainers.image.title="juniper-canopy"
 LABEL org.opencontainers.image.description="Real-time monitoring dashboard for juniper-cascor"
 LABEL org.opencontainers.image.authors="Paul Calnon"
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.source="https://github.com/pcalnon/juniper-canopy"
+LABEL org.opencontainers.image.revision="${GIT_SHA}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.version="${APP_VERSION}"
 
 # Install curl for lightweight health checks (avoids spawning Python interpreter)
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
@@ -76,6 +89,12 @@ ENV JUNIPER_CANOPY_DEMO_MODE=false
 ENV JUNIPER_CANOPY_LOG_LEVEL=INFO
 ENV JUNIPER_DATA_URL=http://juniper-data:8100
 ENV CASCOR_SERVICE_URL=http://juniper-cascor:8200
+
+# Build provenance (see the ARG block in the runtime stage above): exported so
+# the app process can read its own source revision / build date and report them
+# on /v1/health. Empty when built bare (read back as None).
+ENV JUNIPER_CANOPY_GIT_SHA=${GIT_SHA}
+ENV JUNIPER_CANOPY_BUILD_DATE=${BUILD_DATE}
 EXPOSE 8050
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
