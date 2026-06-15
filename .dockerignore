@@ -43,7 +43,17 @@ conftest.py
 __pycache__/
 **/__pycache__/
 *.py[cod]
+# ``*.egg-info/`` alone only matches the context root. The ``**/``-prefixed
+# forms are required to exclude *nested* metadata dirs such as
+# ``src/juniper_canopy.egg-info`` — a stale local build artifact that, when
+# COPYed into the image by ``COPY src/ ./src/``, lands on PYTHONPATH (/app/src)
+# ahead of site-packages and shadows the installed package version. That was
+# the bug behind ``/v1/health`` reporting an old version (0.4.0) while
+# ``pyproject.toml`` was 0.5.0 — surfaced by the build-provenance `make doctor`
+# work (juniper-ml notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md).
 *.egg-info/
+**/*.egg-info/
+**/*.dist-info/
 build/
 dist/
 data/
