@@ -26,9 +26,7 @@ if _UTIL not in sys.path:
 from ui_control_graph import build_app, id_key, lint  # noqa: E402
 
 # id -> reason + tracking ref. This baseline may only SHRINK.
-KNOWN_ORPHANS: dict[str, str] = {
-    "dataset-plotter-dataset-selector": ("Dataset-Visualization dataset picker: options are populated by populate_dataset_selector " "(frontend/components/dataset_plotter.py:386), but the selected value reaches no callback Input/State. Incomplete feature; deferred to its own PR."),
-}
+KNOWN_ORPHANS: dict[str, str] = {}
 
 
 @pytest.fixture(scope="module")

@@ -275,6 +275,11 @@ class DemoBackend:
         self._demo.regenerate_dataset(n_samples=n_samples, n_spirals=n_spirals, noise=noise, n_rotations=n_rotations)
         return self.get_dataset()
 
+    def regenerate_dataset_from_generator(self, generator: str, n_samples: int = 200) -> Optional[DatasetResult]:
+        """Load a JuniperData generator's dataset (xor/circles/moon/…) as the active dataset."""
+        self._demo.regenerate_dataset_from_generator(generator=generator, n_samples=n_samples)
+        return self.get_dataset()
+
     def get_decision_boundary(self, resolution: int = 50) -> Optional[DecisionBoundaryResult]:
         network = self._demo.get_network()
         if network is None:

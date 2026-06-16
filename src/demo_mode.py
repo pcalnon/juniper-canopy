@@ -1761,6 +1761,57 @@ class DemoMode:
         self.logger.info("Dataset regenerated: n_samples=%s, n_rotations=%s", n_samples, n_rotations)
         return self.dataset
 
+    def regenerate_dataset_from_generator(self, generator: str, n_samples: int = 200) -> Dict[str, Any]:
+        """Fetch a JuniperData generator's dataset and install it as the active dataset.
+
+        Non-spiral generators (xor, circles, moon, …) are synthesized by the
+        JuniperData service — the demo simulator only builds spirals locally.
+        Mirrors ``_generate_spiral_dataset_from_juniper_data``'s client construction
+        + NPZ handling, then installs via ``import_dataset`` (atomic swap + network
+        reset, CONC-07). Raises on a missing URL or any JuniperData failure so the
+        ``/api/dataset/generate`` route can surface a clean error.
+
+        Args:
+            generator: JuniperData generator registry key (e.g. "xor", "circles").
+            n_samples: requested sample count (server defaults apply when the
+                generator's param schema differs; reserved for future per-generator
+                param mapping).
+
+        Returns:
+            Dataset dict (same shape as ``import_dataset``).
+        """
+        import numpy as np
+        from juniper_data_client import JuniperDataClient
+        from juniper_data_client.exceptions import JuniperDataClientError, JuniperDataConfigurationError
+
+        from observability import build_data_client_request_hook
+
+        settings = get_settings()
+        juniper_data_url = settings.juniper_data_url
+        if not juniper_data_url:
+            raise JuniperDataConfigurationError("JUNIPER_DATA_URL is required to load non-spiral generators.")
+
+        self.logger.info("Loading generator '%s' from JuniperData at %s (n_samples=%s; server defaults applied)", generator, juniper_data_url, n_samples)
+        client = JuniperDataClient(
+            base_url=juniper_data_url,
+            api_key=settings.juniper_data_api_key,
+            on_request=build_data_client_request_hook(),
+        )
+        try:
+            response = client.create_dataset(generator=generator, params={"seed": 42}, persist=True)
+            dataset_id = response.get("dataset_id")
+            if not dataset_id:
+                raise ValueError("JuniperData response missing dataset_id")
+            npz_data = client.download_artifact_npz(dataset_id)
+        except JuniperDataClientError as exc:
+            self.logger.error("JuniperData generator '%s' fetch failed: %s", generator, exc)
+            raise
+
+        self._validate_npz_arrays(npz_data)
+        inputs = npz_data["X_full"]
+        targets = np.argmax(npz_data["y_full"], axis=1).astype(np.int64)
+        return self.import_dataset(inputs, targets, source_label=f"generator:{generator}")
+
     def import_dataset(self, inputs: Any, targets: Any, source_label: str = "imported") -> Dict[str, Any]:
         """CAN-016b: install a pre-parsed dataset (file upload, URL fetch, etc).
 

@@ -1148,6 +1148,24 @@ async def generate_dataset(request: Request):
     n_rotations = max(0.1, min(10.0, n_rotations))
     noise = max(0.0, min(1.0, noise))
 
+    # Generator selection (dataset-plotter "Dataset:" picker). Spiral is the
+    # demo's local generator; every other generator (xor, circles, moon, …) is
+    # synthesized by the JuniperData service, so it requires that service to be
+    # reachable and surfaces a clean 503 otherwise.
+    generator = str(body.get("generator", "spiral")).strip().lower() or "spiral"
+    if generator not in ("spiral", "spirals"):
+        if not juniper_data_available:
+            return JSONResponse({"error": f"Generator '{generator}' requires the JuniperData service"}, status_code=503)
+        if not hasattr(backend, "regenerate_dataset_from_generator"):
+            return JSONResponse({"error": "Backend does not support generator selection"}, status_code=501)
+        try:
+            dataset = backend.regenerate_dataset_from_generator(generator=generator, n_samples=n_samples)
+            return dataset or {"status": "generated"}
+        except Exception as exc:
+            error_id = uuid.uuid4().hex[:12]
+            system_logger.error("Generator '%s' dataset load failed [error_id=%s]", generator, error_id, exception=exc)
+            return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
+
     try:
         dataset = backend.regenerate_dataset(n_samples=n_samples, n_spirals=n_spirals, noise=noise, n_rotations=n_rotations)
         return dataset or {"status": "generated"}

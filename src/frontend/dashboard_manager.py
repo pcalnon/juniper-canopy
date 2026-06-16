@@ -2797,6 +2797,18 @@ class DashboardManager:
         def generate_dataset(n_clicks, n_samples, n_spirals, n_rotations, noise):
             return self._generate_dataset_handler(n_samples, n_spirals, n_rotations, noise)
 
+        @self.app.callback(
+            [
+                Output("dataset-plotter-load-status", "children"),
+                Output("dataset-plotter-dataset-store", "data", allow_duplicate=True),
+            ],
+            Input("dataset-plotter-load-selected-btn", "n_clicks"),
+            dash.dependencies.State("dataset-plotter-dataset-selector", "value"),
+            prevent_initial_call=True,
+        )
+        def load_selected_dataset(n_clicks, generator):
+            return self._load_selected_dataset_handler(n_clicks, generator)
+
         # CAN-016b: enable the "Import File" button only after a file has been
         # selected (dcc.Upload populates `contents` + `filename`). Show the
         # filename as a small label below the upload widget for visual confirmation.
@@ -2930,6 +2942,34 @@ class DashboardManager:
             return f"❌ {response.json().get('error', 'Failed')}", dash.no_update
         except Exception as e:
             self.logger.warning(f"Dataset generation failed: {e}")
+            return f"❌ Error: {e}", dash.no_update
+
+    def _load_selected_dataset_handler(self, n_clicks, generator):
+        """Load the dataset-plotter selector's chosen generator into the active dataset.
+
+        Spiral is produced locally by the demo backend; every other generator is
+        proxied to JuniperData by POST /api/dataset/generate (which returns 503 when
+        the service is unavailable). The selector's value reaches the app here as a
+        callback State (the wiring the L1 control-graph lint requires).
+        """
+        if not n_clicks or not generator:
+            return dash.no_update, dash.no_update
+        try:
+            response = requests.post(
+                self._api_url("/api/dataset/generate"),
+                json={"generator": generator},
+                timeout=DashboardConstants.API_TIMEOUT_SECONDS + 5,
+                headers=internal_api_headers(),
+            )
+            if response.ok:
+                return f"✅ Loaded '{generator}'", response.json()
+            try:
+                err = response.json().get("error", f"HTTP {response.status_code}")
+            except Exception:
+                err = f"HTTP {response.status_code}"
+            return f"❌ {err}", dash.no_update
+        except Exception as e:
+            self.logger.warning(f"Load selected dataset failed: {e}")
             return f"❌ Error: {e}", dash.no_update
 
     def _import_dataset_file_handler(self, contents, filename):
