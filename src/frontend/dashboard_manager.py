@@ -3582,6 +3582,39 @@ class DashboardManager:
 
         @self.app.callback(
             Output("pending-dataset-banner", "is_open", allow_duplicate=True),
+            Input("restart-with-new-dataset-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def restart_with_new_dataset(n_clicks):
+            """POST /api/train/start?reset=true (cold-swap restart); close the banner.
+
+            Companion to ``cancel_pending_dataset``: instead of discarding the
+            staged dataset change, this commits it by restarting training with a
+            network reset. ``start_training(reset=True)`` consumes the staged
+            dataset and clears the backend ``pending_dataset`` (mirrored in demo
+            mode by ``DemoMode.start``), which ``reconcile_pending_dataset_banner``
+            also observes; we close the banner immediately for responsiveness.
+            """
+            if not n_clicks:
+                return dash.no_update
+            try:
+                resp = requests.post(
+                    self._api_url("/api/train/start"),
+                    params={"reset": "true"},
+                    timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
+                    headers=internal_api_headers(),
+                )
+                if resp.status_code == 200:
+                    self.logger.info("Cold-swap restart with staged dataset")
+                    return False  # close banner
+                self.logger.warning("Restart with new dataset failed: %s %s", resp.status_code, resp.text[:200])
+                return dash.no_update
+            except requests.RequestException as exc:
+                self.logger.warning("Restart with new dataset exception: %s", exc)
+                return dash.no_update
+
+        @self.app.callback(
+            Output("pending-dataset-banner", "is_open", allow_duplicate=True),
             Input("slow-update-interval", "n_intervals"),
             prevent_initial_call=True,
         )

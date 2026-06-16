@@ -1465,6 +1465,14 @@ class DemoMode:
         with self._lock:
             if reset:
                 self._reset_state_and_history()
+                # Cold-swap restart consumes any staged dataset change. The real
+                # cascor backend clears its pending_dataset on
+                # start_training(reset=True); the canopy banner reconcile loop
+                # (reconcile_pending_dataset_banner) relies on that signal to
+                # dismiss the "Stop & Restart with new dataset" banner. Mirror it
+                # here so demo mode closes the banner instead of re-opening it on
+                # the next /api/status poll.
+                self._pending_dataset_config = None
             self.is_running = True
             self._stop.clear()
 
