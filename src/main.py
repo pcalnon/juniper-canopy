@@ -2850,6 +2850,11 @@ class SetParamsRequest(BaseModel):
     nn_output_epochs: int | None = None
     nn_optimizer_type: str | None = None
     nn_activation_function_name: str | None = None
+    # init_output_weights is consumed by the set_params handler (nn_keys) and
+    # surfaced on /api/state, but was missing from this request model — so the
+    # dashboard's dropdown value was silently dropped at parse time
+    # (Pydantic extra="ignore") and never reached the backend. Declared now.
+    nn_init_output_weights: str | None = None
 
     # Candidate parameters
     cn_pool_size: int | None = None

@@ -1178,6 +1178,57 @@ class TestPhase6EA1OutputEpochs:
             json_payload = mock_post.call_args.kwargs.get("json") or mock_post.call_args[1].get("json")
             assert json_payload["nn_output_epochs"] == 77
 
+    def test_apply_handler_includes_init_output_weights_in_payload(self, reset_singletons):
+        """_apply_parameters_handler sends nn_init_output_weights to backend (orphan-control fix)."""
+        from werkzeug.test import EnvironBuilder
+
+        from frontend.dashboard_manager import DashboardManager
+
+        manager = DashboardManager({})
+
+        with patch("requests.post") as mock_post:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_post.return_value = mock_response
+
+            builder = EnvironBuilder(method="GET", base_url="http://localhost:8050/dashboard/", path="/dashboard/")
+            env = builder.get_environ()
+
+            with manager.app.server.request_context(env):
+                params, status = manager._apply_parameters_handler(
+                    n_clicks=1,
+                    nn_max_iter=1000,
+                    nn_max_epochs=200,
+                    nn_lr=0.01,
+                    nn_max_hu=10,
+                    nn_multi_node=[],
+                    nn_growth_trigger="convergence",
+                    nn_growth_epochs=50,
+                    nn_growth_conv_thresh=0.001,
+                    nn_patience=50,
+                    nn_spiral_rot=1.5,
+                    nn_spiral_num=2,
+                    nn_dataset_elem=1000,
+                    nn_dataset_noise=0.25,
+                    cn_pool_size=100,
+                    cn_corr_thresh=0.001,
+                    cn_selected=1,
+                    cn_training_complete="preset_epochs",
+                    cn_training_iter=500,
+                    cn_training_conv_thresh=0.0001,
+                    cn_patience=30,
+                    cn_multi_cand=[],
+                    cn_cand_selection=None,
+                    cn_top_cands=1,
+                    cn_random_cands=1,
+                    nn_init_output_weights="random",
+                )
+
+            assert "nn_init_output_weights" in params
+            assert params["nn_init_output_weights"] == "random"
+            json_payload = mock_post.call_args.kwargs.get("json") or mock_post.call_args[1].get("json")
+            assert json_payload["nn_init_output_weights"] == "random"
+
     def test_apply_handler_uses_default_when_output_epochs_missing(self, reset_singletons):
         """When the callback omits nn_output_epochs, the handler falls back to TrainingConstants default."""
         from werkzeug.test import EnvironBuilder

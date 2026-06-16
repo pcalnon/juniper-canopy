@@ -3392,6 +3392,8 @@ class DashboardManager:
                 dash.dependencies.State("nn-optimizer-type-dropdown", "value"),
                 # Phase 6E A-3: activation_function_name (hidden-unit activation)
                 dash.dependencies.State("nn-activation-function-dropdown", "value"),
+                # init_output_weights (output-layer weight init: zero|random)
+                dash.dependencies.State("nn-init-output-weights-dropdown", "value"),
             ],
             prevent_initial_call=True,
         )
@@ -3424,6 +3426,7 @@ class DashboardManager:
             nn_output_epochs,
             nn_optimizer_type,
             nn_activation_function,
+            nn_init_output_weights,
         ):
             """Apply parameters to backend and update applied store."""
             return self._apply_parameters_handler(
@@ -3455,6 +3458,7 @@ class DashboardManager:
                 nn_output_epochs,
                 nn_optimizer_type,
                 nn_activation_function,
+                nn_init_output_weights,
             )
 
         # ── Initialize from backend on first load ──
@@ -5103,6 +5107,7 @@ class DashboardManager:
         nn_output_epochs=None,
         nn_optimizer_type=None,
         nn_activation_function=None,
+        nn_init_output_weights=None,
     ):
         """Apply parameters to backend and update applied store."""
         if not n_clicks:
@@ -5141,6 +5146,7 @@ class DashboardManager:
             "nn_output_epochs": int(nn_output_epochs) if nn_output_epochs is not None else TrainingConstants.DEFAULT_OUTPUT_EPOCHS,
             "nn_optimizer_type": nn_optimizer_type or TrainingConstants.DEFAULT_OPTIMIZER_TYPE,
             "nn_activation_function_name": nn_activation_function or TrainingConstants.DEFAULT_ACTIVATION_FUNCTION,
+            "nn_init_output_weights": nn_init_output_weights or TrainingConstants.DEFAULT_INIT_OUTPUT_WEIGHTS,
         }
 
         max_retries = DashboardConstants.DASHBOARD_SET_PARAMS_MAX_RETRIES

@@ -2006,6 +2006,7 @@ class DemoMode:
                 "nn_spiral_number": int,
                 "nn_dataset_elements": int,
                 "nn_dataset_noise": float,
+                "nn_init_output_weights": str,
             }
 
             # ── Store cn_* prefixed parameters ──
