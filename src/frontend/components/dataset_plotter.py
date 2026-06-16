@@ -109,6 +109,21 @@ class DatasetPlotter(BaseComponent):
                                     placeholder="Select dataset...",
                                     style={"width": "200px", "display": "inline-block"},
                                 ),
+                                # Explicit Load action: an on-change callback would
+                                # fire when populate_dataset_selector sets the value
+                                # on every page load and reset training on refresh, so
+                                # the selected generator is loaded only on click.
+                                dbc.Button(
+                                    "Load",
+                                    id=f"{self.component_id}-load-selected-btn",
+                                    color="secondary",
+                                    size="sm",
+                                    style={"marginLeft": "10px"},
+                                ),
+                                html.Span(
+                                    id=f"{self.component_id}-load-status",
+                                    style={"marginLeft": "10px", "fontSize": "0.85em", "color": "var(--text-muted)"},
+                                ),
                                 html.Label("Split:", style={"marginLeft": "20px", "marginRight": "10px"}),
                                 dcc.Dropdown(
                                     id=f"{self.component_id}-split-selector",

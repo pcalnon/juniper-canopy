@@ -2797,6 +2797,18 @@ class DashboardManager:
         def generate_dataset(n_clicks, n_samples, n_spirals, n_rotations, noise):
             return self._generate_dataset_handler(n_samples, n_spirals, n_rotations, noise)
 
+        @self.app.callback(
+            [
+                Output("dataset-plotter-load-status", "children"),
+                Output("dataset-plotter-dataset-store", "data", allow_duplicate=True),
+            ],
+            Input("dataset-plotter-load-selected-btn", "n_clicks"),
+            dash.dependencies.State("dataset-plotter-dataset-selector", "value"),
+            prevent_initial_call=True,
+        )
+        def load_selected_dataset(n_clicks, generator):
+            return self._load_selected_dataset_handler(n_clicks, generator)
+
         # CAN-016b: enable the "Import File" button only after a file has been
         # selected (dcc.Upload populates `contents` + `filename`). Show the
         # filename as a small label below the upload widget for visual confirmation.
@@ -2930,6 +2942,34 @@ class DashboardManager:
             return f"❌ {response.json().get('error', 'Failed')}", dash.no_update
         except Exception as e:
             self.logger.warning(f"Dataset generation failed: {e}")
+            return f"❌ Error: {e}", dash.no_update
+
+    def _load_selected_dataset_handler(self, n_clicks, generator):
+        """Load the dataset-plotter selector's chosen generator into the active dataset.
+
+        Spiral is produced locally by the demo backend; every other generator is
+        proxied to JuniperData by POST /api/dataset/generate (which returns 503 when
+        the service is unavailable). The selector's value reaches the app here as a
+        callback State (the wiring the L1 control-graph lint requires).
+        """
+        if not n_clicks or not generator:
+            return dash.no_update, dash.no_update
+        try:
+            response = requests.post(
+                self._api_url("/api/dataset/generate"),
+                json={"generator": generator},
+                timeout=DashboardConstants.API_TIMEOUT_SECONDS + 5,
+                headers=internal_api_headers(),
+            )
+            if response.ok:
+                return f"✅ Loaded '{generator}'", response.json()
+            try:
+                err = response.json().get("error", f"HTTP {response.status_code}")
+            except Exception:
+                err = f"HTTP {response.status_code}"
+            return f"❌ {err}", dash.no_update
+        except Exception as e:
+            self.logger.warning(f"Load selected dataset failed: {e}")
             return f"❌ Error: {e}", dash.no_update
 
     def _import_dataset_file_handler(self, contents, filename):
@@ -3392,6 +3432,8 @@ class DashboardManager:
                 dash.dependencies.State("nn-optimizer-type-dropdown", "value"),
                 # Phase 6E A-3: activation_function_name (hidden-unit activation)
                 dash.dependencies.State("nn-activation-function-dropdown", "value"),
+                # init_output_weights (output-layer weight init: zero|random)
+                dash.dependencies.State("nn-init-output-weights-dropdown", "value"),
             ],
             prevent_initial_call=True,
         )
@@ -3424,6 +3466,7 @@ class DashboardManager:
             nn_output_epochs,
             nn_optimizer_type,
             nn_activation_function,
+            nn_init_output_weights,
         ):
             """Apply parameters to backend and update applied store."""
             return self._apply_parameters_handler(
@@ -3455,6 +3498,7 @@ class DashboardManager:
                 nn_output_epochs,
                 nn_optimizer_type,
                 nn_activation_function,
+                nn_init_output_weights,
             )
 
         # ── Initialize from backend on first load ──
@@ -3578,6 +3622,39 @@ class DashboardManager:
                 return dash.no_update
             except requests.RequestException as exc:
                 self.logger.warning("Cancel pending dataset exception: %s", exc)
+                return dash.no_update
+
+        @self.app.callback(
+            Output("pending-dataset-banner", "is_open", allow_duplicate=True),
+            Input("restart-with-new-dataset-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def restart_with_new_dataset(n_clicks):
+            """POST /api/train/start?reset=true (cold-swap restart); close the banner.
+
+            Companion to ``cancel_pending_dataset``: instead of discarding the
+            staged dataset change, this commits it by restarting training with a
+            network reset. ``start_training(reset=True)`` consumes the staged
+            dataset and clears the backend ``pending_dataset`` (mirrored in demo
+            mode by ``DemoMode.start``), which ``reconcile_pending_dataset_banner``
+            also observes; we close the banner immediately for responsiveness.
+            """
+            if not n_clicks:
+                return dash.no_update
+            try:
+                resp = requests.post(
+                    self._api_url("/api/train/start"),
+                    params={"reset": "true"},
+                    timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
+                    headers=internal_api_headers(),
+                )
+                if resp.status_code == 200:
+                    self.logger.info("Cold-swap restart with staged dataset")
+                    return False  # close banner
+                self.logger.warning("Restart with new dataset failed: %s %s", resp.status_code, resp.text[:200])
+                return dash.no_update
+            except requests.RequestException as exc:
+                self.logger.warning("Restart with new dataset exception: %s", exc)
                 return dash.no_update
 
         @self.app.callback(
@@ -5070,6 +5147,7 @@ class DashboardManager:
         nn_output_epochs=None,
         nn_optimizer_type=None,
         nn_activation_function=None,
+        nn_init_output_weights=None,
     ):
         """Apply parameters to backend and update applied store."""
         if not n_clicks:
@@ -5108,6 +5186,7 @@ class DashboardManager:
             "nn_output_epochs": int(nn_output_epochs) if nn_output_epochs is not None else TrainingConstants.DEFAULT_OUTPUT_EPOCHS,
             "nn_optimizer_type": nn_optimizer_type or TrainingConstants.DEFAULT_OPTIMIZER_TYPE,
             "nn_activation_function_name": nn_activation_function or TrainingConstants.DEFAULT_ACTIVATION_FUNCTION,
+            "nn_init_output_weights": nn_init_output_weights or TrainingConstants.DEFAULT_INIT_OUTPUT_WEIGHTS,
         }
 
         max_retries = DashboardConstants.DASHBOARD_SET_PARAMS_MAX_RETRIES
