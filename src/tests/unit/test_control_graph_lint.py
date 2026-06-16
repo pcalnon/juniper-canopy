@@ -27,7 +27,6 @@ from ui_control_graph import build_app, id_key, lint  # noqa: E402
 
 # id -> reason + tracking ref. This baseline may only SHRINK.
 KNOWN_ORPHANS: dict[str, str] = {
-    "restart-with-new-dataset-button": ("Cold-swap 'Stop & Restart with new dataset' button has no callback " "(dashboard_manager.py:1409). Fix stacked in PR fix/orphan-dataset-restart-button."),
     "nn-init-output-weights-dropdown": ("NN 'Init Output Weights' selector reaches no callback (dashboard_manager.py:880); " "wiring needs backend set_params + demo mirror. Deferred to its own PR."),
     "dataset-plotter-dataset-selector": ("Dataset-Visualization dataset picker has empty options and no callback " "(frontend/components/dataset_plotter.py, dynamic id). Incomplete feature; deferred to its own PR."),
 }
