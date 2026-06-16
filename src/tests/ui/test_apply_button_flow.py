@@ -23,6 +23,13 @@ Tried fixes (none worked):
   * ``page.type()`` with per-keystroke delay + Tab
   * React-friendly ``HTMLInputElement.prototype.value`` setter +
     ``input``/``change`` event dispatch
+  * The *canonical* corrected native-setter (native prototype value
+    setter + **bubbling** ``input``+``change`` + blur + 350 ms debounce
+    wait — the documented React workaround in
+    ``juniper-ml/papers/react-controlled-input-onchange.md``).
+    Re-verified 2026-06-16: Apply pushed the **default** 0.01, not the
+    set 0.0123, so ``dbc.Input``'s own value-tracking swallows the
+    synthetic event just as it does ``el.value = x``.
   * Slow keystroke typing with 2 s post-typing settle
   * ``Locator.click(force=True)`` / ``dispatch_event('click')`` /
     ``evaluate('el.click()')``
@@ -32,9 +39,17 @@ the State block, so the bug is specifically "Playwright value-set
 does not propagate to Dash's React-controlled ``dbc.Input(type=number)``
 internal state". Manual browser sessions work end-to-end.
 
-Track-and-fix separately (likely needs Dash component-level work or a
-``pytest-dash`` style harness that drives Dash's own clientside
-callbacks). For now this xfail documents the harness gap.
+Resolution (L3 POC, 2026-06-16): the Playwright native-setter path
+(POC #2) is a confirmed dead end for ``dbc.Input``. The working path is
+``dash.testing``/``dash_duo`` (POC #1), which drives inputs via Selenium
+``send_keys`` — real keystrokes that fire React's onChange natively — but
+that needs ``selenium`` + ``multiprocess`` + ``chromedriver`` added to the
+env plus its own ``make test-ui-dash`` job (deferred follow-up). The
+Apply -> ``/api/set_params`` -> ``/api/state`` contract this test targets
+is already proven deterministically by L2
+(``test_control_manifest_behavioral`` ``apply-params-button`` row), so this
+browser leg is a redundancy, not a coverage gap. This xfail documents the
+harness wall.
 """
 
 import time
@@ -50,9 +65,11 @@ import requests
     "sees the React onChange — apply callback receives State value=null. PR-10 "
     "investigation confirmed: Apply click DOES fire the callback (visible in "
     "_dash-update-component requests); the State payload itself is wrong. "
-    "Tried fill/type/React-setter/long-wait — none propagate. Manual browser "
-    "sessions work. Remove xfail when the harness can drive React-controlled "
-    "Dash inputs (likely via dash[testing] / pytest-dash).",
+    "Tried fill/type/React-setter/long-wait — none propagate. The corrected "
+    "native-setter (bubbling input+change+blur+debounce; 2026-06-16) also fails: "
+    "Apply pushes the default, not the set value. Manual browser sessions work. "
+    "Un-xfail via dash[testing]/dash_duo (Selenium send_keys), which needs "
+    "selenium+multiprocess+chromedriver added to the env (deferred follow-up).",
 )
 def test_apply_pushes_typed_learning_rate_into_backend(dashboard_page, canopy_url):
     typed = 0.0123
