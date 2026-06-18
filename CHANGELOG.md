@@ -11,6 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Model + dataset-type registry (`src/model_registry.py`) — model-selection
+  groundwork (A0, #368)**: a single source of truth for NN-model (`ModelSpec`) and
+  dataset-type (`DatasetTypeSpec`) specifications. The dashboard's
+  `nn-dataset-type-dropdown` now sources its options and default from
+  `dataset_type_options()` / `DEFAULT_DATASET_TYPE` instead of a hardcoded inline list
+  — **behavior-preserving** (identical labels / values / order / `spirals` default).
+  Seeds the current `cascor` (live, 2-D) and `recurrence`/LMU (coming-soon, 3-D,
+  `requires_dt`) models plus the five 2-D classification dataset types, with a
+  future-proofed spec shape (`status` lifecycle; `version` / `benchmark_id` / `family`
+  / `variant` / `tags`). `task_type` uses juniper-data's vocabulary
+  (`classification` / `regression`); a model's 3-D / irregular-Δt nature is carried by
+  `ndim` + `requires_dt`, not a task-type label. The compatibility resolvers, the
+  dedicated selection surface, and the `nn_model` backend mirror are deferred to A1.
+  Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md`. Regression
+  coverage: `src/tests/unit/test_model_registry.py`.
+
 - **Build provenance on `/v1/health` + `/v1/health/ready`.** The dashboard now
   reports the source `git_sha` and ISO-8601 `build_date` baked into its image
   at build time. New `GIT_SHA` / `BUILD_DATE` / `APP_VERSION` Dockerfile
