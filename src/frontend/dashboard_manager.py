@@ -46,6 +46,7 @@ from dash.dependencies import Input, Output, State
 
 from canopy_constants import DashboardConstants, TrainingConstants
 from frontend.internal_api import internal_api_headers
+from model_registry import DEFAULT_DATASET_TYPE, dataset_type_options
 from settings import get_settings
 
 from . import ui_standards
@@ -1111,14 +1112,8 @@ class DashboardManager:
                                                                                         html.P("Type:", className="mb-1 ms-3"),
                                                                                         dcc.Dropdown(
                                                                                             id="nn-dataset-type-dropdown",
-                                                                                            options=[
-                                                                                                {"label": "Spirals", "value": "spirals"},
-                                                                                                {"label": "XOR", "value": "xor"},
-                                                                                                {"label": "MNIST", "value": "mnist"},
-                                                                                                {"label": "Circles", "value": "circles"},
-                                                                                                {"label": "Moons", "value": "moons"},
-                                                                                            ],
-                                                                                            value="spirals",
+                                                                                            options=dataset_type_options(),
+                                                                                            value=DEFAULT_DATASET_TYPE,
                                                                                             clearable=False,
                                                                                             className="mb-2 ms-3",
                                                                                             style={"width": "calc(100% - 1rem)"},
