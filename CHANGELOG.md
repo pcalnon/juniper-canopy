@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Harness L2 — enroll the three #366-wired controls in the behavioral manifest
+  (#369)**: `restart-with-new-dataset-button`, `nn-init-output-weights-dropdown`, and
+  `dataset-plotter-dataset-selector` were L1-guarded (wired) but not yet behaviorally
+  proven. Adds three `ControlContract` rows to `src/tests/ui_contract/control_manifest.py`
+  (restart → `POST /api/train/start?reset=true`; init-output-weights → `POST
+  /api/set_params` + `/api/state` roundtrip on the non-default `random`; dataset-plotter
+  selector → `POST /api/dataset/generate {"generator": "spiral"}`), exercised in-process
+  by the existing L2 driver. L2 grows 8 → 11 rows; closes the wired-vs-proven gap for the
+  controls completed in #366.
 - **Model + dataset-type registry (`src/model_registry.py`) — model-selection
   groundwork (A0, #368)**: a single source of truth for NN-model (`ModelSpec`) and
   dataset-type (`DatasetTypeSpec`) specifications. The dashboard's
