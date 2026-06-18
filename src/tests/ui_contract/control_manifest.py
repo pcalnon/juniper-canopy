@@ -121,4 +121,33 @@ MANIFEST: tuple[ControlContract, ...] = (
         resp_key="status",
         resp_equals="reset",
     ),
+    # ---- Controls wired by #366 (orphan-control completion); enrolled per #369 ----
+    ControlContract(
+        control_id="restart-with-new-dataset-button",
+        kind="button",
+        method="POST",
+        endpoint="/api/train/start?reset=true",  # main.py:2766; callback sends reset as a query param (dashboard_manager.py:3645)
+        resp_key="status",
+        resp_equals="started",
+        notes="Restart-with-new-dataset commits a staged cold-swap via POST /api/train/start?reset=true (demo clears pending_dataset + restarts). Side effect: starts the demo simulator.",
+    ),
+    ControlContract(
+        control_id="nn-init-output-weights-dropdown",
+        kind="dropdown",
+        method="POST",
+        endpoint="/api/set_params",  # main.py:2901 (SetParamsRequest field main.py:2875; nn_keys main.py:2932)
+        body={"nn_init_output_weights": "random"},  # non-default; default is "zero" (canopy_constants.py:60-61)
+        state_key="nn_init_output_weights",  # get_state main.py:938
+        state_equals="random",
+        notes="Output Weight Init dropdown -> apply-params State (dashboard_manager.py:3436) -> set_params -> /api/state roundtrip. Non-default probe so a dropped field can't pass.",
+    ),
+    ControlContract(
+        control_id="dataset-plotter-dataset-selector",
+        kind="dropdown",
+        method="POST",
+        endpoint="/api/dataset/generate",  # main.py:1128 (load_selected_dataset handler dashboard_manager.py:2947)
+        body={"generator": "spiral"},  # spiral is demo-buildable locally; non-spiral generators need JuniperData (503)
+        expect_status=(200,),
+        notes="Dataset-plotter selector -> load-selected-btn -> load_selected_dataset State -> POST /api/dataset/generate {generator}. Response is the dataset dict (no 'status' key), so status-only assertion.",
+    ),
 )
