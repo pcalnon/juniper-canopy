@@ -309,6 +309,39 @@ class DatasetPlotter(BaseComponent):
                         "borderRadius": "3px",
                     },
                 ),
+                # Sequence (3-D) controls — CANOPY-3D-2 (Phase 2a, compare-signals).
+                # Shown only for sequence datasets (toggle_sequence_controls); a signal
+                # multi-select picks which signals to plot and a segmented toggle switches
+                # small-multiples ⇄ overlay arrangement.
+                html.Div(
+                    [
+                        html.Label("Signals:", style={"marginRight": "10px", "fontWeight": "bold"}),
+                        dcc.Dropdown(
+                            id=f"{self.component_id}-seq-signal-select",
+                            options=[],  # populated when a sequence dataset loads
+                            value=None,
+                            multi=True,
+                            placeholder="All signals",
+                            style={"minWidth": "280px"},
+                        ),
+                        html.Label("Arrange:", style={"marginLeft": "20px", "marginRight": "10px", "fontWeight": "bold"}),
+                        dbc.RadioItems(
+                            id=f"{self.component_id}-seq-arrange",
+                            options=[
+                                {"label": "Small multiples", "value": "small_multiples"},
+                                {"label": "Overlay", "value": "overlay"},
+                            ],
+                            value="small_multiples",
+                            inline=True,
+                            className="btn-group",
+                            inputClassName="btn-check",
+                            labelClassName="btn btn-outline-primary btn-sm",
+                            labelCheckedClassName="active",
+                        ),
+                    ],
+                    id=f"{self.component_id}-seq-controls",
+                    style={"display": "none", "alignItems": "center", "marginBottom": "12px"},
+                ),
                 # Main scatter plot
                 dcc.Graph(
                     id=f"{self.component_id}-scatter-plot",
@@ -351,10 +384,12 @@ class DatasetPlotter(BaseComponent):
                 Input(f"{self.component_id}-dataset-store", "data"),
                 Input(f"{self.component_id}-split-selector", "value"),
                 Input("theme-state", "data"),
+                Input(f"{self.component_id}-seq-signal-select", "value"),
+                Input(f"{self.component_id}-seq-arrange", "value"),
             ],
             prevent_initial_call=False,
         )
-        def update_dataset_plots(dataset: Optional[Dict[str, Any]], split: str, theme: str):
+        def update_dataset_plots(dataset: Optional[Dict[str, Any]], split: str, theme: str, seq_signals: Optional[List[int]] = None, seq_arrange: str = "small_multiples"):
             """
             Update dataset visualizations.
 
@@ -366,7 +401,7 @@ class DatasetPlotter(BaseComponent):
             Returns:
                 Tuple of updated components
             """
-            return self._process_dataset_update(dataset, split, theme)
+            return self._process_dataset_update(dataset, split, theme, seq_signals, seq_arrange)
 
         # PERF-CN-01: prevent_initial_call=False — theme-driven styling must be
         # applied on mount so the stats summary matches the active theme.
@@ -440,9 +475,41 @@ class DatasetPlotter(BaseComponent):
                 current_value = "spiral"
             return options, current_value
 
+        # ── Sequence (3-D) controls: signal multi-select + visibility (CANOPY-3D-2) ──
+        # Phase 2a (compare-signals): the signal selector and arrangement toggle are
+        # meaningful only for 3-D sequence datasets, so they populate from / show with the
+        # loaded dataset and stay hidden (and empty) for 2-D tabular datasets.
+        # PERF-CN-01: prevent_initial_call=False — the controls must reach a correct
+        # initial state on mount (hidden, empty) before any dataset loads.
+        @app.callback(
+            [
+                Output(f"{self.component_id}-seq-signal-select", "options"),
+                Output(f"{self.component_id}-seq-signal-select", "value"),
+            ],
+            Input(f"{self.component_id}-dataset-store", "data"),
+            prevent_initial_call=False,
+        )
+        def populate_sequence_signal_select(dataset):
+            """Offer one option per signal (default: all selected) for sequence datasets."""
+            return self._sequence_signal_options(dataset)
+
+        @app.callback(
+            Output(f"{self.component_id}-seq-controls", "style"),
+            Input(f"{self.component_id}-dataset-store", "data"),
+            prevent_initial_call=False,
+        )
+        def toggle_sequence_controls(dataset):
+            """Show the sequence control bar only when a sequence dataset is loaded."""
+            is_seq = bool(dataset) and dataset.get("dataset_kind") == "sequence"
+            return {
+                "display": "flex" if is_seq else "none",
+                "alignItems": "center",
+                "marginBottom": "12px",
+            }
+
         self.logger.debug(f"Callbacks registered for {self.component_id}")
 
-    def _process_dataset_update(self, dataset: Optional[Dict[str, Any]], split: str, theme: str) -> tuple:
+    def _process_dataset_update(self, dataset: Optional[Dict[str, Any]], split: str, theme: str, seq_signals: Optional[List[int]] = None, seq_arrange: str = "small_multiples") -> tuple:
         """
         Process dataset update and return visualization components.
 
@@ -464,7 +531,7 @@ class DatasetPlotter(BaseComponent):
         # CANOPY-3D-1: 3-D sequence datasets render via a distinct branch (feature
         # small-multiples over real time + a Δt strip); dispatch before any 2-D logic.
         if dataset.get("dataset_kind") == "sequence":
-            return self._process_sequence_update(dataset, theme)
+            return self._process_sequence_update(dataset, theme, seq_signals, seq_arrange)
 
         # Filter data by split
         filtered_data = self._filter_by_split(dataset, split)
@@ -498,15 +565,16 @@ class DatasetPlotter(BaseComponent):
 
         return (scatter_fig, dist_fig, str(n_samples), str(n_features), str(unique_classes), balance_info)
 
-    def _process_sequence_update(self, dataset: Dict[str, Any], theme: str) -> tuple:
-        """CANOPY-3D-1 (Phase 1): render a 3-D sequence (time-series) dataset.
+    def _process_sequence_update(self, dataset: Dict[str, Any], theme: str, seq_signals: Optional[List[int]] = None, seq_arrange: str = "small_multiples") -> tuple:
+        """CANOPY-3D-1/2: render a 3-D sequence (time-series) dataset.
 
-        Compare-signals on window 0 — feature small-multiples over real (cumulative-Δt)
-        time, plus a Δt strip. Returns the same 6-tuple as the tabular path so the
-        ``update_dataset_plots`` callback Outputs are unchanged.
+        Compare-signals on window 0 — selected signals over real (cumulative-Δt) time,
+        arranged as small-multiples or a normalized overlay, plus a Δt strip. Returns the
+        same 6-tuple as the tabular path so the ``update_dataset_plots`` callback Outputs
+        are unchanged.
         """
         seq = dataset.get("sequence", {})
-        scatter_fig = self._create_sequence_plot(seq, theme)
+        scatter_fig = self._create_sequence_plot(seq, theme, seq_signals, seq_arrange)
         dist_fig = self._create_dt_strip(seq, theme)
         return (
             scatter_fig,
@@ -517,24 +585,43 @@ class DatasetPlotter(BaseComponent):
             "N/A",
         )
 
-    def _create_sequence_plot(self, seq: Dict[str, Any], theme: str = "light") -> go.Figure:
-        """Window-0 feature small-multiples over real (cumulative-Δt) time (Phase 1)."""
+    def _create_sequence_plot(self, seq: Dict[str, Any], theme: str = "light", signals: Optional[List[int]] = None, arrangement: str = "small_multiples") -> go.Figure:
+        """Window-0 signal lines over real (cumulative-Δt) time (Phase 2a).
+
+        ``signals`` selects feature indices to plot (``None`` / empty → all). Stale or
+        out-of-range indices (the selector may still hold a prior dataset's selection) are
+        dropped, falling back to all signals. ``arrangement`` is ``"small_multiples"``
+        (each signal per-normalized and vertically offset — the honest default for
+        mixed-scale sets like OHLCV) or ``"overlay"`` (each signal per-normalized on one
+        shared axis — legible cross-signal comparison; a raw overlay would bury
+        small-amplitude signals, design R2).
+        """
         X = np.array(seq.get("X", []), dtype=float)  # (L, F)
         dt = np.array(seq.get("dt", []), dtype=float)  # (L,)
         labels = seq.get("feature_labels", [])
         if X.ndim != 2 or X.shape[0] == 0:
             return create_empty_plot("No sequence data available", theme)
         length, n_features = X.shape
+
+        # Resolve selected feature indices, guarding stale / out-of-range selections.
+        selected = [int(i) for i in (signals or []) if isinstance(i, (int, float)) and 0 <= int(i) < n_features]
+        if not selected:
+            selected = list(range(n_features))
+
         t = np.cumsum(dt) if dt.size == length else np.arange(length, dtype=float)
+        overlay = arrangement == "overlay"
+        count = len(selected)
         fig = go.Figure()
-        for i in range(n_features):
+        for plot_pos, i in enumerate(selected):
             col = X[:, i]
             span = float(col.max() - col.min())
             norm = (col - col.min()) / (span + 1e-9)
+            # overlay: shared normalized axis; small-multiple: stack, first selected on top.
+            offset = 0.0 if overlay else (count - 1 - plot_pos) * 1.15
             fig.add_trace(
                 go.Scatter(
                     x=t,
-                    y=norm + (n_features - 1 - i) * 1.15,
+                    y=norm + offset,
                     mode="lines+markers",
                     name=labels[i] if i < len(labels) else f"Feature {i}",
                     line={"color": self.default_colors[i % len(self.default_colors)]},
@@ -542,10 +629,12 @@ class DatasetPlotter(BaseComponent):
                 )
             )
         is_dark = theme == "dark"
+        title = "Sequence — signal overlay (window 0, normalized, real time)" if overlay else "Sequence — feature small-multiples (window 0, real time)"
+        yaxis: Dict[str, Any] = {"title": "normalized value"} if overlay else {"title": "features (offset, normalized)", "showticklabels": False}
         fig.update_layout(
-            title="Sequence — feature small-multiples (window 0, real time)",
+            title=title,
             xaxis_title="time (cumulative Δt)",
-            yaxis={"title": "features (offset, normalized)", "showticklabels": False},
+            yaxis=yaxis,
             template="plotly_dark" if is_dark else "plotly",
             plot_bgcolor="#242424" if is_dark else "#f8f9fa",
             paper_bgcolor="#242424" if is_dark else "#ffffff",
@@ -572,6 +661,21 @@ class DatasetPlotter(BaseComponent):
             showlegend=False,
         )
         return fig
+
+    def _sequence_signal_options(self, dataset: Optional[Dict[str, Any]]) -> tuple:
+        """(options, value) for the signal multi-select; empty for non-sequence datasets.
+
+        One option per signal (``value`` = feature index, ``label`` = its feature label);
+        the default ``value`` selects every signal (Phase-1 "all signals" behavior).
+        Returns ``([], None)`` for tabular / absent datasets so the control is empty and
+        the visibility callback keeps it hidden.
+        """
+        if not dataset or dataset.get("dataset_kind") != "sequence":
+            return [], None
+        labels = dataset.get("sequence", {}).get("feature_labels", [])
+        options = [{"label": str(lab), "value": i} for i, lab in enumerate(labels)]
+        value = list(range(len(labels)))
+        return options, value
 
     def _filter_by_split(self, dataset: Dict[str, Any], split: str) -> Dict[str, Any]:
         """

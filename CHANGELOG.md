@@ -26,6 +26,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `src/tests/unit/test_sequence_dataset_viz.py` (fixture-tested; live juniper-data 3-D
   end-to-end verification to follow). The control surface (signal/window selectors,
   small-multiple⇄overlay, target toggle) is Phase 2.
+- **3-D dataset viewer — compare-signals controls (Phase 2a, #368)**: the sequence
+  (3-D) dataset view gains its first interactive controls
+  (`src/frontend/components/dataset_plotter.py`). A **signal multi-select** chooses which
+  signals to plot (default: all) and a **Small multiples ⇄ Overlay** segmented toggle
+  switches arrangement — small-multiples keeps each signal per-normalized and vertically
+  offset (the honest default for mixed-scale sets, e.g. OHLCV), overlay shares one
+  normalized axis for direct cross-signal comparison (design R2). Both controls render
+  only for sequence datasets (a new visibility callback) and stay hidden for 2-D tabular;
+  the signal selector self-populates from the loaded dataset's feature labels. Window-0
+  only — **no backend change** (multi-window comparison + the target / characterization
+  companions are Phase 2b/2c). The render path guards stale / out-of-range signal
+  selections (falls back to all). Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_3D_DATASET_VISUALIZATION_DESIGN_2026-06-19.md` §3.1 / §5. Tests:
+  `src/tests/unit/test_sequence_dataset_viz.py` (5 new cases).
 - **Harness L2 — enroll the three #366-wired controls in the behavioral manifest
   (#369)**: `restart-with-new-dataset-button`, `nn-init-output-weights-dropdown`, and
   `dataset-plotter-dataset-selector` were L1-guarded (wired) but not yet behaviorally
