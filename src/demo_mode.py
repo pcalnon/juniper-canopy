@@ -1807,6 +1807,19 @@ class DemoMode:
             self.logger.error("JuniperData generator '%s' fetch failed: %s", generator, exc)
             raise
 
+        # Dispatch on input rank (CANOPY-3D-1). We inspect the artifact directly rather
+        # than juniper_data_client.validate_npz_contract, which is absent from the pinned
+        # / published juniper-data-client (0.4.x). 3-D sequence (irregular-Δt time series)
+        # -> a display-only install (cascor cannot ingest 3-D yet, OQ-4); 2-D tabular ->
+        # the existing classification path.
+        x_probe = npz_data.get("X_full")
+        if x_probe is None:
+            x_probe = npz_data.get("X_train")
+        if x_probe is None:
+            raise ValueError("JuniperData artifact missing required key: X_full (or X_train)")
+        if getattr(x_probe, "ndim", 0) == 3:
+            return self._install_sequence_dataset(npz_data, source_label=f"generator:{generator}")
+
         self._validate_npz_arrays(npz_data)
         inputs = npz_data["X_full"]
         targets = np.argmax(npz_data["y_full"], axis=1).astype(np.int64)
@@ -1885,6 +1898,79 @@ class DemoMode:
             new_dataset["n_classes"],
         )
         return new_dataset
+
+    def _install_sequence_dataset(self, npz_data: Dict[str, Any], source_label: str = "sequence") -> Dict[str, Any]:
+        """CANOPY-3D-1: install a 3-D sequence dataset for DISPLAY ONLY.
+
+        Sequence (irregular-Δt time-series) artifacts cannot train the cascor-like demo
+        simulator (OQ-4: cascor has no 3-D ingestion), so this stores a small,
+        JSON-serializable view (window 0's feature channels + per-step Δt) into
+        ``self.dataset`` for the dataset-plotter to render, and deliberately does NOT
+        touch ``self.network.train_x`` / ``train_y``. Mirrors ``import_dataset``'s lock
+        discipline for the visible-state swap. The installed dict is what reaches the
+        frontend, because ``DemoBackend.regenerate_dataset_from_generator`` returns
+        ``get_dataset()``.
+
+        Args:
+            npz_data: dict of NPZ arrays validated as the 3-D sequence contract
+                (``X_full``/``X_train`` shape ``(W, L, F)``, ``dt_*`` shape ``(W, L)``).
+            source_label: short tag for logging / dataset provenance.
+
+        Returns:
+            The display-only dataset dict (also installed as ``self.dataset``).
+        """
+        import numpy as np
+
+        X = npz_data.get("X_full")
+        if X is None:
+            X = npz_data.get("X_train")
+        if X is None or getattr(X, "ndim", 0) != 3:
+            shape = None if X is None else getattr(X, "shape", None)
+            raise ValueError(f"sequence install expects a 3-D X (W, L, F); got shape {shape}")
+        dt = npz_data.get("dt_full")
+        if dt is None:
+            dt = npz_data.get("dt_train")
+
+        n_windows, lookback, n_features = (int(d) for d in X.shape)
+        # Phase 1 displays window 0 only (feature small-multiples over real time); cap the
+        # JSON payload to one window's (L, F) inputs + its (L,) Δt.
+        window0 = np.asarray(X[0], dtype=np.float32)
+        dt0 = np.asarray(dt[0], dtype=np.float32) if dt is not None else np.zeros(lookback, dtype=np.float32)
+
+        dataset = {
+            "dataset_kind": "sequence",
+            "source": source_label,
+            "n_windows": n_windows,
+            "lookback": lookback,
+            "n_features": n_features,
+            "inputs": [],  # legacy-consumer safety: 2-D readers see empty, not KeyError
+            "targets": [],
+            "sequence": {
+                "X": window0.tolist(),  # window 0, shape (L, F), JSON-serializable
+                "dt": dt0.tolist(),  # window 0 per-step Δt, shape (L,)
+                "feature_labels": [f"Feature {i}" for i in range(n_features)],
+            },
+        }
+
+        if self.running:  # CONC-08: stop training before swapping the visible dataset.
+            self.stop()
+        with self._lock:
+            self.dataset = dataset
+            self.current_epoch = 0
+            self.current_loss = 1.0
+            self.current_accuracy = 0.5
+            self.metrics_history.clear()
+            # Display-only (OQ-4): deliberately NOT setting network.train_x / train_y —
+            # the cascor-like demo simulator cannot train a 3-D sequence dataset.
+
+        self.logger.info(
+            "Sequence dataset loaded for display only (%s): n_windows=%d, lookback=%d, n_features=%d (NOT installed for training)",
+            source_label,
+            n_windows,
+            lookback,
+            n_features,
+        )
+        return dataset
 
     def get_dataset(self) -> Dict[str, Any]:
         """
