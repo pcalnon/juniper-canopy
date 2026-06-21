@@ -461,6 +461,11 @@ class DatasetPlotter(BaseComponent):
             empty_fig = create_empty_plot("No dataset loaded", theme)
             return empty_fig, empty_fig, "0", "0", "0", "N/A"
 
+        # CANOPY-3D-1: 3-D sequence datasets render via a distinct branch (feature
+        # small-multiples over real time + a Δt strip); dispatch before any 2-D logic.
+        if dataset.get("dataset_kind") == "sequence":
+            return self._process_sequence_update(dataset, theme)
+
         # Filter data by split
         filtered_data = self._filter_by_split(dataset, split)
 
@@ -492,6 +497,81 @@ class DatasetPlotter(BaseComponent):
         balance_info = self._calculate_balance(targets) if targets else "N/A"
 
         return (scatter_fig, dist_fig, str(n_samples), str(n_features), str(unique_classes), balance_info)
+
+    def _process_sequence_update(self, dataset: Dict[str, Any], theme: str) -> tuple:
+        """CANOPY-3D-1 (Phase 1): render a 3-D sequence (time-series) dataset.
+
+        Compare-signals on window 0 — feature small-multiples over real (cumulative-Δt)
+        time, plus a Δt strip. Returns the same 6-tuple as the tabular path so the
+        ``update_dataset_plots`` callback Outputs are unchanged.
+        """
+        seq = dataset.get("sequence", {})
+        scatter_fig = self._create_sequence_plot(seq, theme)
+        dist_fig = self._create_dt_strip(seq, theme)
+        return (
+            scatter_fig,
+            dist_fig,
+            str(dataset.get("n_windows", 0)),
+            str(dataset.get("n_features", 0)),
+            "0",
+            "N/A",
+        )
+
+    def _create_sequence_plot(self, seq: Dict[str, Any], theme: str = "light") -> go.Figure:
+        """Window-0 feature small-multiples over real (cumulative-Δt) time (Phase 1)."""
+        X = np.array(seq.get("X", []), dtype=float)  # (L, F)
+        dt = np.array(seq.get("dt", []), dtype=float)  # (L,)
+        labels = seq.get("feature_labels", [])
+        if X.ndim != 2 or X.shape[0] == 0:
+            return create_empty_plot("No sequence data available", theme)
+        length, n_features = X.shape
+        t = np.cumsum(dt) if dt.size == length else np.arange(length, dtype=float)
+        fig = go.Figure()
+        for i in range(n_features):
+            col = X[:, i]
+            span = float(col.max() - col.min())
+            norm = (col - col.min()) / (span + 1e-9)
+            fig.add_trace(
+                go.Scatter(
+                    x=t,
+                    y=norm + (n_features - 1 - i) * 1.15,
+                    mode="lines+markers",
+                    name=labels[i] if i < len(labels) else f"Feature {i}",
+                    line={"color": self.default_colors[i % len(self.default_colors)]},
+                    marker={"size": 4},
+                )
+            )
+        is_dark = theme == "dark"
+        fig.update_layout(
+            title="Sequence — feature small-multiples (window 0, real time)",
+            xaxis_title="time (cumulative Δt)",
+            yaxis={"title": "features (offset, normalized)", "showticklabels": False},
+            template="plotly_dark" if is_dark else "plotly",
+            plot_bgcolor="#242424" if is_dark else "#f8f9fa",
+            paper_bgcolor="#242424" if is_dark else "#ffffff",
+            showlegend=True,
+            hovermode="closest",
+        )
+        return fig
+
+    def _create_dt_strip(self, seq: Dict[str, Any], theme: str = "light") -> go.Figure:
+        """Per-step Δt strip over real time — the irregular-sampling companion (Phase 1)."""
+        dt = np.array(seq.get("dt", []), dtype=float)
+        if dt.size == 0:
+            return create_empty_plot("No Δt available", theme)
+        t = np.cumsum(dt)
+        is_dark = theme == "dark"
+        fig = go.Figure(go.Bar(x=t, y=dt, marker_color="#888888"))
+        fig.update_layout(
+            title="Δt per step (sampling intervals)",
+            xaxis_title="time (cumulative Δt)",
+            yaxis_title="Δt",
+            template="plotly_dark" if is_dark else "plotly",
+            plot_bgcolor="#242424" if is_dark else "#f8f9fa",
+            paper_bgcolor="#242424" if is_dark else "#ffffff",
+            showlegend=False,
+        )
+        return fig
 
     def _filter_by_split(self, dataset: Dict[str, Any], split: str) -> Dict[str, Any]:
         """

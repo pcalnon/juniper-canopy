@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **3-D (time-series) dataset display — Phase 1 (#368)**: canopy can now load and
+  visualize 3-D sequence / irregular-Δt datasets. `DemoMode`'s dataset-load path is
+  `ndim`-aware (`src/demo_mode.py`): a 3-D artifact routes to a new **display-only**
+  `_install_sequence_dataset` (window-0 feature view stored as JSON into `self.dataset`;
+  **not** wired into the demo trainer — the cascor-like simulator can't ingest 3-D, OQ-4),
+  while 2-D keeps the existing classification path. The dataset-plotter
+  (`src/frontend/components/dataset_plotter.py`) gains a sequence render branch
+  (dispatched on `dataset_kind == "sequence"` before any 2-D logic): feature
+  **small-multiples over real (cumulative-Δt) time** + a **Δt strip** (≈ design mockup
+  R4). The dispatch inspects `X_full`/`X_train` rank directly because the installed
+  `juniper-data-client` (0.4.x) does not export `validate_npz_contract`. Design-of-record:
+  juniper-ml `notes/JUNIPER_CANOPY_3D_DATASET_VISUALIZATION_DESIGN_2026-06-19.md`. Tests:
+  `src/tests/unit/test_sequence_dataset_viz.py` (fixture-tested; live juniper-data 3-D
+  end-to-end verification to follow). The control surface (signal/window selectors,
+  small-multiple⇄overlay, target toggle) is Phase 2.
 - **Harness L2 — enroll the three #366-wired controls in the behavioral manifest
   (#369)**: `restart-with-new-dataset-button`, `nn-init-output-weights-dropdown`, and
   `dataset-plotter-dataset-selector` were L1-guarded (wired) but not yet behaviorally
