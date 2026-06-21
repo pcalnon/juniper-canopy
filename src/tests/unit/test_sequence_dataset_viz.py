@@ -156,3 +156,62 @@ def test_plotter_sequence_empty_is_graceful():
     scatter_fig, dist_fig, *_ = plotter._process_dataset_update({"dataset_kind": "sequence", "n_windows": 0, "n_features": 0, "sequence": {}}, "all", "light")
     # no data -> empty plots, no crash
     assert scatter_fig is not None and dist_fig is not None
+
+
+# ----------------------------------------------------- Phase 2a: compare-signals controls
+def _seq_dataset_3feat() -> dict:
+    """A window-0 sequence view with 3 mixed-scale signals (OHLCV-flavoured)."""
+    return {
+        "dataset_kind": "sequence",
+        "n_windows": 4,
+        "n_features": 3,
+        "sequence": {
+            "X": [[0.1, 0.2, 0.9], [0.3, 0.5, 0.7], [0.2, 0.4, 0.8], [0.6, 0.1, 0.5]],  # (L=4, F=3)
+            "dt": [0.0, 1.0, 0.5, 2.0],
+            "feature_labels": ["Open", "Close", "Volume"],
+        },
+    }
+
+
+def test_plotter_sequence_signal_filter_selects_subset():
+    plotter = _bare_plotter()
+    fig, *_ = plotter._process_dataset_update(_seq_dataset_3feat(), "all", "light", [1], "overlay")
+    assert len(fig.data) == 1
+    assert fig.data[0].name == "Close"
+
+
+def test_plotter_sequence_signal_filter_out_of_range_falls_back_to_all():
+    plotter = _bare_plotter()
+    # Stale selection (indices from a larger prior dataset) -> guard falls back to all 3.
+    fig, *_ = plotter._process_dataset_update(_seq_dataset_3feat(), "all", "light", [7, 9], "small_multiples")
+    assert len(fig.data) == 3
+
+
+def test_plotter_sequence_overlay_vs_small_multiple_offset():
+    plotter = _bare_plotter()
+    ds = _seq_dataset_3feat()
+    sm, *_ = plotter._process_dataset_update(ds, "all", "light", None, "small_multiples")
+    ov, *_ = plotter._process_dataset_update(ds, "all", "light", None, "overlay")
+    sm_max = max(float(max(tr.y)) for tr in sm.data)
+    ov_max = max(float(max(tr.y)) for tr in ov.data)
+    # small-multiples vertically offsets each signal (3 signals -> top offset 2*1.15);
+    # overlay shares one normalized [0, 1] axis (no offset).
+    assert sm_max > 1.5
+    assert ov_max <= 1.2
+    assert len(sm.data) == 3 and len(ov.data) == 3
+
+
+def test_sequence_signal_options_population():
+    plotter = _bare_plotter()
+    opts, val = plotter._sequence_signal_options(_seq_dataset_3feat())
+    assert [o["value"] for o in opts] == [0, 1, 2]
+    assert [o["label"] for o in opts] == ["Open", "Close", "Volume"]
+    assert val == [0, 1, 2]  # default: all signals selected
+
+
+def test_sequence_signal_options_empty_for_tabular_and_none():
+    plotter = _bare_plotter()
+    opts, val = plotter._sequence_signal_options({"dataset_kind": "tabular"})
+    assert opts == [] and val is None
+    opts2, val2 = plotter._sequence_signal_options(None)
+    assert opts2 == [] and val2 is None
