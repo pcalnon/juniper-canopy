@@ -309,20 +309,74 @@ class DatasetPlotter(BaseComponent):
                         "borderRadius": "3px",
                     },
                 ),
-                # Sequence (3-D) controls — CANOPY-3D-2 (Phase 2a, compare-signals).
-                # Shown only for sequence datasets (toggle_sequence_controls); a signal
-                # multi-select picks which signals to plot and a segmented toggle switches
-                # small-multiples ⇄ overlay arrangement.
+                # Sequence (3-D) controls — CANOPY-3D-2 (Phase 2a / 2b).
+                # Shown only for sequence datasets (toggle_sequence_controls). A mode toggle
+                # switches between comparing signals (within one window) and comparing
+                # windows (of one signal) — vary one axis at a time; the arrangement toggle
+                # (small multiples ⇄ overlay) applies to both modes.
                 html.Div(
                     [
-                        html.Label("Signals:", style={"marginRight": "10px", "fontWeight": "bold"}),
-                        dcc.Dropdown(
-                            id=f"{self.component_id}-seq-signal-select",
-                            options=[],  # populated when a sequence dataset loads
-                            value=None,
-                            multi=True,
-                            placeholder="All signals",
-                            style={"minWidth": "280px"},
+                        html.Label("Compare:", style={"marginRight": "10px", "fontWeight": "bold"}),
+                        dbc.RadioItems(
+                            id=f"{self.component_id}-seq-mode",
+                            options=[
+                                {"label": "Signals", "value": "signals"},
+                                {"label": "Windows", "value": "windows"},
+                            ],
+                            value="signals",
+                            inline=True,
+                            className="btn-group",
+                            inputClassName="btn-check",
+                            labelClassName="btn btn-outline-secondary btn-sm",
+                            labelCheckedClassName="active",
+                        ),
+                        # Signals mode: one window, multi-select signals.
+                        html.Div(
+                            [
+                                html.Label("Window:", style={"marginLeft": "20px", "marginRight": "10px", "fontWeight": "bold"}),
+                                dcc.Dropdown(
+                                    id=f"{self.component_id}-seq-window-single",
+                                    options=[],
+                                    value=None,
+                                    clearable=False,
+                                    style={"minWidth": "120px"},
+                                ),
+                                html.Label("Signals:", style={"marginLeft": "16px", "marginRight": "10px", "fontWeight": "bold"}),
+                                dcc.Dropdown(
+                                    id=f"{self.component_id}-seq-signal-select",
+                                    options=[],
+                                    value=None,
+                                    multi=True,
+                                    placeholder="All signals",
+                                    style={"minWidth": "240px"},
+                                ),
+                            ],
+                            id=f"{self.component_id}-seq-group-signals",
+                            style={"display": "flex", "alignItems": "center"},
+                        ),
+                        # Windows mode: one signal, multi-select windows.
+                        html.Div(
+                            [
+                                html.Label("Signal:", style={"marginLeft": "20px", "marginRight": "10px", "fontWeight": "bold"}),
+                                dcc.Dropdown(
+                                    id=f"{self.component_id}-seq-signal-single",
+                                    options=[],
+                                    value=None,
+                                    clearable=False,
+                                    style={"minWidth": "150px"},
+                                ),
+                                html.Label("Windows:", style={"marginLeft": "16px", "marginRight": "10px", "fontWeight": "bold"}),
+                                dcc.Dropdown(
+                                    id=f"{self.component_id}-seq-window-multi",
+                                    options=[],
+                                    value=None,
+                                    multi=True,
+                                    placeholder="Select windows",
+                                    style={"minWidth": "240px"},
+                                ),
+                            ],
+                            id=f"{self.component_id}-seq-group-windows",
+                            style={"display": "none", "alignItems": "center"},
                         ),
                         html.Label("Arrange:", style={"marginLeft": "20px", "marginRight": "10px", "fontWeight": "bold"}),
                         dbc.RadioItems(
@@ -340,7 +394,7 @@ class DatasetPlotter(BaseComponent):
                         ),
                     ],
                     id=f"{self.component_id}-seq-controls",
-                    style={"display": "none", "alignItems": "center", "marginBottom": "12px"},
+                    style={"display": "none", "alignItems": "center", "marginBottom": "12px", "flexWrap": "wrap", "gap": "6px"},
                 ),
                 # Main scatter plot
                 dcc.Graph(
@@ -386,10 +440,14 @@ class DatasetPlotter(BaseComponent):
                 Input("theme-state", "data"),
                 Input(f"{self.component_id}-seq-signal-select", "value"),
                 Input(f"{self.component_id}-seq-arrange", "value"),
+                Input(f"{self.component_id}-seq-mode", "value"),
+                Input(f"{self.component_id}-seq-window-single", "value"),
+                Input(f"{self.component_id}-seq-signal-single", "value"),
+                Input(f"{self.component_id}-seq-window-multi", "value"),
             ],
             prevent_initial_call=False,
         )
-        def update_dataset_plots(dataset: Optional[Dict[str, Any]], split: str, theme: str, seq_signals: Optional[List[int]] = None, seq_arrange: str = "small_multiples"):
+        def update_dataset_plots(dataset: Optional[Dict[str, Any]], split: str, theme: str, seq_signals: Optional[List[int]] = None, seq_arrange: str = "small_multiples", seq_mode: str = "signals", seq_window: Optional[int] = None, seq_signal: Optional[int] = None, seq_windows: Optional[List[int]] = None):
             """
             Update dataset visualizations.
 
@@ -397,11 +455,13 @@ class DatasetPlotter(BaseComponent):
                 dataset: Dataset dictionary
                 split: Data split to display ('all', 'train', 'test')
                 theme: Current theme ("light" or "dark")
+                seq_signals / seq_arrange / seq_mode / seq_window / seq_signal / seq_windows:
+                    3-D sequence controls (ignored for 2-D tabular datasets).
 
             Returns:
                 Tuple of updated components
             """
-            return self._process_dataset_update(dataset, split, theme, seq_signals, seq_arrange)
+            return self._process_dataset_update(dataset, split, theme, seq_signals, seq_arrange, seq_mode, seq_window, seq_signal, seq_windows)
 
         # PERF-CN-01: prevent_initial_call=False — theme-driven styling must be
         # applied on mount so the stats summary matches the active theme.
@@ -475,23 +535,29 @@ class DatasetPlotter(BaseComponent):
                 current_value = "spiral"
             return options, current_value
 
-        # ── Sequence (3-D) controls: signal multi-select + visibility (CANOPY-3D-2) ──
-        # Phase 2a (compare-signals): the signal selector and arrangement toggle are
+        # ── Sequence (3-D) controls: populate selectors + visibility (CANOPY-3D-2) ──
+        # Phase 2a/2b: the mode toggle, signal/window selectors and arrangement toggle are
         # meaningful only for 3-D sequence datasets, so they populate from / show with the
         # loaded dataset and stay hidden (and empty) for 2-D tabular datasets.
-        # PERF-CN-01: prevent_initial_call=False — the controls must reach a correct
-        # initial state on mount (hidden, empty) before any dataset loads.
+        # PERF-CN-01: prevent_initial_call=False — controls must reach a correct initial
+        # state on mount (hidden, empty) before any dataset loads.
         @app.callback(
             [
                 Output(f"{self.component_id}-seq-signal-select", "options"),
                 Output(f"{self.component_id}-seq-signal-select", "value"),
+                Output(f"{self.component_id}-seq-window-single", "options"),
+                Output(f"{self.component_id}-seq-window-single", "value"),
+                Output(f"{self.component_id}-seq-signal-single", "options"),
+                Output(f"{self.component_id}-seq-signal-single", "value"),
+                Output(f"{self.component_id}-seq-window-multi", "options"),
+                Output(f"{self.component_id}-seq-window-multi", "value"),
             ],
             Input(f"{self.component_id}-dataset-store", "data"),
             prevent_initial_call=False,
         )
-        def populate_sequence_signal_select(dataset):
-            """Offer one option per signal (default: all selected) for sequence datasets."""
-            return self._sequence_signal_options(dataset)
+        def populate_sequence_controls(dataset):
+            """Populate the signal / window selectors from the loaded sequence dataset."""
+            return self._sequence_control_options(dataset)
 
         @app.callback(
             Output(f"{self.component_id}-seq-controls", "style"),
@@ -505,11 +571,29 @@ class DatasetPlotter(BaseComponent):
                 "display": "flex" if is_seq else "none",
                 "alignItems": "center",
                 "marginBottom": "12px",
+                "flexWrap": "wrap",
+                "gap": "6px",
             }
+
+        @app.callback(
+            [
+                Output(f"{self.component_id}-seq-group-signals", "style"),
+                Output(f"{self.component_id}-seq-group-windows", "style"),
+            ],
+            Input(f"{self.component_id}-seq-mode", "value"),
+            prevent_initial_call=False,
+        )
+        def toggle_sequence_mode_groups(mode):
+            """Show only the controls for the active comparison mode (signals vs windows)."""
+            shown = {"display": "flex", "alignItems": "center"}
+            hidden = {"display": "none"}
+            if mode == "windows":
+                return hidden, shown
+            return shown, hidden
 
         self.logger.debug(f"Callbacks registered for {self.component_id}")
 
-    def _process_dataset_update(self, dataset: Optional[Dict[str, Any]], split: str, theme: str, seq_signals: Optional[List[int]] = None, seq_arrange: str = "small_multiples") -> tuple:
+    def _process_dataset_update(self, dataset: Optional[Dict[str, Any]], split: str, theme: str, seq_signals: Optional[List[int]] = None, seq_arrange: str = "small_multiples", seq_mode: str = "signals", seq_window: Optional[int] = None, seq_signal: Optional[int] = None, seq_windows: Optional[List[int]] = None) -> tuple:
         """
         Process dataset update and return visualization components.
 
@@ -531,7 +615,7 @@ class DatasetPlotter(BaseComponent):
         # CANOPY-3D-1: 3-D sequence datasets render via a distinct branch (feature
         # small-multiples over real time + a Δt strip); dispatch before any 2-D logic.
         if dataset.get("dataset_kind") == "sequence":
-            return self._process_sequence_update(dataset, theme, seq_signals, seq_arrange)
+            return self._process_sequence_update(dataset, theme, seq_signals, seq_arrange, seq_mode, seq_window, seq_signal, seq_windows)
 
         # Filter data by split
         filtered_data = self._filter_by_split(dataset, split)
@@ -565,17 +649,23 @@ class DatasetPlotter(BaseComponent):
 
         return (scatter_fig, dist_fig, str(n_samples), str(n_features), str(unique_classes), balance_info)
 
-    def _process_sequence_update(self, dataset: Dict[str, Any], theme: str, seq_signals: Optional[List[int]] = None, seq_arrange: str = "small_multiples") -> tuple:
+    def _process_sequence_update(self, dataset: Dict[str, Any], theme: str, seq_signals: Optional[List[int]] = None, seq_arrange: str = "small_multiples", seq_mode: str = "signals", seq_window: Optional[int] = None, seq_signal: Optional[int] = None, seq_windows: Optional[List[int]] = None) -> tuple:
         """CANOPY-3D-1/2: render a 3-D sequence (time-series) dataset.
 
-        Compare-signals on window 0 — selected signals over real (cumulative-Δt) time,
-        arranged as small-multiples or a normalized overlay, plus a Δt strip. Returns the
-        same 6-tuple as the tabular path so the ``update_dataset_plots`` callback Outputs
-        are unchanged.
+        Two comparison modes (vary one axis at a time): ``signals`` (default) plots
+        multi-selected signals within one window; ``windows`` plots one signal across
+        multi-selected windows. Both arrange as small-multiples or a normalized overlay,
+        with a Δt strip for the primary window. Returns the same 6-tuple as the tabular
+        path so the ``update_dataset_plots`` callback Outputs are unchanged.
         """
         seq = dataset.get("sequence", {})
-        scatter_fig = self._create_sequence_plot(seq, theme, seq_signals, seq_arrange)
-        dist_fig = self._create_dt_strip(seq, theme)
+        if seq_mode == "windows":
+            scatter_fig = self._create_windows_plot(seq, theme, seq_signal, seq_windows, seq_arrange)
+            primary_window = seq_windows[0] if seq_windows else 0
+        else:
+            primary_window = seq_window if isinstance(seq_window, int) and seq_window >= 0 else 0
+            scatter_fig = self._create_sequence_plot(seq, theme, seq_signals, seq_arrange, primary_window)
+        dist_fig = self._create_dt_strip(seq, theme, primary_window)
         return (
             scatter_fig,
             dist_fig,
@@ -585,52 +675,51 @@ class DatasetPlotter(BaseComponent):
             "N/A",
         )
 
-    def _create_sequence_plot(self, seq: Dict[str, Any], theme: str = "light", signals: Optional[List[int]] = None, arrangement: str = "small_multiples") -> go.Figure:
-        """Window-0 signal lines over real (cumulative-Δt) time (Phase 2a).
+    def _window_arrays(self, seq: Dict[str, Any], window: int) -> tuple:
+        """Resolve ``(X, dt)`` numpy arrays for a window index.
 
-        ``signals`` selects feature indices to plot (``None`` / empty → all). Stale or
-        out-of-range indices (the selector may still hold a prior dataset's selection) are
-        dropped, falling back to all signals. ``arrangement`` is ``"small_multiples"``
-        (each signal per-normalized and vertically offset — the honest default for
-        mixed-scale sets like OHLCV) or ``"overlay"`` (each signal per-normalized on one
-        shared axis — legible cross-signal comparison; a raw overlay would bury
-        small-amplitude signals, design R2).
+        Prefers the capped multi-window store (``windows_X`` / ``windows_dt``, Phase 2b);
+        falls back to the single window-0 view (``X`` / ``dt``) for legacy / minimal dicts.
         """
-        X = np.array(seq.get("X", []), dtype=float)  # (L, F)
-        dt = np.array(seq.get("dt", []), dtype=float)  # (L,)
-        labels = seq.get("feature_labels", [])
-        if X.ndim != 2 or X.shape[0] == 0:
-            return create_empty_plot("No sequence data available", theme)
-        length, n_features = X.shape
+        windows_X = seq.get("windows_X")
+        windows_dt = seq.get("windows_dt")
+        if windows_X and isinstance(window, int) and 0 <= window < len(windows_X):
+            X = np.array(windows_X[window], dtype=float)
+            dt = np.array(windows_dt[window], dtype=float) if windows_dt and window < len(windows_dt) else np.array([], dtype=float)
+            return X, dt
+        return np.array(seq.get("X", []), dtype=float), np.array(seq.get("dt", []), dtype=float)
 
-        # Resolve selected feature indices, guarding stale / out-of-range selections.
-        selected = [int(i) for i in (signals or []) if isinstance(i, (int, float)) and 0 <= int(i) < n_features]
-        if not selected:
-            selected = list(range(n_features))
+    def _plot_normalized_series(self, series: list, theme: str, arrangement: str, title: str) -> go.Figure:
+        """Render per-normalized 1-D series over cumulative-Δt time.
 
-        t = np.cumsum(dt) if dt.size == length else np.arange(length, dtype=float)
+        ``series`` = list of ``(t, values, name, color)``. ``small_multiples`` normalizes
+        each series and stacks them with a vertical offset (first on top); ``overlay``
+        normalizes each onto one shared [0, 1] axis (design R2 — legible across mixed
+        scales).
+        """
+        if not series:
+            return create_empty_plot("No data to plot", theme)
         overlay = arrangement == "overlay"
-        count = len(selected)
+        count = len(series)
         fig = go.Figure()
-        for plot_pos, i in enumerate(selected):
-            col = X[:, i]
-            span = float(col.max() - col.min())
-            norm = (col - col.min()) / (span + 1e-9)
+        for pos, (t, values, name, color) in enumerate(series):
+            vals = np.asarray(values, dtype=float)
+            span = float(vals.max() - vals.min()) if vals.size else 0.0
+            norm = (vals - vals.min()) / (span + 1e-9) if vals.size else vals
             # overlay: shared normalized axis; small-multiple: stack, first selected on top.
-            offset = 0.0 if overlay else (count - 1 - plot_pos) * 1.15
+            offset = 0.0 if overlay else (count - 1 - pos) * 1.15
             fig.add_trace(
                 go.Scatter(
                     x=t,
                     y=norm + offset,
                     mode="lines+markers",
-                    name=labels[i] if i < len(labels) else f"Feature {i}",
-                    line={"color": self.default_colors[i % len(self.default_colors)]},
+                    name=name,
+                    line={"color": color},
                     marker={"size": 4},
                 )
             )
         is_dark = theme == "dark"
-        title = "Sequence — signal overlay (window 0, normalized, real time)" if overlay else "Sequence — feature small-multiples (window 0, real time)"
-        yaxis: Dict[str, Any] = {"title": "normalized value"} if overlay else {"title": "features (offset, normalized)", "showticklabels": False}
+        yaxis: Dict[str, Any] = {"title": "normalized value"} if overlay else {"title": "(offset, normalized)", "showticklabels": False}
         fig.update_layout(
             title=title,
             xaxis_title="time (cumulative Δt)",
@@ -643,9 +732,69 @@ class DatasetPlotter(BaseComponent):
         )
         return fig
 
-    def _create_dt_strip(self, seq: Dict[str, Any], theme: str = "light") -> go.Figure:
-        """Per-step Δt strip over real time — the irregular-sampling companion (Phase 1)."""
-        dt = np.array(seq.get("dt", []), dtype=float)
+    def _create_sequence_plot(self, seq: Dict[str, Any], theme: str = "light", signals: Optional[List[int]] = None, arrangement: str = "small_multiples", window: int = 0) -> go.Figure:
+        """Compare-signals: selected signals of one window over real (cumulative-Δt) time.
+
+        ``signals`` selects feature indices (``None`` / empty → all); stale / out-of-range
+        indices are dropped (fall back to all). ``window`` indexes the stored windows
+        (Phase 2b; window 0 is the default). Arrangement is handled by
+        ``_plot_normalized_series``.
+        """
+        win_idx = window if isinstance(window, int) and window >= 0 else 0
+        X, dt = self._window_arrays(seq, win_idx)
+        labels = seq.get("feature_labels", [])
+        if X.ndim != 2 or X.shape[0] == 0:
+            return create_empty_plot("No sequence data available", theme)
+        length, n_features = X.shape
+
+        # Resolve selected feature indices, guarding stale / out-of-range selections.
+        selected = [int(i) for i in (signals or []) if isinstance(i, (int, float)) and 0 <= int(i) < n_features]
+        if not selected:
+            selected = list(range(n_features))
+
+        t = np.cumsum(dt) if dt.size == length else np.arange(length, dtype=float)
+        series = [(t, X[:, i], labels[i] if i < len(labels) else f"Feature {i}", self.default_colors[i % len(self.default_colors)]) for i in selected]
+        overlay = arrangement == "overlay"
+        title = f"Signals — window {win_idx} ({'overlay, normalized' if overlay else 'small multiples'}, real time)"
+        return self._plot_normalized_series(series, theme, arrangement, title)
+
+    def _create_windows_plot(self, seq: Dict[str, Any], theme: str = "light", signal: Optional[int] = None, windows: Optional[List[int]] = None, arrangement: str = "small_multiples") -> go.Figure:
+        """Compare-windows: one signal across selected windows over real (cumulative-Δt) time.
+
+        ``signal`` is the feature index (defaults to 0); ``windows`` selects window indices
+        (``None`` / empty → the first few stored). Each window keeps its own Δt (sampling is
+        irregular per window), so every series uses its own cumulative-time x-axis, each
+        starting near 0 for comparison.
+        """
+        windows_X = seq.get("windows_X")
+        labels = seq.get("feature_labels", [])
+        n_stored = len(windows_X) if windows_X else 1
+        first_X, _ = self._window_arrays(seq, 0)
+        if first_X.ndim != 2 or first_X.shape[0] == 0:
+            return create_empty_plot("No sequence data available", theme)
+        n_features = first_X.shape[1]
+
+        sig = int(signal) if isinstance(signal, (int, float)) and 0 <= int(signal) < n_features else 0
+        selected = [int(w) for w in (windows or []) if isinstance(w, (int, float)) and 0 <= int(w) < n_stored]
+        if not selected:
+            selected = list(range(min(n_stored, 3)))  # default: the first few windows
+
+        series = []
+        for w in selected:
+            X, dt = self._window_arrays(seq, w)
+            if X.ndim != 2 or X.shape[0] == 0 or sig >= X.shape[1]:
+                continue
+            length = X.shape[0]
+            t = np.cumsum(dt) if dt.size == length else np.arange(length, dtype=float)
+            series.append((t, X[:, sig], f"Window {w}", self.default_colors[w % len(self.default_colors)]))
+        sig_label = labels[sig] if sig < len(labels) else f"Feature {sig}"
+        overlay = arrangement == "overlay"
+        title = f"Windows — {sig_label} ({'overlay, normalized' if overlay else 'small multiples'}, real time)"
+        return self._plot_normalized_series(series, theme, arrangement, title)
+
+    def _create_dt_strip(self, seq: Dict[str, Any], theme: str = "light", window: int = 0) -> go.Figure:
+        """Per-step Δt strip for a window over real time — the irregular-sampling companion."""
+        _, dt = self._window_arrays(seq, window if isinstance(window, int) and window >= 0 else 0)
         if dt.size == 0:
             return create_empty_plot("No Δt available", theme)
         t = np.cumsum(dt)
@@ -662,20 +811,36 @@ class DatasetPlotter(BaseComponent):
         )
         return fig
 
-    def _sequence_signal_options(self, dataset: Optional[Dict[str, Any]]) -> tuple:
-        """(options, value) for the signal multi-select; empty for non-sequence datasets.
+    def _sequence_control_options(self, dataset: Optional[Dict[str, Any]]) -> tuple:
+        """Options + defaults for all sequence selectors; empties for non-sequence datasets.
 
-        One option per signal (``value`` = feature index, ``label`` = its feature label);
-        the default ``value`` selects every signal (Phase-1 "all signals" behavior).
-        Returns ``([], None)`` for tabular / absent datasets so the control is empty and
-        the visibility callback keeps it hidden.
+        Returns an 8-tuple matching ``populate_sequence_controls``'s Outputs:
+        (signal-multi options, value), (window-single options, value),
+        (signal-single options, value), (window-multi options, value). Signals default to
+        all selected; window-single to 0; signal-single to the first signal; window-multi
+        to the first few windows. Window options come from the capped multi-window store.
         """
+        empty: tuple = ([], None, [], None, [], None, [], None)
         if not dataset or dataset.get("dataset_kind") != "sequence":
-            return [], None
-        labels = dataset.get("sequence", {}).get("feature_labels", [])
-        options = [{"label": str(lab), "value": i} for i, lab in enumerate(labels)]
-        value = list(range(len(labels)))
-        return options, value
+            return empty
+        seq = dataset.get("sequence", {})
+        labels = seq.get("feature_labels", [])
+        n_signals = len(labels)
+        windows_X = seq.get("windows_X")
+        n_windows = len(windows_X) if windows_X else int(dataset.get("n_windows_stored", 1) or 1)
+
+        signal_opts = [{"label": str(lab), "value": i} for i, lab in enumerate(labels)]
+        window_opts = [{"label": f"Window {w}", "value": w} for w in range(n_windows)]
+        return (
+            signal_opts,
+            list(range(n_signals)),  # signal-multi: all selected
+            window_opts,
+            0 if n_windows else None,  # window-single: first window
+            signal_opts,
+            0 if n_signals else None,  # signal-single: first signal
+            window_opts,
+            list(range(min(n_windows, 3))),  # window-multi: the first few windows
+        )
 
     def _filter_by_split(self, dataset: Dict[str, Any], split: str) -> Dict[str, Any]:
         """

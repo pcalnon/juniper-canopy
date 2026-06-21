@@ -1,9 +1,11 @@
-"""CANOPY-3D-1 — 3-D (sequence) dataset load + display (Phase 1).
+"""CANOPY-3D-1/2 — 3-D (sequence) dataset load + display (Phases 1, 2a, 2b).
 
 Fixture-tested per the agreed plan: a mocked ``JuniperDataClient`` returns synthetic 3-D
 NPZ artifacts (the real juniper-data path is the same dispatch, verified end-to-end
-separately). Covers the ndim-aware load dispatch, the display-only sequence install, the
-plotter's sequence render branch, and a 2-D regression guard.
+separately). Covers the ndim-aware load dispatch, the display-only sequence install
+(window-0 view + the capped multi-window store), the plotter's two comparison modes
+(compare-signals / compare-windows, small-multiples ⇄ overlay), the selector-options
+helpers, and a 2-D regression guard.
 """
 
 from __future__ import annotations
@@ -201,17 +203,99 @@ def test_plotter_sequence_overlay_vs_small_multiple_offset():
     assert len(sm.data) == 3 and len(ov.data) == 3
 
 
-def test_sequence_signal_options_population():
-    plotter = _bare_plotter()
-    opts, val = plotter._sequence_signal_options(_seq_dataset_3feat())
-    assert [o["value"] for o in opts] == [0, 1, 2]
-    assert [o["label"] for o in opts] == ["Open", "Close", "Volume"]
-    assert val == [0, 1, 2]  # default: all signals selected
+# --------------------------------------------- Phase 2b: compare-windows + multi-window
+def _seq_dataset_multiwindow(n_windows: int = 4, length: int = 4, n_features: int = 2) -> dict:
+    """A sequence view with multiple stored windows (``windows_X`` / ``windows_dt``)."""
+    rng = np.random.default_rng(7)
+    windows_X = [rng.random((length, n_features)).round(3).tolist() for _ in range(n_windows)]
+    windows_dt = []
+    for _ in range(n_windows):
+        d = rng.random(length).round(3)
+        d[0] = 0.0  # contract: first per-step Δt is 0
+        windows_dt.append(d.tolist())
+    return {
+        "dataset_kind": "sequence",
+        "n_windows": n_windows,
+        "n_windows_stored": n_windows,
+        "n_features": n_features,
+        "sequence": {
+            "X": windows_X[0],
+            "dt": windows_dt[0],
+            "feature_labels": [f"Feature {i}" for i in range(n_features)],
+            "windows_X": windows_X,
+            "windows_dt": windows_dt,
+        },
+    }
 
 
-def test_sequence_signal_options_empty_for_tabular_and_none():
+def test_install_caps_and_stores_multiple_windows():
+    demo = _bare_demo()
+    out = demo._install_sequence_dataset(_sequence_npz(5, 4, 2), source_label="generator:irregular_sine")
+    seq = out["sequence"]
+    assert out["n_windows_stored"] == 5  # all 5 fit under the cap
+    assert len(seq["windows_X"]) == 5 and len(seq["windows_dt"]) == 5
+    assert len(seq["windows_X"][0]) == 4 and len(seq["windows_X"][0][0]) == 2  # (L=4, F=2)
+    # the default single view mirrors window 0
+    assert seq["X"] == seq["windows_X"][0] and seq["dt"] == seq["windows_dt"][0]
+
+
+def test_install_caps_window_payload_at_50():
+    demo = _bare_demo()
+    out = demo._install_sequence_dataset(_sequence_npz(60, 3, 1), source_label="big")
+    assert out["n_windows"] == 60  # true window count preserved
+    assert out["n_windows_stored"] == 50  # payload capped
+    assert len(out["sequence"]["windows_X"]) == 50
+
+
+def test_plotter_windows_mode_compares_selected_windows():
     plotter = _bare_plotter()
-    opts, val = plotter._sequence_signal_options({"dataset_kind": "tabular"})
-    assert opts == [] and val is None
-    opts2, val2 = plotter._sequence_signal_options(None)
-    assert opts2 == [] and val2 is None
+    ds = _seq_dataset_multiwindow(n_windows=4, length=4, n_features=2)
+    # windows mode: one signal (0), three selected windows -> one trace per window.
+    fig, *_ = plotter._process_dataset_update(ds, "all", "light", None, "small_multiples", "windows", None, 0, [0, 1, 2])
+    assert len(fig.data) == 3
+    assert [tr.name for tr in fig.data] == ["Window 0", "Window 1", "Window 2"]
+
+
+def test_plotter_windows_mode_default_selection_first_few():
+    plotter = _bare_plotter()
+    ds = _seq_dataset_multiwindow(n_windows=5, length=4, n_features=2)
+    # no windows selected -> the first few (<= 3).
+    fig, *_ = plotter._process_dataset_update(ds, "all", "light", None, "overlay", "windows", None, 1, None)
+    assert [tr.name for tr in fig.data] == ["Window 0", "Window 1", "Window 2"]
+
+
+def test_plotter_signals_mode_respects_window_selection():
+    plotter = _bare_plotter()
+    ds = _seq_dataset_multiwindow(n_windows=3, length=4, n_features=2)
+    # signals mode, window 2 -> plot uses window 2's data; both signals -> 2 traces.
+    fig, *_ = plotter._process_dataset_update(ds, "all", "light", None, "small_multiples", "signals", 2, None, None)
+    assert len(fig.data) == 2
+    assert "window 2" in fig.layout.title.text
+
+
+def test_window_arrays_falls_back_to_window0_view():
+    plotter = _bare_plotter()
+    # legacy dict: only X/dt, no windows_X -> _window_arrays returns the window-0 view.
+    seq = {"X": [[1.0, 2.0], [3.0, 4.0]], "dt": [0.0, 1.0]}
+    X, dt = plotter._window_arrays(seq, 5)  # out-of-range index -> fallback
+    assert X.shape == (2, 2) and list(dt) == [0.0, 1.0]
+
+
+def test_sequence_control_options_population():
+    plotter = _bare_plotter()
+    ds = _seq_dataset_multiwindow(n_windows=4, length=4, n_features=2)
+    sig_opts, sig_multi, win_opts, win_single, sig_opts2, sig_single, win_opts2, win_multi = plotter._sequence_control_options(ds)
+    assert [o["value"] for o in sig_opts] == [0, 1]
+    assert sig_multi == [0, 1]  # all signals
+    assert [o["value"] for o in win_opts] == [0, 1, 2, 3]
+    assert win_single == 0  # first window
+    assert sig_single == 0  # first signal
+    assert win_multi == [0, 1, 2]  # the first few windows (<= 3)
+    assert win_opts == win_opts2 and sig_opts == sig_opts2  # shared option lists
+
+
+def test_sequence_control_options_empty_for_tabular_and_none():
+    plotter = _bare_plotter()
+    empty = ([], None, [], None, [], None, [], None)
+    assert plotter._sequence_control_options({"dataset_kind": "tabular"}) == empty
+    assert plotter._sequence_control_options(None) == empty

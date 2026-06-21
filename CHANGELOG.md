@@ -40,6 +40,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   selections (falls back to all). Design-of-record: juniper-ml
   `notes/JUNIPER_CANOPY_3D_DATASET_VISUALIZATION_DESIGN_2026-06-19.md` §3.1 / §5. Tests:
   `src/tests/unit/test_sequence_dataset_viz.py` (5 new cases).
+- **3-D dataset viewer — compare-windows mode + multi-window backend (Phase 2b, #368)**:
+  the sequence view gains a **`Compare: [Signals | Windows]`** segmented mode toggle (M1).
+  *Compare-windows* plots one selected signal across multiple selected windows; *compare-
+  signals* (default) keeps the multi-signal view but now within a **selectable window**.
+  Each mode reuses the Small multiples ⇄ Overlay arrangement; only the active mode's
+  controls are shown. Backend (`src/demo_mode.py`): `_install_sequence_dataset` now stores
+  a **capped set of windows** (`windows_X` / `windows_dt`, cap 50; `n_windows_stored`
+  records the cap, the true `n_windows` is preserved) so window-switching needs no
+  re-fetch — still **display-only** (OQ-4, not wired into the trainer). Per-window Δt is
+  honoured (each window keeps its own irregular cumulative-time axis). The plotter
+  refactors the render path onto a shared `_plot_normalized_series` helper +
+  `_window_arrays` (which falls back to the window-0 view for legacy dicts), so the Phase-1
+  / 2a single-window behavior is preserved. Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_3D_DATASET_VISUALIZATION_DESIGN_2026-06-19.md` §3.1 / §5. Tests:
+  `src/tests/unit/test_sequence_dataset_viz.py` (8 new cases: window cap, multi-window
+  store, compare-windows render + defaults, window selection, fallback, control options).
 - **Harness L2 — enroll the three #366-wired controls in the behavioral manifest
   (#369)**: `restart-with-new-dataset-button`, `nn-init-output-weights-dropdown`, and
   `dataset-plotter-dataset-selector` were L1-guarded (wired) but not yet behaviorally
