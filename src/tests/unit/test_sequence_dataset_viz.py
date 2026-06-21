@@ -1,11 +1,12 @@
-"""CANOPY-3D-1/2 — 3-D (sequence) dataset load + display (Phases 1, 2a, 2b).
+"""CANOPY-3D-1/2 — 3-D (sequence) dataset load + display (Phases 1, 2a, 2b, 2c).
 
 Fixture-tested per the agreed plan: a mocked ``JuniperDataClient`` returns synthetic 3-D
 NPZ artifacts (the real juniper-data path is the same dispatch, verified end-to-end
 separately). Covers the ndim-aware load dispatch, the display-only sequence install
-(window-0 view + the capped multi-window store), the plotter's two comparison modes
-(compare-signals / compare-windows, small-multiples ⇄ overlay), the selector-options
-helpers, and a 2-D regression guard.
+(window-0 view + the capped multi-window store + per-window target + characterization
+histograms), the plotter's two comparison modes (compare-signals / compare-windows,
+small-multiples ⇄ overlay), the selector-options helpers, the target / characterization
+companions, and a 2-D regression guard.
 """
 
 from __future__ import annotations
@@ -299,3 +300,61 @@ def test_sequence_control_options_empty_for_tabular_and_none():
     empty = ([], None, [], None, [], None, [], None)
     assert plotter._sequence_control_options({"dataset_kind": "tabular"}) == empty
     assert plotter._sequence_control_options(None) == empty
+
+
+# --------------------------------------------------- Phase 2c: target + characterization
+def test_install_stores_target_and_histograms():
+    demo = _bare_demo()
+    out = demo._install_sequence_dataset(_sequence_npz(5, 4, 2), source_label="g")
+    seq = out["sequence"]
+    assert len(seq["windows_y"]) == 5  # one target per stored window
+    assert len(seq["windows_y"][0]) == 2  # y_full is (W, F=2) -> per-window (F,) flattened
+    for h in (seq["dt_hist"], seq["target_hist"]):
+        assert h is not None and len(h["counts"]) == 30 and len(h["edges"]) == 31
+
+
+def _seq_dataset_with_companions() -> dict:
+    ds = _seq_dataset_multiwindow(n_windows=3, length=4, n_features=2)
+    ds["sequence"]["windows_y"] = [[0.5, 0.6], [0.7, 0.8], [0.1, 0.2]]
+    ds["sequence"]["dt_hist"] = {"edges": [0.0, 0.5, 1.0], "counts": [3, 5]}
+    ds["sequence"]["target_hist"] = {"edges": [0.0, 1.0, 2.0], "counts": [2, 4]}
+    return ds
+
+
+def test_target_companion_hidden_when_toggle_off():
+    plotter = _bare_plotter()
+    _, style = plotter._process_target_update(_seq_dataset_with_companions(), [], "signals", 0, None, "light")
+    assert style["display"] == "none"
+
+
+def test_target_companion_shows_selected_window_when_on():
+    plotter = _bare_plotter()
+    # signals mode, window 2 -> the target of window 2
+    fig, style = plotter._process_target_update(_seq_dataset_with_companions(), ["on"], "signals", 2, None, "light")
+    assert style["display"] == "block"
+    assert list(fig.data[0].y) == [0.1, 0.2]
+    assert "window 2" in fig.layout.title.text
+
+
+def test_target_companion_windows_mode_uses_first_selected():
+    plotter = _bare_plotter()
+    fig, _ = plotter._process_target_update(_seq_dataset_with_companions(), ["on"], "windows", None, [1, 2], "light")
+    assert list(fig.data[0].y) == [0.7, 0.8]  # window 1 (first selected)
+
+
+def test_characterization_renders_for_sequence():
+    import plotly.graph_objects as go
+
+    plotter = _bare_plotter()
+    dt_fig, tgt_fig, stats, style = plotter._process_characterization_update(_seq_dataset_with_companions(), "light")
+    assert isinstance(dt_fig, go.Figure) and len(dt_fig.data) == 1
+    assert isinstance(tgt_fig, go.Figure) and len(tgt_fig.data) == 1
+    assert style["display"] == "block"
+    assert stats  # non-empty W/L/F stats children
+
+
+def test_characterization_hidden_for_tabular():
+    plotter = _bare_plotter()
+    dt_fig, tgt_fig, stats, style = plotter._process_characterization_update({"dataset_kind": "tabular"}, "light")
+    assert style == {"display": "none"}
+    assert stats == ""
