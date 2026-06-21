@@ -72,6 +72,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `notes/JUNIPER_CANOPY_3D_DATASET_VISUALIZATION_DESIGN_2026-06-19.md` §3.3 / §5. Tests:
   `src/tests/unit/test_sequence_dataset_viz.py` (6 new cases). With 2a/2b this completes
   the Phase-2 control surface; the advanced full-cross grid remains Phase 3.
+- **3-D dataset viewer — advanced full-cross grid (Phase 3, M4, #368)**: an opt-in
+  **`Advanced: full-cross grid`** switch reveals a scrollable faceted grid of **every
+  signal (columns) × window (rows)**, each cell a normalized line over cumulative-Δt time
+  — the expert view the default two-mode viewer deliberately avoids. Hidden by default and
+  **sequence-only**; **capped at 100 cells** (the window rows are trimmed so
+  `rows × cols ≤ 100`, the title noting e.g. "first 20 of 30 windows"), inside a
+  vertically-scrolling container with per-cell modebar zoom. No backend change (reuses the
+  capped multi-window store from Phase 2b); wired as a **separate callback**
+  (`update_sequence_grid`) so the core callbacks are untouched. Resolves design OQ-B (grid
+  mechanics: row-trim cap + scroll + modebar zoom). **Completes the 3-D dataset
+  visualization design** (Phases 1–3). Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_3D_DATASET_VISUALIZATION_DESIGN_2026-06-19.md` §3.4 / §5. Tests:
+  `src/tests/unit/test_sequence_dataset_viz.py` (4 new cases: hidden-off, hidden-tabular,
+  full-cross render, 100-cell cap).
 - **Harness L2 — enroll the three #366-wired controls in the behavioral manifest
   (#369)**: `restart-with-new-dataset-button`, `nn-init-output-weights-dropdown`, and
   `dataset-plotter-dataset-selector` were L1-guarded (wired) but not yet behaviorally
