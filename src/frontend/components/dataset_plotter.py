@@ -400,6 +400,14 @@ class DatasetPlotter(BaseComponent):
                             inline=True,
                             style={"marginLeft": "20px"},
                         ),
+                        dbc.Checklist(
+                            id=f"{self.component_id}-seq-grid-toggle",
+                            options=[{"label": "Advanced: full-cross grid", "value": "on"}],
+                            value=[],
+                            switch=True,
+                            inline=True,
+                            style={"marginLeft": "20px"},
+                        ),
                     ],
                     id=f"{self.component_id}-seq-controls",
                     style={"display": "none", "alignItems": "center", "marginBottom": "12px", "flexWrap": "wrap", "gap": "6px"},
@@ -456,6 +464,17 @@ class DatasetPlotter(BaseComponent):
                         ),
                     ],
                     style={"display": "flex", "gap": "16px", "alignItems": "flex-start"},
+                ),
+                # Advanced full-cross grid (M4, Phase 3) — opt-in expert view, hidden by
+                # default; a scrollable faceted grid of signals × windows (capped at 100
+                # cells). Toggled by seq-grid-toggle; sequence-only.
+                html.Div(
+                    dcc.Graph(
+                        id=f"{self.component_id}-seq-grid-plot",
+                        config={"displayModeBar": True, "displaylogo": False},
+                    ),
+                    id=f"{self.component_id}-seq-grid-container",
+                    style={"display": "none"},
                 ),
                 # Dataset data store
                 dcc.Store(id=f"{self.component_id}-dataset-store", data=None),
@@ -693,6 +712,23 @@ class DatasetPlotter(BaseComponent):
             """Collapse / expand the characterization companion."""
             new_open = not is_open
             return new_open, "▾ " if new_open else "▸ "
+
+        # ── Advanced full-cross grid (M4, Phase 3) — opt-in, sequence-only ──
+        @app.callback(
+            [
+                Output(f"{self.component_id}-seq-grid-plot", "figure"),
+                Output(f"{self.component_id}-seq-grid-container", "style"),
+            ],
+            [
+                Input(f"{self.component_id}-dataset-store", "data"),
+                Input(f"{self.component_id}-seq-grid-toggle", "value"),
+                Input("theme-state", "data"),
+            ],
+            prevent_initial_call=False,
+        )
+        def update_sequence_grid(dataset, toggle, theme):
+            """Render the advanced full-cross (signals × windows) grid when toggled on."""
+            return self._process_grid_update(dataset, toggle, theme)
 
         self.logger.debug(f"Callbacks registered for {self.component_id}")
 
@@ -1033,6 +1069,84 @@ class DatasetPlotter(BaseComponent):
             html.Div([html.Strong("Lookback: "), str(lookback)]),
             html.Div([html.Strong("Features: "), str(n_features)]),
         ]
+
+    def _process_grid_update(self, dataset: Optional[Dict[str, Any]], toggle: Optional[List[str]], theme: str) -> tuple:
+        """Figure + container style for the advanced full-cross grid (Phase 3, M4).
+
+        Hidden unless toggled on AND the dataset is a sequence. The grid is capped at 100
+        cells (window rows trimmed so ``windows × signals <= 100``); a scrollable container
+        keeps it navigable at scale.
+        """
+        hidden = {"display": "none"}
+        on = bool(toggle) and "on" in (toggle or [])
+        if not on or not dataset or dataset.get("dataset_kind") != "sequence":
+            return create_empty_plot("", theme), hidden
+        seq = dataset.get("sequence", {})
+        fig = self._create_grid_plot(seq, theme)
+        shown = {
+            "display": "block",
+            "maxHeight": "640px",
+            "overflowY": "auto",
+            "marginTop": "12px",
+            "border": "1px solid rgba(128,128,128,0.35)",
+            "borderRadius": "3px",
+        }
+        return fig, shown
+
+    def _create_grid_plot(self, seq: Dict[str, Any], theme: str = "light") -> go.Figure:
+        """Faceted grid: every signal (cols) × window (rows), normalized over cumulative-Δt.
+
+        Capped at 100 cells — the window rows are trimmed so ``rows × cols <= 100`` (design
+        M4). Each cell is a normalized line; per-cell zoom is available via the modebar and
+        the container scrolls vertically.
+        """
+        windows_X = seq.get("windows_X") or ([seq["X"]] if seq.get("X") is not None else [])
+        if not windows_X:
+            return create_empty_plot("No sequence data available", theme)
+        first = np.asarray(windows_X[0], dtype=float)
+        if first.ndim != 2 or first.shape[0] == 0:
+            return create_empty_plot("No sequence data available", theme)
+        n_features = first.shape[1]
+        labels = seq.get("feature_labels", [])
+        n_stored = len(windows_X)
+
+        cap = 100
+        max_windows = max(1, cap // max(n_features, 1))
+        n_win = min(n_stored, max_windows)
+        sig_names = [str(labels[i]) if i < len(labels) else f"Feature {i}" for i in range(n_features)]
+        win_titles = [f"W{w}" for w in range(n_win)]
+
+        hs = min(0.03, 1.0 / max(n_features, 2))
+        vs = min(0.02, 1.0 / max(n_win, 2))
+        fig = make_subplots(rows=n_win, cols=n_features, column_titles=sig_names, row_titles=win_titles, horizontal_spacing=hs, vertical_spacing=vs)
+        for r in range(n_win):
+            X, dt = self._window_arrays(seq, r)
+            if X.ndim != 2 or X.shape[0] == 0:
+                continue
+            length = X.shape[0]
+            t = np.cumsum(dt) if dt.size == length else np.arange(length, dtype=float)
+            for c in range(n_features):
+                col = X[:, c]
+                span = float(col.max() - col.min())
+                norm = (col - col.min()) / (span + 1e-9)
+                fig.add_trace(
+                    go.Scatter(x=t, y=norm, mode="lines", line={"color": self.default_colors[c % len(self.default_colors)], "width": 1}, showlegend=False),
+                    row=r + 1,
+                    col=c + 1,
+                )
+        is_dark = theme == "dark"
+        capped = "" if n_win >= n_stored else f" (first {n_win} of {n_stored} windows)"
+        fig.update_layout(
+            title=f"Full-cross grid — {n_features} signals × {n_win} windows{capped}",
+            height=max(260, n_win * 150),
+            template="plotly_dark" if is_dark else "plotly",
+            plot_bgcolor="#242424" if is_dark else "#f8f9fa",
+            paper_bgcolor="#242424" if is_dark else "#ffffff",
+            margin={"l": 40, "r": 20, "t": 60, "b": 30},
+        )
+        fig.update_xaxes(showticklabels=False)
+        fig.update_yaxes(showticklabels=False)
+        return fig
 
     def _filter_by_split(self, dataset: Dict[str, Any], split: str) -> Dict[str, Any]:
         """

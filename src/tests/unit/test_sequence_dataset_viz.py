@@ -1,4 +1,4 @@
-"""CANOPY-3D-1/2 — 3-D (sequence) dataset load + display (Phases 1, 2a, 2b, 2c).
+"""CANOPY-3D-1/2 — 3-D (sequence) dataset load + display (Phases 1, 2a, 2b, 2c, 3).
 
 Fixture-tested per the agreed plan: a mocked ``JuniperDataClient`` returns synthetic 3-D
 NPZ artifacts (the real juniper-data path is the same dispatch, verified end-to-end
@@ -6,7 +6,7 @@ separately). Covers the ndim-aware load dispatch, the display-only sequence inst
 (window-0 view + the capped multi-window store + per-window target + characterization
 histograms), the plotter's two comparison modes (compare-signals / compare-windows,
 small-multiples ⇄ overlay), the selector-options helpers, the target / characterization
-companions, and a 2-D regression guard.
+companions, the advanced full-cross grid, and a 2-D regression guard.
 """
 
 from __future__ import annotations
@@ -358,3 +358,36 @@ def test_characterization_hidden_for_tabular():
     dt_fig, tgt_fig, stats, style = plotter._process_characterization_update({"dataset_kind": "tabular"}, "light")
     assert style == {"display": "none"}
     assert stats == ""
+
+
+# ----------------------------------------------------- Phase 3: advanced full-cross grid (M4)
+def test_grid_hidden_when_toggle_off():
+    plotter = _bare_plotter()
+    _, style = plotter._process_grid_update(_seq_dataset_multiwindow(3, 4, 2), [], "light")
+    assert style["display"] == "none"
+
+
+def test_grid_hidden_for_tabular_even_when_on():
+    plotter = _bare_plotter()
+    _, style = plotter._process_grid_update({"dataset_kind": "tabular"}, ["on"], "light")
+    assert style["display"] == "none"
+
+
+def test_grid_renders_full_cross_when_on():
+    import plotly.graph_objects as go
+
+    plotter = _bare_plotter()
+    ds = _seq_dataset_multiwindow(n_windows=3, length=4, n_features=2)
+    fig, style = plotter._process_grid_update(ds, ["on"], "light")
+    assert isinstance(fig, go.Figure)
+    assert len(fig.data) == 6  # 3 windows × 2 signals
+    assert style["display"] == "block" and style["overflowY"] == "auto"
+
+
+def test_grid_caps_cells_at_100():
+    plotter = _bare_plotter()
+    # 5 signals × 30 windows -> capped to 5 × 20 = 100 cells (rows trimmed)
+    ds = _seq_dataset_multiwindow(n_windows=30, length=4, n_features=5)
+    fig = plotter._create_grid_plot(ds["sequence"], "light")
+    assert len(fig.data) == 100  # 20 windows × 5 signals
+    assert "first 20 of 30 windows" in fig.layout.title.text
