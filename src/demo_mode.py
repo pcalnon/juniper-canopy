@@ -1904,8 +1904,8 @@ class DemoMode:
 
         Sequence (irregular-Δt time-series) artifacts cannot train the cascor-like demo
         simulator (OQ-4: cascor has no 3-D ingestion), so this stores a small,
-        JSON-serializable view (window 0's feature channels + per-step Δt) into
-        ``self.dataset`` for the dataset-plotter to render, and deliberately does NOT
+        JSON-serializable view (a capped set of windows' feature channels + per-step Δt)
+        into ``self.dataset`` for the dataset-plotter to render, and deliberately does NOT
         touch ``self.network.train_x`` / ``train_y``. Mirrors ``import_dataset``'s lock
         discipline for the visible-state swap. The installed dict is what reaches the
         frontend, because ``DemoBackend.regenerate_dataset_from_generator`` returns
@@ -1932,23 +1932,33 @@ class DemoMode:
             dt = npz_data.get("dt_train")
 
         n_windows, lookback, n_features = (int(d) for d in X.shape)
-        # Phase 1 displays window 0 only (feature small-multiples over real time); cap the
-        # JSON payload to one window's (L, F) inputs + its (L,) Δt.
-        window0 = np.asarray(X[0], dtype=np.float32)
-        dt0 = np.asarray(dt[0], dtype=np.float32) if dt is not None else np.zeros(lookback, dtype=np.float32)
+        # Phase 2b: store a capped set of windows (display-only) so the plotter's
+        # compare-windows mode can switch windows without re-fetching; window 0 remains the
+        # default single view. The cap bounds the JSON payload pushed to the browser store.
+        window_cap = 50
+        n_stored = min(n_windows, window_cap)
+        windows_X = [np.asarray(X[w], dtype=np.float32).tolist() for w in range(n_stored)]
+        if dt is not None:
+            windows_dt = [np.asarray(dt[w], dtype=np.float32).tolist() for w in range(n_stored)]
+        else:
+            zeros = np.zeros(lookback, dtype=np.float32).tolist()
+            windows_dt = [list(zeros) for _ in range(n_stored)]
 
         dataset = {
             "dataset_kind": "sequence",
             "source": source_label,
             "n_windows": n_windows,
+            "n_windows_stored": n_stored,
             "lookback": lookback,
             "n_features": n_features,
             "inputs": [],  # legacy-consumer safety: 2-D readers see empty, not KeyError
             "targets": [],
             "sequence": {
-                "X": window0.tolist(),  # window 0, shape (L, F), JSON-serializable
-                "dt": dt0.tolist(),  # window 0 per-step Δt, shape (L,)
+                "X": windows_X[0],  # window 0, shape (L, F) — default single view (back-compat)
+                "dt": windows_dt[0],  # window 0 per-step Δt, shape (L,)
                 "feature_labels": [f"Feature {i}" for i in range(n_features)],
+                "windows_X": windows_X,  # up to window_cap windows, each (L, F), JSON-serializable
+                "windows_dt": windows_dt,  # matching per-window Δt, each (L,)
             },
         }
 
@@ -1964,9 +1974,10 @@ class DemoMode:
             # the cascor-like demo simulator cannot train a 3-D sequence dataset.
 
         self.logger.info(
-            "Sequence dataset loaded for display only (%s): n_windows=%d, lookback=%d, n_features=%d (NOT installed for training)",
+            "Sequence dataset loaded for display only (%s): n_windows=%d (stored %d), lookback=%d, n_features=%d (NOT installed for training)",
             source_label,
             n_windows,
+            n_stored,
             lookback,
             n_features,
         )
