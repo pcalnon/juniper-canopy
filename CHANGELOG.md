@@ -56,6 +56,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `notes/JUNIPER_CANOPY_3D_DATASET_VISUALIZATION_DESIGN_2026-06-19.md` §3.1 / §5. Tests:
   `src/tests/unit/test_sequence_dataset_viz.py` (8 new cases: window cap, multi-window
   store, compare-windows render + defaults, window selection, fallback, control options).
+- **3-D dataset viewer — target + characterization companions (Phase 2c, #368)**: the
+  final Phase-2 slice completes the two-mode viewer. An optional **regression-target**
+  graph (a `Show target` switch in the control bar) renders the primary window's target;
+  a **collapsible characterization side companion** (on by default) shows whole-dataset
+  **Δt** and **target** histograms plus a **W / L / F** stats block beside the main plots
+  — the viz area is now a flex row whose companion hides for 2-D tabular so the main
+  column expands. Backend (`src/demo_mode.py`): `_install_sequence_dataset` additionally
+  stores the per-window regression target (`windows_y`, capped) and precomputes bounded
+  whole-dataset `dt_hist` / `target_hist` (~30 bins each) — still **display-only** (OQ-4).
+  The companions are wired as **separate callbacks**, so the core `update_dataset_plots`
+  (and its tests) are unchanged. Resolves design OQ-A (target = a separate companion
+  strip) and OQ-C (characterization = whole-dataset summary + the always-on selected-window
+  Δt strip). Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_3D_DATASET_VISUALIZATION_DESIGN_2026-06-19.md` §3.3 / §5. Tests:
+  `src/tests/unit/test_sequence_dataset_viz.py` (6 new cases). With 2a/2b this completes
+  the Phase-2 control surface; the advanced full-cross grid remains Phase 3.
 - **Harness L2 — enroll the three #366-wired controls in the behavioral manifest
   (#369)**: `restart-with-new-dataset-button`, `nn-init-output-weights-dropdown`, and
   `dataset-plotter-dataset-selector` were L1-guarded (wired) but not yet behaviorally

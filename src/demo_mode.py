@@ -1944,6 +1944,33 @@ class DemoMode:
             zeros = np.zeros(lookback, dtype=np.float32).tolist()
             windows_dt = [list(zeros) for _ in range(n_stored)]
 
+        # Phase 2c companions (display-only): the regression target per stored window for the
+        # optional target view, plus whole-dataset Δt / target histograms (computed over ALL
+        # windows, then bounded to ~30 bins) for the characterization companion.
+        y = npz_data.get("y_full")
+        if y is None:
+            y = npz_data.get("y_train")
+        windows_y: list = []
+        if y is not None:
+            y_arr = np.asarray(y)
+            windows_y = [np.asarray(y_arr[w], dtype=np.float32).ravel().tolist() for w in range(min(n_stored, y_arr.shape[0]))]
+
+        def _bounded_hist(values):
+            arr = np.asarray(values, dtype=np.float64).ravel()
+            arr = arr[np.isfinite(arr)]
+            if arr.size == 0:
+                return None
+            counts, edges = np.histogram(arr, bins=30)
+            return {"edges": edges.astype(float).tolist(), "counts": counts.astype(int).tolist()}
+
+        if dt is not None:
+            dt_arr = np.asarray(dt)
+            dt_values = dt_arr[:, 1:] if dt_arr.ndim == 2 and dt_arr.shape[1] > 1 else dt_arr  # drop the leading per-window 0
+            dt_hist = _bounded_hist(dt_values)
+        else:
+            dt_hist = None
+        target_hist = _bounded_hist(y) if y is not None else None
+
         dataset = {
             "dataset_kind": "sequence",
             "source": source_label,
@@ -1959,6 +1986,9 @@ class DemoMode:
                 "feature_labels": [f"Feature {i}" for i in range(n_features)],
                 "windows_X": windows_X,  # up to window_cap windows, each (L, F), JSON-serializable
                 "windows_dt": windows_dt,  # matching per-window Δt, each (L,)
+                "windows_y": windows_y,  # per-window regression target (flattened), capped
+                "dt_hist": dt_hist,  # whole-dataset Δt histogram {edges, counts} (or None)
+                "target_hist": target_hist,  # whole-dataset target histogram {edges, counts} (or None)
             },
         }
 

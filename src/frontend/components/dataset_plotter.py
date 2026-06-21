@@ -40,7 +40,7 @@ import dash_bootstrap_components as dbc
 import numpy as np
 import plotly.graph_objects as go
 from dash import dcc, html
-from dash.dependencies import Input, Output
+from dash.dependencies import Input, Output, State
 from plotly.subplots import make_subplots
 
 from canopy_constants import DashboardConstants, SecurityConstants
@@ -392,21 +392,70 @@ class DatasetPlotter(BaseComponent):
                             labelClassName="btn btn-outline-primary btn-sm",
                             labelCheckedClassName="active",
                         ),
+                        dbc.Checklist(
+                            id=f"{self.component_id}-seq-target-toggle",
+                            options=[{"label": "Show target", "value": "on"}],
+                            value=[],
+                            switch=True,
+                            inline=True,
+                            style={"marginLeft": "20px"},
+                        ),
                     ],
                     id=f"{self.component_id}-seq-controls",
                     style={"display": "none", "alignItems": "center", "marginBottom": "12px", "flexWrap": "wrap", "gap": "6px"},
                 ),
-                # Main scatter plot
-                dcc.Graph(
-                    id=f"{self.component_id}-scatter-plot",
-                    config={"displayModeBar": True, "displaylogo": False},
-                    style={"height": "800px", "maxWidth": "900px", "margin": "0 auto"},
-                ),
-                # Feature distribution histograms
-                dcc.Graph(
-                    id=f"{self.component_id}-distribution-plot",
-                    config={"displayModeBar": False},
-                    style={"height": "30vh", "maxHeight": "450px", "minHeight": "250px"},
+                # Viz area: a flex row — the main plots (scatter + Δt strip + optional
+                # regression target) and a collapsible characterization side companion
+                # (CANOPY-3D-2, Phase 2c). The companion hides for 2-D tabular datasets so
+                # the main column expands to full width.
+                html.Div(
+                    [
+                        html.Div(
+                            [
+                                # Main scatter plot
+                                dcc.Graph(
+                                    id=f"{self.component_id}-scatter-plot",
+                                    config={"displayModeBar": True, "displaylogo": False},
+                                    style={"height": "800px", "maxWidth": "900px", "margin": "0 auto"},
+                                ),
+                                # Feature distribution histograms / Δt strip
+                                dcc.Graph(
+                                    id=f"{self.component_id}-distribution-plot",
+                                    config={"displayModeBar": False},
+                                    style={"height": "30vh", "maxHeight": "450px", "minHeight": "250px"},
+                                ),
+                                # Optional regression-target companion (shown via the toggle)
+                                dcc.Graph(
+                                    id=f"{self.component_id}-seq-target-plot",
+                                    config={"displayModeBar": False},
+                                    style={"display": "none", "height": "240px"},
+                                ),
+                            ],
+                            style={"flex": "1", "minWidth": "0"},
+                        ),
+                        # Characterization side companion — on by default, collapsible.
+                        html.Div(
+                            [
+                                html.Div(
+                                    [html.Span("▾ ", id=f"{self.component_id}-seq-char-icon"), "Characterization"],
+                                    id=f"{self.component_id}-seq-char-toggle",
+                                    style={"cursor": "pointer", "fontWeight": "bold", "marginBottom": "8px"},
+                                ),
+                                dbc.Collapse(
+                                    [
+                                        html.Div(id=f"{self.component_id}-seq-char-stats", style={"fontSize": "0.85em", "marginBottom": "10px"}),
+                                        dcc.Graph(id=f"{self.component_id}-seq-char-dt-hist", config={"displayModeBar": False}, style={"height": "200px"}),
+                                        dcc.Graph(id=f"{self.component_id}-seq-char-target-dist", config={"displayModeBar": False}, style={"height": "200px"}),
+                                    ],
+                                    id=f"{self.component_id}-seq-char-collapse",
+                                    is_open=True,
+                                ),
+                            ],
+                            id=f"{self.component_id}-seq-char-companion",
+                            style={"display": "none", "width": "340px", "flexShrink": "0", "paddingLeft": "12px"},
+                        ),
+                    ],
+                    style={"display": "flex", "gap": "16px", "alignItems": "flex-start"},
                 ),
                 # Dataset data store
                 dcc.Store(id=f"{self.component_id}-dataset-store", data=None),
@@ -590,6 +639,60 @@ class DatasetPlotter(BaseComponent):
             if mode == "windows":
                 return hidden, shown
             return shown, hidden
+
+        # ── Sequence (3-D) companions: target view + characterization (CANOPY-3D-2 / 2c) ──
+        # Separate callbacks (the core update_dataset_plots is unchanged): an optional
+        # regression-target graph (toggled) and a collapsible characterization side
+        # companion (Δt + target histograms + W/L/F stats), both sequence-only.
+        @app.callback(
+            [
+                Output(f"{self.component_id}-seq-target-plot", "figure"),
+                Output(f"{self.component_id}-seq-target-plot", "style"),
+            ],
+            [
+                Input(f"{self.component_id}-dataset-store", "data"),
+                Input(f"{self.component_id}-seq-target-toggle", "value"),
+                Input(f"{self.component_id}-seq-mode", "value"),
+                Input(f"{self.component_id}-seq-window-single", "value"),
+                Input(f"{self.component_id}-seq-window-multi", "value"),
+                Input("theme-state", "data"),
+            ],
+            prevent_initial_call=False,
+        )
+        def update_sequence_target(dataset, toggle, seq_mode, seq_window, seq_windows, theme):
+            """Render the regression-target companion for the primary window (when toggled on)."""
+            return self._process_target_update(dataset, toggle, seq_mode, seq_window, seq_windows, theme)
+
+        @app.callback(
+            [
+                Output(f"{self.component_id}-seq-char-dt-hist", "figure"),
+                Output(f"{self.component_id}-seq-char-target-dist", "figure"),
+                Output(f"{self.component_id}-seq-char-stats", "children"),
+                Output(f"{self.component_id}-seq-char-companion", "style"),
+            ],
+            [
+                Input(f"{self.component_id}-dataset-store", "data"),
+                Input("theme-state", "data"),
+            ],
+            prevent_initial_call=False,
+        )
+        def update_sequence_characterization(dataset, theme):
+            """Render the characterization companion (Δt + target histograms + W/L/F stats)."""
+            return self._process_characterization_update(dataset, theme)
+
+        @app.callback(
+            [
+                Output(f"{self.component_id}-seq-char-collapse", "is_open"),
+                Output(f"{self.component_id}-seq-char-icon", "children"),
+            ],
+            Input(f"{self.component_id}-seq-char-toggle", "n_clicks"),
+            State(f"{self.component_id}-seq-char-collapse", "is_open"),
+            prevent_initial_call=True,
+        )
+        def toggle_characterization_collapse(n_clicks, is_open):
+            """Collapse / expand the characterization companion."""
+            new_open = not is_open
+            return new_open, "▾ " if new_open else "▸ "
 
         self.logger.debug(f"Callbacks registered for {self.component_id}")
 
@@ -841,6 +944,95 @@ class DatasetPlotter(BaseComponent):
             window_opts,
             list(range(min(n_windows, 3))),  # window-multi: the first few windows
         )
+
+    def _process_target_update(self, dataset: Optional[Dict[str, Any]], toggle: Optional[List[str]], seq_mode: str, seq_window: Optional[int], seq_windows: Optional[List[int]], theme: str) -> tuple:
+        """Figure + style for the optional regression-target companion (Phase 2c).
+
+        Hidden unless the toggle is on AND the dataset is a sequence. The target shown is the
+        primary window's (the selected window in signals mode; the first selected window in
+        windows mode).
+        """
+        hidden = {"display": "none", "height": "240px"}
+        on = bool(toggle) and "on" in (toggle or [])
+        if not on or not dataset or dataset.get("dataset_kind") != "sequence":
+            return create_empty_plot("", theme), hidden
+        seq = dataset.get("sequence", {})
+        if seq_mode == "windows":
+            window = seq_windows[0] if seq_windows else 0
+        else:
+            window = seq_window if isinstance(seq_window, int) and seq_window >= 0 else 0
+        return self._create_target_plot(seq, theme, window), {"display": "block", "height": "240px"}
+
+    def _create_target_plot(self, seq: Dict[str, Any], theme: str, window: int) -> go.Figure:
+        """Bar of a window's regression target (labelled by feature when lengths match)."""
+        windows_y = seq.get("windows_y") or []
+        idx = window if isinstance(window, int) and 0 <= window < len(windows_y) else 0
+        if not windows_y or idx >= len(windows_y):
+            return create_empty_plot("No target available", theme)
+        target = np.asarray(windows_y[idx], dtype=float).ravel()
+        labels = seq.get("feature_labels", [])
+        names = [str(lab) for lab in labels] if target.size == len(labels) and labels else [f"t{j}" for j in range(target.size)]
+        is_dark = theme == "dark"
+        fig = go.Figure(go.Bar(x=names, y=target.tolist(), marker_color="#9b59b6"))
+        fig.update_layout(
+            title=f"Regression target — window {idx}",
+            template="plotly_dark" if is_dark else "plotly",
+            plot_bgcolor="#242424" if is_dark else "#f8f9fa",
+            paper_bgcolor="#242424" if is_dark else "#ffffff",
+            showlegend=False,
+            margin={"l": 40, "r": 10, "t": 40, "b": 30},
+        )
+        return fig
+
+    def _process_characterization_update(self, dataset: Optional[Dict[str, Any]], theme: str) -> tuple:
+        """Figures + stats + companion style for the characterization side companion (Phase 2c).
+
+        Whole-dataset Δt and target histograms (precomputed at load over ALL windows) plus a
+        W / L / F stats block. Hidden for non-sequence datasets.
+        """
+        if not dataset or dataset.get("dataset_kind") != "sequence":
+            empty = create_empty_plot("", theme)
+            return empty, empty, "", {"display": "none"}
+        seq = dataset.get("sequence", {})
+        dt_fig = self._create_hist_plot(seq.get("dt_hist"), theme, "Δt distribution (all windows)", "#888888")
+        tgt_fig = self._create_hist_plot(seq.get("target_hist"), theme, "Target distribution (all windows)", "#2ecc71")
+        stats = self._sequence_stats_children(dataset)
+        companion_style = {"display": "block", "width": "340px", "flexShrink": "0", "paddingLeft": "12px"}
+        return dt_fig, tgt_fig, stats, companion_style
+
+    def _create_hist_plot(self, hist: Optional[Dict[str, Any]], theme: str, title: str, color: str) -> go.Figure:
+        """Bar chart from a precomputed ``{edges, counts}`` histogram (or an empty plot)."""
+        if not hist or not hist.get("counts"):
+            return create_empty_plot("No data", theme)
+        edges = hist["edges"]
+        counts = hist["counts"]
+        centers = [(edges[i] + edges[i + 1]) / 2 for i in range(len(counts))]
+        widths = [edges[i + 1] - edges[i] for i in range(len(counts))]
+        is_dark = theme == "dark"
+        fig = go.Figure(go.Bar(x=centers, y=counts, width=widths, marker_color=color))
+        fig.update_layout(
+            title=title,
+            template="plotly_dark" if is_dark else "plotly",
+            plot_bgcolor="#242424" if is_dark else "#f8f9fa",
+            paper_bgcolor="#242424" if is_dark else "#ffffff",
+            showlegend=False,
+            bargap=0,
+            margin={"l": 40, "r": 10, "t": 40, "b": 30},
+        )
+        return fig
+
+    def _sequence_stats_children(self, dataset: Dict[str, Any]) -> list:
+        """W / L / F summary lines for the characterization companion."""
+        n_windows = dataset.get("n_windows", 0)
+        n_stored = dataset.get("n_windows_stored", n_windows)
+        lookback = dataset.get("lookback", 0)
+        n_features = dataset.get("n_features", 0)
+        note = "" if n_stored >= n_windows else f" (showing first {n_stored})"
+        return [
+            html.Div([html.Strong("Windows: "), f"{n_windows}{note}"]),
+            html.Div([html.Strong("Lookback: "), str(lookback)]),
+            html.Div([html.Strong("Features: "), str(n_features)]),
+        ]
 
     def _filter_by_split(self, dataset: Dict[str, Any], split: str) -> Dict[str, Any]:
         """
