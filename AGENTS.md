@@ -5,7 +5,7 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.5.0
-**Last Updated**: 2026-05-23
+**Last Updated**: 2026-06-21
 
 ---
 
@@ -125,6 +125,17 @@ pytest -m "not requires_cascor" -v
 open reports/coverage/index.html  # macOS
 xdg-open reports/coverage/index.html  # Linux
 ```
+
+### Coverage
+
+Reproduce the CI coverage gate locally (full suite):
+
+```bash
+make coverage                 # convenience wrapper
+bash util/run_coverage.bash   # source of truth (mirrors .github/workflows/ci.yml)
+```
+
+Gate: 80% aggregate (override with `COVERAGE_FAIL_UNDER=<n>`). The script runs the full gated suite by design so the percentage matches CI; for a narrower run use plain `pytest`.
 
 #### Pytest Markers
 

@@ -15,7 +15,7 @@
 
 PYTEST ?= pytest
 
-.PHONY: test test-ui test-all
+.PHONY: test test-ui test-all coverage
 
 test:
 	$(PYTEST)
@@ -24,3 +24,6 @@ test-ui:
 	$(PYTEST) src/tests/ui --override-ini=addopts=
 
 test-all: test test-ui
+
+coverage:  ## Reproduce the CI coverage gate locally (full suite)
+	@bash util/run_coverage.bash
