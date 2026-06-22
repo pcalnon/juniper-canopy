@@ -111,6 +111,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Design-of-record: juniper-ml
   `notes/JUNIPER_CANOPY_MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md`. Regression
   coverage: `src/tests/unit/test_model_registry.py`.
+- **Recurrence (LMU) service adapter + outbound settings — model-selection A1 enabler
+  (A1-i, #368)**: the first build slice of A1 (making `recurrence` genuinely *trainable*
+  from canopy, not just a coming-soon registry entry). Adds `RecurrenceServiceAdapter`
+  (`src/backend/recurrence_service_adapter.py`) — a thin **synchronous** `httpx` REST
+  client for the juniper-recurrence model service: a blocking `POST /v1/train` (the LMU is
+  a one-shot ridge/lstsq fit — no epochs to stream, hence no WebSocket) plus the instant
+  `GET /v1/training/status`. It sends the outbound `X-API-Key`, applies a **generous
+  read-timeout** to the blocking train, and maps failures onto a typed error hierarchy
+  (`RecurrenceTrainInProgressError` 409 / `RecurrenceServiceAuthError` 401·403 /
+  `RecurrenceServiceTimeoutError` / `RecurrenceServiceUnavailableError` / base
+  `RecurrenceServiceError`) so the one-shot UI path (D1-A, A1-iii) can surface each
+  distinctly. New `Settings.recurrence_service_url` + `recurrence_api_key`
+  (`src/settings.py`) mirror the juniper-data outbound-key pattern: the prefixed
+  `JUNIPER_CANOPY_*` var wins over the shared cross-service var (`RECURRENCE_SERVICE_URL` /
+  `JUNIPER_RECURRENCE_API_KEY`), and the key honours `_FILE` secret indirection.
+  **Adapter + settings only — no routing or UI yet**: `create_backend` provider routing is
+  A1-ii; the one-shot execution path + cascade-panel suppression A1-iii. Scope is `train` +
+  `status` (predict / crossval deferred — enabler OQ-2). Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_MODEL_SELECTION_A1_ENABLER_SCOPE_2026-06-18.md` (D3) /
+  `..._MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md`. Tests:
+  `src/tests/unit/test_recurrence_service_adapter.py` (24 cases, mocked via
+  `httpx.MockTransport`) + `src/tests/unit/test_recurrence_settings.py` (11 cases).
 
 - **Build provenance on `/v1/health` + `/v1/health/ready`.** The dashboard now
   reports the source `git_sha` and ISO-8601 `build_date` baked into its image
