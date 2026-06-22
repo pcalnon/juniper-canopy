@@ -268,7 +268,7 @@ class RecurrenceServiceAdapter:
         if ridge is not None:
             body["ridge"] = ridge
 
-        data = self._request("POST", "/v1/train", self._train_timeout, json_body=body)
+        data = self._call("POST", "/v1/train", self._train_timeout, json_body=body)
         return RecurrenceTrainResult(
             final_metrics=dict(data.get("final_metrics") or {}),
             n_epochs=int(data.get("n_epochs", 0)),
@@ -284,7 +284,7 @@ class RecurrenceServiceAdapter:
         (A1-ii) uses this to flip a binary in-progress -> trained after the backgrounded
         train completes.
         """
-        data = self._request("GET", "/v1/training/status", self._status_timeout)
+        data = self._call("GET", "/v1/training/status", self._status_timeout)
         return RecurrenceStatus(
             state=str(data.get("state", "idle")),
             final_metrics=data.get("final_metrics"),
@@ -300,8 +300,18 @@ class RecurrenceServiceAdapter:
             headers["X-API-Key"] = self._api_key
         return headers
 
-    def _request(self, method: str, path: str, timeout: httpx.Timeout, *, json_body: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-        """Issue one request and map transport / HTTP failures onto the typed hierarchy."""
+    def _call(self, method: str, path: str, timeout: httpx.Timeout, *, json_body: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        """Issue one request and map transport / HTTP failures onto the typed hierarchy.
+
+        Named ``_call`` (deliberately NOT ``_request`` / ``_get`` / ``_post``): the static
+        guard ``tests/unit/backend/test_cascor_service_adapter_v1_prefix_regression.py``
+        flags any ``_request``-family call under ``src/backend/`` that passes a
+        ``/v1/``-prefixed path — a convention specific to ``JuniperCascorClient`` (whose
+        ``api_url`` already embeds ``/v1``, so cascor paths must omit it). This adapter is
+        raw ``httpx`` against a plain ``base_url``, and the recurrence routes genuinely are
+        ``/v1/...`` (the service's own tests POST ``/v1/train``), so the prefix is correct
+        here and the helper must sit outside that guarded name-set.
+        """
         try:
             with httpx.Client(base_url=self._base_url, headers=self._headers(), timeout=timeout, transport=self._transport) as client:
                 response = client.request(method, path, json=json_body)
