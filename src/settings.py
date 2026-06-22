@@ -224,6 +224,27 @@ class Settings(BaseSettings):
     cascor_ws_origin: str = Field(default_factory=_default_cascor_ws_origin)
     cascor_discovery: CascorDiscoverySettings = CascorDiscoverySettings()
 
+    # Recurrence (LMU) model service — model-selection A1 enabler (D3). When set,
+    # canopy routes a ``recurrence``-provider model to ``RecurrenceServiceAdapter``,
+    # which speaks the service's synchronous one-shot ``POST /v1/train`` contract.
+    #
+    # ``recurrence_service_url`` resolution (``_check_recurrence_service_url``):
+    # prefixed canonical ``JUNIPER_CANOPY_RECURRENCE_SERVICE_URL`` → shared cross-
+    # service ``RECURRENCE_SERVICE_URL`` (the var juniper-deploy sets, mirroring
+    # ``JUNIPER_DATA_URL``) → ``None``. ``None`` leaves recurrence unconfigured (the
+    # model stays non-routable); inside docker compose the canonical value is
+    # ``http://juniper-recurrence:8210``.
+    recurrence_service_url: Optional[str] = None
+    # Outbound API key canopy sends as ``X-API-Key`` on every recurrence request.
+    # The recurrence service runs ``SecurityMiddleware``, so a missing key 401s — by
+    # design, so the failure is loud rather than silent. Resolved by
+    # ``_check_recurrence_api_key`` via ``get_secret`` (honors ``<NAME>_FILE``
+    # indirection for Docker/k8s secret mounts): prefixed
+    # ``JUNIPER_CANOPY_RECURRENCE_API_KEY[_FILE]`` → shared
+    # ``JUNIPER_RECURRENCE_API_KEY[_FILE]`` (the var the recurrence service itself
+    # reads) → ``None``. Mirrors ``juniper_data_api_key``.
+    recurrence_api_key: Optional[str] = None
+
     # Demo
     demo_update_interval: float = 1.0
     demo_cascade_every: int = 30
@@ -389,6 +410,49 @@ class Settings(BaseSettings):
                 stacklevel=2,
             )
             return legacy
+        return v
+
+    @field_validator("recurrence_service_url", mode="before")
+    @classmethod
+    def _check_recurrence_service_url(cls, v):
+        """Honor a shared unprefixed ``RECURRENCE_SERVICE_URL`` fallback.
+
+        Precedence: the prefixed ``JUNIPER_CANOPY_RECURRENCE_SERVICE_URL`` is
+        handled natively by pydantic-settings (so if set it already arrives as
+        ``v``); otherwise fall back to the shared cross-service
+        ``RECURRENCE_SERVICE_URL`` that juniper-deploy sets (mirroring the
+        ``JUNIPER_DATA_URL`` shared-var pattern in ``_check_juniper_data_url``).
+        """
+        if os.getenv("JUNIPER_CANOPY_RECURRENCE_SERVICE_URL") is not None:
+            return v
+        shared = os.getenv("RECURRENCE_SERVICE_URL")
+        if shared is not None:
+            return shared
+        return v
+
+    @field_validator("recurrence_api_key", mode="before")
+    @classmethod
+    def _check_recurrence_api_key(cls, v):
+        """Resolve the outbound recurrence API key, ``_FILE`` form first.
+
+        Order (mirrors ``_check_juniper_data_api_key`` so Docker-secrets /
+        k8s-secrets mounts work without leaking the value through env dumps):
+
+          1. ``JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE`` → file content, or
+             ``JUNIPER_CANOPY_RECURRENCE_API_KEY`` direct (prefixed canonical —
+             a canopy-specific override deploy can route separately).
+          2. ``JUNIPER_RECURRENCE_API_KEY_FILE`` → file content, or
+             ``JUNIPER_RECURRENCE_API_KEY`` direct (shared cross-service var the
+             recurrence service itself reads).
+          3. ``v`` (whatever pydantic-settings already populated; usually
+             ``None`` once we've reached this branch).
+        """
+        prefixed = get_secret("JUNIPER_CANOPY_RECURRENCE_API_KEY")
+        if prefixed:
+            return prefixed
+        shared = get_secret("JUNIPER_RECURRENCE_API_KEY")
+        if shared:
+            return shared
         return v
 
     @field_validator("backend_path", mode="before")
