@@ -19,6 +19,7 @@ from backend.protocol import BackendProtocol
 
 if TYPE_CHECKING:
     from backend.demo_backend import DemoBackend
+    from settings import Settings
 
 __all__ = [
     "BackendProtocol",
@@ -33,14 +34,21 @@ def create_backend(
     *,
     service_url: str | None = None,
     demo_mode: bool | None = None,
+    nn_model: str | None = None,
 ) -> BackendProtocol:
     """Factory: create the appropriate backend based on environment.
 
     Args:
         service_url: Explicit CasCor service URL (overrides settings/env).
         demo_mode: Explicit demo mode flag (overrides settings/env).
+        nn_model: Selected model key (e.g. ``"recurrence"``). When it resolves to a
+            recurrence-provider model (via the registry) and
+            ``settings.recurrence_service_url`` is configured, a ``RecurrenceBackend`` is
+            returned (A1-ii / D5). ``None`` — the startup default — leaves the demo/cascor
+            selection below entirely unchanged.
 
     Selection logic (first match wins):
+        0. nn_model -> recurrence provider (+ recurrence_service_url set) -> RecurrenceBackend
         1. demo_mode=True (explicit)           -> DemoBackend
         2. settings.demo_mode=True             -> DemoBackend
         3. service_url provided                -> ServiceBackend
@@ -60,6 +68,14 @@ def create_backend(
     from settings import get_settings
 
     settings = get_settings()
+
+    # D5 (A1-ii): route an explicit recurrence-provider model to the recurrence service
+    # before the demo/cascor resolution. ``nn_model`` is None on the cascor/demo startup
+    # path, so everything below is unchanged unless a recurrence model is requested.
+    if nn_model:
+        recurrence_backend = _try_create_recurrence_backend(nn_model, settings)
+        if recurrence_backend is not None:
+            return recurrence_backend
 
     # Resolve demo mode
     force_demo = demo_mode if demo_mode is not None else settings.demo_mode
@@ -90,3 +106,29 @@ def create_backend(
 
     logger.info("No CasCor service URL configured — falling back to demo mode")
     return DemoBackend(get_demo_mode(update_interval=1.0))
+
+
+def _try_create_recurrence_backend(nn_model: str, settings: "Settings") -> Optional[BackendProtocol]:
+    """Return a ``RecurrenceBackend`` if ``nn_model`` is a configured recurrence model, else None.
+
+    Returns ``None`` (so ``create_backend`` falls through to the demo/cascor resolution)
+    when ``nn_model`` is not a recurrence-provider model, or when it is but
+    ``recurrence_service_url`` is unset — the latter is logged loudly. The A1 selection UI
+    (A1-iv) gates an unconfigured recurrence model out of the picker, so the unset-URL path
+    is a safety net rather than the normal flow.
+    """
+    from model_registry import RECURRENCE_PROVIDER, get_model_spec
+
+    spec = get_model_spec(nn_model)
+    if spec is None or spec.provider != RECURRENCE_PROVIDER:
+        return None
+    if not settings.recurrence_service_url:
+        logger.warning("Model %r is a recurrence model but recurrence_service_url is not configured — falling back to the default backend", nn_model)
+        return None
+
+    from backend.recurrence_backend import RecurrenceBackend
+    from backend.recurrence_service_adapter import RecurrenceServiceAdapter
+
+    adapter = RecurrenceServiceAdapter(settings.recurrence_service_url, settings.recurrence_api_key)
+    logger.info("Recurrence mode: model %r -> RecurrenceServiceAdapter at %s", nn_model, settings.recurrence_service_url)
+    return RecurrenceBackend(adapter)
