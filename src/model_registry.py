@@ -11,7 +11,7 @@
 # File Path:     ${HOME}/Development/python/Juniper/juniper-canopy/src/
 #
 # Date Created:  2026-06-17
-# Last Modified: 2026-06-17
+# Last Modified: 2026-06-23
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -20,9 +20,10 @@
 #     Single source of truth for NN-model and dataset-type specifications used by the
 #     model-selection feature. This module (A0) defines the spec dataclasses, seeds the
 #     current models and dataset types, and supplies dataset_type_options() so the
-#     dashboard dataset-type dropdown no longer hardcodes its options. The compatibility
-#     resolvers, the dedicated selection surface, and the nn_model backend mirror are
-#     deferred to A1.
+#     dashboard dataset-type dropdown no longer hardcodes its options. A1-iv-1 adds the pure
+#     compatibility engine (compatible() + temporal_ok() + the compatible_models /
+#     compatible_datasets resolvers); the dedicated selection surface and the nn_model
+#     backend mirror remain deferred to A1-iv-3+.
 #
 #     Design of record: juniper-ml
 #     notes/JUNIPER_CANOPY_MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md
@@ -45,17 +46,21 @@
 #
 #####################################################################################################################################################################################################
 # TODO :
-#     - A1: compatibility predicate + resolvers, the dedicated selection surface, the
-#       nn_model backend mirror.
+#     - A1-iv-3+: the dedicated selection surface, the nn_model backend mirror, the
+#       reason-suffix greying (the per-locus phrasing layered on this engine).
 #
 #####################################################################################################################################################################################################
 # COMPLETED:
+#     - A1-iv-1: compatibility predicate (compatible / temporal_ok) + resolvers
+#       (compatible_models / compatible_datasets).
 #
 #####################################################################################################################################################################################################
 """Model + dataset-type registry (single source of truth) for model selection.
 
-A0 scope: spec dataclasses + seeds + ``dataset_type_options()``. See the module header
-and the design-of-record note for the full design.
+A0 scope: spec dataclasses + seeds + ``dataset_type_options()``. A1-iv-1 adds the pure,
+browser-free compatibility engine (``compatible`` + ``temporal_ok`` + the
+``compatible_models`` / ``compatible_datasets`` resolvers) — the §4 correctness guarantee.
+See the module header and the design-of-record note for the full design.
 """
 
 from __future__ import annotations
@@ -172,3 +177,52 @@ def get_model_spec(key: str) -> ModelSpec | None:
         if key == spec.key or key in spec.aliases:
             return spec
     return None
+
+
+# Compatibility engine (A1-iv-1) — the pure dataset x model predicate + resolvers (design §4).
+# Datasets declare PROPERTIES (ndim / task_type / temporal); models declare REQUIREMENTS
+# (input_ndim / supported_task_types / requires_dt). Compatibility is a pure, browser-free
+# predicate and IS the correctness guarantee (D5): the UI greying layered on top is a
+# best-effort affordance, and the target model service still fails closed on a shape mismatch
+# (FR9). The temporal clause is the fine discriminator that separates same-ndim / same-task
+# models (e.g. two 3-D regressors) as the model population grows (§1). Resolvers filter purely
+# on compatibility and are independent of ``status`` (lifecycle gating is a separate
+# presentation axis — D8).
+
+
+def temporal_ok(dataset: DatasetTypeSpec, model: ModelSpec) -> bool:
+    """Return True when ``model`` satisfies ``dataset``'s temporal requirement.
+
+    Only *irregular*-delta-t data imposes a constraint: the model must consume per-step
+    delta-t (``requires_dt``). Regular and non-temporal datasets place no constraint — a
+    delta-t-aware model still accepts them (delta-t is simply constant or absent). Design §4.
+    """
+    if dataset.temporal == "irregular":
+        return model.requires_dt
+    return True
+
+
+def compatible(dataset: DatasetTypeSpec, model: ModelSpec) -> bool:
+    """Return True when ``dataset`` can be trained on ``model`` — the design §4 predicate.
+
+    Multi-axis: ``ndim`` (necessary) AND ``task_type`` (carried; currently inert across the
+    seeds) AND the temporal clause (``temporal_ok``). This is *compatibility* only and is
+    independent of ``model.status``: a ``coming_soon`` model is still compatible (D8).
+    """
+    return dataset.ndim in model.input_ndim and dataset.task_type in model.supported_task_types and temporal_ok(dataset, model)
+
+
+def compatible_models(dataset: DatasetTypeSpec, *, models: tuple[ModelSpec, ...] = MODELS) -> list[ModelSpec]:
+    """Return the models compatible with ``dataset``, in ``models`` order.
+
+    Pure compatibility — no ``status`` filtering (D8). ``models`` is injectable for tests.
+    """
+    return [model for model in models if compatible(dataset, model)]
+
+
+def compatible_datasets(model: ModelSpec, *, dataset_types: tuple[DatasetTypeSpec, ...] = DATASET_TYPES) -> list[DatasetTypeSpec]:
+    """Return the dataset types compatible with ``model``, in ``dataset_types`` order.
+
+    Pure compatibility — no ``status`` filtering (D8). ``dataset_types`` is injectable for tests.
+    """
+    return [dataset for dataset in dataset_types if compatible(dataset, model)]
