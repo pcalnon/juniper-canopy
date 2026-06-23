@@ -78,6 +78,12 @@ class MetricsResult(TypedDict, total=False):
 
     epoch: int
     loss: float
+    # A1-iii-b2: the regression metric set returned by RecurrenceBackend.get_metrics for a
+    # one-shot (recurrence / LMU) fit — these models never emit an 'accuracy' key.
+    r2: float
+    mse: float
+    rmse: float
+    mae: float
     accuracy: float
     learning_rate: float
     timestamp: str
