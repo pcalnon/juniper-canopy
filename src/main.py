@@ -2916,7 +2916,7 @@ async def api_train_status():
     Returns:
         Training status dictionary with network info and training state.
     """
-    return {"backend": backend.backend_type, **backend.get_status()}
+    return {"backend": backend.backend_type, "execution": backend.execution, **backend.get_status()}
 
 
 class SetParamsRequest(BaseModel):

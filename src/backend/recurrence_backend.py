@@ -120,6 +120,11 @@ class RecurrenceBackend:
         # suppression off it; main.py's backend_type branches are audited in A1-iii.
         return "recurrence"
 
+    @property
+    def execution(self) -> str:
+        """One-shot fit paradigm — drives A1-iii cascade-panel suppression + regression metrics."""
+        return "one_shot"
+
     # --- Training control ---
 
     def start_training(self, reset: bool = True, **kwargs: Any) -> ControlResult:

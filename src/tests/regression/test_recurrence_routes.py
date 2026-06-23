@@ -111,6 +111,12 @@ class TestRecurrenceRouteCorrectness:
         # The bug: `!= "service"` made recurrence serve simulated demo snapshots.
         assert resp.json().get("message") != "Demo mode: showing simulated snapshots"
 
+    def test_train_status_exposes_one_shot_execution(self, client, recurrence_backend):
+        # A1-iii-b1: /api/train/status carries the execution paradigm that drives UI suppression.
+        resp = client.get("/api/train/status")
+        assert resp.status_code == 200
+        assert resp.json()["execution"] == "one_shot"
+
     def test_workers_stats_empty_for_recurrence(self, client, recurrence_backend):
         resp = client.get("/api/v1/workers/stats")
         assert resp.status_code == 200

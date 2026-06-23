@@ -178,6 +178,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `notes/JUNIPER_CANOPY_A1_III_DASHBOARD_INTEGRATION_SCOPE_2026-06-23.md`. Tests:
   `src/tests/regression/test_recurrence_routes.py` (11 cases — route mis-bucket guards,
   topology/boundary 503, dataset-ref forwarding, cascor-unaffected, the helper).
+- **One-shot cascade-panel suppression — model-selection A1 enabler (A1-iii-b1, #368)**:
+  the dashboard now hides the cascade-network-only panels for a one-shot (recurrence / LMU)
+  model. Adds an **execution paradigm** axis: `ModelSpec.execution` (`"live" | "one_shot"`,
+  `model_registry.py`) + an `execution` property on `BackendProtocol` and all three backends
+  (`demo`/`service` → `"live"`, `recurrence` → `"one_shot"`), surfaced to the frontend via a
+  new `"execution"` field on `GET /api/train/status`. A new `model-class-store` (`dcc.Store`)
+  is hydrated from that route on mount; when it reads `"one_shot"`, three callbacks
+  (`_setup_model_class_callbacks`) **suppress** the cascade-only surface — the 5 viz tabs
+  (Candidate Metrics / Network Topology / Network Evolution / Decision Boundary / Workers,
+  rebuilt via a new `_all_visualization_tabs()` + `_visible_tabs()` so a now-hidden active
+  tab falls back to *Training Metrics*) and the status-bar **Iteration** (hidden-units)
+  segment. An LMU has no growing topology, decision boundary, candidate units, or worker pool,
+  so these are meaningless for it; the route layer already refuses to serve them (A1-iii-a).
+  **Suppression only** — the metrics accuracy→regression switch + the one-shot result view are
+  A1-iii-b2. Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_A1_III_DASHBOARD_INTEGRATION_SCOPE_2026-06-23.md`. Tests:
+  `src/tests/unit/test_recurrence_ui_suppression.py` (8 cases — execution flag across the
+  backends + registry, and `_visible_tabs` drop/keep behavior) + a `/api/train/status`
+  execution assertion in `test_recurrence_routes.py`.
 
 - **Build provenance on `/v1/health` + `/v1/health/ready`.** The dashboard now
   reports the source `git_sha` and ISO-8601 `build_date` baked into its image

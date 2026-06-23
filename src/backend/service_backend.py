@@ -80,6 +80,11 @@ class ServiceBackend:
     def backend_type(self) -> str:
         return "service"
 
+    @property
+    def execution(self) -> str:
+        """Execution paradigm — cascor streams live per-epoch training (A1-iii)."""
+        return "live"
+
     # --- Training control ---
 
     def start_training(self, reset: bool = True, **kwargs: Any) -> ControlResult:

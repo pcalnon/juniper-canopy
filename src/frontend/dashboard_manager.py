@@ -360,6 +360,11 @@ TAB_HEADER_MAP = {
 }
 
 
+# A1-iii-b1: viz tabs that are cascade-network-specific and meaningless for a one-shot
+# (recurrence / LMU) model — hidden when the active model's execution is "one_shot".
+_CASCADE_ONLY_TAB_IDS = frozenset({"candidates", "topology", "evolution", "boundaries", "workers"})
+
+
 class DashboardManager:
     """
     Central dashboard manager for Juniper Canopy.
@@ -735,6 +740,9 @@ class DashboardManager:
                                                                     style={"fontWeight": "bold", "color": "#17a2b8"},
                                                                 ),
                                                             ],
+                                                            # A1-iii-b1: id so a one_shot (recurrence) model can hide
+                                                            # this cascade-only "Iteration" (hidden-units) segment.
+                                                            id="status-iteration-segment",
                                                             style={"marginRight": "20px"},
                                                         ),
                                                         # Latency display (right side)
@@ -1557,83 +1565,10 @@ class DashboardManager:
                         dbc.Col(
                             [
                                 dbc.Tabs(
-                                    [
-                                        dbc.Tab(
-                                            self.metrics_panel.get_layout(),
-                                            label="Training Metrics",
-                                            tab_id="metrics",
-                                        ),
-                                        dbc.Tab(
-                                            self.candidate_metrics_panel.get_layout(),
-                                            label="Candidate Metrics",
-                                            tab_id="candidates",
-                                        ),
-                                        dbc.Tab(
-                                            self.network_visualizer.get_layout(),
-                                            label="Network Topology",
-                                            tab_id="topology",
-                                        ),
-                                        dbc.Tab(
-                                            self.network_evolution.get_layout(),
-                                            label="Network Evolution",
-                                            tab_id="evolution",
-                                        ),
-                                        dbc.Tab(
-                                            self.decision_boundary.get_layout(),
-                                            label="Decision Boundary",
-                                            tab_id="boundaries",
-                                        ),
-                                        dbc.Tab(
-                                            self.dataset_plotter.get_layout(),
-                                            label="Dataset View",
-                                            tab_id="dataset",
-                                        ),
-                                        dbc.Tab(
-                                            self.worker_panel.get_layout(),
-                                            label="Workers",
-                                            tab_id="workers",
-                                        ),
-                                        dbc.Tab(
-                                            self.parameters_panel.get_layout(),
-                                            label="Parameters",
-                                            tab_id="parameters",
-                                        ),
-                                        dbc.Tab(
-                                            self.hdf5_snapshots_panel.get_layout(),
-                                            label="Snapshots",
-                                            tab_id="snapshots",
-                                        ),
-                                        dbc.Tab(
-                                            self.replay_player_panel.get_layout(),
-                                            label="Replay",
-                                            tab_id="replay",
-                                        ),
-                                        dbc.Tab(
-                                            self.network_editor_panel.get_layout(),
-                                            label="Network Editor",
-                                            tab_id="network-editor",
-                                        ),
-                                        dbc.Tab(
-                                            self.redis_panel.get_layout(),
-                                            label="Redis",
-                                            tab_id="redis",
-                                        ),
-                                        dbc.Tab(
-                                            self.cassandra_panel.get_layout(),
-                                            label="Cassandra",
-                                            tab_id="cassandra",
-                                        ),
-                                        dbc.Tab(
-                                            self.tutorial_panel.get_layout(),
-                                            label="Tutorial",
-                                            tab_id="tutorial",
-                                        ),
-                                        dbc.Tab(
-                                            self.about_panel.get_layout(),
-                                            label="About",
-                                            tab_id="about",
-                                        ),
-                                    ],
+                                    # A1-iii-b1: the tab list is built by a method so the
+                                    # model-class suppression callback can rebuild it with the
+                                    # cascade-only tabs filtered out for a one_shot model.
+                                    self._all_visualization_tabs(),
                                     id="visualization-tabs",
                                     active_tab="metrics",
                                 )
@@ -1677,6 +1612,11 @@ class DashboardManager:
                 # events. Each entry is a tiny dict with counts only — full
                 # connections lists would explode the store at 20×.
                 dcc.Store(id="evolution-snapshots-store", data=[]),
+                # A1-iii-b1: the active model's execution paradigm ("live" | "one_shot"),
+                # hydrated from GET /api/train/status. Drives cascade-panel suppression — a
+                # "one_shot" (recurrence) model hides the 5 cascade-only viz tabs + the
+                # status-bar iteration segment. Defaults "live" so the full dashboard renders.
+                dcc.Store(id="model-class-store", storage_type="memory", data="live"),
                 # Update intervals
                 dcc.Interval(id="fast-update-interval", interval=DashboardConstants.FAST_UPDATE_INTERVAL_MS, n_intervals=0),
                 dcc.Interval(id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0),
@@ -1888,6 +1828,112 @@ class DashboardManager:
         """
         return f"{self._api_base_url}/{path.lstrip('/')}"
 
+    def _all_visualization_tabs(self):
+        """Return the full ordered list of right-panel ``dbc.Tab``s (A1-iii-b1).
+
+        Extracted from ``get_layout`` so the model-class suppression callback
+        (``_setup_model_class_callbacks``) can rebuild the tab bar with the 5 cascade-only
+        tabs (candidates / topology / evolution / boundaries / workers) filtered out when a
+        one-shot model is active.
+        """
+        # NOTE: one ``dbc.Tab`` per call with ``label=`` and ``tab_id=`` on SEPARATE lines
+        # (trailing comma keeps Black from collapsing them at line-length 512). The UI test
+        # ``test_sidebar_width._parse_tab_labels`` greps this source for the
+        # ``label="X",\n  tab_id="y"`` pattern, so the multi-line shape is load-bearing.
+        return [
+            dbc.Tab(
+                self.metrics_panel.get_layout(),
+                label="Training Metrics",
+                tab_id="metrics",
+            ),
+            dbc.Tab(
+                self.candidate_metrics_panel.get_layout(),
+                label="Candidate Metrics",
+                tab_id="candidates",
+            ),
+            dbc.Tab(
+                self.network_visualizer.get_layout(),
+                label="Network Topology",
+                tab_id="topology",
+            ),
+            dbc.Tab(
+                self.network_evolution.get_layout(),
+                label="Network Evolution",
+                tab_id="evolution",
+            ),
+            dbc.Tab(
+                self.decision_boundary.get_layout(),
+                label="Decision Boundary",
+                tab_id="boundaries",
+            ),
+            dbc.Tab(
+                self.dataset_plotter.get_layout(),
+                label="Dataset View",
+                tab_id="dataset",
+            ),
+            dbc.Tab(
+                self.worker_panel.get_layout(),
+                label="Workers",
+                tab_id="workers",
+            ),
+            dbc.Tab(
+                self.parameters_panel.get_layout(),
+                label="Parameters",
+                tab_id="parameters",
+            ),
+            dbc.Tab(
+                self.hdf5_snapshots_panel.get_layout(),
+                label="Snapshots",
+                tab_id="snapshots",
+            ),
+            dbc.Tab(
+                self.replay_player_panel.get_layout(),
+                label="Replay",
+                tab_id="replay",
+            ),
+            dbc.Tab(
+                self.network_editor_panel.get_layout(),
+                label="Network Editor",
+                tab_id="network-editor",
+            ),
+            dbc.Tab(
+                self.redis_panel.get_layout(),
+                label="Redis",
+                tab_id="redis",
+            ),
+            dbc.Tab(
+                self.cassandra_panel.get_layout(),
+                label="Cassandra",
+                tab_id="cassandra",
+            ),
+            dbc.Tab(
+                self.tutorial_panel.get_layout(),
+                label="Tutorial",
+                tab_id="tutorial",
+            ),
+            dbc.Tab(
+                self.about_panel.get_layout(),
+                label="About",
+                tab_id="about",
+            ),
+        ]
+
+    def _visible_tabs(self, model_class):
+        """Return the right-panel tabs for the model class (A1-iii-b1).
+
+        For a ``"one_shot"`` model the cascade-only tabs are dropped; otherwise the full list
+        is returned unchanged. Pure (no Dash context) so the suppression logic is directly
+        unit-testable. Deliberately does NOT touch ``active_tab`` — the dashboard keeps exactly
+        two ``visualization-tabs.active_tab`` writers (Store-restore + tutorial trigger) to
+        avoid a mount-time restore race, and the default active tab ("metrics") is never a
+        cascade tab, so it survives the filter. (Resetting a hidden active tab on a *runtime*
+        model swap belongs with A1-iv's model-switch flow.)
+        """
+        tabs = self._all_visualization_tabs()
+        if model_class == "one_shot":
+            tabs = [tab for tab in tabs if tab.tab_id not in _CASCADE_ONLY_TAB_IDS]
+        return tabs
+
     def _setup_callbacks(self):
         """Set up dashboard callbacks."""
         self._setup_theme_callbacks()  # Define theme callbacks
@@ -1900,6 +1946,7 @@ class DashboardManager:
         self._setup_experimental_functions_callbacks()  # P2-4 (Issue #3)
         self._setup_live_dataset_switch_callbacks()  # P2-5 (Issue #3)
         self._setup_dataset_swap_observers_callbacks()  # P2-7 (Issue #3)
+        self._setup_model_class_callbacks()  # A1-iii-b1: cascade-panel suppression for one-shot models
 
     def _setup_sidebar_visibility_callback(self):
         """Set up sidebar contextual visibility based on active tab."""
@@ -1938,6 +1985,54 @@ class DashboardManager:
         def resize_sidebar_for_tab(active_tab: str):
             sidebar = ui_standards.TAB_SIDEBAR_WIDTH.get(active_tab, ui_standards.WIDE_SIDEBAR)
             return sidebar, ui_standards.GRID_COLUMNS - sidebar
+
+    def _setup_model_class_callbacks(self):
+        """A1-iii-b1: hydrate the model-class flag and suppress cascade-only panels for one-shot models.
+
+        ``model-class-store`` is hydrated once from ``GET /api/train/status`` (which carries the
+        active backend's ``execution`` paradigm). When it reads ``"one_shot"`` (a recurrence /
+        LMU fit), the cascade-only viz tabs and the status-bar iteration segment are hidden — an
+        LMU has no growing topology, decision boundary, candidate units, or worker pool.
+        """
+
+        @self.app.callback(
+            Output("model-class-store", "data"),
+            Input("params-init-interval", "n_intervals"),
+            prevent_initial_call=True,
+        )
+        def hydrate_model_class(_n_intervals):
+            """Read the active backend's execution paradigm from /api/train/status (once on mount)."""
+            try:
+                resp = requests.get(
+                    self._api_url("/api/train/status"),
+                    timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT,
+                    headers=internal_api_headers(),
+                )
+                if resp.ok and resp.json().get("execution") == "one_shot":
+                    return "one_shot"
+            except Exception as exc:
+                # Transport hiccup → keep the default "live" (render the full dashboard).
+                self.logger.debug("model-class hydration failed; defaulting to 'live': %s", exc)
+            return "live"
+
+        @self.app.callback(
+            Output("visualization-tabs", "children"),
+            Input("model-class-store", "data"),
+            prevent_initial_call=True,
+        )
+        def suppress_cascade_tabs(model_class):
+            """Rebuild the tab bar, dropping the cascade-only tabs when the model is one_shot."""
+            return self._visible_tabs(model_class)
+
+        @self.app.callback(
+            Output("status-iteration-segment", "style"),
+            Input("model-class-store", "data"),
+            prevent_initial_call=True,
+        )
+        def toggle_iteration_segment(model_class):
+            """Hide the status-bar 'Iteration' (hidden-units) segment for a one_shot model."""
+            base = {"marginRight": "20px"}
+            return {**base, "display": "none"} if model_class == "one_shot" else base
 
     # Define theme callbacks
     def _setup_theme_callbacks(self):
