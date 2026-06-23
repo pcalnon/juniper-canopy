@@ -70,6 +70,11 @@ class DemoBackend:
     def backend_type(self) -> str:
         return "demo"
 
+    @property
+    def execution(self) -> str:
+        """Execution paradigm — demo streams per-epoch like cascor (A1-iii)."""
+        return "live"
+
     # --- Training control ---
 
     def start_training(self, reset: bool = True, **kwargs: Any) -> ControlResult:

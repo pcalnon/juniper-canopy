@@ -89,6 +89,7 @@ class ModelSpec:
     benchmark_id: str = ""  # stable ref for result analysis
     requires_dt: bool = False  # consumes per-step delta-t (irregular sequences)
     status: str = "live"  # "live"|"coming_soon"|"experimental"|"deprecated"|"broken"
+    execution: str = "live"  # "live" (streamed per-epoch training) | "one_shot" (single blocking fit). Drives the A1-iii one-shot UI: suppress cascade panels + switch metrics accuracy->regression when "one_shot".
     tags: frozenset[str] = frozenset()  # facet tags for the A1 selection surface
     description: str = ""
     aliases: tuple[str, ...] = ()
@@ -145,6 +146,7 @@ MODELS: tuple[ModelSpec, ...] = (
         version="0.1.0",
         requires_dt=True,
         status="coming_soon",
+        execution="one_shot",
         provider=RECURRENCE_PROVIDER,
         description="Legendre Memory Unit regressor for irregular-delta-t time series.",
     ),

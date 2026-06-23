@@ -306,5 +306,15 @@ class BackendProtocol(Protocol):
 
     @property
     def backend_type(self) -> str:
-        """Return 'demo' or 'service' for logging/status."""
+        """Return 'demo', 'service', or 'recurrence' for logging/status."""
+        ...
+
+    @property
+    def execution(self) -> str:
+        """Return the execution paradigm: 'live' or 'one_shot' (A1-iii).
+
+        'live' — streamed per-epoch training (demo / cascor). 'one_shot' — a single blocking
+        fit (recurrence / LMU). The dashboard suppresses cascade-only panels and renders a
+        regression result instead of a per-epoch classification view when 'one_shot'.
+        """
         ...
