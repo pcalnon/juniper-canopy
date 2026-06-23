@@ -114,6 +114,12 @@ DATASET_TYPES: tuple[DatasetTypeSpec, ...] = (
 # Default dataset type — preserves the prior hardcoded value="spirals".
 DEFAULT_DATASET_TYPE: str = DATASET_TYPES[0].value
 
+# Provider sentinel for models served by the juniper-recurrence model service. Single
+# source of truth shared by the ``recurrence`` ModelSpec seed (below) and the backend
+# factory's provider routing (``backend.create_backend``, A1-ii). The cascor model uses
+# the ``"in-process"`` provider; demo has none.
+RECURRENCE_PROVIDER: str = "juniper-recurrence"
+
 # Known models. cascor is the live feed-forward backend; recurrence (LMU) is the
 # coming-soon 3-D / irregular-delta-t model (published as juniper-recurrence-model
 # 0.1.0; the canopy-routable service is not yet deployed — design note §5.7 / §8.4).
@@ -139,7 +145,7 @@ MODELS: tuple[ModelSpec, ...] = (
         version="0.1.0",
         requires_dt=True,
         status="coming_soon",
-        provider="juniper-recurrence",
+        provider=RECURRENCE_PROVIDER,
         description="Legendre Memory Unit regressor for irregular-delta-t time series.",
     ),
 )
@@ -152,3 +158,15 @@ def dataset_type_options() -> list[dict[str, str]]:
     ``dashboard_manager``). Order is preserved for behavior parity.
     """
     return [{"label": spec.label, "value": spec.value} for spec in DATASET_TYPES]
+
+
+def get_model_spec(key: str) -> ModelSpec | None:
+    """Return the :class:`ModelSpec` for ``key`` (matching ``key`` or an alias), or None.
+
+    Used by the backend factory (``backend.create_backend``) to resolve a selected model
+    key to its provider for routing, and available to the A1 selection UI for lookups.
+    """
+    for spec in MODELS:
+        if key == spec.key or key in spec.aliases:
+            return spec
+    return None

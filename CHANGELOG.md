@@ -133,6 +133,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `..._MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md`. Tests:
   `src/tests/unit/test_recurrence_service_adapter.py` (24 cases, mocked via
   `httpx.MockTransport`) + `src/tests/unit/test_recurrence_settings.py` (11 cases).
+- **Recurrence backend + provider routing — model-selection A1 enabler (A1-ii, #368)**:
+  the second build slice, making the recurrence model *routable* through canopy's backend
+  factory. Adds `RecurrenceBackend` (`src/backend/recurrence_backend.py`) — a
+  `BackendProtocol` wrapper over the A1-i `RecurrenceServiceAdapter` that bridges the
+  execution-paradigm mismatch (D1-A): the recurrence `POST /v1/train` is a **synchronous
+  one-shot fit**, so `start_training` backgrounds it on a daemon thread and the backend
+  reports a **binary** `idle → training → trained|failed` status via `get_status` /
+  `is_training_active` (no fabricated per-epoch progress). The cascade-only protocol
+  surface is honestly stubbed — `get_network_topology` / `get_raw_topology` /
+  `get_decision_boundary` return `None` (LMU has no growing topology or 2-D decision
+  boundary, D6) — and `get_metrics` carries the **regression** metric set (mse / rmse / mae
+  / r2 / loss, never accuracy); `apply_params` stages `d` / `theta` / `ridge` for the next
+  fit; failures surface via the existing `completion_reason` field. `create_backend()`
+  (`src/backend/__init__.py`) gains an `nn_model` axis (D5): a recurrence-provider model
+  (resolved via the new `model_registry.get_model_spec()` + `RECURRENCE_PROVIDER` constant)
+  with `recurrence_service_url` configured routes to `RecurrenceBackend`; **every other
+  case — non-recurrence model, unconfigured URL, or the `nn_model=None` startup default —
+  leaves the demo/cascor selection byte-for-byte unchanged**. **Routing + backend only**:
+  wiring `backend_type == "recurrence"` through `main.py`'s route branches and the one-shot
+  result view / panel suppression are A1-iii. Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_MODEL_SELECTION_A1_ENABLER_SCOPE_2026-06-18.md` (D1-A / D5 / D6).
+  Tests: `src/tests/unit/backend/test_recurrence_backend.py` (24 cases — backgrounding,
+  binary status, stubs, failure handling, controllable fake adapter) +
+  `src/tests/unit/test_recurrence_routing.py` (9 cases — routing precedence + `get_model_spec`).
 
 - **Build provenance on `/v1/health` + `/v1/health/ready`.** The dashboard now
   reports the source `git_sha` and ISO-8601 `build_date` baked into its image
