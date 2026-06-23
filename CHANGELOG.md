@@ -197,6 +197,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `src/tests/unit/test_recurrence_ui_suppression.py` (8 cases — execution flag across the
   backends + registry, and `_visible_tabs` drop/keep behavior) + a `/api/train/status`
   execution assertion in `test_recurrence_routes.py`.
+- **One-shot regression result view — model-selection A1 enabler (A1-iii-b2, #368)**: the
+  final A1-iii slice — a one-shot (recurrence / LMU) model now renders its **regression**
+  result instead of a broken classification view. The metrics panel
+  (`src/frontend/components/metrics_panel.py`) gains a `model-class-store`-driven callback
+  (`render_model_class_metrics`) that, when the active model is `one_shot`, **hides the
+  classification surface** (the accuracy / hidden-units / learning-rate cards row +
+  both per-epoch loss/accuracy plots — meaningless for a single regression fit) and **shows a
+  regression result card** (`_build_oneshot_result`): R² / RMSE / MSE / MAE / Loss formatted as
+  plain floats (never a percentage), with a spinner placeholder while the fit runs. The
+  `MetricsResult` TypedDict (`backend/protocol.py`) gains the regression keys (`r2` / `mse` /
+  `rmse` / `mae`) so `RecurrenceBackend.get_metrics` is type-honest. **Design choice:** a
+  dedicated result card (per design D-iii-3 "a regression-metrics card") rather than retrofitting
+  the classification cards in-place — which also sidesteps the cascor nested-vs-flat metrics-
+  envelope mismatch (the hidden classification cards never read recurrence data). Design-of-
+  record: juniper-ml `notes/JUNIPER_CANOPY_A1_III_DASHBOARD_INTEGRATION_SCOPE_2026-06-23.md`.
+  Tests: `src/tests/unit/test_recurrence_oneshot_result.py` (7 cases — surface toggle +
+  regression card / spinner) + regenerated `snapshots/metrics_panel.txt`; UI sub-suite run
+  locally.
 
 - **Build provenance on `/v1/health` + `/v1/health/ready`.** The dashboard now
   reports the source `git_sha` and ISO-8601 `build_date` baked into its image

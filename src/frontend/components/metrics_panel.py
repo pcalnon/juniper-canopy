@@ -443,8 +443,13 @@ class MetricsPanel(BaseComponent):
                             style={"flex": "1", "textAlign": "center", "padding": "15px"},
                         ),
                     ],
+                    id=f"{self.component_id}-classification-metrics",
                     style={"display": "flex", "justifyContent": "space-around", "marginBottom": "20px", "gap": "10px"},
                 ),
+                # A1-iii-b2: one-shot (recurrence / LMU) regression result card. Hidden for a
+                # live model; for a one_shot model the classification cards + plots above/below
+                # are hidden and this card is shown + populated by ``render_model_class_metrics``.
+                html.Div(id=f"{self.component_id}-oneshot-result", style={"display": "none"}),
                 # Training progress bars
                 html.Div(
                     id=f"{self.component_id}-progress-bars",
@@ -687,6 +692,27 @@ class MetricsPanel(BaseComponent):
         )
         def update_metrics_display(metrics_data: List[Dict[str, Any]], theme: str, display_mode_state: Dict, view_state: Dict, training_state: Dict):
             return self._update_metrics_display_handler(metrics_data=metrics_data, theme=theme, view_state=view_state, display_mode_state=display_mode_state, training_state=training_state)
+
+        # A1-iii-b2: render the one-shot regression result for a recurrence (LMU) model and
+        # hide the classification surface (the accuracy cards + per-epoch loss/accuracy plots
+        # are meaningless for a single regression fit). Driven by the b1 ``model-class-store``;
+        # re-fires on each metrics-store update so the result card fills in when the fit lands.
+        @app.callback(
+            [
+                Output(f"{self.component_id}-oneshot-result", "children"),
+                Output(f"{self.component_id}-oneshot-result", "style"),
+                Output(f"{self.component_id}-classification-metrics", "style"),
+                Output(f"{self.component_id}-loss-plot", "style"),
+                Output(f"{self.component_id}-accuracy-plot", "style"),
+            ],
+            [
+                Input("model-class-store", "data"),
+                Input(f"{self.component_id}-metrics-store", "data"),
+            ],
+            prevent_initial_call=False,
+        )
+        def render_model_class_metrics(model_class: str, metrics_data: List[Dict[str, Any]]):
+            return self._render_model_class_metrics(model_class, metrics_data)
 
         # Phase B: Incremental chart update via Plotly.extendTraces (§S7).
         # When WS bridge pushes new metrics events, append them to the
@@ -1460,6 +1486,65 @@ class MetricsPanel(BaseComponent):
         except Exception as e:
             self.logger.error(f"Failed to delete layout: {e}")
             return f"❌ Error: {str(e)}", None, layout_name
+
+    def _render_model_class_metrics(self, model_class: str, metrics_data: List[Dict[str, Any]]):
+        """Toggle the metrics surface by model class (A1-iii-b2).
+
+        Returns ``(oneshot_children, oneshot_style, classification_style, loss_plot_style,
+        accuracy_plot_style)``. For a ``"one_shot"`` model the regression result card is shown
+        and the classification cards + both per-epoch plots are hidden; otherwise the normal
+        (live) surface is shown and the result card stays hidden. Pure — directly unit-testable.
+        """
+        cards_style = {"display": "flex", "justifyContent": "space-around", "marginBottom": "20px", "gap": "10px"}
+        plot_style = {"height": "300px"}
+        if model_class == "one_shot":
+            hidden_cards = {**cards_style, "display": "none"}
+            hidden_plot = {**plot_style, "display": "none"}
+            return self._build_oneshot_result(metrics_data), {"display": "block", "marginBottom": "20px"}, hidden_cards, hidden_plot, hidden_plot
+        # live (demo / cascor): classification surface visible, result card hidden
+        return [], {"display": "none"}, cards_style, plot_style, plot_style
+
+    def _build_oneshot_result(self, metrics_data: List[Dict[str, Any]]):
+        """Build the one-shot regression result card from the latest metrics (A1-iii-b2).
+
+        ``metrics_data`` is ``RecurrenceBackend.get_metrics_history()`` — a single flat point
+        ``{r2, mse, rmse, mae, loss, epoch}`` once the fit lands, or empty while it runs (then a
+        spinner is shown). Regression-generic: never an accuracy/percentage readout.
+        """
+        if not metrics_data:
+            return html.Div(
+                [
+                    dbc.Spinner(size="sm", color="primary"),
+                    html.Span("  Awaiting recurrence (LMU) fit result…", style={"marginLeft": "8px", "color": "var(--text-muted)"}),
+                ],
+                style={"textAlign": "center", "padding": "30px"},
+            )
+        latest = metrics_data[-1] if isinstance(metrics_data, list) else metrics_data
+
+        def _fmt(key: str) -> str:
+            value = latest.get(key)
+            return f"{value:.4f}" if isinstance(value, (int, float)) and not isinstance(value, bool) else "--"
+
+        cards = [
+            html.Div(
+                [html.H5(label, style={"color": "var(--text-muted)", "marginBottom": "4px"}), html.H3(_fmt(key), style={"color": color})],
+                className="metric-card",
+                style={"flex": "1", "textAlign": "center", "padding": "12px"},
+            )
+            for label, key, color in (
+                ("R²", "r2", "#28a745"),
+                ("RMSE", "rmse", "#dc3545"),
+                ("MSE", "mse", "#fd7e14"),
+                ("MAE", "mae", "#6f42c1"),
+                ("Loss", "loss", "#17a2b8"),
+            )
+        ]
+        return html.Div(
+            [
+                html.H5("Recurrence (LMU) — final regression metrics", style={"marginBottom": "12px"}),
+                html.Div(cards, style={"display": "flex", "justifyContent": "space-around", "gap": "10px"}),
+            ]
+        )
 
     def _create_loss_plot(self, metrics_data: List[Dict[str, Any]], theme: str = "light") -> go.Figure:
         """
