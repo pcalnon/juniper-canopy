@@ -5,7 +5,7 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.5.0
-**Last Updated**: 2026-06-21
+**Last Updated**: 2026-06-23
 
 ---
 
@@ -24,10 +24,10 @@ The juniper_canopy prototype is a real-time monitoring and diagnostic frontend f
 
 ### Conda Environment
 
-> **Required:** Activate the `JuniperCanopy` conda environment before running any commands.
+> **Required:** Activate the live `JuniperCanopy1` conda environment before running any commands. The env name is **versioned** — rebuilds increment the suffix and rename the old env `*-DEPRECATED` (never activate those). Discover yours with `conda env list | grep JuniperCanopy`.
 
 ```bash
-conda activate JuniperCanopy
+conda activate JuniperCanopy1   # live env; see the note above
 ```
 
 For agents and subagents working on this codebase, follow this checklist:
@@ -935,17 +935,17 @@ def robust_function():
 
 ### Conda Environment
 
-The project uses the JuniperCanopy conda environment:
+The project uses the live `JuniperCanopy1` conda environment (the name is versioned — discover yours with `conda env list | grep JuniperCanopy`; never activate a `*-DEPRECATED` env):
 
 ```bash
 # Location
-/opt/miniforge3/envs/JuniperCanopy
+/opt/miniforge3/envs/JuniperCanopy1
 
 # Activate manually
-conda activate JuniperCanopy
+conda activate JuniperCanopy1
 
 # Python interpreter path
-/opt/miniforge3/envs/JuniperCanopy/bin/python
+/opt/miniforge3/envs/JuniperCanopy1/bin/python
 ```
 
 ### Configuration
@@ -977,10 +977,10 @@ export JUNIPER_CANOPY_DEMO_MODE=true
 python main.py
 
 # Correct (uses conda Python)
-/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
+/opt/miniforge3/envs/JuniperCanopy1/bin/python main.py
 
 # Or activate environment first
-conda activate JuniperCanopy
+conda activate JuniperCanopy1
 python main.py
 ```
 
@@ -1105,7 +1105,7 @@ logs/
 export JUNIPER_CANOPY_LOG_LEVEL=DEBUG
 
 # Run with verbose output
-/opt/miniforge3/envs/JuniperCanopy/bin/python -u main.py
+/opt/miniforge3/envs/JuniperCanopy1/bin/python -u main.py
 ```
 
 ## Deployment
@@ -1124,7 +1124,7 @@ export JUNIPER_CANOPY_CASCOR_SERVICE_URL=http://cascor-host:8200
 
 # Run application
 cd src
-/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
+/opt/miniforge3/envs/JuniperCanopy1/bin/python main.py
 ```
 
 ### Docker
@@ -1291,14 +1291,14 @@ The demo mode must accurately simulate the real CasCor backend to enable UI deve
 
 ### Conda Environment, Path and Environment
 
-**Always use JuniperCanopy conda environment:**
+**Always use the live `JuniperCanopy1` conda environment** (the name is versioned — discover yours with `conda env list | grep JuniperCanopy`):
 
 ```bash
 # Location
-/opt/miniforge3/envs/JuniperCanopy
+/opt/miniforge3/envs/JuniperCanopy1
 
 # Python interpreter path
-/opt/miniforge3/envs/JuniperCanopy/bin/python
+/opt/miniforge3/envs/JuniperCanopy1/bin/python
 ```
 
 **Launch via scripts in `util/`** (they activate conda automatically):
