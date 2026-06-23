@@ -124,7 +124,7 @@ and a **WebSocket control surface** for pausing, resuming, and stepping a runnin
 ### Prerequisites
 
 - Python ≥ 3.11
-- Conda environment `JuniperCanopy` (rebuilt envs may be named `JuniperCanopy1` per `notes/JUNIPER_CONDA_ENV_REBUILD_PROCEDURE.md` in the parent ecosystem documentation)
+- Conda environment `JuniperCanopy1` — the live env is **versioned** (rebuilds increment the suffix and rename the old env `*-DEPRECATED`; never activate those). Discover yours with `conda env list | grep JuniperCanopy`. See the Juniper ecosystem conda-env rebuild procedure (`juniper-ml/notes/JUNIPER_CONDA_ENV_REBUILD_PROCEDURE.md`).
 - Git
 - For service mode: a running `juniper-cascor` instance on `http://<host>:8200`; optionally a running `juniper-data` instance on `http://<host>:8100`
 
@@ -133,7 +133,7 @@ and a **WebSocket control surface** for pausing, resuming, and stepping a runnin
 ```bash
 git clone https://github.com/pcalnon/juniper-canopy.git
 cd juniper-canopy
-conda activate JuniperCanopy
+conda activate JuniperCanopy1   # live env — run: conda env list | grep JuniperCanopy
 pip install -e ".[dev]"
 ```
 

@@ -11,15 +11,17 @@
 **The following commands launch a full set of Juniper Project services, start services in the order listed below:**
 
 - juniper-data: cd /home/pcalnon/Development/python/Juniper/juniper-data && conda activate JuniperData && pip install -e ".[all]" && PYTHON_GIL=0 uvicorn juniper_data.api.app:app --host 0.0.0.0 --port 8100
-- juniper-cascor: cd /home/pcalnon/Development/python/Juniper/juniper-cascor/src && conda activate JuniperCascor && JUNIPER_CASCOR_PORT=8201 python server.py
-- juniper-canopy: cd /home/pcalnon/Development/python/Juniper/juniper-canopy/src && conda activate JuniperCanopy && CASCOR_SERVICE_URL="<http://localhost:8201>" uvicorn main:app --host 0.0.0.0 --port 8050
+- juniper-cascor: cd /home/pcalnon/Development/python/Juniper/juniper-cascor/src && conda activate JuniperCascor1 && JUNIPER_CASCOR_PORT=8201 python server.py
+- juniper-canopy: cd /home/pcalnon/Development/python/Juniper/juniper-canopy/src && conda activate JuniperCanopy1 && CASCOR_SERVICE_URL="<http://localhost:8201>" uvicorn main:app --host 0.0.0.0 --port 8050
+
+> **Conda env naming:** the live envs are **versioned** — `JuniperCanopy1`, `JuniperCascor1` (the bare `JuniperCanopy` / `JuniperCascor` are now `*-DEPRECATED` with a broken toolchain; `JuniperData` is unversioned). Discover yours with `conda env list | grep Juniper<App>` and use that name; rebuilds increment the suffix.
 
 **General list of useful Commands:**
 
 | Task                        | Command                                                                                              |
 |-----------------------------|------------------------------------------------------------------------------------------------------|
 | Run in demo mode            | `./demo`                                                                                             |
-| Run natively (real backend) | `conda activate JuniperCanopy && cd src && uvicorn main:app --port 8050`                             |
+| Run natively (real backend) | `conda activate JuniperCanopy1 && cd src && uvicorn main:app --port 8050`                             |
 | Run via Docker              | `docker build -f conf/Dockerfile -t juniper_canopy . && docker run --rm -p 8050:8050 juniper_canopy` |
 | Run via Docker Compose      | `docker compose -f conf/docker-compose.yaml up --build`                                              |
 | Health check                | `curl -s http://localhost:8050/v1/health \| python -m json.tool`                                     |
@@ -93,7 +95,7 @@ Existing components: `training_metrics`, `metrics_panel`, `network_visualizer`, 
 ### 4. Add a Dependency
 
 1. Add to `conf/requirements.txt` (and `conf/conda_environment.yaml` if conda-installable)
-2. Run `pip install -r conf/requirements.txt` in the `JuniperCanopy` conda env
+2. Run `pip install -r conf/requirements.txt` in the `JuniperCanopy1` conda env
 3. Update `conf/Dockerfile` if needed for Docker builds
 
 > See: [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)
@@ -213,7 +215,7 @@ Coverage includes:
 
 | Symptom                                          | Cause                      | Fix                                                                                                             |
 |--------------------------------------------------|----------------------------|-----------------------------------------------------------------------------------------------------------------|
-| `ModuleNotFoundError: No module named 'uvicorn'` | Wrong Python env           | `conda activate JuniperCanopy`                                                                            |
+| `ModuleNotFoundError: No module named 'uvicorn'` | Wrong Python env           | `conda activate JuniperCanopy1`                                                                            |
 | Env var not taking effect                        | Missing `CASCOR_` prefix   | Use `CASCOR_TRAINING_EPOCHS=300`, not `TRAINING_EPOCHS=300`                                                     |
 | YAML config not loading                          | Syntax error               | `python -c "import yaml; yaml.safe_load(open('conf/app_config.yaml'))"`                                         |
 | Demo mode not starting                           | `CASCOR_DEMO_MODE` not set | Run via `./demo` or `export CASCOR_DEMO_MODE=1` first                                                           |
