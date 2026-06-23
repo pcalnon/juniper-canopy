@@ -157,6 +157,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Tests: `src/tests/unit/backend/test_recurrence_backend.py` (24 cases — backgrounding,
   binary status, stubs, failure handling, controllable fake adapter) +
   `src/tests/unit/test_recurrence_routing.py` (9 cases — routing precedence + `get_model_spec`).
+- **Recurrence route correctness + dataset-ref plumbing — model-selection A1 enabler
+  (A1-iii-a, #368)**: makes a recurrence (one-shot) backend behave correctly in `main.py`'s
+  route layer and lets a recurrence fit actually run. **Route fixes** (`src/main.py`): the
+  `/api/v1/snapshots` mock-snapshot path is gated on `== "demo"` (was `!= "service"`, which
+  made recurrence serve fabricated demo snapshots); the snapshot create/restore adapter calls
+  are gated on `== "service"` (recurrence's `_adapter` is a different type — it must use the
+  h5py fallback, not cascor's `save_snapshot`/`load_snapshot`); `/api/v1/workers/stats` +
+  `/workers/list` return an **empty** pool for recurrence instead of the synthetic demo-worker
+  fixtures; and the lifespan seeds `training_state` from `get_status()` for recurrence (it has
+  no live stream / `set_state_update_callback`). The cascade-only routes were already correctly
+  fenced by `== "service"` guards (clean 501/503), and `RecurrenceBackend` already returns
+  `None` for topology / decision-boundary (a regression test now locks in the clean 503).
+  **Dataset-ref plumbing**: `/api/train/start` gains an optional body (`dataset` ref +
+  `d`/`theta`/`ridge`) and the `/ws/control` `start` command forwards its `params`, both via a
+  shared `_recurrence_start_kwargs` helper — for **recurrence only**, so cascor/demo keep their
+  bare `start_training(reset=…)` call **byte-for-byte unchanged** (extra kwargs would break
+  them). **No UI** — the model picker + the one-shot result view / panel suppression are
+  A1-iii-b / A1-iv. Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_A1_III_DASHBOARD_INTEGRATION_SCOPE_2026-06-23.md`. Tests:
+  `src/tests/regression/test_recurrence_routes.py` (11 cases — route mis-bucket guards,
+  topology/boundary 503, dataset-ref forwarding, cascor-unaffected, the helper).
 
 - **Build provenance on `/v1/health` + `/v1/health/ready`.** The dashboard now
   reports the source `git_sha` and ISO-8601 `build_date` baked into its image

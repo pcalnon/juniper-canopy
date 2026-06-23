@@ -254,6 +254,17 @@ async def lifespan(app: FastAPI):
             )
         # Register callback so relay-driven state updates keep training_state current
         backend.set_state_update_callback(training_state.update_state)
+    elif backend.backend_type == "recurrence":
+        # Recurrence (one-shot LMU) has no live training stream and no
+        # ``set_state_update_callback`` — the dashboard reads its binary status by
+        # polling ``get_status()``. Seed ``training_state`` from the backend's initial
+        # status so the dashboard boots to a consistent idle baseline (A1-iii-a).
+        initial_status = backend.get_status()
+        training_state.update_state(
+            status=initial_status.get("fsm_status", "idle"),
+            phase=initial_status.get("phase", "idle"),
+        )
+        system_logger.info("Global training_state seeded for recurrence (one-shot) backend: %s", initial_status.get("fsm_status", "idle"))
 
     system_logger.info("Backend initialized: %s", backend.backend_type)
     # METRICS-MON R3.2 / seed-11: reflect the post-fallback backend type in
@@ -596,6 +607,31 @@ async def websocket_training_endpoint(websocket: WebSocket):
         websocket_manager.disconnect(websocket)
 
 
+def _recurrence_start_kwargs(payload: "dict | None") -> dict:
+    """Extract a recurrence dataset-ref + LMU hyperparameters from a start payload (A1-iii-a).
+
+    The one-shot recurrence ``start_training`` needs a dataset reference
+    (``generator``/``name``/``dataset_id`` + ``params``/``split``) and optional
+    ``d``/``theta``/``ridge``. ``payload`` is the REST ``/api/train/start`` body (as a dict)
+    or the WS ``/ws/control`` ``start`` ``params`` dict. Returns ONLY the keys actually
+    present, so cascor/demo (which never supply a payload) keep their bare
+    ``start_training(reset=...)`` call unchanged.
+    """
+    kwargs: dict = {}
+    if not payload:
+        return kwargs
+    dataset = payload.get("dataset") or {}
+    for key in ("dataset_id", "name", "generator", "split"):
+        if dataset.get(key) is not None:
+            kwargs[key] = dataset[key]
+    if dataset.get("params") is not None:
+        kwargs["params"] = dataset["params"]
+    for key in ("d", "theta", "ridge"):
+        if payload.get(key) is not None:
+            kwargs[key] = payload[key]
+    return kwargs
+
+
 @app.websocket("/ws/control")
 async def websocket_control_endpoint(websocket: WebSocket):
     """WebSocket endpoint for training control commands.
@@ -685,7 +721,10 @@ async def websocket_control_endpoint(websocket: WebSocket):
         dict" when building the command_response envelope.
         """
         if cmd == "start":
-            return backend.start_training(reset=reset)
+            # A1-iii-a: forward a one-shot dataset-ref + hyperparameters for recurrence
+            # (carried in the WS ``params``); cascor/demo keep the bare reset-only call.
+            start_kwargs = _recurrence_start_kwargs(params) if backend.backend_type == "recurrence" else {}
+            return backend.start_training(reset=reset, **start_kwargs)
         if cmd == "stop":
             return backend.stop_training()
         if cmd == "pause":
@@ -1533,8 +1572,10 @@ async def get_snapshots():
         system_logger.error("Failed to list snapshots: %s", e)
         snapshots = []
 
-    # Demo mode or no real snapshots available → return mock data
-    if (backend.backend_type == "demo" or not snapshots) and backend.backend_type != "service":
+    # Demo mode → return mock data. (A1-iii-a: gate on ``== "demo"`` rather than
+    # ``!= "service"`` so a non-cascor, non-demo backend — e.g. recurrence — does NOT
+    # fall into the "no real snapshots" branch and serve fabricated demo snapshots.)
+    if backend.backend_type == "demo":
         # Combine session-created demo snapshots with mock snapshots
         mock_snapshots = _generate_mock_snapshots()
 
@@ -1809,8 +1850,11 @@ async def create_snapshot(
         # call idempotent on a hot path that may run frequently.
         await asyncio.to_thread(Path(_snapshots_dir).mkdir, parents=True, exist_ok=True)
 
-        # Attempt to create HDF5 snapshot via CasCor integration
-        if hasattr(backend, "_adapter") and hasattr(backend._adapter, "save_snapshot"):
+        # Attempt to create HDF5 snapshot via CasCor integration. (A1-iii-a: gate on
+        # ``backend_type == "service"`` — recurrence also exposes ``_adapter`` but it is a
+        # ``RecurrenceServiceAdapter`` with cascor-incompatible semantics, so it must use
+        # the h5py state-dump fallback below, never the cascor adapter's ``save_snapshot``.)
+        if backend.backend_type == "service" and hasattr(backend, "_adapter") and hasattr(backend._adapter, "save_snapshot"):
             backend._adapter.save_snapshot(str(snapshot_path), description=description)
         else:
             # Fallback: create a minimal HDF5 file with current state
@@ -2021,7 +2065,9 @@ async def restore_snapshot(snapshot_id: str):
         snapshot_path = Path(snapshot_data.get("path", f"{_snapshots_dir}/{snapshot_id}.h5"))
         meta_params = None
 
-        if hasattr(backend, "_adapter") and hasattr(backend._adapter, "load_snapshot"):
+        # A1-iii-a: gate on ``backend_type == "service"`` — recurrence's ``_adapter`` is a
+        # different type, so it falls to the h5py fallback rather than cascor's load path.
+        if backend.backend_type == "service" and hasattr(backend, "_adapter") and hasattr(backend._adapter, "load_snapshot"):
             backend._adapter.load_snapshot(str(snapshot_path))
         else:
             # Fallback: read HDF5 file and restore state
@@ -2656,6 +2702,11 @@ async def get_worker_stats():
                 "error_id": error_id,
             }
 
+    # A1-iii-a: a one-shot LMU regressor has no distributed worker pool — return an
+    # empty pool rather than the synthetic demo fixtures below (which are demo-only).
+    if backend.backend_type == "recurrence":
+        return {"total": 0, "idle": 0, "busy": 0, "stale": 0, "total_tasks_completed": 0, "total_tasks_failed": 0, "average_health_score": 0}
+
     import time
 
     return {"total": 2, "idle": 1, "busy": 1, "stale": 0, "total_tasks_completed": 42, "total_tasks_failed": 1, "average_health_score": 0.9767, "timestamp": time.time()}
@@ -2678,6 +2729,10 @@ async def get_worker_list():
             error_id = uuid.uuid4().hex[:12]
             system_logger.warning("Failed to fetch worker list from CasCor [error_id=%s]", error_id)
             return {"workers": [], "count": 0, "error": "Upstream error", "error_id": error_id}
+
+    # A1-iii-a: recurrence (one-shot LMU) has no worker pool — empty list, not demo fixtures.
+    if backend.backend_type == "recurrence":
+        return {"workers": [], "count": 0}
 
     import time
 
@@ -2763,18 +2818,36 @@ async def ws_endpoint(websocket: WebSocket):
         websocket_manager.disconnect(websocket)
 
 
+class _TrainStartBody(BaseModel):
+    """Optional body for ``POST /api/train/start`` (A1-iii-a).
+
+    Lets a one-shot (recurrence) fit carry its dataset reference + LMU hyperparameters.
+    Ignored for cascor/demo (which start from a separately-staged/pending dataset). Every
+    field is optional so the existing no-body ``?reset=`` callers are unaffected.
+    """
+
+    dataset: dict | None = None  # {generator | name | dataset_id, params, split}
+    d: int | None = None
+    theta: float | None = None
+    ridge: float | None = None
+
+
 @app.post("/api/train/start")
-async def api_train_start(reset: bool = False):
+async def api_train_start(reset: bool = False, body: _TrainStartBody | None = None):
     """
     Start training.
     Args:
         reset: Whether to reset network before starting
+        body: Optional one-shot dataset ref + LMU hyperparameters (recurrence only)
     Returns:
         Training status
     """
     from communication.websocket_manager import create_control_ack_message
 
-    result = backend.start_training(reset=reset)
+    # A1-iii-a: forward a one-shot dataset-ref + hyperparameters for recurrence; cascor/demo
+    # keep the bare reset-only call (no extra kwargs reach their start_training).
+    start_kwargs = _recurrence_start_kwargs(body.model_dump()) if (backend.backend_type == "recurrence" and body is not None) else {}
+    result = backend.start_training(reset=reset, **start_kwargs)
     message = "Training started successfully"
     schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", True, message)))
     return {"status": "started", **result}
