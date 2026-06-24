@@ -51,7 +51,7 @@ def test_select_model_handler_success_mirrors_swap(manager, monkeypatch):
     body = {"nn_model": "recurrence", "backend": "recurrence", "execution": "one_shot", "status": "coming_soon", "swapped": True}
     monkeypatch.setattr(requests, "post", lambda *a, **k: _resp(ok=True, json_body=body))
     store, model_class, summary = manager._select_model_handler("recurrence")
-    assert store == body
+    assert store == "recurrence"  # model-selection-store now holds the model key (A1-iv-3b)
     assert model_class == "one_shot"  # mirrored to model-class-store -> drives cascade suppression
     assert summary.startswith("Active: Recurrence (LMU)")
     assert "coming soon" in summary
@@ -80,3 +80,23 @@ def test_model_summary_text_live_vs_coming_soon():
     soon = DashboardManager._model_summary_text({"nn_model": "recurrence", "status": "coming_soon"})
     assert soon.startswith("Active: Recurrence (LMU)")
     assert "coming soon" in soon
+
+
+# Dataset gate (A1-iv-3b): the model -> dataset-dropdown greying callback body.
+
+
+def test_gate_dataset_options_handler_greys_and_snaps_for_recurrence(manager):
+    options, value = manager._gate_dataset_options_handler("recurrence", "spirals")
+    by_value = {option["value"]: option for option in options}
+    assert by_value["spirals"]["disabled"] is True  # 2-D greyed for the 3-D model
+    assert "disabled" not in by_value["equities_seq"]  # the compatible 3-D dataset stays plain
+    assert value == "equities_seq"  # the stranded 2-D selection snaps to the first compatible (D5)
+
+
+def test_gate_dataset_options_handler_keeps_compatible_value(manager):
+    _options, value = manager._gate_dataset_options_handler("cascor", "spirals")
+    assert value is dash.no_update  # spirals stays valid for cascor -> no snap
+
+
+def test_gate_dataset_options_handler_noop_without_model(manager):
+    assert manager._gate_dataset_options_handler("", "spirals") == (dash.no_update, dash.no_update)
