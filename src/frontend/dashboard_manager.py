@@ -46,7 +46,7 @@ from dash.dependencies import Input, Output, State
 
 from canopy_constants import DashboardConstants, TrainingConstants
 from frontend.internal_api import internal_api_headers
-from model_registry import DEFAULT_DATASET_TYPE, dataset_type_options
+from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, dataset_type_options, get_model_spec, model_options
 from settings import get_settings
 
 from . import ui_standards
@@ -1047,6 +1047,23 @@ class DashboardManager:
                                                                         ],
                                                                         id="sidebar-nn-growth-triggers",
                                                                     ),
+                                                                    # ── Model (A1-iv-3a) ──
+                                                                    html.Div(
+                                                                        [
+                                                                            html.Hr(),
+                                                                            html.P("Model:", className="mb-1 fw-bold mt-1"),
+                                                                            dcc.Dropdown(
+                                                                                id="nn-model-dropdown",
+                                                                                options=model_options(),
+                                                                                value=DEFAULT_MODEL_KEY,
+                                                                                clearable=False,
+                                                                                className="mb-2 ms-3",
+                                                                                style={"width": "calc(100% - 1rem)"},
+                                                                            ),
+                                                                            html.Div(id="nn-model-summary", className="ms-3 mb-2 small text-muted"),
+                                                                        ],
+                                                                        id="sidebar-nn-model",
+                                                                    ),
                                                                     # ── Spiral Dataset ──
                                                                     html.Div(
                                                                         [
@@ -1617,6 +1634,9 @@ class DashboardManager:
                 # "one_shot" (recurrence) model hides the 5 cascade-only viz tabs + the
                 # status-bar iteration segment. Defaults "live" so the full dashboard renders.
                 dcc.Store(id="model-class-store", storage_type="memory", data="live"),
+                # A1-iv-3a: the currently-selected model key, written by the sidebar picker's
+                # POST /api/model/select callback (the runtime backend swap, A1-iv-2).
+                dcc.Store(id="model-selection-store", storage_type="memory", data=DEFAULT_MODEL_KEY),
                 # Update intervals
                 dcc.Interval(id="fast-update-interval", interval=DashboardConstants.FAST_UPDATE_INTERVAL_MS, n_intervals=0),
                 dcc.Interval(id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0),
@@ -1947,6 +1967,7 @@ class DashboardManager:
         self._setup_live_dataset_switch_callbacks()  # P2-5 (Issue #3)
         self._setup_dataset_swap_observers_callbacks()  # P2-7 (Issue #3)
         self._setup_model_class_callbacks()  # A1-iii-b1: cascade-panel suppression for one-shot models
+        self._setup_model_selection_callbacks()  # A1-iv-3a: sidebar model picker -> runtime backend swap
 
     def _setup_sidebar_visibility_callback(self):
         """Set up sidebar contextual visibility based on active tab."""
@@ -2033,6 +2054,57 @@ class DashboardManager:
             """Hide the status-bar 'Iteration' (hidden-units) segment for a one_shot model."""
             base = {"marginRight": "20px"}
             return {**base, "display": "none"} if model_class == "one_shot" else base
+
+    def _setup_model_selection_callbacks(self):
+        """A1-iv-3a: the sidebar model picker drives the runtime backend swap.
+
+        Selecting a model POSTs its key to ``POST /api/model/select`` (A1-iv-2) — which
+        re-creates the process-global backend — and mirrors the resulting execution paradigm
+        into ``model-class-store`` (``allow_duplicate``) so the A1-iii-b1 one-shot cascade-panel
+        suppression follows the swap. The compact summary reflects the live selection + status.
+        """
+
+        @self.app.callback(
+            Output("model-selection-store", "data"),
+            Output("model-class-store", "data", allow_duplicate=True),
+            Output("nn-model-summary", "children"),
+            Input("nn-model-dropdown", "value"),
+            prevent_initial_call=True,
+        )
+        def select_model(model_key):
+            return self._select_model_handler(model_key)
+
+    def _select_model_handler(self, model_key):
+        """Apply a model selection via ``POST /api/model/select`` and mirror the result.
+
+        Returns ``(model_selection_store, model_class_store, summary_text)``; on any failure all
+        three are ``dash.no_update`` so a transient error leaves the UI on its prior model.
+        """
+        if not model_key:
+            return dash.no_update, dash.no_update, dash.no_update
+        try:
+            resp = requests.post(
+                self._api_url("/api/model/select"),
+                json={"nn_model": model_key},
+                timeout=DashboardConstants.API_TIMEOUT_SECONDS + 5,
+                headers=internal_api_headers(),
+            )
+            if resp.ok:
+                data = resp.json()
+                return data, data.get("execution", "live"), self._model_summary_text(data)
+            self.logger.warning("Model select failed (%s): %s", resp.status_code, resp.text[:200])
+        except Exception as exc:
+            self.logger.debug("Model select request failed: %s", exc)
+        return dash.no_update, dash.no_update, dash.no_update
+
+    @staticmethod
+    def _model_summary_text(data):
+        """Compact 'Active: <label>' summary line for the sidebar model picker (A1-iv-3a)."""
+        spec = get_model_spec(data.get("nn_model", ""))
+        label = spec.label if spec is not None else data.get("nn_model", "?")
+        status = data.get("status", "live")
+        note = "" if status == "live" else f" · {status.replace('_', ' ')}"
+        return f"Active: {label}{note}"
 
     # Define theme callbacks
     def _setup_theme_callbacks(self):

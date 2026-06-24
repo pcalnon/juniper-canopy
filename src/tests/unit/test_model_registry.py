@@ -13,6 +13,7 @@ import pytest
 from model_registry import (
     DATASET_TYPES,
     DEFAULT_DATASET_TYPE,
+    DEFAULT_MODEL_KEY,
     MODELS,
     DatasetTypeSpec,
     ModelSpec,
@@ -20,6 +21,8 @@ from model_registry import (
     compatible_datasets,
     compatible_models,
     dataset_type_options,
+    get_model_spec,
+    model_options,
     temporal_ok,
 )
 
@@ -188,3 +191,26 @@ def test_resolvers_agree_with_predicate_over_seeds():
         assert compatible_models(dataset) == [model for model in MODELS if compatible(dataset, model)]
     for model in MODELS:
         assert compatible_datasets(model) == [dataset for dataset in DATASET_TYPES if compatible(dataset, model)]
+
+
+# Model-picker options (A1-iv-3a): the registry source for the sidebar nn-model-dropdown.
+
+
+def test_default_model_key_is_a_live_seed():
+    """The picker boots to a real, trainable model (the cascor in-process default)."""
+    spec = get_model_spec(DEFAULT_MODEL_KEY)
+    assert spec is not None
+    assert spec.is_live
+
+
+def test_model_options_cover_all_models_in_registry_order():
+    assert [option["value"] for option in model_options()] == [model.key for model in MODELS]
+
+
+def test_model_options_label_carries_lifecycle_hint_for_non_live():
+    by_value = {option["value"]: option["label"] for option in model_options()}
+    # cascor is live -> plain label (no hint).
+    assert by_value["cascor"] == "CasCor (Cascade-Correlation)"
+    # recurrence is coming_soon -> the label carries the lifecycle hint (D8).
+    assert by_value["recurrence"].startswith("Recurrence (LMU)")
+    assert "coming soon" in by_value["recurrence"]

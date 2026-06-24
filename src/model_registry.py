@@ -11,7 +11,7 @@
 # File Path:     ${HOME}/Development/python/Juniper/juniper-canopy/src/
 #
 # Date Created:  2026-06-17
-# Last Modified: 2026-06-23
+# Last Modified: 2026-06-24
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -53,6 +53,7 @@
 # COMPLETED:
 #     - A1-iv-1: compatibility predicate (compatible / temporal_ok) + resolvers
 #       (compatible_models / compatible_datasets).
+#     - A1-iv-3a: model_options() + DEFAULT_MODEL_KEY (the sidebar model-picker source).
 #
 #####################################################################################################################################################################################################
 """Model + dataset-type registry (single source of truth) for model selection.
@@ -157,6 +158,10 @@ MODELS: tuple[ModelSpec, ...] = (
     ),
 )
 
+# Default selected model for the A1 picker — the live in-process cascor backend (mirrors the
+# DEFAULT_DATASET_TYPE first-element convention; MODELS[0] is the cascor seed).
+DEFAULT_MODEL_KEY: str = MODELS[0].key
+
 
 def dataset_type_options() -> list[dict[str, str]]:
     """Return the dataset-type dropdown options as ``[{"label", "value"}, ...]``.
@@ -165,6 +170,16 @@ def dataset_type_options() -> list[dict[str, str]]:
     ``dashboard_manager``). Order is preserved for behavior parity.
     """
     return [{"label": spec.label, "value": spec.value} for spec in DATASET_TYPES]
+
+
+def model_options() -> list[dict[str, str]]:
+    """Return the model-picker dropdown options as ``[{"label", "value"}, ...]`` (A1-iv-3a).
+
+    Source for the ``nn-model-dropdown`` options. Registry order is preserved. Non-``live``
+    models carry a short lifecycle hint in the label (D8) so the picker reads honestly before
+    the full faceted surface (A1b) lands.
+    """
+    return [{"label": spec.label if spec.status == "live" else f"{spec.label} — {spec.status.replace('_', ' ')}", "value": spec.key} for spec in MODELS]
 
 
 def get_model_spec(key: str) -> ModelSpec | None:
