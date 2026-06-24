@@ -54,6 +54,8 @@
 #     - A1-iv-1: compatibility predicate (compatible / temporal_ok) + resolvers
 #       (compatible_models / compatible_datasets).
 #     - A1-iv-3a: model_options() + DEFAULT_MODEL_KEY (the sidebar model-picker source).
+#     - A1-iv-3b: equities_seq 3-D seed + dataset_reason() + gated_dataset_options() (the
+#       model->dataset compatibility gate).
 #
 #####################################################################################################################################################################################################
 """Model + dataset-type registry (single source of truth) for model selection.
@@ -107,15 +109,17 @@ class ModelSpec:
         return self.status == "live"
 
 
-# Selectable dataset types. The order is user-facing and MUST match the previously
-# inlined dropdown options (spirals first = default). All five current types are 2-D
-# classification (juniper-data vocabulary).
+# Selectable dataset types. The order is user-facing; the five 2-D classification types come
+# first (spirals = default), preserving the original inlined dropdown order. A1-iv-3b appends
+# the 3-D irregular-delta-t regression seed (``equities_seq``) so the recurrence (LMU) model
+# has a compatible dataset; the sidebar gate (``gated_dataset_options``) greys it for 2-D models.
 DATASET_TYPES: tuple[DatasetTypeSpec, ...] = (
     DatasetTypeSpec(value="spirals", label="Spirals", task_type="classification", ndim=2),
     DatasetTypeSpec(value="xor", label="XOR", task_type="classification", ndim=2),
     DatasetTypeSpec(value="mnist", label="MNIST", task_type="classification", ndim=2),
     DatasetTypeSpec(value="circles", label="Circles", task_type="classification", ndim=2),
     DatasetTypeSpec(value="moons", label="Moons", task_type="classification", ndim=2),
+    DatasetTypeSpec(value="equities_seq", label="Equities (sequence)", task_type="regression", ndim=3, temporal="irregular"),
 )
 
 # Default dataset type — preserves the prior hardcoded value="spirals".
@@ -241,3 +245,39 @@ def compatible_datasets(model: ModelSpec, *, dataset_types: tuple[DatasetTypeSpe
     Pure compatibility — no ``status`` filtering (D8). ``dataset_types`` is injectable for tests.
     """
     return [dataset for dataset in dataset_types if compatible(dataset, model)]
+
+
+def dataset_reason(dataset: DatasetTypeSpec, model: ModelSpec) -> str | None:
+    """Dataset-perspective incompatibility reason for the dropdown suffix (A1-iv-3b; D2/§5.4).
+
+    Returns ``None`` when ``dataset`` is compatible with ``model``; otherwise a short
+    "needs a … model" phrase naming the first failing axis — what KIND of model this dataset
+    needs (the reason sits on the greyed option, per the design example "Spirals — needs a
+    2-D model").
+    """
+    if dataset.ndim not in model.input_ndim:
+        return f"needs a {dataset.ndim}-D model"
+    if dataset.task_type not in model.supported_task_types:
+        return f"needs a {dataset.task_type} model"
+    if not temporal_ok(dataset, model):
+        return "needs a Δt-aware model"
+    return None
+
+
+def gated_dataset_options(model_key: str) -> list[dict[str, object]]:
+    """Dataset-dropdown options gated against the selected model (A1-iv-3b).
+
+    Compatible dataset types are plain, selectable options; incompatible ones are ``disabled``
+    with a reason-suffix label (D2). Single source for the initial render (``DEFAULT_MODEL_KEY``)
+    and the runtime gate callback. An unknown ``model_key`` (no spec) falls back to ungated
+    options so a desync never hides every dataset.
+    """
+    spec = get_model_spec(model_key)
+    options: list[dict[str, object]] = []
+    for dataset in DATASET_TYPES:
+        reason = dataset_reason(dataset, spec) if spec is not None else None
+        if reason is None:
+            options.append({"label": dataset.label, "value": dataset.value})
+        else:
+            options.append({"label": f"{dataset.label} — {reason}", "value": dataset.value, "disabled": True})
+    return options

@@ -20,7 +20,9 @@ from model_registry import (
     compatible,
     compatible_datasets,
     compatible_models,
+    dataset_reason,
     dataset_type_options,
+    gated_dataset_options,
     get_model_spec,
     model_options,
     temporal_ok,
@@ -36,9 +38,12 @@ _PREVIOUS_HARDCODED_OPTIONS = [
 ]
 
 
-def test_dataset_type_options_are_behavior_preserving():
-    """dataset_type_options() must reproduce the previously inlined list exactly."""
-    assert dataset_type_options() == _PREVIOUS_HARDCODED_OPTIONS
+def test_dataset_type_options_preserve_2d_order_then_append_3d_seed():
+    """The five original 2-D options are preserved in order (A0 contract); A1-iv-3b appends
+    the equities_seq 3-D entry for the recurrence model."""
+    options = dataset_type_options()
+    assert options[:5] == _PREVIOUS_HARDCODED_OPTIONS
+    assert {"label": "Equities (sequence)", "value": "equities_seq"} in options
 
 
 def test_default_dataset_type_preserved():
@@ -51,11 +56,14 @@ def test_dataset_values_are_unique():
     assert len(values) == len(set(values))
 
 
-def test_current_dataset_types_are_2d_classification():
-    for spec in DATASET_TYPES:
-        assert spec.ndim == 2
-        assert spec.task_type == "classification"
-        assert spec.temporal == "none"
+def test_dataset_seeds_2d_classification_plus_3d_sequence():
+    by_value = {spec.value: spec for spec in DATASET_TYPES}
+    for value in ("spirals", "xor", "mnist", "circles", "moons"):
+        spec = by_value[value]
+        assert spec.ndim == 2 and spec.task_type == "classification" and spec.temporal == "none"
+    # A1-iv-3b: the 3-D irregular-Δt regression seed that makes the recurrence model selectable.
+    seq = by_value["equities_seq"]
+    assert seq.ndim == 3 and seq.task_type == "regression" and seq.temporal == "irregular"
 
 
 def test_model_keys_are_unique():
@@ -165,10 +173,11 @@ def test_compatible_models_resolver_over_seeds():
 
 
 def test_compatible_datasets_resolver_over_seeds():
-    # cascor (2-D, classification+regression) matches all five 2-D classification seeds.
-    assert compatible_datasets(_model("cascor")) == list(DATASET_TYPES)
-    # recurrence (3-D) matches NONE of the current 2-D seeds — the iv-3 "no 3-D dataset yet" gap.
-    assert compatible_datasets(_model("recurrence")) == []
+    # cascor (2-D, classification+regression) matches the five 2-D classification seeds, NOT the
+    # 3-D equities_seq (A1-iv-3b added it for the recurrence model).
+    assert [dataset.value for dataset in compatible_datasets(_model("cascor"))] == ["spirals", "xor", "mnist", "circles", "moons"]
+    # recurrence (3-D irregular) now matches the equities_seq seed (was [] before iv-3b).
+    assert [dataset.value for dataset in compatible_datasets(_model("recurrence"))] == ["equities_seq"]
 
 
 def test_resolvers_are_injectable_and_order_preserving():
@@ -214,3 +223,63 @@ def test_model_options_label_carries_lifecycle_hint_for_non_live():
     # recurrence is coming_soon -> the label carries the lifecycle hint (D8).
     assert by_value["recurrence"].startswith("Recurrence (LMU)")
     assert "coming soon" in by_value["recurrence"]
+
+
+# Dataset gate (A1-iv-3b): the model->dataset greying source for the sidebar dropdown.
+
+
+def _spec(key):
+    spec = get_model_spec(key)
+    assert spec is not None
+    return spec
+
+
+def test_equities_seq_makes_recurrence_trainable():
+    """The 3-D seed gives the recurrence (LMU) model a compatible dataset (was [] before iv-3b)."""
+    assert [dataset.value for dataset in compatible_datasets(_spec("recurrence"))] == ["equities_seq"]
+
+
+def test_dataset_reason_none_when_compatible():
+    spirals = next(dataset for dataset in DATASET_TYPES if dataset.value == "spirals")
+    assert dataset_reason(spirals, _spec("cascor")) is None
+
+
+def test_dataset_reason_names_the_failing_axis():
+    spirals = next(dataset for dataset in DATASET_TYPES if dataset.value == "spirals")  # 2-D
+    equities = next(dataset for dataset in DATASET_TYPES if dataset.value == "equities_seq")  # 3-D
+    # 2-D dataset vs the 3-D recurrence model -> ndim reason (what model the dataset needs).
+    assert dataset_reason(spirals, _spec("recurrence")) == "needs a 2-D model"
+    # 3-D dataset vs the 2-D cascor model -> ndim reason.
+    assert dataset_reason(equities, _spec("cascor")) == "needs a 3-D model"
+
+
+def test_dataset_reason_task_and_temporal_axes():
+    # ndim matches, task mismatches -> task reason (a non-ndim axis of the dropdown suffix).
+    assert dataset_reason(_TABULAR_REGRESSION, _CLASSIFIER_2D) == "needs a regression model"
+    # ndim + task match; irregular-Δt data vs a non-Δt model -> temporal reason.
+    assert dataset_reason(_SEQ_IRREGULAR, _PLAIN_3D) == "needs a Δt-aware model"
+
+
+def test_gated_dataset_options_greys_incompatible_for_recurrence():
+    by_value = {option["value"]: option for option in gated_dataset_options("recurrence")}
+    # equities_seq (3-D) is compatible -> plain, selectable.
+    assert by_value["equities_seq"] == {"label": "Equities (sequence)", "value": "equities_seq"}
+    # the 2-D types are disabled with a reason-suffix label.
+    assert by_value["spirals"]["disabled"] is True
+    assert by_value["spirals"]["label"] == "Spirals — needs a 2-D model"
+
+
+def test_gated_dataset_options_all_plain_for_cascor_then_3d_greyed():
+    # cascor (2-D, classification+regression) accepts every 2-D type; only the 3-D seed is greyed.
+    by_value = {option["value"]: option for option in gated_dataset_options("cascor")}
+    for value in ("spirals", "xor", "mnist", "circles", "moons"):
+        assert "disabled" not in by_value[value]
+    assert by_value["equities_seq"]["disabled"] is True
+    assert by_value["equities_seq"]["label"] == "Equities (sequence) — needs a 3-D model"
+
+
+def test_gated_dataset_options_unknown_model_is_ungated():
+    # No spec -> fall back to all-plain options (never hide every dataset on a desync).
+    options = gated_dataset_options("nonexistent")
+    assert all("disabled" not in option for option in options)
+    assert [option["value"] for option in options] == [dataset.value for dataset in DATASET_TYPES]

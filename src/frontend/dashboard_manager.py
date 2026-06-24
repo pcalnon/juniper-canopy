@@ -46,7 +46,7 @@ from dash.dependencies import Input, Output, State
 
 from canopy_constants import DashboardConstants, TrainingConstants
 from frontend.internal_api import internal_api_headers
-from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, dataset_type_options, get_model_spec, model_options
+from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, gated_dataset_options, get_model_spec, model_options
 from settings import get_settings
 
 from . import ui_standards
@@ -1137,7 +1137,7 @@ class DashboardManager:
                                                                                         html.P("Type:", className="mb-1 ms-3"),
                                                                                         dcc.Dropdown(
                                                                                             id="nn-dataset-type-dropdown",
-                                                                                            options=dataset_type_options(),
+                                                                                            options=gated_dataset_options(DEFAULT_MODEL_KEY),
                                                                                             value=DEFAULT_DATASET_TYPE,
                                                                                             clearable=False,
                                                                                             className="mb-2 ms-3",
@@ -2074,6 +2074,32 @@ class DashboardManager:
         def select_model(model_key):
             return self._select_model_handler(model_key)
 
+        @self.app.callback(
+            Output("nn-dataset-type-dropdown", "options"),
+            Output("nn-dataset-type-dropdown", "value"),
+            Input("model-selection-store", "data"),
+            State("nn-dataset-type-dropdown", "value"),
+            prevent_initial_call=True,
+        )
+        def gate_dataset_options(model_key, current_value):
+            return self._gate_dataset_options_handler(model_key, current_value)
+
+    def _gate_dataset_options_handler(self, model_key, current_value):
+        """Gate the dataset dropdown against the selected model (A1-iv-3b).
+
+        Returns ``(options, value)``: incompatible datasets are disabled with a reason-suffix
+        label (D2); if the current selection became incompatible, snap to the first compatible
+        one (dataset-primary conflict policy, D5) so a recurrence fit never starts from a
+        stranded, greyed dataset. Both are ``dash.no_update`` when there is no model yet.
+        """
+        if not model_key:
+            return dash.no_update, dash.no_update
+        options = gated_dataset_options(model_key)
+        enabled = [option["value"] for option in options if not option.get("disabled")]
+        if current_value in enabled or not enabled:
+            return options, dash.no_update
+        return options, enabled[0]
+
     def _select_model_handler(self, model_key):
         """Apply a model selection via ``POST /api/model/select`` and mirror the result.
 
@@ -2091,7 +2117,7 @@ class DashboardManager:
             )
             if resp.ok:
                 data = resp.json()
-                return data, data.get("execution", "live"), self._model_summary_text(data)
+                return data.get("nn_model", model_key), data.get("execution", "live"), self._model_summary_text(data)
             self.logger.warning("Model select failed (%s): %s", resp.status_code, resp.text[:200])
         except Exception as exc:
             self.logger.debug("Model select request failed: %s", exc)
