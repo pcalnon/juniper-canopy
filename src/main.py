@@ -148,6 +148,62 @@ async def _websocket_keepalive_loop(interval: float, channel: str = "training") 
             system_logger.debug("WebSocket keepalive ping failed: %s", exc)
 
 
+def _seed_training_state(backend: Any) -> None:
+    """Seed the global ``training_state`` from a freshly-initialized backend.
+
+    The per-backend-type seeding shared by application startup (``lifespan``) and the A1-iv-2
+    runtime model swap (``_swap_backend``), kept in one place so the two never drift:
+
+    - demo: copy the demo simulation's current state.
+    - service (cascor): pull ``get_synced_state()`` and register the relay state-update
+      callback so live per-epoch updates keep ``training_state`` current.
+    - recurrence (one-shot LMU): seed the binary idle/phase baseline from ``get_status()``
+      (no live stream, no callback).
+    """
+    if backend.backend_type == "demo" and hasattr(backend, "_demo"):
+        demo = backend._demo
+        if demo.training_state:
+            demo_state = demo.training_state.get_state()
+            training_state.update_state(**demo_state)
+            system_logger.info(
+                "Global training_state synced with demo defaults: LR=%s, MaxHidden=%s, Epochs=%s",
+                demo_state.get("learning_rate"),
+                demo_state.get("max_hidden_units"),
+                demo_state.get("max_epochs"),
+            )
+    elif backend.backend_type == "service":
+        synced = backend.get_synced_state()
+        if synced:
+            training_state.update_state(
+                status=synced.status,
+                phase=synced.phase,
+                current_epoch=synced.current_epoch,
+                max_epochs=synced.max_epochs,
+                learning_rate=synced.params.get("learning_rate", training_state.get_state().get("learning_rate")),
+                max_hidden_units=synced.params.get("max_hidden_units", training_state.get_state().get("max_hidden_units")),
+                **synced.progress_fields,
+            )
+            system_logger.info(
+                "Global training_state synced with cascor: status=%s, epoch=%s, params=%s keys",
+                synced.status,
+                synced.current_epoch,
+                len(synced.params),
+            )
+        # Register callback so relay-driven state updates keep training_state current
+        backend.set_state_update_callback(training_state.update_state)
+    elif backend.backend_type == "recurrence":
+        # Recurrence (one-shot LMU) has no live training stream and no
+        # ``set_state_update_callback`` — the dashboard reads its binary status by
+        # polling ``get_status()``. Seed ``training_state`` from the backend's initial
+        # status so the dashboard boots to a consistent idle baseline (A1-iii-a).
+        initial_status = backend.get_status()
+        training_state.update_state(
+            status=initial_status.get("fsm_status", "idle"),
+            phase=initial_status.get("phase", "idle"),
+        )
+        system_logger.info("Global training_state seeded for recurrence (one-shot) backend: %s", initial_status.get("fsm_status", "idle"))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
@@ -222,49 +278,16 @@ async def lifespan(app: FastAPI):
     if not backend_initialized:
         await backend.initialize()
 
-    # Sync global training_state from backend
-    if backend.backend_type == "demo" and hasattr(backend, "_demo"):
-        demo = backend._demo
-        if demo.training_state:
-            demo_state = demo.training_state.get_state()
-            training_state.update_state(**demo_state)
-            system_logger.info(
-                "Global training_state synced with demo defaults: LR=%s, MaxHidden=%s, Epochs=%s",
-                demo_state.get("learning_rate"),
-                demo_state.get("max_hidden_units"),
-                demo_state.get("max_epochs"),
-            )
-    elif backend.backend_type == "service":
-        synced = backend.get_synced_state()
-        if synced:
-            training_state.update_state(
-                status=synced.status,
-                phase=synced.phase,
-                current_epoch=synced.current_epoch,
-                max_epochs=synced.max_epochs,
-                learning_rate=synced.params.get("learning_rate", training_state.get_state().get("learning_rate")),
-                max_hidden_units=synced.params.get("max_hidden_units", training_state.get_state().get("max_hidden_units")),
-                **synced.progress_fields,
-            )
-            system_logger.info(
-                "Global training_state synced with cascor: status=%s, epoch=%s, params=%s keys",
-                synced.status,
-                synced.current_epoch,
-                len(synced.params),
-            )
-        # Register callback so relay-driven state updates keep training_state current
-        backend.set_state_update_callback(training_state.update_state)
-    elif backend.backend_type == "recurrence":
-        # Recurrence (one-shot LMU) has no live training stream and no
-        # ``set_state_update_callback`` — the dashboard reads its binary status by
-        # polling ``get_status()``. Seed ``training_state`` from the backend's initial
-        # status so the dashboard boots to a consistent idle baseline (A1-iii-a).
-        initial_status = backend.get_status()
-        training_state.update_state(
-            status=initial_status.get("fsm_status", "idle"),
-            phase=initial_status.get("phase", "idle"),
-        )
-        system_logger.info("Global training_state seeded for recurrence (one-shot) backend: %s", initial_status.get("fsm_status", "idle"))
+    # A1-iv-2: remember the service URL the default backend resolved to (auto-discovered or
+    # configured) so a later swap back from the recurrence model re-creates the SAME cascor
+    # backend instead of silently falling to demo when the URL was discovered, not in settings.
+    global _resolved_service_url
+    _resolved_service_url = (discovered_url or settings.cascor_service_url) if backend.backend_type == "service" else None
+
+    # Sync global training_state from the freshly-initialized backend. Shared with the A1-iv-2
+    # runtime model swap (``_swap_backend``) so the per-backend-type seeding logic lives in
+    # exactly one place and cannot drift between startup and a live model switch.
+    _seed_training_state(backend)
 
     system_logger.info("Backend initialized: %s", backend.backend_type)
     # METRICS-MON R3.2 / seed-11: reflect the post-fallback backend type in
@@ -396,6 +419,12 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 # Backend is initialized in lifespan via create_backend() factory
 backend = None
+# A1-iv-2: the currently-selected model key driving the live ``backend`` (None = the
+# cascor/demo startup default) and the service URL that default resolved to. Both are set by
+# the lifespan + ``_swap_backend`` so a runtime model switch can faithfully re-create either
+# backend (D5: re-create, not multiplex).
+current_nn_model: Optional[str] = None
+_resolved_service_url: Optional[str] = None
 
 # Initialize Dash dashboard (standalone with its own Flask server)
 dashboard_manager = DashboardManager({})
@@ -2919,6 +2948,102 @@ async def api_train_status():
     return {"backend": backend.backend_type, "execution": backend.execution, **backend.get_status()}
 
 
+class _ModelSelectBody(BaseModel):
+    """Request body for ``POST /api/model/select`` (A1-iv-2)."""
+
+    nn_model: str
+
+
+def _selection_targets_recurrence(nn_model: str) -> bool:
+    """True when selecting ``nn_model`` should route to the recurrence service backend.
+
+    Mirrors ``create_backend``'s routing: a model targets the recurrence backend iff it is a
+    recurrence-provider model AND ``recurrence_service_url`` is configured. Every other
+    selection (cascor, or recurrence without a configured URL) resolves to the default
+    cascor/demo backend — so this single predicate decides whether a swap is a no-op (target
+    backend type unchanged) or a real re-create.
+    """
+    from model_registry import RECURRENCE_PROVIDER, get_model_spec
+
+    spec = get_model_spec(nn_model)
+    return spec is not None and spec.provider == RECURRENCE_PROVIDER and bool(settings.recurrence_service_url)
+
+
+def _model_state_response(nn_model: str, *, swapped: bool) -> dict:
+    """Describe the live backend + current selection for the ``/api/model/*`` responses."""
+    from model_registry import get_model_spec
+
+    spec = get_model_spec(nn_model)
+    return {
+        "nn_model": nn_model,
+        "backend": backend.backend_type,
+        "execution": backend.execution,
+        "status": spec.status if spec is not None else "unknown",
+        "swapped": swapped,
+    }
+
+
+async def _swap_backend(nn_model: str) -> dict:
+    """Re-create the process-global ``backend`` for a newly-selected model (A1-iv-2).
+
+    Toggles between the recurrence (one-shot LMU) service backend and the default cascor/demo
+    backend. **No-ops** when the selection would not change the live backend type, so
+    re-selecting the active model never tears down a working connection. **Refuses** to swap
+    while training is active (409). The new backend is created + initialized BEFORE the global
+    is reassigned and the old one is shut down only AFTER — so concurrent requests always see a
+    live backend, and a failed ``initialize()`` leaves the current backend untouched (502).
+    D5: re-create, not multiplex (sufficient for the two-model population).
+    """
+    from fastapi import HTTPException
+
+    from backend import create_backend
+
+    global backend, current_nn_model
+
+    if _selection_targets_recurrence(nn_model) == (backend.backend_type == "recurrence"):
+        # Target backend type is unchanged — record the selection and skip the re-create.
+        current_nn_model = nn_model
+        return _model_state_response(nn_model, swapped=False)
+
+    if backend.is_training_active():
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot switch models while training is active. Pause or stop training first.",
+        )
+
+    old_backend = backend
+    new_backend = create_backend(nn_model=nn_model, service_url=_resolved_service_url)
+    if not await new_backend.initialize():
+        await new_backend.shutdown()
+        raise HTTPException(status_code=502, detail=f"Failed to initialize the backend for model {nn_model!r}.")
+
+    backend = new_backend
+    current_nn_model = nn_model
+    _seed_training_state(new_backend)
+    set_demo_mode_active(new_backend.backend_type == "demo")
+    await old_backend.shutdown()
+    system_logger.info("Backend swapped for model %r -> %s", nn_model, new_backend.backend_type)
+    return _model_state_response(nn_model, swapped=True)
+
+
+@app.post("/api/model/select")
+async def api_model_select(body: _ModelSelectBody):
+    """Select the active NN model, re-creating the backend if the target changes (A1-iv-2).
+
+    The A1 model picker (A1-iv-3/iv-4) POSTs the chosen model key here. Validates the key
+    against the registry, then swaps the process-global backend (a no-op when the live backend
+    type is unchanged). Lifecycle ``status`` gating (``coming_soon`` etc.) is the picker's job;
+    this endpoint is the mechanism and returns the model ``status`` so the UI can reflect it.
+    """
+    from fastapi import HTTPException
+
+    from model_registry import get_model_spec
+
+    if get_model_spec(body.nn_model) is None:
+        raise HTTPException(status_code=422, detail=f"Unknown model: {body.nn_model!r}")
+    return await _swap_backend(body.nn_model)
+
+
 class SetParamsRequest(BaseModel):
     """Validated request body for the set_params endpoint."""
 
@@ -3083,7 +3208,7 @@ async def api_set_params(body: SetParamsRequest):
                 if result.get("skipped"):
                     err_payload["skipped"] = result["skipped"]
                 return JSONResponse(err_payload, status_code=502)
-            skipped = list(result.get("skipped") or [])
+            skipped = list(result.get("skipped") or [])  # type: ignore[call-overload]  # pre-existing: dict.get() is object-typed, runtime value is a list (surfaced by the A1-iv-2 main.py mypy re-check)
 
         # Only update TrainingState AFTER backend confirms success
         if ts_updates:
