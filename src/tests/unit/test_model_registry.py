@@ -24,8 +24,10 @@ from model_registry import (
     dataset_reason,
     dataset_type_options,
     gated_dataset_options,
+    get_dataset_spec,
     get_model_spec,
     model_options,
+    model_reason,
     temporal_ok,
 )
 
@@ -279,6 +281,49 @@ def test_dataset_reason_task_and_temporal_axes():
     assert dataset_reason(_TABULAR_REGRESSION, _CLASSIFIER_2D) == "needs a regression model"
     # ndim + task match; irregular-Δt data vs a non-Δt model -> temporal reason.
     assert dataset_reason(_SEQ_IRREGULAR, _PLAIN_3D) == "needs a Δt-aware model"
+
+
+# Model-table compatibility cell (A1b-1): model_reason is the model-perspective inverse.
+
+
+def test_model_reason_none_when_compatible():
+    spirals = next(dataset for dataset in DATASET_TYPES if dataset.value == "spirals")  # 2-D
+    equities = next(dataset for dataset in DATASET_TYPES if dataset.value == "equities_seq")  # 3-D
+    assert model_reason(_spec("cascor"), spirals) is None
+    assert model_reason(_spec("recurrence"), equities) is None
+
+
+def test_model_reason_names_the_failing_axis():
+    spirals = next(dataset for dataset in DATASET_TYPES if dataset.value == "spirals")  # 2-D
+    equities = next(dataset for dataset in DATASET_TYPES if dataset.value == "equities_seq")  # 3-D
+    # The 3-D recurrence model vs a 2-D dataset -> it needs 3-D data (inverse of "needs a 3-D model").
+    assert model_reason(_spec("recurrence"), spirals) == "needs 3-D data"
+    # The 2-D cascor model vs a 3-D dataset -> it needs 2-D data.
+    assert model_reason(_spec("cascor"), equities) == "needs 2-D data"
+
+
+def test_model_reason_task_and_temporal_axes():
+    # ndim matches, task mismatches -> the classifier needs classification data.
+    assert model_reason(_CLASSIFIER_2D, _TABULAR_REGRESSION) == "needs classification data"
+    # ndim + task match; the non-Δt 3-D model vs irregular-Δt data -> temporal reason.
+    assert model_reason(_PLAIN_3D, _SEQ_IRREGULAR) == "needs regularly-sampled data"
+
+
+def test_model_reason_inverse_consistent_with_dataset_reason_over_seeds():
+    """model_reason and dataset_reason agree with the predicate on every seed pair (both directions)."""
+    for dataset in DATASET_TYPES:
+        for model in MODELS:
+            same_verdict = (model_reason(model, dataset) is None) == (dataset_reason(dataset, model) is None)
+            assert same_verdict
+            assert (model_reason(model, dataset) is None) == compatible(dataset, model)
+
+
+def test_get_dataset_spec_resolves_and_misses():
+    spec = get_dataset_spec("equities_seq")
+    assert spec is not None
+    assert spec.value == "equities_seq" and spec.ndim == 3
+    assert get_dataset_spec("nonexistent") is None
+    assert get_dataset_spec("") is None
 
 
 def test_gated_dataset_options_greys_incompatible_for_recurrence():

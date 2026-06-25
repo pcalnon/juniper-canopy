@@ -58,6 +58,8 @@
 #       model->dataset compatibility gate).
 #     - A1-iv-3c: DatasetTypeSpec.default_params + dataset_default_params() (the registry-seeded
 #       juniper-data params the one-shot Start button forwards so the recurrence fit is bounded).
+#     - A1b-1: get_dataset_spec() + model_reason() (the model-perspective inverse of
+#       dataset_reason) — the compatibility-cell text for the dedicated model-selection surface.
 #
 #####################################################################################################################################################################################################
 """Model + dataset-type registry (single source of truth) for model selection.
@@ -230,6 +232,18 @@ def get_model_spec(key: str) -> ModelSpec | None:
     return None
 
 
+def get_dataset_spec(value: str) -> DatasetTypeSpec | None:
+    """Return the :class:`DatasetTypeSpec` for ``value``, or None (symmetric with get_model_spec).
+
+    Used by the A1b model-selection surface to resolve the currently-selected dataset value to
+    its spec so the per-model compatibility cell (``model_reason``) can be computed against it.
+    """
+    for spec in DATASET_TYPES:
+        if spec.value == value:
+            return spec
+    return None
+
+
 # Compatibility engine (A1-iv-1) — the pure dataset x model predicate + resolvers (design §4).
 # Datasets declare PROPERTIES (ndim / task_type / temporal); models declare REQUIREMENTS
 # (input_ndim / supported_task_types / requires_dt). Compatibility is a pure, browser-free
@@ -293,6 +307,27 @@ def dataset_reason(dataset: DatasetTypeSpec, model: ModelSpec) -> str | None:
         return f"needs a {dataset.task_type} model"
     if not temporal_ok(dataset, model):
         return "needs a Δt-aware model"
+    return None
+
+
+def model_reason(model: ModelSpec, dataset: DatasetTypeSpec) -> str | None:
+    """Model-perspective incompatibility reason for the model-table cell (A1b-1; D2/§5.2).
+
+    Returns ``None`` when ``model`` is compatible with ``dataset``; otherwise a short
+    "needs … data" phrase naming the first failing axis — what KIND of data this model needs
+    that the current dataset does not supply. This is the model-perspective inverse of
+    ``dataset_reason`` (which names what kind of model a dataset needs); the phrase sits in the
+    model row's compatibility cell (e.g. "Recurrence (LMU) — needs 3-D data" against a 2-D
+    dataset). The axis order mirrors ``dataset_reason`` so the two stay consistent.
+    """
+    if dataset.ndim not in model.input_ndim:
+        dims = " or ".join(f"{n}-D" for n in sorted(model.input_ndim))
+        return f"needs {dims} data"
+    if dataset.task_type not in model.supported_task_types:
+        tasks = " or ".join(sorted(model.supported_task_types))
+        return f"needs {tasks} data"
+    if not temporal_ok(dataset, model):
+        return "needs regularly-sampled data"
     return None
 
 

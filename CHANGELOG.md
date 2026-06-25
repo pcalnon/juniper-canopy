@@ -215,6 +215,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Tests: `src/tests/unit/test_recurrence_oneshot_result.py` (7 cases — surface toggle +
   regression card / spinner) + regenerated `snapshots/metrics_panel.txt`; UI sub-suite run
   locally.
+- **Dedicated model-selection surface (A1b-1, #368)**: model selection moves from the sidebar
+  `nn-model-dropdown` (A1-iv-3a) to a dedicated **`dbc.Modal`** (`size="xl"`, scrollable) holding a
+  custom **`dbc.Table`** of models, opened by a compact sidebar **"Model: … ▸ change"** summary +
+  button (`src/frontend/dashboard_manager.py`). Each row shows the model label / description,
+  category, a lifecycle **status badge** (D8), a **compatibility cell**, and a per-row **Select**
+  button (pattern-matching `{"type": "model-select-btn", "index": <key>}`) disabled only for
+  *incompatible* models — per ratified **option (a)** a `coming_soon` model stays selectable (D8
+  Train-gating deferred to iv-5). The compatibility cell is driven by a new registry
+  **`model_reason()`** — the model-perspective inverse of `dataset_reason()` (e.g. "needs 3-D data"
+  against a 2-D dataset). Selecting reuses the unchanged `_select_model_handler`
+  (`POST /api/model/select` + store mirror) and closes the modal; the downstream dataset gate
+  (A1-iv-3b) and one-shot start-body resolver (A1-iv-3c) are **untouched** — they key off the
+  stores, not the dropdown, so only the input side moved. A modal was chosen over a Models tab
+  because the tab bar caps `active_tab` writers at two and is rebuilt by the one-shot suppression —
+  a modal's `is_open` toggle sidesteps both (OQ-1); a custom `dbc.Table` over `dash_table.DataTable`
+  because the cells are rich components with no virtualization payoff at this row count (OQ-4). New
+  registry helpers: `model_reason()` + `get_dataset_spec()`. Design-of-record: juniper-ml
+  `notes/JUNIPER_CANOPY_MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md` (D7 / §5.2 / §5.3). Tests:
+  `src/tests/regression/test_model_table.py` (15 cases — table builder, status badge, open/close,
+  Select → apply + close) + `src/tests/unit/test_model_registry.py` (`model_reason` / `get_dataset_spec`).
+  The reactive reverse dataset→model gate, degenerate states, and the search box are A1b-2.
 
 - **Build provenance on `/v1/health` + `/v1/health/ready`.** The dashboard now
   reports the source `git_sha` and ISO-8601 `build_date` baked into its image
