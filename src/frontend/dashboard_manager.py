@@ -46,7 +46,7 @@ from dash.dependencies import Input, Output, State
 
 from canopy_constants import DashboardConstants, TrainingConstants
 from frontend.internal_api import internal_api_headers
-from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_reason
+from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_reason
 from settings import get_settings
 
 from . import ui_standards
@@ -801,6 +801,10 @@ class DashboardManager:
                                         dbc.CardHeader(html.H5("Training Controls")),
                                         dbc.CardBody(
                                             [
+                                                # A1-iv-5 / D8 (§5.7): when a non-live model is selected it is shown +
+                                                # selectable but NOT trainable — this status reason explains why Start is
+                                                # disabled (filled by ``annotate_train_gate``). Empty/hidden for a live model.
+                                                html.Div(id="train-gate-notice", className="mb-2"),
                                                 html.Div(
                                                     [
                                                         dbc.Button(
@@ -2201,6 +2205,18 @@ class DashboardManager:
         def annotate_model_hint(dataset_value):
             return self._dataset_model_hint_handler(dataset_value)
 
+        # A1-iv-5 / D8 (§5.7): when the selected model is non-live, show a status reason near the
+        # training controls explaining why Start is disabled. Cleared (hidden) for a live model.
+        # Pairs with the Start force-disable in ``update_button_appearance`` (same model-selection
+        # Input), so the gate and its explanation always move together.
+        @self.app.callback(
+            Output("train-gate-notice", "children"),
+            Input("model-selection-store", "data"),
+            prevent_initial_call=True,
+        )
+        def annotate_train_gate(model_key):
+            return self._train_gate_notice_handler(model_key)
+
     @staticmethod
     def _resolve_oneshot_start_body_handler(model_class: "str | None", dataset_generator: "str | None") -> "dict[str, object] | None":
         """Build the one-shot Start dataset-ref body (A1-iv-3c), or None for a live model.
@@ -2321,6 +2337,29 @@ class DashboardManager:
         or "" when no dataset is selected so the annotation clears rather than rendering "None".
         """
         return dataset_model_hint(dataset_value) or ""
+
+    @staticmethod
+    def _train_gate_notice_handler(model_key):
+        """D8 Train-gate status notice for a non-live selected model (A1-iv-5; §5.7).
+
+        Returns a warning ``dbc.Alert`` explaining why Start is disabled when the selected model is
+        non-live (``coming_soon`` / ``experimental`` / ``deprecated`` / ``broken``), or ``None``
+        (hidden) for a live / trainable model — the visible companion to the Start force-disable in
+        ``_update_button_appearance_handler`` (both key off ``model_is_trainable``).
+        """
+        if model_is_trainable(model_key):
+            return None
+        spec = get_model_spec(model_key)
+        label = spec.label if spec is not None else (model_key or "This model")
+        status = spec.status.replace("_", " ") if spec is not None else "unavailable"
+        return dbc.Alert(
+            [
+                html.Strong(f"{label} is {status}. "),
+                html.Span("This model can be selected for inspection but is not trainable yet — Start is disabled."),
+            ],
+            color="warning",
+            className="mb-0",
+        )
 
     @staticmethod
     def _status_badge(status):
@@ -3607,12 +3646,20 @@ class DashboardManager:
                 Output("reset-button", "disabled"),
                 Output("reset-button", "children"),
             ],
-            Input("button-states", "data"),
+            [
+                Input("button-states", "data"),
+                # A1-iv-5 / D8: re-evaluate the Start gate when the selected model changes — a
+                # non-live model is shown + selectable but NOT trainable (§5.7), so Start is
+                # force-disabled for it. Reading it in the SAME callback that owns
+                # ``start-button.disabled`` combines the training-state and model-status factors in
+                # one place — no racy second writer.
+                Input("model-selection-store", "data"),
+            ],
             prevent_initial_call=False,
         )
-        def update_button_appearance(button_states):
-            """Update button states (disabled/loading) with visual feedback."""
-            return self._update_button_appearance_handler(button_states=button_states)
+        def update_button_appearance(button_states, model_key):
+            """Update button states (disabled/loading) with visual feedback + the D8 Train-gate."""
+            return self._update_button_appearance_handler(button_states=button_states, model_key=model_key)
 
         @self.app.callback(
             Output("button-states", "data", allow_duplicate=True),
@@ -5403,17 +5450,27 @@ class DashboardManager:
             duration=8000,
         )
 
-    def _update_button_appearance_handler(self, button_states=None):
-        """Update button states (disabled/loading) with visual feedback."""
+    def _update_button_appearance_handler(self, button_states=None, model_key=None):
+        """Update button states (disabled/loading) with visual feedback.
+
+        A1-iv-5 / D8 Train-gate: when the selected model is non-live (``coming_soon`` /
+        ``experimental`` / ``deprecated`` / ``broken``), the Start button is force-disabled
+        regardless of training state — a non-live model is shown and selectable for inspection but
+        not trainable (design §5.7). The pause / stop / resume / reset controls follow
+        ``button-states`` unchanged. Live models (the common path) are entirely unaffected.
+        """
 
         def get_button_props(cmd, label, icon):
-            state = button_states.get(cmd, {"disabled": False, "loading": False, "timestamp": 0})
+            state = (button_states or {}).get(cmd, {"disabled": False, "loading": False, "timestamp": 0})
             disabled = state.get("disabled", False)
             loading = state.get("loading", False)
             text = f"⏳ {label}..." if loading else f"{icon} {label}"
             return disabled, text
 
         start_disabled, start_text = get_button_props("start", "Start Training", "▶")
+        # D8 Train-gate: a non-live model can be selected (to inspect) but not trained.
+        if not model_is_trainable(model_key):
+            start_disabled = True
         pause_disabled, pause_text = get_button_props("pause", "Pause Training", "⏸")
         stop_disabled, stop_text = get_button_props("stop", "Stop Training", "⏹")
         resume_disabled, resume_text = get_button_props("resume", "Resume Training", "⏯")

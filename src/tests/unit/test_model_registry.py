@@ -27,6 +27,7 @@ from model_registry import (
     gated_dataset_options,
     get_dataset_spec,
     get_model_spec,
+    model_is_trainable,
     model_options,
     model_reason,
     temporal_ok,
@@ -104,13 +105,15 @@ def test_cascor_seed():
     assert cascor.supported_task_types == frozenset({"classification", "regression"})
 
 
-def test_recurrence_seed_is_coming_soon_and_3d():
+def test_recurrence_seed_is_live_and_3d():
     recurrence = next(model for model in MODELS if model.key == "recurrence")
-    assert not recurrence.is_live
-    assert recurrence.status == "coming_soon"
+    # A1-iv-5: flipped coming_soon -> live (service deployed + canopy-wired, juniper-deploy #132).
+    assert recurrence.is_live
+    assert recurrence.status == "live"
     assert recurrence.input_ndim == frozenset({3})
     assert recurrence.requires_dt is True
     assert recurrence.supported_task_types == frozenset({"regression"})
+    assert recurrence.execution == "one_shot"  # still a single blocking fit (drives the one-shot UI)
 
 
 def test_specs_are_frozen():
@@ -183,10 +186,11 @@ def test_compatible_temporal_axis_is_the_fine_discriminator():
 
 
 def test_compatible_is_independent_of_status():
-    """Compatibility is orthogonal to lifecycle status (D8): coming_soon ≠ incompatible."""
-    recurrence = _model("recurrence")
-    assert recurrence.status == "coming_soon"
-    assert compatible(_SEQ_IRREGULAR, recurrence) is True
+    """Compatibility is orthogonal to lifecycle status (D8): a non-live model ≠ incompatible."""
+    # A1-iv-5 flipped recurrence to live, so assert the orthogonality with a synthetic non-live model.
+    coming_soon = ModelSpec(key="cs3d", label="Coming Soon 3-D", category="ts_established", input_ndim=frozenset({3}), supported_task_types=frozenset({"regression"}), requires_dt=True, status="coming_soon")
+    assert not coming_soon.is_live
+    assert compatible(_SEQ_IRREGULAR, coming_soon) is True  # compatible despite being non-live
 
 
 def test_compatible_models_resolver_over_seeds():
@@ -240,13 +244,36 @@ def test_model_options_cover_all_models_in_registry_order():
     assert [option["value"] for option in model_options()] == [model.key for model in MODELS]
 
 
+def test_model_options_all_live_have_plain_labels_post_iv5():
+    # Post A1-iv-5 every shipped model is live -> no lifecycle-hint suffix in the real options.
+    for option in model_options():
+        assert " — " not in option["label"]
+
+
 def test_model_options_label_carries_lifecycle_hint_for_non_live():
-    by_value = {option["value"]: option["label"] for option in model_options()}
-    # cascor is live -> plain label (no hint).
-    assert by_value["cascor"] == "CasCor (Cascade-Correlation)"
-    # recurrence is coming_soon -> the label carries the lifecycle hint (D8).
-    assert by_value["recurrence"].startswith("Recurrence (LMU)")
-    assert "coming soon" in by_value["recurrence"]
+    # A1-iv-5 made every shipped model live, so inject a synthetic non-live model to assert the
+    # lifecycle-hint label path (model_options is now injectable).
+    live = next(model for model in MODELS if model.status == "live")
+    coming_soon = ModelSpec(key="cs", label="Future Model", category="ts_growth", input_ndim=frozenset({3}), supported_task_types=frozenset({"regression"}), status="coming_soon")
+    by_value = {option["value"]: option["label"] for option in model_options(models=(live, coming_soon))}
+    assert by_value[live.key] == live.label  # live -> plain label (no hint)
+    assert by_value["cs"] == "Future Model — coming soon"  # non-live -> lifecycle hint suffix
+
+
+# D8 Train-gate predicate (A1-iv-5): model_is_trainable.
+
+
+def test_model_is_trainable_live_unknown_and_synthetic_non_live():
+    # Both shipped models are live post A1-iv-5 -> trainable.
+    assert model_is_trainable("cascor") is True
+    assert model_is_trainable("recurrence") is True
+    # Unknown / empty key -> True (never strand Start on a desync; the service fails closed, FR9).
+    assert model_is_trainable("does-not-exist") is True
+    assert model_is_trainable("") is True
+    assert model_is_trainable(None) is True
+    # A synthetic non-live model -> NOT trainable (the D8 gate; injected since no shipped model is non-live).
+    coming_soon = ModelSpec(key="cs", label="CS", category="ts_growth", input_ndim=frozenset({3}), supported_task_types=frozenset({"regression"}), status="coming_soon")
+    assert model_is_trainable("cs", models=(coming_soon,)) is False
 
 
 # Dataset gate (A1-iv-3b): the model->dataset greying source for the sidebar dropdown.
