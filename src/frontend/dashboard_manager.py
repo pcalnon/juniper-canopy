@@ -46,7 +46,7 @@ from dash.dependencies import Input, Output, State
 
 from canopy_constants import DashboardConstants, TrainingConstants
 from frontend.internal_api import internal_api_headers
-from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, dataset_default_params, gated_dataset_options, get_model_spec, model_options
+from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, dataset_default_params, gated_dataset_options, get_dataset_spec, get_model_spec, model_reason
 from settings import get_settings
 
 from . import ui_standards
@@ -1060,20 +1060,35 @@ class DashboardManager:
                                                                         ],
                                                                         id="sidebar-nn-growth-triggers",
                                                                     ),
-                                                                    # ── Model (A1-iv-3a) ──
+                                                                    # ── Model (A1b-1: dedicated selection surface) ──
+                                                                    # The sidebar dropdown is replaced by a compact summary + a "▸ change"
+                                                                    # button that opens the dedicated model-selection modal (D7/§5.1). The
+                                                                    # full, gated model table lives there; the sidebar stays width-pinned and
+                                                                    # carries no scale pressure as the model population grows.
                                                                     html.Div(
                                                                         [
                                                                             html.Hr(),
                                                                             html.P("Model:", className="mb-1 fw-bold mt-1"),
-                                                                            dcc.Dropdown(
-                                                                                id="nn-model-dropdown",
-                                                                                options=model_options(),
-                                                                                value=DEFAULT_MODEL_KEY,
-                                                                                clearable=False,
-                                                                                className="mb-2 ms-3",
-                                                                                style={"width": "calc(100% - 1rem)"},
+                                                                            html.Div(
+                                                                                [
+                                                                                    # ``nn-model-summary`` is KEPT (the select callback writes it);
+                                                                                    # seeded with the default model so it reads honestly at first paint
+                                                                                    # now that the dropdown no longer shows the current value.
+                                                                                    html.Span(
+                                                                                        self._initial_model_summary(),
+                                                                                        id="nn-model-summary",
+                                                                                        className="small text-muted",
+                                                                                    ),
+                                                                                    dbc.Button(
+                                                                                        "▸ change",
+                                                                                        id="nn-model-change-button",
+                                                                                        color="link",
+                                                                                        size="sm",
+                                                                                        className="p-0 ms-2 align-baseline text-decoration-none",
+                                                                                    ),
+                                                                                ],
+                                                                                className="ms-3 mb-2 d-flex align-items-baseline",
                                                                             ),
-                                                                            html.Div(id="nn-model-summary", className="ms-3 mb-2 small text-muted"),
                                                                         ],
                                                                         id="sidebar-nn-model",
                                                                     ),
@@ -1821,6 +1836,29 @@ class DashboardManager:
                 # Outcome alert — opens after the swap POST resolves
                 # (success / cancelled / error). Auto-dismisses after 5s.
                 html.Div(id="live-switch-outcome-alert", style={"position": "fixed", "top": "5rem", "right": "1rem", "zIndex": 1060, "minWidth": "20rem"}),
+                # Model-selection surface (A1b-1; design D7/§5.2): a dedicated full-width modal
+                # opened from the sidebar "▸ change" button. ``toggle_model_modal`` fills the body
+                # container with a custom ``dbc.Table`` (status badge + compatibility cell + a
+                # per-row Select button disabled for incompatible models), gated against the
+                # current dataset. ``size="xl"`` caps the width (dbc 2.0.4 / Bootstrap 5) and
+                # ``scrollable`` scrolls the body as the model population grows — so the surface
+                # scales to many models with no manual sizing (modal chosen over a Models tab: the
+                # tab bar caps ``active_tab`` writers at two and is rebuilt by one-shot suppression;
+                # a modal's ``is_open`` toggle sidesteps both — OQ-1).
+                dbc.Modal(
+                    [
+                        dbc.ModalHeader(dbc.ModalTitle("Select a Model")),
+                        dbc.ModalBody(html.Div(id="model-selection-table-container")),
+                        dbc.ModalFooter(
+                            dbc.Button("Close", id="model-selection-modal-close", color="secondary", outline=True),
+                        ),
+                    ],
+                    id="model-selection-modal",
+                    is_open=False,
+                    size="xl",
+                    scrollable=True,
+                    centered=True,
+                ),
                 # Hidden div to store WebSocket data
                 html.Div(id="websocket-data", style={"display": "none"}),
                 dcc.Store(id="training-control-action", data=None),
@@ -2075,23 +2113,50 @@ class DashboardManager:
             return {**base, "display": "none"} if model_class == "one_shot" else base
 
     def _setup_model_selection_callbacks(self):
-        """A1-iv-3a: the sidebar model picker drives the runtime backend swap.
+        """A1b-1: the dedicated model-selection surface drives the runtime backend swap.
 
-        Selecting a model POSTs its key to ``POST /api/model/select`` (A1-iv-2) — which
-        re-creates the process-global backend — and mirrors the resulting execution paradigm
-        into ``model-class-store`` (``allow_duplicate``) so the A1-iii-b1 one-shot cascade-panel
-        suppression follows the swap. The compact summary reflects the live selection + status.
+        Selection moved from the sidebar dropdown (A1-iv-3a) to a per-row Select button in the
+        ``model-selection-modal`` table (opened by the sidebar "▸ change" button). The chosen model
+        POSTs its key to ``POST /api/model/select`` (A1-iv-2) — which re-creates the process-global
+        backend — and mirrors the resulting execution paradigm into ``model-class-store``
+        (``allow_duplicate``) so the A1-iii-b1 one-shot cascade-panel suppression follows the swap.
+        The compact sidebar summary reflects the live selection + status; the modal then closes.
+        ``gate_dataset_options`` (A1-iv-3b) and ``resolve_oneshot_start_body`` (A1-iv-3c) are
+        UNCHANGED — they key off the stores, not the input control, so only the input side moved.
         """
 
+        # A1b-1: the dedicated model-selection modal. The sidebar "▸ change" button opens it
+        # (rebuilding the table against the CURRENT dataset value so its compatibility cells +
+        # disabled Select buttons reflect it on open, §5.3); the Close button closes it.
+        @self.app.callback(
+            Output("model-selection-modal", "is_open"),
+            Output("model-selection-table-container", "children"),
+            Input("nn-model-change-button", "n_clicks"),
+            Input("model-selection-modal-close", "n_clicks"),
+            State("nn-dataset-type-dropdown", "value"),
+            State("model-selection-store", "data"),
+            prevent_initial_call=True,
+        )
+        def toggle_model_modal(_open_clicks, _close_clicks, dataset_value, selected_model):
+            return self._toggle_model_modal_handler(dash.callback_context.triggered_id, dataset_value, selected_model)
+
+        # A1b-1: a model is selected by the per-row Select button in the table (pattern-matching
+        # ``{"type": "model-select-btn", "index": <key>}``), REPLACING the old nn-model-dropdown
+        # Input. The clicked key is resolved from ``ctx.triggered_id`` and applied via the SAME
+        # ``_select_model_handler`` (POST /api/model/select + store mirror, A1-iv-3a); the modal
+        # then closes. Downstream gates are insulated — ``gate_dataset_options`` keys off
+        # ``model-selection-store`` and ``resolve_oneshot_start_body`` off ``model-class-store``,
+        # NOT the input control — so swapping the input side leaves every downstream gate intact.
         @self.app.callback(
             Output("model-selection-store", "data"),
             Output("model-class-store", "data", allow_duplicate=True),
             Output("nn-model-summary", "children"),
-            Input("nn-model-dropdown", "value"),
+            Output("model-selection-modal", "is_open", allow_duplicate=True),
+            Input({"type": "model-select-btn", "index": dash.ALL}, "n_clicks"),
             prevent_initial_call=True,
         )
-        def select_model(model_key):
-            return self._select_model_handler(model_key)
+        def select_model(n_clicks_list):
+            return self._select_model_from_table_handler(n_clicks_list, dash.callback_context.triggered_id)
 
         @self.app.callback(
             Output("nn-dataset-type-dropdown", "options"),
@@ -2174,6 +2239,35 @@ class DashboardManager:
             self.logger.debug("Model select request failed: %s", exc)
         return dash.no_update, dash.no_update, dash.no_update
 
+    def _toggle_model_modal_handler(self, triggered_id, dataset_value, selected_model):
+        """Open/close the model-selection modal (A1b-1).
+
+        Opening (``nn-model-change-button``) rebuilds the table against the CURRENT dataset value
+        (a ``State``) so the per-row compatibility cells + disabled Select buttons reflect it on
+        open (§5.3 pre-filter-on-open). Closing (``model-selection-modal-close``) leaves the table
+        as-is. Returns ``(is_open, table_children)``.
+        """
+        if triggered_id == "nn-model-change-button":
+            return True, self._build_model_selection_table(dataset_value, selected_model)
+        return False, dash.no_update
+
+    def _select_model_from_table_handler(self, n_clicks_list, triggered_id):
+        """Apply the model whose table Select button was clicked, then close the modal (A1b-1).
+
+        The pattern-matching ``model-select-btn`` callback also fires once when the table is first
+        inserted into the modal (every ``n_clicks`` is ``None``) — that no-click fire is guarded to
+        a four-way ``no_update``. On a real click the model key is read from ``triggered_id["index"]``
+        and applied via the shared ``_select_model_handler`` (POST /api/model/select + store mirror);
+        the modal closes only when the selection actually applied (the handler no-ops on failure, so
+        a transient error leaves the modal open on the prior model). Returns
+        ``(model_selection_store, model_class_store, summary, modal_is_open)``.
+        """
+        if not isinstance(triggered_id, dict) or not any(n_clicks_list or []):
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        store, model_class, summary = self._select_model_handler(triggered_id.get("index"))
+        is_open = False if store is not dash.no_update else dash.no_update
+        return store, model_class, summary, is_open
+
     @staticmethod
     def _model_summary_text(data):
         """Compact 'Active: <label>' summary line for the sidebar model picker (A1-iv-3a)."""
@@ -2182,6 +2276,79 @@ class DashboardManager:
         status = data.get("status", "live")
         note = "" if status == "live" else f" · {status.replace('_', ' ')}"
         return f"Active: {label}{note}"
+
+    def _initial_model_summary(self):
+        """Seed text for the sidebar model summary at first paint (A1b-1).
+
+        Resolves the default model's status from the registry so the summary reads honestly before
+        any selection callback fires — the dropdown that previously showed the current value is gone,
+        so the summary is now the only at-rest indicator of the active model.
+        """
+        spec = get_model_spec(DEFAULT_MODEL_KEY)
+        status = spec.status if spec is not None else "live"
+        return self._model_summary_text({"nn_model": DEFAULT_MODEL_KEY, "status": status})
+
+    @staticmethod
+    def _status_badge(status):
+        """Lifecycle-status badge for the model table (D8) — distinct from incompatibility greying."""
+        color = {
+            "live": "success",
+            "coming_soon": "info",
+            "experimental": "warning",
+            "deprecated": "secondary",
+            "broken": "danger",
+        }.get(status, "secondary")
+        return dbc.Badge(status.replace("_", " "), color=color, className="text-uppercase")
+
+    @staticmethod
+    def _build_model_selection_table(dataset_value, selected_model):
+        """Build the custom ``dbc.Table`` of models for the selection modal (A1b-1; design §5.2).
+
+        Rows = every registry model. Columns: Model / Category / Status / Compatibility / Select.
+        Compatibility is computed against the currently-selected dataset (``dataset_value``) via
+        ``model_reason``; an incompatible model shows the reason in its compatibility cell and its
+        Select button is disabled. Per ratified option (a) a ``coming_soon`` model stays selectable
+        — ONLY *incompatible* models are disabled (D8 Train-gating is deferred to iv-5). The
+        currently-active row is highlighted. A ``dash_table.DataTable`` is deliberately NOT used
+        (OQ-4): the cells are rich components (a badge, a reason cell, a per-row disabled button)
+        and there is no virtualization payoff at this row count.
+        """
+        dataset = get_dataset_spec(dataset_value) if dataset_value else None
+        header = html.Thead(html.Tr([html.Th(col) for col in ("Model", "Category", "Status", "Compatibility", "")]))
+        rows = []
+        for model in MODELS:
+            reason = model_reason(model, dataset) if dataset is not None else None
+            is_compatible = reason is None
+            is_active = model.key == selected_model
+            model_cell = [html.Strong(model.label)]
+            if model.description:
+                model_cell.extend([html.Br(), html.Span(model.description, className="text-muted small")])
+            if is_compatible:
+                compat_cell = html.Span("✓ compatible", className="text-success small")
+            else:
+                compat_cell = html.Span(reason, className="text-muted small fst-italic")
+            select_button = dbc.Button(
+                "Selected" if is_active else "Select",
+                id={"type": "model-select-btn", "index": model.key},
+                color="success" if is_active else "primary",
+                outline=not is_active,
+                size="sm",
+                disabled=not is_compatible,
+                title=(reason or ("Currently active" if is_active else "Select this model")),
+            )
+            rows.append(
+                html.Tr(
+                    [
+                        html.Td(model_cell),
+                        html.Td(model.category.replace("_", " ")),
+                        html.Td(DashboardManager._status_badge(model.status)),
+                        html.Td(compat_cell),
+                        html.Td(select_button),
+                    ],
+                    className="table-active" if is_active else "",
+                )
+            )
+        return dbc.Table([header, html.Tbody(rows)], hover=True, responsive=True, className="align-middle mb-0")
 
     # Define theme callbacks
     def _setup_theme_callbacks(self):

@@ -16,13 +16,16 @@
 #####################################################################
 """Regression tests for the A1-iv-3a model picker (juniper-canopy #368).
 
-Exercises ``DashboardManager._select_model_handler`` (the testable body behind the
-``nn-model-dropdown`` callback) with a mocked ``/api/model/select`` round-trip — no server.
-On success it returns the swap response + the execution paradigm (mirrored to
-``model-class-store``) + a compact summary; on an empty selection or any transport/HTTP failure
-it returns ``dash.no_update`` for all three outputs so the UI stays on its prior model.
+Exercises ``DashboardManager._select_model_handler`` (the shared testable body behind model
+selection — the sidebar ``nn-model-dropdown`` in iv-3a, the modal table Select button since
+A1b-1; the handler is unchanged, only its caller moved) with a mocked ``/api/model/select``
+round-trip — no server. On success it returns the swap response + the execution paradigm
+(mirrored to ``model-class-store``) + a compact summary; on an empty selection or any
+transport/HTTP failure it returns ``dash.no_update`` for all three outputs so the UI stays on
+its prior model. The table-specific wiring (open/close + Select -> close) is covered by
+``test_model_table.py``.
 
-Constructing the ``DashboardManager`` here also validates that the new picker layout and the
+Constructing the ``DashboardManager`` here also validates that the model-selection layout and the
 ``allow_duplicate`` model-class-store callback register cleanly.
 """
 
