@@ -23,12 +23,23 @@
 #    (router miss) or, in the current asymmetric-mount state, as 401
 #    (middleware fires first).
 #
-#    This regression test walks the AST of every ``.py`` file under
-#    ``src/backend/`` and asserts that no ``_request("GET"|"POST"|…,
-#    "/v1/...", …)`` or ``_request(…, f"/v1/...", …)`` call exists.
+#    This regression test walks the AST of every **cascor-client-based
+#    adapter** under ``src/backend/`` (defect #7: scoped by import — only
+#    files that import ``juniper_cascor_client`` can exhibit the bug) and
+#    asserts that no ``_request("GET"|"POST"|…, "/v1/...", …)`` or
+#    ``_request(…, f"/v1/...", …)`` call exists.
 #    Catches the bug class at PR-merge time rather than at runtime
 #    (where the ``except`` clauses swallow the 404 into a warning log
 #    and a graceful empty payload, masking the regression).
+#
+#    Scoping (defect #7): the ``/v1/v1/...`` double-prefix is specific to
+#    ``JuniperCascorClient`` (its ``api_url`` already carries ``/v1``).
+#    Other backend adapters — e.g. ``recurrence_service_adapter.py``, which
+#    speaks raw ``httpx`` against a plain ``base_url`` and legitimately
+#    passes ``/v1/...`` paths through its own ``_call`` — must NOT be
+#    guarded. Walking *every* file false-positived on the recurrence
+#    adapter during A1-i (forcing a ``_request`` -> ``_call`` rename); the
+#    guard now applies only to files that import the cascor client.
 #
 #####################################################################################################################################################################################################
 
@@ -47,8 +58,35 @@ BACKEND_DIR = REPO_ROOT / "src" / "backend"
 GUARDED_METHODS = frozenset({"_request", "_get", "_post", "_put", "_patch", "_delete"})
 
 
+def _imports_cascor_client(py_path: Path) -> bool:
+    """Return True when ``py_path`` imports ``juniper_cascor_client`` (defect #7 scoping).
+
+    The ``/v1/v1/...`` double-prefix bug is specific to ``JuniperCascorClient._request`` — its
+    ``api_url`` already carries the ``/v1`` version prefix. Only files that actually use the cascor
+    client can exhibit it; other backend adapters (e.g. the recurrence service adapter, which speaks
+    raw ``httpx`` against a plain ``base_url`` and legitimately passes ``/v1/...`` paths) must NOT be
+    guarded. Detected at the AST level so a comment/docstring mention of the client does not count.
+    """
+    tree = ast.parse(py_path.read_text(encoding="utf-8"), filename=str(py_path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.module and node.module.split(".")[0] == "juniper_cascor_client":
+                return True
+        elif isinstance(node, ast.Import):
+            if any(alias.name.split(".")[0] == "juniper_cascor_client" for alias in node.names):
+                return True
+    return False
+
+
 def _iter_backend_py_files() -> Iterator[Path]:
-    return (p for p in BACKEND_DIR.rglob("*.py") if p.is_file())
+    """Backend ``.py`` files that import the cascor client — the only ones the guard applies to.
+
+    Defect #7: previously this yielded EVERY file under ``src/backend/``, which false-positived on
+    adapters that define their own ``_request``/``_post`` and legitimately use ``/v1/...`` paths
+    against a client whose base url has no ``/v1`` (the recurrence service adapter, A1-i). The guard
+    now applies only to cascor-client-based adapters — the sole place the double-prefix can occur.
+    """
+    return (p for p in BACKEND_DIR.rglob("*.py") if p.is_file() and _imports_cascor_client(p))
 
 
 def _path_arg_str_value(call: ast.Call) -> str | None:
@@ -145,3 +183,34 @@ def test_cascor_service_adapter_specifically_clean() -> None:
     assert adapter_path.exists(), f"{adapter_path} not found — regression test cannot run; check repo layout."
     offenders = _find_guarded_calls_in_file(adapter_path)
     assert not offenders, "cascor_service_adapter.py contains /v1/-prefixed _request calls: " f"{offenders}. Strip the /v1 prefix; juniper-cascor-client's _request prepends /v1 itself."
+
+
+# --------------------------------------------------------------------------- defect #7: scoping
+
+
+def test_imports_cascor_client_detects_real_imports_only(tmp_path) -> None:
+    """``_imports_cascor_client`` keys on AST imports, not comment/docstring mentions."""
+    importer = tmp_path / "uses_cascor.py"
+    importer.write_text("from juniper_cascor_client import JuniperCascorClient\n\nx = JuniperCascorClient\n")
+    submodule_importer = tmp_path / "uses_cascor_exc.py"
+    submodule_importer.write_text("from juniper_cascor_client.exceptions import JuniperCascorClientError\n")
+    plain = tmp_path / "no_cascor.py"
+    # Mentions the client in a docstring and even calls a guarded method with a /v1 path — but does
+    # NOT import the client, so it is out of scope (the defect-#7 false-positive class).
+    plain.write_text('"""Speaks raw httpx, not the cascor client."""\n\n\nclass A:\n    def f(self):\n        self._post("/v1/train", json={})\n')
+    assert _imports_cascor_client(importer) is True
+    assert _imports_cascor_client(submodule_importer) is True
+    assert _imports_cascor_client(plain) is False
+
+
+def test_guard_scope_includes_cascor_excludes_non_cascor_adapters() -> None:
+    """Defect #7: the guard walks ONLY cascor-client-based adapters.
+
+    ``cascor_service_adapter.py`` (imports ``JuniperCascorClient``) stays in scope; the recurrence
+    service adapter (raw httpx, legitimately uses ``/v1/...`` paths through its own ``_call``) is
+    excluded — so a non-cascor adapter's own ``_request``/``_post`` with a ``/v1/`` path can never
+    false-positive (the A1-i regression class that forced the ``_request`` -> ``_call`` rename).
+    """
+    scoped = {p.name for p in _iter_backend_py_files()}
+    assert "cascor_service_adapter.py" in scoped
+    assert "recurrence_service_adapter.py" not in scoped
