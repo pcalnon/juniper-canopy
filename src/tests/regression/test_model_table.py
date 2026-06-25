@@ -45,7 +45,7 @@ import pytest
 import requests
 
 from frontend.dashboard_manager import DashboardManager
-from model_registry import MODELS
+from model_registry import MODELS, ModelSpec
 
 
 @pytest.fixture(scope="module")
@@ -145,12 +145,17 @@ def test_table_greys_incompatible_models_against_3d_dataset():
     assert "needs 2-D data" in _all_text(table)
 
 
-def test_table_option_a_coming_soon_stays_selectable_when_compatible():
-    """Ratified option (a): a coming_soon model is NOT disabled — only *incompatible* is (D8 -> iv-5)."""
-    table = DashboardManager._build_model_selection_table("equities_seq", "recurrence")
-    recurrence = next(model for model in MODELS if model.key == "recurrence")
-    assert recurrence.status == "coming_soon"  # guard the premise
-    assert _button_for(table, "recurrence").disabled is False  # selectable despite coming_soon
+def test_table_option_a_non_live_stays_selectable_when_compatible():
+    """Ratified option (a): a non-live but COMPATIBLE model is NOT disabled — only *incompatible* is.
+
+    A1-iv-5 flipped recurrence to live, so inject a synthetic coming_soon 3-D model: a non-live
+    model that is compatible with the dataset stays selectable in the table (the D8 Train-gate is a
+    separate axis from the table's compatibility greying — you can select it to inspect, just not
+    train it)."""
+    coming_soon = ModelSpec(key="cs3d", label="Coming Soon 3-D", category="ts_established", input_ndim=frozenset({3}), supported_task_types=frozenset({"regression"}), requires_dt=True, status="coming_soon")
+    table = DashboardManager._build_model_selection_table("equities_seq", "cs3d", models=(coming_soon,))
+    assert coming_soon.status == "coming_soon"  # premise: a non-live model
+    assert _button_for(table, "cs3d").disabled is False  # selectable despite non-live (it is compatible)
 
 
 def test_table_highlights_the_active_row_and_labels_its_button():
@@ -206,7 +211,7 @@ def test_toggle_close_leaves_table_untouched(manager):
 
 
 def test_select_from_table_applies_and_closes_modal(manager, monkeypatch):
-    body = {"nn_model": "recurrence", "backend": "recurrence", "execution": "one_shot", "status": "coming_soon", "swapped": True}
+    body = {"nn_model": "recurrence", "backend": "recurrence", "execution": "one_shot", "status": "live", "swapped": True}
     monkeypatch.setattr(requests, "post", lambda *a, **k: _resp(ok=True, json_body=body))
     store, model_class, summary, is_open = manager._select_model_from_table_handler([None, 1], {"type": "model-select-btn", "index": "recurrence"})
     assert store == "recurrence"
@@ -280,3 +285,52 @@ def test_dataset_hint_callback_is_registered(manager):
     """Wiring guard: the reverse-gate annotation Output (a Div, so invisible to the control-graph
     lint) is connected to a callback. Catches accidental removal/miswiring of annotate_model_hint."""
     assert any(key.startswith("nn-model-dataset-hint.children") for key in manager.app.callback_map)
+
+
+# --------------------------------------------------------------------------- D8 Train-gate (A1-iv-5, §5.7)
+
+
+def test_update_button_appearance_force_disables_start_for_non_live(manager, monkeypatch):
+    """D8: a non-live selected model force-disables Start; the other controls follow button-states."""
+    import frontend.dashboard_manager as dm
+
+    button_states = {
+        "start": {"disabled": False, "loading": False, "timestamp": 0},
+        "pause": {"disabled": True, "loading": False, "timestamp": 0},
+        "stop": {"disabled": True, "loading": False, "timestamp": 0},
+        "resume": {"disabled": True, "loading": False, "timestamp": 0},
+        "reset": {"disabled": False, "loading": False, "timestamp": 0},
+    }
+    # Live model (cascor) -> Start follows button-states (enabled here); no gate.
+    live_out = manager._update_button_appearance_handler(button_states=button_states, model_key="cascor")
+    assert live_out[0] is False  # start_disabled
+    assert live_out[2] is True  # pause_disabled follows button-states
+    # Non-live model -> Start force-disabled regardless of button-states; the others are unaffected.
+    monkeypatch.setattr(dm, "model_is_trainable", lambda model_key: False)
+    gated_out = manager._update_button_appearance_handler(button_states=button_states, model_key="anything")
+    assert gated_out[0] is True  # start force-disabled by the D8 gate
+    assert gated_out[2] is True  # pause unchanged (still per button-states)
+    assert gated_out[8] is False  # reset unchanged (still per button-states)
+
+
+def test_train_gate_notice_handler_alert_for_non_live_none_for_live(monkeypatch):
+    """D8 notice: a warning Alert (label + status + reason) for a non-live model, None for live."""
+    import frontend.dashboard_manager as dm
+
+    # Live models -> no notice (hidden).
+    assert DashboardManager._train_gate_notice_handler("cascor") is None
+    assert DashboardManager._train_gate_notice_handler("recurrence") is None  # A1-iv-5: now live
+    # Non-live -> a warning alert naming the model + its status + the reason.
+    coming_soon = ModelSpec(key="cs", label="Future Model", category="ts_growth", input_ndim=frozenset({3}), supported_task_types=frozenset({"regression"}), status="coming_soon")
+    monkeypatch.setattr(dm, "model_is_trainable", lambda model_key: False)
+    monkeypatch.setattr(dm, "get_model_spec", lambda key: coming_soon)
+    alert = DashboardManager._train_gate_notice_handler("cs")
+    assert type(alert).__name__ == "Alert"
+    assert alert.color == "warning"
+    text = _all_text(alert)
+    assert "Future Model" in text and "coming soon" in text and "not trainable" in text
+
+
+def test_train_gate_notice_callback_is_registered(manager):
+    """Wiring guard: the D8 train-gate notice Output (a Div, lint-invisible) is connected."""
+    assert any(key.startswith("train-gate-notice.children") for key in manager.app.callback_map)

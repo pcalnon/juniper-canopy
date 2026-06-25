@@ -62,6 +62,8 @@
 #       dataset_reason) — the compatibility-cell text for the dedicated model-selection surface.
 #     - A1b-2: dataset_model_hint() — the sidebar reverse-gate annotation (§5.3) naming the model
 #       constraint the selected dataset imposes; also surfaces the empty-compatible-set state (§5.8).
+#     - A1-iv-5: flipped recurrence coming_soon → live (service deployed + canopy-wired, deploy #132)
+#       + model_is_trainable() (the D8 Train-gate predicate) + model_options(models=) injectability.
 #
 #####################################################################################################################################################################################################
 """Model + dataset-type registry (single source of truth) for model selection.
@@ -154,9 +156,12 @@ DEFAULT_DATASET_TYPE: str = DATASET_TYPES[0].value
 # the ``"in-process"`` provider; demo has none.
 RECURRENCE_PROVIDER: str = "juniper-recurrence"
 
-# Known models. cascor is the live feed-forward backend; recurrence (LMU) is the
-# coming-soon 3-D / irregular-delta-t model (published as juniper-recurrence-model
-# 0.1.0; the canopy-routable service is not yet deployed — design note §5.7 / §8.4).
+# Known models. cascor is the live in-process feed-forward backend; recurrence (LMU) is the
+# live 3-D / irregular-delta-t one-shot model (juniper-recurrence-model 0.1.0). A1-iv-5 flipped
+# it coming_soon → live now that the canopy-routable service is deployed + wired in-stack
+# (juniper-deploy #132 wires JUNIPER_CANOPY_RECURRENCE_SERVICE_URL → http://juniper-recurrence:8210;
+# design §5.7 / §8.4). canopy's D8 Train-gate (model_is_trainable) disables Start for any *non*-live
+# model, so a future experimental/coming_soon entry is shown but not trainable.
 MODELS: tuple[ModelSpec, ...] = (
     ModelSpec(
         key="cascor",
@@ -178,7 +183,7 @@ MODELS: tuple[ModelSpec, ...] = (
         family="lmu",
         version="0.1.0",
         requires_dt=True,
-        status="coming_soon",
+        status="live",  # A1-iv-5: flipped coming_soon → live (service deployed + canopy-wired, juniper-deploy #132)
         execution="one_shot",
         provider=RECURRENCE_PROVIDER,
         description="Legendre Memory Unit regressor for irregular-delta-t time series.",
@@ -212,14 +217,32 @@ def dataset_default_params(value: str) -> dict[str, object]:
     return {}
 
 
-def model_options() -> list[dict[str, str]]:
+def model_options(*, models: tuple[ModelSpec, ...] = MODELS) -> list[dict[str, str]]:
     """Return the model-picker dropdown options as ``[{"label", "value"}, ...]`` (A1-iv-3a).
 
-    Source for the ``nn-model-dropdown`` options. Registry order is preserved. Non-``live``
-    models carry a short lifecycle hint in the label (D8) so the picker reads honestly before
-    the full faceted surface (A1b) lands.
+    Registry order is preserved. Non-``live`` models carry a short lifecycle hint in the label
+    (D8) so the picker reads honestly. ``models`` is injectable so the non-live label path stays
+    testable once every shipped model is live (post A1-iv-5).
     """
-    return [{"label": spec.label if spec.status == "live" else f"{spec.label} — {spec.status.replace('_', ' ')}", "value": spec.key} for spec in MODELS]
+    return [{"label": spec.label if spec.status == "live" else f"{spec.label} — {spec.status.replace('_', ' ')}", "value": spec.key} for spec in models]
+
+
+def model_is_trainable(model_key: str, *, models: tuple[ModelSpec, ...] = MODELS) -> bool:
+    """True when the model for ``model_key`` can be trained now — its status is 'live' (D8; §5.7).
+
+    The D8 Train-gate (A1-iv-5): a non-live model (``coming_soon`` / ``experimental`` /
+    ``deprecated`` / ``broken``) is shown and selectable for inspection but NOT trainable, so the
+    dashboard disables the Start button for it. An unknown ``model_key`` (no spec) defaults to
+    trainable so a transient desync never strands Start — the target model service still fails
+    closed on an actual shape/availability mismatch (FR9). ``models`` is injectable so the non-live
+    branch stays testable once every shipped model is live.
+    """
+    if not model_key:
+        return True
+    for spec in models:
+        if model_key == spec.key or model_key in spec.aliases:
+            return spec.status == "live"
+    return True
 
 
 def get_model_spec(key: str) -> ModelSpec | None:
