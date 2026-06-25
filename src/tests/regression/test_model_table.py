@@ -334,3 +334,42 @@ def test_train_gate_notice_handler_alert_for_non_live_none_for_live(monkeypatch)
 def test_train_gate_notice_callback_is_registered(manager):
     """Wiring guard: the D8 train-gate notice Output (a Div, lint-invisible) is connected."""
     assert any(key.startswith("train-gate-notice.children") for key in manager.app.callback_map)
+
+
+# --------------------------------------------------------------------------- search (A1b, §5.2)
+
+
+def test_table_search_filters_rows_over_label_family_category():
+    # search "lmu" -> only the recurrence row (family lmu); cascor filtered out.
+    table = DashboardManager._build_model_selection_table("equities_seq", "recurrence", search="lmu")
+    assert {button.id["index"] for button in _select_buttons(table)} == {"recurrence"}
+    # search "cascor" -> only cascor.
+    table2 = DashboardManager._build_model_selection_table("spirals", "cascor", search="cascor")
+    assert {button.id["index"] for button in _select_buttons(table2)} == {"cascor"}
+    # blank search -> all models (no filter).
+    table3 = DashboardManager._build_model_selection_table("spirals", "cascor", search="")
+    assert {button.id["index"] for button in _select_buttons(table3)} == {model.key for model in MODELS}
+
+
+def test_table_search_no_match_shows_message():
+    # A non-empty query that matches nothing -> a "no matches" alert, not an empty table (§5.2).
+    table = DashboardManager._build_model_selection_table("spirals", "cascor", search="zzz-no-such-model")
+    assert type(table).__name__ == "Alert"
+    assert _has_id(table, "model-search-empty-alert")
+    assert "No models match" in _all_text(table)
+    assert not _select_buttons(table)  # no rows rendered
+
+
+def test_toggle_open_honors_search_and_search_rebuilds_keeping_open(manager):
+    # Open (change-button) builds the table honoring the current search term.
+    is_open, children = manager._toggle_model_modal_handler("nn-model-change-button", "spirals", "cascor", "cascor")
+    assert is_open is True
+    assert {button.id["index"] for button in _select_buttons(children)} == {"cascor"}  # filtered on open
+    # Typing in the search box rebuilds filtered + leaves the modal open (is_open no_update).
+    is_open2, children2 = manager._toggle_model_modal_handler("model-search-input", "spirals", "cascor", "lmu")
+    assert is_open2 is dash.no_update
+    assert {button.id["index"] for button in _select_buttons(children2)} == {"recurrence"}
+    # Close still closes regardless of the search term.
+    is_open3, children3 = manager._toggle_model_modal_handler("model-selection-modal-close", "spirals", "cascor", "lmu")
+    assert is_open3 is False
+    assert children3 is dash.no_update

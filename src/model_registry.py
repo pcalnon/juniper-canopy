@@ -64,6 +64,8 @@
 #       constraint the selected dataset imposes; also surfaces the empty-compatible-set state (§5.8).
 #     - A1-iv-5: flipped recurrence coming_soon → live (service deployed + canopy-wired, deploy #132)
 #       + model_is_trainable() (the D8 Train-gate predicate) + model_options(models=) injectability.
+#     - A1b-search: model_matches_search() — the model-table search predicate (label + family +
+#       category + tags, §5.2) backing the modal search box.
 #
 #####################################################################################################################################################################################################
 """Model + dataset-type registry (single source of truth) for model selection.
@@ -243,6 +245,20 @@ def model_is_trainable(model_key: str, *, models: tuple[ModelSpec, ...] = MODELS
         if model_key == spec.key or model_key in spec.aliases:
             return spec.status == "live"
     return True
+
+
+def model_matches_search(model: ModelSpec, query: str) -> bool:
+    """True when ``model`` matches the free-text search ``query`` (A1b search box; design §5.2).
+
+    Case-insensitive substring match over the model's ``label`` + ``family`` + ``category`` +
+    ``tags`` — NOT label-only (§8), so a family ("lmu") or a facet tag finds the model even when the
+    label does not contain the term. A blank / whitespace query matches everything (no filter).
+    """
+    needle = query.strip().lower()
+    if not needle:
+        return True
+    haystack = " ".join((model.label, model.family, model.category, *model.tags)).lower()
+    return needle in haystack
 
 
 def get_model_spec(key: str) -> ModelSpec | None:

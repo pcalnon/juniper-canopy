@@ -265,6 +265,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Tests: `model_is_trainable` + the flipped/repurposed registry assertions
   (`test_model_registry.py`), the Start force-disable + notice handlers + wiring
   (`test_model_table.py`), and the live-status route assertion (`test_model_select.py`).
+- **Model-table search box (A1b, #368)**: the model-selection modal gains a **free-text search**
+  (`model-search-input`, a `type="search"` box with a native clear) above the table. It filters the
+  model rows by **label + family + category + tags** (not label-only, §8) via a new registry
+  `model_matches_search()` predicate; a blank query shows everything and a non-empty query that
+  matches nothing renders a clear "no models match" message. Search is **folded into the existing
+  modal toggle callback** (the one that owns the table container) — typing rebuilds the table
+  filtered while the modal stays open, with no racy second writer; `_build_model_selection_table`
+  gains a `search=` parameter. This is the §5.2 scale affordance (browse-and-compare at
+  dozens-to-hundreds of model variants); it has no functional effect at today's two models but
+  completes the surface. Design-of-record: juniper-ml
+  [`notes/JUNIPER_CANOPY_MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/JUNIPER_CANOPY_MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md)
+  (§5.2). Tests: `model_matches_search` (`test_model_registry.py`) + search filtering / no-match
+  message / open-honours-search + search-rebuilds-keeping-open (`test_model_table.py`). **This
+  completes the A1 model-selection feature end-to-end.**
 
 - **Build provenance on `/v1/health` + `/v1/health/ready`.** The dashboard now
   reports the source `git_sha` and ISO-8601 `build_date` baked into its image

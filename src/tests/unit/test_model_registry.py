@@ -28,6 +28,7 @@ from model_registry import (
     get_dataset_spec,
     get_model_spec,
     model_is_trainable,
+    model_matches_search,
     model_options,
     model_reason,
     temporal_ok,
@@ -274,6 +275,26 @@ def test_model_is_trainable_live_unknown_and_synthetic_non_live():
     # A synthetic non-live model -> NOT trainable (the D8 gate; injected since no shipped model is non-live).
     coming_soon = ModelSpec(key="cs", label="CS", category="ts_growth", input_ndim=frozenset({3}), supported_task_types=frozenset({"regression"}), status="coming_soon")
     assert model_is_trainable("cs", models=(coming_soon,)) is False
+
+
+# Model-table search predicate (A1b search; §5.2): model_matches_search.
+
+
+def test_model_matches_search_over_label_family_category_tags():
+    cascor = next(model for model in MODELS if model.key == "cascor")
+    recurrence = next(model for model in MODELS if model.key == "recurrence")
+    # Case-insensitive substring over label / family / category.
+    assert model_matches_search(cascor, "cascor") is True  # label + family
+    assert model_matches_search(recurrence, "lmu") is True  # family (label also carries "LMU")
+    assert model_matches_search(recurrence, "ESTABLISHED") is True  # category ts_established, case-insensitive
+    assert model_matches_search(cascor, "lmu") is False  # not in cascor's label/family/category/tags
+    # Blank / whitespace query matches everything (no filter).
+    assert model_matches_search(cascor, "") is True
+    assert model_matches_search(cascor, "   ") is True
+    # Tags are searchable too (not label-only, §8).
+    tagged = ModelSpec(key="t", label="T", category="ts_growth", input_ndim=frozenset({3}), supported_task_types=frozenset({"regression"}), tags=frozenset({"experimental-xyz"}))
+    assert model_matches_search(tagged, "experimental-xyz") is True
+    assert model_matches_search(tagged, "nope") is False
 
 
 # Dataset gate (A1-iv-3b): the model->dataset greying source for the sidebar dropdown.
