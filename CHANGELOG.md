@@ -236,6 +236,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `src/tests/regression/test_model_table.py` (15 cases — table builder, status badge, open/close,
   Select → apply + close) + `src/tests/unit/test_model_registry.py` (`model_reason` / `get_dataset_spec`).
   The reactive reverse dataset→model gate, degenerate states, and the search box are A1b-2.
+- **Reactive reverse gate + degenerate states (A1b-2, #368)**: completes the bidirectional gate
+  (§5.3) on the sidebar side. A new **reverse-gate annotation** under the model summary
+  (`nn-model-dataset-hint`) names the model constraint the *currently-selected dataset* imposes —
+  e.g. *"3-D Δt-aware models only"* for `equities_seq`, *"2-D models only"* for the 2-D types — the
+  dataset-side mirror of the table's per-row `model_reason` greying. It updates on every dataset
+  change (a user pick **or** the forward-gate snap from `gate_dataset_options`) via a new registry
+  `dataset_model_hint()` helper. The model **table** also now renders a clear **recovery message**
+  (§5.8) when a dataset has *no* compatible model (degenerate empty-compatible-set state) instead of
+  a silently-unusable all-greyed list — defensive under option (a) (every current seed dataset has a
+  compatible model), exercised via an injectable `models=` param. The **optional search box (§5.2)
+  is deferred** — it is a FR12 scale affordance with no value at the current two-model population.
+  Design-of-record: juniper-ml
+  [`notes/JUNIPER_CANOPY_MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/JUNIPER_CANOPY_MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md)
+  (§5.3 / §5.8). Tests: `src/tests/unit/test_model_registry.py` (`dataset_model_hint`) +
+  `src/tests/regression/test_model_table.py` (degenerate recovery, hint handler/seed, callback wiring).
 
 - **Build provenance on `/v1/health` + `/v1/health/ready`.** The dashboard now
   reports the source `git_sha` and ISO-8601 `build_date` baked into its image

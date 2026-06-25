@@ -60,6 +60,8 @@
 #       juniper-data params the one-shot Start button forwards so the recurrence fit is bounded).
 #     - A1b-1: get_dataset_spec() + model_reason() (the model-perspective inverse of
 #       dataset_reason) — the compatibility-cell text for the dedicated model-selection surface.
+#     - A1b-2: dataset_model_hint() — the sidebar reverse-gate annotation (§5.3) naming the model
+#       constraint the selected dataset imposes; also surfaces the empty-compatible-set state (§5.8).
 #
 #####################################################################################################################################################################################################
 """Model + dataset-type registry (single source of truth) for model selection.
@@ -329,6 +331,29 @@ def model_reason(model: ModelSpec, dataset: DatasetTypeSpec) -> str | None:
     if not temporal_ok(dataset, model):
         return "needs regularly-sampled data"
     return None
+
+
+def dataset_model_hint(dataset_value: str, *, models: tuple[ModelSpec, ...] = MODELS) -> str | None:
+    """Sidebar reverse-gate hint naming the model constraint the selected dataset imposes (A1b-2; §5.3).
+
+    Given the selected dataset, a short positive phrase describing what KIND of model it admits —
+    so the user sees, at rest in the sidebar, why some models are greyed in the table. This is the
+    dataset-side mirror of the table's per-row ``model_reason`` greying (the reverse gate, §5.3):
+    it names the structural discriminators (``ndim``, plus Δt-awareness for irregular sequences).
+
+    Returns ``None`` when no dataset is selected (so the caller clears the annotation); a
+    ``"no compatible models"`` warning when the compatible set is empty (the degenerate state,
+    §5.8). ``models`` is injectable for tests (mirrors ``compatible_models``).
+    """
+    spec = get_dataset_spec(dataset_value)
+    if spec is None:
+        return None
+    if not compatible_models(spec, models=models):
+        return "no compatible models"
+    parts = [f"{spec.ndim}-D"]
+    if spec.temporal == "irregular":
+        parts.append("Δt-aware")
+    return f"{' '.join(parts)} models only"
 
 
 def gated_dataset_options(model_key: str) -> list[dict[str, object]]:

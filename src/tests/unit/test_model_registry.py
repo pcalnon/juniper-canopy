@@ -21,6 +21,7 @@ from model_registry import (
     compatible_datasets,
     compatible_models,
     dataset_default_params,
+    dataset_model_hint,
     dataset_reason,
     dataset_type_options,
     gated_dataset_options,
@@ -324,6 +325,31 @@ def test_get_dataset_spec_resolves_and_misses():
     assert spec.value == "equities_seq" and spec.ndim == 3
     assert get_dataset_spec("nonexistent") is None
     assert get_dataset_spec("") is None
+
+
+# Sidebar reverse-gate annotation (A1b-2; §5.3): dataset_model_hint.
+
+
+def test_dataset_model_hint_names_the_constraint_per_dataset():
+    # spirals = 2-D -> "2-D models only"; equities_seq = 3-D irregular -> "3-D Δt-aware models only".
+    assert dataset_model_hint("spirals") == "2-D models only"
+    assert dataset_model_hint("equities_seq") == "3-D Δt-aware models only"
+
+
+def test_dataset_model_hint_none_without_a_dataset():
+    assert dataset_model_hint("") is None
+    assert dataset_model_hint("does-not-exist") is None
+
+
+def test_dataset_model_hint_empty_compatible_set_warns():
+    # Degenerate (§5.8): inject an empty model population so nothing is compatible.
+    assert dataset_model_hint("spirals", models=()) == "no compatible models"
+
+
+def test_dataset_model_hint_non_none_for_every_seed_dataset():
+    """Each seed dataset has ≥1 compatible model under option (a), so the hint is always a phrase."""
+    for dataset in DATASET_TYPES:
+        assert dataset_model_hint(dataset.value) is not None
 
 
 def test_gated_dataset_options_greys_incompatible_for_recurrence():

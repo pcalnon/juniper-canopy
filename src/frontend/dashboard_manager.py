@@ -46,7 +46,7 @@ from dash.dependencies import Input, Output, State
 
 from canopy_constants import DashboardConstants, TrainingConstants
 from frontend.internal_api import internal_api_headers
-from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, dataset_default_params, gated_dataset_options, get_dataset_spec, get_model_spec, model_reason
+from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_reason
 from settings import get_settings
 
 from . import ui_standards
@@ -1088,6 +1088,15 @@ class DashboardManager:
                                                                                     ),
                                                                                 ],
                                                                                 className="ms-3 mb-2 d-flex align-items-baseline",
+                                                                            ),
+                                                                            # A1b-2 (§5.3): the reverse-gate annotation — names the model
+                                                                            # constraint the CURRENT dataset imposes ("3-D models only"),
+                                                                            # the dataset-side mirror of the table's per-row greying. Seeded
+                                                                            # for the default dataset; updated by the dataset→hint callback.
+                                                                            html.Div(
+                                                                                self._initial_dataset_model_hint(),
+                                                                                id="nn-model-dataset-hint",
+                                                                                className="ms-3 mb-2 small text-muted fst-italic",
                                                                             ),
                                                                         ],
                                                                         id="sidebar-nn-model",
@@ -2180,6 +2189,18 @@ class DashboardManager:
         def resolve_oneshot_start_body(model_class, dataset_generator):
             return self._resolve_oneshot_start_body_handler(model_class, dataset_generator)
 
+        # A1b-2 (§5.3): the reactive reverse gate. Selecting a dataset annotates the sidebar with
+        # the model constraint it imposes ("3-D models only"), the dataset-side mirror of the
+        # table's per-row ``model_reason`` greying. Fires on every dataset change — a user pick OR
+        # the forward-gate snap (``gate_dataset_options``) — so the hint always tracks the dataset.
+        @self.app.callback(
+            Output("nn-model-dataset-hint", "children"),
+            Input("nn-dataset-type-dropdown", "value"),
+            prevent_initial_call=True,
+        )
+        def annotate_model_hint(dataset_value):
+            return self._dataset_model_hint_handler(dataset_value)
+
     @staticmethod
     def _resolve_oneshot_start_body_handler(model_class: "str | None", dataset_generator: "str | None") -> "dict[str, object] | None":
         """Build the one-shot Start dataset-ref body (A1-iv-3c), or None for a live model.
@@ -2288,6 +2309,19 @@ class DashboardManager:
         status = spec.status if spec is not None else "live"
         return self._model_summary_text({"nn_model": DEFAULT_MODEL_KEY, "status": status})
 
+    def _initial_dataset_model_hint(self):
+        """Seed text for the sidebar reverse-gate hint at first paint (A1b-2; §5.3)."""
+        return dataset_model_hint(DEFAULT_DATASET_TYPE) or ""
+
+    @staticmethod
+    def _dataset_model_hint_handler(dataset_value):
+        """Sidebar reverse-gate annotation for the current dataset (A1b-2; §5.3).
+
+        Returns the model-constraint phrase for ``dataset_value`` (e.g. "3-D Δt-aware models only"),
+        or "" when no dataset is selected so the annotation clears rather than rendering "None".
+        """
+        return dataset_model_hint(dataset_value) or ""
+
     @staticmethod
     def _status_badge(status):
         """Lifecycle-status badge for the model table (D8) — distinct from incompatibility greying."""
@@ -2301,8 +2335,8 @@ class DashboardManager:
         return dbc.Badge(status.replace("_", " "), color=color, className="text-uppercase")
 
     @staticmethod
-    def _build_model_selection_table(dataset_value, selected_model):
-        """Build the custom ``dbc.Table`` of models for the selection modal (A1b-1; design §5.2).
+    def _build_model_selection_table(dataset_value, selected_model, *, models=MODELS):
+        """Build the custom ``dbc.Table`` of models for the selection modal (A1b-1/A1b-2; design §5.2).
 
         Rows = every registry model. Columns: Model / Category / Status / Compatibility / Select.
         Compatibility is computed against the currently-selected dataset (``dataset_value``) via
@@ -2312,13 +2346,20 @@ class DashboardManager:
         currently-active row is highlighted. A ``dash_table.DataTable`` is deliberately NOT used
         (OQ-4): the cells are rich components (a badge, a reason cell, a per-row disabled button)
         and there is no virtualization payoff at this row count.
+
+        A1b-2: when a dataset is selected but **no** model can train it, a recovery message is
+        rendered above the (all-greyed) table — the degenerate empty-compatible-set state (§5.8).
+        ``models`` is injectable so that state is testable with the real seeds (every current seed
+        dataset has a compatible model under option (a)).
         """
         dataset = get_dataset_spec(dataset_value) if dataset_value else None
         header = html.Thead(html.Tr([html.Th(col) for col in ("Model", "Category", "Status", "Compatibility", "")]))
         rows = []
-        for model in MODELS:
+        compatible_count = 0
+        for model in models:
             reason = model_reason(model, dataset) if dataset is not None else None
             is_compatible = reason is None
+            compatible_count += int(is_compatible)
             is_active = model.key == selected_model
             model_cell = [html.Strong(model.label)]
             if model.description:
@@ -2348,7 +2389,21 @@ class DashboardManager:
                     className="table-active" if is_active else "",
                 )
             )
-        return dbc.Table([header, html.Tbody(rows)], hover=True, responsive=True, className="align-middle mb-0")
+        table = dbc.Table([header, html.Tbody(rows)], hover=True, responsive=True, className="align-middle mb-0")
+        # Degenerate state (§5.8): a dataset is selected but NO model can train it — show a clear
+        # recovery message above the (all-greyed) table rather than a silently-unusable list.
+        if dataset is not None and compatible_count == 0:
+            recovery = dbc.Alert(
+                [
+                    html.Strong("No compatible model. "),
+                    html.Span("No model can train the selected dataset yet — switch the dataset in the sidebar, or choose a model that supports it once one is available."),
+                ],
+                color="warning",
+                className="mb-3",
+                id="model-selection-empty-alert",
+            )
+            return html.Div([recovery, table])
+        return table
 
     # Define theme callbacks
     def _setup_theme_callbacks(self):
