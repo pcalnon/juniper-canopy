@@ -112,6 +112,11 @@ def _rows(table):
     return [n for n in _walk(table) if type(n).__name__ == "Tr"]
 
 
+def _has_id(node, target):
+    """True when any component under ``node`` carries ``id == target``."""
+    return any(getattr(n, "id", None) == target for n in _walk(node))
+
+
 # --------------------------------------------------------------------------- table builder
 
 
@@ -232,3 +237,46 @@ def test_select_from_table_keeps_modal_open_on_failed_apply(manager, monkeypatch
 def test_initial_model_summary_seeds_the_default_model(manager):
     # cascor is the DEFAULT_MODEL_KEY and is live -> "Active: CasCor ..." with no status note.
     assert manager._initial_model_summary() == "Active: CasCor (Cascade-Correlation)"
+
+
+# --------------------------------------------------------------------------- degenerate state (A1b-2, §5.8)
+
+
+def test_table_degenerate_empty_set_shows_recovery_alert():
+    # Inject a model population with nothing compatible with the 3-D dataset (cascor is 2-D only)
+    # -> a recovery message wraps the (all-greyed) table, not a bare Table (§5.8).
+    cascor_only = tuple(model for model in MODELS if model.key == "cascor")
+    result = DashboardManager._build_model_selection_table("equities_seq", "recurrence", models=cascor_only)
+    assert type(result).__name__ == "Div"  # alert + table wrapper
+    assert _has_id(result, "model-selection-empty-alert")
+    assert "No compatible model" in _all_text(result)
+    assert any(type(n).__name__ == "Table" for n in _walk(result))  # the greyed table is still shown below
+
+
+def test_table_non_degenerate_returns_bare_table():
+    # >=1 compatible model -> a bare Table, no recovery wrapper.
+    result = DashboardManager._build_model_selection_table("equities_seq", "recurrence")
+    assert type(result).__name__ == "Table"
+    assert not _has_id(result, "model-selection-empty-alert")
+
+
+# --------------------------------------------------------------------------- reverse-gate sidebar hint (A1b-2, §5.3)
+
+
+def test_dataset_model_hint_handler_text_and_clear(manager):
+    assert manager._dataset_model_hint_handler("equities_seq") == "3-D Δt-aware models only"
+    assert manager._dataset_model_hint_handler("spirals") == "2-D models only"
+    # no / unknown dataset -> "" so the annotation clears (never renders "None")
+    assert manager._dataset_model_hint_handler("") == ""
+    assert manager._dataset_model_hint_handler("does-not-exist") == ""
+
+
+def test_initial_dataset_model_hint_seeds_default_dataset(manager):
+    # DEFAULT_DATASET_TYPE = spirals (2-D) -> "2-D models only" at first paint.
+    assert manager._initial_dataset_model_hint() == "2-D models only"
+
+
+def test_dataset_hint_callback_is_registered(manager):
+    """Wiring guard: the reverse-gate annotation Output (a Div, so invisible to the control-graph
+    lint) is connected to a callback. Catches accidental removal/miswiring of annotate_model_hint."""
+    assert any(key.startswith("nn-model-dataset-hint.children") for key in manager.app.callback_map)
