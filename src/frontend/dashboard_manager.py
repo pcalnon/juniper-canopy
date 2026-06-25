@@ -46,7 +46,7 @@ from dash.dependencies import Input, Output, State
 
 from canopy_constants import DashboardConstants, TrainingConstants
 from frontend.internal_api import internal_api_headers
-from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, gated_dataset_options, get_model_spec, model_options
+from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, dataset_default_params, gated_dataset_options, get_model_spec, model_options
 from settings import get_settings
 
 from . import ui_standards
@@ -107,7 +107,7 @@ from .walkthrough_steps import get_walkthrough_steps as _walkthrough_steps  # CA
 # server-side handler produced, so existing Dash outputs
 # (``training-control-action``, ``button-states``) keep their shape.
 PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS = r"""
-function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, last_click, button_states) {
+function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, last_click, button_states, oneshot_start_body) {
     var dc = window.dash_clientside || {};
     var no_update = (dc.no_update !== undefined) ? dc.no_update : null;
     var ctx = dc.callback_context || {};
@@ -165,7 +165,14 @@ function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, l
             console.warn('[Phase D] REST fallback (' + command + '):', reason);
         }
         try {
-            fetch('/api/train/' + command, { method: 'POST', credentials: 'same-origin' })
+            // A1-iv-3c: a one-shot Start carries the dataset-ref body (generator + registry
+            // params); every other command and a live-model Start post no body (route unchanged).
+            var fetchOpts = { method: 'POST', credentials: 'same-origin' };
+            if (command === 'start' && oneshot_start_body) {
+                fetchOpts.headers = { 'Content-Type': 'application/json' };
+                fetchOpts.body = JSON.stringify(oneshot_start_body);
+            }
+            fetch('/api/train/' + command, fetchOpts)
                 .then(function(resp) {
                     if (!resp.ok) {
                         console.warn('[Phase D] REST /api/train/' + command + ' returned ' + resp.status);
@@ -206,7 +213,13 @@ function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, l
             commandId = 'btn-' + now.toFixed(3) + '-' + Math.floor(Math.random() * 1e9).toString(16);
         }
         try {
-            var sendPromise = ws.send({ command: command, command_id: commandId });
+            // A1-iv-3c: attach the one-shot dataset-ref body as the WS ``params`` (the /ws/control
+            // start handler feeds it to _recurrence_start_kwargs); a live-model Start sends none.
+            var sendMsg = { command: command, command_id: commandId };
+            if (command === 'start' && oneshot_start_body) {
+                sendMsg.params = oneshot_start_body;
+            }
+            var sendPromise = ws.send(sendMsg);
             if (sendPromise && typeof sendPromise.then === 'function') {
                 sendPromise
                     .then(function(data) {
@@ -1637,6 +1650,12 @@ class DashboardManager:
                 # A1-iv-3a: the currently-selected model key, written by the sidebar picker's
                 # POST /api/model/select callback (the runtime backend swap, A1-iv-2).
                 dcc.Store(id="model-selection-store", storage_type="memory", data=DEFAULT_MODEL_KEY),
+                # A1-iv-3c: the one-shot (recurrence) Start dataset-ref body — ``{"dataset": {...}}``
+                # or None. A single Python callback resolves it from model-class-store +
+                # nn-dataset-type-dropdown so BOTH training-button transports (the server-side REST
+                # handler and the Phase D clientside WS/REST JS) forward the same generator + registry
+                # params on Start; None for a live (cascor/demo) model leaves their start POST unchanged.
+                dcc.Store(id="oneshot-start-params-store", storage_type="memory", data=None),
                 # Update intervals
                 dcc.Interval(id="fast-update-interval", interval=DashboardConstants.FAST_UPDATE_INTERVAL_MS, n_intervals=0),
                 dcc.Interval(id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0),
@@ -2083,6 +2102,38 @@ class DashboardManager:
         )
         def gate_dataset_options(model_key, current_value):
             return self._gate_dataset_options_handler(model_key, current_value)
+
+        # A1-iv-3c: resolve the one-shot Start dataset-ref body in ONE place from the model-class
+        # flag + the (gated) dataset generator, so both training-button transports forward the
+        # same body. Re-fires on either Input so the store tracks model swaps and dataset snaps.
+        @self.app.callback(
+            Output("oneshot-start-params-store", "data"),
+            Input("model-class-store", "data"),
+            Input("nn-dataset-type-dropdown", "value"),
+            prevent_initial_call=True,
+        )
+        def resolve_oneshot_start_body(model_class, dataset_generator):
+            return self._resolve_oneshot_start_body_handler(model_class, dataset_generator)
+
+    @staticmethod
+    def _resolve_oneshot_start_body_handler(model_class: "str | None", dataset_generator: "str | None") -> "dict[str, object] | None":
+        """Build the one-shot Start dataset-ref body (A1-iv-3c), or None for a live model.
+
+        For a one_shot (recurrence) model the Start button MUST forward a dataset reference, else
+        ``RecurrenceBackend.start_training`` bails ("no dataset reference"). The generator is the
+        gated dataset-dropdown value; its juniper-data params come from the registry's seeded
+        ``default_params`` (single source of truth) — the synthetic n_samples/noise sidebar inputs
+        do not apply to a 3-D sequence generator. Returns None for a live (cascor/demo) model so
+        its bare reset-only start POST is unchanged. Stored in ``oneshot-start-params-store`` and
+        read by BOTH training-button transports (server-side REST handler + Phase D clientside JS).
+        """
+        if model_class != "one_shot" or not dataset_generator:
+            return None
+        dataset_ref: dict[str, object] = {"generator": dataset_generator}
+        params = dataset_default_params(dataset_generator)
+        if params:
+            dataset_ref["params"] = params
+        return {"dataset": dataset_ref}
 
     def _gate_dataset_options_handler(self, model_key, current_value):
         """Gate the dataset dropdown against the selected model (A1-iv-3b).
@@ -3245,6 +3296,10 @@ class DashboardManager:
                 [
                     dash.dependencies.State("last-button-click", "data"),
                     dash.dependencies.State("button-states", "data"),
+                    # A1-iv-3c: the resolved one-shot Start dataset-ref body (or None); the
+                    # clientside JS reads it as its 8th positional arg, the server-side handler
+                    # as ``oneshot_start_body``. Appended last so existing arg positions hold.
+                    dash.dependencies.State("oneshot-start-params-store", "data"),
                 ],
                 prevent_initial_call=True,
             )
@@ -3266,10 +3321,14 @@ class DashboardManager:
                 [
                     dash.dependencies.State("last-button-click", "data"),
                     dash.dependencies.State("button-states", "data"),
+                    # A1-iv-3c: the resolved one-shot Start dataset-ref body (or None); the
+                    # clientside JS reads it as its 8th positional arg, the server-side handler
+                    # as ``oneshot_start_body``. Appended last so existing arg positions hold.
+                    dash.dependencies.State("oneshot-start-params-store", "data"),
                 ],
                 prevent_initial_call=True,
             )
-            def handle_training_buttons(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, last_click, button_states, **kwargs):
+            def handle_training_buttons(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, last_click, button_states, oneshot_start_body=None, **kwargs):
                 """Handle training control button clicks with debouncing and optimistic UI."""
                 return self._handle_training_buttons_handler(
                     start_clicks=start_clicks,
@@ -3279,6 +3338,7 @@ class DashboardManager:
                     reset_clicks=reset_clicks,
                     last_click=last_click,
                     button_states=button_states,
+                    oneshot_start_body=oneshot_start_body,
                     **kwargs,
                 )
 
@@ -4992,6 +5052,7 @@ class DashboardManager:
         reset_clicks=None,
         last_click=None,
         button_states=None,
+        oneshot_start_body=None,
         **kwargs,
     ):
         """Handle training control button clicks with debouncing and optimistic UI."""
@@ -5029,7 +5090,13 @@ class DashboardManager:
         detail = ""
         try:
             url = self._api_url(f"/api/train/{command}")
-            response = requests.post(url, timeout=DashboardConstants.DASHBOARD_POST_TIMEOUT, headers=internal_api_headers())
+            # A1-iv-3c: a one-shot (recurrence) Start forwards the dataset-ref body so the fit has
+            # a generator + registry params; every other command and the live (cascor/demo) Start
+            # send no body, so the route sees ``body=None`` and their start path is unchanged.
+            post_kwargs = {"timeout": DashboardConstants.DASHBOARD_POST_TIMEOUT, "headers": internal_api_headers()}
+            if command == "start" and oneshot_start_body:
+                post_kwargs["json"] = oneshot_start_body
+            response = requests.post(url, **post_kwargs)
             response.raise_for_status()
             success = True
         except Exception as e:

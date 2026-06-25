@@ -20,6 +20,7 @@ from model_registry import (
     compatible,
     compatible_datasets,
     compatible_models,
+    dataset_default_params,
     dataset_reason,
     dataset_type_options,
     gated_dataset_options,
@@ -64,6 +65,26 @@ def test_dataset_seeds_2d_classification_plus_3d_sequence():
     # A1-iv-3b: the 3-D irregular-Δt regression seed that makes the recurrence model selectable.
     seq = by_value["equities_seq"]
     assert seq.ndim == 3 and seq.task_type == "regression" and seq.temporal == "irregular"
+
+
+def test_default_params_seeded_only_for_equities_seq():
+    """A1-iv-3c: the synthetic 2-D types carry no start params; equities_seq carries the
+    bounded + stationary registry seed (the single source of truth for a one-shot fit)."""
+    by_value = {spec.value: spec for spec in DATASET_TYPES}
+    for value in ("spirals", "xor", "mnist", "circles", "moons"):
+        assert by_value[value].default_params == {}
+    assert by_value["equities_seq"].default_params == {"max_symbols": 5, "regression_target": "return"}
+
+
+def test_dataset_default_params_returns_seed_copy():
+    """A1-iv-3c: the resolver returns the seed for a known value, ``{}`` for an unknown one, and a
+    COPY so a caller mutating the result can never corrupt the frozen registry constant."""
+    assert dataset_default_params("equities_seq") == {"max_symbols": 5, "regression_target": "return"}
+    assert dataset_default_params("spirals") == {}
+    assert dataset_default_params("nonexistent") == {}
+    first = dataset_default_params("equities_seq")
+    first["max_symbols"] = 999
+    assert dataset_default_params("equities_seq")["max_symbols"] == 5
 
 
 def test_model_keys_are_unique():
