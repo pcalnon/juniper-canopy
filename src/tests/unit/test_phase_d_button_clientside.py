@@ -113,6 +113,25 @@ class TestClientsideJsContract:
         # Surfaces the HTTP status on a non-OK response.
         assert "'HTTP ' + resp.status" in js
 
+    def test_js_forwards_oneshot_dataset_ref_body(self):
+        """A1-iv-3c: a one-shot (recurrence) Start must carry the dataset-ref body on BOTH the
+        WS send (as the control-message ``params``) and the REST fallback (as the JSON body);
+        every other command and a live (cascor/demo) Start send none. The resolved body arrives
+        as the callback's trailing ``oneshot_start_body`` State, so the JS never re-resolves the
+        registry params client-side."""
+        from frontend.dashboard_manager import PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+
+        js = PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+        # The resolved body arrives as the trailing positional arg (the new State).
+        assert "oneshot_start_body" in js
+        # Gated to the start command only (present in both the WS and REST branches).
+        assert js.count("command === 'start' && oneshot_start_body") >= 2
+        # WS transport attaches it as the control-message ``params``.
+        assert "sendMsg.params = oneshot_start_body" in js
+        # REST fallback attaches it as a JSON body with the matching content type.
+        assert "JSON.stringify(oneshot_start_body)" in js
+        assert "'Content-Type': 'application/json'" in js
+
 
 # =====================================================================
 # Registration behavior — flag-gated clientside vs server-side.

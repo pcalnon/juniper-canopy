@@ -56,6 +56,8 @@
 #     - A1-iv-3a: model_options() + DEFAULT_MODEL_KEY (the sidebar model-picker source).
 #     - A1-iv-3b: equities_seq 3-D seed + dataset_reason() + gated_dataset_options() (the
 #       model->dataset compatibility gate).
+#     - A1-iv-3c: DatasetTypeSpec.default_params + dataset_default_params() (the registry-seeded
+#       juniper-data params the one-shot Start button forwards so the recurrence fit is bounded).
 #
 #####################################################################################################################################################################################################
 """Model + dataset-type registry (single source of truth) for model selection.
@@ -68,7 +70,7 @@ See the module header and the design-of-record note for the full design.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -80,6 +82,12 @@ class DatasetTypeSpec:
     task_type: str  # juniper-data vocabulary: "classification" | "regression"
     ndim: int  # input rank: 2 (tabular) | 3 (sequence)
     temporal: str = "none"  # "none" | "regular" | "irregular" (3-D only)
+    # A1-iv-3c: juniper-data generator params the one-shot (recurrence) Start button forwards
+    # for a fast, usable fit — the registry is the single source of truth (the synthetic
+    # n_samples/noise sidebar inputs do not apply to a 3-D sequence generator). Empty for the
+    # synthetic 2-D types. NB: a dict field makes DatasetTypeSpec unhashable — fine here, specs
+    # are only ever iterated or indexed by ``.value`` (never set-membered or used as a dict key).
+    default_params: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -119,7 +127,18 @@ DATASET_TYPES: tuple[DatasetTypeSpec, ...] = (
     DatasetTypeSpec(value="mnist", label="MNIST", task_type="classification", ndim=2),
     DatasetTypeSpec(value="circles", label="Circles", task_type="classification", ndim=2),
     DatasetTypeSpec(value="moons", label="Moons", task_type="classification", ndim=2),
-    DatasetTypeSpec(value="equities_seq", label="Equities (sequence)", task_type="regression", ndim=3, temporal="irregular"),
+    DatasetTypeSpec(
+        value="equities_seq",
+        label="Equities (sequence)",
+        task_type="regression",
+        ndim=3,
+        temporal="irregular",
+        # Bounded + stationary so the one-shot fit is fast and well-conditioned: cap the universe
+        # (vs the ~500-symbol juniper-data default that would blow the 300s train timeout) and use
+        # the stationary return target (the raw next_close default extrapolates badly on trending
+        # prices — see the recurrence equities readout finding).
+        default_params={"max_symbols": 5, "regression_target": "return"},
+    ),
 )
 
 # Default dataset type — preserves the prior hardcoded value="spirals".
@@ -174,6 +193,19 @@ def dataset_type_options() -> list[dict[str, str]]:
     ``dashboard_manager``). Order is preserved for behavior parity.
     """
     return [{"label": spec.label, "value": spec.value} for spec in DATASET_TYPES]
+
+
+def dataset_default_params(value: str) -> dict[str, object]:
+    """Return a copy of the one-shot start params seeded for dataset ``value`` (A1-iv-3c).
+
+    The recurrence (one-shot) Start button forwards these as the juniper-data ``generator``
+    params so the fit is bounded + stationary (see ``DatasetTypeSpec.default_params``). A copy
+    is returned so a caller can never mutate the registry seed. Unknown ``value`` → ``{}``.
+    """
+    for spec in DATASET_TYPES:
+        if spec.value == value:
+            return dict(spec.default_params)
+    return {}
 
 
 def model_options() -> list[dict[str, str]]:
