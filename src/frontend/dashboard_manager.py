@@ -46,7 +46,7 @@ from dash.dependencies import Input, Output, State
 
 from canopy_constants import DashboardConstants, TrainingConstants
 from frontend.internal_api import internal_api_headers
-from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_reason
+from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason
 from settings import get_settings
 
 from . import ui_standards
@@ -801,6 +801,10 @@ class DashboardManager:
                                         dbc.CardHeader(html.H5("Training Controls")),
                                         dbc.CardBody(
                                             [
+                                                # A1-iv-5 / D8 (§5.7): when a non-live model is selected it is shown +
+                                                # selectable but NOT trainable — this status reason explains why Start is
+                                                # disabled (filled by ``annotate_train_gate``). Empty/hidden for a live model.
+                                                html.Div(id="train-gate-notice", className="mb-2"),
                                                 html.Div(
                                                     [
                                                         dbc.Button(
@@ -1857,7 +1861,25 @@ class DashboardManager:
                 dbc.Modal(
                     [
                         dbc.ModalHeader(dbc.ModalTitle("Select a Model")),
-                        dbc.ModalBody(html.Div(id="model-selection-table-container")),
+                        dbc.ModalBody(
+                            [
+                                # A1b search (§5.2): free-text filter over label + family + category + tags.
+                                # ``type="search"`` gives a native clear (×); the integer-ms debounce
+                                # (the repo standard — commits ~350 ms after the last keystroke, no blur
+                                # needed, per the no-boolean-debounce convention) rebuilds the table as
+                                # you type. Folded into ``toggle_model_modal`` (it owns the table
+                                # container), so there is no racy second writer.
+                                dbc.Input(
+                                    id="model-search-input",
+                                    type="search",
+                                    value="",
+                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
+                                    placeholder="Search models by name, family, category, or tag…",
+                                    className="mb-3",
+                                ),
+                                html.Div(id="model-selection-table-container"),
+                            ]
+                        ),
                         dbc.ModalFooter(
                             dbc.Button("Close", id="model-selection-modal-close", color="secondary", outline=True),
                         ),
@@ -2136,18 +2158,21 @@ class DashboardManager:
 
         # A1b-1: the dedicated model-selection modal. The sidebar "▸ change" button opens it
         # (rebuilding the table against the CURRENT dataset value so its compatibility cells +
-        # disabled Select buttons reflect it on open, §5.3); the Close button closes it.
+        # disabled Select buttons reflect it on open, §5.3); the Close button closes it. A1b search:
+        # typing in ``model-search-input`` rebuilds the table filtered (§5.2) — folded in here (the
+        # one callback that owns ``model-selection-table-container``) so there is no racy 2nd writer.
         @self.app.callback(
             Output("model-selection-modal", "is_open"),
             Output("model-selection-table-container", "children"),
             Input("nn-model-change-button", "n_clicks"),
             Input("model-selection-modal-close", "n_clicks"),
+            Input("model-search-input", "value"),
             State("nn-dataset-type-dropdown", "value"),
             State("model-selection-store", "data"),
             prevent_initial_call=True,
         )
-        def toggle_model_modal(_open_clicks, _close_clicks, dataset_value, selected_model):
-            return self._toggle_model_modal_handler(dash.callback_context.triggered_id, dataset_value, selected_model)
+        def toggle_model_modal(_open_clicks, _close_clicks, search, dataset_value, selected_model):
+            return self._toggle_model_modal_handler(dash.callback_context.triggered_id, dataset_value, selected_model, search)
 
         # A1b-1: a model is selected by the per-row Select button in the table (pattern-matching
         # ``{"type": "model-select-btn", "index": <key>}``), REPLACING the old nn-model-dropdown
@@ -2200,6 +2225,18 @@ class DashboardManager:
         )
         def annotate_model_hint(dataset_value):
             return self._dataset_model_hint_handler(dataset_value)
+
+        # A1-iv-5 / D8 (§5.7): when the selected model is non-live, show a status reason near the
+        # training controls explaining why Start is disabled. Cleared (hidden) for a live model.
+        # Pairs with the Start force-disable in ``update_button_appearance`` (same model-selection
+        # Input), so the gate and its explanation always move together.
+        @self.app.callback(
+            Output("train-gate-notice", "children"),
+            Input("model-selection-store", "data"),
+            prevent_initial_call=True,
+        )
+        def annotate_train_gate(model_key):
+            return self._train_gate_notice_handler(model_key)
 
     @staticmethod
     def _resolve_oneshot_start_body_handler(model_class: "str | None", dataset_generator: "str | None") -> "dict[str, object] | None":
@@ -2260,17 +2297,20 @@ class DashboardManager:
             self.logger.debug("Model select request failed: %s", exc)
         return dash.no_update, dash.no_update, dash.no_update
 
-    def _toggle_model_modal_handler(self, triggered_id, dataset_value, selected_model):
-        """Open/close the model-selection modal (A1b-1).
+    def _toggle_model_modal_handler(self, triggered_id, dataset_value, selected_model, search=""):
+        """Open/close the model-selection modal + live-filter the table (A1b-1 / A1b search).
 
         Opening (``nn-model-change-button``) rebuilds the table against the CURRENT dataset value
-        (a ``State``) so the per-row compatibility cells + disabled Select buttons reflect it on
-        open (§5.3 pre-filter-on-open). Closing (``model-selection-modal-close``) leaves the table
-        as-is. Returns ``(is_open, table_children)``.
+        (a ``State``) and the current search term so the per-row compatibility cells + disabled
+        Select buttons reflect both on open (§5.3). Typing in the search box (``model-search-input``)
+        rebuilds the table filtered (§5.2) while the modal stays open. Closing
+        (``model-selection-modal-close``) leaves the table as-is. Returns ``(is_open, table_children)``.
         """
-        if triggered_id == "nn-model-change-button":
-            return True, self._build_model_selection_table(dataset_value, selected_model)
-        return False, dash.no_update
+        if triggered_id == "model-selection-modal-close":
+            return False, dash.no_update
+        # change-button -> open + build; search-input -> keep open + rebuild filtered.
+        is_open = True if triggered_id == "nn-model-change-button" else dash.no_update
+        return is_open, self._build_model_selection_table(dataset_value, selected_model, search=search or "")
 
     def _select_model_from_table_handler(self, n_clicks_list, triggered_id):
         """Apply the model whose table Select button was clicked, then close the modal (A1b-1).
@@ -2323,6 +2363,29 @@ class DashboardManager:
         return dataset_model_hint(dataset_value) or ""
 
     @staticmethod
+    def _train_gate_notice_handler(model_key):
+        """D8 Train-gate status notice for a non-live selected model (A1-iv-5; §5.7).
+
+        Returns a warning ``dbc.Alert`` explaining why Start is disabled when the selected model is
+        non-live (``coming_soon`` / ``experimental`` / ``deprecated`` / ``broken``), or ``None``
+        (hidden) for a live / trainable model — the visible companion to the Start force-disable in
+        ``_update_button_appearance_handler`` (both key off ``model_is_trainable``).
+        """
+        if model_is_trainable(model_key):
+            return None
+        spec = get_model_spec(model_key)
+        label = spec.label if spec is not None else (model_key or "This model")
+        status = spec.status.replace("_", " ") if spec is not None else "unavailable"
+        return dbc.Alert(
+            [
+                html.Strong(f"{label} is {status}. "),
+                html.Span("This model can be selected for inspection but is not trainable yet — Start is disabled."),
+            ],
+            color="warning",
+            className="mb-0",
+        )
+
+    @staticmethod
     def _status_badge(status):
         """Lifecycle-status badge for the model table (D8) — distinct from incompatibility greying."""
         color = {
@@ -2335,28 +2398,39 @@ class DashboardManager:
         return dbc.Badge(status.replace("_", " "), color=color, className="text-uppercase")
 
     @staticmethod
-    def _build_model_selection_table(dataset_value, selected_model, *, models=MODELS):
-        """Build the custom ``dbc.Table`` of models for the selection modal (A1b-1/A1b-2; design §5.2).
+    def _build_model_selection_table(dataset_value, selected_model, *, models=MODELS, search=""):
+        """Build the custom ``dbc.Table`` of models for the selection modal (A1b; design §5.2).
 
-        Rows = every registry model. Columns: Model / Category / Status / Compatibility / Select.
-        Compatibility is computed against the currently-selected dataset (``dataset_value``) via
-        ``model_reason``; an incompatible model shows the reason in its compatibility cell and its
-        Select button is disabled. Per ratified option (a) a ``coming_soon`` model stays selectable
-        — ONLY *incompatible* models are disabled (D8 Train-gating is deferred to iv-5). The
-        currently-active row is highlighted. A ``dash_table.DataTable`` is deliberately NOT used
-        (OQ-4): the cells are rich components (a badge, a reason cell, a per-row disabled button)
-        and there is no virtualization payoff at this row count.
+        Rows = every model matching the optional ``search`` filter (label + family + category +
+        tags, §5.2). Columns: Model / Category / Status / Compatibility / Select. Compatibility is
+        computed against the currently-selected dataset (``dataset_value``) via ``model_reason``; an
+        incompatible model shows the reason in its compatibility cell and its Select button is
+        disabled. Per ratified option (a) a non-live model stays selectable here — ONLY
+        *incompatible* models are disabled (non-live models are Train-gated at the controls, not in
+        the table — A1-iv-5). The currently-active row is highlighted. A ``dash_table.DataTable`` is
+        deliberately NOT used (OQ-4): the cells are rich components (a badge, a reason cell, a
+        per-row disabled button) and there is no virtualization payoff at this row count.
 
-        A1b-2: when a dataset is selected but **no** model can train it, a recovery message is
-        rendered above the (all-greyed) table — the degenerate empty-compatible-set state (§5.8).
-        ``models`` is injectable so that state is testable with the real seeds (every current seed
-        dataset has a compatible model under option (a)).
+        Degenerate states: a non-empty ``search`` that matches nothing renders a "no matches"
+        message (§5.2); when a dataset is selected but **no** visible model can train it, a recovery
+        message is rendered above the (all-greyed) table (the empty-compatible-set state, §5.8).
+        ``models`` is injectable so both states are testable with the real seeds.
         """
         dataset = get_dataset_spec(dataset_value) if dataset_value else None
+        visible = [model for model in models if model_matches_search(model, search or "")]
+        # A1b search (§5.2): a non-empty query that matches nothing -> a clear "no matches" message,
+        # distinct from the §5.8 empty-compatible-set state below (which is about the dataset).
+        if not visible:
+            return dbc.Alert(
+                [html.Strong("No models match your search. "), html.Span("Clear the search box to see all models.")],
+                color="secondary",
+                className="mb-0",
+                id="model-search-empty-alert",
+            )
         header = html.Thead(html.Tr([html.Th(col) for col in ("Model", "Category", "Status", "Compatibility", "")]))
         rows = []
         compatible_count = 0
-        for model in models:
+        for model in visible:
             reason = model_reason(model, dataset) if dataset is not None else None
             is_compatible = reason is None
             compatible_count += int(is_compatible)
@@ -3607,12 +3681,20 @@ class DashboardManager:
                 Output("reset-button", "disabled"),
                 Output("reset-button", "children"),
             ],
-            Input("button-states", "data"),
+            [
+                Input("button-states", "data"),
+                # A1-iv-5 / D8: re-evaluate the Start gate when the selected model changes — a
+                # non-live model is shown + selectable but NOT trainable (§5.7), so Start is
+                # force-disabled for it. Reading it in the SAME callback that owns
+                # ``start-button.disabled`` combines the training-state and model-status factors in
+                # one place — no racy second writer.
+                Input("model-selection-store", "data"),
+            ],
             prevent_initial_call=False,
         )
-        def update_button_appearance(button_states):
-            """Update button states (disabled/loading) with visual feedback."""
-            return self._update_button_appearance_handler(button_states=button_states)
+        def update_button_appearance(button_states, model_key):
+            """Update button states (disabled/loading) with visual feedback + the D8 Train-gate."""
+            return self._update_button_appearance_handler(button_states=button_states, model_key=model_key)
 
         @self.app.callback(
             Output("button-states", "data", allow_duplicate=True),
@@ -5403,17 +5485,27 @@ class DashboardManager:
             duration=8000,
         )
 
-    def _update_button_appearance_handler(self, button_states=None):
-        """Update button states (disabled/loading) with visual feedback."""
+    def _update_button_appearance_handler(self, button_states=None, model_key=None):
+        """Update button states (disabled/loading) with visual feedback.
+
+        A1-iv-5 / D8 Train-gate: when the selected model is non-live (``coming_soon`` /
+        ``experimental`` / ``deprecated`` / ``broken``), the Start button is force-disabled
+        regardless of training state — a non-live model is shown and selectable for inspection but
+        not trainable (design §5.7). The pause / stop / resume / reset controls follow
+        ``button-states`` unchanged. Live models (the common path) are entirely unaffected.
+        """
 
         def get_button_props(cmd, label, icon):
-            state = button_states.get(cmd, {"disabled": False, "loading": False, "timestamp": 0})
+            state = (button_states or {}).get(cmd, {"disabled": False, "loading": False, "timestamp": 0})
             disabled = state.get("disabled", False)
             loading = state.get("loading", False)
             text = f"⏳ {label}..." if loading else f"{icon} {label}"
             return disabled, text
 
         start_disabled, start_text = get_button_props("start", "Start Training", "▶")
+        # D8 Train-gate: a non-live model can be selected (to inspect) but not trained.
+        if not model_is_trainable(model_key):
+            start_disabled = True
         pause_disabled, pause_text = get_button_props("pause", "Pause Training", "⏸")
         stop_disabled, stop_text = get_button_props("stop", "Stop Training", "⏹")
         resume_disabled, resume_text = get_button_props("resume", "Resume Training", "⏯")

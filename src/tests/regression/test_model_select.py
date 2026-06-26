@@ -133,7 +133,7 @@ def test_select_swaps_default_to_recurrence(client, swap_env, monkeypatch):
     assert body["nn_model"] == "recurrence"
     assert body["backend"] == "recurrence"
     assert body["execution"] == "one_shot"
-    assert body["status"] == "coming_soon"  # real registry status
+    assert body["status"] == "live"  # real registry status (A1-iv-5 flipped recurrence coming_soon -> live)
     assert body["swapped"] is True
     # New backend installed + initialized; old one torn down; selection recorded.
     assert main.backend is new_backend

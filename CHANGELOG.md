@@ -251,6 +251,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [`notes/JUNIPER_CANOPY_MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/JUNIPER_CANOPY_MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md)
   (§5.3 / §5.8). Tests: `src/tests/unit/test_model_registry.py` (`dataset_model_hint`) +
   `src/tests/regression/test_model_table.py` (degenerate recovery, hint handler/seed, callback wiring).
+- **Recurrence model goes live + D8 Train-gating (A1-iv-5, #368)**: the `recurrence` (LMU) model is
+  flipped from `coming_soon` → **`live`** now that the canopy-routable service is deployed and wired
+  in-stack (juniper-deploy #132 sets `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL` → `http://juniper-recurrence:8210`),
+  so it is now a fully selectable, trainable model. Alongside it lands the **D8 Train-gate** (design
+  §5.7): a registry `model_is_trainable()` predicate (status == `live`; unknown → trainable so a
+  desync never strands Start, FR9), the Start button **force-disabled** for any non-live model
+  (folded into `update_button_appearance` via a new `model-selection-store` Input — a single-point
+  combination of training-state + model-status, not a racy second writer), and a `train-gate-notice`
+  status reason near the training controls explaining why Start is disabled. A non-live model stays
+  *selectable* for inspection (option (a)) but is not trainable. With every shipped model now live the
+  gate is exercised via synthetic non-live models (`model_options()` gained a `models=` injectable).
+  Tests: `model_is_trainable` + the flipped/repurposed registry assertions
+  (`test_model_registry.py`), the Start force-disable + notice handlers + wiring
+  (`test_model_table.py`), and the live-status route assertion (`test_model_select.py`).
+- **Model-table search box (A1b, #368)**: the model-selection modal gains a **free-text search**
+  (`model-search-input`, a `type="search"` box with a native clear) above the table. It filters the
+  model rows by **label + family + category + tags** (not label-only, §8) via a new registry
+  `model_matches_search()` predicate; a blank query shows everything and a non-empty query that
+  matches nothing renders a clear "no models match" message. Search is **folded into the existing
+  modal toggle callback** (the one that owns the table container) — typing rebuilds the table
+  filtered while the modal stays open, with no racy second writer; `_build_model_selection_table`
+  gains a `search=` parameter. This is the §5.2 scale affordance (browse-and-compare at
+  dozens-to-hundreds of model variants); it has no functional effect at today's two models but
+  completes the surface. Design-of-record: juniper-ml
+  [`notes/JUNIPER_CANOPY_MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/JUNIPER_CANOPY_MODEL_DATASET_SELECTION_DESIGN_2026-06-17.md)
+  (§5.2). Tests: `model_matches_search` (`test_model_registry.py`) + search filtering / no-match
+  message / open-honours-search + search-rebuilds-keeping-open (`test_model_table.py`). **This
+  completes the A1 model-selection feature end-to-end.**
 
 - **Build provenance on `/v1/health` + `/v1/health/ready`.** The dashboard now
   reports the source `git_sha` and ISO-8601 `build_date` baked into its image
