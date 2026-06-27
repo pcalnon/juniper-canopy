@@ -184,18 +184,16 @@ class TestDatasetCreationE2E:
     def test_create_circles_dataset(self, fake_client):
         """Create a circles dataset and validate response structure.
 
-        The shipped ``juniper-data-client.testing.fake_client`` (>=0.4.0)
-        registers the generator as ``"circle"`` (singular). XREPO-01 /
-        DC-01 originally proposed ``"circles"`` as the canonical
-        server-side name with ``"circle"`` as a legacy alias; until that
-        rename ships in juniper-data-client, this test validates against
-        the actual API. The data-client's own parity test covers the
-        alias path when it lands.
+        XREPO-01 / DC-01: ``"circles"`` is the canonical server-side name and
+        ``"circle"`` is a legacy alias. As of juniper-data-client 0.4.1 the
+        rename has shipped — passing the legacy ``"circle"`` alias now
+        normalizes to canonical ``"circles"`` (emitting a DeprecationWarning),
+        so this test validates the alias-normalization path.
         """
         result = fake_client.create_dataset("circle", {"n_points": 80, "noise": 0.08, "factor": 0.4, "seed": 11})
 
         assert "dataset_id" in result
-        assert result["generator"] == "circle"
+        assert result["generator"] == "circles"
         assert result["meta"]["n_features"] == 2
         assert result["meta"]["n_classes"] == 2
 
