@@ -59,5 +59,6 @@ class TestGracefulDisconnection:
         fake = FakeCascorClient(scenario="two_spiral_training")
         adapter = CascorServiceAdapter(client=fake)
         adapter.shutdown()
-        # cascor should still show as training
-        assert fake._state == "training"
+        # cascor should still show as training; FakeCascorClient (cascor-client
+        # 0.5.0, Phase 4D) reports the canonical uppercase STATE_TRAINING.
+        assert fake._state == "STARTED"
