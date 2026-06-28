@@ -54,8 +54,11 @@ Juniper Canopy is a real-time monitoring and diagnostic frontend for Cascade Cor
 
 2. **Activate the conda environment:**
 
+   The env name is versioned: each rebuild increments the suffix and renames the
+   old env `*-DEPRECATED`. Discover yours with `conda env list | grep JuniperCanopy`.
+
    ```bash
-   conda activate JuniperCanopy
+   conda activate JuniperCanopy1   # live env; see the note above
    ```
 
 3. **Verify dependencies:**
@@ -686,16 +689,17 @@ ModuleNotFoundError: No module named 'uvicorn'
 
 **Solutions:**
 
-✅ **Use conda environment Python explicitly:**
+✅ **Use conda environment Python explicitly:** (the env name is versioned;
+discover yours with `conda env list | grep JuniperCanopy`)
 
 ```bash
-/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
+/opt/miniforge3/envs/JuniperCanopy1/bin/python main.py
 ```
 
 ✅ **Or activate environment first:**
 
 ```bash
-conda activate JuniperCanopy
+conda activate JuniperCanopy1
 python main.py
 ```
 
