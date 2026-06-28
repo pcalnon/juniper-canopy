@@ -78,11 +78,11 @@
 # Jinja2==3.1.6
 # jschema-to-python==1.2.3
 # jsonpickle==4.1.1
-# juniper-canopy==0.5.0
-# juniper-cascor-client==0.3.0
-# juniper-cascor-protocol==0.1.0
-# juniper-data-client==0.4.0
-# juniper-observability==0.2.0
+# juniper-* pins intentionally omitted from this frozen snapshot: the authoritative
+# versions are pinned in requirements.lock (compiled from the pyproject.toml floors).
+# The values once frozen here (juniper-data-client 0.4.0, juniper-cascor-client 0.3.0,
+# ...) were BELOW the current pyproject floors and must not be reinstalled -- consult
+# requirements.lock, not this stale freeze block.
 # license-expression==30.4.4
 # markdown-it-py==4.0.0
 # MarkupSafe==3.0.3
