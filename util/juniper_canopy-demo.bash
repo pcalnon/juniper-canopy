@@ -47,6 +47,47 @@ export PARENT_PATH_PARAM="$(realpath "${BASH_SOURCE[0]}")" && INIT_CONF="$(dirna
 
 
 #####################################################################################################################################################################################################
+# Resolve the live JuniperCanopy* conda environment (versioned-env convention)
+#####################################################################################################################################################################################################
+# The canopy conda env name is VERSIONED (see AGENTS.md): every rebuild increments
+# the numeric suffix (JuniperCanopy1, JuniperCanopy2, ...) and renames the previous
+# env to "*-DEPRECATED".  Hard-coding a name -- whether the unversioned "JuniperCanopy"
+# (which does not exist) or a fixed "JuniperCanopy1" -- silently re-drifts on the next
+# rebuild.  resolve_canopy_env discovers the single live, non-deprecated env and stores
+# it in CANOPY_ENV_NAME, erroring clearly when zero or more than one candidate is found.
+resolve_canopy_env() {
+    local line name
+    local -a candidates=()
+    while IFS= read -r line; do
+        # Skip the header/legend comment lines emitted by `conda env list`.
+        [[ -z "${line}" || "${line}" == \#* ]] && continue
+        # The env name is the first whitespace-delimited field (the active env is
+        # flagged with a separate-column '*', so the first field is still the name).
+        name="${line%%[[:space:]]*}"
+        [[ "${name}" == JuniperCanopy* ]] || continue
+        [[ "${name}" == *-DEPRECATED ]] && continue
+        candidates+=("${name}")
+    done < <(conda env list)
+
+    if [[ "${#candidates[@]}" -eq 0 ]]; then
+        echo -e "${RED}✗ No live (non-deprecated) JuniperCanopy* conda environment found${NC}"
+        log_error "No live (non-deprecated) JuniperCanopy* conda environment found"
+        echo "  The env name is versioned; discover or (re)build it, e.g.:"
+        echo "      conda env list | grep JuniperCanopy"
+        return 1
+    fi
+    if [[ "${#candidates[@]}" -gt 1 ]]; then
+        echo -e "${RED}✗ Multiple live JuniperCanopy* environments: ${candidates[*]}${NC}"
+        log_error "Ambiguous JuniperCanopy* environments: ${candidates[*]}"
+        echo "  Exactly one non-deprecated env is expected; rename stale ones '*-DEPRECATED'."
+        return 1
+    fi
+    CANOPY_ENV_NAME="${candidates[0]}"
+    return 0
+}
+
+
+#####################################################################################################################################################################################################
 # Display Banner
 #####################################################################################################################################################################################################
 log_trace "Display Banner for Juniper Canopy Demo Mode Quick Start"
@@ -72,12 +113,15 @@ echo -e "${GREEN}✓ Conda found${NC}"
 
 
 #####################################################################################################################################################################################################
-# Check if JuniperCanopy environment exists
+# Check if a live JuniperCanopy* environment exists
 #####################################################################################################################################################################################################
-log_trace "Check if JuniperCanopy environment exists"
-if ! conda env list | grep -q "JuniperCanopy"; then
-    echo -e "${YELLOW}⚠ JuniperCanopy environment not found${NC}"
-    log_warning "\tJuniperCanopy environment not found"
+log_trace "Check if a live JuniperCanopy* environment exists"
+# Use a captured-output emptiness test rather than `grep -q`: when the invoking shell
+# has `set -o pipefail`, `grep -q`'s early exit SIGPIPEs the upstream stage and flips
+# the whole pipeline non-zero, which would spuriously trigger env (re)creation.
+if [[ -z "$(conda env list | awk '{print $1}' | grep -E '^JuniperCanopy' | grep -v -- '-DEPRECATED')" ]]; then
+    echo -e "${YELLOW}⚠ No live JuniperCanopy* environment found${NC}"
+    log_warning "\tNo live JuniperCanopy* environment found"
     echo "  Creating environment from conda_environment.yaml..."
     log_debug "  Creating environment from conda_environment.yaml..."
 
@@ -91,17 +135,18 @@ if ! conda env list | grep -q "JuniperCanopy"; then
         log_critical "✗ conf/conda_environment.yaml not found$"
     fi
 fi
-echo -e "${GREEN}✓ JuniperCanopy environment available${NC}"
-log_trace "✓ JuniperCanopy environment available"
+echo -e "${GREEN}✓ JuniperCanopy* environment available${NC}"
+log_trace "✓ JuniperCanopy* environment available"
 
 
 #####################################################################################################################################################################################################
-# Activate environment
+# Activate environment (resolve the live versioned env dynamically)
 #####################################################################################################################################################################################################
-echo -e "${BLUE}→ Activating JuniperCanopy environment...${NC}"
-log_trace "Activating JuniperCanopy environment..."
+resolve_canopy_env || exit 1
+echo -e "${BLUE}→ Activating ${CANOPY_ENV_NAME} environment...${NC}"
+log_trace "Activating ${CANOPY_ENV_NAME} environment..."
 eval "$(conda shell.bash hook)"
-conda activate JuniperCanopy
+conda activate "${CANOPY_ENV_NAME}"
 
 
 #####################################################################################################################################################################################################
