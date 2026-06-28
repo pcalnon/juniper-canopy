@@ -4,7 +4,7 @@
 **Sub-Project**: JuniperCanopy
 **Author**: Paul Calnon
 **Date**: 2026-06-26
-**Status**: Root cause confirmed; environment fixed; regression guard landed (PR #1). Stale-test alignment tracked separately (PR #2).
+**Status**: Root cause confirmed; environment fixed; regression guard landed (PR #1 = #402). Stale-test alignment landed (PR #2 = #403). Secondary-finding follow-ups addressed 2026-06-28: #3 launcher env name (PR #404), #4 requirements comment drift (PR #405), #5 setuptools/torch lock conflict — decided known-benign (PR #406). #6 (ecosystem plain-wheel drift checker) remains open for juniper-ml.
 **Scope**: `juniper-canopy` @ `main` `c25b7a1` (v0.5.0), live env `JuniperCanopy1` (Python 3.13).
 
 ---
@@ -132,15 +132,44 @@ bit-rot class — not an `editable` install (so juniper-ml's `editable_install_d
    `conda activate JuniperCanopy`, but that env does not exist (only `JuniperCanopy1` and
    `JuniperCanopy-DEPRECATED`). On-host `./demo` is broken (factory-refactor env-name drift). Also
    hardcodes port 8050.
+   - **Status (2026-06-28): FIXED in PR #404.** A new `resolve_canopy_env()` discovers the single
+     live, non-deprecated `JuniperCanopy*` env via `conda env list` (honoring the versioned-env
+     convention in `AGENTS.md`) and activates `"${CANOPY_ENV_NAME}"`; it errors clearly on zero or
+     ambiguous matches. A regression guard (EV-1..EV-5 in `test_demo_script_error_handling.py`, in the
+     CI unit lane) fails on any hard-coded `JuniperCanopy*` activation — bare *or* a re-drifting pinned
+     `JuniperCanopy1`. A latent `grep -q` + `pipefail` trap in the env existence-check was fixed in the
+     same PR. User-facing refs refreshed: `docs/USER_MANUAL.md` + the printed hint in
+     `src/tests/integration/test_setup.py` now use the discovery idiom; `conf/conda_environment_ci.yaml`
+     left as-is (ephemeral CI env). Port 8050 left untouched (optional per Prevention; not co-located).
 4. **Misleading commented client pins.** `conf/requirements.txt`, `requirements.txt`,
    `conf/requirements_ci.txt` carry commented client pins at the OLD versions
    (e.g. `# juniper-cascor-client==0.3.0`, `# juniper-data-client==0.4.0`); `requirements.lock` is
    the only correct source. Misleading to anyone reinstalling.
+   - **Status (2026-06-28): FIXED in PR #405.** The five stale commented `juniper-*` pins were
+     replaced with an annotation pointing to `requirements.lock` as the authoritative source (and
+     warning the old values are below the current floors). Discovered during the fix: the three paths
+     are a single real file behind a symlink chain (`requirements.txt` → `conf/requirements.txt` →
+     `conf/requirements_ci.txt`), so one edit covers all three. `test_requirements_integrity.py`
+     RQ-1..RQ-7 still pass (the parser skips comment lines), and the symlink invariant is untouched.
 5. **`setuptools` vs `torch` soft conflict.** `requirements.lock` pins `setuptools==82.0.1`, but
    `torch 2.11.0+cpu` declares `setuptools<82`. `torch` is not in the lock (installed separately via
    the `demo` extra + PyTorch CPU index), so the lock ignores its constraint. **Non-breaking** —
    `import torch` succeeds with setuptools 82.0.1 — but `pip install -r requirements.lock` prints an
    alarming (benign) conflict line every time.
+   - **Decision (2026-06-28): RECORDED AS KNOWN-BENIGN — no lock/workflow change (PR #406).** Owner
+     decision (option (c)). Options weighed:
+     - **(a) Compile the lock with `--extra demo`** so torch's `setuptools<82` enters the lock.
+       Rejected: the compile commands (`lockfile-update.yml`, the `ci.yml` freshness check) carry no
+       PyTorch CPU `--extra-index-url`, so `torch>=2.0.0` would resolve from PyPI to the CUDA
+       megabuild and pull its entire `nvidia-*` tree into `requirements.lock` — directly contradicting
+       the documented intent (`pyproject.toml` keeps `torch` out of base deps to avoid the ~2GB
+       footprint).
+     - **(b) A narrow `setuptools<82` pin** (via `pyproject.toml` or a constraints file fed to both
+       compile commands). Rejected: caps `setuptools` for *all* canopy installs purely to silence a
+       cosmetic warning about an already-working `torch`.
+     - **(c) Accept and document** (chosen). The conflict is genuinely benign — `import torch` works
+       with `setuptools 82.0.1`, verified — so it is recorded here rather than "fixed".
+       `requirements.lock` and the compile/freshness workflows are intentionally left unchanged.
 6. **Sibling-env drift is the same class, ecosystem-wide.** The plain-wheel-below-floor failure
    mode is not canopy-specific; `JuniperCascor1` / `JuniperData` could drift identically. The PR #1
    guard covers canopy only. A juniper-ml tooling gap (a plain-wheel drift checker complementing
@@ -149,10 +178,15 @@ bit-rot class — not an `editable` install (so juniper-ml's `editable_install_d
 ## Prevention
 
 The PR #1 guard turns the silent failure (stale-but-present wheel) into a loud, actionable test
-failure on every run, with a fix hint (`python -m pip install -r requirements.lock`). Recommended
-follow-ups (out of this PR's scope): refresh the three `requirements*.txt` comment drift; decide the
-`setuptools`/`torch` lock pin; repair the `./demo` launcher env name; add an ecosystem plain-wheel
-drift checker in juniper-ml.
+failure on every run, with a fix hint (`python -m pip install -r requirements.lock`).
+
+Recommended follow-ups (status as of 2026-06-28):
+
+- Refresh the `requirements*.txt` comment drift — **DONE (PR #405)** (finding #4).
+- Decide the `setuptools`/`torch` lock pin — **DONE: recorded known-benign (PR #406)** (finding #5).
+- Repair the `./demo` launcher env name — **DONE (PR #404)** (finding #3).
+- Add an ecosystem plain-wheel drift checker in juniper-ml — **still open** (finding #6; belongs in
+  juniper-ml, out of scope for juniper-canopy).
 
 ## Considered and declined: hardening `demo_mode.py`
 
