@@ -31,18 +31,18 @@ Operational setup guide for running the Juniper Canopy test suite with the same 
 
 ### Conda Environment
 
-The project uses the `JuniperCanopy` conda environment:
+The project uses the `JuniperCanopy1` conda environment:
 
 ```bash
 # Location
-/opt/miniforge3/envs/JuniperCanopy
+/opt/miniforge3/envs/JuniperCanopy1
 
 # Activate
-conda activate JuniperCanopy
+conda activate JuniperCanopy1
 
 # Verify activation
 which python
-# Should output: /opt/miniforge3/envs/JuniperCanopy/bin/python
+# Should output: /opt/miniforge3/envs/JuniperCanopy1/bin/python
 ```
 
 ## Environment Configuration
@@ -58,7 +58,7 @@ cd juniper_canopy
 ### 2. Activate Environment
 
 ```bash
-conda activate JuniperCanopy
+conda activate JuniperCanopy1
 ```
 
 ### 3. Set Environment Variables (Optional)
@@ -112,7 +112,7 @@ pip --version
    ```json
    // .vscode/settings.json
    {
-     "python.defaultInterpreterPath": "/opt/miniforge3/envs/JuniperCanopy/bin/python",
+     "python.defaultInterpreterPath": "/opt/miniforge3/envs/JuniperCanopy1/bin/python",
      "python.testing.pytestEnabled": true,
      "python.testing.pytestArgs": [
        "src/tests",
@@ -169,7 +169,7 @@ pip --version
 1. **Configure Project Interpreter**
    - File → Settings → Project → Python Interpreter
    - Add → Conda Environment → Existing
-   - Select: `/opt/miniforge3/envs/JuniperCanopy/bin/python`
+   - Select: `/opt/miniforge3/envs/JuniperCanopy1/bin/python`
 
 2. **Configure Pytest**
    - File → Settings → Tools → Python Integrated Tools
@@ -210,7 +210,7 @@ python --version
 
 # Check Python path
 which python
-# Should be: /opt/miniforge3/envs/JuniperCanopy/bin/python
+# Should be: /opt/miniforge3/envs/JuniperCanopy1/bin/python
 
 # Check conda environment
 conda info --envs | grep JuniperCanopy
@@ -282,7 +282,7 @@ echo $PYTHONPATH
 export PYTHONPATH="${PYTHONPATH}:$(pwd)/src"
 
 # Or activate conda environment
-conda activate JuniperCanopy
+conda activate JuniperCanopy1
 ```
 
 Opt-in full suite including gated tests:

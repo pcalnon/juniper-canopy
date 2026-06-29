@@ -4,7 +4,7 @@
 **Sub-Project**: JuniperCanopy
 **Author**: Paul Calnon
 **Date**: 2026-06-26
-**Status**: Root cause confirmed; environment fixed; regression guard landed (PR #1 = #402). Stale-test alignment landed (PR #2 = #403). Secondary-finding follow-ups addressed 2026-06-28: #3 launcher env name (PR #404), #4 requirements comment drift (PR #405), #5 setuptools/torch lock conflict — decided known-benign (PR #406). #6 (ecosystem plain-wheel drift checker) remains open for juniper-ml.
+**Status**: Root cause confirmed; environment fixed; regression guard landed (PR #1 = #402). Stale-test alignment landed (PR #2 = #403). Secondary-finding follow-ups addressed 2026-06-28: #3 launcher env name (PR #404), #4 requirements comment drift (PR #405), #5 setuptools/torch lock conflict — decided known-benign (PR #406). #6 (ecosystem plain-wheel drift checker) shipped as juniper-ml's E-2 `util/env_floor_drift_check.py` (juniper-ml #574); verified against canopy 2026-06-29 (4 floors, all OK).
 **Scope**: `juniper-canopy` @ `main` `c25b7a1` (v0.5.0), live env `JuniperCanopy1` (Python 3.13).
 
 ---
@@ -174,6 +174,14 @@ bit-rot class — not an `editable` install (so juniper-ml's `editable_install_d
    mode is not canopy-specific; `JuniperCascor1` / `JuniperData` could drift identically. The PR #1
    guard covers canopy only. A juniper-ml tooling gap (a plain-wheel drift checker complementing
    `editable_install_drift_check.py`) is noted for juniper-ml, **not** fixed here.
+   - **Status (2026-06-29): RESOLVED in juniper-ml.** Shipped as the E-2 checker
+     `util/env_floor_drift_check.py` (juniper-ml #574): it reads each installed distribution's
+     `Version` straight from the conda env's `*.dist-info` (the plain-wheel case
+     `editable_install_drift_check.py` misses) and classifies every `juniper-*` floor as
+     `OK` / `BELOW_FLOOR` / `MISSING`. Verified against canopy on 2026-06-29
+     (`python util/env_floor_drift_check.py --repo-root ../juniper-canopy --env JuniperCanopy1`
+     → 4 floors, 4 OK, 0 BELOW_FLOOR) — it would have caught this incident's
+     `juniper-data-client 0.4.0` / `juniper-cascor-client 0.3.0` drift.
 
 ## Prevention
 
@@ -185,8 +193,11 @@ Recommended follow-ups (status as of 2026-06-28):
 - Refresh the `requirements*.txt` comment drift — **DONE (PR #405)** (finding #4).
 - Decide the `setuptools`/`torch` lock pin — **DONE: recorded known-benign (PR #406)** (finding #5).
 - Repair the `./demo` launcher env name — **DONE (PR #404)** (finding #3).
-- Add an ecosystem plain-wheel drift checker in juniper-ml — **still open** (finding #6; belongs in
-  juniper-ml, out of scope for juniper-canopy).
+- Add an ecosystem plain-wheel drift checker in juniper-ml — **DONE: shipped as E-2
+  `util/env_floor_drift_check.py` (juniper-ml #574)**, verified against canopy 2026-06-29 (finding #6).
+- Refresh the broader canopy developer-doc env-name drift (`docs/cascor/`, `docs/testing/`,
+  `.github/instructions/`, `notes/WORKTREE_SETUP_PROCEDURE.md`) — **DONE (this PR)** (the deferred
+  tail of finding #3).
 
 ## Considered and declined: hardening `demo_mode.py`
 

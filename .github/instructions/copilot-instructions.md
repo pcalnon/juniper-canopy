@@ -107,7 +107,7 @@ dashboard_manager.register_component(my_component)
 **CRITICAL**: Before running ANY Python code or test, first activate:
 
 ```bash
-conda activate JuniperCanopy
+conda activate JuniperCanopy1
 ```
 
 This provides torch, yaml, h5py, and all ML dependencies. The project was developed for Ubuntu but should work cross-platform.
@@ -552,7 +552,7 @@ class TestWebSocketPerformance:
 **Run all tests**:
 
 ```bash
-conda activate JuniperCanopy
+conda activate JuniperCanopy1
 cd src/tests
 pytest
 ```
@@ -626,7 +626,7 @@ ptw src/tests -- --testmon  # Only run affected tests
 
 ```bash
 #!/usr/bin/env bash
-conda activate JuniperCanopy
+conda activate JuniperCanopy1
 pytest src/tests/unit -x  # Stop on first failure
 if [ $? -ne 0 ]; then
     echo "Unit tests failed. Commit aborted."
@@ -771,9 +771,9 @@ Type=simple
 User=pcalnon
 Group=pcalnon
 WorkingDirectory=/home/pcalnon/Development/python/Juniper/juniper-canopy/src
-Environment="PATH=/home/pcalnon/miniconda3/envs/JuniperCanopy/bin"
+Environment="PATH=/home/pcalnon/miniconda3/envs/JuniperCanopy1/bin"
 Environment="CASCOR_BACKEND_PATH=/home/pcalnon/Development/python/Juniper/juniper-cascor/src"
-ExecStart=/home/pcalnon/miniconda3/envs/JuniperCanopy/bin/python main.py
+ExecStart=/home/pcalnon/miniconda3/envs/JuniperCanopy1/bin/python main.py
 Restart=on-failure
 RestartSec=10
 

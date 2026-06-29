@@ -905,7 +905,7 @@ pre-commit run --all-files
 ```bash
 # Problem: ModuleNotFoundError
 # Solution: Activate conda environment
-conda activate JuniperCanopy
+conda activate JuniperCanopy1
 ```
 
 #### 2. Test Discovery Fails
