@@ -306,7 +306,7 @@ Service-mode transform behavior used by dashboard components:
 2. **Dependencies installed:**
 
    ```bash
-   conda activate JuniperCanopy
+   conda activate JuniperCanopy1
    pip install torch numpy
    ```
 
