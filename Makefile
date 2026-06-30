@@ -15,7 +15,7 @@
 
 PYTEST ?= pytest
 
-.PHONY: test test-ui test-all coverage
+.PHONY: test test-ui test-all coverage check-env
 
 test:
 	$(PYTEST)
@@ -27,3 +27,6 @@ test-all: test test-ui
 
 coverage:  ## Reproduce the CI coverage gate locally (full suite)
 	@bash util/run_coverage.bash
+
+check-env:  ## Assert active env + requirements.lock satisfy pyproject juniper-* floors (run in JuniperCanopy1 before serving)
+	juniper-env-drift-check --repo-root . --check-lock

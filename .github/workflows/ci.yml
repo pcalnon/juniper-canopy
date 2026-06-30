@@ -158,6 +158,22 @@ jobs:
           # Install project as editable so source-tree path resolution works
           pip install -e .
 
+      # Preflight (test-suite audit §10.1): assert the juniper-* distributions
+      # installed above (plain wheels included) satisfy canopy's pyproject.toml
+      # floors AND that requirements.lock pins satisfy them (catches
+      # lock-below-floor drift). Guards the 2026-06-26 incident class — a live
+      # env that drifted below floors while CI stayed green. The shared checker
+      # ships as the juniper-env-drift-check console script in
+      # juniper-ci-tools>=0.5.1 (juniper-ml#579/#590). Runs inside this already
+      # required job (see required-checks `needs`), so a failure blocks the PR.
+      - name: Preflight - Environment Floor-Drift Check
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Environment Floor-Drift Check       ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          python -m pip install "juniper-ci-tools>=0.5.1,<0.6.0"
+          juniper-env-drift-check --repo-root . --check-lock
+
       - name: Create required directories
         run: |
           mkdir -p logs src/logs reports/junit reports/coverage reports/htmlcov
@@ -543,7 +559,7 @@ jobs:
         shell: bash -l {0}
         run: |
           python -m pip install --upgrade "pip>=26.1.1"
-          pip install "juniper-ci-tools>=0.2.0,<0.5.0"
+          pip install "juniper-ci-tools>=0.5.1,<0.6.0"
 
       - name: Generate Dependency Documentation
         shell: bash -l {0}
@@ -679,7 +695,7 @@ jobs:
       - name: Install juniper-ci-tools (workflow-path + agents-md lints)
         run: |
           python -m pip install --upgrade "pip>=26.1.1"
-          pip install "juniper-ci-tools>=0.2.0,<0.5.0"
+          pip install "juniper-ci-tools>=0.5.1,<0.6.0"
 
       - name: Lint .github/workflows/ script paths
         run: |

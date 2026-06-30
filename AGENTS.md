@@ -5,7 +5,7 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.5.0
-**Last Updated**: 2026-06-23
+**Last Updated**: 2026-06-30
 
 ---
 
@@ -947,6 +947,15 @@ conda activate JuniperCanopy1
 # Python interpreter path
 /opt/miniforge3/envs/JuniperCanopy1/bin/python
 ```
+
+> **Env floor-drift guard:** Before serving, run `make check-env` (which runs
+> `juniper-env-drift-check --repo-root . --check-lock`) to assert the active
+> `JuniperCanopy1` environment and `requirements.lock` still satisfy the
+> `juniper-*` floors declared in `pyproject.toml`. This is the local/runtime
+> guard for the 2026-06-26 incident class — a live env that drifted below the
+> floors while CI stayed green (the same check also runs as a CI preflight in
+> the `unit-tests` job). Requires `juniper-ci-tools>=0.5.1`
+> (`pip install "juniper-ci-tools>=0.5.1,<0.6.0"`).
 
 ### Configuration
 
