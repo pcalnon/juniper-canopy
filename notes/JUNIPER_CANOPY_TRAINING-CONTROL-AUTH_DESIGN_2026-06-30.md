@@ -49,7 +49,7 @@ banner via `_surface_training_control_outcome_handler` (`src/frontend/dashboard_
 **Hard constraints (each verified):**
 
 | # | Constraint | Evidence |
-|---|---|---|
+| --- | --- | --- |
 | C1 | **API-key auth stays ON** — an intentional secret, not an accident; disabling it removes a real control. Off the table. | Encrypted `CANOPY_API_KEY` in juniper-deploy `.env.secrets.enc:10`; empty template `.env.secrets.example:13`; container env `CANOPY_API_KEY_FILE: /run/secrets/canopy_api_key` (`docker-compose.yml:576`); secret def `canopy_api_key.file` (`docker-compose.yml:932-933`); on-disk `./secrets/canopy_api_key.txt` = 43 bytes. |
 | C2 | **The browser cannot hold the server key.** The key authenticates *machine* callers; the per-process token is generated per start and never leaves the process. | `src/security.py:30-31`; `_authenticate_websocket` reads `X-API-Key` header or `?api_key` only (`src/main.py:497`); browsers cannot set custom WS headers — the URL is built with no key (`src/frontend/assets/websocket_client.js:516`). |
 | C3 | **Do not expose the server `X-API-Key` to the browser.** Shipping the secret to every dashboard visitor defeats the auth boundary. | Design invariant; the server-side injection (`internal_api_headers()`, `src/frontend/internal_api.py:63-79`) runs only in-process. |
@@ -71,7 +71,7 @@ against `settings.websocket.allowed_origins`; "CSRF" = first-frame token validat
 connection cap or the REST fixed-window rate limiter.
 
 | Route | Primary caller | Key gate | Origin gate | CSRF gate | Per-IP / RL | Net effect today | Anchors |
-|---|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- | --- |
 | `/` | browser nav | exempt | — | — | — | 200 → redirect to `/dashboard/` | exempt set `src/canopy_constants.py:357`; handler `src/main.py:459-466` |
 | `/dashboard/*` | browser (Dash UI) | exempt (prefix) | — | — | — | UI served anonymously (the page itself) | prefix `src/canopy_constants.py:353`; mount `src/main.py:434` |
 | `/metrics` | Prometheus | exempt (prefix) | — | — | IP allowlist | scrape-only; untrusted IP → 403 | prefix `:353`; `MetricsAuthMiddleware` `src/main.py:407` |
@@ -182,7 +182,7 @@ as a side effect (`_docs_enabled = not get_secret("CANOPY_API_KEY")`, `src/main.
 ### Option comparison
 
 | Option | Restores Start | Restores WS push | `/api/csrf` for browser | Security delta | Rebuild | Owner-gated | Verdict |
-|---|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- | --- |
 | (a) flip flag off | yes (server-side, keyed) | **no** | **no** | none (auth unchanged) | env: no / code: yes | deploy approval | **Mitigation now** |
 | (b) Origin+CSRF browser-auth | yes (REST + WS) | yes | yes | **net-positive** (adds Origin+CSRF to `/api/train/*`) | yes | deploy approval | **Durable fix** |
 | (c) exempt-only | yes | partial | yes | **negative if naive** (opens `/api/train/*`) | yes | — | Unsafe alone; = (b) when done right |
@@ -244,7 +244,7 @@ requirement there**, while `/v1/*` and external surfaces remain key-gated — *g
 ### 7.1 Threat actors
 
 | Actor | Capability | Outcome under the fix |
-|---|---|---|
+| --- | --- | --- |
 | **Malicious website** (canopy open in another tab) | Sends requests with the victim's ambient cookies; **cannot** read cross-origin responses, forge the `Origin` header, or read a canopy-origin CSRF token. | **Blocked.** Cross-site POST to `/api/train/*` → `Origin: https://evil.com` allowlist-rejected, and no readable CSRF token → token-rejected. `/ws/control` is Origin-rejected (4003, `src/main.py:693`) then CSRF-rejected. **The realistic browser threat — fully defeated.** |
 | **Passive network eavesdropper** | Reads wire traffic. | **No worse than today.** The `X-API-Key` is itself sent in cleartext over HTTP, so the key gives no confidentiality advantage on the wire. Confidentiality is a TLS concern, terminated by the reverse proxy in prod (`https_only=False  # HTTPS enforced by reverse proxy`, `src/main.py:381`); the deploy binds loopback (`docker-compose.yml:557`), so there is no on-path position by default. |
 | **Active non-browser attacker with port access** (curl/script reaching `:8050`) | Can spoof the `Origin` header, mint an anonymous CSRF token, replay the session cookie. | **Partially mitigated, bounded, and gated by the network boundary** — the honest residual risk; see §7.3. |
@@ -406,7 +406,7 @@ Each work-unit is independently shippable and verifiable; never merge to `main` 
 changes are **owner-gated** (Paul approves deployment gates).
 
 | PR | Title | Lands in container via | Content | Gated tests |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | **PR-0** | Unblock: disable Phase-D clientside buttons in deploy | **deploy env** (no rebuild) | Add `JUNIPER_CANOPY_ENABLE_WS_CONTROL_BUTTONS=false` to the canopy service (`docker-compose.yml` ~`:576`) | manual smoke (click Start → 200); compose config validate |
 | **PR-1a** | Exempt-tier split (`KEY_EXEMPT_PATHS`) + `/api/csrf` key-exempt (Origin-hardened) | canopy rebuild | §8.1 + §6 hardening | `test_middleware.py` (key-exempt ≠ rate-exempt); `/api/csrf` anonymous-200 + off-origin-reject |
 | **PR-1b** | `require_browser_control_auth` dependency on `/api/train/*` | canopy rebuild | §8.2 (key-OR-(Origin+CSRF)) | new dependency unit tests (Origin matrix; CSRF valid/invalid/missing; key-still-works) |

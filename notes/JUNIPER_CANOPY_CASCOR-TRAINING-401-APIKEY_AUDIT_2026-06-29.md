@@ -91,16 +91,16 @@ But that handler runs only **after** the middleware admits the request. The midd
 
 ## The auth activation toggle (exact)
 
-| Aspect | Value |
-|---|---|
-| Enabling condition | `get_secret("CANOPY_API_KEY")` returns non-empty → `APIKeyAuth(enabled=True)` (`src/security.py:48,64,259`) |
-| Env var (direct) | `CANOPY_API_KEY` (bare; read via `os.environ`, **not** the `JUNIPER_CANOPY_` pydantic prefix) |
-| File indirection | `CANOPY_API_KEY_FILE` → path → file contents (preferred; `src/secrets_util.py:55-62`) |
-| Where it is set live | The `juniper-canopy:latest` container env (juniper-deploy) — **not** in this repo |
-| Header the server expects | `X-API-Key: <value>` (`src/security.py:21,82`) |
-| Enforcement | `SecurityMiddleware` (`src/middleware.py:70`, added `src/main.py:367-369`), runs **before routing**, so even non-existent paths like `/v1/` 401 instead of 404 |
-| Exempt paths | exact: `/health`, `/api/health`, `/v1/health`, `/v1/health/live`, `/v1/health/ready` (`src/canopy_constants.py:355-362`); prefixes: `/dashboard`, `/metrics` (`:353`). **`/api/train/*`, `/api/csrf`, `/v1/` are NOT exempt.** |
-| Side effect | `_docs_enabled = not get_secret("CANOPY_API_KEY")` → `/docs`,`/redoc`,`/openapi.json` disabled (`src/main.py:337`) |
+| Aspect                    | Value                                                                                                                                                                                                                          |
+|---------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Enabling condition        | `get_secret("CANOPY_API_KEY")` returns non-empty → `APIKeyAuth(enabled=True)` (`src/security.py:48,64,259`)                                                                                                                    |
+| Env var (direct)          | `CANOPY_API_KEY` (bare; read via `os.environ`, **not** the `JUNIPER_CANOPY_` pydantic prefix)                                                                                                                                  |
+| File indirection          | `CANOPY_API_KEY_FILE` → path → file contents (preferred; `src/secrets_util.py:55-62`)                                                                                                                                          |
+| Where it is set live      | The `juniper-canopy:latest` container env (juniper-deploy) — **not** in this repo                                                                                                                                              |
+| Header the server expects | `X-API-Key: <value>` (`src/security.py:21,82`)                                                                                                                                                                                 |
+| Enforcement               | `SecurityMiddleware` (`src/middleware.py:70`, added `src/main.py:367-369`), runs **before routing**, so even non-existent paths like `/v1/` 401 instead of 404                                                                 |
+| Exempt paths              | exact: `/health`, `/api/health`, `/v1/health`, `/v1/health/live`, `/v1/health/ready` (`src/canopy_constants.py:355-362`); prefixes: `/dashboard`, `/metrics` (`:353`). **`/api/train/*`, `/api/csrf`, `/v1/` are NOT exempt.** |
+| Side effect               | `_docs_enabled = not get_secret("CANOPY_API_KEY")` → `/docs`,`/redoc`,`/openapi.json` disabled (`src/main.py:337`)                                                                                                             |
 
 ---
 
@@ -122,8 +122,8 @@ But that handler runs only **after** the middleware admits the request. The midd
 ## Relevant existing notes docs
 
 | Doc | Relevance |
-|---|---|
-| `juniper-ml/notes/observability/CANOPY_DASHBOARD_SELF_CALL_REFACTOR_2026-05-10.md` | **Most relevant.** Documents Option B (X-API-Key injection in **server-side** self-calls, shipped canopy#265) vs deferred Option C (in-process calls). Explains precisely why **browser-originated** calls (this bug) were never covered. Cross-repo. |
+| --- | --- |
+| `juniper-ml/notes/observability/CANOPY_DASHBOARD_SELF_CALL_REFACTOR_2026-05-10.md` | **Most relevant.** Docs Opt-B (X-API-Key injection in **server-side** self-calls, shipped canopy#265) vs deferred Opt-C (in-process calls). Writes why **browser-originated** calls (this bug) were never covered. Cross-repo. |
 | `notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md` | Designs the "`{label} failed.`" danger-alert surfacing that renders this 401; both transports feed `training-control-action`. Explains the banner mechanism (not the auth cause). |
 | `notes/fixes/FIX_FRONTEND_REGRESSIONS_2026-05-30.md` | Frontend-regression remediation observed on the **deployed docker stack** (Bug-4 class, canopy↔cascor); same deploy context as this failure. |
 | `notes/CANOPY_RUNTIME_CLIENT_FLOOR_DRIFT_ROOT_CAUSE_2026-06-26.md` | Prior "green tests / dead app" root-cause writeup (client-wheel floor drift). Different root cause, but the same "tests pass, runtime breaks" methodology applies. |
