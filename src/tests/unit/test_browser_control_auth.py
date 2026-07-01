@@ -222,11 +222,17 @@ class TestApiCsrfOriginHardening:
         assert resp.status_code == 403
         assert resp.json()["detail"] == "Origin not allowed."
 
-    def test_missing_origin_mint_rejected_403(self, client, monkeypatch):
-        # Fail-closed: no Origin at all (and no key) -> rejected.
+    def test_missing_origin_mint_allowed_same_origin(self, client, monkeypatch):
+        # A same-origin browser GET omits the Origin header entirely (it sends
+        # sec-fetch-site: same-origin instead) — this is the bootstrap the
+        # dashboard runs on page load. Missing Origin == same-origin and MUST mint
+        # a token, else window.__canopy_csrf never populates and the browser
+        # control surface 403s. Regression guard for the shipped-then-fixed
+        # /api/csrf same-origin bootstrap defect (browser sends no Origin on GET).
         _enable_api_key_auth(monkeypatch)
         resp = client.get("/api/csrf")
-        assert resp.status_code == 403
+        assert resp.status_code == 200
+        assert len(resp.json()["csrf_token"]) > 20
 
     def test_keyed_caller_bypasses_origin(self, client, monkeypatch):
         # A valid key mints even off-origin (keyed callers are trusted).
