@@ -213,6 +213,17 @@ async def lifespan(app: FastAPI):
     if settings.metrics_enabled:
         set_build_info("juniper_canopy", APP_VERSION, git_sha=provenance_git_sha(), build_date=provenance_build_date())
 
+    # E-8: boot-time dependency-floor self-check. Fail loud here -- before backend
+    # init / binding -- if any installed juniper-* wheel is below canopy's declared
+    # floor, instead of serving on a stale wheel (the "green tests / dead app" class
+    # from the canopy incident). Reads canopy's own Requires-Dist floors from the
+    # installed distribution metadata; raises DependencyFloorError (uvicorn startup
+    # fails) on a violation. Bypass with JUNIPER_SKIP_DEP_FLOOR_CHECK=1 (logged
+    # loudly). The automatic prevention companion to ``make check-env`` (E-2).
+    from juniper_service_core import enforce_dependency_floors
+
+    enforce_dependency_floors(distribution="juniper-canopy", logger=system_logger)
+
     system_logger.info("Starting Juniper Canopy application")
     system_logger.info("Settings: server=%s:%s, demo=%s", settings.server.host, settings.server.port, settings.demo_mode)
 
