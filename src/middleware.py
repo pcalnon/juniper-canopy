@@ -18,6 +18,11 @@ from security import APIKeyAuth, RateLimiter
 # The canonical source of truth is :class:`canopy_constants.SecurityConstants`.
 EXEMPT_PATH_PREFIXES = SecurityConstants.EXEMPT_PATH_PREFIXES
 EXEMPT_PATHS = SecurityConstants.EXEMPT_PATHS
+# PR-1 (Start-Training 401 fix): the key-exempt tier — auth-exempt but STILL
+# rate-limited (the same-origin browser control surface). Exposed as module
+# aliases for parity with the fully-exempt names above.
+KEY_EXEMPT_PATH_PREFIXES = SecurityConstants.KEY_EXEMPT_PATH_PREFIXES
+KEY_EXEMPT_PATHS = SecurityConstants.KEY_EXEMPT_PATHS
 _DEFAULT_CSP = SecurityConstants.DEFAULT_CSP_POLICY
 _MAX_REQUEST_BODY_BYTES = SecurityConstants.MAX_REQUEST_BODY_BYTES
 
@@ -110,9 +115,15 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if self._is_exempt(path):
             return await call_next(request)
 
+        # PR-1: a key-exempt path skips the API-key gate but is STILL
+        # rate-limited. The same-origin browser control surface (/api/csrf,
+        # /api/train/*) lives here; /api/train/* then owns its real authn via
+        # the require_browser_control_auth dependency (Origin + CSRF).
+        key_exempt = self._is_key_exempt(path)
+
         api_key = None
         try:
-            if self._api_key_auth.enabled:
+            if self._api_key_auth.enabled and not key_exempt:
                 api_key = await self._api_key_auth(request)
 
             if self._rate_limiter.enabled:
@@ -148,3 +159,23 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if path in EXEMPT_PATHS:
             return True
         return any(path.startswith(prefix) for prefix in EXEMPT_PATH_PREFIXES)
+
+    def _is_key_exempt(self, path: str) -> bool:
+        """Check if a path is key-exempt (auth-exempt but still rate-limited).
+
+        PR-1 (Start-Training 401 fix): the same-origin browser control surface
+        (``/api/csrf`` exact, ``/api/train/`` prefix) skips the API-key gate —
+        the browser cannot hold the server key — but stays under the rate
+        limiter, unlike the fully-exempt :meth:`_is_exempt` set. ``/api/train/*``
+        is then authenticated per-route by ``require_browser_control_auth``
+        (Origin + CSRF); ``/api/csrf`` is hardened in its own handler.
+
+        Args:
+            path: The request path.
+
+        Returns:
+            True if the path is key-exempt, False otherwise.
+        """
+        if path in KEY_EXEMPT_PATHS:
+            return True
+        return any(path.startswith(prefix) for prefix in KEY_EXEMPT_PATH_PREFIXES)

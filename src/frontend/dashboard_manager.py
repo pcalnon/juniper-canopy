@@ -172,6 +172,14 @@ function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, l
                 fetchOpts.headers = { 'Content-Type': 'application/json' };
                 fetchOpts.body = JSON.stringify(oneshot_start_body);
             }
+            // PR-1 (Start-Training 401 fix): attach the CSRF token (bootstrapped
+            // and cached by websocket_client.js on page load) so the keyless REST
+            // fallback satisfies require_browser_control_auth on the server. The
+            // session cookie already rides on credentials:'same-origin'. Skipped
+            // when no token is set (CSRF disabled -> server falls back to Origin-only).
+            if (window.__canopy_csrf) {
+                fetchOpts.headers = Object.assign({}, fetchOpts.headers || {}, { 'X-CSRF-Token': window.__canopy_csrf });
+            }
             fetch('/api/train/' + command, fetchOpts)
                 .then(function(resp) {
                     if (!resp.ok) {

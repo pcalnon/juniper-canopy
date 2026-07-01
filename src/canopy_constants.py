@@ -366,6 +366,20 @@ class SecurityConstants:
         }
     )
 
+    # ── Key-exempt tier (PR-1, Start-Training 401 fix) ──
+    # Paths that skip the API-key gate but REMAIN rate-limited — distinct from
+    # the fully-exempt sets above, which short-circuit before BOTH the key gate
+    # and the limiter. This is the same-origin browser control surface:
+    # ``/api/csrf`` must be anonymously mintable so the browser can fetch a
+    # token, and ``/api/train/*`` is authenticated by the per-route
+    # ``require_browser_control_auth`` dependency (Origin + CSRF) instead of the
+    # X-API-Key the browser cannot hold. ``/v1/*`` and every other route stay
+    # key-gated (C5). The ``/api/train/`` prefix carries a trailing slash so it
+    # matches only the training-control routes, never a future ``/api/train…``
+    # sibling. See JUNIPER_CANOPY_TRAINING-CONTROL-AUTH_DESIGN_2026-06-30.md §8.1.
+    KEY_EXEMPT_PATH_PREFIXES: Final[tuple[str, ...]] = ("/api/train/",)
+    KEY_EXEMPT_PATHS: Final[frozenset[str]] = frozenset({"/api/csrf"})
+
     # ── Default Content-Security-Policy ──
     # - Dash requires 'unsafe-inline' for styles and scripts.
     # - cdn.jsdelivr.net serves Bootstrap CSS via dash-bootstrap-components.

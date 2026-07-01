@@ -332,6 +332,13 @@ class Settings(BaseSettings):
     csrf_token_ttl_seconds: int = 3600  # 1h sliding TTL
     session_secret_key: str = ""  # SessionMiddleware secret (auto-generated if empty)
     ws_control_auth_timeout: float = 5.0  # Seconds to wait for CSRF first-frame
+    # PR-1 (Start-Training 401 fix): authenticate the same-origin browser control
+    # surface (/api/train/*, /api/csrf, /ws/control) by Origin + CSRF + session
+    # instead of the X-API-Key the browser cannot hold. Default ON so the fix is
+    # active on rebuild; set JUNIPER_CANOPY_BROWSER_CONTROL_AUTH_ENABLED=false to
+    # restore pre-fix behaviour (key required even for the browser surface). See
+    # notes/JUNIPER_CANOPY_TRAINING-CONTROL-AUTH_DESIGN_2026-06-30.md §8.
+    browser_control_auth_enabled: bool = True
 
     # Phase 1B Track 1 (SEC-06): opt-in Sec-WebSocket-Protocol bearer auth for
     # all WS endpoints. Defaults to False until every downstream client

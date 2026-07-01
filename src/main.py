@@ -55,7 +55,7 @@ import uvicorn
 from a2wsgi import WSGIMiddleware
 
 # from fastapi.staticfiles import StaticFiles
-from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -359,7 +359,7 @@ if settings.cors_origins:
 
 # Security headers (outermost — runs on every response)
 from middleware import RequestBodyLimitMiddleware, SecurityHeadersMiddleware, SecurityMiddleware
-from security import get_api_key_auth, get_rate_limiter
+from security import browser_origin_allowed, get_api_key_auth, get_rate_limiter, require_browser_control_auth
 
 app.add_middleware(RequestBodyLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
@@ -477,7 +477,20 @@ async def api_csrf_token(request: Request):
 
     The token is stored server-side with a 1h sliding TTL and must be
     sent as the first frame after /ws/control connection is accepted.
+
+    PR-1 hardening (§6): the route is key-exempt (``KEY_EXEMPT_PATHS``) so the
+    same-origin browser can fetch a token, but minting is restricted to
+    same-origin (or keyed) callers when auth is enabled — it must not become an
+    off-origin token oracle. In open/dev mode (no key configured) it stays
+    anonymously mintable.
     """
+    from fastapi import HTTPException
+
+    _key = request.headers.get("X-API-Key")
+    _keyed = bool(_key is not None and api_key_auth.validate(_key))
+    if api_key_auth.enabled and not _keyed and not browser_origin_allowed(request):
+        raise HTTPException(status_code=403, detail="Origin not allowed.")
+
     if not settings.csrf_enabled:
         return {"csrf_token": "", "enabled": False}  # nosec B105 — empty token when CSRF disabled
     store = get_csrf_store(ttl_seconds=settings.csrf_token_ttl_seconds)
@@ -485,16 +498,26 @@ async def api_csrf_token(request: Request):
     return {"csrf_token": token, "enabled": True}
 
 
-async def _authenticate_websocket(websocket: WebSocket) -> bool:
+async def _authenticate_websocket(websocket: WebSocket, allow_browser_auth: bool = False) -> bool:
     """Authenticate WebSocket connection using X-API-Key header.
 
     BaseHTTPMiddleware does not intercept WebSocket upgrades, so
     authentication must be performed explicitly at connection accept.
 
+    PR-1 (Start-Training 401 fix): when ``allow_browser_auth`` is True, an
+    *absent* key is accepted so the downstream Origin gate (and, on
+    ``/ws/control``, the CSRF first-frame) becomes the real authn for the
+    same-origin browser, which cannot hold the server key. A *present* key is
+    still validated, so keyed callers — and a bad key — are unaffected (no
+    regression). When ``allow_browser_auth`` is False the legacy behaviour
+    holds: any keyless connection is closed 4001.
+
     Returns True if authenticated (or auth disabled), False otherwise.
     """
     if api_key_auth.enabled:
         key = websocket.headers.get("X-API-Key") or websocket.query_params.get("api_key")
+        if allow_browser_auth and key is None:
+            return True
         if not api_key_auth.validate(key):
             await websocket.close(code=4001, reason="Authentication required")
             return False
@@ -553,7 +576,10 @@ async def websocket_training_endpoint(websocket: WebSocket):
             console.log('Received:', data.type);
         };
     """
-    if not await _authenticate_websocket(websocket):
+    # PR-1 (C5): read-only metric stream — relax the key gate so the keyless
+    # same-origin browser is admitted by the Origin gate below (no state to
+    # forge, no CSRF frame). A present key is still validated.
+    if not await _authenticate_websocket(websocket, allow_browser_auth=True):
         return
 
     # SEC-06: opt-in bearer-token auth over Sec-WebSocket-Protocol
@@ -671,7 +697,10 @@ async def websocket_control_endpoint(websocket: WebSocket):
     3. Per-IP connection cap (M-SEC-04)
     4. CSRF first-frame auth (M-SEC-02) — 5s timeout → close 1008
     """
-    if not await _authenticate_websocket(websocket):
+    # PR-1: relax the key gate for the same-origin browser — a keyless
+    # connection defers to the Origin + CSRF first-frame gates below; a
+    # present key is still validated (keyed callers unaffected).
+    if not await _authenticate_websocket(websocket, allow_browser_auth=True):
         return
 
     # SEC-06: opt-in bearer-token auth over Sec-WebSocket-Protocol
@@ -2808,7 +2837,10 @@ async def ws_endpoint(websocket: WebSocket):
 
     Handles both text and non-text frames gracefully.
     """
-    if not await _authenticate_websocket(websocket):
+    # PR-1 (C5): read-only compat stream — relax the key gate so the keyless
+    # same-origin browser is admitted by the Origin gate below (no state to
+    # forge, no CSRF frame). A present key is still validated.
+    if not await _authenticate_websocket(websocket, allow_browser_auth=True):
         return
 
     # SEC-06: opt-in bearer-token auth over Sec-WebSocket-Protocol
@@ -2861,7 +2893,7 @@ class _TrainStartBody(BaseModel):
     ridge: float | None = None
 
 
-@app.post("/api/train/start")
+@app.post("/api/train/start", dependencies=[Depends(require_browser_control_auth)])
 async def api_train_start(reset: bool = False, body: _TrainStartBody | None = None):
     """
     Start training.
@@ -2882,7 +2914,7 @@ async def api_train_start(reset: bool = False, body: _TrainStartBody | None = No
     return {"status": "started", **result}
 
 
-@app.post("/api/train/pause")
+@app.post("/api/train/pause", dependencies=[Depends(require_browser_control_auth)])
 async def api_train_pause():
     """
     Pause training.
@@ -2896,7 +2928,7 @@ async def api_train_pause():
     return {"status": "paused"}
 
 
-@app.post("/api/train/resume")
+@app.post("/api/train/resume", dependencies=[Depends(require_browser_control_auth)])
 async def api_train_resume():
     """
     Resume training.
@@ -2910,7 +2942,7 @@ async def api_train_resume():
     return {"status": "running"}
 
 
-@app.post("/api/train/stop")
+@app.post("/api/train/stop", dependencies=[Depends(require_browser_control_auth)])
 async def api_train_stop():
     """
     Stop training.
@@ -2924,7 +2956,7 @@ async def api_train_stop():
     return {"status": "stopped"}
 
 
-@app.post("/api/train/reset")
+@app.post("/api/train/reset", dependencies=[Depends(require_browser_control_auth)])
 async def api_train_reset():
     """
     Reset training.
@@ -2938,7 +2970,7 @@ async def api_train_reset():
     return {"status": "reset", **result}
 
 
-@app.get("/api/train/status")
+@app.get("/api/train/status", dependencies=[Depends(require_browser_control_auth)])
 async def api_train_status():
     """
     Get current training status (P1-NEW-003).
