@@ -576,7 +576,10 @@ async def websocket_training_endpoint(websocket: WebSocket):
             console.log('Received:', data.type);
         };
     """
-    if not await _authenticate_websocket(websocket):
+    # PR-1 (C5): read-only metric stream — relax the key gate so the keyless
+    # same-origin browser is admitted by the Origin gate below (no state to
+    # forge, no CSRF frame). A present key is still validated.
+    if not await _authenticate_websocket(websocket, allow_browser_auth=True):
         return
 
     # SEC-06: opt-in bearer-token auth over Sec-WebSocket-Protocol
@@ -2834,7 +2837,10 @@ async def ws_endpoint(websocket: WebSocket):
 
     Handles both text and non-text frames gracefully.
     """
-    if not await _authenticate_websocket(websocket):
+    # PR-1 (C5): read-only compat stream — relax the key gate so the keyless
+    # same-origin browser is admitted by the Origin gate below (no state to
+    # forge, no CSRF frame). A present key is still validated.
+    if not await _authenticate_websocket(websocket, allow_browser_auth=True):
         return
 
     # SEC-06: opt-in bearer-token auth over Sec-WebSocket-Protocol
