@@ -281,3 +281,88 @@ def reset_security_state() -> None:
     global _api_key_auth, _rate_limiter
     _api_key_auth = None
     _rate_limiter = None
+
+
+def browser_origin_allowed(request: Request) -> bool:
+    """Return True if the request's Origin header is an allowlisted same-origin.
+
+    PR-1 (Start-Training 401 fix): the REST counterpart of
+    ``ws_security.validate_origin`` — reuses the WebSocket Origin allowlist
+    (``settings.websocket.allowed_origins``) and the same comparison semantics
+    so the browser control surface enforces one Origin policy across HTTP and
+    WebSocket. Fail-closed: a missing/disallowed Origin returns False.
+
+    Args:
+        request: The incoming HTTP request.
+
+    Returns:
+        True if the ``Origin`` header matches the allowlist, else False.
+    """
+    from settings import get_settings
+    from ws_security import is_origin_allowed
+
+    origin = request.headers.get("origin")
+    return is_origin_allowed(origin, get_settings().websocket.allowed_origins)
+
+
+async def require_browser_control_auth(request: Request) -> None:
+    """Authenticate the same-origin browser control surface (PR-1).
+
+    FastAPI dependency for the ``/api/train/*`` routes. The browser structurally
+    cannot hold the per-process server ``X-API-Key`` (this module mints
+    ``INTERNAL_REQUEST_TOKEN`` fresh each start, and browsers cannot set custom
+    WebSocket headers), so the same-origin browser is authenticated by
+    **Origin + CSRF token + session cookie** — the controls ``/ws/control``
+    already trusts — while keyed callers keep working unchanged.
+
+    Acceptance rule (see
+    ``notes/JUNIPER_CANOPY_TRAINING-CONTROL-AUTH_DESIGN_2026-06-30.md`` §8.2):
+
+    1. A valid ``X-API-Key`` always passes (server-side self-calls, programmatic
+       or otherwise keyed callers). A present-but-invalid key is a hard 401.
+    2. When API-key auth is globally disabled (no key configured) the surface is
+       open (dev/demo parity with :class:`APIKeyAuth`).
+    3. Otherwise (keyless, auth enabled) the browser path applies:
+
+       - flag OFF -> preserve pre-fix behaviour: the key is still required (401);
+       - the Origin must be allowlisted (403, fail-closed on missing);
+       - the CSRF token must validate, unless CSRF is disabled (Origin-only,
+         design OQ-6).
+
+    ``/v1/*`` and every non-browser surface keep the middleware key gate.
+
+    Raises:
+        HTTPException: 401 on a bad/required key; 403 on a bad Origin/CSRF.
+    """
+    auth = get_api_key_auth()
+    key = request.headers.get("X-API-Key")
+
+    # 1. Keyed callers always work; a present-but-invalid key is rejected.
+    if auth.enabled and key is not None:
+        if auth.validate(key):
+            return
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key.")
+
+    # 2. Auth globally disabled -> open access (dev/demo).
+    if not auth.enabled:
+        return
+
+    # 3. Browser path: key absent, auth enabled.
+    from settings import get_settings
+
+    _settings = get_settings()
+    if not _settings.browser_control_auth_enabled:
+        # Flag off: preserve pre-fix behaviour — the key is still required.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing API key. Provide X-API-Key header.")
+
+    # 3a. Origin allowlist (fail-closed on missing/disallowed).
+    if not browser_origin_allowed(request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Origin not allowed.")
+
+    # 3b. CSRF token — skipped only when CSRF is disabled (Origin-only, OQ-6).
+    if _settings.csrf_enabled:
+        from csrf import get_csrf_store
+
+        token = request.headers.get("X-CSRF-Token")
+        if not token or not get_csrf_store().validate(token):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or missing CSRF token.")
