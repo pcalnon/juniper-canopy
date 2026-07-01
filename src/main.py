@@ -479,16 +479,26 @@ async def api_csrf_token(request: Request):
     sent as the first frame after /ws/control connection is accepted.
 
     PR-1 hardening (§6): the route is key-exempt (``KEY_EXEMPT_PATHS``) so the
-    same-origin browser can fetch a token, but minting is restricted to
-    same-origin (or keyed) callers when auth is enabled — it must not become an
-    off-origin token oracle. In open/dev mode (no key configured) it stays
-    anonymously mintable.
+    same-origin browser can fetch a token. Minting is refused only for an
+    explicit **disallowed** ``Origin`` (a cross-origin page) when auth is enabled;
+    a *missing* Origin is the normal same-origin GET — browsers omit the Origin
+    header on same-origin GETs (they send ``sec-fetch-site: same-origin`` instead)
+    — and is allowed, as are keyed callers. In open/dev mode (no key configured)
+    it stays anonymously mintable. This blocks an off-origin browser token oracle
+    without breaking the same-origin bootstrap.
     """
     from fastapi import HTTPException
 
     _key = request.headers.get("X-API-Key")
     _keyed = bool(_key is not None and api_key_auth.validate(_key))
-    if api_key_auth.enabled and not _keyed and not browser_origin_allowed(request):
+    # Reject only an Origin that is PRESENT and not allowlisted (an explicit
+    # cross-origin request). A MISSING Origin is the same-origin browser bootstrap
+    # (the dashboard's page-load GET /api/csrf) and must be allowed, else
+    # window.__canopy_csrf never populates and the whole browser control surface
+    # 403s. The state-changing /api/train/* POSTs stay fail-closed on Origin
+    # (browsers do send Origin on POST), so this relaxation is scoped to minting.
+    _origin = request.headers.get("origin")
+    if api_key_auth.enabled and not _keyed and _origin is not None and not browser_origin_allowed(request):
         raise HTTPException(status_code=403, detail="Origin not allowed.")
 
     if not settings.csrf_enabled:
