@@ -107,6 +107,14 @@ dependencies = [
     # ``ReadinessResponse`` model for build provenance (juniper-ml
     # notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md).
     "juniper-observability>=0.4.0",
+    # E-8 boot-time dependency-floor self-check. canopy calls
+    # ``enforce_dependency_floors(distribution="juniper-canopy")`` in its FastAPI
+    # lifespan (``src/main.py``) to fail loud before binding if any installed
+    # ``juniper-*`` wheel is below canopy's declared floor -- the automatic
+    # *prevention* companion to the E-2 env-floor-drift *detector* (``make
+    # check-env`` / ``juniper-env-drift-check``), catching the "green tests /
+    # dead app" class at first boot. Unconditional (the check must always run).
+    "juniper-service-core>=0.4.0",
     # METRICS-MON R2.2.5 / seed-05: WS frame schema validation. Pinned
     # at the first stable release; pulled in transitively by
     # juniper-cascor-client too, but pinned explicitly here so the
