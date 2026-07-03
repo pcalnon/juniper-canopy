@@ -183,7 +183,9 @@ demo = [
     # to install torch via ``conf/requirements.txt`` + the PyTorch CPU index
     # URL for size-optimised bash-script installs; this extra is the
     # canonical path for ``pip install juniper-canopy[demo]``.
-    "torch>=2.0.0",
+    # SEC-F17 (CVE-2025-3001, lstm_cell memory corruption, fixed 2.10.0):
+    # floor raised 2.0.0 -> 2.10.0 to exclude the vulnerable 2.0-2.9 range.
+    "torch>=2.10.0",
 ]
 dev = [
     "juniper-canopy[juniper-data,juniper-cascor,observability,demo]",
