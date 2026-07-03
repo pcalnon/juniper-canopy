@@ -38,10 +38,12 @@
 #####################################################################################################################################################################################################
 import asyncio
 import importlib.metadata
+import ipaddress
 import json
 import os
 import re
 import secrets
+import socket
 
 # import sys
 import time
@@ -50,6 +52,7 @@ from collections import deque
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 import uvicorn
 from a2wsgi import WSGIMiddleware
@@ -1336,6 +1339,50 @@ async def import_dataset_file(file: UploadFile = File(...)):  # noqa: B008 — F
         return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
 
 
+# SEC-F08: SSRF egress guard for POST /api/dataset/import-url. The URL-fetch
+# import makes the canopy server issue an outbound request to a caller-supplied
+# address; unguarded, that address can be a loopback / RFC-1918 / link-local host
+# (including the cloud-metadata endpoint 169.254.169.254). These helpers resolve
+# the target and refuse it when the RESOLVED IP is non-public — validating the
+# resolved address rather than the URL string, so a hostname that resolves to an
+# internal address (DNS rebind) is caught too. Audit: SEC-F08 (HO-1/HO-7),
+# juniper-ml notes/JUNIPER_STACK_SECURITY_AUDIT_PLAN_2026-07-02.md §4.3 / §5.2.
+def _import_url_ip_is_blocked(ip_text: str) -> bool:
+    """True when ``ip_text`` is a non-routable / internal address the SSRF guard
+    must refuse: loopback (127.0.0.0/8, ::1), RFC-1918 private (10/8, 172.16/12,
+    192.168/16), link-local (169.254/16 incl. the metadata IP, fe80::/10),
+    unique-local IPv6 (fc00::/7), unspecified (0.0.0.0, ::), multicast, and
+    reserved ranges. An unparseable value fails closed (blocked)."""
+    try:
+        addr = ipaddress.ip_address(ip_text)
+    except ValueError:
+        return True
+    return bool(addr.is_loopback or addr.is_private or addr.is_link_local or addr.is_reserved or addr.is_multicast or addr.is_unspecified)
+
+
+def _classify_import_url_target(url: str) -> Optional[str]:
+    """Resolve ``url``'s host and return a human-readable rejection reason when it
+    maps to any non-public address, else ``None`` (safe to fetch).
+
+    Every resolved A/AAAA record is checked — a host that resolves to a mix of
+    public and internal addresses is rejected. Uses a blocking ``getaddrinfo``,
+    so callers must invoke it off the event loop (``asyncio.to_thread``)."""
+    host = urlsplit(url).hostname
+    if not host:
+        return "URL has no host to resolve"
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        return f"Could not resolve host: {host}"
+    resolved = {str(info[4][0]) for info in infos}
+    if not resolved:
+        return f"Could not resolve host: {host}"
+    for ip_text in sorted(resolved):
+        if _import_url_ip_is_blocked(ip_text):
+            return "Refusing to fetch a URL that resolves to a non-public address"
+    return None
+
+
 class _ImportUrlRequest(BaseModel):
     """Body for ``POST /api/dataset/import-url``."""
 
@@ -1346,16 +1393,21 @@ class _ImportUrlRequest(BaseModel):
 async def import_dataset_url(request: _ImportUrlRequest):
     """CAN-016b: fetch a CSV from a URL and import it (demo mode only).
 
-    Network access is gated by ``settings.dataset_import_url_enabled`` (off by
-    default in production-leaning configs to avoid letting the canopy server
-    issue arbitrary outbound requests). 10s fetch timeout, 10 MB body cap.
+    Network access is gated by ``settings.dataset_import_url_enabled`` — a real
+    ``Settings`` field that defaults **off** (SEC-F08): URL-based import lets the
+    server issue arbitrary outbound requests, so it is opt-in. When enabled, the
+    fetch is hardened against SSRF — the resolved target IP is refused if it is
+    loopback / private / link-local / reserved (``_classify_import_url_target``),
+    redirects are **not** followed (a public→internal 302 cannot bypass the
+    egress guard), and the 10 MB cap is enforced *during* the streamed download.
+    10s fetch timeout.
     """
     if backend.backend_type != "demo":
         return JSONResponse(
             {"error": "Dataset import only available in demo mode (cascor backend doesn't accept inline datasets yet)"},
             status_code=400,
         )
-    if not getattr(settings, "dataset_import_url_enabled", True):
+    if not settings.dataset_import_url_enabled:
         return JSONResponse({"error": "URL-based dataset import is disabled by configuration"}, status_code=403)
     if not hasattr(backend, "import_dataset"):
         return JSONResponse({"error": "Backend does not support dataset import"}, status_code=501)
@@ -1364,6 +1416,14 @@ async def import_dataset_url(request: _ImportUrlRequest):
     if not (url.startswith("http://") or url.startswith("https://")):
         return JSONResponse({"error": "URL must use http:// or https:// scheme"}, status_code=400)
 
+    # SEC-F08: SSRF egress guard. Resolve the host and refuse the fetch when the
+    # RESOLVED IP is loopback / private / link-local / reserved — validating the
+    # resolved address (not just the URL string) defeats DNS-rebind. Blocking DNS
+    # runs off the event loop so the single uvicorn worker never stalls (SEC-F20).
+    ssrf_rejection = await asyncio.to_thread(_classify_import_url_target, url)
+    if ssrf_rejection is not None:
+        return JSONResponse({"error": ssrf_rejection}, status_code=400)
+
     try:
         import httpx
     except ImportError:
@@ -1371,19 +1431,30 @@ async def import_dataset_url(request: _ImportUrlRequest):
 
     from dataset_import import MAX_FILE_BYTES, DatasetImportError, parse_csv_bytes
 
+    # SEC-F08: redirects disabled (a 302 to an internal host must not slip past
+    # the egress guard, which only validated the original URL) and the size cap
+    # enforced while streaming — abort as soon as the running byte count exceeds
+    # MAX_FILE_BYTES instead of buffering the whole body first.
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            resp = await client.get(url)
-        if resp.status_code != 200:
-            return JSONResponse({"error": f"Fetch failed: HTTP {resp.status_code}"}, status_code=400)
-        raw = resp.content
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+            async with client.stream("GET", url) as resp:
+                if resp.status_code != 200:
+                    return JSONResponse({"error": f"Fetch failed: HTTP {resp.status_code}"}, status_code=400)
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > MAX_FILE_BYTES:
+                        return JSONResponse(
+                            {"error": f"Remote file too large: exceeds {MAX_FILE_BYTES} bytes"},
+                            status_code=413,
+                        )
+                    chunks.append(chunk)
+        raw = b"".join(chunks)
     except httpx.TimeoutException:
         return JSONResponse({"error": "Fetch timed out (10s limit)"}, status_code=504)
     except httpx.HTTPError as exc:
         return JSONResponse({"error": f"Fetch failed: {type(exc).__name__}"}, status_code=400)
-
-    if len(raw) > MAX_FILE_BYTES:
-        return JSONResponse({"error": f"Remote file too large: {len(raw)} bytes (limit {MAX_FILE_BYTES})"}, status_code=413)
 
     try:
         inputs, targets = parse_csv_bytes(raw)

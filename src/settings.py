@@ -347,6 +347,19 @@ class Settings(BaseSettings):
     # and the server validates <key> against `api_keys` before accepting.
     ws_auth_enabled: bool = False
 
+    # SEC-F08: real off-switch for POST /api/dataset/import-url. The handler
+    # previously read this via ``getattr(settings, "dataset_import_url_enabled",
+    # True)`` against a *non-existent* attribute, so the documented gate was
+    # dead: because this ``Settings`` model uses ``extra="ignore"`` (model_config
+    # above), setting ``JUNIPER_CANOPY_DATASET_IMPORT_URL_ENABLED`` was silently
+    # dropped and the endpoint could never be turned off. Declaring it as a real
+    # field makes the env override functional. Defaults **off**: URL-based import
+    # makes the canopy server issue arbitrary outbound requests (a server-side
+    # request-forgery surface), so it must be explicitly opted into. See the
+    # security audit finding SEC-F08 in juniper-ml
+    # notes/JUNIPER_STACK_SECURITY_AUDIT_PLAN_2026-07-02.md (§4.3 / §5.2).
+    dataset_import_url_enabled: bool = False
+
     @property
     def ws_bridge_enabled(self) -> bool:
         """Runtime check: bridge is active only when dev-flipped ON and not kill-switched."""
