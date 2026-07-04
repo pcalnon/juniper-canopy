@@ -1,0 +1,314 @@
+#!/usr/bin/env python
+"""Per-file coverage gate: inner-callback bodies of dashboard_manager.py (part 2).
+
+Covers the dataset-apply / experimental-functions / live-dataset-switch /
+dataset-swap-observer inner callbacks (source regions ~4126-4536), invoked via
+the raw registered callback function (see raw_cb docstring in inner1). Every
+test asserts real return behaviour.
+"""
+
+from unittest.mock import MagicMock, patch
+
+import dash
+import pytest
+import requests
+
+from frontend.dashboard_manager import DashboardManager
+
+
+@pytest.fixture
+def dm():
+    return DashboardManager({})
+
+
+def raw_cb(dm, name):
+    matches = []
+    for entry in dm.app.callback_map.values():
+        cb = entry.get("callback")
+        if cb is None:
+            continue
+        raw = getattr(cb, "__wrapped__", cb)
+        if getattr(raw, "__name__", None) == name:
+            matches.append(raw)
+    if not matches:
+        raise KeyError(f"callback {name!r} not registered")
+    if len(matches) > 1:
+        raise AssertionError(f"ambiguous callback name {name!r}: {len(matches)} matches")
+    return matches[0]
+
+
+def _resp(*, status=200, json_value=None, text=""):
+    r = MagicMock()
+    r.status_code = status
+    r.json.return_value = json_value if json_value is not None else {}
+    r.text = text
+    return r
+
+
+# ---------------------------------------------------------------------------
+# apply_dataset (4128-4161)
+# ---------------------------------------------------------------------------
+class TestApplyDatasetInner:
+    def test_no_click(self, dm):
+        cb = raw_cb(dm, "apply_dataset")
+        assert cb(None, "spirals", 100, 0.1, 1.5, 2) is dash.no_update
+
+    @patch("requests.post")
+    def test_success_opens_banner(self, mock_post, dm):
+        mock_post.return_value = _resp(status=200)
+        cb = raw_cb(dm, "apply_dataset")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            assert cb(1, "spirals", 100, 0.1, 1.5, 2) is True
+        # dataset_type + all four optional numeric/spiral fields were forwarded
+        payload = mock_post.call_args.kwargs["json"]
+        assert payload["nn_dataset_type"] == "spirals"
+        assert payload["nn_dataset_elements"] == 100
+
+    @patch("requests.post")
+    def test_non_200_no_update(self, mock_post, dm):
+        mock_post.return_value = _resp(status=500, text="err")
+        cb = raw_cb(dm, "apply_dataset")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            assert cb(1, "spirals", None, None, None, None) is dash.no_update
+
+    @patch("requests.post", side_effect=requests.ConnectionError("down"))
+    def test_exception_no_update(self, _mock_post, dm):
+        cb = raw_cb(dm, "apply_dataset")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            assert cb(1, "spirals", 100, 0.1, 1.5, 2) is dash.no_update
+
+
+# ---------------------------------------------------------------------------
+# cancel_pending_dataset (4170-4185)
+# ---------------------------------------------------------------------------
+class TestCancelPendingDatasetInner:
+    def test_no_click(self, dm):
+        cb = raw_cb(dm, "cancel_pending_dataset")
+        assert cb(None) is dash.no_update
+
+    @patch("requests.delete")
+    def test_success_closes_banner(self, mock_delete, dm):
+        mock_delete.return_value = _resp(status=200)
+        cb = raw_cb(dm, "cancel_pending_dataset")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            assert cb(1) is False
+
+    @patch("requests.delete")
+    def test_non_200_no_update(self, mock_delete, dm):
+        mock_delete.return_value = _resp(status=404, text="nope")
+        cb = raw_cb(dm, "cancel_pending_dataset")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            assert cb(1) is dash.no_update
+
+    @patch("requests.delete", side_effect=requests.ConnectionError("down"))
+    def test_exception_no_update(self, _mock_delete, dm):
+        cb = raw_cb(dm, "cancel_pending_dataset")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            assert cb(1) is dash.no_update
+
+
+# ---------------------------------------------------------------------------
+# restart_with_new_dataset (4202-4218)
+# ---------------------------------------------------------------------------
+class TestRestartWithNewDatasetInner:
+    def test_no_click(self, dm):
+        cb = raw_cb(dm, "restart_with_new_dataset")
+        assert cb(None) is dash.no_update
+
+    @patch("requests.post")
+    def test_success_closes_banner(self, mock_post, dm):
+        mock_post.return_value = _resp(status=200)
+        cb = raw_cb(dm, "restart_with_new_dataset")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            assert cb(1) is False
+
+    @patch("requests.post")
+    def test_non_200_no_update(self, mock_post, dm):
+        mock_post.return_value = _resp(status=500, text="err")
+        cb = raw_cb(dm, "restart_with_new_dataset")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            assert cb(1) is dash.no_update
+
+    @patch("requests.post", side_effect=requests.ConnectionError("down"))
+    def test_exception_no_update(self, _mock_post, dm):
+        cb = raw_cb(dm, "restart_with_new_dataset")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            assert cb(1) is dash.no_update
+
+
+# ---------------------------------------------------------------------------
+# reconcile_pending_dataset_banner (4233-4244)
+# ---------------------------------------------------------------------------
+class TestReconcilePendingDatasetBannerInner:
+    @patch("requests.get")
+    def test_pending_true(self, mock_get, dm):
+        mock_get.return_value = _resp(status=200, json_value={"pending_dataset": {"nn_dataset_type": "xor"}})
+        cb = raw_cb(dm, "reconcile_pending_dataset_banner")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            assert cb(1) is True
+
+    @patch("requests.get")
+    def test_pending_false(self, mock_get, dm):
+        mock_get.return_value = _resp(status=200, json_value={"pending_dataset": None})
+        cb = raw_cb(dm, "reconcile_pending_dataset_banner")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            assert cb(1) is False
+
+    @patch("requests.get")
+    def test_non_200_no_update(self, mock_get, dm):
+        mock_get.return_value = _resp(status=500)
+        cb = raw_cb(dm, "reconcile_pending_dataset_banner")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            assert cb(1) is dash.no_update
+
+    @patch("requests.get", side_effect=requests.ConnectionError("down"))
+    def test_exception_no_update(self, _mock_get, dm):
+        cb = raw_cb(dm, "reconcile_pending_dataset_banner")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            assert cb(1) is dash.no_update
+
+
+# ---------------------------------------------------------------------------
+# _setup_experimental_functions_callbacks (4282-4298, 4316-4348)
+# ---------------------------------------------------------------------------
+class TestExperimentalFunctionsInner:
+    @patch("requests.get")
+    def test_load_reconcile_success(self, mock_get, dm):
+        mock_get.return_value = _resp(status=200, json_value={"data": {"enabled": True}})
+        cb = raw_cb(dm, "load_reconcile_experimental_functions")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            value, store, alert = cb(1)
+        assert value is True
+        assert store == {"experimental_functions": True}
+        assert alert is None
+
+    @patch("requests.get")
+    def test_load_reconcile_non_200_warns(self, mock_get, dm):
+        mock_get.return_value = _resp(status=503, text="down")
+        cb = raw_cb(dm, "load_reconcile_experimental_functions")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            value, store, alert = cb(1)
+        assert value is False
+        assert store == {"experimental_functions": False}
+        assert alert is not None
+
+    @patch("requests.get", side_effect=requests.ConnectionError("down"))
+    def test_load_reconcile_exception(self, _mock_get, dm):
+        cb = raw_cb(dm, "load_reconcile_experimental_functions")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            value, store, alert = cb(1)
+        assert value is False
+        assert alert is not None
+
+    @patch("requests.post")
+    def test_toggle_success_authoritative_matches(self, mock_post, dm):
+        mock_post.return_value = _resp(status=200, json_value={"data": {"enabled": True}})
+        cb = raw_cb(dm, "handle_experimental_functions_toggle")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            value, store, alert = cb(True, {"experimental_functions": False})
+        assert value is True
+        assert store == {"experimental_functions": True}
+        assert alert is None
+
+    @patch("requests.post")
+    def test_toggle_success_authoritative_differs_warns(self, mock_post, dm):
+        # requested True but backend authoritative False -> warning alert
+        mock_post.return_value = _resp(status=200, json_value={"data": {"enabled": False}})
+        cb = raw_cb(dm, "handle_experimental_functions_toggle")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            value, store, alert = cb(True, {"experimental_functions": False})
+        assert value is False
+        assert alert is not None
+
+    @patch("requests.post")
+    def test_toggle_non_200_reverts(self, mock_post, dm):
+        mock_post.return_value = _resp(status=500, text="rejected")
+        cb = raw_cb(dm, "handle_experimental_functions_toggle")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            value, store, alert = cb(True, {"experimental_functions": False})
+        assert value is False  # reverted to last-known-good
+        assert alert is not None
+
+    @patch("requests.post", side_effect=requests.ConnectionError("down"))
+    def test_toggle_exception_reverts(self, _mock_post, dm):
+        cb = raw_cb(dm, "handle_experimental_functions_toggle")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            value, store, alert = cb(True, {"experimental_functions": True})
+        assert value is True  # reverted to last-known-good
+        assert alert is not None
+
+
+# ---------------------------------------------------------------------------
+# _setup_live_dataset_switch_callbacks inner delegations (4382-4483)
+# ---------------------------------------------------------------------------
+class TestLiveDatasetSwitchInner:
+    @patch("requests.get")
+    def test_update_training_status_store(self, mock_get, dm):
+        mock_get.return_value = _resp(status=200, json_value={"is_running": True, "phase": "output"})
+        cb = raw_cb(dm, "update_training_status_store")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            result = cb(1)
+        assert result == {"is_running": True, "phase": "output"}
+
+    def test_gate_live_switch_button(self, dm):
+        cb = raw_cb(dm, "gate_live_switch_button")
+        # both conditions met -> not disabled (False)
+        assert cb({"experimental_functions": True}, {"is_running": True}) is False
+        # missing running -> disabled (True)
+        assert cb({"experimental_functions": True}, {"is_running": False}) is True
+
+    def test_open_live_switch_modal(self, dm):
+        cb = raw_cb(dm, "open_live_switch_modal")
+        is_open, rows = cb(1, "spirals", 100, 0.1, 2, 1.5)
+        assert is_open is True
+        assert isinstance(rows, list) and rows
+
+    def test_close_live_switch_modal_on_fallback(self, dm):
+        cb = raw_cb(dm, "close_live_switch_modal_on_fallback")
+        assert cb(1) is False
+        assert cb(None) is dash.no_update
+
+    @patch("requests.post")
+    def test_accept_live_switch_success(self, mock_post, dm):
+        mock_post.return_value = _resp(status=200, json_value={"data": {"status": "swapped", "pre_swap_snapshot_id": "snap1"}})
+        cb = raw_cb(dm, "accept_live_switch")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            modal, progress, outcome, in_flight = cb(1, "spirals", 100, 0.1, 2, 1.5)
+        assert modal is False and progress is False
+        assert in_flight == {"in_flight": False}
+        assert outcome is not None
+
+    def test_open_progress_alert_on_accept(self, dm):
+        cb = raw_cb(dm, "open_progress_alert_on_accept")
+        progress, in_flight = cb(1)
+        assert progress is True and in_flight == {"in_flight": True}
+
+    @patch("requests.delete")
+    def test_cancel_live_switch_success(self, mock_delete, dm):
+        mock_delete.return_value = _resp(status=200)
+        cb = raw_cb(dm, "cancel_live_switch")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            assert cb(1) is dash.no_update
+
+
+# ---------------------------------------------------------------------------
+# _setup_dataset_swap_observers_callbacks inner delegations (4504, 4518, 4536)
+# ---------------------------------------------------------------------------
+class TestDatasetSwapObserversInner:
+    @patch("requests.get")
+    def test_poll_dataset_swap_events(self, mock_get, dm):
+        mock_get.return_value = _resp(status=200, json_value={"data": {"events": [{"timestamp": "t1"}]}})
+        cb = raw_cb(dm, "poll_dataset_swap_events")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            result = cb(1)
+        assert result == {"events": [{"timestamp": "t1"}]}
+
+    def test_hydrate_loaded_snapshot_swap_events_no_session(self, dm):
+        cb = raw_cb(dm, "hydrate_loaded_snapshot_swap_events")
+        # no session and no prior snapshot -> no_update
+        assert cb(None, {}) is dash.no_update
+
+    def test_merge_ws_dataset_swap_events_empty_buffer(self, dm):
+        cb = raw_cb(dm, "merge_ws_dataset_swap_events")
+        # non-dict buffer -> no_update
+        assert cb(None, None) is dash.no_update

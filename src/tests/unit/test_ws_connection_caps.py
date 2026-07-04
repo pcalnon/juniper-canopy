@@ -192,7 +192,7 @@ class TestGlobalConnectionCap:
         assert rejected not in mgr.active_connections
         assert mgr._per_ip_counts == {"10.0.0.1": 1}
         assert mgr._per_session_counts == {"sess-A": 1}
-        
+
     async def test_global_cap_rejection_releases_reserved_session_slots(self):
         """A connect-time global-cap reject must not strand per-IP/session slots."""
         mgr = WebSocketManager()
