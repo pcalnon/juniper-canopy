@@ -149,6 +149,14 @@ if TYPE_CHECKING:
     from logger.logger import SystemLogger
 
 
+# SEC-F19 / D4: name of the anonymous browser-session cookie set by canopy's
+# SessionMiddleware (see ``main.py`` -> ``session_cookie="canopy_session"``). The
+# per-session WS cap keys on this cookie value. Duplicated as a module constant
+# (rather than imported from main) to avoid a circular import; keep in sync with
+# the SessionMiddleware ``session_cookie`` in main.py.
+_SESSION_COOKIE_NAME = "canopy_session"
+
+
 class WebSocketManager:
     """
     - Active WebSocket connections with metadata
@@ -222,6 +230,15 @@ class WebSocketManager:
         # without forcing the public API to become async.
         self._ip_lock = threading.Lock()
 
+        # SEC-F19 / D4: Per-session connection tracking keyed on the anonymous
+        # ``canopy_session`` cookie. Restores per-client fairness where the
+        # per-IP cap above is inert (a shared NAT gateway IP collapses every
+        # client to one key, audit HO-3). Same atomic check-then-increment /
+        # decrement-on-disconnect discipline as the per-IP counter, under its
+        # own lock so the two caps never contend.
+        self._per_session_counts: Dict[str, int] = {}
+        self._session_lock = threading.Lock()
+
         self.logger.info(f"WebSocketManager initialized: " f"max_connections={self.max_connections}, " f"heartbeat_interval={self.heartbeat_interval}s, " f"reconnect_attempts={self.reconnect_attempts}, " f"reconnect_delay={self.reconnect_delay}s")
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
@@ -287,6 +304,12 @@ class WebSocketManager:
         Example:
             await websocket_manager.connect(websocket, client_id='dashboard-1')
         """
+        # SEC-F19 / D4: this ``max_connections`` check is the stack-absolute
+        # GLOBAL connection cap. Every WS endpoint (/ws/training, /ws/control,
+        # /ws) admits through this single ``connect()`` choke point, so it
+        # bounds total server resource across all endpoints and backstops the
+        # cookieless per-session case (design §5 Option B / §9 R2). Over-cap ->
+        # close 1013 (same code as the per-IP / per-session paths).
         # BUG-CN-09 (Phase 3C): hold _connections_lock for the cap-check +
         # add so a concurrent `connect()` cannot also pass `len(...) <
         # max_connections` and overshoot, and so the set mutation cannot race
@@ -360,6 +383,14 @@ class WebSocketManager:
 
         Increments the counter if allowed. Counter is decremented in disconnect().
 
+        SEC-F19 / D4: this cap is DoS-dampening only and is **inert behind
+        NAT** -- inside Docker every client presents as the bridge-gateway IP
+        (audit HO-3), so the cap is shared across all users and is NOT a
+        per-client authenticator. :meth:`check_per_session_limit` restores
+        per-client fairness under a shared NAT IP; :meth:`check_connection_limits`
+        composes the two. Genuine per-client identity needs the deferred
+        fronting-proxy X-Forwarded-For work (Phase 4).
+
         Returns:
             True if the connection is allowed, False if limit reached.
         """
@@ -387,6 +418,88 @@ class WebSocketManager:
                 self._per_ip_counts.pop(source_ip, None)
             else:
                 self._per_ip_counts[source_ip] = count - 1
+
+    def _session_key(self, websocket: WebSocket) -> Optional[str]:
+        """Return the anonymous ``canopy_session`` cookie value from the WS
+        handshake, or ``None`` when the client sent no session cookie (SEC-F19/D4).
+
+        A ``None`` key marks a cookieless (first) connection: it is exempt from
+        the per-session cap and left to the global ``max_connections`` cap as the
+        backstop (design §9 R2). Defensive against a malformed Cookie header
+        (returns ``None``).
+        """
+        try:
+            value = websocket.cookies.get(_SESSION_COOKIE_NAME)
+        except Exception:  # pragma: no cover - defensive against a malformed Cookie header
+            return None
+        return value if isinstance(value, str) else None
+
+    def check_per_session_limit(self, websocket: WebSocket, max_per_session: int) -> bool:
+        """Check if the browser session has room for another connection (SEC-F19/D4).
+
+        Keyed on the anonymous ``canopy_session`` cookie so per-client fairness
+        survives Docker NAT, where every client shares the bridge-gateway IP and
+        the per-IP cap is inert. A cookieless connection (no session cookie) is
+        allowed and left to the global cap as the backstop (design §9 R2).
+        Increments the per-session counter when allowed (atomic check-then-
+        increment under ``_session_lock``); decremented in :meth:`disconnect`.
+
+        Returns:
+            True if the connection is allowed, False if the per-session limit is
+            reached.
+        """
+        session_key = self._session_key(websocket)
+        if session_key is None:
+            # Cookieless first connection -- global cap backstops (R2).
+            return True
+        with self._session_lock:
+            current = self._per_session_counts.get(session_key, 0)
+            if current >= max_per_session:
+                self.logger.warning(f"Per-session limit reached for session {session_key[:8]}... ({current}/{max_per_session})")
+                return False
+            self._per_session_counts[session_key] = current + 1
+        return True
+
+    def _decrement_session_count(self, websocket: WebSocket) -> None:
+        """Decrement the per-session counter on disconnect (SEC-F19 / D4).
+
+        Symmetric to :meth:`check_per_session_limit`: a cookieless connection was
+        never counted, so a ``None`` key is a no-op.
+        """
+        session_key = self._session_key(websocket)
+        if session_key is None:
+            return
+        with self._session_lock:
+            count = self._per_session_counts.get(session_key, 0)
+            if count <= 1:
+                self._per_session_counts.pop(session_key, None)
+            else:
+                self._per_session_counts[session_key] = count - 1
+
+    def check_connection_limits(self, websocket: WebSocket, *, max_per_ip: int, max_per_session: int) -> bool:
+        """Composite admission gate for a new WS connection (SEC-F19 / D4).
+
+        Applies the per-IP cap (DoS-dampening, inert behind NAT) and then the
+        per-session cap (per-client fairness under a shared NAT IP). Returns True
+        only when BOTH pass. On a per-session rejection the per-IP slot just
+        taken is released, so a rejected attempt cannot leak the per-IP counter.
+        The stack-absolute GLOBAL cap (``max_connections``) is enforced
+        separately and authoritatively inside :meth:`connect` and also backstops
+        the cookieless case. Callers reject an over-cap connection with close
+        code 1013.
+
+        Returns:
+            True if the connection is within both the per-IP and per-session
+            caps, False otherwise.
+        """
+        if not self.check_per_ip_limit(websocket, max_per_ip):
+            return False
+        if not self.check_per_session_limit(websocket, max_per_session):
+            # Roll back the per-IP increment taken above so a per-session
+            # rejection does not leak the per-IP counter.
+            self._decrement_ip_count(websocket)
+            return False
+        return True
 
     def disconnect(self, websocket: WebSocket):
         """
@@ -430,6 +543,9 @@ class WebSocketManager:
                 channel_count_after = new_count
 
         self._decrement_ip_count(websocket)
+        # SEC-F19 / D4: release the per-session slot symmetrically (also outside
+        # _connections_lock; a no-op for a cookieless connection).
+        self._decrement_session_count(websocket)
         self.logger.info(f"Client disconnected: {client_id} " f"(Remaining: {remaining})")
 
         # OBS-WIRE A.4: publish gauge outside the lock (same rationale as
