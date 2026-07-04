@@ -186,7 +186,7 @@ class TestGlobalConnectionCap:
 
         rejected = _make_ws(ip="10.0.0.2", session="sess-B")
         assert mgr.check_connection_limits(rejected, max_per_ip=5, max_per_session=5) is True
-        await mgr.connect(rejected)
+        await mgr.connect(rejected, limits_reserved=True)
 
         rejected.close.assert_awaited_once_with(code=1013, reason="Max connections reached")
         assert rejected not in mgr.active_connections
