@@ -2,10 +2,10 @@
 
 ## Get Juniper Canopy running in 5 minutes
 
-**Version:** 0.25.0  
-**Status:** ✅ Production Ready  
-**Last Updated:** January 29, 2026  
-**Project:** Juniper - Cascade Correlation Neural Network Monitoring  
+**Version:** 0.25.1
+**Status:** ✅ Production Ready
+**Last Updated:** July 4, 2026
+**Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
 
@@ -73,8 +73,8 @@ cd juniper_canopy
 #### Option A: Using conda (recommended)
 
 ```bash
-# Activate JuniperPython environment
-conda activate JuniperPython
+# Activate the live JuniperCanopy environment
+conda activate JuniperCanopy1
 ```
 
 #### Option B: Let the demo script handle it
@@ -91,7 +91,7 @@ The `./demo` script automatically activates the conda environment.
 #### What happens
 
 1. Script activates conda environment
-2. Sets `CASCOR_DEMO_MODE=1` environment variable
+2. Sets `JUNIPER_CANOPY_DEMO_MODE=1` environment variable
 3. Starts FastAPI + Dash server
 4. Demo mode generates simulated training data
 
@@ -99,11 +99,11 @@ The `./demo` script automatically activates the conda environment.
 
 ```bash
 Starting Juniper Canopy in demo mode...
-Activating conda environment: JuniperPython
+Activating conda environment: JuniperCanopy1
 INFO:     Started server process [12345]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:8050 (Press CTRL+C to quit)
+INFO:     Uvicorn running on http://127.0.0.1:8050 (Press CTRL+C to quit)
 Dash is running on http://127.0.0.1:8050/
 
  * Serving Flask app 'demo_mode'
@@ -199,8 +199,8 @@ tail -f logs/ui.log
 ### Step 1: Set Backend Path
 
 ```bash
-# Set CasCor backend path (default: ../cascor)
-export CASCOR_BACKEND_PATH=/path/to/cascor
+# Set CasCor backend path (default: ../juniper-cascor)
+export JUNIPER_CANOPY_BACKEND_PATH=/path/to/juniper-cascor
 
 # Or use default (../cascor)
 # No export needed if using default
@@ -210,10 +210,10 @@ export CASCOR_BACKEND_PATH=/path/to/cascor
 
 ```bash
 # Ensure demo mode is NOT forced
-unset CASCOR_DEMO_MODE
+unset JUNIPER_CANOPY_DEMO_MODE
 
 # Or explicitly set to 0
-export CASCOR_DEMO_MODE=0
+export JUNIPER_CANOPY_DEMO_MODE=0
 ```
 
 ### Step 3: Launch Production Mode
@@ -228,7 +228,7 @@ export CASCOR_DEMO_MODE=0
 
 ```bash
 cd src
-/opt/miniforge3/envs/JuniperPython/bin/python main.py
+/opt/miniforge3/envs/JuniperCanopy1/bin/python main.py
 ```
 
 ### Step 4: Verify Backend Connection
@@ -263,21 +263,20 @@ WARNING: CasCor backend not found, falling back to demo mode
 
 ```bash
 # Server configuration
-CASCOR_SERVER_PORT=8050
-CASCOR_SERVER_HOST=0.0.0.0
+JUNIPER_CANOPY_SERVER__HOST=127.0.0.1
+JUNIPER_CANOPY_SERVER__PORT=8050
 
 # Demo mode (0=production, 1=demo)
-CASCOR_DEMO_MODE=1
+JUNIPER_CANOPY_DEMO_MODE=1
 
 # Debug logging (0=off, 1=on)
-CASCOR_DEBUG=0
+JUNIPER_CANOPY_LOG_LEVEL=INFO
 
-# Backend path (default: ../cascor)
-CASCOR_BACKEND_PATH=../cascor
+# Backend path (default: ../juniper-cascor)
+JUNIPER_CANOPY_BACKEND_PATH=../juniper-cascor
 
 # Update interval (seconds)
-CASCOR_DEMO_UPDATE_INTERVAL=1.0
-CASCOR_DEMO_MAX_EPOCHS=100
+JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL=1.0
 ```
 
 #### Load environment variables
@@ -287,8 +286,8 @@ CASCOR_DEMO_MAX_EPOCHS=100
 source .env
 
 # Or use export manually
-export CASCOR_SERVER_PORT=8050
-export CASCOR_DEMO_MODE=1
+export JUNIPER_CANOPY_SERVER__PORT=8050
+export JUNIPER_CANOPY_DEMO_MODE=1
 ```
 
 ### Configuration File
@@ -297,7 +296,7 @@ export CASCOR_DEMO_MODE=1
 
 ```yaml
 server:
-  host: "0.0.0.0"
+  host: "127.0.0.1"
   port: 8050
   reload: false
 
@@ -337,10 +336,10 @@ ModuleNotFoundError: No module named 'uvicorn'
 
 ```bash
 # Activate conda environment
-conda activate JuniperPython
+conda activate JuniperCanopy1
 
 # Or use explicit Python path
-/opt/miniforge3/envs/JuniperPython/bin/python src/main.py
+/opt/miniforge3/envs/JuniperCanopy1/bin/python src/main.py
 ```
 
 ---
@@ -365,7 +364,7 @@ lsof -i :8050
 kill -9 <PID>
 
 # Or use different port
-export CASCOR_SERVER_PORT=8051
+export JUNIPER_CANOPY_SERVER__PORT=8051
 ./demo
 ```
 
@@ -395,13 +394,38 @@ tail -f logs/system.log
 # Look for errors or warnings
 
 # 3. Restart with explicit demo mode
-export CASCOR_DEMO_MODE=1
+export JUNIPER_CANOPY_DEMO_MODE=1
 ./demo
 ```
 
 ---
 
-### Issue 4: WebSocket Connection Failed
+### Issue 4: Startup Refuses `0.0.0.0`
+
+**Error:**
+
+```bash
+NonLoopbackBindError: REFUSING TO START: canopy is configured to bind a non-loopback interface
+```
+
+**Cause:** Canopy now fail-closes when `JUNIPER_CANOPY_SERVER__HOST` is non-loopback
+unless `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true`.
+
+**Solution:**
+
+```bash
+# Local development and demo mode
+export JUNIPER_CANOPY_SERVER__HOST=127.0.0.1
+./demo
+
+# Only for fronted deployments with an authenticated perimeter
+export JUNIPER_CANOPY_SERVER__HOST=0.0.0.0
+export JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true
+```
+
+---
+
+### Issue 5: WebSocket Connection Failed
 
 **Error in browser console:**
 
@@ -425,7 +449,7 @@ wscat -c ws://localhost:8050/ws/training
 
 ---
 
-### Issue 5: Import Errors in Tests
+### Issue 6: Import Errors in Tests
 
 **Error:**
 
@@ -448,12 +472,12 @@ pytest src/tests/ -v  # This will fail
 
 ---
 
-### Issue 6: Conda Environment Not Found
+### Issue 7: Conda Environment Not Found
 
 **Error:**
 
 ```bash
-CondaEnvironmentError: environment 'JuniperPython' not found
+CondaEnvironmentError: environment 'JuniperCanopy1' not found
 ```
 
 **Solution:**
@@ -463,8 +487,8 @@ CondaEnvironmentError: environment 'JuniperPython' not found
 conda env create -f conf/conda_environment.yaml
 
 # Or manually
-conda create -n JuniperPython python=3.11
-conda activate JuniperPython
+conda create -n JuniperCanopy1 python=3.12
+conda activate JuniperCanopy1
 pip install -r conf/requirements.txt
 ```
 
@@ -543,8 +567,8 @@ def __init__(self):
 **When ready for production:**
 
 1. Install CasCor backend
-2. Set `CASCOR_BACKEND_PATH`
-3. Disable demo mode: `unset CASCOR_DEMO_MODE`
+2. Set `JUNIPER_CANOPY_BACKEND_PATH`
+3. Disable demo mode: `unset JUNIPER_CANOPY_DEMO_MODE`
 4. Run: `./try`
 
 **See production mode setup above.**
@@ -557,7 +581,7 @@ def __init__(self):
 
 ```bash
 # Reduce update interval (default: 1.0s)
-export CASCOR_DEMO_UPDATE_INTERVAL=0.5
+export JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL=0.5
 ./demo
 ```
 
@@ -565,7 +589,7 @@ export CASCOR_DEMO_UPDATE_INTERVAL=0.5
 
 ```bash
 # Set logging level to WARNING
-export CASCOR_LOGGING_LEVEL=WARNING
+export JUNIPER_CANOPY_LOG_LEVEL=WARNING
 ./demo
 ```
 
@@ -648,11 +672,11 @@ ws://localhost:8050/ws/control
 
 **If something doesn't work:**
 
-- [ ] Conda environment activated? (`conda activate JuniperPython`)
+- [ ] Conda environment activated? (`conda activate JuniperCanopy1`)
 - [ ] Python version 3.11+? (`python --version`)
 - [ ] Dependencies installed? (`pip install -r conf/requirements.txt`)
 - [ ] Port 8050 available? (`lsof -i :8050`)
-- [ ] Demo mode enabled? (`export CASCOR_DEMO_MODE=1`)
+- [ ] Demo mode enabled? (`export JUNIPER_CANOPY_DEMO_MODE=1`)
 - [ ] Running from correct directory? (`pwd` should end with juniper_canopy)
 - [ ] Logs showing errors? (`tail -f logs/system.log`)
 

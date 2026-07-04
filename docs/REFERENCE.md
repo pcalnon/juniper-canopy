@@ -4,7 +4,7 @@
 
 **Version:** 0.25.0
 **Status:** Active
-**Last Updated:** March 3, 2026
+**Last Updated:** July 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -51,17 +51,17 @@ Detailed REST API endpoint specifications and response schemas.
 
 Configuration follows a three-level hierarchy (highest to lowest priority):
 
-1. **Environment variables** (`CASCOR_*`, `JUNIPER_CANOPY_*`)
-2. **YAML configuration** (`conf/app_config.yaml`)
+1. **Pydantic settings** (`JUNIPER_CANOPY_*` environment variables)
+2. **YAML configuration** (`conf/app_config.yaml`) for legacy `ConfigManager` callers
 3. **Constants module** (`src/canopy_constants.py`)
 
 | Setting Category | Prefix | Examples |
 |-----------------|--------|---------|
-| Server | `CASCOR_SERVER_*` | `CASCOR_SERVER_HOST`, `CASCOR_SERVER_PORT` |
-| Training | `CASCOR_TRAINING_*` | `CASCOR_TRAINING_EPOCHS`, `CASCOR_TRAINING_LEARNING_RATE` |
-| WebSocket | `CASCOR_WEBSOCKET_*` | `CASCOR_WEBSOCKET_MAX_CONNECTIONS` |
-| Demo Mode | `CASCOR_DEMO_*` | `CASCOR_DEMO_MODE`, `CASCOR_DEMO_UPDATE_INTERVAL` |
-| Frontend | `JUNIPER_CANOPY_*` | `JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS` |
+| Server | `JUNIPER_CANOPY_SERVER__*` | `JUNIPER_CANOPY_SERVER__HOST`, `JUNIPER_CANOPY_SERVER__PORT` |
+| Training | `JUNIPER_CANOPY_TRAINING__*` | `JUNIPER_CANOPY_TRAINING__EPOCHS__DEFAULT`, `JUNIPER_CANOPY_TRAINING__LEARNING_RATE__DEFAULT` |
+| WebSocket | `JUNIPER_CANOPY_WEBSOCKET__*` | `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS`, `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS_PER_SESSION` |
+| Demo Mode | `JUNIPER_CANOPY_DEMO_*` | `JUNIPER_CANOPY_DEMO_MODE`, `JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL` |
+| Security | `JUNIPER_CANOPY_*` | `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED`, `JUNIPER_CANOPY_BROWSER_CONTROL_AUTH_ENABLED` |
 
 See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for the complete environment variable reference.
 
@@ -75,6 +75,12 @@ Real-time communication channels for training updates and control.
 |---------|------|-----------|---------|
 | Training | `/ws/training` | Server -> Client | Metrics, state, topology updates |
 | Control | `/ws/control` | Bidirectional | Start, stop, pause, resume, reset commands |
+
+**Connection limits:** `/ws/training`, `/ws/control`, and legacy `/ws` all admit through
+`WebSocketManager`. The stack-wide `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS` cap defaults to `50`;
+per-IP and per-session caps default to `5` each. Over-cap connections close with code `1013`.
+The per-IP cap is DoS dampening only and is not per-client identity behind NAT; the per-session cap
+uses the anonymous `canopy_session` cookie for best-effort fairness.
 
 **Message format:**
 
@@ -188,16 +194,18 @@ The most commonly used environment variables for juniper-canopy configuration. F
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `JUNIPER_CANOPY_DEMO_MODE` | unset | Set `1` to enable demo mode (simulated training) |
-| `CASCOR_SERVER_HOST` | `127.0.0.1` | Server bind address |
-| `CASCOR_SERVER_PORT` | `8050` | Server port |
-| `CASCOR_SERVER_DEBUG` | `0` | Enable debug mode |
-| `CASCOR_BACKEND_PATH` | `../juniper-cascor` | Path to CasCor backend |
-| `CASCOR_TRAINING_EPOCHS` | `500` | Maximum training epochs |
-| `CASCOR_TRAINING_LEARNING_RATE` | `0.01` | Learning rate |
-| `CASCOR_TRAINING_HIDDEN_UNITS` | `40` | Max hidden units |
-| `CASCOR_WEBSOCKET_MAX_CONNECTIONS` | `50` | Max concurrent WebSocket connections |
-| `CASCOR_WEBSOCKET_HEARTBEAT_INTERVAL` | `30` | Heartbeat interval (seconds) |
-| `CASCOR_DEMO_UPDATE_INTERVAL` | `1.0` | Demo simulation step interval (seconds) |
+| `JUNIPER_CANOPY_SERVER__HOST` | `127.0.0.1` | Server bind address; non-loopback requires `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true` |
+| `JUNIPER_CANOPY_SERVER__PORT` | `8050` | Server port |
+| `JUNIPER_CANOPY_SERVER__DEBUG` | `false` | Enable debug mode |
+| `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED` | `false` | Operator attestation for non-loopback binds behind a fronting authenticating proxy |
+| `JUNIPER_CANOPY_BACKEND_PATH` | `../juniper-cascor` | Path to CasCor backend |
+| `JUNIPER_CANOPY_TRAINING__EPOCHS__DEFAULT` | `1000000` | Default maximum training epochs |
+| `JUNIPER_CANOPY_TRAINING__LEARNING_RATE__DEFAULT` | `0.01` | Default learning rate |
+| `JUNIPER_CANOPY_TRAINING__HIDDEN_UNITS__DEFAULT` | `1000` | Default max hidden units |
+| `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS` | `50` | Stack-wide WebSocket cap across all endpoints |
+| `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS_PER_SESSION` | `5` | Per-session WebSocket fairness cap keyed on `canopy_session` |
+| `JUNIPER_CANOPY_WEBSOCKET__HEARTBEAT_INTERVAL` | `30` | Heartbeat interval (seconds) |
+| `JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL` | `1.0` | Demo simulation step interval (seconds) |
 | `JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS` | `1000` | Dashboard metrics refresh (ms) |
 | `JUNIPER_CANOPY_LOG_FORMAT` | `text` | Set `json` for structured JSON logging |
 | `JUNIPER_CANOPY_SENTRY_DSN` | unset | Sentry error tracking DSN |
@@ -205,6 +213,6 @@ The most commonly used environment variables for juniper-canopy configuration. F
 
 ---
 
-**Last Updated:** March 3, 2026
-**Version:** 0.25.0
+**Last Updated:** July 4, 2026
+**Version:** 0.25.1
 **Maintainer:** Paul Calnon

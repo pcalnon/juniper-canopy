@@ -2,9 +2,9 @@
 
 ## Complete Environment Configuration for Juniper Canopy
 
-**Version:** 0.25.0  
-**Status:** ✅ Production Ready  
-**Last Updated:** January 29, 2026  
+**Version:** 0.25.1
+**Status:** ✅ Production Ready
+**Last Updated:** July 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -303,7 +303,7 @@ pip list --outdated
 ```yaml
 # Server configuration
 server:
-  host: "0.0.0.0"              # Bind address
+  host: "127.0.0.1"            # Loopback bind (non-loopback requires fronting-auth attestation)
   port: 8050                    # Server port
   reload: false                 # Auto-reload on code changes
   workers: 1                    # Number of worker processes
@@ -326,7 +326,7 @@ logging:
 
 # Backend integration
 backend:
-  path: "../cascor"             # CasCor backend path
+  path: "../juniper-cascor"     # CasCor backend path
   timeout: 30                   # Connection timeout (seconds)
   retry_attempts: 3             # Number of retry attempts
   retry_delay: 5                # Delay between retries (seconds)
@@ -404,28 +404,42 @@ dependencies:
 
 ### Standard Variables
 
-**Format:** `CASCOR_<SECTION>_<KEY>`
+**Format:** `JUNIPER_CANOPY_<SECTION>__<KEY>` for nested Pydantic settings.
 
-**Example:** `app_config.yaml` key `server.port` → `CASCOR_SERVER_PORT`
+**Example:** `settings.server.port` -> `JUNIPER_CANOPY_SERVER__PORT`.
+
+Legacy `CASCOR_*` variables are accepted only where `src/settings.py` provides an explicit fallback
+(`CASCOR_DEMO_MODE`, `CASCOR_BACKEND_PATH`, `CASCOR_SERVICE_URL`, and selected logging/demo fields).
+New configuration should use the `JUNIPER_CANOPY_` prefix.
 
 ### Core Variables
 
 ```bash
 # Server configuration
-export CASCOR_SERVER_PORT=8050        # Server port
-export CASCOR_SERVER_HOST="0.0.0.0"   # Bind address
+export JUNIPER_CANOPY_SERVER__HOST="127.0.0.1"  # Loopback bind; safe default
+export JUNIPER_CANOPY_SERVER__PORT=8050         # Server port
+export JUNIPER_CANOPY_SERVER__DEBUG=false       # Debug mode
+
+# Startup bind guard (SEC-F22)
+# Set only when a fronting authenticating proxy terminates auth before Canopy.
+export JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=false
 
 # Demo mode
-export CASCOR_DEMO_MODE=1             # Force demo mode (1=on, 0=off)
-export CASCOR_DEMO_UPDATE_INTERVAL=1.0
-export CASCOR_DEMO_MAX_EPOCHS=100
+export JUNIPER_CANOPY_DEMO_MODE=1
+export JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL=1.0
 
 # Logging
-export CASCOR_DEBUG=1                 # Enable debug logging
-export CASCOR_LOGGING_LEVEL="DEBUG"   # Log level
+export JUNIPER_CANOPY_LOG_LEVEL="DEBUG"
+export JUNIPER_CANOPY_LOG_FORMAT="text"   # "text" or "json"
 
 # Backend
-export CASCOR_BACKEND_PATH="../cascor"
+export JUNIPER_CANOPY_BACKEND_PATH="../juniper-cascor"
+export JUNIPER_CANOPY_CASCOR_SERVICE_URL="http://localhost:8200"
+
+# WebSocket connection caps (SEC-F19)
+export JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS=50
+export JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS_PER_IP=5
+export JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS_PER_SESSION=5
 
 # Paths
 export CASCOR_DATA_DIR="./data"
@@ -433,13 +447,38 @@ export CASCOR_LOGS_DIR="./logs"
 export CASCOR_REPORTS_DIR="./reports"
 ```
 
+### Startup Bind Guard
+
+Canopy now enforces the loopback bind as a startup invariant. During FastAPI lifespan startup,
+`security.enforce_loopback_bind_guard()` refuses to serve when `settings.server.host`
+(`JUNIPER_CANOPY_SERVER__HOST`) is not loopback (`127.0.0.0/8`, `::1`, or `localhost`) unless
+`JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true`.
+
+- Use `127.0.0.1` or `localhost` for local development and single-user demo runs.
+- Do **not** set `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true` just to silence startup failures.
+  It is an operator attestation that a fronting authenticating proxy or equivalent perimeter is present.
+- A container may still bind `0.0.0.0` internally only when the deployment owner has consciously attested
+  the external perimeter; otherwise the app fails closed before backend initialization.
+
+### WebSocket Connection Caps
+
+`src/communication/websocket_manager.py` applies three availability limits to all WebSocket endpoints:
+
+| Setting | Default | Scope | Notes |
+| ------- | ------- | ----- | ----- |
+| `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS` | `50` | Global across `/ws/training`, `/ws/control`, and `/ws` | Enforced in `WebSocketManager.connect()`; the N+1th socket closes with code `1013`. |
+| `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS_PER_IP` | `5` | Source IP | DoS dampening only; behind Docker/NAT all browser clients can share one gateway IP. |
+| `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS_PER_SESSION` | `5` | Anonymous `canopy_session` cookie | Restores best-effort fairness behind NAT; cookieless first connections are backstopped by the global cap. |
+
+These caps are not authentication. They bound resource usage and avoid one browser session starving another.
+
 ### Setting Environment Variables
 
 #### Method 1: Export in shell
 
 ```bash
-export CASCOR_SERVER_PORT=8051
-export CASCOR_DEBUG=1
+export JUNIPER_CANOPY_SERVER__PORT=8051
+export JUNIPER_CANOPY_LOG_LEVEL=DEBUG
 ```
 
 #### Method 2: .env file (recommended)
@@ -448,10 +487,10 @@ Create `.env` in project root:
 
 ```bash
 # .env file
-CASCOR_SERVER_PORT=8050
-CASCOR_DEBUG=1
-CASCOR_DEMO_MODE=1
-CASCOR_BACKEND_PATH=../cascor
+JUNIPER_CANOPY_SERVER__HOST=127.0.0.1
+JUNIPER_CANOPY_SERVER__PORT=8050
+JUNIPER_CANOPY_DEMO_MODE=1
+JUNIPER_CANOPY_BACKEND_PATH=../juniper-cascor
 ```
 
 Load with:
@@ -471,10 +510,10 @@ set +a
 #!/bin/bash
 # setup_env.bash
 
-export CASCOR_SERVER_PORT=8050
-export CASCOR_DEBUG=0
-export CASCOR_DEMO_MODE=1
-export CASCOR_BACKEND_PATH=../cascor
+export JUNIPER_CANOPY_SERVER__HOST=127.0.0.1
+export JUNIPER_CANOPY_SERVER__PORT=8050
+export JUNIPER_CANOPY_DEMO_MODE=1
+export JUNIPER_CANOPY_BACKEND_PATH=../juniper-cascor
 ```
 
 Source with:
@@ -494,7 +533,7 @@ source setup_env.bash
 
 ```yaml
 backend:
-  path: "${CASCOR_BACKEND_PATH}"  # Expands to env var value
+  path: "${JUNIPER_CANOPY_BACKEND_PATH}"  # Expands to env var value
 
 logging:
   level: "$LOG_LEVEL"             # Expands to env var value
@@ -504,9 +543,9 @@ logging:
 
 **Precedence (highest to lowest):**
 
-1. Environment variables (`CASCOR_*`)
-2. Configuration file (`conf/app_config.yaml`)
-3. Default values (in code)
+1. Pydantic settings (`JUNIPER_CANOPY_*` environment variables)
+2. Configuration file (`conf/app_config.yaml`) for legacy `ConfigManager` callers
+3. Defaults in `src/settings.py` and `src/canopy_constants.py`
 
 **Example:**
 
@@ -518,7 +557,7 @@ server:
 
 ```bash
 # Environment variable override
-export CASCOR_SERVER_PORT=8051  # Overrides file value
+export JUNIPER_CANOPY_SERVER__PORT=8051  # Overrides file/default value
 
 # Result: Server runs on port 8051
 ```
@@ -598,12 +637,12 @@ python script.py
 
 ### Backend Integration Path
 
-**Default:** `../cascor` (relative to juniper_canopy)
+**Default:** `../juniper-cascor` (relative to juniper_canopy)
 
 **Override with environment variable:**
 
 ```bash
-export CASCOR_BACKEND_PATH=/absolute/path/to/cascor
+export JUNIPER_CANOPY_BACKEND_PATH=/absolute/path/to/juniper-cascor
 ```
 
 **Or in app_config.yaml:**
@@ -697,7 +736,7 @@ ls -la data/
 ./demo
 
 # Check for errors in output
-# Should see: "Uvicorn running on http://0.0.0.0:8050"
+# Should see: "Uvicorn running on http://127.0.0.1:8050" or localhost
 
 # In another terminal, test API
 curl http://localhost:8050/health
@@ -835,12 +874,40 @@ ls -l conf/app_config.yaml
 # Validate YAML syntax
 python -c "import yaml; print(yaml.safe_load(open('conf/app_config.yaml')))"
 
-# Check environment variables
-env | grep CASCOR
+# Check current Canopy environment variables
+env | grep JUNIPER_CANOPY
 
 # Export variables correctly
-export CASCOR_SERVER_PORT=8051  # Not: export CASCOR_SERVER_PORT 8051
+export JUNIPER_CANOPY_SERVER__PORT=8051  # Note the double underscore for nested settings
 ```
+
+---
+
+### Issue: Startup Refuses Non-Loopback Bind
+
+**Symptoms:**
+
+```bash
+NonLoopbackBindError: REFUSING TO START: canopy is configured to bind a non-loopback interface
+```
+
+**Cause:** `JUNIPER_CANOPY_SERVER__HOST` is set to a non-loopback address such as `0.0.0.0`
+without `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true`.
+
+**Solutions:**
+
+```bash
+# Local development / demo: bind loopback
+export JUNIPER_CANOPY_SERVER__HOST=127.0.0.1
+./demo
+
+# Fronted deployment only: attest the perimeter deliberately
+export JUNIPER_CANOPY_SERVER__HOST=0.0.0.0
+export JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true
+```
+
+Use the attestation path only when a fronting authenticating proxy or equivalent perimeter protects
+the training-control surface before traffic reaches Canopy.
 
 ---
 
@@ -886,7 +953,7 @@ lsof -i :8050
 kill -9 <PID>
 
 # Or use different port
-export CASCOR_SERVER_PORT=8051
+export JUNIPER_CANOPY_SERVER__PORT=8051
 ./demo
 ```
 
@@ -993,9 +1060,9 @@ COPY conf/ ./conf/
 RUN mkdir -p logs data reports
 
 # Set environment variables
-ENV CASCOR_DEMO_MODE=1
-ENV CASCOR_SERVER_HOST=0.0.0.0
-ENV CASCOR_SERVER_PORT=8050
+ENV JUNIPER_CANOPY_DEMO_MODE=1
+ENV JUNIPER_CANOPY_SERVER__HOST=127.0.0.1
+ENV JUNIPER_CANOPY_SERVER__PORT=8050
 
 # Expose port
 EXPOSE 8050
@@ -1008,8 +1075,11 @@ CMD ["python", "src/main.py"]
 
 ```bash
 docker build -t juniper_canopy .
-docker run -p 8050:8050 juniper_canopy
+docker run --rm -p 8050:8050 juniper_canopy
 ```
+
+If a container must bind `0.0.0.0` internally, set `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true`
+only after the deployment owner has verified the host publish, ingress, or proxy is the real authenticated perimeter.
 
 ---
 
