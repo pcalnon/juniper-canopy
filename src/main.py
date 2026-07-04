@@ -227,6 +227,17 @@ async def lifespan(app: FastAPI):
 
     enforce_dependency_floors(distribution="juniper-canopy", logger=system_logger)
 
+    # D2 (SEC-F22): loopback bind-guard. Fail loud + closed here -- before
+    # backend init / serving -- when canopy is configured to bind a non-loopback
+    # interface without an explicit fronting-auth attestation, instead of
+    # silently exposing the in-network-bypassable browser training-control
+    # surface (audit HO-6). Loopback binds (the default) start normally.
+    # Implemented inline in canopy (no new dependency). Design-of-record:
+    # juniper-ml notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md §4 / §8 D2.
+    from security import enforce_loopback_bind_guard
+
+    enforce_loopback_bind_guard(settings.server.host, attested=settings.fronting_auth_attested, logger=system_logger)
+
     system_logger.info("Starting Juniper Canopy application")
     system_logger.info("Settings: server=%s:%s, demo=%s", settings.server.host, settings.server.port, settings.demo_mode)
 
@@ -625,8 +636,17 @@ async def websocket_training_endpoint(websocket: WebSocket):
             await websocket.close(code=4003, reason="Origin not allowed")
             return
 
-    # Phase B-pre-a: Per-IP connection cap (M-SEC-04)
-    if not websocket_manager.check_per_ip_limit(websocket, ws_settings.max_connections_per_ip):
+    # SEC-F19 / D4: per-IP cap (M-SEC-04; DoS-dampening, INERT BEHIND NAT --
+    # every client behind Docker NAT shares the bridge-gateway IP) + per-session
+    # cap keyed on the anonymous canopy_session cookie (restores per-client
+    # fairness under a shared NAT IP). The global cap
+    # (websocket_manager.max_connections, enforced in connect()) bounds total
+    # load + backstops cookieless connections. Over-cap -> close 1013.
+    if not websocket_manager.check_connection_limits(
+        websocket,
+        max_per_ip=ws_settings.max_connections_per_ip,
+        max_per_session=ws_settings.max_connections_per_session,
+    ):
         await websocket.close(code=1013, reason="Per-IP connection limit reached")
         return
 
@@ -746,8 +766,15 @@ async def websocket_control_endpoint(websocket: WebSocket):
             await websocket.close(code=4003, reason="Policy violation")  # M-SEC-06: opaque
             return
 
-    # Phase B-pre-a: Per-IP connection cap (M-SEC-04)
-    if not websocket_manager.check_per_ip_limit(websocket, ws_settings.max_connections_per_ip):
+    # SEC-F19 / D4: per-IP cap (M-SEC-04; DoS-dampening, INERT BEHIND NAT) +
+    # per-session cap keyed on the anonymous canopy_session cookie (per-client
+    # fairness under a shared NAT IP); the global cap (connect()) backstops the
+    # cookieless case. Over-cap -> close 1013 (opaque per M-SEC-06).
+    if not websocket_manager.check_connection_limits(
+        websocket,
+        max_per_ip=ws_settings.max_connections_per_ip,
+        max_per_session=ws_settings.max_connections_per_session,
+    ):
         await websocket.close(code=1013, reason="Policy violation")  # M-SEC-06: opaque
         return
 
@@ -2954,8 +2981,15 @@ async def ws_endpoint(websocket: WebSocket):
             await websocket.close(code=4003, reason="Origin not allowed")
             return
 
-    # SEC-12: Per-IP connection cap (parity with /ws/training, /ws/control)
-    if not websocket_manager.check_per_ip_limit(websocket, ws_settings.max_connections_per_ip):
+    # SEC-F19 / D4: per-IP cap (DoS-dampening, INERT BEHIND NAT) + per-session
+    # cap keyed on the anonymous canopy_session cookie; the global cap
+    # (connect()) backstops cookieless connections. Parity with /ws/training,
+    # /ws/control. Over-cap -> close 1013.
+    if not websocket_manager.check_connection_limits(
+        websocket,
+        max_per_ip=ws_settings.max_connections_per_ip,
+        max_per_session=ws_settings.max_connections_per_session,
+    ):
         await websocket.close(code=1013, reason="Per-IP connection limit reached")
         return
 

@@ -126,6 +126,13 @@ class ServerSettings(BaseModel):
 class WebSocketSettings(BaseModel):
     """WebSocket configuration (replaces YAML backend.communication section)."""
 
+    # SEC-F19 / D4: stack-absolute GLOBAL connection cap across *all* WS
+    # endpoints (/ws/training, /ws/control, /ws). Enforced in
+    # ``WebSocketManager.connect`` -- the single choke point every endpoint
+    # admits a socket through -- so it bounds total server resource across the
+    # whole stack and backstops the cookieless per-session case (design §5
+    # Option B / §9 R2). The N+1th connection stack-wide is rejected with close
+    # code 1013. This is availability / DoS-dampening, not authentication.
     max_connections: int = 50
     heartbeat_interval: int = 30
     reconnect_attempts: int = 5
@@ -138,7 +145,24 @@ class WebSocketSettings(BaseModel):
         "https://localhost:8050",
         "https://127.0.0.1:8050",
     ]
+    # SEC-F19 / D4: the per-IP cap is DoS-dampening only and is INERT BEHIND
+    # NAT -- inside Docker every client presents as the bridge-gateway IP
+    # (audit HO-3), so this cap is shared across all users and is NOT a
+    # per-client authenticator. ``max_connections_per_session`` below restores
+    # per-client fairness under a shared NAT IP; genuine per-client identity
+    # needs the deferred fronting-proxy X-Forwarded-For work (Phase 4). Kept
+    # because it still dampens a single-IP flood off-NAT. Design-of-record:
+    # juniper-ml notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md §5.
     max_connections_per_ip: int = 5
+    # SEC-F19 / D4: per-session connection cap keyed on the anonymous
+    # ``canopy_session`` cookie read from the WS handshake. Restores per-client
+    # fairness where the per-IP cap is inert (a shared NAT gateway IP): one
+    # browser session monopolizing sockets can no longer starve another session
+    # behind the same gateway (the live self-DoS, audit HO-3). A cookieless
+    # first connection is allowed and left to ``max_connections`` (global) as
+    # the backstop. Best-effort fairness / DoS-dampening, not authentication (a
+    # determined attacker rotates cookies).
+    max_connections_per_session: int = 5
     idle_timeout_seconds: int = 120
     max_message_size_training: int = 4096
     max_message_size_control: int = 65536
@@ -359,6 +383,21 @@ class Settings(BaseSettings):
     # security audit finding SEC-F08 in juniper-ml
     # notes/JUNIPER_STACK_SECURITY_AUDIT_PLAN_2026-07-02.md (§4.3 / §5.2).
     dataset_import_url_enabled: bool = False
+
+    # SEC-F22 / D2 (startup bind-guard). Operator attestation that a fronting
+    # authenticating proxy terminates auth in front of canopy, making a
+    # non-loopback bind safe. Default **False**: canopy REFUSES TO START when
+    # ``server.host`` is a non-loopback interface (anything not in 127.0.0.0/8,
+    # not ``::1``, not ``localhost``) unless this is explicitly set True --
+    # converting the sole effective SEC-F22 control (the loopback bind) from an
+    # implicit default into an enforced invariant and closing the silent
+    # ``BIND_HOST=0.0.0.0`` footgun (audit HO-6). Set
+    # ``JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true`` ONLY when such a proxy is
+    # actually deployed -- it is an *attestation*, not a verification. Enforced
+    # at startup in ``main.lifespan`` via ``security.enforce_loopback_bind_guard``
+    # (implemented inline in canopy; no new dependency). Design-of-record:
+    # juniper-ml notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md §4 / §8 D2.
+    fronting_auth_attested: bool = False
 
     @property
     def ws_bridge_enabled(self) -> bool:
