@@ -280,7 +280,7 @@ class WebSocketManager:
         client_id: Optional[str] = None,
         subprotocol: Optional[str] = None,
         channel: Optional[str] = None,
-    ):
+    ) -> bool:
         """
         Accept new WebSocket connection.
 
@@ -324,7 +324,7 @@ class WebSocketManager:
                 close_ws = False
         if close_ws:
             await websocket.close(code=1013, reason="Max connections reached")
-            return
+            return False
 
         await websocket.accept(subprotocol=subprotocol)
 
@@ -377,6 +377,7 @@ class WebSocketManager:
             },
             websocket,
         )
+        return True
 
     def check_per_ip_limit(self, websocket: WebSocket, max_per_ip: int) -> bool:
         """Check if the source IP has room for another connection (M-SEC-04).
@@ -500,6 +501,19 @@ class WebSocketManager:
             self._decrement_ip_count(websocket)
             return False
         return True
+
+    def release_connection_limits(self, websocket: WebSocket) -> None:
+        """Release cap counters reserved by :meth:`check_connection_limits`.
+
+        Endpoint handlers reserve per-IP/per-session slots before awaiting the
+        WebSocket accept/register path. If the later global cap rejects in
+        :meth:`connect`, or the accept fails before the socket enters
+        ``active_connections``, ``disconnect`` intentionally no-ops because the
+        socket was never active. This helper lets callers roll back only the
+        endpoint-level reservations in that pre-registration failure window.
+        """
+        self._decrement_ip_count(websocket)
+        self._decrement_session_count(websocket)
 
     def disconnect(self, websocket: WebSocket):
         """
