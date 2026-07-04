@@ -654,7 +654,14 @@ async def websocket_training_endpoint(websocket: WebSocket):
     # OBS-WIRE A.4: pass channel="training" so connect/disconnect updates
     # juniper_canopy_websocket_connections_active{channel="training"} and
     # outbound dispatch labels juniper_canopy_websocket_messages_total{...}.
-    await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol, channel="training")
+    if not await websocket_manager.connect(
+        websocket,
+        client_id=client_id,
+        subprotocol=ws_subprotocol,
+        channel="training",
+        limits_reserved=True,
+    ):
+        return
 
     idle_timeout = ws_settings.idle_timeout_seconds
     max_msg_size = ws_settings.max_message_size_training
@@ -782,7 +789,14 @@ async def websocket_control_endpoint(websocket: WebSocket):
     # OBS-WIRE A.4: pass channel="control" so connect/disconnect updates
     # juniper_canopy_websocket_connections_active{channel="control"} and
     # outbound dispatch labels juniper_canopy_websocket_messages_total{...}.
-    await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol, channel="control")
+    if not await websocket_manager.connect(
+        websocket,
+        client_id=client_id,
+        subprotocol=ws_subprotocol,
+        channel="control",
+        limits_reserved=True,
+    ):
+        return
 
     # Phase B-pre-b: CSRF first-frame authentication (M-SEC-02)
     if settings.csrf_enabled:
@@ -2993,7 +3007,8 @@ async def ws_endpoint(websocket: WebSocket):
         await websocket.close(code=1013, reason="Per-IP connection limit reached")
         return
 
-    await websocket_manager.connect(websocket, subprotocol=ws_subprotocol)
+    if not await websocket_manager.connect(websocket, subprotocol=ws_subprotocol, limits_reserved=True):
+        return
     try:
         while True:
             await websocket.receive_text()
