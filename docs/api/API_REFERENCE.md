@@ -1,7 +1,7 @@
 # Juniper Canopy API Reference
 
-**Version:** 1.4.0
-**Last Updated:** May 4, 2026
+**Version:** 1.4.1
+**Last Updated:** July 4, 2026
 **Base URL:** `http://127.0.0.1:8050`
 
 ---
@@ -32,7 +32,7 @@ Juniper Canopy provides a RESTful HTTP API and WebSocket channels for real-time 
 - **Data Format:** JSON
 - **Encoding:** UTF-8
 - **CORS:** Enabled for localhost origins
-- **Rate Limiting:** None (currently)
+- **Rate Limiting:** REST limiting is configurable; WebSocket connection caps are enforced
 
 ### External CasCor Normalization (Service Mode)
 
@@ -79,18 +79,18 @@ This provides:
 
 ## Authentication
 
-**Current Status:** No authentication required (MVP)
+Authentication is configuration-dependent:
 
-**Future Plans:** JWT-based authentication (optional)
+- If `CANOPY_API_KEY` is unset, API-key authentication is disabled for development/demo use.
+- If `CANOPY_API_KEY` is set, keyed callers must send `X-API-Key: <value>`.
+- Same-origin browser training controls (`/api/train/*`, `/api/csrf`, `/ws/control`) use the browser path:
+  allowed `Origin` + `canopy_session` cookie + CSRF token when `JUNIPER_CANOPY_BROWSER_CONTROL_AUTH_ENABLED=true`
+  (the default). Keyed callers continue to work.
 
-```yaml
-# conf/app_config.yaml (future)
-security:
-  authentication:
-    enabled: true
-    method: jwt
-    token_expiry_hours: 24
-```
+The browser-control path is not a network perimeter by itself. Canopy now enforces that perimeter at startup:
+`JUNIPER_CANOPY_SERVER__HOST` must be loopback (`127.0.0.0/8`, `::1`, or `localhost`) unless
+`JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true` explicitly attests that a fronting authenticating proxy or
+equivalent perimeter protects Canopy before traffic reaches the app.
 
 ---
 
@@ -1085,6 +1085,21 @@ Most WebSocket messages use this shape:
 - Some control-channel messages may omit `timestamp`.
 - Runtime dashboard updates consume `metrics`, `state`, `topology`, and `event` message types.
 
+### Connection Admission and Limits
+
+All WebSocket endpoints (`/ws/training`, `/ws/control`, and the legacy `/ws`) share the same admission policy:
+
+| Gate | Setting | Default | Failure |
+| ---- | ------- | ------- | ------- |
+| API key / browser auth | `CANOPY_API_KEY`, `JUNIPER_CANOPY_BROWSER_CONTROL_AUTH_ENABLED` | API key unset, browser auth on | Close `4001` for missing/invalid keyed auth where required. |
+| Origin allowlist | `JUNIPER_CANOPY_WEBSOCKET__ALLOWED_ORIGINS` | localhost origins | Close `4003`; `/ws/control` uses opaque reason `Policy violation`. |
+| Global connection cap | `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS` | `50` | Close `1013` when the stack-wide N+1th socket connects. |
+| Per-IP cap | `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS_PER_IP` | `5` | Close `1013`; DoS dampening only, and inert behind NAT where clients share one gateway IP. |
+| Per-session cap | `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS_PER_SESSION` | `5` | Close `1013`; keyed on the anonymous `canopy_session` cookie for best-effort fairness behind NAT. |
+
+Cookieless first connections are exempt from the per-session cap and are backstopped by the global cap.
+These limits are availability controls, not authentication.
+
 ### WS /ws/training
 
 **Description:** Stream training state/metrics/topology/event updates.
@@ -1262,7 +1277,7 @@ ws://127.0.0.1:8050/ws/control
 }
 ```
 
-**Supported Commands:** `start`, `stop`, `pause`, `resume`, `reset`
+**Supported Commands:** `start`, `stop`, `pause`, `resume`, `reset`, `set_params`
 
 ## Data Models
 
@@ -1405,6 +1420,8 @@ interface TrainingState {
 
 - Network disconnection → Client receives `onclose` event
 - Server shutdown → `server_shutdown` message sent before close
+- WebSocket admission cap exceeded → close code `1013`
+- Origin/auth policy rejection → close code `4001`, `4003`, or `1008` depending on the failed gate
 
 **Command Errors:**
 
@@ -1426,19 +1443,14 @@ interface TrainingState {
 
 ## Rate Limiting
 
-**Current Status:** No rate limiting (MVP)
+REST rate limiting is available but disabled by default (`JUNIPER_CANOPY_RATE_LIMIT_ENABLED=false`).
+When enabled, requests are counted by API key or source IP. Canopy's own server-side dashboard self-calls
+carry an internal per-process header and are exempt so polling does not drain the user's bucket.
 
-**Future Plans:**
+WebSocket availability limits are always enforced by `WebSocketManager` as described in
+[Connection Admission and Limits](#connection-admission-and-limits).
 
-```yaml
-security:
-  rate_limiting:
-    enabled: true
-    requests_per_minute: 100
-    burst_size: 10
-```
-
-**Response Headers (Future):**
+**Response Headers:**
 
 ```bash
 X-RateLimit-Limit: 100

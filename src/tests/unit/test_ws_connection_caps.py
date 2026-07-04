@@ -192,3 +192,31 @@ class TestGlobalConnectionCap:
         assert rejected not in mgr.active_connections
         assert mgr._per_ip_counts == {"10.0.0.1": 1}
         assert mgr._per_session_counts == {"sess-A": 1}
+        
+    async def test_global_cap_rejection_releases_reserved_session_slots(self):
+        """A connect-time global-cap reject must not strand per-IP/session slots."""
+        mgr = WebSocketManager()
+        mgr.max_connections = 1
+        ip = "172.23.0.1"
+        session = "sess-A"
+
+        ws1 = _make_ws(ip=ip, session=session)
+        assert mgr.check_connection_limits(ws1, max_per_ip=10, max_per_session=5) is True
+        assert await mgr.connect(ws1) is True
+
+        ws2 = _make_ws(ip=ip, session=session)
+        assert mgr.check_connection_limits(ws2, max_per_ip=10, max_per_session=5) is True
+        assert mgr._per_ip_counts[ip] == 2
+        assert mgr._per_session_counts[session] == 2
+
+        assert await mgr.connect(ws2) is False
+        mgr.release_connection_limits(ws2)
+
+        ws2.close.assert_awaited_once_with(code=1013, reason="Max connections reached")
+        assert ws2 not in mgr.active_connections
+        assert mgr._per_ip_counts[ip] == 1
+        assert mgr._per_session_counts[session] == 1
+
+        mgr.disconnect(ws1)
+        assert ip not in mgr._per_ip_counts
+        assert session not in mgr._per_session_counts

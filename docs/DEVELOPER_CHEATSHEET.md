@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.0
-**Date**: 2026-03-15
+**Version**: 1.0.2
+**Date**: 2026-07-04
 **Project**: juniper-canopy
 
 ---
@@ -12,7 +12,7 @@
 
 - juniper-data: cd /home/pcalnon/Development/python/Juniper/juniper-data && conda activate JuniperData && pip install -e ".[all]" && PYTHON_GIL=0 uvicorn juniper_data.api.app:app --host 0.0.0.0 --port 8100
 - juniper-cascor: cd /home/pcalnon/Development/python/Juniper/juniper-cascor/src && conda activate JuniperCascor1 && JUNIPER_CASCOR_PORT=8201 python server.py
-- juniper-canopy: cd /home/pcalnon/Development/python/Juniper/juniper-canopy/src && conda activate JuniperCanopy1 && CASCOR_SERVICE_URL="<http://localhost:8201>" uvicorn main:app --host 0.0.0.0 --port 8050
+- juniper-canopy: cd /home/pcalnon/Development/python/Juniper/juniper-canopy/src && conda activate JuniperCanopy1 && JUNIPER_CANOPY_CASCOR_SERVICE_URL="<http://localhost:8201>" uvicorn main:app --host 127.0.0.1 --port 8050
 
 > **Conda env naming:** the live envs are **versioned** — `JuniperCanopy1`, `JuniperCascor1` (the bare `JuniperCanopy` / `JuniperCascor` are now `*-DEPRECATED` with a broken toolchain; `JuniperData` is unversioned). Discover yours with `conda env list | grep Juniper<App>` and use that name; rebuilds increment the suffix.
 
@@ -53,7 +53,7 @@
 
 juniper-canopy uses a 3-level hierarchy (highest priority first):
 
-1. **Environment variables** (`CASCOR_*`, `JUNIPER_CANOPY_*`)
+1. **Pydantic environment variables** (`JUNIPER_CANOPY_*`; selected legacy `CASCOR_*` fallbacks remain)
 2. **YAML config** (`conf/app_config.yaml`) -- supports `${VAR:default}` substitution
 3. **Constants module** (`src/canopy_constants.py`) -- dataclass-based (`TrainingConstants`, `DashboardConstants`, `ServerConstants`)
 
@@ -65,10 +65,14 @@ Add at the appropriate level based on how dynamic the value needs to be. If addi
 
 ```bash
 # Real backend mode
-unset CASCOR_DEMO_MODE
-export CASCOR_BACKEND_PATH=/path/to/cascor
-cd src && uvicorn main:app --host 0.0.0.0 --port 8050
+unset JUNIPER_CANOPY_DEMO_MODE
+export JUNIPER_CANOPY_BACKEND_PATH=/path/to/juniper-cascor
+cd src && uvicorn main:app --host 127.0.0.1 --port 8050
 ```
+
+Canopy refuses to start on a non-loopback bind (`0.0.0.0`, routable IP, or `::`) unless
+`JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true` is set. Use that attestation only for deployments
+with a fronting authenticating proxy or equivalent perimeter in front of the browser control surface.
 
 WebSocket channels for real-time training updates:
 
@@ -134,17 +138,20 @@ Common failure causes:
 | Variable                                    | Default             | Description                                                                                                       |
 |---------------------------------------------|---------------------|-------------------------------------------------------------------------------------------------------------------|
 | `JUNIPER_CANOPY_DEMO_MODE`                  | unset               | Set `1` to enable demo mode (simulated training). `CASCOR_DEMO_MODE` is accepted as a deprecated legacy fallback. |
-| `CASCOR_SERVER_HOST`                        | `127.0.0.1`         | Server bind address                                                                                               |
-| `CASCOR_SERVER_PORT`                        | `8050`              | Server port                                                                                                       |
-| `CASCOR_SERVER_DEBUG`                       | `0`                 | Enable debug mode                                                                                                 |
-| `CASCOR_BACKEND_PATH`                       | `../juniper-cascor` | Path to CasCor backend                                                                                            |
-| `CASCOR_TRAINING_EPOCHS`                    | `500`               | Maximum training epochs                                                                                           |
-| `CASCOR_TRAINING_LEARNING_RATE`             | `0.01`              | Learning rate                                                                                                     |
-| `CASCOR_TRAINING_HIDDEN_UNITS`              | `40`                | Max hidden units                                                                                                  |
-| `CASCOR_WEBSOCKET_MAX_CONNECTIONS`          | `50`                | Max concurrent WebSocket connections                                                                              |
-| `CASCOR_WEBSOCKET_HEARTBEAT_INTERVAL`       | `30`                | Heartbeat interval (seconds)                                                                                      |
-| `CASCOR_DEMO_UPDATE_INTERVAL`               | `1.0`               | Demo simulation step interval (seconds)                                                                           |
-| `CASCOR_DEMO_CASCADE_EVERY`                 | `30`                | Demo: add hidden unit every N epochs                                                                              |
+| `JUNIPER_CANOPY_SERVER__HOST`               | `127.0.0.1`         | Server bind address; non-loopback requires explicit fronting-auth attestation                                      |
+| `JUNIPER_CANOPY_SERVER__PORT`               | `8050`              | Server port                                                                                                       |
+| `JUNIPER_CANOPY_SERVER__DEBUG`              | `false`             | Enable debug mode                                                                                                 |
+| `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED`     | `false`             | Allow non-loopback bind only after operator attests a fronting authenticating proxy/perimeter                      |
+| `JUNIPER_CANOPY_BACKEND_PATH`               | `../juniper-cascor` | Path to CasCor backend                                                                                            |
+| `JUNIPER_CANOPY_TRAINING__EPOCHS__DEFAULT`  | `1000000`           | Default maximum training epochs                                                                                   |
+| `JUNIPER_CANOPY_TRAINING__LEARNING_RATE__DEFAULT` | `0.01`        | Default learning rate                                                                                             |
+| `JUNIPER_CANOPY_TRAINING__HIDDEN_UNITS__DEFAULT` | `1000`          | Default max hidden units                                                                                          |
+| `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS` | `50`                | Stack-wide cap across `/ws/training`, `/ws/control`, and `/ws`; over-cap closes with 1013                         |
+| `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS_PER_IP` | `5`         | Per-IP DoS dampening; not per-client identity behind NAT                                                           |
+| `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS_PER_SESSION` | `5`    | Per-session fairness cap keyed on `canopy_session`                                                               |
+| `JUNIPER_CANOPY_WEBSOCKET__HEARTBEAT_INTERVAL` | `30`           | Heartbeat interval (seconds)                                                                                      |
+| `JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL`       | `1.0`               | Demo simulation step interval (seconds)                                                                           |
+| `JUNIPER_CANOPY_DEMO_CASCADE_EVERY`         | `30`                | Demo: add hidden unit every N epochs                                                                              |
 | `JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS` | `1000`              | Dashboard metrics refresh (ms)                                                                                    |
 | `JUNIPER_CANOPY_METRICS_BUFFER_SIZE`        | `10000`             | Metrics data buffer size                                                                                          |
 | `JUNIPER_CANOPY_LOG_FORMAT`                 | text                | Set `json` for structured JSON logging                                                                            |
@@ -216,12 +223,14 @@ Coverage includes:
 | Symptom                                          | Cause                      | Fix                                                                                                             |
 |--------------------------------------------------|----------------------------|-----------------------------------------------------------------------------------------------------------------|
 | `ModuleNotFoundError: No module named 'uvicorn'` | Wrong Python env           | `conda activate JuniperCanopy1`                                                                            |
-| Env var not taking effect                        | Missing `CASCOR_` prefix   | Use `CASCOR_TRAINING_EPOCHS=300`, not `TRAINING_EPOCHS=300`                                                     |
+| Env var not taking effect                        | Missing `JUNIPER_CANOPY_` prefix or nested delimiter | Use `JUNIPER_CANOPY_TRAINING__EPOCHS__DEFAULT=300`, not `TRAINING_EPOCHS=300`                         |
 | YAML config not loading                          | Syntax error               | `python -c "import yaml; yaml.safe_load(open('conf/app_config.yaml'))"`                                         |
-| Demo mode not starting                           | `CASCOR_DEMO_MODE` not set | Run via `./demo` or `export CASCOR_DEMO_MODE=1` first                                                           |
+| Demo mode not starting                           | Demo mode env not set      | Run via `./demo` or `export JUNIPER_CANOPY_DEMO_MODE=1` first                                                   |
 | Demo shows stale data                            | Singleton not reset        | Restart app; check `reset_singletons` fixture covers new singletons                                             |
-| WebSocket not connecting                         | Wrong port or path         | Verify `ws://localhost:8050/ws/training`; check `CASCOR_WEBSOCKET_*` vars                                       |
-| Tests fail with backend errors                   | Demo mode not forced       | Ensure `conftest.py` sets `CASCOR_DEMO_MODE=1`; do not set `CASCOR_BACKEND_AVAILABLE` unless backend is running |
+| WebSocket not connecting                         | Wrong port or path         | Verify `ws://localhost:8050/ws/training`; check `JUNIPER_CANOPY_WEBSOCKET__*` vars                              |
+| Startup refuses non-loopback bind                | Bind guard blocked unsafe exposure | Use `JUNIPER_CANOPY_SERVER__HOST=127.0.0.1`, or set `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true` only behind an authenticating proxy |
+| WebSocket closes with `1013`                     | Global, per-IP, or per-session cap reached | Check `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS*`; remember per-IP is shared behind NAT                         |
+| Tests fail with backend errors                   | Demo mode not forced       | Ensure `conftest.py` sets `JUNIPER_CANOPY_DEMO_MODE=1`; do not set `CASCOR_BACKEND_AVAILABLE` unless backend is running |
 | Docs job fails in CI (`Documentation Links`)     | Broken links/anchors or unsafe doc path | Re-run `python scripts/check_doc_links.py --cross-repo skip --exclude templates --exclude history --exclude pull_requests --exclude releases --exclude analysis --exclude fixes --exclude development --exclude CHANGELOG.md` and fix reported markdown targets |
 | Prometheus metrics missing                       | Feature not enabled        | Set `JUNIPER_CANOPY_METRICS_ENABLED=true`; verify `/metrics` endpoint returns data                              |
 
@@ -252,6 +261,6 @@ Coverage includes:
 
 ---
 
-**Last Updated:** 2026-04-05
-**Version:** 1.0.1
+**Last Updated:** 2026-07-04
+**Version:** 1.0.2
 **Maintainer:** Paul Calnon

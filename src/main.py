@@ -654,13 +654,13 @@ async def websocket_training_endpoint(websocket: WebSocket):
     # OBS-WIRE A.4: pass channel="training" so connect/disconnect updates
     # juniper_canopy_websocket_connections_active{channel="training"} and
     # outbound dispatch labels juniper_canopy_websocket_messages_total{...}.
-    if not await websocket_manager.connect(
-        websocket,
-        client_id=client_id,
-        subprotocol=ws_subprotocol,
-        channel="training",
-        limits_reserved=True,
-    ):
+    try:
+        connected = await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol, channel="training")
+    except Exception:
+        websocket_manager.release_connection_limits(websocket)
+        raise
+    if not connected:
+        websocket_manager.release_connection_limits(websocket)
         return
 
     idle_timeout = ws_settings.idle_timeout_seconds
@@ -789,13 +789,13 @@ async def websocket_control_endpoint(websocket: WebSocket):
     # OBS-WIRE A.4: pass channel="control" so connect/disconnect updates
     # juniper_canopy_websocket_connections_active{channel="control"} and
     # outbound dispatch labels juniper_canopy_websocket_messages_total{...}.
-    if not await websocket_manager.connect(
-        websocket,
-        client_id=client_id,
-        subprotocol=ws_subprotocol,
-        channel="control",
-        limits_reserved=True,
-    ):
+    try:
+        connected = await websocket_manager.connect(websocket, client_id=client_id, subprotocol=ws_subprotocol, channel="control")
+    except Exception:
+        websocket_manager.release_connection_limits(websocket)
+        raise
+    if not connected:
+        websocket_manager.release_connection_limits(websocket)
         return
 
     # Phase B-pre-b: CSRF first-frame authentication (M-SEC-02)
@@ -3007,7 +3007,13 @@ async def ws_endpoint(websocket: WebSocket):
         await websocket.close(code=1013, reason="Per-IP connection limit reached")
         return
 
-    if not await websocket_manager.connect(websocket, subprotocol=ws_subprotocol, limits_reserved=True):
+    try:
+        connected = await websocket_manager.connect(websocket, subprotocol=ws_subprotocol)
+    except Exception:
+        websocket_manager.release_connection_limits(websocket)
+        raise
+    if not connected:
+        websocket_manager.release_connection_limits(websocket)
         return
     try:
         while True:
