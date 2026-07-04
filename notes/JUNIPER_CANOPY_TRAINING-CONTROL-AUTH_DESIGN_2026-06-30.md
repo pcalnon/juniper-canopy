@@ -57,7 +57,7 @@ banner via `_surface_training_control_outcome_handler` (`src/frontend/dashboard_
 | C5 | **`/v1/*` and other non-browser API surfaces must remain key-gated.** External / programmatic clients can and do hold a key. | `/v1/*` is not exempt (`src/canopy_constants.py:355-367`); the audit confirms live `GET /v1/` → 401. |
 
 **Non-goals.** (a) Option C (in-process self-calls) from
-`juniper-ml/notes/observability/CANOPY_DASHBOARD_SELF_CALL_REFACTOR_2026-05-10.md`
+`juniper-ml/notes/observability/JUNIPER_2026-05-10_JUNIPER-CANOPY_DASHBOARD-SELF-CALL-REFACTOR.md`
 — it addresses the *server-side* self-call cost, not the *browser* path, and does not fix this 401. (b) Enabling the SEC-06 bearer subprotocol
 (`ws_auth_enabled`, `src/settings.py:341`) — it still requires the token *in the browser* (§4d). (c) Re-architecting the dashboard to a separate
 process. (d) Changing the secret's value or rotation.
@@ -504,7 +504,7 @@ curl -sS -i http://localhost:8050/v1/health                       # expect 200
 **Companion / cross-repo:**
 
 - [`notes/JUNIPER_CANOPY_CASCOR-TRAINING-401-APIKEY_AUDIT_2026-06-29.md`](JUNIPER_CANOPY_CASCOR-TRAINING-401-APIKEY_AUDIT_2026-06-29.md) — the root-cause audit (H1/H1b, the toggle table, the call path).
-- `juniper-ml/notes/observability/CANOPY_DASHBOARD_SELF_CALL_REFACTOR_2026-05-10.md` — Option B (server-side `X-API-Key` injection, shipped canopy#265) vs deferred Option C; §7 explicitly notes browser-side data fetching as out of scope, which is why browser-originated calls were never covered.
+- `juniper-ml/notes/observability/JUNIPER_2026-05-10_JUNIPER-CANOPY_DASHBOARD-SELF-CALL-REFACTOR.md` — Option B (server-side `X-API-Key` injection, shipped canopy#265) vs deferred Option C; §7 explicitly notes browser-side data fetching as out of scope, which is why browser-originated calls were never covered.
 - [`notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md`](CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md) — the danger-alert surfacing that renders this 401 (both transports feed `training-control-action`).
 - juniper-deploy `/home/pcalnon/Development/python/Juniper/juniper-deploy/docker-compose.yml` — canopy service (`:545`), `CANOPY_API_KEY_FILE` (`:576`), loopback bind (`:557`), rate limit on (`:572`), `secrets: - canopy_api_key` (`:616-617`), secret def (`:932-933`); cascor WS origins (`:234,:384`, **not** canopy inbound).
 - juniper-deploy `/home/pcalnon/Development/python/Juniper/juniper-deploy/.env.secrets.enc:10` (encrypted `CANOPY_API_KEY`), `.env.secrets.example:13` (empty template), `./secrets/canopy_api_key.txt` (43 bytes).

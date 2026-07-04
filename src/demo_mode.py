@@ -598,7 +598,7 @@ class DemoMode:
 
         # Phase 3 progress fields (mirror cascor TrainingState semantics so the
         # canopy progress UI displays non-zero values during demo training).
-        # See juniper-ml/notes/code-review/CANOPY_CASCOR_INTERFACE_ROADMAP_2026-04-08.md §5.
+        # See juniper-ml/notes/code-review/JUNIPER_2026-04-08_JUNIPER-ECOSYSTEM_CANOPY-CASCOR-INTERFACE-ROADMAP.md §5.
         self._best_correlation_state: float = 0.0
         self._candidates_trained_count: int = 0
         self._candidates_total_count: int = 0

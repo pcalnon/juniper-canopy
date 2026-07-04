@@ -389,7 +389,7 @@ class TestPhase4TypedContract:
     """Phase 4 / P5-RC-18: BackendProtocol method returns conform to the
     declared TypedDict shapes. These are field-presence contract tests, not
     runtime type assertions — TypedDicts erase to plain dicts at runtime.
-    See juniper-ml/notes/code-review/CANOPY_CASCOR_INTERFACE_ROADMAP_2026-04-08.md §6.1.
+    See juniper-ml/notes/code-review/JUNIPER_2026-04-08_JUNIPER-ECOSYSTEM_CANOPY-CASCOR-INTERFACE-ROADMAP.md §6.1.
     """
 
     def test_start_training_envelope_keys(self, service_backend):

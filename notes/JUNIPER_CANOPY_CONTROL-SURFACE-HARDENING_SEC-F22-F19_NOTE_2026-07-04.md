@@ -10,7 +10,7 @@
 **Scope**: Records the two now-enforced control-surface invariants shipped in this PR and, explicitly, what remains deferred.
 
 > Design of record (read first): juniper-ml
-> [`notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md)
+> [`notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md`](https://github.com/pcalnon/juniper-ml/blob/main/notes/JUNIPER_2026-07-03_JUNIPER-CANOPY_CONTROL-SURFACE-AUTH-AND-NAT-DESIGN.md)
 > — §4 (SEC-F22 Option A), §5 (SEC-F19 Option B), §7 Phases 1–2, §8 decisions D2 + D4, §9 testing.
 > Companion: [`JUNIPER_CANOPY_TRAINING-CONTROL-AUTH_DESIGN_2026-06-30.md`](JUNIPER_CANOPY_TRAINING-CONTROL-AUTH_DESIGN_2026-06-30.md)
 > §7.3 stated the load-bearing loopback precondition this PR now enforces.

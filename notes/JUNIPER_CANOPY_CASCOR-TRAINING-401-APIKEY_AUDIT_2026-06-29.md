@@ -123,7 +123,7 @@ But that handler runs only **after** the middleware admits the request. The midd
 
 | Doc | Relevance |
 | --- | --- |
-| `juniper-ml/notes/observability/CANOPY_DASHBOARD_SELF_CALL_REFACTOR_2026-05-10.md` | **Most relevant.** Docs Opt-B (X-API-Key injection in **server-side** self-calls, shipped canopy#265) vs deferred Opt-C (in-process calls). Writes why **browser-originated** calls (this bug) were never covered. Cross-repo. |
+| `juniper-ml/notes/observability/JUNIPER_2026-05-10_JUNIPER-CANOPY_DASHBOARD-SELF-CALL-REFACTOR.md` | **Most relevant.** Docs Opt-B (X-API-Key injection in **server-side** self-calls, shipped canopy#265) vs deferred Opt-C (in-process calls). Writes why **browser-originated** calls (this bug) were never covered. Cross-repo. |
 | `notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md` | Designs the "`{label} failed.`" danger-alert surfacing that renders this 401; both transports feed `training-control-action`. Explains the banner mechanism (not the auth cause). |
 | `notes/fixes/FIX_FRONTEND_REGRESSIONS_2026-05-30.md` | Frontend-regression remediation observed on the **deployed docker stack** (Bug-4 class, canopy↔cascor); same deploy context as this failure. |
 | `notes/CANOPY_RUNTIME_CLIENT_FLOOR_DRIFT_ROOT_CAUSE_2026-06-26.md` | Prior "green tests / dead app" root-cause writeup (client-wheel floor drift). Different root cause, but the same "tests pass, runtime breaks" methodology applies. |

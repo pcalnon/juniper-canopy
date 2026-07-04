@@ -3,7 +3,7 @@
 * **Author**: Paul Calnon (drafted by Claude Code Opus 4.7)
 * **Status**: Reviewed — open questions resolved 2026-05-09 (see §10 Resolution log)
 * **Scope**: Six user-reported issues affecting the juniper-canopy Dash UI and its interaction with the juniper-cascor backend.
-* **Companion pointer**: `juniper-ml/notes/canopy_frontend_issues_plan_2026-05-09.md`
+* **Companion pointer**: `juniper-ml/notes/JUNIPER_2026-05-09_JUNIPER-CANOPY_FRONTEND-ISSUES-PLAN.md`
 
 ## Revisions
 
