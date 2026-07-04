@@ -168,6 +168,31 @@ class TestGlobalConnectionCap:
         assert mgr.get_connection_count() == 3
         assert ws4 not in mgr.active_connections
 
+    async def test_global_reject_after_reserved_limits_releases_counters(self):
+        """A global-cap rejection must not leak per-IP or per-session slots.
+
+        FastAPI endpoints reserve per-IP/per-session capacity via
+        ``check_connection_limits`` before calling ``connect()``, where the
+        global stack-wide cap is enforced. If that later global check rejects,
+        the already-reserved slots must be released or future legitimate
+        connections can be blocked by stale counters.
+        """
+        mgr = WebSocketManager()
+        mgr.max_connections = 1
+
+        admitted = _make_ws(ip="10.0.0.1", session="sess-A")
+        assert mgr.check_connection_limits(admitted, max_per_ip=5, max_per_session=5) is True
+        assert await mgr.connect(admitted, limits_reserved=True) is True
+
+        rejected = _make_ws(ip="10.0.0.2", session="sess-B")
+        assert mgr.check_connection_limits(rejected, max_per_ip=5, max_per_session=5) is True
+        assert await mgr.connect(rejected, limits_reserved=True) is False
+
+        rejected.close.assert_awaited_once_with(code=1013, reason="Max connections reached")
+        assert rejected not in mgr.active_connections
+        assert mgr._per_ip_counts == {"10.0.0.1": 1}
+        assert mgr._per_session_counts == {"sess-A": 1}
+        
     async def test_global_cap_rejection_releases_reserved_session_slots(self):
         """A connect-time global-cap reject must not strand per-IP/session slots."""
         mgr = WebSocketManager()

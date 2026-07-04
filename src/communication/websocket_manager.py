@@ -280,6 +280,7 @@ class WebSocketManager:
         client_id: Optional[str] = None,
         subprotocol: Optional[str] = None,
         channel: Optional[str] = None,
+        limits_reserved: bool = False,
     ) -> bool:
         """
         Accept new WebSocket connection.
@@ -300,6 +301,15 @@ class WebSocketManager:
                 ``juniper_canopy_websocket_messages_total{channel, type}``.
                 Pass ``None`` (default) on the legacy ``/ws`` compat route
                 to skip metric emission and preserve closed-set discipline.
+            limits_reserved: True when the caller has already incremented the
+                per-IP/per-session counters via ``check_connection_limits``.
+                When the global cap rejects here, those reservations must be
+                released because ``disconnect()`` only decrements counters for
+                websockets that were added to ``active_connections``.
+
+        Returns:
+            True when the websocket was accepted and tracked; False when the
+            global cap rejected the connection.
 
         Example:
             await websocket_manager.connect(websocket, client_id='dashboard-1')
@@ -323,6 +333,9 @@ class WebSocketManager:
             else:
                 close_ws = False
         if close_ws:
+            if limits_reserved:
+                self._decrement_ip_count(websocket)
+                self._decrement_session_count(websocket)
             await websocket.close(code=1013, reason="Max connections reached")
             return False
 
