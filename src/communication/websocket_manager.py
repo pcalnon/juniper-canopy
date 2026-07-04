@@ -132,9 +132,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import hmac
 
 # import json
 import logging
+import secrets
 import threading
 import time
 from datetime import datetime
@@ -155,6 +158,33 @@ if TYPE_CHECKING:
 # (rather than imported from main) to avoid a circular import; keep in sync with
 # the SessionMiddleware ``session_cookie`` in main.py.
 _SESSION_COOKIE_NAME = "canopy_session"
+
+
+# SEC-F19 log hygiene (PR #420 independent-review follow-up): never log the raw
+# ``canopy_session`` cookie value. That cookie is a signed Starlette session
+# token (``main.py`` -> ``SessionMiddleware(session_cookie="canopy_session")``);
+# even a short raw prefix in a log line is an avoidable identifier leak that aids
+# cross-log correlation of a browser session. ``_hash_session_key_for_log``
+# returns a short, non-reversible tag instead -- keyed HMAC-SHA256 over the raw
+# cookie with a per-process random secret, so the digest is NOT an offline-
+# computable function of the cookie (an attacker who obtains the logs cannot
+# confirm a stolen/guessed cookie by re-hashing it) and does not correlate across
+# process restarts. Mirrors the cascor sibling, which hashes its identity before
+# logging (juniper-cascor ``src/api/workers/security.py``).
+_LOG_HASH_KEY = secrets.token_bytes(32)
+
+
+def _hash_session_key_for_log(session_key: str) -> str:
+    """Return a short, non-reversible tag for ``session_key`` that is safe to log.
+
+    Keyed HMAC-SHA256 over the raw ``canopy_session`` cookie value with a
+    per-process secret (:data:`_LOG_HASH_KEY`); only the first 12 hex characters
+    are returned -- enough to correlate log lines within one process lifetime
+    without being reversible. Guarantees the raw cookie value never reaches a log
+    line (SEC-F19 log hygiene).
+    """
+    digest = hmac.new(_LOG_HASH_KEY, session_key.encode("utf-8"), hashlib.sha256).hexdigest()
+    return digest[:12]
 
 
 class WebSocketManager:
@@ -456,7 +486,7 @@ class WebSocketManager:
         with self._session_lock:
             current = self._per_session_counts.get(session_key, 0)
             if current >= max_per_session:
-                self.logger.warning(f"Per-session limit reached for session {session_key[:8]}... ({current}/{max_per_session})")
+                self.logger.warning(f"Per-session limit reached for session hash={_hash_session_key_for_log(session_key)} ({current}/{max_per_session})")
                 return False
             self._per_session_counts[session_key] = current + 1
         return True
