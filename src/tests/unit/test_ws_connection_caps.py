@@ -19,11 +19,11 @@ notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md
 §5 (Option B) / §9 (R2, testing).
 """
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from communication.websocket_manager import WebSocketManager
+from communication.websocket_manager import WebSocketManager, _hash_session_key_for_log
 
 
 def _make_ws(ip="127.0.0.1", session=None):
@@ -220,3 +220,45 @@ class TestGlobalConnectionCap:
         mgr.disconnect(ws1)
         assert ip not in mgr._per_ip_counts
         assert session not in mgr._per_session_counts
+
+
+@pytest.mark.unit
+class TestPerSessionLogHygiene:
+    """SEC-F19 log hygiene: the per-session cap must never log the raw cookie.
+
+    PR #420 independent-review follow-up. ``check_per_session_limit`` previously
+    logged ``session_key[:8]`` -- a raw prefix of the signed ``canopy_session``
+    cookie. It must log a non-reversible keyed hash instead so the raw cookie
+    value never reaches a log line.
+    """
+
+    def test_over_cap_warning_hashes_session_and_omits_raw_cookie(self):
+        raw_cookie = "RAW-canopy-session-COOKIE-9f8e7d6c5b4a"
+        mgr = WebSocketManager()
+        # Spy on the (possibly project-SystemLogger) logger directly so the
+        # assertion is independent of how the logger routes/propagates records.
+        mgr.logger = MagicMock()
+
+        # Fill the per-session cap, then trip it once more to force the warning.
+        for _ in range(5):
+            assert mgr.check_per_session_limit(_make_ws(session=raw_cookie), max_per_session=5) is True
+        assert mgr.check_per_session_limit(_make_ws(session=raw_cookie), max_per_session=5) is False
+
+        mgr.logger.warning.assert_called_once()
+        logged = " ".join(str(arg) for arg in mgr.logger.warning.call_args.args)
+        # The raw cookie -- and its first-8 prefix, the exact pre-fix leak -- must
+        # be absent from the emitted log line...
+        assert raw_cookie not in logged
+        assert raw_cookie[:8] not in logged
+        # ...and the keyed hash of the cookie must be present in its place.
+        assert _hash_session_key_for_log(raw_cookie) in logged
+
+    def test_hash_is_reversible_free_deterministic_and_distinct(self):
+        tag_a = _hash_session_key_for_log("session-A")
+        tag_b = _hash_session_key_for_log("session-B")
+        # Deterministic within a process; a compact hex prefix; not the raw value.
+        assert tag_a == _hash_session_key_for_log("session-A")
+        assert tag_a != tag_b
+        assert len(tag_a) == 12
+        assert all(ch in "0123456789abcdef" for ch in tag_a)
+        assert "session-A" not in tag_a
