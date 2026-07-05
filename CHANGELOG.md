@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **CI: per-file coverage is now a blocking gate (ecosystem per-file coverage rollout C-5).** The
+  `unit-tests` job's coverage lane (`src/tests/unit/ src/tests/regression/`, `--cov=src`) now runs the
+  shared `juniper-coverage-gap-map --enforce` gate from `juniper-ci-tools>=0.6.0,<0.7.0` as a
+  **blocking** step: CI **fails** when any source file's statement coverage is below 90% or any packaged
+  sub-module's pooled (statement-weighted) coverage is below 95%. The gate computes statement % itself
+  from `reports/coverage.json`, so this repo's `branch = true` coverage config does not change the gate
+  basis; it complements the existing aggregate `--cov-fail-under=80` gate (which a few well-covered
+  files can mask). The three existing `juniper-ci-tools` CI pins were bumped `>=0.5.1,<0.6.0` →
+  `>=0.6.0,<0.7.0` (0.6.0 is a superset — it adds the enforcing coverage gate and keeps every existing
+  console script). See juniper-ml
+  `notes/JUNIPER_ECOSYSTEM_PER_FILE_COVERAGE_ROLLOUT_SCOPING_2026-06-30.md`.
+
+### Tests
+
+- **Lifted whole-`src` per-file coverage to satisfy the new gate — no production-code change.** The unit
+  lane's overall pooled statement coverage rose **87.5% → 98.5%** (coverage.py total **85.8% → 97.5%**),
+  bringing every source file to **≥90% statement** and every sub-module to **≥95% pooled**. ~520 new
+  deterministic, offline unit tests were added for the previously under-covered files:
+  `main.py` (76.6 → 99.3%; FastAPI routes / WebSocket handlers / lifespan via `TestClient`),
+  `frontend/dashboard_manager.py` (77.2 → 99.9%; Dash inner-callback bodies invoked directly),
+  `demo_mode.py` (88.2 → 99.3%),
+  `backend/{cascor_service_adapter,training_monitor,demo_backend,service_backend}.py` (→ 100%),
+  `frontend/components/{parameters_panel,candidate_metrics_panel,network_evolution,decision_boundary,network_editor_panel,replay_player_panel,dataset_plotter}.py`
+  (→ 100%), plus the WebSocket-audit helpers in `audit_log.py` and the API-key branch of
+  `frontend/internal_api.py`. UI (`src/tests/ui/`, Playwright) tests remain out of the coverage lane by
+  design (session-fixture event-loop leak); no `get_layout()` / panel layout was touched.
+
 ### Added
 
 - **3-D (time-series) dataset display — Phase 1 (#368)**: canopy can now load and
