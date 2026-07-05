@@ -31,7 +31,7 @@ put,delete,patch}(...)`` that targets ``self._api_url(...)`` /
 ``self._api_base_url`` URLs.
 
 Long-term direction (Option C, deferred — see
-juniper-ml/notes/observability/CANOPY_DASHBOARD_SELF_CALL_REFACTOR_2026-05-10.md):
+juniper-ml/notes/observability/JUNIPER_2026-05-10_JUNIPER-CANOPY_DASHBOARD-SELF-CALL-REFACTOR.md):
 the HTTP self-call indirection should be replaced with direct in-process
 function calls into the FastAPI route handlers, eliminating the
 serialize/deserialize round-trip and the metric-noise contribution. This

@@ -2,7 +2,7 @@
 native-value-setter does NOT drive Dash's React-controlled ``dbc.Input(type=number)``.
 
 This is the reproducible artifact behind the audit doc's §5.3 / §6 claim
-(`juniper-ml/notes/JUNIPER_CANOPY_AUDIT_REGRESSIONS_AND_MODEL_SELECTION_2026-06-15.md`).
+(`juniper-ml/notes/JUNIPER_2026-06-15_JUNIPER-CANOPY_AUDIT-REGRESSIONS-AND-MODEL-SELECTION.md`).
 It is a **strict xfail**: the assertion that the set value reaches the backend
 is expected to FAIL (Apply pushes the *default*, not the set value), proving the
 POC #2 wall empirically and continuously. If a future Dash/dbc release fixes the

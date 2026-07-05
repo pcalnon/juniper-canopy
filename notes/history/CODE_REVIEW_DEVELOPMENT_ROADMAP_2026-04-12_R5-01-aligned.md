@@ -2,7 +2,7 @@
 
 **Date**: 2026-04-12
 **Version**: 0.4.0
-**Source of Truth**: [R5-01 Canonical Development Plan](../../juniper-ml/notes/interface_proposals/R5-01_canonical_development_plan.md)
+**Source of Truth**: [R5-01 Canonical Development Plan](../../juniper-ml/notes/interface_proposals/JUNIPER_2026-04-20_JUNIPER-ECOSYSTEM_R5-01-CANONICAL-DEVELOPMENT-PLAN.md)
 **Supersedes**: [CODE_REVIEW_DEVELOPMENT_ROADMAP_2026-04-04.md](CODE_REVIEW_DEVELOPMENT_ROADMAP_2026-04-04.md)
 
 **Companion Documents**:
@@ -154,7 +154,7 @@ Track PAR is otherwise complete.
 
 ## 4. R5-01 Canonical Phase Execution
 
-This section summarizes the 11 R5-01 phases and their canopy impact. See [R5-01 Canonical Development Plan](../../juniper-ml/notes/interface_proposals/R5-01_canonical_development_plan.md) for full detail.
+This section summarizes the 11 R5-01 phases and their canopy impact. See [R5-01 Canonical Development Plan](../../juniper-ml/notes/interface_proposals/JUNIPER_2026-04-20_JUNIPER-ECOSYSTEM_R5-01-CANONICAL-DEVELOPMENT-PLAN.md) for full detail.
 
 ### Phase 0-cascor: Seq, Replay, Resume (2.0 days)
 

@@ -5,7 +5,7 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.5.0
-**Last Updated**: 2026-06-30
+**Last Updated**: 2026-07-04
 
 ---
 
@@ -260,7 +260,7 @@ For any new `prometheus_client` `Counter` / `Gauge` / `Histogram` / `Summary` / 
 - `register_info_or_update(name, description, **labels)` — sugar for the `Info` two-step register-then-`.info({...})` pattern.
 - `lazy_register_or_reuse(...)` — for the lazy-init-with-`None`-sentinel pattern.
 
-Tests touching these collectors should use `juniper_observability.testing.reset_prometheus_registry`. Existing examples in this repo: `src/observability.py:_ensure_canopy_metrics`, `src/main.py` (browser WS metrics), `src/adapter_validation.py`, `src/frontend/dashboard_manager.py`. See [the design doc in juniper-ml](https://github.com/pcalnon/juniper-ml/blob/main/notes/observability/REGISTER_OR_REUSE_HELPER_DESIGN_2026-05-05.md) for the rationale.
+Tests touching these collectors should use `juniper_observability.testing.reset_prometheus_registry`. Existing examples in this repo: `src/observability.py:_ensure_canopy_metrics`, `src/main.py` (browser WS metrics), `src/adapter_validation.py`, `src/frontend/dashboard_manager.py`. See [the design doc in juniper-ml](https://github.com/pcalnon/juniper-ml/blob/main/notes/observability/JUNIPER_2026-05-05_JUNIPER-ML_REGISTER-OR-REUSE-HELPER-DESIGN.md) for the rationale.
 
 ### CI/CD
 
