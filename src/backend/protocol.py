@@ -26,12 +26,12 @@
 #####################################################################################################################################################################################################
 # Notes:
 #     Phase 5 of the Microservices Architecture Development Roadmap.
-#     See: juniper-ml/notes/MICROSERVICES-ARCHITECTURE_DEVELOPMENT-ROADMAP.md
+#     See: juniper-ml/notes/JUNIPER_2026-04-20_JUNIPER-ECOSYSTEM_MICROSERVICES-ARCHITECTURE-DEVELOPMENT-ROADMAP.md
 #
 #####################################################################################################################################################################################################
 # References:
 #     - PEP 544 — Protocols: Structural subtyping (static duck typing)
-#     - juniper-ml/notes/MICROSERVICES-ARCHITECTURE_DEVELOPMENT-ROADMAP.md §5.4
+#     - juniper-ml/notes/JUNIPER_2026-04-20_JUNIPER-ECOSYSTEM_MICROSERVICES-ARCHITECTURE-DEVELOPMENT-ROADMAP.md §5.4
 #
 #####################################################################################################################################################################################################
 # TODO :

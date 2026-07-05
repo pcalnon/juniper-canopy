@@ -243,7 +243,7 @@ class TestDemoModeDataGeneration:
 class TestPhase3ProgressFields:
     """Phase 3 metrics granularity: TrainingState progress fields are exposed
     by DemoMode so the canopy progress UI displays non-zero values during demo
-    training. See juniper-ml/notes/code-review/CANOPY_CASCOR_INTERFACE_ROADMAP_2026-04-08.md §5.
+    training. See juniper-ml/notes/code-review/JUNIPER_2026-04-08_JUNIPER-ECOSYSTEM_CANOPY-CASCOR-INTERFACE-ROADMAP.md §5.
     """
 
     PHASE3_FIELDS = (

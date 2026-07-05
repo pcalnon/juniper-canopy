@@ -109,7 +109,7 @@ grep -n 'enable_ws_control_buttons' src/settings.py    # = True (src/settings.py
 ## Reference docs
 
 - [`notes/JUNIPER_CANOPY_CASCOR-TRAINING-401-APIKEY_AUDIT_2026-06-29.md`](../../notes/JUNIPER_CANOPY_CASCOR-TRAINING-401-APIKEY_AUDIT_2026-06-29.md) — **primary source**: full ranked root-cause, toggle table, call-path.
-- `juniper-ml/notes/observability/CANOPY_DASHBOARD_SELF_CALL_REFACTOR_2026-05-10.md` (cross-repo) — **most relevant**: Option B (server-side `X-API-Key` injection, shipped canopy#265) vs deferred Option C; explains why **browser-originated** calls were never covered.
+- `juniper-ml/notes/observability/JUNIPER_2026-05-10_JUNIPER-CANOPY_DASHBOARD-SELF-CALL-REFACTOR.md` (cross-repo) — **most relevant**: Option B (server-side `X-API-Key` injection, shipped canopy#265) vs deferred Option C; explains why **browser-originated** calls were never covered.
 - [`src/frontend/internal_api.py`](../../src/frontend/internal_api.py) (module docstring) — states the helper is for **server-side** self-calls only; points to the refactor doc above.
 - [`notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md`](../../notes/CANOPY_TRAINING_CONTROL_ERROR_SURFACING_DESIGN_2026-06-14.md) — designs the "`{label} failed.`" danger-alert that renders this 401 (the banner mechanism, not the auth cause).
 - [`notes/fixes/FIX_FRONTEND_REGRESSIONS_2026-05-30.md`](../../notes/fixes/FIX_FRONTEND_REGRESSIONS_2026-05-30.md) — frontend-regression remediation on the **deployed docker stack** (same deploy context).
