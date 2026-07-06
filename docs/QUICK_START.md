@@ -409,7 +409,8 @@ NonLoopbackBindError: REFUSING TO START: canopy is configured to bind a non-loop
 ```
 
 **Cause:** Canopy now fail-closes when `JUNIPER_CANOPY_SERVER__HOST` is non-loopback
-unless `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true`.
+unless a perimeter attestation is set (`JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED` or
+`JUNIPER_CANOPY_AUTH_PROXY_ATTESTED`).
 
 **Solution:**
 
@@ -418,9 +419,13 @@ unless `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true`.
 export JUNIPER_CANOPY_SERVER__HOST=127.0.0.1
 ./demo
 
-# Only for fronted deployments with an authenticated perimeter
+# Containerized behind a loopback-only host publish (the deploy default)
 export JUNIPER_CANOPY_SERVER__HOST=0.0.0.0
-export JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true
+export JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true
+
+# Or behind a fronting authenticating reverse proxy (Phase 4)
+export JUNIPER_CANOPY_SERVER__HOST=0.0.0.0
+export JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true
 ```
 
 ---

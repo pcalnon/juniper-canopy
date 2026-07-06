@@ -387,7 +387,7 @@ async def require_browser_control_auth(request: Request) -> None:
 
 class NonLoopbackBindError(RuntimeError):
     """Raised at startup when canopy is configured to bind a non-loopback
-    interface without the fronting-auth attestation (SEC-F22 / D2).
+    interface without a bind attestation (SEC-F22 / D2).
 
     Fail-closed: raising here aborts application startup (the FastAPI lifespan
     propagates it, uvicorn exits) so canopy never serves a single request on an
@@ -421,37 +421,52 @@ def is_loopback_host(host: str) -> bool:
         return False
 
 
-def enforce_loopback_bind_guard(host: str, *, attested: bool, logger=None) -> None:
+def enforce_loopback_bind_guard(host: str, *, loopback_publish_attested: bool, auth_proxy_attested: bool, logger=None) -> None:
     """Refuse to start on an unattested non-loopback bind (SEC-F22 / D2).
 
     - Loopback ``host`` -> always allowed (no-op); canopy starts normally.
-    - Non-loopback ``host`` + ``attested`` True -> allowed, with a loud WARNING
-      recording that the operator has attested a fronting authenticating proxy.
-    - Non-loopback ``host`` + ``attested`` False -> CRITICAL log + raise
-      :class:`NonLoopbackBindError` (fail-closed; startup aborts).
+    - Non-loopback ``host`` + AT LEAST ONE attestation True -> allowed, with a
+      loud WARNING recording which attestation permitted the bind.
+    - Non-loopback ``host`` + BOTH attestations False -> CRITICAL log + raise
+      :class:`NonLoopbackBindError` (fail-closed; startup aborts). There is no
+      warning-only mode: an unattested non-loopback bind ALWAYS hard-fails.
 
-    ``attested`` is the value of ``settings.fronting_auth_attested`` (env
-    ``JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED``). It is an operator *attestation*
-    that a fronting proxy is present -- not a verification -- so the
-    non-loopback path is loud by design.
+    Two independent operator attestations (each an *attestation*, not a
+    verification) can make a non-loopback bind safe:
+
+    - ``loopback_publish_attested`` (``settings.loopback_publish_attested``, env
+      ``JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED``) -- canopy is reachable only
+      via a loopback-only host publish (the containerized default; verifiable by
+      the juniper-deploy preflight).
+    - ``auth_proxy_attested`` (``settings.auth_proxy_attested``, env
+      ``JUNIPER_CANOPY_AUTH_PROXY_ATTESTED``) -- a fronting authenticating reverse
+      proxy terminates access (Phase 4).
+
+    The non-loopback path is loud by design.
     """
     if is_loopback_host(host):
         return
-    if attested:
+    if loopback_publish_attested or auth_proxy_attested:
         if logger is not None:
+            permitted = []
+            if loopback_publish_attested:
+                permitted.append("JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true (loopback-only host publish)")
+            if auth_proxy_attested:
+                permitted.append("JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true (fronting authenticating proxy)")
             logger.warning(
-                "canopy bound to non-loopback host %r with JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true -- assuming a " "fronting authenticating proxy terminates auth in front of the control surface (SEC-F22/D2). This is an " "operator attestation, NOT a verification: the browser-control gate (Origin+CSRF) is bypassable by any " "in-network non-browser client, so a real fronting proxy MUST be present.",
+                "canopy bound to non-loopback host %r permitted by %s -- this is an operator attestation, NOT a " "verification: the browser-control gate (Origin+CSRF) is bypassable by any in-network non-browser client, " "so the attested perimeter (a loopback-only host publish and/or a fronting authenticating proxy) MUST " "actually be present (SEC-F22/D2).",
                 host,
+                " and ".join(permitted),
             )
         return
     message = (
         f"REFUSING TO START: canopy is configured to bind a non-loopback interface (server.host={host!r}) with no "
-        "fronting authenticating proxy attested. The browser training-control surface (/api/train/*, /ws/control) is "
-        "bypassable from any in-network foothold (SEC-F22): its Origin check is spoofable and its CSRF token is "
-        "anonymously mintable, so the loopback bind is the only effective control. Bind a loopback host "
-        "(127.0.0.1 / ::1 / localhost) OR deploy a fronting authenticating proxy and set "
-        "JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true. See juniper-ml "
-        "notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md §4 / §8 (D2)."
+        "bind attestation. The browser training-control surface (/api/train/*, /ws/control) is bypassable from any "
+        "in-network foothold (SEC-F22): its Origin check is spoofable and its CSRF token is anonymously mintable, so "
+        "the loopback bind is the only effective control. Bind a loopback host (127.0.0.1 / ::1 / localhost) OR attest "
+        "the perimeter: set JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true (reachable only via a loopback-only host "
+        "publish) or JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true (a fronting authenticating proxy terminates access). See "
+        "juniper-ml notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md §4 / §8 (D2)."
     )
     if logger is not None:
         logger.critical(message)
