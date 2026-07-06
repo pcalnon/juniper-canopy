@@ -51,7 +51,7 @@ Settings load from the `JUNIPER_CANOPY_` environment namespace (`src/settings.py
 | `JUNIPER_CANOPY_CASCOR_SERVICE_URL` | — | URL of the juniper-cascor service (required for service mode). |
 | `JUNIPER_DATA_URL` | `http://localhost:8100` | URL of the juniper-data service. |
 | `JUNIPER_CANOPY_DEMO_MODE` | `false` | Set `1` to run the UI against simulated data (no backend). |
-| `JUNIPER_CANOPY_SERVER__HOST` / `JUNIPER_CANOPY_SERVER__PORT` | `127.0.0.1` / `8050` | Bind address / port. |
+| `JUNIPER_CANOPY_SERVER__HOST` / `JUNIPER_CANOPY_SERVER__PORT` | `127.0.0.1` / `8050` | Bind address / port. A non-loopback host requires a perimeter attestation (`JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED` or `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED`); otherwise startup fail-closes (SEC-F22). |
 | `JUNIPER_DATA_API_KEY` | — | API key for juniper-data when its auth is enabled. |
 | `JUNIPER_CANOPY_LOG_LEVEL` | `INFO` | Logging verbosity. |
 

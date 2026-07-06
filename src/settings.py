@@ -384,20 +384,32 @@ class Settings(BaseSettings):
     # notes/JUNIPER_STACK_SECURITY_AUDIT_PLAN_2026-07-02.md (§4.3 / §5.2).
     dataset_import_url_enabled: bool = False
 
-    # SEC-F22 / D2 (startup bind-guard). Operator attestation that a fronting
-    # authenticating proxy terminates auth in front of canopy, making a
-    # non-loopback bind safe. Default **False**: canopy REFUSES TO START when
-    # ``server.host`` is a non-loopback interface (anything not in 127.0.0.0/8,
-    # not ``::1``, not ``localhost``) unless this is explicitly set True --
-    # converting the sole effective SEC-F22 control (the loopback bind) from an
-    # implicit default into an enforced invariant and closing the silent
-    # ``BIND_HOST=0.0.0.0`` footgun (audit HO-6). Set
-    # ``JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true`` ONLY when such a proxy is
-    # actually deployed -- it is an *attestation*, not a verification. Enforced
-    # at startup in ``main.lifespan`` via ``security.enforce_loopback_bind_guard``
+    # SEC-F22 / D2 (startup bind-guard). Two independent operator attestations,
+    # either of which makes a **non-loopback** app-bind safe. Both default
+    # **False**: canopy REFUSES TO START when ``server.host`` is a non-loopback
+    # interface (anything not in 127.0.0.0/8, not ``::1``, not ``localhost``)
+    # unless AT LEAST ONE is explicitly set True -- converting the sole effective
+    # SEC-F22 control (the loopback bind) from an implicit default into an
+    # enforced invariant and closing the silent ``BIND_HOST=0.0.0.0`` footgun
+    # (audit HO-6). Each is an *attestation*, not a verification. Enforced at
+    # startup in ``main.lifespan`` via ``security.enforce_loopback_bind_guard``
     # (implemented inline in canopy; no new dependency). Design-of-record:
     # juniper-ml notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md §4 / §8 D2.
-    fronting_auth_attested: bool = False
+    #
+    # ``loopback_publish_attested`` -- canopy is reachable ONLY via a
+    # loopback-only host publish (the containerized default: the juniper-deploy
+    # compose maps ``127.0.0.1:8050:8050`` so the in-container ``0.0.0.0`` bind is
+    # fronted by a host-side loopback perimeter). Verifiable by the juniper-deploy
+    # preflight. Set ``JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true`` for that
+    # posture.
+    loopback_publish_attested: bool = False
+    #
+    # ``auth_proxy_attested`` -- a fronting authenticating reverse proxy
+    # terminates access in front of canopy (Phase 4). Attestation only; there is
+    # no runtime verification the proxy is present. Set
+    # ``JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true`` ONLY when such a proxy is
+    # actually deployed.
+    auth_proxy_attested: bool = False
 
     @property
     def ws_bridge_enabled(self) -> bool:

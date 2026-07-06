@@ -70,9 +70,11 @@ export JUNIPER_CANOPY_BACKEND_PATH=/path/to/juniper-cascor
 cd src && uvicorn main:app --host 127.0.0.1 --port 8050
 ```
 
-Canopy refuses to start on a non-loopback bind (`0.0.0.0`, routable IP, or `::`) unless
-`JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true` is set. Use that attestation only for deployments
-with a fronting authenticating proxy or equivalent perimeter in front of the browser control surface.
+Canopy refuses to start on a non-loopback bind (`0.0.0.0`, routable IP, or `::`) unless at least one
+perimeter attestation is set: `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true` (reachable only via a
+loopback-only host publish, the containerized default) or `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true`
+(a fronting authenticating reverse proxy terminates access, Phase 4). Set one only when that perimeter
+is actually present in front of the browser control surface.
 
 WebSocket channels for real-time training updates:
 
@@ -141,7 +143,8 @@ Common failure causes:
 | `JUNIPER_CANOPY_SERVER__HOST`               | `127.0.0.1`         | Server bind address; non-loopback requires explicit fronting-auth attestation                                      |
 | `JUNIPER_CANOPY_SERVER__PORT`               | `8050`              | Server port                                                                                                       |
 | `JUNIPER_CANOPY_SERVER__DEBUG`              | `false`             | Enable debug mode                                                                                                 |
-| `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED`     | `false`             | Allow non-loopback bind only after operator attests a fronting authenticating proxy/perimeter                      |
+| `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED`  | `false`             | Allow non-loopback bind: reachable only via a loopback-only host publish (containerized default)                   |
+| `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED`        | `false`             | Allow non-loopback bind: a fronting authenticating reverse proxy terminates access (Phase 4)                       |
 | `JUNIPER_CANOPY_BACKEND_PATH`               | `../juniper-cascor` | Path to CasCor backend                                                                                            |
 | `JUNIPER_CANOPY_TRAINING__EPOCHS__DEFAULT`  | `1000000`           | Default maximum training epochs                                                                                   |
 | `JUNIPER_CANOPY_TRAINING__LEARNING_RATE__DEFAULT` | `0.01`        | Default learning rate                                                                                             |
@@ -228,7 +231,7 @@ Coverage includes:
 | Demo mode not starting                           | Demo mode env not set      | Run via `./demo` or `export JUNIPER_CANOPY_DEMO_MODE=1` first                                                   |
 | Demo shows stale data                            | Singleton not reset        | Restart app; check `reset_singletons` fixture covers new singletons                                             |
 | WebSocket not connecting                         | Wrong port or path         | Verify `ws://localhost:8050/ws/training`; check `JUNIPER_CANOPY_WEBSOCKET__*` vars                              |
-| Startup refuses non-loopback bind                | Bind guard blocked unsafe exposure | Use `JUNIPER_CANOPY_SERVER__HOST=127.0.0.1`, or set `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true` only behind an authenticating proxy |
+| Startup refuses non-loopback bind                | Bind guard blocked unsafe exposure | Use `JUNIPER_CANOPY_SERVER__HOST=127.0.0.1`, or attest the perimeter: `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true` (loopback-only host publish) or `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true` (fronting auth proxy) |
 | WebSocket closes with `1013`                     | Global, per-IP, or per-session cap reached | Check `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS*`; remember per-IP is shared behind NAT                         |
 | Tests fail with backend errors                   | Demo mode not forced       | Ensure `conftest.py` sets `JUNIPER_CANOPY_DEMO_MODE=1`; do not set `CASCOR_BACKEND_AVAILABLE` unless backend is running |
 | Docs job fails in CI (`Documentation Links`)     | Broken links/anchors or unsafe doc path | Re-run `python scripts/check_doc_links.py --cross-repo skip --exclude templates --exclude history --exclude pull_requests --exclude releases --exclude analysis --exclude fixes --exclude development --exclude CHANGELOG.md` and fix reported markdown targets |
