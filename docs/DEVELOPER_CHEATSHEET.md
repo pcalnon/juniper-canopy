@@ -22,8 +22,8 @@
 |-----------------------------|------------------------------------------------------------------------------------------------------|
 | Run in demo mode            | `./demo`                                                                                             |
 | Run natively (real backend) | `conda activate JuniperCanopy1 && cd src && uvicorn main:app --port 8050`                             |
-| Run via Docker              | `docker build -f conf/Dockerfile -t juniper_canopy . && docker run --rm -p 8050:8050 juniper_canopy` |
-| Run via Docker Compose      | `docker compose -f conf/docker-compose.yaml up --build`                                              |
+| Run via Docker              | `docker build -t juniper-canopy . && docker run --rm -p 127.0.0.1:8050:8050 juniper-canopy` |
+| Run full stack (Compose)    | `cd ../juniper-deploy && docker compose up --build`                                          |
 | Health check                | `curl -s http://localhost:8050/v1/health \| python -m json.tool`                                     |
 | Liveness / readiness        | `curl -s http://localhost:8050/v1/health/live` / `.../v1/health/ready`                               |
 | Run all tests               | `cd src && pytest tests/ -v`                                                                         |
@@ -102,7 +102,7 @@ Existing components: `training_metrics`, `metrics_panel`, `network_visualizer`, 
 
 1. Add to `conf/requirements.txt` (and `conf/conda_environment.yaml` if conda-installable)
 2. Run `pip install -r conf/requirements.txt` in the `JuniperCanopy1` conda env
-3. Update `conf/Dockerfile` if needed for Docker builds
+3. Update the repo-root `Dockerfile` if needed for Docker builds
 
 > See: [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)
 
