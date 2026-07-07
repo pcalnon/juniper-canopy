@@ -98,6 +98,14 @@ from settings import get_settings
 # Initialize configuration
 settings = get_settings()
 
+# SEC-F27: overlay any uvicorn CLI --host/--port onto settings so the SEC-F22 bind
+# guard (in lifespan) evaluates the real bind even when canopy is launched via
+# `uvicorn main:app --host ...` rather than `python main.py` (no-op for the latter).
+# juniper-ml notes/JUNIPER_2026-07-06_JUNIPER-ECOSYSTEM_LAUNCH-PATH-BIND-AUDIT.md (SEC-F27).
+from security import settings_with_uvicorn_cli_bind
+
+settings = settings_with_uvicorn_cli_bind(settings)
+
 # Application version from package metadata
 try:
     APP_VERSION = importlib.metadata.version("juniper-canopy")
