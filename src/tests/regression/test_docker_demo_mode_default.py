@@ -43,10 +43,6 @@ class TestDockerRuntimeDefaults:
         dockerfile = (_REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
         assert "JUNIPER_CANOPY_DEMO_MODE=1" not in dockerfile
 
-    def test_conf_dockerfile_does_not_force_demo_mode(self):
-        dockerfile = (_REPO_ROOT / "conf" / "Dockerfile").read_text(encoding="utf-8")
-        assert "JUNIPER_CANOPY_DEMO_MODE=1" not in dockerfile
-
     def test_repo_root_resolution_finds_dockerfiles(self):
         """Locks in the parents[3] path math used by the tests above.
 
@@ -57,6 +53,5 @@ class TestDockerRuntimeDefaults:
         evaluated. This sanity check makes that class of bug loud.
         """
         assert (_REPO_ROOT / "Dockerfile").is_file(), f"Repo-root Dockerfile not found at {_REPO_ROOT}"
-        assert (_REPO_ROOT / "conf" / "Dockerfile").is_file(), f"conf/Dockerfile not found under {_REPO_ROOT}"
         # Sanity: the resolved root is the repo, not src/ or tests/.
         assert (_REPO_ROOT / "src").is_dir(), f"Expected src/ under {_REPO_ROOT}"

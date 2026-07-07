@@ -78,7 +78,6 @@ conf/*.conf
 conf/*_functions.conf
 conf/__pycache__/
 conf/backups/
-conf/docker-compose.yaml
 conf/conda_environment*.yaml
 conf/requirements*.txt
 conf/setup-miniconda-patched-conda_environment.yaml

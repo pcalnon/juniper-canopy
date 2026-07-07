@@ -72,5 +72,5 @@ For conda/mamba-managed dependencies, see `conf/conda_environment_ci.yaml`.
 
 - CUDA/cuDNN are optional; the dashboard can operate in demo mode without a GPU backend.
 - The shared `JuniperPython` conda environment is managed at the ecosystem level.
-- Docker is used for optional containerized deployment via `conf/docker-compose.yaml`.
+- Docker is used for optional containerized deployment via `juniper-deploy` (Docker Compose for the full stack; the legacy `conf/docker-compose.yaml` was removed).
 - The Dash/Plotly web framework is pip-managed and listed in `conf/requirements_ci.txt`.

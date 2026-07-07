@@ -293,7 +293,7 @@ class RedisClient:
 **4. Deployment**:
 
 - Standalone: `redis-server --port 6379 --appendonly yes`
-- Docker: `docker-compose up redis` (see `conf/docker-compose.yaml`)
+- Docker: `docker-compose up redis` (see `../juniper-deploy/docker-compose.yml`)
 - Ubuntu systemd: `sudo systemctl start redis-server`
 
 **5. Testing Requirements**:
@@ -670,13 +670,13 @@ if __name__ == "__main__":
 ## Docker Deployment
 
 ### Multi-Stage Build Strategy
-The `conf/Dockerfile` uses Python 3.9 slim base. For production:
+The container image builds from the repo-root `Dockerfile` (the legacy `conf/Dockerfile` was removed; `juniper-deploy` builds the maintained image). For production:
 
 **Build image**:
 
 ```bash
 cd /path/to/juniper_canopy
-docker build -f conf/Dockerfile -t juniper_canopy:latest .
+docker build -t juniper-canopy:latest .
 ```
 
 **Standalone run**:
@@ -698,7 +698,7 @@ docker run -d \
 
 ```bash
 cd /path/to/juniper_canopy
-docker-compose -f conf/docker-compose.yaml up -d
+docker-compose -f ../juniper-deploy/docker-compose.yml up -d
 ```
 
 **Stack includes**:
@@ -720,10 +720,10 @@ JWT_SECRET_KEY=your-secret-key-here
 **Service management**:
 
 ```bash
-docker-compose -f conf/docker-compose.yaml ps        # Status
-docker-compose -f conf/docker-compose.yaml logs -f   # Follow logs
-docker-compose -f conf/docker-compose.yaml down      # Stop all
-docker-compose -f conf/docker-compose.yaml restart juniper_canopy  # Restart service
+docker-compose -f ../juniper-deploy/docker-compose.yml ps        # Status
+docker-compose -f ../juniper-deploy/docker-compose.yml logs -f   # Follow logs
+docker-compose -f ../juniper-deploy/docker-compose.yml down      # Stop all
+docker-compose -f ../juniper-deploy/docker-compose.yml restart juniper_canopy  # Restart service
 ```
 
 **Volume persistence**:
