@@ -229,14 +229,20 @@ async def lifespan(app: FastAPI):
 
     # D2 (SEC-F22): loopback bind-guard. Fail loud + closed here -- before
     # backend init / serving -- when canopy is configured to bind a non-loopback
-    # interface without an explicit fronting-auth attestation, instead of
-    # silently exposing the in-network-bypassable browser training-control
-    # surface (audit HO-6). Loopback binds (the default) start normally.
-    # Implemented inline in canopy (no new dependency). Design-of-record:
-    # juniper-ml notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md §4 / §8 D2.
+    # interface with NEITHER bind-posture attestation set, instead of silently
+    # exposing the in-network-bypassable browser training-control surface (audit
+    # HO-6). Either attestation (loopback-publish OR auth-proxy) permits the bind;
+    # loopback binds (the default) start regardless. Implemented inline in canopy
+    # (no new dependency). Design-of-record: juniper-ml
+    # notes/JUNIPER_CANOPY_CONTROL_SURFACE_AUTH_AND_NAT_DESIGN_2026-07-03.md §4 / §8 D2.
     from security import enforce_loopback_bind_guard
 
-    enforce_loopback_bind_guard(settings.server.host, attested=settings.fronting_auth_attested, logger=system_logger)
+    enforce_loopback_bind_guard(
+        settings.server.host,
+        loopback_publish_attested=settings.loopback_publish_attested,
+        auth_proxy_attested=settings.auth_proxy_attested,
+        logger=system_logger,
+    )
 
     system_logger.info("Starting Juniper Canopy application")
     system_logger.info("Settings: server=%s:%s, demo=%s", settings.server.host, settings.server.port, settings.demo_mode)

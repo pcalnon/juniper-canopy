@@ -821,16 +821,18 @@ jobs:
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - Docker Smoke Test                   ║"
           echo "╚════════════════════════════════════════════════════════════╝"
-          # SEC-F22 / D2 (PR #420 follow-up): the startup loopback bind-guard
-          # (src/security.py -> enforce_loopback_bind_guard, run in main.lifespan)
-          # refuses to serve on the container's internal non-loopback bind
-          # (the Dockerfile sets JUNIPER_CANOPY_SERVER__HOST=0.0.0.0) unless the
-          # operator attests a fronting authenticating proxy. This smoke test has
-          # no such proxy and only needs the container to boot for the health
-          # probe, so attest here (and ONLY in this ephemeral CI container).
+          # SEC-F22 / D2: the startup loopback bind-guard (src/security.py ->
+          # enforce_loopback_bind_guard, run in main.lifespan) refuses to serve
+          # on the container's internal non-loopback bind (the Dockerfile sets
+          # JUNIPER_CANOPY_SERVER__HOST=0.0.0.0) unless the operator attests the
+          # deployment perimeter via one of the two bind-posture flags. This
+          # ephemeral smoke container just needs to boot for the /v1/health
+          # probe, so attest the loopback-publish posture here (and ONLY in this
+          # throwaway CI container; the two-flag scheme replaced the former
+          # single JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED flag).
           docker run -d --name juniper-canopy-test \
             -p 8050:8050 \
-            -e JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true \
+            -e JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true \
             juniper-canopy:ci-${{ github.sha }}
 
           echo "Waiting for service to become healthy..."

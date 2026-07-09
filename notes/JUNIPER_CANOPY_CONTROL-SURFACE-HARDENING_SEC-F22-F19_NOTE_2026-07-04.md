@@ -6,7 +6,7 @@
 **Author**: Paul Calnon (implementation by Claude Code, Opus 4.8)
 **License**: MIT License
 **Date**: 2026-07-04
-**Status**: Implemented — Phases 1–2 of the design of record. Owner-gated for any deploy roll-out; do not auto-merge.
+**Status**: Implemented — Phases 1–2 of the design of record. **Updated 2026-07-06:** the SEC-F22 bind-guard now uses the owner-ratified **two-flag** bind-posture attestation (`JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED` / `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED`), replacing the original single `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED` flag (design OQ-1). Owner-gated for any deploy roll-out; do not auto-merge.
 **Scope**: Records the two now-enforced control-surface invariants shipped in this PR and, explicitly, what remains deferred.
 
 > Design of record (read first): juniper-ml
@@ -34,18 +34,28 @@ in-network- (or internet-) reachable, with no guard rail.
 A **startup bind-guard** now converts that precondition into a fail-closed invariant. At canopy startup, before it
 serves any request, canopy **refuses to start** when `settings.server.host`
 (`JUNIPER_CANOPY_SERVER__HOST`) is a **non-loopback** interface — anything not in `127.0.0.0/8`, not `::1`, not
-`localhost` — **unless** the new `settings.fronting_auth_attested`
-(`JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED`, default `False`) is `True`. A loopback host always starts. The refusal is
-fail-loud (a CRITICAL log) and fail-closed (raises `NonLoopbackBindError`, so uvicorn exits). The attested
-non-loopback path is allowed but logs a loud WARNING — the flag is an operator **attestation** that a fronting
-authenticating proxy is present, not a verification.
+`localhost` — **unless** the operator attests the deployment perimeter via one of **two** bind-posture flags (both
+default `False`):
+
+- `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED` (`settings.loopback_publish_attested`) — the service is reachable **only**
+  via a loopback-only host publish (the containerized default: `127.0.0.1:8050:8050` in front of the in-container
+  `0.0.0.0` bind). This is the one attestation a deploy-layer preflight can actually **verify**.
+- `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED` (`settings.auth_proxy_attested`) — a fronting authenticating reverse proxy
+  terminates access in front of the control surface (the Phase-4 milestone); attestation only.
+
+A loopback host always starts. A non-loopback bind is permitted when **either** flag is `True` (the guard logs
+**which** one permitted it, at WARNING); with **neither** set the refusal is fail-loud (a CRITICAL log naming both
+flags) and fail-closed (raises `NonLoopbackBindError`, so uvicorn exits). The hard fail is **uniform** — there is no
+warning-only mode that lets an unattested non-loopback bind proceed. Each flag is an operator **attestation**, not a
+verification. (This two-flag scheme is the owner-ratified refinement of the original single
+`JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED` flag — design OQ-1.)
 
 Implemented **inline in canopy** (no new dependency):
 
 - `src/security.py` — `is_loopback_host`, `enforce_loopback_bind_guard`, `NonLoopbackBindError`.
 - `src/main.py` — the `lifespan` startup calls the guard (mirrors the existing E-8 `enforce_dependency_floors`
   fail-loud idiom), before backend init.
-- `src/settings.py` — the `fronting_auth_attested` field.
+- `src/settings.py` — the `loopback_publish_attested` and `auth_proxy_attested` fields.
 
 > **Deploy roll-out caveat (owner-gated).** The containerized deploy sets
 > `JUNIPER_CANOPY_SERVER__HOST=0.0.0.0` *inside* the container
@@ -54,11 +64,14 @@ Implemented **inline in canopy** (no new dependency):
 > (`127.0.0.1:8050:8050`, `:557`), not the in-container bind. Because the guard
 > keys on `settings.server.host`, rolling this code out to that deploy will make
 > canopy **refuse to start** until the owner sets
-> `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true` — the conscious attestation that
-> the perimeter (the loopback publish today; a fronting proxy when Phase 4
-> lands) is in place. That is the intended effect: the guard converts the silent
-> `0.0.0.0` bind into a documented, deliberate choice. This is a deploy/env
-> change and is therefore owner-gated (not part of this merge).
+> `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true` — the attestation that matches
+> exactly the deploy's posture (reachable only via the host-side loopback
+> publish), and the one a deploy-layer preflight can verify.
+> `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true` is the alternative, reserved for when
+> the Phase-4 fronting authenticating proxy lands. That is the intended effect:
+> the guard converts the silent `0.0.0.0` bind into a documented, deliberate
+> choice. This is a deploy/env change and is therefore owner-gated (not part of
+> this merge).
 
 ### 1.2 SEC-F19 (D4) — global + per-session WS caps; the per-IP cap is re-scoped honestly
 
