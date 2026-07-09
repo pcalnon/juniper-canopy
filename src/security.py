@@ -10,14 +10,19 @@ Configuration is read from environment variables:
 import hmac
 import ipaddress
 import secrets
+import sys
 import time
 from collections import defaultdict
 from threading import Lock
+from typing import TYPE_CHECKING, cast
 
 from fastapi import HTTPException, Request, status
 from fastapi.security import APIKeyHeader
 
 from secrets_util import get_secret
+
+if TYPE_CHECKING:
+    from settings import Settings
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -480,3 +485,54 @@ def enforce_loopback_bind_guard(
     if logger is not None:
         logger.critical(message)
     raise NonLoopbackBindError(message)
+
+
+def _cli_option_value(argv: list[str], option: str) -> str | None:
+    """Return a CLI option value from ``--name value`` or ``--name=value``."""
+    prefix = f"{option}="
+    for index, arg in enumerate(argv):
+        if arg.startswith(prefix):
+            return arg[len(prefix) :]
+        if arg == option and index + 1 < len(argv):
+            return argv[index + 1]
+    return None
+
+
+def settings_with_uvicorn_cli_bind(settings: "Settings", argv: list[str] | None = None) -> "Settings":
+    """Overlay a uvicorn CLI ``--host`` / ``--port`` onto settings for bind-guard parity.
+
+    ``uvicorn main:app --host 0.0.0.0`` is a supported launch path. uvicorn consumes
+    ``--host`` itself and never sets ``JUNIPER_CANOPY_SERVER__HOST``, so the SEC-F22
+    guard -- which reads ``settings.server.host`` -- would see the loopback default
+    while uvicorn binds a public socket (the SEC-F23 / SEC-F27 bypass class). Mirror
+    the CLI bind host/port into a transient settings copy before ``main.lifespan`` runs
+    :func:`enforce_loopback_bind_guard`, so the guard evaluates the *real* bind on the
+    ``uvicorn main:app`` path too -- the parity juniper-cascor already has via its
+    ``_settings_with_uvicorn_cli_bind``.
+
+    A ``python main.py`` launch carries no uvicorn CLI bind args, so this is a no-op
+    there (host/port stay settings-driven). Design-of-record: juniper-ml
+    ``notes/JUNIPER_2026-07-06_JUNIPER-ECOSYSTEM_LAUNCH-PATH-BIND-AUDIT.md`` (SEC-F27).
+    """
+    args = list(sys.argv if argv is None else argv)
+    if not any("uvicorn" in arg for arg in args[:2]) and "main:app" not in args:
+        return settings
+
+    updates: dict[str, object] = {}
+    host = _cli_option_value(args, "--host")
+    if host:
+        updates["host"] = host
+
+    port = _cli_option_value(args, "--port")
+    if port is not None:
+        try:
+            updates["port"] = int(port)
+        except ValueError:
+            # Non-integer --port: uvicorn itself would reject it; leave port
+            # settings-driven rather than crash the guard-parity path.
+            pass
+
+    if not updates:
+        return settings
+    # pydantic is treated as untyped here, so model_copy() is Any -> cast for mypy.
+    return cast("Settings", settings.model_copy(update={"server": settings.server.model_copy(update=updates)}))

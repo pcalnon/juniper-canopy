@@ -118,8 +118,8 @@ These are justified only when genuine remote or multi-user access becomes a requ
 
 ## 4. Verification
 
-- New unit tests: `src/tests/unit/test_bind_guard.py` (SEC-F22/D2 — non-loopback + no attest refuses to start;
-  non-loopback + attest binds; loopback binds regardless; fail-loud logging) and
+- New unit tests: `src/tests/unit/test_bind_guard.py` (SEC-F22/D2 — non-loopback + neither attest refuses to start;
+  non-loopback + either attest binds; loopback binds regardless; fail-loud logging) and
   `src/tests/unit/test_ws_connection_caps.py` (SEC-F19/D4 — global cap rejects the N+1th stack-wide; two sessions from
   one peer IP each keep their per-session allocation; a legit single user is unaffected; cookieless allowed;
   per-IP-slot rollback on per-session rejection).

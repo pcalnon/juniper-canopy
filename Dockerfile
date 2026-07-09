@@ -83,7 +83,14 @@ ENV PYTHONPATH=/app/src
 
 # Service configuration — uses JUNIPER_CANOPY_ prefix for pydantic-settings.
 # Nested settings use double-underscore delimiter (SERVER__HOST, SERVER__PORT).
-ENV JUNIPER_CANOPY_SERVER__HOST=0.0.0.0
+# SEC-F22/D2: default to a loopback bind so a bare `docker run -p 8050:8050` is
+# safe-by-default — the startup bind-guard refuses an unattested non-loopback
+# bind, and a published port to a loopback bind is not reachable from outside
+# the container. Matches the juniper-cascor default. Deployments that must be
+# reachable through the published port override SERVER__HOST=0.0.0.0 AND attest
+# the perimeter (JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true for the
+# loopback-only host publish the juniper-deploy compose provides).
+ENV JUNIPER_CANOPY_SERVER__HOST=127.0.0.1
 ENV JUNIPER_CANOPY_SERVER__PORT=8050
 ENV JUNIPER_CANOPY_DEMO_MODE=false
 ENV JUNIPER_CANOPY_LOG_LEVEL=INFO

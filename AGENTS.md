@@ -5,7 +5,7 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.5.0
-**Last Updated**: 2026-07-04
+**Last Updated**: 2026-07-07
 
 ---
 
@@ -540,29 +540,26 @@ cd src && uvicorn main:app --host 0.0.0.0 --port 8050
 
 ## Docker and Local Stack
 
-Containerization configs live under `conf/`:
-
-- `conf/Dockerfile` – Builds a Juniper Canopy image (FastAPI + Dash + demo/backend integration)
-- `conf/docker-compose.yaml` – Optional local stack (app + supporting services like Redis)
+The container image builds from the **repo-root `Dockerfile`** (the image `juniper-deploy` builds and publishes). Full-stack local orchestration lives in `../juniper-deploy` (Docker Compose for the whole Juniper stack). The legacy `conf/Dockerfile` + `conf/docker-compose.yaml` were removed — they were superseded by `juniper-deploy`.
 
 ### Basic Docker Usage
 
 ```bash
-# Build image
-docker build -f conf/Dockerfile -t juniper_canopy .
+# Build the image (repo-root Dockerfile)
+docker build -t juniper-canopy .
 
-# Run container
-docker run --rm -p 8050:8050 juniper_canopy
+# Run the container -- publish loopback on the host (SEC-F22 posture)
+docker run --rm -p 127.0.0.1:8050:8050 juniper-canopy
 
-# Or with docker-compose
-docker compose -f conf/docker-compose.yaml up --build
+# Full stack (canopy + cascor + data + redis) via juniper-deploy
+cd ../juniper-deploy && docker compose up --build
 ```
 
 ### Agent Guidance for Docker
 
 - Keep ports and environment variables consistent with `app_config.yaml` and `ServerConstants`
-- If you change API paths or WebSocket endpoints, update both FastAPI routes and Docker/docker-compose health checks
-- The canonical entrypoint is `uvicorn main:app`—if this changes, update `conf/Dockerfile`
+- If you change API paths or WebSocket endpoints, update both FastAPI routes and the Docker health checks
+- The canonical entrypoint is `python src/main.py` (settings-driven; the SEC-F22 bind guard evaluates `settings.server.host`)—if this changes, update the repo-root `Dockerfile`
 
 ## Constants Management
 
@@ -1142,11 +1139,11 @@ cd src
 # Build image (root Dockerfile)
 docker build -t juniper-canopy .
 
-# Run container
-docker run --rm -p 8050:8050 juniper-canopy
+# Run container -- publish loopback on the host (SEC-F22 posture)
+docker run --rm -p 127.0.0.1:8050:8050 juniper-canopy
 
-# Or with docker-compose (conf/ directory)
-docker compose -f conf/docker-compose.yaml up --build
+# Full stack (canopy + cascor + data + redis) via juniper-deploy
+cd ../juniper-deploy && docker compose up --build
 ```
 
 ## API and WebSocket Contracts

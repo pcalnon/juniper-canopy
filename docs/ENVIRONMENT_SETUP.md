@@ -420,9 +420,13 @@ export JUNIPER_CANOPY_SERVER__HOST="127.0.0.1"  # Loopback bind; safe default
 export JUNIPER_CANOPY_SERVER__PORT=8050         # Server port
 export JUNIPER_CANOPY_SERVER__DEBUG=false       # Debug mode
 
-# Startup bind guard (SEC-F22)
-# Set only when a fronting authenticating proxy terminates auth before Canopy.
-export JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=false
+# Startup bind guard (SEC-F22 / D2) — two independent perimeter attestations.
+# A non-loopback SERVER__HOST fail-closes unless at least one is true.
+# loopback_publish_attested: reachable only via a loopback-only host publish
+#   (the containerized default; juniper-deploy maps 127.0.0.1:8050).
+# auth_proxy_attested: a fronting authenticating reverse proxy terminates access.
+export JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=false
+export JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=false
 
 # Demo mode
 export JUNIPER_CANOPY_DEMO_MODE=1
@@ -451,12 +455,19 @@ export CASCOR_REPORTS_DIR="./reports"
 
 Canopy now enforces the loopback bind as a startup invariant. During FastAPI lifespan startup,
 `security.enforce_loopback_bind_guard()` refuses to serve when `settings.server.host`
-(`JUNIPER_CANOPY_SERVER__HOST`) is not loopback (`127.0.0.0/8`, `::1`, or `localhost`) unless
-`JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true`.
+(`JUNIPER_CANOPY_SERVER__HOST`) is not loopback (`127.0.0.0/8`, `::1`, or `localhost`) unless at least
+one perimeter attestation is true:
+
+- `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true` — canopy is reachable only via a loopback-only host
+  publish (the containerized default; the juniper-deploy compose maps `127.0.0.1:8050:8050`, so the
+  in-container `0.0.0.0` bind is fronted by a host-side loopback perimeter). Verifiable by the
+  juniper-deploy preflight.
+- `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true` — a fronting authenticating reverse proxy terminates access
+  in front of canopy (Phase 4; attestation only).
 
 - Use `127.0.0.1` or `localhost` for local development and single-user demo runs.
-- Do **not** set `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true` just to silence startup failures.
-  It is an operator attestation that a fronting authenticating proxy or equivalent perimeter is present.
+- Do **not** set either attestation just to silence startup failures. Each is an operator attestation
+  that the named perimeter is actually present.
 - A container may still bind `0.0.0.0` internally only when the deployment owner has consciously attested
   the external perimeter; otherwise the app fails closed before backend initialization.
 
@@ -892,7 +903,8 @@ NonLoopbackBindError: REFUSING TO START: canopy is configured to bind a non-loop
 ```
 
 **Cause:** `JUNIPER_CANOPY_SERVER__HOST` is set to a non-loopback address such as `0.0.0.0`
-without `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true`.
+without a perimeter attestation (`JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED` or
+`JUNIPER_CANOPY_AUTH_PROXY_ATTESTED`).
 
 **Solutions:**
 
@@ -901,13 +913,17 @@ without `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true`.
 export JUNIPER_CANOPY_SERVER__HOST=127.0.0.1
 ./demo
 
-# Fronted deployment only: attest the perimeter deliberately
+# Containerized behind a loopback-only host publish (the deploy default):
 export JUNIPER_CANOPY_SERVER__HOST=0.0.0.0
-export JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true
+export JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true
+
+# Fronted deployment with an authenticating reverse proxy (Phase 4):
+export JUNIPER_CANOPY_SERVER__HOST=0.0.0.0
+export JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true
 ```
 
-Use the attestation path only when a fronting authenticating proxy or equivalent perimeter protects
-the training-control surface before traffic reaches Canopy.
+Use an attestation path only when the named perimeter — a loopback-only host publish, or a fronting
+authenticating proxy — actually protects the training-control surface before traffic reaches Canopy.
 
 ---
 
@@ -1078,8 +1094,10 @@ docker build -t juniper_canopy .
 docker run --rm -p 8050:8050 juniper_canopy
 ```
 
-If a container must bind `0.0.0.0` internally, set `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true`
-only after the deployment owner has verified the host publish, ingress, or proxy is the real authenticated perimeter.
+If a container must bind `0.0.0.0` internally, attest the perimeter — set
+`JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true` (reachable only via a loopback-only host publish) or
+`JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true` (a fronting authenticating proxy) — only after the deployment
+owner has verified that perimeter is the real one.
 
 ---
 

@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 import pytest
 
-from security import NonLoopbackBindError, enforce_loopback_bind_guard, is_loopback_host
+from security import NonLoopbackBindError, enforce_loopback_bind_guard, is_loopback_host, settings_with_uvicorn_cli_bind
 
 
 @pytest.mark.unit

@@ -267,6 +267,15 @@ log_debug "Run using uvicorn for proper ASGI server support & Launch using exec 
 if [ -n "${JUNIPER_DATA_PID:-}" ]; then
     trap 'kill "${JUNIPER_DATA_PID}" 2>/dev/null' EXIT
 fi
-exec "$CONDA_PREFIX/bin/uvicorn" main:app --host 0.0.0.0 --port 8050 --log-level info
+# Bind host/port are driven through settings (JUNIPER_CANOPY_SERVER__HOST default 127.0.0.1
+# loopback, JUNIPER_CANOPY_SERVER__PORT default 8050) so the SEC-F22 bind guard evaluates the
+# real bind; a `uvicorn --host` CLI flag would bypass the guard. The demo binds loopback by
+# default -- browse http://localhost:8050/dashboard/ on this machine. To expose the demo on
+# your network you MUST attest the perimeter (the guard hard-fails on an unattested non-loopback
+# bind); see juniper-ml notes/JUNIPER_2026-07-06_JUNIPER-ECOSYSTEM_LAUNCH-PATH-BIND-AUDIT.md:
+#   export JUNIPER_CANOPY_SERVER__HOST=0.0.0.0
+#   export JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true   # ONLY if fronted by a loopback-only host publish
+#   # or JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true            # ONLY if a fronting authenticating proxy is deployed
+exec "$CONDA_PREFIX/bin/python" main.py
 
 exit $(( TRUE ))

@@ -88,9 +88,10 @@ Authentication is configuration-dependent:
   (the default). Keyed callers continue to work.
 
 The browser-control path is not a network perimeter by itself. Canopy now enforces that perimeter at startup:
-`JUNIPER_CANOPY_SERVER__HOST` must be loopback (`127.0.0.0/8`, `::1`, or `localhost`) unless
-`JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true` explicitly attests that a fronting authenticating proxy or
-equivalent perimeter protects Canopy before traffic reaches the app.
+`JUNIPER_CANOPY_SERVER__HOST` must be loopback (`127.0.0.0/8`, `::1`, or `localhost`) unless a perimeter
+attestation explicitly declares one is present — `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true` (reachable
+only via a loopback-only host publish) or `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true` (a fronting
+authenticating proxy terminates access before traffic reaches the app).
 
 ---
 

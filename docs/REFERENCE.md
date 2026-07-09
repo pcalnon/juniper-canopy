@@ -61,7 +61,7 @@ Configuration follows a three-level hierarchy (highest to lowest priority):
 | Training | `JUNIPER_CANOPY_TRAINING__*` | `JUNIPER_CANOPY_TRAINING__EPOCHS__DEFAULT`, `JUNIPER_CANOPY_TRAINING__LEARNING_RATE__DEFAULT` |
 | WebSocket | `JUNIPER_CANOPY_WEBSOCKET__*` | `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS`, `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS_PER_SESSION` |
 | Demo Mode | `JUNIPER_CANOPY_DEMO_*` | `JUNIPER_CANOPY_DEMO_MODE`, `JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL` |
-| Security | `JUNIPER_CANOPY_*` | `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED`, `JUNIPER_CANOPY_BROWSER_CONTROL_AUTH_ENABLED` |
+| Security | `JUNIPER_CANOPY_*` | `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED`, `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED`, `JUNIPER_CANOPY_BROWSER_CONTROL_AUTH_ENABLED` |
 
 See [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md) for the complete environment variable reference.
 
@@ -194,10 +194,11 @@ The most commonly used environment variables for juniper-canopy configuration. F
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `JUNIPER_CANOPY_DEMO_MODE` | unset | Set `1` to enable demo mode (simulated training) |
-| `JUNIPER_CANOPY_SERVER__HOST` | `127.0.0.1` | Server bind address; non-loopback requires `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED=true` |
+| `JUNIPER_CANOPY_SERVER__HOST` | `127.0.0.1` | Server bind address; non-loopback requires `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true` or `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true` |
 | `JUNIPER_CANOPY_SERVER__PORT` | `8050` | Server port |
 | `JUNIPER_CANOPY_SERVER__DEBUG` | `false` | Enable debug mode |
-| `JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED` | `false` | Operator attestation for non-loopback binds behind a fronting authenticating proxy |
+| `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED` | `false` | Operator attestation: non-loopback bind is reachable only via a loopback-only host publish (containerized default) |
+| `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED` | `false` | Operator attestation: a fronting authenticating reverse proxy terminates access (Phase 4) |
 | `JUNIPER_CANOPY_BACKEND_PATH` | `../juniper-cascor` | Path to CasCor backend |
 | `JUNIPER_CANOPY_TRAINING__EPOCHS__DEFAULT` | `1000000` | Default maximum training epochs |
 | `JUNIPER_CANOPY_TRAINING__LEARNING_RATE__DEFAULT` | `0.01` | Default learning rate |
