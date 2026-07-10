@@ -59,15 +59,24 @@ def test_regenerate_from_generator_proxies_juniper_data_and_installs():
 
 
 @pytest.mark.integration
-def test_generate_route_rejects_non_spiral_when_juniper_data_unavailable(client):
+def test_generate_route_rejects_non_spiral_when_juniper_data_unavailable(client, monkeypatch):
     """A non-spiral generator returns a clean 503 (not a silent spiral) when JuniperData is down."""
+    import main as main_module
+
+    # The route consults main.juniper_data_available, which the startup probe
+    # sets from the REAL host (a dev box running the stack probes True). Pin
+    # False so the test asserts the unavailable branch everywhere.
+    monkeypatch.setattr(main_module, "juniper_data_available", False)
     resp = client.post("/api/dataset/generate", json={"generator": "circles"})
     assert resp.status_code == 503, resp.text
     assert "JuniperData" in resp.json().get("error", "")
 
 
 @pytest.mark.integration
-def test_generate_route_still_serves_spiral_without_juniper_data(client):
+def test_generate_route_still_serves_spiral_without_juniper_data(client, monkeypatch):
     """Spiral stays demo-local: the default/spiral path is unaffected by the generator branch."""
+    import main as main_module
+
+    monkeypatch.setattr(main_module, "juniper_data_available", False)
     resp = client.post("/api/dataset/generate", json={"generator": "spiral", "n_samples": 60})
     assert resp.status_code == 200, resp.text

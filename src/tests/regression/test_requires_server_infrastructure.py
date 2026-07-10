@@ -22,7 +22,6 @@ Guards against two previously-shipped bugs:
 
 from __future__ import annotations
 
-import importlib
 import os
 import sys
 from pathlib import Path
@@ -220,13 +219,16 @@ class TestInProcessAppAuthDisabled:
 
     def test_security_apikey_auth_disabled_in_test_process(self):
         """``security.APIKeyAuth`` defaults to disabled when no key is configured."""
-        # Force a fresh import to read the current env (which conftest has
-        # already cleaned). main.py constructs the auth dependency at import.
-        # We probe the security module directly to verify behaviour without
-        # tripping any singleton state in main.
+        # NEVER importlib.reload(security) here: reload re-executes the module
+        # in place, re-minting NonLoopbackBindError / INTERNAL_REQUEST_TOKEN
+        # underneath already-collected test modules (test_bind_guard /
+        # test_security hold the originals), failing them whenever this file
+        # runs before unit/ (bare ``pytest`` orders regression/ first; CI's
+        # explicit ``src/tests/unit/ src/tests/regression/`` order masks it).
+        # APIKeyAuth reads no env at construction, so a plain import probes
+        # the no-keys-means-disabled contract just as well.
         import security as security_module
 
-        importlib.reload(security_module)
         auth = security_module.APIKeyAuth()
         assert auth.enabled is False, "APIKeyAuth(api_keys=None) reported enabled=True. " "Either the env leaked a key into the constructor, or the " "no-keys-means-disabled contract changed — the in-process " "WebSocket tests rely on this."
 
