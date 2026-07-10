@@ -55,6 +55,7 @@ from backend.protocol import (
     TopologyResult,
 )
 from backend.state_sync import CascorStateSync, SyncedState
+from canopy_constants import TrainingConstants
 
 logger = logging.getLogger("juniper_canopy.backend.service_backend")
 
@@ -87,13 +88,55 @@ class ServiceBackend:
 
     # --- Training control ---
 
+    # Default dataset staged on a first start against a fresh cascor (no network,
+    # nothing staged, nothing loaded) — the "trivial case" of the training-start
+    # diagnosis 2026-07-09 (PR-B2). Values are the Dataset-panel defaults from
+    # TrainingConstants, in the canopy staging dialect that cascor's
+    # StageDatasetRequest speaks (cascor translates to juniper-data's schema at
+    # its fetch boundary since PR-B1).
+    _DEFAULT_FIRST_START_DATASET: Dict[str, Any] = {
+        "nn_dataset_type": "spirals",
+        "nn_dataset_elements": TrainingConstants.DEFAULT_DATASET_ELEMENTS,
+        "nn_dataset_noise": TrainingConstants.DEFAULT_DATASET_NOISE,
+        "nn_spiral_rotations": TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
+        "nn_spiral_number": TrainingConstants.DEFAULT_SPIRAL_NUMBER,
+    }
+
     def start_training(self, reset: bool = True, **kwargs: Any) -> ControlResult:
-        if self._adapter.network is None:
-            return ControlResult(ok=False, error="No network created")
         if self._adapter.is_training_in_progress():
             return ControlResult(ok=False, error="Training already in progress")
-        success = self._adapter.start_training_background(**kwargs)
-        return ControlResult(ok=success, is_training=success)
+        if self._adapter.network is None:
+            # PR-B2: cascor creates the network from the dataset dims on start
+            # (PR-B1), honoring this class's long-standing "will create on
+            # start" startup log — canopy's job is only to guarantee there IS
+            # a dataset for cascor to size from.
+            failure = self._ensure_first_start_dataset()
+            if failure is not None:
+                return ControlResult(ok=False, error=failure)
+        started, error = self._adapter.start_training_background(**kwargs)
+        if not started:
+            return ControlResult(ok=False, error=error or "Failed to start training")
+        return ControlResult(ok=True, is_training=True)
+
+    def _ensure_first_start_dataset(self) -> Optional[str]:
+        """Trivial-case first start: make sure cascor has data to size the network from.
+
+        Startable already (returns None) when a staged dataset is pending or a
+        dataset is loaded; otherwise stages the Dataset-panel defaults
+        (``_DEFAULT_FIRST_START_DATASET``). Returns an error message on staging
+        failure.
+        """
+        pending = self._adapter.get_pending_dataset()
+        if pending.get("pending"):
+            return None
+        info = self._adapter.get_dataset_info() or {}
+        if info.get("loaded"):
+            return None
+        logger.info("First start on a fresh cascor: staging default dataset %s", self._DEFAULT_FIRST_START_DATASET)
+        result = self._adapter.stage_dataset(**self._DEFAULT_FIRST_START_DATASET)
+        if not result.get("ok"):
+            return f"Failed to stage default dataset: {result.get('error', 'unknown error')}"
+        return None
 
     def stop_training(self) -> ControlResult:
         success = self._adapter.request_training_stop()

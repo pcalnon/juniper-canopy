@@ -45,7 +45,7 @@ def mock_adapter():
 
     # Training control
     adapter.is_training_in_progress.return_value = False
-    adapter.start_training_background.return_value = True
+    adapter.start_training_background.return_value = (True, None)
     adapter.request_training_stop.return_value = True
 
     # Status and metrics
@@ -119,12 +119,59 @@ class TestTrainingControl:
         assert result["is_training"] is True
         mock_adapter.start_training_background.assert_called_once()
 
-    def test_start_training_no_network(self, service_backend, mock_adapter):
-        """start_training() should fail when no network exists."""
+    def test_start_training_no_network_stages_default_dataset(self, service_backend, mock_adapter):
+        """PR-B2 (training-start diagnosis 2026-07-09): with no network and
+        nothing staged/loaded, start stages the Dataset-panel default dataset,
+        then starts — cascor creates the network from the dataset dims on
+        start (PR-B1). Previously this returned ok=False 'No network created'
+        with no creation path anywhere."""
         type(mock_adapter).network = PropertyMock(return_value=None)
+        mock_adapter.get_pending_dataset.return_value = {"ok": True, "pending": None}
+        mock_adapter.get_dataset_info.return_value = {"loaded": False}
+        mock_adapter.stage_dataset.return_value = {"ok": True, "data": {}, "config": {}}
+        result = service_backend.start_training()
+        assert result["ok"] is True
+        mock_adapter.stage_dataset.assert_called_once_with(**ServiceBackend._DEFAULT_FIRST_START_DATASET)
+        mock_adapter.start_training_background.assert_called_once()
+
+    def test_start_training_no_network_pending_dataset_skips_staging(self, service_backend, mock_adapter):
+        """A user-staged pending dataset is respected — no default staged over it."""
+        type(mock_adapter).network = PropertyMock(return_value=None)
+        mock_adapter.get_pending_dataset.return_value = {"ok": True, "pending": {"dataset_type": "spirals"}}
+        result = service_backend.start_training()
+        assert result["ok"] is True
+        mock_adapter.stage_dataset.assert_not_called()
+        mock_adapter.start_training_background.assert_called_once()
+
+    def test_start_training_no_network_loaded_dataset_skips_staging(self, service_backend, mock_adapter):
+        """A dataset already loaded on cascor is enough to size the network from."""
+        type(mock_adapter).network = PropertyMock(return_value=None)
+        mock_adapter.get_pending_dataset.return_value = {"ok": True, "pending": None}
+        mock_adapter.get_dataset_info.return_value = {"loaded": True, "train_samples": 800}
+        result = service_backend.start_training()
+        assert result["ok"] is True
+        mock_adapter.stage_dataset.assert_not_called()
+        mock_adapter.start_training_background.assert_called_once()
+
+    def test_start_training_default_stage_failure_propagates(self, service_backend, mock_adapter):
+        """A staging failure surfaces as ok=False with the reason; no start attempted."""
+        type(mock_adapter).network = PropertyMock(return_value=None)
+        mock_adapter.get_pending_dataset.return_value = {"ok": True, "pending": None}
+        mock_adapter.get_dataset_info.return_value = {"loaded": False}
+        mock_adapter.stage_dataset.return_value = {"ok": False, "error": "cascor unreachable"}
         result = service_backend.start_training()
         assert result["ok"] is False
-        assert "No network" in result["error"]
+        assert "Failed to stage default dataset" in result["error"]
+        assert "cascor unreachable" in result["error"]
+        mock_adapter.start_training_background.assert_not_called()
+
+    def test_start_training_failure_carries_cascor_detail(self, service_backend, mock_adapter):
+        """The cascor 409 detail rides back through the adapter tuple into
+        ControlResult.error (PR-B2 — previously flattened to a bare False)."""
+        mock_adapter.start_training_background.return_value = (False, "Training cannot be started: Training data not provided")
+        result = service_backend.start_training()
+        assert result["ok"] is False
+        assert "Training data not provided" in result["error"]
 
     def test_start_training_already_in_progress(self, service_backend, mock_adapter):
         """start_training() should fail when training already running."""
