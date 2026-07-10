@@ -821,17 +821,17 @@ jobs:
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - Docker Smoke Test                   ║"
           echo "╚════════════════════════════════════════════════════════════╝"
-          # SEC-F22 / D2: the startup loopback bind-guard (src/security.py ->
-          # enforce_loopback_bind_guard, run in main.lifespan) refuses to serve
-          # on the container's internal non-loopback bind (the Dockerfile sets
-          # JUNIPER_CANOPY_SERVER__HOST=0.0.0.0) unless the operator attests the
-          # deployment perimeter via one of the two bind-posture flags. This
-          # ephemeral smoke container just needs to boot for the /v1/health
-          # probe, so attest the loopback-publish posture here (and ONLY in this
-          # throwaway CI container; the two-flag scheme replaced the former
-          # single JUNIPER_CANOPY_FRONTING_AUTH_ATTESTED flag).
+          # SEC-F22 / D2: the Dockerfile ships a loopback in-container default
+          # (JUNIPER_CANOPY_SERVER__HOST=127.0.0.1), which a published port
+          # cannot reach (docker forwards to the container's eth0, not its
+          # loopback) -- the in-container HEALTHCHECK passes while the runner's
+          # curl gets connection-refused. Per the Dockerfile's documented
+          # published-port posture, override the in-container bind to 0.0.0.0
+          # AND attest it, and keep the runner-side publish loopback-only so
+          # the attested loopback-publish perimeter is actually true here.
           docker run -d --name juniper-canopy-test \
-            -p 8050:8050 \
+            -p 127.0.0.1:8050:8050 \
+            -e JUNIPER_CANOPY_SERVER__HOST=0.0.0.0 \
             -e JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true \
             juniper-canopy:ci-${{ github.sha }}
 
