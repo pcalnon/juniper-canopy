@@ -182,3 +182,68 @@ class TestBindGuardSettingsIntegration:
         s = Settings()
         assert s.loopback_publish_attested is True
         assert s.auth_proxy_attested is True
+
+
+@pytest.mark.unit
+class TestUvicornCliBindParity:
+    """SEC-F27: a uvicorn CLI --host feeds the SEC-F22 guard via settings parity.
+
+    canopy's guard reads ``settings.server.host``; a ``uvicorn main:app --host X``
+    launch binds X without touching that setting, so the guard was blind to it
+    (SEC-F23). ``settings_with_uvicorn_cli_bind`` overlays the CLI bind onto settings
+    so the guard evaluates the real host on every launch path.
+    """
+
+    def test_python_main_launch_is_noop(self):
+        from settings import Settings
+
+        s = Settings()
+        out = settings_with_uvicorn_cli_bind(s, ["main.py"])
+        # No uvicorn CLI bind args -> unchanged (host/port stay settings-driven).
+        assert out.server.host == s.server.host
+        assert out.server.port == s.server.port
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["/env/bin/uvicorn", "main:app", "--host", "0.0.0.0"],
+            ["/env/bin/uvicorn", "main:app", "--host=0.0.0.0"],
+            ["/env/bin/python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0"],
+        ],
+    )
+    def test_uvicorn_cli_host_overlays_settings(self, argv):
+        from settings import Settings
+
+        out = settings_with_uvicorn_cli_bind(Settings(), argv)
+        assert out.server.host == "0.0.0.0"
+
+    def test_uvicorn_cli_port_overlays_settings(self):
+        from settings import Settings
+
+        out = settings_with_uvicorn_cli_bind(
+            Settings(),
+            ["/env/bin/uvicorn", "main:app", "--host", "0.0.0.0", "--port", "9999"],
+        )
+        assert out.server.host == "0.0.0.0"
+        assert out.server.port == 9999
+
+    def test_non_integer_port_is_ignored(self):
+        from settings import Settings
+
+        s = Settings()
+        out = settings_with_uvicorn_cli_bind(s, ["/env/bin/uvicorn", "main:app", "--port", "notaport"])
+        # A bad --port is left settings-driven rather than crashing the parity path.
+        assert out.server.port == s.server.port
+
+    def test_cli_host_reaches_guard_and_refuses(self):
+        from settings import Settings
+
+        # The point of SEC-F27: a CLI --host 0.0.0.0 with no attestation must now make
+        # the guard refuse, exactly as a settings-driven 0.0.0.0 bind would.
+        overlaid = settings_with_uvicorn_cli_bind(Settings(), ["/env/bin/uvicorn", "main:app", "--host", "0.0.0.0"])
+        with pytest.raises(NonLoopbackBindError):
+            enforce_loopback_bind_guard(
+                overlaid.server.host,
+                loopback_publish_attested=overlaid.loopback_publish_attested,
+                auth_proxy_attested=overlaid.auth_proxy_attested,
+            )

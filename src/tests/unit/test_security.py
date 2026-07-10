@@ -171,6 +171,15 @@ class TestRateLimiter:
         request = MagicMock()
         await limiter(request)  # Should not raise
 
+    def test_get_key_prefers_api_key_over_client_ip(self):
+        limiter = RateLimiter(enabled=True)
+        request = MagicMock()
+        request.client.host = "10.1.2.3"
+        # An authenticated key is the rate-limit identity; the client IP is
+        # only the anonymous fallback.
+        assert limiter._get_key(request, "secret-key") == "key:secret-key"
+        assert limiter._get_key(request, None) == "ip:10.1.2.3"
+
 
 class TestInternalRequestRateLimitExemption:
     """#2a: canopy's own server-side self-calls carry a per-process token that
