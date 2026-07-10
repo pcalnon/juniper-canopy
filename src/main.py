@@ -941,15 +941,30 @@ async def websocket_control_endpoint(websocket: WebSocket):
                     ),
                     timeout=timeout,
                 )
-                await websocket_manager.send_personal_message(
-                    create_command_response_message(
-                        command,
-                        "success",
-                        command_id=command_id,
-                        data=result if isinstance(result, dict) else None,
-                    ),
-                    websocket,
-                )
+                failure = _control_result_failure(result)
+                if failure is not None:
+                    system_logger.warning("Command '%s' failed: %s", command, failure)
+                    await websocket_manager.send_personal_message(
+                        create_command_response_message(
+                            command,
+                            "error",
+                            command_id=command_id,
+                            data=result if isinstance(result, dict) else None,
+                            error=failure,
+                            code="command_failed",
+                        ),
+                        websocket,
+                    )
+                else:
+                    await websocket_manager.send_personal_message(
+                        create_command_response_message(
+                            command,
+                            "success",
+                            command_id=command_id,
+                            data=result if isinstance(result, dict) else None,
+                        ),
+                        websocket,
+                    )
             except asyncio.TimeoutError:
                 system_logger.error("Command '%s' timed out after %ss", command, timeout)
                 await websocket_manager.send_personal_message(
@@ -3040,6 +3055,21 @@ async def ws_endpoint(websocket: WebSocket):
         websocket_manager.disconnect(websocket)
 
 
+def _control_result_failure(result: Any) -> Optional[str]:
+    """Return the backend failure message when a control result signals failure, else None.
+
+    Backends return ``ControlResult`` (TypedDict, total=False): only an explicit
+    ``ok=False`` is a failure. An absent ``ok`` (demo-state dicts) or a non-dict
+    result keeps the legacy success interpretation, so demo and pre-ControlResult
+    shapes are unaffected. Phase D §S10 error surfacing keys off error envelopes
+    and non-2xx responses — wrapping an ``ok=False`` result in a success envelope
+    is the "dead button" class (training-start diagnosis 2026-07-09 §4.2).
+    """
+    if isinstance(result, dict) and result.get("ok") is False:
+        return str(result.get("error") or "command failed")
+    return None
+
+
 class _TrainStartBody(BaseModel):
     """Optional body for ``POST /api/train/start`` (A1-iii-a).
 
@@ -3064,12 +3094,19 @@ async def api_train_start(reset: bool = False, body: _TrainStartBody | None = No
     Returns:
         Training status
     """
+    from fastapi import HTTPException
+
     from communication.websocket_manager import create_control_ack_message
 
     # A1-iii-a: forward a one-shot dataset-ref + hyperparameters for recurrence; cascor/demo
     # keep the bare reset-only call (no extra kwargs reach their start_training).
     start_kwargs = _recurrence_start_kwargs(body.model_dump()) if (backend.backend_type == "recurrence" and body is not None) else {}
     result = backend.start_training(reset=reset, **start_kwargs)
+    failure = _control_result_failure(result)
+    if failure is not None:
+        system_logger.warning("Training start rejected: %s", failure)
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, failure)))
+        raise HTTPException(status_code=409, detail=f"Training could not be started: {failure}")
     message = "Training started successfully"
     schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", True, message)))
     return {"status": "started", **result}
@@ -3082,9 +3119,16 @@ async def api_train_pause():
     Returns:
         Training status
     """
+    from fastapi import HTTPException
+
     from communication.websocket_manager import create_control_ack_message
 
-    backend.pause_training()
+    result = backend.pause_training()
+    failure = _control_result_failure(result)
+    if failure is not None:
+        system_logger.warning("Training pause rejected: %s", failure)
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("pause", False, failure)))
+        raise HTTPException(status_code=409, detail=f"Training could not be paused: {failure}")
     schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("pause", True, "Training paused")))
     return {"status": "paused"}
 
@@ -3096,9 +3140,16 @@ async def api_train_resume():
     Returns:
         Training status
     """
+    from fastapi import HTTPException
+
     from communication.websocket_manager import create_control_ack_message
 
-    backend.resume_training()
+    result = backend.resume_training()
+    failure = _control_result_failure(result)
+    if failure is not None:
+        system_logger.warning("Training resume rejected: %s", failure)
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("resume", False, failure)))
+        raise HTTPException(status_code=409, detail=f"Training could not be resumed: {failure}")
     schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("resume", True, "Training resumed")))
     return {"status": "running"}
 
@@ -3110,9 +3161,16 @@ async def api_train_stop():
     Returns:
         Training status
     """
+    from fastapi import HTTPException
+
     from communication.websocket_manager import create_control_ack_message
 
-    backend.stop_training()
+    result = backend.stop_training()
+    failure = _control_result_failure(result)
+    if failure is not None:
+        system_logger.warning("Training stop rejected: %s", failure)
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", False, failure)))
+        raise HTTPException(status_code=409, detail=f"Training could not be stopped: {failure}")
     schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", True, "Training stopped")))
     return {"status": "stopped"}
 
@@ -3124,9 +3182,16 @@ async def api_train_reset():
     Returns:
         Training status with reset state
     """
+    from fastapi import HTTPException
+
     from communication.websocket_manager import create_control_ack_message
 
     result = backend.reset_training()
+    failure = _control_result_failure(result)
+    if failure is not None:
+        system_logger.warning("Training reset rejected: %s", failure)
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("reset", False, failure)))
+        raise HTTPException(status_code=409, detail=f"Training could not be reset: {failure}")
     schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("reset", True, "Training reset")))
     return {"status": "reset", **result}
 
