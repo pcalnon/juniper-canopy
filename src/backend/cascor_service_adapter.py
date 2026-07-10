@@ -590,13 +590,21 @@ class CascorServiceAdapter:
     # Training control
     # ------------------------------------------------------------------
 
-    def start_training_background(self, *args, **kwargs) -> bool:
+    def start_training_background(self, *args, **kwargs) -> "Tuple[bool, Optional[str]]":
+        """Kick off training via REST. Returns ``(started, error_message)``.
+
+        PR-B2 (training-start diagnosis 2026-07-09): the cascor 409 detail
+        (e.g. "Training cannot be started: Training data not provided") used to
+        be flattened to a bare ``False`` here, so the §S10 surfacing could only
+        show a generic failure. The message now rides back to ServiceBackend's
+        ControlResult.
+        """
         try:
             self._client.start_training(**kwargs)
-            return True
+            return True, None
         except JuniperCascorClientError as e:
             logger.error(f"Failed to start training: {e}")
-            return False
+            return False, str(e)
 
     def is_training_in_progress(self) -> bool:
         try:

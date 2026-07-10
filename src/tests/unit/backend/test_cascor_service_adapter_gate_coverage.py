@@ -671,12 +671,15 @@ class TestNetworkAndTrainingControl:
 
     def test_start_training_background_success(self, adapter, mock_client):
         mock_client.start_training.return_value = None
-        assert adapter.start_training_background(epochs=5) is True
+        assert adapter.start_training_background(epochs=5) == (True, None)
         mock_client.start_training.assert_called_once_with(epochs=5)
 
     def test_start_training_background_error(self, adapter, mock_client):
+        # PR-B2: the failure detail rides back alongside the flag.
         mock_client.start_training.side_effect = JuniperCascorClientError("start boom")
-        assert adapter.start_training_background() is False
+        started, error = adapter.start_training_background()
+        assert started is False
+        assert "start boom" in error
 
     def test_is_training_in_progress_true_top_flag(self, adapter, mock_client):
         mock_client.get_training_status.return_value = {"is_training": True}

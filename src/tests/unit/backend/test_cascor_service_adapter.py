@@ -121,8 +121,9 @@ class TestRESTDelegation:
         mock_client.create_network.assert_called_once_with()
 
     def test_start_training_background(self, adapter, mock_client):
+        # PR-B2: (started, error) tuple — the cascor 409 detail rides back.
         result = adapter.start_training_background()
-        assert result is True
+        assert result == (True, None)
         mock_client.start_training.assert_called_once()
 
     def test_is_training_in_progress(self, adapter, mock_client):
@@ -469,7 +470,9 @@ class TestErrorHandling:
         from juniper_cascor_client.exceptions import JuniperCascorConnectionError
 
         mock_client.start_training.side_effect = JuniperCascorConnectionError("fail")
-        assert adapter.start_training_background() is False
+        started, error = adapter.start_training_background()
+        assert started is False
+        assert "fail" in error
 
     def test_is_training_on_error(self, adapter, mock_client):
         from juniper_cascor_client.exceptions import JuniperCascorConnectionError
