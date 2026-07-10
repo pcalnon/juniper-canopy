@@ -163,10 +163,12 @@ class TestTrainStartDatasetRef:
 
     def test_no_body_still_works_for_recurrence(self, client, recurrence_backend):
         # Backward-compat: a bare start (no body) must fail closed in the BACKEND
-        # ("no dataset reference"), not at the route — the route accepts the empty body.
+        # ("no dataset reference"), not at the route — the route accepts the empty
+        # body (no 422). 2026-07-09 PR-A: the backend rejection now surfaces as
+        # HTTP 409 with the error in ``detail`` instead of a 200 wrapping ok=False.
         resp = client.post("/api/train/start")
-        assert resp.status_code == 200
-        assert resp.json()["ok"] is False  # backend rejects: no dataset ref
+        assert resp.status_code == 409
+        assert "no dataset reference" in resp.json()["detail"]
 
     def test_body_ignored_for_non_recurrence(self, client, monkeypatch):
         # cascor/demo must keep the bare reset-only call — extra kwargs would break them.
