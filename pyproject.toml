@@ -147,14 +147,13 @@ juniper-data = [
     "requests>=2.28.0",
 ]
 juniper-cascor = [
-    # CFG-14: floor matches the juniper-ml meta-package
-    # (juniper-ml/pyproject.toml ``[clients]`` pins ``juniper-cascor-client>=0.3.0``).
-    # The previous ``>=0.1.0`` admitted three minor versions of incompatible
-    # behavior; bumping aligns canopy's installable set with what users get
-    # transitively via ``pip install juniper-ml[clients]`` and removes the
-    # gap. Tightening further to the current release floor (0.4.0) is a
-    # separate decision once canopy adopts post-0.3.x APIs.
-    "juniper-cascor-client>=0.5.0",
+    # Floor 0.6.0: FakeCascorClient gained ``_request`` in-memory parity
+    # (cascor-client#91) for the staging + experimental-functions routes that
+    # CascorServiceAdapter drives through the real client's private escape
+    # hatch. Canopy's fake-backed suites (test_fake_service_backend etc.)
+    # crash with AttributeError under any earlier release, so the floor is
+    # the oldest version those tests can run against.
+    "juniper-cascor-client>=0.6.0",
 ]
 observability = [
     # prometheus-client moved to [project] dependencies on 2026-05-10
