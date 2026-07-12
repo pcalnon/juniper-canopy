@@ -48,10 +48,22 @@ def connection_indicator_layout():
     )
 
 
-# Clientside callback JS for updating the indicator from ws-connection-status store.
+# Clientside callback JS for updating the indicator from the
+# ws-connection-status store plus the stream-health-store (N2).
 # Returns [children, style] for the badge.
+#
+# N2 degraded-mode dimension (training-runtime defects plan §4 I-1 / §5 T2):
+# the browser socket being open is NOT end-to-end health — in the 2026-07-10
+# incident the badge showed a green "WS: Connected" for 12+ hours while the
+# canopy→cascor relay behind it was dead. The badge now also consumes
+# `stream-health-store` (fed by GET /api/stream_health from the relay /
+# control-supervisor liveness state) and downgrades an otherwise-green badge:
+#   - upstream "reconnecting" (relay disconnected)      → amber "WS: Upstream reconnecting"
+#   - upstream "degraded" (connected but frame-starved) → amber "WS: Upstream degraded"
+# Absent/"n/a" stream health (demo mode, store not yet populated) preserves
+# the original 4-state behavior.
 CONNECTION_INDICATOR_JS = """
-function(wsStatus) {
+function(wsStatus, streamHealth) {
     if (!wsStatus) return [window.dash_clientside.no_update, window.dash_clientside.no_update];
 
     var baseStyle = {
@@ -70,6 +82,12 @@ function(wsStatus) {
         return ["WS: Demo", baseStyle];
     }
     if (wsStatus.connected) {
+        var upstream = streamHealth && streamHealth.overall;
+        if (upstream === "reconnecting" || upstream === "degraded") {
+            baseStyle.backgroundColor = "#ffc107";
+            baseStyle.color = "#212529";
+            return [upstream === "reconnecting" ? "WS: Upstream reconnecting" : "WS: Upstream degraded", baseStyle];
+        }
         baseStyle.backgroundColor = "#28a745";
         return ["WS: Connected", baseStyle];
     }

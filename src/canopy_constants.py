@@ -266,6 +266,21 @@ class DashboardConstants:
     # stale value" UX bug.
     NUMERIC_INPUT_DEBOUNCE_MS: Final[int] = 350
 
+    # ── E-3 (training-runtime defects plan §9): apply-in-flight watchdog ──
+    # A failed Apply used to leave the CAN-000 `apply-in-flight` clamp stuck
+    # true (every non-200 path returned `dash.no_update` for
+    # `applied-params-store`, the store whose update released the clamp),
+    # permanently disabling BOTH update intervals — the pre-refresh total
+    # freeze of I-1 root cause 4. The server callback now always releases the
+    # clamp; this clientside watchdog is the safety net for the class no
+    # server response can fix (the `/_dash-update-component` POST itself
+    # failing at the network level). Limit must exceed the worst-case legit
+    # apply: 3 retries × DASHBOARD_LONG_POST_TIMEOUT (10 s) + 2 ×
+    # DASHBOARD_RETRY_AFTER_MAX_SLEEP_S (2 s) + DASHBOARD_GET_TIMEOUT (5 s)
+    # verify ≈ 39 s.
+    APPLY_WATCHDOG_INTERVAL_MS: Final[int] = 5000
+    APPLY_IN_FLIGHT_MAX_MS: Final[int] = 60000
+
 
 class ServerConstants:
     """Server configuration constants.
@@ -455,6 +470,15 @@ class BackendConstants:
 
     # ── Training metrics buffer ──
     MAX_METRICS_BUFFER_SIZE: Final[int] = 10000
+
+    # ── N2: canopy→cascor stream liveness (cascor_service_adapter) ──
+    # Age of the last inbound frame beyond which a *connected* relay stream is
+    # classified "degraded" (cascor pings every 30 s, so 60 s = two missed
+    # pings). Full liveness expiry (close + reconnect) is governed separately
+    # by ``settings.ws_stream_liveness_timeout_seconds``.
+    RELAY_STALE_AFTER_SECONDS: Final[float] = 60.0
+    # Pong deadline for the control-stream protocol-level keepalive probe.
+    CONTROL_PROBE_PONG_TIMEOUT_SECONDS: Final[float] = 10.0
 
     # ── Demo mode timing ──
     DEMO_THREAD_JOIN_TIMEOUT: Final[float] = 5.0

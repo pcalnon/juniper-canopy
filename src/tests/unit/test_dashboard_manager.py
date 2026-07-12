@@ -416,6 +416,90 @@ class TestApplyInFlightIntervalPause:
         assert 'Input("apply-in-flight", "data")' in window
 
 
+class TestApplyInFlightWatchdogE3:
+    """E-3 (training-runtime defects plan §9): the apply-in-flight clamp must never stick.
+
+    E-3 verdict — the stuck path EXISTED: every failure path of
+    ``_apply_parameters_handler`` (non-200, 429-exhausted, retries-exhausted)
+    returns ``dash.no_update`` for ``applied-params-store``, and the store
+    update was the clamp's ONLY release signal — so one failed Apply (the
+    observed evening-502 pattern) disabled BOTH update intervals until a page
+    refresh: the pre-refresh total freeze of I-1 root cause 4. The fix is a
+    triple-redundant release: (a) the apply callback writes ``apply-in-flight
+    = False`` directly on every return path, (b) the store-driven clientside
+    release still fires on success, (c) a clientside watchdog force-clears an
+    over-age clamp (covers the callback POST itself failing at the network
+    level — the one class no server response can fix).
+    """
+
+    @pytest.fixture
+    def dashboard_manager_source(self):
+        path = Path(__file__).resolve().parents[2] / "frontend" / "dashboard_manager.py"
+        return path.read_text(encoding="utf-8")
+
+    # ── Behavior: the stuck mechanism + the server-side release ──
+
+    def test_failure_path_does_not_write_applied_store(self, dashboard):
+        """The stuck-path mechanism: a 5xx apply returns ``no_update`` for
+        ``applied-params-store`` — correct for the store's applied-params
+        semantics, fatal as the sole clamp release (the pre-fix design)."""
+        import dash
+
+        mock_response = MagicMock(status_code=502, text="Bad Gateway")
+        with patch("requests.post", return_value=mock_response):
+            store_value, status_msg = dashboard._apply_parameters_handler(1, *([None] * 24))
+        assert store_value is dash.no_update
+        assert "502" in status_msg
+
+    def test_release_is_false_after_a_real_click(self, dashboard):
+        """The apply callback's third Output must release the clamp on every
+        completed run — success and failure alike."""
+        assert dashboard._apply_in_flight_release(1) is False
+        assert dashboard._apply_in_flight_release(3) is False
+
+    def test_release_is_no_update_without_a_click(self, dashboard):
+        import dash
+
+        assert dashboard._apply_in_flight_release(None) is dash.no_update
+        assert dashboard._apply_in_flight_release(0) is dash.no_update
+
+    # ── Wiring: server-side release on the apply callback ──
+
+    def test_apply_callback_carries_in_flight_release_output(self, dashboard_manager_source):
+        """The apply callback's Output list must include the apply-in-flight
+        release alongside applied-params-store (E-3 fix a)."""
+        idx = dashboard_manager_source.find('Output("applied-params-store", "data"),')
+        assert idx != -1
+        window = dashboard_manager_source[idx : idx + 800]
+        assert 'Output("apply-in-flight", "data", allow_duplicate=True),' in window
+
+    def test_apply_wrapper_returns_release_value(self, dashboard_manager_source):
+        assert "_apply_in_flight_release(n_clicks)" in dashboard_manager_source
+
+    # ── Wiring: clientside watchdog (E-3 fix c) ──
+
+    def test_watchdog_interval_in_layout(self, dashboard_manager_source):
+        """The watchdog tick must be its own interval — the clamp disables the
+        fast/slow intervals, so neither can host its own rescue."""
+        assert 'dcc.Interval(id="apply-watchdog-interval"' in dashboard_manager_source
+
+    def test_watchdog_callback_wired_to_clear_stuck_clamp(self, dashboard_manager_source):
+        idx = dashboard_manager_source.find('Input("apply-watchdog-interval", "n_intervals")')
+        assert idx != -1
+        # The watchdog's Output (force-release) must sit in the same callback
+        # registration (search backwards within the registration window).
+        window = dashboard_manager_source[max(0, idx - 800) : idx + 300]
+        assert 'Output("apply-in-flight", "data", allow_duplicate=True)' in window
+        assert 'State("apply-in-flight", "data")' in window
+
+    def test_click_writer_stamps_age_for_watchdog(self, dashboard_manager_source):
+        """Writer 1 must stamp the click time so the watchdog can age the clamp."""
+        assert "{in_flight: true, since: Date.now()}" in dashboard_manager_source
+
+    def test_watchdog_uses_max_age_constant(self, dashboard_manager_source):
+        assert "APPLY_IN_FLIGHT_MAX_MS" in dashboard_manager_source
+
+
 class TestPinnedParameters:
     """CAN-005: pin/unpin meta params + sidebar mirror."""
 

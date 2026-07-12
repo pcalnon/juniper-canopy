@@ -1156,8 +1156,58 @@ async def get_state():
 
     # Service mode: provide all nn_*/cn_* keys the dashboard expects.
     # Keys that cascor exposes are fetched live; the rest get defaults.
+    #
+    # N2 (training-runtime defects plan §4 I-1): the BASE fields
+    # (status/phase/current_epoch/timestamp) are now LIVE-FIRST. This route
+    # already paid a live cascor call per GET for the parameter keys
+    # (``get_canopy_params``) while serving base fields solely from the
+    # relay-fed ``training_state`` global — which went ~8 h stale in the
+    # 2026-07-10 session when the WS relay silently died. The base fields now
+    # ride the same live-fetch posture (one consolidated ``get_status()``
+    # call), and the relay-fed global is only the fallback on upstream error,
+    # explicitly marked ``stale: true`` with an age. The global itself stays
+    # relay-updated for demo mode and WS-push granularity.
     if backend.backend_type == "service" and hasattr(backend, "_adapter"):
+        # Both fetches are synchronous HTTP calls — keep them off the event
+        # loop so a slow cascor cannot stall every other canopy route.
+        def _fetch_live_status_and_params():
+            return backend.get_status(), backend._adapter.get_canopy_params()
+
+        live_status, canopy_params = await asyncio.to_thread(_fetch_live_status_and_params)
+
         state = training_state.get_state()
+
+        live_ok = isinstance(live_status, dict) and not live_status.get("error") and "fsm_status" in live_status
+        if live_ok:
+            from backend.state_sync import CascorStateSync
+
+            if live_status.get("failed"):
+                state["status"] = "Failed"
+            elif live_status.get("is_paused"):
+                state["status"] = "Paused"
+            elif live_status.get("is_running") or live_status.get("is_training"):
+                state["status"] = "Started"
+            elif live_status.get("completed"):
+                state["status"] = "Completed"
+            else:
+                state["status"] = CascorStateSync._normalize_status(str(live_status.get("fsm_status", "")))
+            live_phase = live_status.get("phase")
+            if isinstance(live_phase, str) and live_phase:
+                state["phase"] = live_phase
+            live_epoch = live_status.get("current_epoch")
+            if live_epoch is not None:
+                state["current_epoch"] = live_epoch
+            state["timestamp"] = time.time()
+            state["stale"] = False
+        else:
+            # Upstream error: serve the last-known relay-fed global, honestly
+            # marked. The 8-hour-stale-base-fields class is impossible while
+            # cascor is reachable; when it is NOT, the staleness is declared.
+            state["stale"] = True
+            try:
+                state["stale_age_seconds"] = round(max(0.0, time.time() - float(state.get("timestamp") or 0.0)), 1)
+            except (TypeError, ValueError):
+                state["stale_age_seconds"] = None
 
         # Populate all nn_*/cn_* keys with defaults first (dashboard reads all 22)
         state.setdefault("nn_max_iterations", TrainingConstants.DEFAULT_MAX_GROWTH_ITERATIONS)
@@ -1186,8 +1236,8 @@ async def get_state():
         state.setdefault("cn_top_candidates", TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT)
         state.setdefault("cn_random_candidates", TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT)
 
-        # Override with live values from cascor (keys it actually exposes)
-        canopy_params = backend._adapter.get_canopy_params()
+        # Override with live values from cascor (keys it actually exposes).
+        # Fetched above in the same off-loop thread hop as the status call.
         state.update(canopy_params)
         return state
 
@@ -1202,6 +1252,23 @@ async def get_status():
         Training status dictionary with FSM-based status and phase
     """
     return backend.get_status()
+
+
+@app.get("/api/stream_health")
+async def get_stream_health():
+    """
+    N2 (training-runtime defects plan §4 I-1 / §5 T2): canopy→cascor stream
+    health for the dashboard's degraded-mode indicator.
+
+    Returns ``{"overall": "healthy"|"degraded"|"reconnecting"|"n/a", "relay":
+    {...}, "control": {...}}`` in service mode — a pure in-memory snapshot of
+    the metrics-relay / control-stream supervisor liveness state (no upstream
+    call). Non-service backends (demo/recurrence) have no upstream stream, so
+    ``overall`` is ``"n/a"`` and the badge ignores it.
+    """
+    if backend.backend_type == "service" and hasattr(backend, "_adapter"):
+        return backend._adapter.get_stream_health()
+    return {"overall": "n/a", "mode": backend.backend_type, "relay": None, "control": None}
 
 
 @app.get("/api/metrics")

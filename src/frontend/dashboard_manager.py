@@ -1701,6 +1701,11 @@ class DashboardManager:
                 # button is in flight, so a server roundtrip isn't racing against
                 # interval-driven REST polls / clientside drains.
                 dcc.Store(id="apply-in-flight", data=False),
+                # E-3 (training-runtime defects plan §9): watchdog tick for the
+                # apply-in-flight clamp. Deliberately NOT one of the two clamped
+                # intervals — it must keep firing while they are disabled so a
+                # stuck clamp can always be force-released clientside.
+                dcc.Interval(id="apply-watchdog-interval", interval=DashboardConstants.APPLY_WATCHDOG_INTERVAL_MS, n_intervals=0),
                 # FRONTEND_ISSUES_PLAN_2026-05-09 §2.5 C / Issue #2 — write-only
                 # sink for the force-blur clientside callback. Dash requires
                 # an Output target on every callback; this Store exists solely
@@ -1727,6 +1732,11 @@ class DashboardManager:
                 # Dash's "every clientside callback needs an Output".
                 dcc.Store(id="live-switch-fallback-sink", data=None),
                 dcc.Store(id="ws-connection-status", data={"connected": False, "reconnecting": False, "mode": "demo" if get_settings().demo_mode else "live"}),
+                # N2: canopy→cascor stream health (relay + control supervisor),
+                # polled from GET /api/stream_health on the slow interval. Feeds
+                # the degraded-mode dimension of the WS badge — browser-socket-
+                # open must not masquerade as end-to-end healthy.
+                dcc.Store(id="stream-health-store", data=None),
                 # GAP-WS-15: bridge for `settings.enable_raf_coalescer` → JS `window._juniperRafCoalescerEnabled`
                 dcc.Store(id="ws-config-init", data=None),
                 # Raw weight-oriented topology for heatmap view (OF-1)
@@ -2746,23 +2756,40 @@ class DashboardManager:
     def _setup_datastore_callbacks(self):
 
         # CAN-000: pause periodic update intervals while Apply Parameters is in
-        # flight. The user-visible behavior fix is that the dashboard stops
-        # firing REST polls and ws-buffer drains the moment Apply is clicked
-        # and resumes the next time `applied-params-store` updates (the
-        # apply_parameters server callback always writes that store, on both
-        # success and failure paths, so resume is reliable).
+        # flight. The dashboard stops firing REST polls and ws-buffer drains
+        # the moment Apply is clicked and resumes when the clamp is released.
         #
-        # Three small clientside callbacks:
-        #   1. apply-button click -> apply-in-flight = True
-        #   2. applied-params-store update -> apply-in-flight = False
+        # E-3 (training-runtime defects plan §9): the original release relied
+        # SOLELY on `applied-params-store` updating — but every failure path of
+        # `_apply_parameters_handler` (non-200, 429-exhausted, retries-
+        # exhausted) returned `dash.no_update` for that store, so one failed
+        # Apply left the clamp stuck true and BOTH intervals disabled until a
+        # page refresh: the pre-refresh total freeze of I-1 root cause 4
+        # (the evening-502 pattern froze every interval-driven surface,
+        # header included). The release is now triple-redundant:
+        #   a. the apply_parameters server callback writes apply-in-flight =
+        #      False directly on EVERY return path (see
+        #      `_apply_in_flight_release`);
+        #   b. the applied-params-store clientside release below still fires
+        #      on the success path;
+        #   c. a clientside watchdog force-clears a clamp older than
+        #      APPLY_IN_FLIGHT_MAX_MS — covering the one class no server
+        #      response can fix (the callback POST itself failing at the
+        #      network level) plus any future stuck path.
+        #
+        # Clientside callbacks:
+        #   1. apply-button click -> apply-in-flight = {in_flight, since}
+        #   2. applied-params-store update -> apply-in-flight = false
         #   3. apply-in-flight -> {fast,slow}-update-interval.disabled
+        #   4. watchdog tick -> force-clear an over-age in-flight clamp
         # The third callback fires on layout mount (prevent_initial_call=False)
         # so the intervals start in their default enabled state.
         self.app.clientside_callback(
             """
             function(nClicks) {
                 if (!nClicks) return window.dash_clientside.no_update;
-                return true;
+                // E-3: stamp the click time so the watchdog can age the clamp.
+                return {in_flight: true, since: Date.now()};
             }
             """,
             Output("apply-in-flight", "data"),
@@ -2772,9 +2799,9 @@ class DashboardManager:
         self.app.clientside_callback(
             """
             function(appliedData) {
-                // applied-params-store is written by apply_parameters() on
-                // every click, success or failure. Whenever it updates,
-                // the in-flight clamp can come off.
+                // applied-params-store updates on the success path; the
+                // server callback additionally releases the clamp directly
+                // on every path (E-3), so this is belt-and-braces.
                 return false;
             }
             """,
@@ -2795,6 +2822,25 @@ class DashboardManager:
             ],
             Input("apply-in-flight", "data"),
             prevent_initial_call=False,
+        )
+        # E-3: clientside watchdog — force-release a stuck clamp. Runs on its
+        # own always-enabled interval (the clamp disables the fast/slow
+        # intervals, so neither can host its own rescue).
+        self.app.clientside_callback(
+            f"""
+            function(n, inFlight) {{
+                if (!inFlight || !inFlight.since) return window.dash_clientside.no_update;
+                if (Date.now() - inFlight.since > {DashboardConstants.APPLY_IN_FLIGHT_MAX_MS}) {{
+                    console.warn("apply-in-flight clamp exceeded {DashboardConstants.APPLY_IN_FLIGHT_MAX_MS}ms; watchdog force-released it (E-3)");
+                    return false;
+                }}
+                return window.dash_clientside.no_update;
+            }}
+            """,
+            Output("apply-in-flight", "data", allow_duplicate=True),
+            Input("apply-watchdog-interval", "n_intervals"),
+            dash.dependencies.State("apply-in-flight", "data"),
+            prevent_initial_call=True,
         )
 
         # CAN-018: hand the CONTROL_TOOLTIPS dict to the
@@ -3048,12 +3094,27 @@ class DashboardManager:
             prevent_initial_call=True,
         )
 
-        # Phase B: Connection indicator badge (4-state: connected/reconnecting/offline/demo)
+        # N2: poll canopy→cascor stream health into stream-health-store on the
+        # slow interval. Server-side (not a clientside peek) because the truth
+        # lives in the backend relay/supervisor liveness state, not in the
+        # browser bridge.
+        @self.app.callback(
+            Output("stream-health-store", "data"),
+            Input("slow-update-interval", "n_intervals"),
+            prevent_initial_call=True,
+        )
+        def update_stream_health(n):
+            """Fetch /api/stream_health for the degraded-mode badge dimension."""
+            return self._update_stream_health_handler(n)
+
+        # Phase B: Connection indicator badge (4-state: connected/reconnecting/offline/demo,
+        # N2: + upstream stream-health dimension — degraded/reconnecting downgrade a green badge)
         self.app.clientside_callback(
             CONNECTION_INDICATOR_JS,
             Output("ws-connection-indicator", "children"),
             Output("ws-connection-indicator", "style"),
             Input("ws-connection-status", "data"),
+            Input("stream-health-store", "data"),
         )
 
         # Network Evolution: capture a snapshot whenever a ``cascade_add`` event
@@ -3957,6 +4018,11 @@ class DashboardManager:
             [
                 Output("applied-params-store", "data"),
                 Output("params-status", "children", allow_duplicate=True),
+                # E-3: release the apply-in-flight clamp on EVERY return path.
+                # applied-params-store stays no_update on failure (it must only
+                # record genuinely-applied params), so it cannot double as the
+                # release signal — that reliance is what froze the dashboard.
+                Output("apply-in-flight", "data", allow_duplicate=True),
             ],
             Input("apply-params-button", "n_clicks"),
             [
@@ -4028,38 +4094,43 @@ class DashboardManager:
             nn_activation_function,
             nn_init_output_weights,
         ):
-            """Apply parameters to backend and update applied store."""
-            return self._apply_parameters_handler(
-                n_clicks,
-                nn_max_iter,
-                nn_max_epochs,
-                nn_lr,
-                nn_max_hu,
-                nn_multi_node,
-                nn_growth_trigger,
-                nn_growth_epochs,
-                nn_growth_conv_thresh,
-                nn_patience,
-                nn_spiral_rot,
-                nn_spiral_num,
-                nn_dataset_elem,
-                nn_dataset_noise,
-                cn_pool_size,
-                cn_corr_thresh,
-                cn_selected,
-                cn_training_complete,
-                cn_training_iter,
-                cn_training_conv_thresh,
-                cn_patience,
-                cn_multi_cand,
-                cn_cand_selection,
-                cn_top_cands,
-                cn_random_cands,
-                nn_output_epochs,
-                nn_optimizer_type,
-                nn_activation_function,
-                nn_init_output_weights,
-            )
+            """Apply parameters to backend, update applied store, and ALWAYS release the in-flight clamp (E-3)."""
+            try:
+                store_value, status_msg = self._apply_parameters_handler(
+                    n_clicks,
+                    nn_max_iter,
+                    nn_max_epochs,
+                    nn_lr,
+                    nn_max_hu,
+                    nn_multi_node,
+                    nn_growth_trigger,
+                    nn_growth_epochs,
+                    nn_growth_conv_thresh,
+                    nn_patience,
+                    nn_spiral_rot,
+                    nn_spiral_num,
+                    nn_dataset_elem,
+                    nn_dataset_noise,
+                    cn_pool_size,
+                    cn_corr_thresh,
+                    cn_selected,
+                    cn_training_complete,
+                    cn_training_iter,
+                    cn_training_conv_thresh,
+                    cn_patience,
+                    cn_multi_cand,
+                    cn_cand_selection,
+                    cn_top_cands,
+                    cn_random_cands,
+                    nn_output_epochs,
+                    nn_optimizer_type,
+                    nn_activation_function,
+                    nn_init_output_weights,
+                )
+            except Exception as e:  # E-3: a raising handler must not leave the clamp stuck
+                self.logger.error(f"apply_parameters handler raised: {e}", exc_info=True)
+                store_value, status_msg = dash.no_update, f"Error: {str(e)[:40]}"
+            return store_value, status_msg, self._apply_in_flight_release(n_clicks)
 
         # ── Initialize from backend on first load ──
 
@@ -5861,6 +5932,36 @@ class DashboardManager:
         except (TypeError, ValueError):
             return fallback
         return seconds if seconds >= 0 else fallback
+
+    def _apply_in_flight_release(self, n_clicks):
+        """E-3: value for the apply callback's `apply-in-flight` Output.
+
+        Returns ``False`` (release the clamp) whenever the callback ran for a
+        real click — the apply attempt is over by the time the server callback
+        returns, success or failure alike. Returns ``dash.no_update`` for the
+        no-click guard path (nothing armed the clamp). This is the
+        server-side half of the E-3 fix; the clientside watchdog covers the
+        request-never-completed class.
+        """
+        return False if n_clicks else dash.no_update
+
+    def _update_stream_health_handler(self, n=None):
+        """N2: poll /api/stream_health into stream-health-store for the badge.
+
+        On fetch failure returns ``dash.no_update`` (the badge then falls back
+        to browser-socket truth alone — an unreachable canopy already turns
+        the badge red via the socket state).
+        """
+        try:
+            url = self._api_url("/api/stream_health")
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
+            if not response.ok:
+                self.logger.debug(f"Stream health API returned {response.status_code}")
+                return dash.no_update
+            return response.json()
+        except Exception as e:
+            self.logger.debug(f"Failed to fetch stream health: {e}")
+            return dash.no_update
 
     def _init_params_from_backend_handler(self, n, current_applied):
         """Initialize input values and applied params from backend on first load."""
