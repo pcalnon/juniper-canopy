@@ -351,6 +351,17 @@ class Settings(BaseSettings):
     ws_control_stop_timeout: float = 2.0  # §S10.1 per-command stop/pause/resume/reset timeout
     ws_control_set_params_timeout: float = 1.0  # §S10.1 per-command set_params timeout (mirrors ws_set_params_timeout)
 
+    # N2 (training-runtime defects plan §4 I-1 / §5 T2/T5): canopy→cascor stream liveness.
+    # The 2026-07-10 incident: cascor closed canopy's control WS 40 s after connect and the
+    # supervisor (whose liveness notion was `_ws is not None`) never noticed for 12+ hours.
+    # These knobs drive the half-open detection + supervised reconnect in
+    # backend/cascor_service_adapter.py (ControlStreamSupervisor + the metrics relay loop).
+    # Cascor pings every 30 s, so a healthy stream sees at least one frame per ~30 s even when
+    # idle; the 90 s window tolerates two missed pings before declaring the stream dead.
+    ws_stream_liveness_timeout_seconds: float = 90.0  # no-frame window before a stream is declared dead and reconnected (0 disables)
+    ws_stream_probe_interval_seconds: float = 30.0  # control-stream protocol-level keepalive probe period (0 disables)
+    ws_relay_summary_interval_seconds: float = 60.0  # metrics-relay periodic INFO throughput summary period (0 disables)
+
     # Phase B-pre-b: CSRF + control-path security (M-SEC-02)
     csrf_enabled: bool = True  # CSRF protection on /ws/control
     csrf_token_ttl_seconds: int = 3600  # 1h sliding TTL
