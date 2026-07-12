@@ -220,6 +220,15 @@ class DashboardConstants:
     MAX_METRICS_HISTORY: Final[int] = 100
     MAX_DATA_POINTS: Final[int] = 10000
 
+    # N1 (training-runtime defects plan §4 I-1): bound the full-history metrics
+    # fetch. In ``full`` / ``hidden_units`` display modes the metrics-store poll
+    # fetches the complete history (``limit=0`` → up to 10k rows); refetching
+    # that every fast-interval tick (1 s) is an unconditional 10k-rows-per-second
+    # steady state. Interval-driven full fetches therefore only run every Nth
+    # fast tick (N = this modulus → one full fetch per ~5 s at the 1 s fast
+    # interval); a display-mode switch still triggers an immediate fetch.
+    FULL_HISTORY_POLL_TICK_MODULUS: Final[int] = 5
+
     DEFAULT_METRICS_HISTORY: Final[int] = 50
     DEFAULT_DATA_POINTS: Final[int] = 1000
     DEFAULT_SLIDING_WINDOW_SIZE: Final[int] = 500
