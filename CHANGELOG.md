@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **N1 — un-gated metrics/topology polls (sticky-gate starvation fix; juniper-ml
+  training-runtime defects plan §4 I-1/I-2, posture O2).** The metrics-store poll no longer
+  skips REST while the WS bridge reports `connected` + `metricsReceived`, and the topology
+  poll no longer requires `topologyReceived`: the sticky flags starved long-lived tabs
+  indefinitely once WS frames stopped arriving (tiles/charts froze at stale values until a
+  manual refresh — the 2026-07-10 frozen-dashboard session). The metrics poll now runs every
+  fast tick (1 Hz); the topology poll stays tab-gated on the slow interval (5 s) with the
+  `cascade_add` WS push as the fast path and tab-activation refetch. **This is the
+  correctness bridge until the WS-primary target lands (Q6/C6/N8)**, with three
+  validation-mandated guard rails: an **empty-guard** (an empty/errored fetch returns
+  `no_update` when the store already holds data, so cascor's post-run metrics clear can't
+  blank a completed run's charts), an **event-loop guard** (`/api/metrics/history`,
+  `/api/topology`, `/api/topology/raw` now run their synchronous backend calls via
+  `asyncio.to_thread` so a slow cascor can't stall canopy's event loop at 1 Hz), and a
+  **bounded full-history fetch** (`full`/`hidden_units` display modes fetch `limit=0` — up
+  to 10k rows — only every `FULL_HISTORY_POLL_TICK_MODULUS`-th tick (~0.2 Hz) on
+  interval-driven ticks; a display-mode switch, now an Input on the poll, refetches
+  immediately). Also removed the dead-end `ws-state-buffer` / `ws-candidate-progress-buffer`
+  stores and their clientside drains (no Input consumed them; the JS ring buffers stay for
+  N8), and fixed the metrics handler's stale "every 10th tick at 100ms" docstring (the fast
+  interval is 1000 ms). Tests: un-gated handler + empty-guard + bounded-fetch units
+  (`src/tests/unit/test_phase_b_bridge.py`), `asyncio.to_thread` wiring pins
+  (`src/tests/unit/test_main_api_coverage.py`), and a WS-silent Playwright scenario — tiles
+  advance via poll on a long-lived tab and post-run tiles survive the 1 Hz poll
+  (`src/tests/ui/test_ws_silent_poll_liveness.py`).
+
 ### Changed
 
 - **CI: per-file coverage is now a blocking gate (ecosystem per-file coverage rollout C-5).** The
