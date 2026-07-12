@@ -72,92 +72,190 @@ class TestPhaseBFlags:
 
 
 @pytest.mark.unit
-class TestMetricsPollingToggle:
-    """Test polling toggle in _update_metrics_store_handler."""
+class TestMetricsPollUngated:
+    """N1 (training-runtime defects plan §4 I-1, posture O2): the metrics-store
+    poll is un-gated — it proceeds on every fast-interval tick regardless of WS
+    connection state. The former sticky GAP-WS-16 gate (skip REST while
+    connected + metricsReceived) starved long-lived tabs once WS frames stopped
+    arriving; these tests pin the new contract (bridge until Q6/C6/N8)."""
 
-    def test_returns_no_update_when_ws_connected_and_metrics_received(self):
-        """GAP-WS-16: REST poll is skipped only when WS reports BOTH connected
-        AND metricsReceived (avoids the empty-chart blip during the connect→
-        first-frame window)."""
-        import dash
-
+    def _dm(self):
         from frontend.dashboard_manager import DashboardManager
 
         dm = DashboardManager.__new__(DashboardManager)
         dm.logger = __import__("logging").getLogger("test")
+        dm._api_base_url = "http://127.0.0.1:8050"
+        return dm
 
-        ws_status = {"connected": True, "reconnecting": False, "mode": "live", "metricsReceived": True}
+    def test_poll_proceeds_even_when_ws_connected_and_metrics_received(self):
+        """The N1 regression pin: a tab whose WS reports connected+metricsReceived
+        (the sticky-starvation state) still polls REST every tick."""
+        dm = self._dm()
 
-        with patch("frontend.dashboard_manager.get_settings") as mock_settings:
-            mock_settings.return_value.ws_bridge_enabled = True
-            result = dm._update_metrics_store_handler(n=1, ws_status=ws_status)
+        with patch("frontend.dashboard_manager.requests") as mock_requests:
+            mock_resp = mock_requests.get.return_value
+            mock_resp.ok = True
+            mock_resp.json.return_value = [{"epoch": 1, "error": 0.5}]
+            result = dm._update_metrics_store_handler(n=1, display_mode_state={"mode": "window", "window_size": 100}, trigger="fast-update-interval.n_intervals")
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+        mock_requests.get.assert_called_once()
+
+    def test_poll_proceeds_when_ws_disconnected(self):
+        """REST poll proceeds normally with no WS connection (unchanged)."""
+        dm = self._dm()
+
+        with patch("frontend.dashboard_manager.requests") as mock_requests:
+            mock_resp = mock_requests.get.return_value
+            mock_resp.ok = True
+            mock_resp.json.return_value = [{"epoch": 1, "error": 0.5}]
+            result = dm._update_metrics_store_handler(n=1, display_mode_state={"mode": "window", "window_size": 100})
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+
+    def test_empty_fetch_with_populated_store_returns_no_update(self):
+        """Empty-guard (plan §8 row 1): an empty fetch must not wipe a populated
+        store — cascor clears metrics post-run, and the un-gated 1 Hz poll would
+        otherwise blank a completed run's charts."""
+        import dash
+
+        dm = self._dm()
+
+        with patch("frontend.dashboard_manager.requests") as mock_requests:
+            mock_resp = mock_requests.get.return_value
+            mock_resp.ok = True
+            mock_resp.json.return_value = {"history": []}
+            result = dm._update_metrics_store_handler(n=1, current_metrics=[{"epoch": 7}])
 
         assert result is dash.no_update
 
-    def test_rest_poll_continues_when_connected_but_no_metrics_yet(self):
-        """GAP-WS-16: connected=True but metricsReceived=False keeps REST polling
-        until the first WS metrics frame arrives. Without this gate, a tab that
-        connects mid-training shows an empty chart for one polling interval."""
+    def test_empty_fetch_with_empty_store_passes_through(self):
+        """Genuinely-empty-and-store-empty passes through (no data to preserve)."""
+        dm = self._dm()
+
+        with patch("frontend.dashboard_manager.requests") as mock_requests:
+            mock_resp = mock_requests.get.return_value
+            mock_resp.ok = True
+            mock_resp.json.return_value = {"history": []}
+            result = dm._update_metrics_store_handler(n=1, current_metrics=[])
+
+        assert result == []
+
+    def test_non_ok_with_populated_store_returns_no_update(self):
+        """A non-ok fetch preserves the last-known-good store."""
+        import dash
+
+        dm = self._dm()
+
+        with patch("frontend.dashboard_manager.requests") as mock_requests:
+            mock_resp = mock_requests.get.return_value
+            mock_resp.ok = False
+            mock_resp.status_code = 502
+            result = dm._update_metrics_store_handler(n=1, current_metrics=[{"epoch": 7}])
+
+        assert result is dash.no_update
+
+    def test_exception_with_populated_store_returns_no_update(self):
+        """A fetch exception preserves the last-known-good store."""
+        import dash
+
+        dm = self._dm()
+
+        with patch("frontend.dashboard_manager.requests") as mock_requests:
+            mock_requests.get.side_effect = RuntimeError("connection refused")
+            result = dm._update_metrics_store_handler(n=1, current_metrics=[{"epoch": 7}])
+
+        assert result is dash.no_update
+
+    def test_exception_with_empty_store_returns_empty_list(self):
+        """A fetch exception with nothing to preserve keeps the [] contract."""
+        dm = self._dm()
+
+        with patch("frontend.dashboard_manager.requests") as mock_requests:
+            mock_requests.get.side_effect = RuntimeError("connection refused")
+            result = dm._update_metrics_store_handler(n=1, current_metrics=None)
+
+        assert result == []
+
+
+@pytest.mark.unit
+class TestFullHistoryFetchBounded:
+    """N1 (plan §8 row 2): full/hidden_units display modes fetch the complete
+    history (limit=0 → up to 10k rows) — interval-driven ticks must not refetch
+    that every second. Off-modulus ticks skip; the modulus tick, a display-mode
+    switch, and window mode fetch normally."""
+
+    def _dm(self):
         from frontend.dashboard_manager import DashboardManager
 
         dm = DashboardManager.__new__(DashboardManager)
         dm.logger = __import__("logging").getLogger("test")
         dm._api_base_url = "http://127.0.0.1:8050"
+        return dm
 
-        ws_status = {"connected": True, "reconnecting": False, "mode": "live", "metricsReceived": False}
+    def test_full_mode_interval_off_tick_skips_fetch(self):
+        import dash
 
-        with patch("frontend.dashboard_manager.get_settings") as mock_settings, patch("frontend.dashboard_manager.requests") as mock_requests:
-            mock_settings.return_value.ws_bridge_enabled = True
+        dm = self._dm()
+
+        with patch("frontend.dashboard_manager.requests") as mock_requests:
+            result = dm._update_metrics_store_handler(n=1, display_mode_state={"mode": "full"}, trigger="fast-update-interval.n_intervals")
+
+        assert result is dash.no_update
+        mock_requests.get.assert_not_called()
+
+    def test_full_mode_interval_modulus_tick_fetches_all(self):
+        from canopy_constants import DashboardConstants
+
+        dm = self._dm()
+        tick = DashboardConstants.FULL_HISTORY_POLL_TICK_MODULUS
+
+        with patch("frontend.dashboard_manager.requests") as mock_requests:
             mock_resp = mock_requests.get.return_value
             mock_resp.ok = True
-            mock_resp.json.return_value = [{"epoch": 1, "error": 0.5}]
-            result = dm._update_metrics_store_handler(
-                n=1,
-                display_mode_state={"mode": "window", "window_size": 100},
-                ws_status=ws_status,
-            )
+            mock_resp.json.return_value = {"history": [{"epoch": 1}]}
+            result = dm._update_metrics_store_handler(n=tick, display_mode_state={"mode": "full"}, trigger="fast-update-interval.n_intervals")
 
-        assert isinstance(result, list)
-        assert len(result) == 1
+        assert result == [{"epoch": 1}]
+        assert "limit=0" in mock_requests.get.call_args[0][0]
 
-    def test_falls_back_to_rest_when_ws_disconnected(self):
-        """When WS is disconnected, REST poll proceeds normally."""
-        from frontend.dashboard_manager import DashboardManager
+    def test_full_mode_display_mode_switch_fetches_immediately(self):
+        """A display-mode switch (display-mode-store Input trigger) must fetch
+        immediately even on an off-modulus tick, so Full History stays snappy."""
+        dm = self._dm()
 
-        dm = DashboardManager.__new__(DashboardManager)
-        dm.logger = __import__("logging").getLogger("test")
-        dm._api_base_url = "http://127.0.0.1:8050"
-
-        ws_status = {"connected": False, "reconnecting": True, "mode": "live"}
-
-        with patch("frontend.dashboard_manager.get_settings") as mock_settings, patch("frontend.dashboard_manager.requests") as mock_requests:
-            mock_settings.return_value.ws_bridge_enabled = True
+        with patch("frontend.dashboard_manager.requests") as mock_requests:
             mock_resp = mock_requests.get.return_value
             mock_resp.ok = True
-            mock_resp.json.return_value = [{"epoch": 1, "error": 0.5}]
-            result = dm._update_metrics_store_handler(n=1, display_mode_state={"mode": "window", "window_size": 100}, ws_status=ws_status)
+            mock_resp.json.return_value = {"history": [{"epoch": 1}]}
+            result = dm._update_metrics_store_handler(n=1, display_mode_state={"mode": "full"}, trigger="metrics-panel-display-mode-store.data")
 
-        assert isinstance(result, list)
-        assert len(result) == 1
+        assert result == [{"epoch": 1}]
 
-    def test_rest_poll_continues_when_bridge_disabled(self):
-        """When bridge is disabled (default), REST poll always proceeds."""
-        from frontend.dashboard_manager import DashboardManager
+    def test_hidden_units_mode_bounded_like_full(self):
+        import dash
 
-        dm = DashboardManager.__new__(DashboardManager)
-        dm.logger = __import__("logging").getLogger("test")
-        dm._api_base_url = "http://127.0.0.1:8050"
+        dm = self._dm()
 
-        ws_status = {"connected": True, "reconnecting": False, "mode": "live"}
+        with patch("frontend.dashboard_manager.requests") as mock_requests:
+            result = dm._update_metrics_store_handler(n=2, display_mode_state={"mode": "hidden_units"}, trigger="fast-update-interval.n_intervals")
 
-        with patch("frontend.dashboard_manager.get_settings") as mock_settings, patch("frontend.dashboard_manager.requests") as mock_requests:
-            mock_settings.return_value.ws_bridge_enabled = False
+        assert result is dash.no_update
+        mock_requests.get.assert_not_called()
+
+    def test_window_mode_fetches_every_interval_tick(self):
+        dm = self._dm()
+
+        with patch("frontend.dashboard_manager.requests") as mock_requests:
             mock_resp = mock_requests.get.return_value
             mock_resp.ok = True
-            mock_resp.json.return_value = []
-            result = dm._update_metrics_store_handler(n=1, ws_status=ws_status)
+            mock_resp.json.return_value = {"history": [{"epoch": 1}]}
+            result = dm._update_metrics_store_handler(n=1, display_mode_state={"mode": "window", "window_size": 100}, trigger="fast-update-interval.n_intervals")
 
-        assert isinstance(result, list)
+        assert result == [{"epoch": 1}]
+        assert "limit=100" in mock_requests.get.call_args[0][0]
 
 
 @pytest.mark.unit
@@ -351,8 +449,12 @@ class TestGapWs16WebSocketClientResume:
 
 
 @pytest.mark.unit
-class TestGapWs16RestSwitchoverGate:
-    """GAP-WS-16: dashboard_manager REST→WS switchover must wait for first metrics frame."""
+class TestN1MetricsPollGateRemoved:
+    """N1: the GAP-WS-16 sticky REST→WS switchover gate is REMOVED from the
+    metrics-store poll. The sticky ``metricsReceived`` flag starved long-lived
+    tabs indefinitely once WS frames stopped arriving (training-runtime defects
+    plan §4 I-1 root cause 1); the poll now runs every fast tick as the bridge
+    until the WS-primary target (Q6/C6/N8) lands."""
 
     @pytest.fixture
     def dashboard_manager_source(self):
@@ -361,20 +463,25 @@ class TestGapWs16RestSwitchoverGate:
         path = Path(__file__).resolve().parents[2] / "frontend" / "dashboard_manager.py"
         return path.read_text(encoding="utf-8")
 
-    def test_gate_requires_metrics_received(self, dashboard_manager_source):
-        """The REST poll suppression must require ws_status['metricsReceived'], not
-        only 'connected'."""
-        assert 'ws_status.get("metricsReceived")' in dashboard_manager_source
+    def test_metrics_poll_gate_removed(self, dashboard_manager_source):
+        """The sticky-gate expression must be gone from the metrics poll."""
+        assert 'ws_status.get("metricsReceived")' not in dashboard_manager_source
+
+    def test_bridge_posture_documented(self, dashboard_manager_source):
+        """The un-gated poll must say it is the bridge until WS-primary (N8)."""
+        assert "Q6/C6/N8" in dashboard_manager_source
 
 
 @pytest.mark.unit
 class TestGapWs25TopologyRestGate:
-    """GAP-WS-25: topology REST poll waits for first WS topology frame.
+    """Topology poll posture after N1: the sticky ``topologyReceived`` REST gate
+    is REMOVED (same starvation class as the metrics gate — plan §4 I-2); the
+    poll stays tab-gated on the slow interval with ``cascade_add`` WS push as
+    the fast path, and the ``active_tab`` Input refetches on tab switch.
 
-    Mirrors GAP-WS-16's metricsReceived pattern. Cascor only broadcasts
-    `topology` on cascade_add (grow events), so a fresh tab can wait
-    minutes for one. Until the first frame arrives, REST keeps polling
-    so the visualizer paints something.
+    The JS-side GAP-WS-25 flags stay in ws_dash_bridge.js (harmless bookkeeping
+    that N8's liveness-gated fallback may consume), so the bridge-asset
+    assertions below still hold.
     """
 
     @pytest.fixture
@@ -400,9 +507,9 @@ class TestGapWs25TopologyRestGate:
     def test_peek_connection_status_merges_topology_received(self, bridge_js):
         assert "topologyReceived: !!this._topologyReceived" in bridge_js
 
-    def test_dashboard_topology_gate_requires_topology_received(self, dashboard_manager_source):
-        """The topology REST gate must require ws_status['topologyReceived']."""
-        assert 'ws_status.get("topologyReceived")' in dashboard_manager_source
+    def test_dashboard_topology_gate_removed(self, dashboard_manager_source):
+        """N1: the sticky topologyReceived REST gate must be gone."""
+        assert 'ws_status.get("topologyReceived")' not in dashboard_manager_source
 
     def test_raw_topology_intentionally_ungated(self, dashboard_manager_source):
         """Raw topology has no WS source — must remain ungated, with a
@@ -413,10 +520,10 @@ class TestGapWs25TopologyRestGate:
         # the callback definition stays as-is.
         assert "def update_raw_topology_store(n, active_tab, view_mode):" in dashboard_manager_source
 
-    def test_topology_callback_signature_unchanged(self, dashboard_manager_source):
-        """The existing topology callback signature stays — we only tightened
-        the gate condition, didn't add new inputs."""
-        assert "def update_topology_store(n, ws_topology, active_tab, ws_status):" in dashboard_manager_source
+    def test_topology_callback_signature_dropped_ws_status(self, dashboard_manager_source):
+        """N1: the topology callback no longer reads ws-connection-status —
+        the gate was its only consumer."""
+        assert "def update_topology_store(n, ws_topology, active_tab):" in dashboard_manager_source
 
 
 @pytest.mark.unit

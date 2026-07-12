@@ -1708,11 +1708,13 @@ class DashboardManager:
                 # callback's output.
                 dcc.Store(id="apply-blur-sink", data=None),
                 # Phase B: WebSocket drain stores (structured objects, D-07)
+                # N1: the dead-end ws-state-buffer / ws-candidate-progress-buffer
+                # stores (drained but never consumed by any Input) were removed;
+                # the bridge-side ring buffers in ws_dash_bridge.js stay so N8
+                # (WS-primary wiring, wave 4) can re-attach them.
                 dcc.Store(id="ws-metrics-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
                 dcc.Store(id="ws-topology-buffer", data=None),
-                dcc.Store(id="ws-state-buffer", data=None),
                 dcc.Store(id="ws-cascade-add-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
-                dcc.Store(id="ws-candidate-progress-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
                 # P2-7 follow-up: WS push buffer for dataset_swap events.
                 # Hydrated by a clientside drain of
                 # ``window._juniperWsDrain._datasetSwapBuffer``; a
@@ -2969,20 +2971,9 @@ class DashboardManager:
             prevent_initial_call=True,
         )
 
-        # Drain state buffer → ws-state-buffer store
-        self.app.clientside_callback(
-            """
-            function(n) {
-                if (!window._juniperWsDrain) return window.dash_clientside.no_update;
-                var state = window._juniperWsDrain.drainState();
-                if (!state) return window.dash_clientside.no_update;
-                return state;
-            }
-            """,
-            Output("ws-state-buffer", "data"),
-            Input("fast-update-interval", "n_intervals"),
-            prevent_initial_call=True,
-        )
+        # N1: the ws-state-buffer drain callback was removed — the store had no
+        # Input consumer, so the drain was write-only dead machinery. The JS
+        # ring buffer (ws_dash_bridge.js drainState) stays for N8 (wave 4).
 
         # Drain cascade_add buffer → ws-cascade-add-buffer store
         self.app.clientside_callback(
@@ -3000,21 +2991,9 @@ class DashboardManager:
             prevent_initial_call=True,
         )
 
-        # Drain candidate_progress buffer → ws-candidate-progress-buffer store
-        self.app.clientside_callback(
-            """
-            function(n) {
-                if (!window._juniperWsDrain) return window.dash_clientside.no_update;
-                var events = window._juniperWsDrain.drainCandidateProgress();
-                if (!events || events.length === 0) return window.dash_clientside.no_update;
-                window._juniperWsDrain._gen++;
-                return {events: events, gen: window._juniperWsDrain._gen, last_drain_ms: Date.now()};
-            }
-            """,
-            Output("ws-candidate-progress-buffer", "data"),
-            Input("fast-update-interval", "n_intervals"),
-            prevent_initial_call=True,
-        )
+        # N1: the ws-candidate-progress-buffer drain callback was removed — the
+        # store had no Input consumer (same dead-end class as ws-state-buffer).
+        # The JS ring buffer (drainCandidateProgress) stays for N8 (wave 4).
 
         # P2-7 follow-up: drain dataset_swap buffer → ws-dataset-swap-buffer store.
         # The server-side merger in _setup_dataset_swap_observers_callbacks
@@ -3171,20 +3150,26 @@ class DashboardManager:
         # PERF-CN-01: prevent_initial_call=False — must hit /api/metrics/history
         # on mount to populate the metrics store before the first interval tick
         # (also drives the metrics panel's plots and stats).
+        # N1 (training-runtime defects plan §4 I-1, posture O2): the poll runs on
+        # every fast-interval tick — the Phase-B sticky WS gate is gone (see
+        # _update_metrics_store_handler for why, and for the guard rails).
+        # display-mode-store is an Input so a mode switch refetches immediately;
+        # the metrics store itself rides along as State for the empty-guard.
         @self.app.callback(
             Output("metrics-panel-metrics-store", "data"),
             Input("fast-update-interval", "n_intervals"),
-            dash.dependencies.State("metrics-panel-display-mode-store", "data"),
-            dash.dependencies.State("ws-connection-status", "data"),
+            Input("metrics-panel-display-mode-store", "data"),
+            dash.dependencies.State("metrics-panel-metrics-store", "data"),
             prevent_initial_call=False,
         )
-        def update_metrics_store(n, display_mode_state, ws_status):
-            """Fetch metrics history from API and update metrics panel store.
-
-            Phase B polling toggle: when WS bridge is connected, skip REST poll.
-            Falls back to 1 Hz REST (D-05) when WS disconnected.
-            """
-            return self._update_metrics_store_handler(n=n, display_mode_state=display_mode_state, ws_status=ws_status)
+        def update_metrics_store(n, display_mode_state, current_metrics):
+            """Fetch metrics history from API and update metrics panel store (1 Hz poll)."""
+            try:
+                ctx = dash.callback_context
+                trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
+            except dash.exceptions.MissingCallbackContextException:
+                trigger = ""  # direct invocation (tests) — treated like a mount/mode-switch fetch
+            return self._update_metrics_store_handler(n=n, display_mode_state=display_mode_state, current_metrics=current_metrics, trigger=trigger)
 
         # PERF-CN-01: prevent_initial_call=False — must hit /api/network/topology
         # on mount (when the topology tab is active) so the network visualizer
@@ -3194,15 +3179,20 @@ class DashboardManager:
             Input("slow-update-interval", "n_intervals"),
             Input("ws-topology-buffer", "data"),
             Input("visualization-tabs", "active_tab"),
-            dash.dependencies.State("ws-connection-status", "data"),
             prevent_initial_call=False,
         )
-        def update_topology_store(n, ws_topology, active_tab, ws_status):
+        def update_topology_store(n, ws_topology, active_tab):
             """Fetch topology from API or accept WebSocket push.
 
             OI-2: WebSocket topology pushes (from cascade_add events) take
             priority over REST polling for near-real-time updates.
-            Phase B: skip REST poll when WS connected (D-54: REST paths preserved).
+            N1 (training-runtime defects plan §4 I-2, posture O2): the REST
+            fallback is no longer gated on WS connection state — the sticky
+            ``topologyReceived`` gate starved long-lived tabs when ``cascade_add``
+            frames stopped arriving. The poll stays tab-gated on the slow
+            interval (see _update_topology_store_handler); the ``active_tab``
+            Input refetches on tab switch. This is the correctness bridge until
+            the WS-primary target lands (Q6/C6/N8).
             """
             ctx = dash.callback_context
             trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
@@ -3223,17 +3213,10 @@ class DashboardManager:
                     return self._update_topology_store_handler(n=n, active_tab=active_tab)
                 return CascorServiceAdapter._transform_topology(ws_topology)
 
-            # Phase B: skip REST poll when WS bridge is connected.
-            # GAP-WS-25: also require topologyReceived so we don't blank the
-            # network view in the window between socket-open and the first
-            # topology frame. Cascor only broadcasts `topology` on cascade_add
-            # (grow events) — a fresh tab opened mid-training could otherwise
-            # wait minutes for one, leaving the visualizer empty.
-            settings = get_settings()
-            if settings.ws_bridge_enabled and ws_status and ws_status.get("connected") and ws_status.get("topologyReceived"):
-                return dash.no_update
-
-            # REST fallback — only poll when topology tab is active
+            # REST fallback — only poll when topology tab is active. Deliberately
+            # NOT WS-gated (N1): the former sticky topologyReceived gate meant
+            # neither push nor poll updated the store once cascade_add frames
+            # stopped arriving. cascade_add push above remains the fast path.
             return self._update_topology_store_handler(n=n, active_tab=active_tab)
 
         # PERF-CN-01: prevent_initial_call=False — must hit the raw-topology API
@@ -5183,36 +5166,44 @@ class DashboardManager:
             self.logger.warning(f"Failed to fetch network stats: {e}")
             return self._network_info_error_div("Network Stats", "Error", f"{type(e).__name__}: {e}")
 
-    def _update_metrics_store_handler(self, n=None, display_mode_state=None, ws_status=None):
+    def _update_metrics_store_handler(self, n=None, display_mode_state=None, current_metrics=None, trigger=None):
         """Fetch metrics history from API and update metrics panel store.
 
-        Phase B polling toggle: when WS bridge reports connected, skip REST poll
-        to eliminate redundant traffic. Falls back to 1 Hz (every 10th tick at
-        100ms fast interval) when WS is disconnected (D-05).
+        N1 (training-runtime defects plan §4 I-1, posture O2): the poll runs on
+        every fast-interval tick (1 Hz at ``FAST_UPDATE_INTERVAL_MS`` = 1000 ms).
+        The former Phase-B sticky WS gate (skip REST while ``ws_status`` reported
+        ``connected`` + ``metricsReceived``) starved long-lived tabs indefinitely
+        once WS metrics frames stopped arriving, freezing tiles and charts at
+        stale values. This un-gated poll is the correctness BRIDGE until the
+        WS-primary target lands (Q6/C6/N8): N8 wires the WS buffers into the
+        tile/state Outputs and demotes this poll to a liveness-gated fallback.
 
-        GAP-WS-16: the gate now also requires ``metricsReceived`` so REST
-        keeps polling during the brief window between socket-open and the
-        first metrics frame (initial_metrics burst on fresh connect, or a
-        live metrics broadcast on resume). Without this, a tab that
-        connects while training is mid-stream sees an empty chart for one
-        polling interval.
+        Guard rails (both validation-mandated, plan §8 rows 1-2):
+
+        - **Empty-guard**: when the fetch is empty or errored AND the store
+          already holds data, return ``dash.no_update`` so the last-known-good
+          store survives — cascor clears metrics post-run, and an un-gated
+          1 Hz poll would otherwise blank a completed run's charts. A genuinely
+          empty fetch with an empty store passes through unchanged.
+        - **Bounded full-history fetch**: ``full`` / ``hidden_units`` display
+          modes fetch the complete history (``limit=0`` → up to 10k rows), so
+          interval-driven ticks only refetch every
+          ``FULL_HISTORY_POLL_TICK_MODULUS``-th tick (~0.2 Hz); a display-mode
+          switch (or a direct/mount invocation) still fetches immediately.
         """
-        settings = get_settings()
-        if settings.ws_bridge_enabled and ws_status and ws_status.get("connected") and ws_status.get("metricsReceived"):
+        mode_state = display_mode_state if isinstance(display_mode_state, dict) else {}
+        mode = mode_state.get("mode", "window")
+        full_fetch = mode in ("full", "hidden_units")
+        if full_fetch and trigger and trigger.startswith("fast-update-interval") and n and n % DashboardConstants.FULL_HISTORY_POLL_TICK_MODULUS != 0:
             return dash.no_update
 
         try:
-            mode_state = display_mode_state or {"mode": "window", "window_size": 100}
-            mode = mode_state.get("mode", "window")
-            if mode == "full" or mode == "hidden_units":
-                limit = 0  # fetch all
-            else:
-                limit = mode_state.get("window_size", 100)
+            limit = 0 if full_fetch else mode_state.get("window_size", 100)  # 0 = fetch all
             url = self._api_url(f"/api/metrics/history?limit={limit}")
             response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
             if not response.ok:
                 self.logger.warning(f"Metrics history API returned {response.status_code}")
-                return []
+                return dash.no_update if current_metrics else []
             payload = response.json()
 
             # Normalize to a list for the Store (handle different API envelopes)
@@ -5229,6 +5220,10 @@ class DashboardManager:
                 metrics = []
 
             self.logger.debug(f"Fetched {len(metrics)} metrics from {url}")
+
+            if not metrics and current_metrics:
+                # Empty-guard: preserve the last-known-good store (see docstring).
+                return dash.no_update
 
             # Phase B: Track REST polling bandwidth (P0 motivator proof metric)
             if not hasattr(self, "_rest_bytes_gauge"):
@@ -5254,10 +5249,15 @@ class DashboardManager:
             return metrics
         except Exception as e:
             self.logger.warning(f"Failed to fetch metrics from API: {type(e).__name__}: {e}")
-            return []
+            return dash.no_update if current_metrics else []
 
     def _update_topology_store_handler(self, n=None, active_tab=None):
-        """Fetch topology from API and update network visualizer store."""
+        """Fetch topology from API and update network visualizer store.
+
+        Failure paths deliberately return ``dash.no_update`` (same last-known-good
+        posture as the metrics handler's N1 empty-guard) so a transient upstream
+        error never blanks the network view.
+        """
         # Only update if topology tab is active
         if active_tab != "topology":
             return dash.no_update
