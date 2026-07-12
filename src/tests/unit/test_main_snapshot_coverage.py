@@ -295,6 +295,106 @@ class TestCreateSnapshotRealMode:
             assert response.status_code == 500
             assert "Failed to create snapshot" in response.json()["detail"]
 
+    @pytest.mark.unit
+    def test_create_snapshot_blank_description_forwards_empty_string(self, app_client, snapshot_dir):
+        """Omitted description must reach the adapter as "" — never None (N4 / incident I-3).
+
+        The route previously defaulted the query param to ``None`` and forwarded it,
+        so the cascor-client posted ``{"description": null}`` and cascor rejected the
+        request with a 422 ``string_type`` validation error.
+        """
+        import main
+
+        fake_integration = FakeIntegration()
+        mock_svc = _make_service_backend(adapter=fake_integration)
+
+        with (
+            patch.object(main, "backend", mock_svc),
+            patch.object(main, "_snapshots_dir", str(snapshot_dir)),
+        ):
+            response = app_client.post("/api/v1/snapshots?name=blank_desc_test")
+
+            assert response.status_code == 201
+            assert fake_integration.save_snapshot_called
+            assert fake_integration.saved_description is not None
+            assert fake_integration.saved_description == ""
+            # The response surface must not carry null either.
+            assert response.json()["description"] == ""
+
+    @pytest.mark.unit
+    async def test_create_snapshot_none_description_normalized_at_adapter_seam(self, snapshot_dir):
+        """A direct ``description=None`` call is normalized to "" before the adapter call (N4)."""
+        import main
+
+        fake_integration = FakeIntegration()
+        mock_svc = _make_service_backend(adapter=fake_integration)
+
+        with (
+            patch.object(main, "backend", mock_svc),
+            patch.object(main, "_snapshots_dir", str(snapshot_dir)),
+        ):
+            result = await main.create_snapshot(name="none_desc_test", description=None)
+
+            assert fake_integration.save_snapshot_called
+            assert fake_integration.saved_description == ""
+            assert result["id"] == "none_desc_test"
+
+    @pytest.mark.unit
+    def test_create_snapshot_failure_detail_carries_upstream_reason(self, app_client, snapshot_dir):
+        """The 500 detail must include the upstream failure reason, not just a constant (N4).
+
+        The route previously flattened every failure to ``"Failed to create snapshot"``,
+        producing the doubled toast with zero diagnostic content (plan §4 I-3, S11).
+        """
+        import main
+
+        class FailingIntegration:
+            def save_snapshot(self, path, description=None):
+                raise RuntimeError("disk quota exceeded (simulated)")
+
+            def shutdown(self):
+                pass
+
+        mock_svc = _make_service_backend(adapter=FailingIntegration())
+
+        with (
+            patch.object(main, "backend", mock_svc),
+            patch.object(main, "_snapshots_dir", str(snapshot_dir)),
+        ):
+            response = app_client.post("/api/v1/snapshots?name=fail_detail_test")
+
+            assert response.status_code == 500
+            detail = response.json()["detail"]
+            assert "Failed to create snapshot" in detail
+            assert "disk quota exceeded (simulated)" in detail
+
+    @pytest.mark.unit
+    def test_create_snapshot_failure_detail_truncates_long_reason(self, app_client, snapshot_dir):
+        """Upstream reasons are truncated to a sane display length in the 500 detail (N4)."""
+        import main
+
+        long_reason = "x" * 1000
+
+        class FailingIntegration:
+            def save_snapshot(self, path, description=None):
+                raise RuntimeError(long_reason)
+
+            def shutdown(self):
+                pass
+
+        mock_svc = _make_service_backend(adapter=FailingIntegration())
+
+        with (
+            patch.object(main, "backend", mock_svc),
+            patch.object(main, "_snapshots_dir", str(snapshot_dir)),
+        ):
+            response = app_client.post("/api/v1/snapshots?name=fail_truncate_test")
+
+            assert response.status_code == 500
+            detail = response.json()["detail"]
+            assert "Failed to create snapshot" in detail
+            assert len(detail) <= len("Failed to create snapshot: ") + 300
+
 
 class TestRestoreSnapshotRealMode:
     """Tests for restore_snapshot in real mode (lines 1266-1270, 1338-1399)."""

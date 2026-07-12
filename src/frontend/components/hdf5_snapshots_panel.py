@@ -406,7 +406,8 @@ class HDF5SnapshotsPanel(BaseComponent):
             resp = requests.post(
                 f"{self._api_base_url}/api/v1/snapshots",
                 params=params,
-                timeout=self.api_timeout + 3,  # Allow extra time for creation, headers=internal_api_headers()
+                timeout=self.api_timeout + 3,  # Allow extra time for creation
+                headers=internal_api_headers(),
             )
 
             if resp.status_code == 201:
