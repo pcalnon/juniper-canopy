@@ -245,18 +245,36 @@ class TestDatastoreInner:
 
     @patch("requests.get")
     def test_update_metrics_store_delegates(self, mock_get, dm):
+        # Called outside a Dash callback context: the wrapper's
+        # MissingCallbackContextException branch maps that to trigger="" (a
+        # mount/mode-switch-style fetch). Third positional arg is the
+        # current store contents (N1 empty-guard State).
         mock_get.return_value = _resp(ok=True, json_value={"history": [{"epoch": 1}]})
         cb = raw_cb(dm, "update_metrics_store")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
             result = cb(1, {"mode": "window", "window_size": 100}, None)
         assert result == [{"epoch": 1}]
 
+    @patch("requests.get")
+    def test_update_metrics_store_interval_trigger_in_callback_context(self, mock_get, dm):
+        # N1: exercise the wrapper's happy ctx path — an interval-tick trigger
+        # inside a (mocked) callback context reaches the handler with the
+        # interval prop_id, and window mode fetches on every tick.
+        mock_get.return_value = _resp(ok=True, json_value={"history": [{"epoch": 2}]})
+        cb = raw_cb(dm, "update_metrics_store")
+        fake_ctx = MagicMock()
+        fake_ctx.triggered = [{"prop_id": "fast-update-interval.n_intervals"}]
+        with patch.object(dmmod.dash, "callback_context", fake_ctx):
+            with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+                result = cb(1, {"mode": "window", "window_size": 100}, None)
+        assert result == [{"epoch": 2}]
+
     def test_update_topology_store_ws_complete(self, dm):
         cb = raw_cb(dm, "update_topology_store")
         fake_ctx = MagicMock()
         fake_ctx.triggered = [{"prop_id": "ws-topology-buffer.data"}]
         with patch.object(dmmod.dash, "callback_context", fake_ctx), patch("backend.cascor_service_adapter.CascorServiceAdapter._is_complete_topology", return_value=True), patch("backend.cascor_service_adapter.CascorServiceAdapter._transform_topology", return_value={"transformed": True}):
-            result = cb(1, {"hidden_units": [1, 2]}, "topology", None)
+            result = cb(1, {"hidden_units": [1, 2]}, "topology")
         assert result == {"transformed": True}
 
     def test_update_topology_store_ws_stub_falls_back_to_rest(self, dm):
@@ -266,29 +284,31 @@ class TestDatastoreInner:
         with patch.object(dmmod.dash, "callback_context", fake_ctx), patch("backend.cascor_service_adapter.CascorServiceAdapter._is_complete_topology", return_value=False), patch("backend.cascor_service_adapter.CascorServiceAdapter._transform_topology", return_value={"rest": True}), patch("requests.get") as mock_get:
             mock_get.return_value = _resp(ok=True, json_value={"data": {"input_units": 2}})
             with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-                result = cb(1, {"hidden_units": 5}, "topology", None)
+                result = cb(1, {"hidden_units": 5}, "topology")
         assert result == {"rest": True}
 
-    def test_update_topology_store_ws_gated_no_update(self, dm):
+    def test_update_topology_store_polls_rest_even_with_ws_connected(self, dm):
+        # N1: the sticky topologyReceived gate is gone — an interval tick on the
+        # active topology tab polls REST regardless of WS connection state
+        # (the gate pinned here pre-N1 returned no_update and starved the view).
         cb = raw_cb(dm, "update_topology_store")
         fake_ctx = MagicMock()
         fake_ctx.triggered = [{"prop_id": "slow-update-interval.n_intervals"}]
-        fake_settings = MagicMock()
-        fake_settings.ws_bridge_enabled = True
-        with patch.object(dmmod.dash, "callback_context", fake_ctx), patch.object(dmmod, "get_settings", return_value=fake_settings):
-            result = cb(1, None, "topology", {"connected": True, "topologyReceived": True})
-        assert result is dash.no_update
+        with patch.object(dmmod.dash, "callback_context", fake_ctx), patch("backend.cascor_service_adapter.CascorServiceAdapter._transform_topology", return_value={"rest": True}), patch("requests.get") as mock_get:
+            mock_get.return_value = _resp(ok=True, json_value={"data": {"input_units": 2}})
+            with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+                result = cb(1, None, "topology")
+        assert result == {"rest": True}
+        mock_get.assert_called_once()
 
     def test_update_topology_store_rest_fallback(self, dm):
         cb = raw_cb(dm, "update_topology_store")
         fake_ctx = MagicMock()
         fake_ctx.triggered = [{"prop_id": "slow-update-interval.n_intervals"}]
-        fake_settings = MagicMock()
-        fake_settings.ws_bridge_enabled = False
-        with patch.object(dmmod.dash, "callback_context", fake_ctx), patch.object(dmmod, "get_settings", return_value=fake_settings), patch("backend.cascor_service_adapter.CascorServiceAdapter._transform_topology", return_value={"rest": True}), patch("requests.get") as mock_get:
+        with patch.object(dmmod.dash, "callback_context", fake_ctx), patch("backend.cascor_service_adapter.CascorServiceAdapter._transform_topology", return_value={"rest": True}), patch("requests.get") as mock_get:
             mock_get.return_value = _resp(ok=True, json_value={"data": {"input_units": 2}})
             with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-                result = cb(1, None, "topology", None)
+                result = cb(1, None, "topology")
         assert result == {"rest": True}
 
     @patch("requests.get")

@@ -695,6 +695,98 @@ class TestMetricsHistoryEndpointDirect:
 
 
 # =============================================================================
+# N1 event-loop guard: the poll routes exercised by the un-gated dashboard
+# polls must run their synchronous backend calls via asyncio.to_thread so a
+# slow cascor cannot stall canopy's event loop (training-runtime defects plan
+# §8 row 2).
+# =============================================================================
+class TestPollRoutesUseToThread:
+    """Pin the asyncio.to_thread wiring on /api/metrics/history, /api/topology,
+    and /api/topology/raw (the routes the N1 un-gated polls hit)."""
+
+    @pytest.mark.asyncio
+    async def test_metrics_history_runs_backend_call_in_thread(self):
+        import main
+
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+
+        original_backend = main.backend
+        try:
+            main.backend = mock_backend
+            with patch("main.asyncio.to_thread", new=AsyncMock(return_value=[{"epoch": 1}])) as mock_to_thread:
+                result = await main.get_metrics_history(limit=50)
+
+            mock_to_thread.assert_awaited_once()
+            call = mock_to_thread.await_args
+            assert call.args[0] == mock_backend.get_metrics_history
+            assert call.args[1] == 50
+            assert result == {"history": [{"epoch": 1}]}
+            mock_backend.get_metrics_history.assert_not_called()  # only via to_thread
+        finally:
+            main.backend = original_backend
+
+    @pytest.mark.asyncio
+    async def test_metrics_history_limit_zero_maps_to_10k_in_thread(self):
+        import main
+
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+
+        original_backend = main.backend
+        try:
+            main.backend = mock_backend
+            with patch("main.asyncio.to_thread", new=AsyncMock(return_value=[])) as mock_to_thread:
+                result = await main.get_metrics_history(limit=0)
+
+            call = mock_to_thread.await_args
+            assert call.args[0] == mock_backend.get_metrics_history
+            assert call.args[1] == 10000
+            assert result == {"history": []}
+        finally:
+            main.backend = original_backend
+
+    @pytest.mark.asyncio
+    async def test_topology_runs_backend_call_in_thread(self):
+        import main
+
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+
+        original_backend = main.backend
+        try:
+            main.backend = mock_backend
+            with patch("main.asyncio.to_thread", new=AsyncMock(return_value={"nodes": [], "connections": []})) as mock_to_thread:
+                result = await main.get_topology()
+
+            mock_to_thread.assert_awaited_once()
+            assert mock_to_thread.await_args.args[0] == mock_backend.get_network_topology
+            assert result == {"nodes": [], "connections": []}
+            mock_backend.get_network_topology.assert_not_called()
+        finally:
+            main.backend = original_backend
+
+    @pytest.mark.asyncio
+    async def test_raw_topology_runs_backend_call_in_thread(self):
+        import main
+
+        mock_backend = MagicMock()
+        mock_backend.backend_type = "service"
+
+        original_backend = main.backend
+        try:
+            main.backend = mock_backend
+            with patch("main.asyncio.to_thread", new=AsyncMock(return_value={"weights": []})) as mock_to_thread:
+                result = await main.get_raw_topology()
+
+            mock_to_thread.assert_awaited_once()
+            assert mock_to_thread.await_args.args[0] == mock_backend.get_raw_topology
+            assert result == {"weights": []}
+        finally:
+            main.backend = original_backend
+
+
+# =============================================================================
 # Test /api/metrics endpoint - direct async function calls
 # =============================================================================
 class TestMetricsEndpointDirect:

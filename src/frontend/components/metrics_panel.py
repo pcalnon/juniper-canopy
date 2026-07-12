@@ -499,7 +499,10 @@ class MetricsPanel(BaseComponent):
                     style={"height": "300px"},
                 ),
                 # Candidate Pool Section moved to CandidateMetricsPanel (candidate_metrics_panel.py)
-                # Data store for metrics
+                # Data store for metrics. Hydrated by the dashboard-level
+                # /api/metrics/history poll on every fast-interval tick (1 s) —
+                # un-gated per N1 (the bridge posture until WS-primary lands,
+                # Q6/C6/N8); the WS extendTraces path remains the chart fast path.
                 dcc.Store(id=f"{self.component_id}-metrics-store", data=[]),
                 dcc.Store(id=f"{self.component_id}-network-stats-store", data={}),
                 dcc.Store(id=f"{self.component_id}-training-state-store", data={}),

@@ -1291,7 +1291,10 @@ async def get_metrics_history(limit: int = 100):
         Dictionary with history list
     """
     count = limit if limit > 0 else 10000
-    return {"history": backend.get_metrics_history(count)}
+    # N1 event-loop guard: the backend call is a synchronous cascor-client call;
+    # run it in a thread so a slow cascor cannot stall canopy's event loop under
+    # the un-gated 1 Hz dashboard poll.
+    return {"history": await asyncio.to_thread(backend.get_metrics_history, count)}
 
 
 @app.get("/api/network/stats")
@@ -1352,7 +1355,9 @@ async def get_topology():
     Returns:
         Network topology dictionary with nodes and connections
     """
-    topology = backend.get_network_topology()
+    # N1 event-loop guard: same sync-in-async pattern as /api/metrics/history —
+    # the un-gated topology poll exercises this route on every slow tick.
+    topology = await asyncio.to_thread(backend.get_network_topology)
     if topology is None:
         return JSONResponse({"error": "No topology available"}, status_code=503)
     return topology
@@ -1364,7 +1369,8 @@ async def get_raw_topology():
     Get raw weight-oriented network topology (pre-transformation).
     Returns CasCor's native format with weight arrays for heatmap visualization.
     """
-    raw = backend.get_raw_topology()
+    # N1 event-loop guard (trivially co-located with /api/topology).
+    raw = await asyncio.to_thread(backend.get_raw_topology)
     if raw is None:
         return JSONResponse({"error": "No raw topology available"}, status_code=503)
     return raw

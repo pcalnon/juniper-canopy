@@ -219,21 +219,22 @@ class TestClassifyExceptionFailure:
 class TestStoreHandlerBranches:
     @patch("requests.get")
     def test_metrics_full_mode_and_non_ok(self, mock_get, dm):
-        # mode == "full" -> limit=0 branch (line 5208), then non-OK -> [] (5214-5215)
+        # mode == "full" -> limit=0 branch, then non-OK with an empty store -> []
+        # (the N1 empty-guard only preserves a store that already holds data).
         mock_get.return_value = _resp(ok=False, status=500)
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dm._update_metrics_store_handler(n=1, display_mode_state={"mode": "full"}, ws_status=None)
+            result = dm._update_metrics_store_handler(n=1, display_mode_state={"mode": "full"})
         assert result == []
 
     @patch("requests.get")
     def test_metrics_gauge_registration_failure_swallowed(self, mock_get, dm):
         # Force the observability import path to raise so the gauge except: branch
-        # (lines 5245-5246 -> self._rest_bytes_gauge = None) is taken, and the
-        # handler still returns the metrics list.
+        # (-> self._rest_bytes_gauge = None) is taken, and the handler still
+        # returns the metrics list.
         mock_get.return_value = _resp(ok=True, json_value={"history": [{"epoch": 1}]})
         with patch("juniper_observability.register_or_reuse", side_effect=RuntimeError("no registry")):
             with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-                result = dm._update_metrics_store_handler(n=1, display_mode_state={"mode": "full"}, ws_status=None)
+                result = dm._update_metrics_store_handler(n=1, display_mode_state={"mode": "full"})
         assert result == [{"epoch": 1}]
         assert dm._rest_bytes_gauge is None
 

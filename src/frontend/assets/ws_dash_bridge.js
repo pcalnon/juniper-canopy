@@ -42,26 +42,26 @@
     window._juniperWsDrain = {
         // Bounded ring buffers
         _metricsBuffer: [],           // max MAX_METRICS
-        _stateBuffer: null,           // latest only (single object)
+        _stateBuffer: null,           // latest only (single object); server-side drain removed by N1 — N8 (wave 4) re-wires it
         _topologyBuffer: null,        // latest only
         _cascadeAddBuffer: [],        // max MAX_CASCADE_ADD
-        _candidateProgressBuffer: [], // max MAX_CANDIDATE_PROGRESS
+        _candidateProgressBuffer: [], // max MAX_CANDIDATE_PROGRESS; server-side drain removed by N1 — N8 (wave 4) re-wires it
         _replayWeightBuffer: [],      // CAN-015g (g-4): max MAX_REPLAY_WEIGHTS
         _datasetSwapBuffer: [],       // P2-7 follow-up: max MAX_DATASET_SWAPS
         _connectionStatus: {connected: false, reconnecting: false, mode: "live"},
         // GAP-WS-16: metricsReceived flips true when initial_metrics or the
-        // first metrics frame is delivered, so the REST /api/metrics/history
-        // poll can stay quiet until WS metrics are actually flowing instead
-        // of switching off the moment the socket reports connected. Stored
-        // outside _connectionStatus because websocket_client.js replaces
+        // first metrics frame is delivered. N1 removed the server-side REST
+        // gate that consumed this flag (the sticky gate starved long-lived
+        // tabs when WS frames stopped); the flag stays as connection-state
+        // bookkeeping for N8's liveness-gated fallback. Stored outside
+        // _connectionStatus because websocket_client.js replaces
         // _connectionStatus wholesale on every status change; peekConnectionStatus
         // merges this flag back in so it survives reconnects.
         _metricsReceived: false,
         // GAP-WS-25: same pattern for topology. Cascor only broadcasts
-        // `topology` on cascade_add (network grow events) — a fresh tab opened
-        // mid-training could wait minutes for one. Until the first topology
-        // frame arrives, the REST /api/topology poll keeps running so the
-        // network visualizer paints something. Once a frame arrives, REST quiets.
+        // `topology` on cascade_add (network grow events). N1 removed the
+        // server-side REST gate here too — the tab-gated slow-interval poll
+        // now always runs; this flag stays for N8.
         _topologyReceived: false,
         _gen: 0,                      // drain generation counter
 
