@@ -28,6 +28,7 @@ from frontend.components.hdf5_snapshots_panel import (  # noqa: E402
     DEFAULT_REFRESH_INTERVAL_MS,
     HDF5SnapshotsPanel,
 )
+from frontend.internal_api import internal_api_headers  # noqa: E402
 
 
 @pytest.fixture
@@ -501,6 +502,29 @@ class TestHDF5SnapshotsCreateHandler:
             # Verify the description was passed as a parameter
             call_kwargs = mock_post.call_args
             assert call_kwargs.kwargs.get("params", {}).get("description") == "Test description"
+
+    def test_create_snapshot_sends_internal_api_headers(self, panel):
+        """Create POST must carry ``internal_api_headers()`` (N4 / incident I-3).
+
+        The sibling snapshot requests (list/detail/restore/delete) already pass the
+        headers kwarg; the create POST had it swallowed by a trailing inline comment,
+        which breaks creation the moment API-key auth or rate limiting is active.
+        """
+        mock_response = MagicMock()
+        mock_response.status_code = 201
+        mock_response.json.return_value = {
+            "id": "snapshot_001",
+            "message": "Snapshot created successfully",
+        }
+
+        with patch("requests.post", return_value=mock_response) as mock_post:
+            result = panel._create_snapshot_handler()
+            assert result["success"] is True
+
+            call_kwargs = mock_post.call_args
+            assert call_kwargs.kwargs.get("headers") == internal_api_headers()
+            # The timeout kwarg must survive alongside the restored headers kwarg.
+            assert call_kwargs.kwargs.get("timeout") == panel.api_timeout + 3
 
     def test_create_snapshot_server_error(self, panel):
         """Should return error on 500 response."""

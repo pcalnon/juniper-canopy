@@ -1995,14 +1995,17 @@ def _log_snapshot_activity(action: str, snapshot_id: str, details: dict = None, 
 @app.post("/api/v1/snapshots", status_code=201)
 async def create_snapshot(
     name: str = None,
-    description: str = None,
+    description: str = "",
 ):
     """
     Create a new HDF5 snapshot of the current training state.
 
     Args:
         name: Optional custom name for the snapshot (auto-generated if not provided)
-        description: Optional description for the snapshot
+        description: Optional description for the snapshot. Defaults to "" (never
+            ``None``) — cascor's ``SnapshotCreateRequest.description: str`` accepts an
+            omitted/blank string but 422s an explicit ``null``, so a blank description
+            must never be forwarded as ``None`` (plan N4 / incident I-3).
 
     Returns:
         JSON object with the created snapshot metadata
@@ -2075,7 +2078,10 @@ async def create_snapshot(
         # ``RecurrenceServiceAdapter`` with cascor-incompatible semantics, so it must use
         # the h5py state-dump fallback below, never the cascor adapter's ``save_snapshot``.)
         if backend.backend_type == "service" and hasattr(backend, "_adapter") and hasattr(backend._adapter, "save_snapshot"):
-            backend._adapter.save_snapshot(str(snapshot_path), description=description)
+            # N4 (plan I-3): normalize a ``None`` description to "" at the seam — the
+            # adapter defaults to "" and the cascor-client would otherwise POST
+            # ``{"description": null}``, which cascor rejects with a 422.
+            backend._adapter.save_snapshot(str(snapshot_path), description=description or "")
         else:
             # Fallback: create a minimal HDF5 file with current state
             try:
@@ -2146,9 +2152,13 @@ async def create_snapshot(
         raise
     except Exception as e:
         system_logger.error("Failed to create snapshot: %s", e)
+        # N4 (plan I-3): carry the upstream failure reason in the HTTP detail
+        # (truncated for display) so the frontend toast shows the actual cause
+        # instead of doubling a generic constant with zero diagnostic content.
+        reason = str(e) or e.__class__.__name__
         raise HTTPException(
             status_code=500,
-            detail="Failed to create snapshot",
+            detail=f"Failed to create snapshot: {reason[:300]}",
         ) from e
 
 
