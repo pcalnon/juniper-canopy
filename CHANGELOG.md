@@ -33,9 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   N8), and fixed the metrics handler's stale "every 10th tick at 100ms" docstring (the fast
   interval is 1000 ms). Tests: un-gated handler + empty-guard + bounded-fetch units
   (`src/tests/unit/test_phase_b_bridge.py`), `asyncio.to_thread` wiring pins
-  (`src/tests/unit/test_main_api_coverage.py`), and a WS-silent Playwright scenario — tiles
-  advance via poll on a long-lived tab and post-run tiles survive the 1 Hz poll
-  (`src/tests/ui/test_ws_silent_poll_liveness.py`).
+  (`src/tests/unit/test_main_api_coverage.py`), and WS-silent Playwright scenarios asserting on
+  the store wire — the metrics store keeps hydrating via poll on a long-lived tab under the
+  sticky connected+received WS state, a stopped run's populated store survives continued 1 Hz
+  polling, and the topology store fetches REST on tab switch
+  (`src/tests/ui/test_ws_silent_poll_liveness.py`). The store wire (not the tiles) is the UI
+  observable because `update_metrics_display` renders lazily in the headless harness on main
+  too — a pre-existing issue noted for E-3/N2, not introduced here.  
 
 ### Changed
 
