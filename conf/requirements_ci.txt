@@ -157,14 +157,14 @@ torch
 # Core dependencies - using flexible versions for Python 3.14 compatibility
 a2wsgi>=1.10
 annotated-types>=0.7
-anyio>=4.14.1
+anyio>=4.14.2
 attrs>=25.0
 certifi
-cffi>=2.0
+cffi>=2.1.0
 click>=8.4.2
 colorama>=0.4
 contourpy>=1.3
-coverage>=7.15.0
+coverage>=7.15.1
 cycler>=0.12
 dash>=3.0
 dash-bootstrap-components>=2.0
@@ -173,7 +173,7 @@ dnspython>=2.0
 email-validator>=2.0
 exceptiongroup>=1.0
 fastapi>=0.100
-filelock>=3.29.5
+filelock>=3.29.7
 flake8>=7.0
 Flask>=3.0
 fonttools>=4.63.0
