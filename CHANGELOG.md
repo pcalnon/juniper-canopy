@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   polling, and the topology store fetches REST on tab switch
   (`src/tests/ui/test_ws_silent_poll_liveness.py`). The store wire (not the tiles) is the UI
   observable because `update_metrics_display` renders lazily in the headless harness on main
-  too — a pre-existing issue noted for E-3/N2, not introduced here.
+  too — a pre-existing issue noted for E-3/N2, not introduced here.  
 
 ### Changed
 

@@ -38,6 +38,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import threading
 import time
 from typing import Any, Callable, Dict, Optional, Tuple, Union, cast
 
@@ -69,6 +70,123 @@ def _first_defined(*values, default=None):
     return default
 
 
+def _ws_open(ws: Any) -> bool:
+    """Return True iff a raw ``websockets`` connection object is usable (OPEN).
+
+    N2 (training-runtime defects plan §4 I-1 root cause 3 / §5 T2): the old
+    liveness notion was ``_ws is not None``, which is blind to half-open /
+    peer-closed sockets — the ``websockets`` ``ClientConnection`` object stays
+    non-None forever after the peer closes (its ``state`` flips to CLOSED, set
+    either by the inbound close frame or by the library's own protocol-level
+    keepalive detecting a dead peer). The 2026-07-10 incident: cascor closed
+    the control WS at 18:17:03 and the supervisor never noticed for 12+ hours.
+
+    Compares ``state.name`` against ``"OPEN"`` (``websockets.protocol.State``)
+    via ``getattr`` so canopy takes no direct import dependency on the
+    ``websockets`` package and degrades gracefully for fakes/mocks that expose
+    no ``state`` surface (presence then remains the best available signal).
+
+    CL1 seam: when juniper-cascor-client ships first-class half-open detection
+    (roadmap unit CL1 — liveness surfaced on the stream classes), this helper
+    collapses to that surface instead of reaching into ``_ws``.
+    """
+    if ws is None:
+        return False
+    state = getattr(ws, "state", None)
+    if state is None:
+        return True
+    return getattr(state, "name", None) == "OPEN"
+
+
+class StreamHealth:
+    """Thread-safe liveness + throughput snapshot for one canopy→cascor stream.
+
+    N2 (training-runtime defects plan §4 I-1 / §5 T2/T5): both the metrics
+    relay and the control-stream supervisor keep one of these updated so that
+    (a) the periodic relay summary can make silence visible in the logs, and
+    (b) ``/api/state`` staleness marking and the dashboard's degraded-mode
+    indicator can report end-to-end stream health instead of merely
+    "browser socket open".
+
+    Status classification:
+        - ``reconnecting`` — not currently connected (includes pre-first-connect).
+        - ``degraded``     — connected, but the last inbound activity is older than
+                             ``stale_after_seconds`` (only when that bound is set;
+                             cascor pings every ~30 s, so a quiet-but-healthy relay
+                             stream still shows activity well inside 60 s).
+        - ``healthy``      — connected with recent activity (or activity not required).
+    """
+
+    def __init__(self, name: str, stale_after_seconds: Optional[float] = None):
+        self._name = name
+        self._stale_after = stale_after_seconds
+        self._lock = threading.Lock()
+        self._connected = False
+        self._ever_connected = False
+        self._last_activity: Optional[float] = None
+        self._reconnect_count = 0
+        self._last_disconnect_reason: Optional[str] = None
+        self._frames_total = 0
+        self._frames_by_type: Dict[str, int] = {}
+        self._interval_counts: Dict[str, int] = {}
+
+    def mark_connected(self) -> None:
+        with self._lock:
+            if self._ever_connected:
+                self._reconnect_count += 1
+            self._ever_connected = True
+            self._connected = True
+            self._last_activity = time.monotonic()
+
+    def mark_disconnected(self, reason: str) -> None:
+        with self._lock:
+            self._connected = False
+            self._last_disconnect_reason = reason
+
+    def mark_activity(self, frame_type: Optional[str] = None) -> None:
+        """Record inbound activity; ``frame_type`` additionally bumps the forwarded-frame counters."""
+        with self._lock:
+            self._last_activity = time.monotonic()
+            if frame_type:
+                self._frames_total += 1
+                self._frames_by_type[frame_type] = self._frames_by_type.get(frame_type, 0) + 1
+                self._interval_counts[frame_type] = self._interval_counts.get(frame_type, 0) + 1
+
+    def _status_locked(self) -> str:
+        if not self._connected:
+            return "reconnecting"
+        if self._stale_after is not None:
+            if self._last_activity is None or (time.monotonic() - self._last_activity) > self._stale_after:
+                return "degraded"
+        return "healthy"
+
+    def status(self) -> str:
+        with self._lock:
+            return self._status_locked()
+
+    def snapshot(self) -> Dict[str, Any]:
+        """Return a JSON-safe health snapshot for /api/stream_health and the UI badge."""
+        with self._lock:
+            age = (time.monotonic() - self._last_activity) if self._last_activity is not None else None
+            return {
+                "name": self._name,
+                "connected": self._connected,
+                "status": self._status_locked(),
+                "last_activity_age_seconds": round(age, 1) if age is not None else None,
+                "reconnect_count": self._reconnect_count,
+                "last_disconnect_reason": self._last_disconnect_reason,
+                "frames_forwarded_total": self._frames_total,
+                "frames_by_type": dict(self._frames_by_type),
+            }
+
+    def take_interval_counts(self) -> Dict[str, int]:
+        """Return and reset the per-summary-interval frame counters (relay summary loop)."""
+        with self._lock:
+            counts = self._interval_counts
+            self._interval_counts = {}
+            return counts
+
+
 class ControlStreamSupervisor:
     """Phase C: persistent /ws/control connection to cascor for set_params.
 
@@ -78,6 +196,16 @@ class ControlStreamSupervisor:
 
     The supervisor runs on the event loop passed at construction time.
     ``apply_params`` calls it via ``asyncio.run_coroutine_threadsafe``.
+
+    N2 liveness posture (training-runtime defects plan §4 I-1 root cause 3 /
+    §5 T2): ``is_connected`` consults the real socket state (``_ws_open``),
+    and the connect loop runs a periodic protocol-level keepalive probe
+    (``ws.ping()`` — an existing capability of the underlying ``websockets``
+    connection; cascor's server answers protocol pings at the WS layer). On
+    liveness loss the supervisor logs one WARNING with the reason, closes the
+    stream, and reconnects with logged backoff — the 12-hour-silent-death
+    class of the 2026-07-10 incident is thereby impossible: every disconnect
+    and every reconnect attempt logs exactly one line.
     """
 
     _BACKOFF = [1, 2, 5, 10, 30]
@@ -94,15 +222,34 @@ class ControlStreamSupervisor:
         self._connect_task: Optional[asyncio.Task] = None
         self._shutdown = False
         self.loop: Optional[asyncio.AbstractEventLoop] = None
+        # N2: liveness knobs (refreshed from settings in ``start()``; defaults
+        # here keep direct ``_connect_loop()`` invocation in tests working).
+        self._probe_interval: float = 30.0
+        self._probe_pong_timeout: float = BackendConstants.CONTROL_PROBE_PONG_TIMEOUT_SECONDS
+        # N2: health snapshot for /api/stream_health + the degraded-mode badge.
+        # No stale_after bound: /ws/control is command/response — quiet-but-open
+        # is its normal state, so "connected" alone classifies healthy.
+        self.health = StreamHealth("control")
 
     @property
     def is_connected(self) -> bool:
-        return self._stream is not None and self._stream._ws is not None
+        """Real socket liveness — half-open/peer-closed sockets read as disconnected.
+
+        Pre-N2 this was ``self._stream._ws is not None``, which stayed True for
+        12+ hours after cascor closed the socket (2026-07-10 incident).
+        CL1 seam: swap the ``_ws`` reach-in for the cascor-client liveness
+        surface once roadmap unit CL1 ships it.
+        """
+        return self._stream is not None and _ws_open(self._stream._ws)
 
     async def start(self) -> None:
         """Start the supervisor background connect loop."""
         self.loop = asyncio.get_running_loop()
         self._shutdown = False
+        from settings import get_settings
+
+        app_settings = get_settings()
+        self._probe_interval = float(getattr(app_settings, "ws_stream_probe_interval_seconds", self._probe_interval))
         self._connect_task = asyncio.create_task(self._connect_loop())
 
     async def stop(self) -> None:
@@ -115,16 +262,42 @@ class ControlStreamSupervisor:
         if self._stream:
             await self._stream.disconnect()
             self._stream = None
+        self.health.mark_disconnected("supervisor stopped")
 
     async def set_params(self, params: dict, *, timeout: float = 1.0) -> dict:
         """Send set_params via the persistent control stream."""
         if not self.is_connected or self._stream is None:
             raise JuniperCascorConnectionError("Control stream not connected")
         result = await self._stream.set_params(params, timeout=timeout)
+        # N2: a correlated ack is inbound activity — feed the liveness clock.
+        self.health.mark_activity("ack")
         return result if isinstance(result, dict) else {}
 
+    async def _probe_liveness(self) -> bool:
+        """Protocol-level keepalive probe: ping the socket and await the pong.
+
+        Returns True when the pong arrives within the deadline (marking
+        activity), or when no probe surface exists (fakes / future CL1 client
+        objects) — in that case the ``is_connected`` state check remains the
+        authoritative signal. Returns False on a missed pong or send failure.
+        """
+        stream = self._stream
+        ws = getattr(stream, "_ws", None) if stream is not None else None
+        ping = getattr(ws, "ping", None)
+        if ws is None or ping is None or not callable(ping):
+            return True
+        try:
+            pong_waiter = await ping()
+            await asyncio.wait_for(pong_waiter, timeout=self._probe_pong_timeout)
+            self.health.mark_activity()
+            return True
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return False
+
     async def _connect_loop(self) -> None:
-        """Auto-reconnect loop with backoff."""
+        """Auto-reconnect loop with backoff and keepalive probing."""
         attempt = 0
         while not self._shutdown:
             try:
@@ -135,6 +308,7 @@ class ControlStreamSupervisor:
                 )
                 await self._stream.connect()
                 logger.info("Control stream supervisor connected to %s", self._ws_url)
+                self.health.mark_connected()
                 attempt = 0
                 # Stay connected until disconnect. ASYNC110 prefers an
                 # ``asyncio.Event`` here; for this supervisor a 1-second
@@ -143,13 +317,34 @@ class ControlStreamSupervisor:
                 # would require touching the stream class, and (b) the
                 # one-second granularity is well below any reconnect
                 # latency we care about.
+                disconnect_reason = None
+                last_probe = time.monotonic()
                 while not self._shutdown and self.is_connected:  # noqa: ASYNC110
                     await asyncio.sleep(1)
+                    if self._probe_interval > 0 and time.monotonic() - last_probe >= self._probe_interval:
+                        last_probe = time.monotonic()
+                        if not await self._probe_liveness():
+                            disconnect_reason = f"keepalive probe failed (no pong within {self._probe_pong_timeout:.0f}s)"
+                            break
+                if not self._shutdown:
+                    if disconnect_reason is None:
+                        ws = getattr(self._stream, "_ws", None) if self._stream is not None else None
+                        close_code = getattr(ws, "close_code", None)
+                        disconnect_reason = f"socket no longer open (close_code={close_code})"
+                    # N2: the pre-fix loop fell through here SILENTLY and
+                    # re-connected without a trace (and with the blind
+                    # ``_ws is not None`` check it never fell through at all).
+                    logger.warning("Control stream liveness lost: %s — reconnecting", disconnect_reason)
+                    self.health.mark_disconnected(disconnect_reason)
+                    if self._stream is not None:
+                        with contextlib.suppress(Exception):
+                            await self._stream.disconnect()
             except asyncio.CancelledError:
                 return
             except Exception as e:
                 delay = self._BACKOFF[min(attempt, len(self._BACKOFF) - 1)]
                 logger.warning("Control stream supervisor disconnected (%s), reconnecting in %ds", e, delay)
+                self.health.mark_disconnected(str(e))
                 attempt += 1
                 try:
                     await asyncio.sleep(delay)
@@ -246,6 +441,11 @@ class CascorServiceAdapter:
         self.training_monitor = _ServiceTrainingMonitor(self._client)
         self._training_stream: Optional[CascorTrainingStream] = None
         self._relay_task: Optional[asyncio.Task] = None
+        # N2: periodic relay throughput summary task (started with the relay).
+        self._relay_summary_task: Optional[asyncio.Task] = None
+        # N2: relay stream health (also reachable via the lazy ``relay_health``
+        # property for ``__new__``-created instances — same pattern as ``_cb``).
+        self._relay_health = StreamHealth("training-relay", stale_after_seconds=BackendConstants.RELAY_STALE_AFTER_SECONDS)
         self._attached_to_existing: bool = False
         self._state_update_callback: Optional[Callable] = None
         self._circuit = CircuitBreaker(name=BackendConstants.CIRCUIT_BREAKER_NAME, failure_threshold=BackendConstants.CIRCUIT_BREAKER_FAILURE_THRESHOLD, recovery_timeout=BackendConstants.CIRCUIT_BREAKER_RECOVERY_TIMEOUT)
@@ -325,12 +525,31 @@ class CascorServiceAdapter:
         """
         Open a WebSocket training stream and relay messages to Canopy's
         websocket_manager for broadcast to dashboard clients.
+
+        N2 hardening (training-runtime defects plan §4 I-1 / §5 T2/T5): the
+        relay now (a) bounds every frame wait by a liveness window so a
+        half-open socket cannot starve it silently, (b) counts inbound frames
+        by type into ``relay_health`` and emits a periodic INFO summary
+        (zero-counts included — silence becomes visible), and (c) logs one
+        line for EVERY disconnect and reconnect attempt, reconnecting with
+        backoff on all failure classes. Pre-N2, a ``connect()`` failure raised
+        ``JuniperCascorConnectionError`` (not an ``OSError``), fell into the
+        generic ``except Exception`` arm, and ``break``-ed the loop — killing
+        the relay permanently after a single failed reconnect.
         """
 
         async def _relay_loop():
             import random
 
             from communication.websocket_manager import websocket_manager
+            from settings import get_settings
+
+            relay_settings = get_settings()
+            liveness_timeout = float(getattr(relay_settings, "ws_stream_liveness_timeout_seconds", 90.0))
+
+            def _backoff_delay(attempt_n: int) -> float:
+                # Phase F: jitter backoff — matches JS formula (GAP-WS-30/31)
+                return float(max(random.random() * min(60, 0.5 * (2 ** min(attempt_n, 7))), 0.5))  # Floor at 500ms
 
             attempt = 0
             relay_enabled = True
@@ -348,9 +567,27 @@ class CascorServiceAdapter:
                 try:
                     stream = CascorTrainingStream(base_url=self._ws_url, api_key=self._api_key)
                     await stream.connect()
+                    logger.info("Cascor metrics stream connected to %s", self._ws_url)
+                    self.relay_health.mark_connected()
                     attempt = 0
                     last_training_seq = None
-                    async for message in stream.stream():
+                    # N2: pull frames through an explicit iterator so each wait is
+                    # bounded by the liveness window — with a bare ``async for`` a
+                    # half-open socket parks the relay on ``recv()`` forever (the
+                    # 2026-07-10 silent-death class).
+                    disconnect_reason = "stream ended (peer closed)"
+                    frame_iter = stream.stream().__aiter__()
+                    while True:
+                        try:
+                            if liveness_timeout > 0:
+                                message = await asyncio.wait_for(frame_iter.__anext__(), timeout=liveness_timeout)
+                            else:
+                                message = await frame_iter.__anext__()
+                        except StopAsyncIteration:
+                            break
+                        except asyncio.TimeoutError:
+                            disconnect_reason = f"liveness expired (no frames in {liveness_timeout:.0f}s)"
+                            break
                         # METRICS-MON R2.2.5 / seed-05: validate the inbound
                         # frame against juniper-cascor-protocol's canonical
                         # envelope schemas. Validation is observational —
@@ -395,6 +632,13 @@ class CascorServiceAdapter:
                             logger.debug("Inbound-frame seq-gap hook errored; relay continues", exc_info=True)
 
                         msg_type = message.get("type", "")
+
+                        # N2: every inbound frame (pings included) feeds the
+                        # liveness clock and the per-type counters — so the
+                        # periodic summary can show e.g. ``ping=2, metrics=0``,
+                        # the exact heartbeat-only signature of the 2026-07-10
+                        # incident that had zero diagnostic surface before.
+                        self.relay_health.mark_activity(msg_type or "untyped")
 
                         # Phase F: respond to cascor heartbeat pings with pong
                         if msg_type == "ping":
@@ -497,22 +741,82 @@ class CascorServiceAdapter:
                                 except Exception as ee:  # nosec B110
                                     logger.debug(f"Event callback error: {ee}")
 
-                    await stream.disconnect()
+                    # N2: liveness expiry abandons the (possibly cancelled)
+                    # generator; close both it and the socket best-effort
+                    # before reconnecting.
+                    with contextlib.suppress(Exception):
+                        await frame_iter.aclose()
+                    with contextlib.suppress(Exception):
+                        await stream.disconnect()
+                    # N2: one line per disconnect — never reconnect silently
+                    # (the pre-fix stream-ended path re-connected with no log
+                    # and no backoff).
+                    delay = _backoff_delay(attempt)
+                    logger.warning(f"Cascor metrics stream disconnected ({disconnect_reason}). Reconnecting in {delay:.1f}s")
+                    self.relay_health.mark_disconnected(disconnect_reason)
+                    attempt += 1
+                    await asyncio.sleep(delay)
                 except asyncio.CancelledError:
                     relay_enabled = False
-                except OSError as e:
-                    # Phase F: jitter backoff — matches JS formula (GAP-WS-30/31)
-                    delay = random.random() * min(60, 0.5 * (2 ** min(attempt, 7)))
-                    delay = max(delay, 0.5)  # Floor at 500ms
+                    self.relay_health.mark_disconnected("relay stopped")
+                except (OSError, JuniperCascorClientError) as e:
+                    # N2: ``JuniperCascorClientError`` added — ``connect()``
+                    # wraps socket errors in ``JuniperCascorConnectionError``
+                    # (NOT an OSError), which previously fell through to the
+                    # generic arm below and permanently killed the relay after
+                    # one failed reconnect.
+                    delay = _backoff_delay(attempt)
                     logger.warning(f"Cascor metrics stream disconnected ({e}). Reconnecting in {delay:.1f}s")
+                    self.relay_health.mark_disconnected(str(e))
                     attempt += 1
                     try:
                         await asyncio.sleep(delay)
                     except asyncio.CancelledError:
                         relay_enabled = False
                 except Exception as e:
-                    logger.error("Unexpected error in relay loop: %s", e, exc_info=True)
-                    break
+                    # N2: an unexpected error must not kill the relay silently
+                    # (this arm used to ``break``, creating a permanent,
+                    # unlogged-thereafter relay death). Log loudly, then
+                    # reconnect with the same backoff.
+                    delay = _backoff_delay(attempt)
+                    logger.error("Unexpected error in relay loop: %s — reconnecting in %.1fs", e, delay, exc_info=True)
+                    self.relay_health.mark_disconnected(f"unexpected error: {e}")
+                    attempt += 1
+                    try:
+                        await asyncio.sleep(delay)
+                    except asyncio.CancelledError:
+                        relay_enabled = False
+
+        # N2 (§5 T5): periodic INFO throughput summary — the relay previously
+        # had no lifecycle/throughput logging after its single start line, so
+        # a starved stream was indistinguishable from a quiet one. Counts are
+        # per-type since the last summary, zero-counts included: silence is
+        # itself the signal.
+        _SUMMARY_CORE_TYPES = ("metrics", "state", "topology", "ping")
+
+        async def _relay_summary_loop(interval: float):
+            while True:
+                await asyncio.sleep(interval)
+                try:
+                    counts = self.relay_health.take_interval_counts()
+                    snap = self.relay_health.snapshot()
+                    total = sum(counts.values())
+                    parts = [f"{t}={counts.get(t, 0)}" for t in _SUMMARY_CORE_TYPES]
+                    parts += [f"{t}={n}" for t, n in sorted(counts.items()) if t not in _SUMMARY_CORE_TYPES]
+                    age = snap.get("last_activity_age_seconds")
+                    logger.info(
+                        "Metrics relay summary: %d frame(s) in last %.0fs (%s); status=%s; last-frame-age=%s; reconnects=%d",
+                        total,
+                        interval,
+                        ", ".join(parts),
+                        snap.get("status"),
+                        f"{age:.1f}s" if age is not None else "never",
+                        snap.get("reconnect_count", 0),
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:  # noqa: BLE001 — observability MUST NOT break the relay
+                    logger.debug("Relay summary emission failed; continuing", exc_info=True)
 
         self._relay_task = asyncio.create_task(_relay_loop())
         logger.info("Metrics relay started")
@@ -521,6 +825,9 @@ class CascorServiceAdapter:
         from settings import get_settings
 
         app_settings = get_settings()
+        summary_interval = float(getattr(app_settings, "ws_relay_summary_interval_seconds", 60.0))
+        if summary_interval > 0:
+            self._relay_summary_task = asyncio.create_task(_relay_summary_loop(summary_interval))
         if getattr(app_settings, "use_websocket_set_params", False):
             await self._control_supervisor.start()
             logger.info("Control stream supervisor started (use_websocket_set_params=True)")
@@ -533,12 +840,65 @@ class CascorServiceAdapter:
         # Phase C: stop control supervisor
         await self._control_supervisor.stop()
 
+        # N2: stop the throughput summary task alongside the relay.
+        summary_task = getattr(self, "_relay_summary_task", None)
+        if summary_task and not summary_task.done():
+            summary_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await summary_task
+        self._relay_summary_task = None
+
         if self._relay_task and not self._relay_task.done():
             self._relay_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._relay_task
         self._relay_task = None
         logger.info("Metrics relay stopped")
+
+    # ------------------------------------------------------------------
+    # N2: stream health (relay + control) for /api/stream_health + UI badge
+    # ------------------------------------------------------------------
+
+    @property
+    def relay_health(self) -> StreamHealth:
+        """Lazy relay-health accessor (safe for __new__-created instances)."""
+        try:
+            return self._relay_health
+        except AttributeError:
+            self._relay_health = StreamHealth("training-relay", stale_after_seconds=BackendConstants.RELAY_STALE_AFTER_SECONDS)
+            return self._relay_health
+
+    def get_stream_health(self) -> Dict[str, Any]:
+        """Combined canopy→cascor stream-health snapshot (N2 degraded-mode indicator).
+
+        Returns ``{"overall", "relay", "control"}`` where ``overall`` is
+        ``healthy`` / ``degraded`` / ``reconnecting``:
+
+        - the relay (metrics stream) drives ``overall`` directly — it is the
+          path that feeds tiles/charts/state, so its loss IS the degradation;
+        - an unhealthy control stream degrades an otherwise-healthy overall to
+          ``degraded`` only while WS set_params is enabled (apply falls back
+          to REST — degraded, not broken).
+
+        The UI badge consumes this via ``GET /api/stream_health`` so that
+        "browser socket open" can no longer masquerade as end-to-end healthy.
+        """
+        relay = self.relay_health.snapshot()
+        control: Dict[str, Any]
+        supervisor = getattr(self, "_control_supervisor", None)
+        from settings import get_settings
+
+        control_enabled = bool(getattr(get_settings(), "use_websocket_set_params", False)) and supervisor is not None
+        if supervisor is not None:
+            control = supervisor.health.snapshot()
+        else:
+            control = {"name": "control", "connected": False, "status": "reconnecting"}
+        control["enabled"] = control_enabled
+
+        overall = relay.get("status", "reconnecting")
+        if overall == "healthy" and control_enabled and control.get("status") != "healthy":
+            overall = "degraded"
+        return {"overall": overall, "relay": relay, "control": control}
 
     # ------------------------------------------------------------------
     # Network property (lines 491, 1803 in main.py)
