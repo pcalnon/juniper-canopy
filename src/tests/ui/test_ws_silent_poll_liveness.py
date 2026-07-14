@@ -73,34 +73,55 @@ def _wait_status(canopy_url: str, predicate, *, timeout: float = 10.0) -> dict:
 
 def _attach_store_collector(page, output_name):
     """Collect ``_dash-update-component`` responses whose callback output is
-    ``output_name``. Body reads are deferred (sync-API handlers must not
-    block); call the returned ``drain()`` after waiting to get
-    ``[(status, payload-or-None), ...]``."""
+    ``output_name``. Body reads happen inside ``drain()`` (sync-API response
+    handlers must not block) and are MEMOIZED on first success: Chromium
+    evicts response bodies under renderer pressure (headless CI runners,
+    especially after heavy re-renders like the network-visualizer tab), so a
+    late re-read of an old response raises and, pre-memoization, every
+    payload silently degraded to ``None`` at assert time — the
+    ``(200, NoneType)`` captures of the 2026-07-12..14 CI failures. Call
+    ``drain()`` periodically (the ``_wait_for`` loops do) so first reads
+    happen close to arrival; a body that is never readable is surfaced as a
+    ``"<body-unavailable:ExcName>"`` sentinel payload instead of ``None``.
+    Returns ``[(status, payload), ...]`` for responses matching
+    ``output_name``."""
     collected = []
+    memo = {}  # index into collected -> ("nonmatch",) | ("match", status, payload)
 
     def on_response(resp):
         if "_dash-update-component" in resp.url:
-            collected.append(resp)  # body read deferred
+            collected.append(resp)  # body read deferred to drain()
 
     page.on("response", on_response)
 
     def drain():
         results = []
-        for resp in collected:
-            try:
-                out = json.loads(resp.request.post_data or "{}").get("output", "")
-            except Exception:
-                continue
-            if out != output_name:
-                continue
-            payload = None
-            if resp.status == 200:
+        for i, resp in enumerate(collected):
+            entry = memo.get(i)
+            if entry is None:
                 try:
-                    body = json.loads(resp.text())
-                    payload = body.get("response", {}).get(output_name.rsplit(".", 1)[0], {}).get("data")
+                    out = json.loads(resp.request.post_data or "{}").get("output", "")
                 except Exception:
-                    payload = None
-            results.append((resp.status, payload))
+                    memo[i] = ("nonmatch",)
+                    continue
+                if out != output_name:
+                    memo[i] = ("nonmatch",)
+                    continue
+                if resp.status != 200:
+                    entry = memo[i] = ("match", resp.status, None)
+                else:
+                    try:
+                        body = json.loads(resp.text())
+                        payload = body.get("response", {}).get(output_name.rsplit(".", 1)[0], {}).get("data")
+                        entry = memo[i] = ("match", 200, payload)
+                    except Exception as exc:
+                        # Body not readable (yet or anymore) — do NOT memoize,
+                        # so the next drain() retries; report a sentinel that
+                        # no assertion can mistake for real data.
+                        entry = ("match", 200, f"<body-unavailable:{type(exc).__name__}>")
+            if entry[0] == "nonmatch":
+                continue
+            results.append((entry[1], entry[2]))
         return results
 
     return drain
@@ -225,6 +246,9 @@ def test_topology_store_fetches_on_tab_switch_with_ws_silent(dashboard_page, can
 
     drain = _attach_store_collector(dashboard_page, _TOPOLOGY_STORE_OUTPUT)
     dashboard_page.locator("#visualization-tabs >> a:has-text('Network Topology')").first.click()
+    # Confirm the tab actually activated (the callback's REST fallback is
+    # tab-gated) before holding the store to the fetch contract.
+    dashboard_page.wait_for_selector("#visualization-tabs a.active:has-text('Network Topology')", timeout=10_000)
 
     # Tab activation triggers the callback immediately; the slow interval
     # (5 s) re-fires it while the tab stays active. Wait ≤ slow tick + margin.
@@ -233,5 +257,12 @@ def test_topology_store_fetches_on_tab_switch_with_ws_silent(dashboard_page, can
         return writes or None
 
     writes = _wait_for(topo_write, timeout=12.0, page=dashboard_page)
-    assert writes, f"topology store never received a REST fetch under WS-silent sticky state; captured={[(s, type(p).__name__) for s, p in drain()]}"
+    if not writes:
+        # Failure triage: distinguish a broken route from a broken store wire.
+        try:
+            route = requests.get(f"{canopy_url}/api/topology", timeout=2)
+            route_info = (route.status_code, sorted(route.json().keys()) if route.ok else route.text[:120])
+        except Exception as exc:
+            route_info = f"route probe failed: {exc}"
+        raise AssertionError(f"topology store never received a REST fetch under WS-silent sticky state; captured={[(s, type(p).__name__ if not isinstance(p, str) else p) for s, p in drain()]}; direct GET /api/topology={route_info}")
     assert writes[-1].get("connections") is not None, "transformed topology payload missing connections"
