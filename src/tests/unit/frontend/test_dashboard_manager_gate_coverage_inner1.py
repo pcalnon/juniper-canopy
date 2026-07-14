@@ -278,11 +278,14 @@ class TestDatastoreInner:
         assert result == {"transformed": True}
 
     def test_update_topology_store_ws_stub_falls_back_to_rest(self, dm):
+        # Weight-format REST payload so the fallback exercises the transform
+        # (graph-format now passes through untransformed — see
+        # test_update_topology_store_graph_format_passthrough).
         cb = raw_cb(dm, "update_topology_store")
         fake_ctx = MagicMock()
         fake_ctx.triggered = [{"prop_id": "ws-topology-buffer.data"}]
         with patch.object(dmmod.dash, "callback_context", fake_ctx), patch("backend.cascor_service_adapter.CascorServiceAdapter._is_complete_topology", return_value=False), patch("backend.cascor_service_adapter.CascorServiceAdapter._transform_topology", return_value={"rest": True}), patch("requests.get") as mock_get:
-            mock_get.return_value = _resp(ok=True, json_value={"data": {"input_units": 2}})
+            mock_get.return_value = _resp(ok=True, json_value={"data": {"input_size": 2, "output_size": 1, "hidden_units": []}})
             with dm.app.server.test_request_context(base_url="http://localhost:8050"):
                 result = cb(1, {"hidden_units": 5}, "topology")
         assert result == {"rest": True}
@@ -291,11 +294,14 @@ class TestDatastoreInner:
         # N1: the sticky topologyReceived gate is gone — an interval tick on the
         # active topology tab polls REST regardless of WS connection state
         # (the gate pinned here pre-N1 returned no_update and starved the view).
+        # Weight-format payload (no input_units key) so the adapter transform
+        # still runs — graph-format payloads now pass through untransformed
+        # (see test_update_topology_store_graph_format_passthrough).
         cb = raw_cb(dm, "update_topology_store")
         fake_ctx = MagicMock()
         fake_ctx.triggered = [{"prop_id": "slow-update-interval.n_intervals"}]
         with patch.object(dmmod.dash, "callback_context", fake_ctx), patch("backend.cascor_service_adapter.CascorServiceAdapter._transform_topology", return_value={"rest": True}), patch("requests.get") as mock_get:
-            mock_get.return_value = _resp(ok=True, json_value={"data": {"input_units": 2}})
+            mock_get.return_value = _resp(ok=True, json_value={"data": {"input_size": 2, "output_size": 1, "hidden_units": []}})
             with dm.app.server.test_request_context(base_url="http://localhost:8050"):
                 result = cb(1, None, "topology")
         assert result == {"rest": True}
@@ -306,10 +312,29 @@ class TestDatastoreInner:
         fake_ctx = MagicMock()
         fake_ctx.triggered = [{"prop_id": "slow-update-interval.n_intervals"}]
         with patch.object(dmmod.dash, "callback_context", fake_ctx), patch("backend.cascor_service_adapter.CascorServiceAdapter._transform_topology", return_value={"rest": True}), patch("requests.get") as mock_get:
-            mock_get.return_value = _resp(ok=True, json_value={"data": {"input_units": 2}})
+            mock_get.return_value = _resp(ok=True, json_value={"data": {"input_size": 2, "output_size": 1, "hidden_units": []}})
             with dm.app.server.test_request_context(base_url="http://localhost:8050"):
                 result = cb(1, None, "topology")
         assert result == {"rest": True}
+
+    def test_update_topology_store_graph_format_passthrough(self, dm):
+        # Demo-mode seam (2026-07-14, canopy#449): a graph-format payload
+        # (has ``input_units``) is returned UNTRANSFORMED and the service
+        # adapter is never consulted — its module hard-imports
+        # juniper_cascor_client (the optional [juniper-cascor] extra), which
+        # is legitimately absent in demo-only installs; importing it here
+        # turned every dispatch into a silent no_update (empty topology
+        # panel). The patched transform's sentinel must NOT come back.
+        cb = raw_cb(dm, "update_topology_store")
+        fake_ctx = MagicMock()
+        fake_ctx.triggered = [{"prop_id": "slow-update-interval.n_intervals"}]
+        graph_payload = {"input_units": 2, "output_units": 1, "hidden_units": 0, "nodes": [{"id": "input_0"}], "connections": []}
+        with patch.object(dmmod.dash, "callback_context", fake_ctx), patch("backend.cascor_service_adapter.CascorServiceAdapter._transform_topology", return_value={"rest": True}) as mock_transform, patch("requests.get") as mock_get:
+            mock_get.return_value = _resp(ok=True, json_value={"data": graph_payload})
+            with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+                result = cb(1, None, "topology")
+        assert result == graph_payload
+        mock_transform.assert_not_called()
 
     @patch("requests.get")
     def test_update_raw_topology_store_delegates(self, mock_get, dm):
