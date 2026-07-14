@@ -87,6 +87,7 @@ def _attach_store_collector(page, output_name):
     ``output_name``."""
     collected = []
     memo = {}  # index into collected -> ("nonmatch",) | ("match", status, payload)
+    inputs = {}  # index into collected -> {input_id: value} of matching dispatches (failure triage)
 
     def on_response(resp):
         if "_dash-update-component" in resp.url:
@@ -100,19 +101,31 @@ def _attach_store_collector(page, output_name):
             entry = memo.get(i)
             if entry is None:
                 try:
-                    out = json.loads(resp.request.post_data or "{}").get("output", "")
+                    req = json.loads(resp.request.post_data or "{}")
+                    out = req.get("output", "")
                 except Exception:
                     memo[i] = ("nonmatch",)
                     continue
                 if out != output_name:
                     memo[i] = ("nonmatch",)
                     continue
+                inputs[i] = {inp.get("id"): inp.get("value") for inp in req.get("inputs", []) if isinstance(inp, dict)}
                 if resp.status != 200:
                     entry = memo[i] = ("match", resp.status, None)
                 else:
                     try:
                         body = json.loads(resp.text())
-                        payload = body.get("response", {}).get(output_name.rsplit(".", 1)[0], {}).get("data")
+                        resp_map = body.get("response") or {}
+                        component = output_name.rsplit(".", 1)[0]
+                        if component in resp_map:
+                            payload = resp_map[component].get("data")
+                        else:
+                            # dash 4.x serializes PreventUpdate/no_update as
+                            # HTTP 200 {"multi":true,"response":{}} (not 204):
+                            # the output key is simply absent. Mark it so a
+                            # gated/no-op dispatch is distinguishable from a
+                            # genuine null write in failure messages.
+                            payload = "<no_update>"
                         entry = memo[i] = ("match", 200, payload)
                     except Exception as exc:
                         # Body not readable (yet or anymore) — do NOT memoize,
@@ -124,6 +137,13 @@ def _attach_store_collector(page, output_name):
             results.append((entry[1], entry[2]))
         return results
 
+    def detail():
+        """(status, payload, inputs) triples of matching dispatches — for failure messages."""
+        drained = drain()
+        matched = [inputs.get(i, {}) for i in sorted(inputs)]
+        return [(s, p, matched[j] if j < len(matched) else {}) for j, (s, p) in enumerate(drained)]
+
+    drain.detail = detail
     return drain
 
 
@@ -256,13 +276,41 @@ def test_topology_store_fetches_on_tab_switch_with_ws_silent(dashboard_page, can
         writes = [p for s, p in drain() if s == 200 and isinstance(p, dict) and p.get("nodes")]
         return writes or None
 
-    writes = _wait_for(topo_write, timeout=12.0, page=dashboard_page)
+    writes = _wait_for(topo_write, timeout=15.0, page=dashboard_page)
     if not writes:
-        # Failure triage: distinguish a broken route from a broken store wire.
+        # Failure triage, in causality order:
+        # 1. per-dispatch active_tab values — a non-"topology" value on every
+        #    dispatch means the gate (not the fetch) starved the store;
+        # 2. direct GET /api/topology — route-broken vs wire-broken;
+        # 3. a forced callback-wire POST with active_tab="topology" — if THIS
+        #    returns data while the browser dispatches no_update'd, the
+        #    handler works and the dispatches carried the wrong inputs; if it
+        #    also comes back empty/no_update, the server side is the problem.
+        dispatches = [(s, p if isinstance(p, str) else type(p).__name__, (inp or {}).get("visualization-tabs")) for s, p, inp in drain.detail()]
         try:
             route = requests.get(f"{canopy_url}/api/topology", timeout=2)
             route_info = (route.status_code, sorted(route.json().keys()) if route.ok else route.text[:120])
         except Exception as exc:
             route_info = f"route probe failed: {exc}"
-        raise AssertionError(f"topology store never received a REST fetch under WS-silent sticky state; captured={[(s, type(p).__name__ if not isinstance(p, str) else p) for s, p in drain()]}; direct GET /api/topology={route_info}")
+        component = _TOPOLOGY_STORE_OUTPUT.rsplit(".", 1)[0]
+        probe_body = {
+            "output": _TOPOLOGY_STORE_OUTPUT,
+            "outputs": {"id": component, "property": "data"},
+            "inputs": [
+                {"id": "slow-update-interval", "property": "n_intervals", "value": 99},
+                {"id": "ws-topology-buffer", "property": "data", "value": None},
+                {"id": "visualization-tabs", "property": "active_tab", "value": "topology"},
+            ],
+            "changedPropIds": ["visualization-tabs.active_tab"],
+        }
+        try:
+            wire = requests.post(f"{canopy_url}/dashboard/_dash-update-component", json=probe_body, headers={"Origin": canopy_url}, timeout=8)
+            if not wire.ok:
+                wire_info = (wire.status_code, wire.text[:120])
+            else:
+                comp = (wire.json().get("response") or {}).get(component)
+                wire_info = (wire.status_code, "no_update" if comp is None else f"nodes={len((comp.get('data') or {}).get('nodes') or [])}")
+        except Exception as exc:
+            wire_info = f"wire probe failed: {exc}"
+        raise AssertionError(f"topology store never received a REST fetch under WS-silent sticky state; dispatches (status, payload, active_tab)={dispatches}; direct GET /api/topology={route_info}; forced wire dispatch={wire_info}")
     assert writes[-1].get("connections") is not None, "transformed topology payload missing connections"
