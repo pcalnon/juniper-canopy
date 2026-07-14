@@ -120,6 +120,31 @@ def _wait_for(predicate, *, timeout: float, interval: float = 0.5, page=None):
     return None
 
 
+def _ensure_running_run(dashboard_page, canopy_url):
+    """Lifecycle-robust precondition: return with a training run RUNNING.
+
+    On CI runners the demo's boot-time auto-run (or the fresh run a preceding
+    test left behind) converges after ~31 epochs — CI has no juniper-data
+    service, so the demo falls back to local dataset generation, every
+    first-cascade candidate misses the correlation threshold, and the run ends
+    in fsm ``COMPLETED`` (hidden_units=0) roughly 31 s after any start. The
+    Start button posts ``/api/train/start`` with the route-default
+    ``reset=False``, and ``training_state_machine._handle_start`` has no
+    COMPLETED branch — START from COMPLETED is refused (409) and
+    ``is_running`` never flips, which is exactly how this suite went red on
+    main 2026-07-12..13. RESET is legal from every state (→ STOPPED), and
+    START from STOPPED is legal, so go Reset → Start whenever the run is not
+    live. The restart-orchestration UX itself (surfacing the refusal, N3) is
+    product work tracked in the training-runtime defects plan — these tests
+    only need the precondition."""
+    if _status(canopy_url).get("is_running"):
+        return
+    dashboard_page.click("#reset-button")
+    _wait_status(canopy_url, lambda s: s.get("is_running") is False and s.get("fsm_status") != "COMPLETED")
+    dashboard_page.click("#start-button")
+    _wait_status(canopy_url, lambda s: s.get("is_running") is True)
+
+
 @pytest.mark.ui
 def test_metrics_store_polls_on_long_lived_tab_with_ws_silent(dashboard_page, canopy_url):
     """The N1 regression pin: a long-lived tab whose WS claims connected +
@@ -130,11 +155,9 @@ def test_metrics_store_polls_on_long_lived_tab_with_ws_silent(dashboard_page, ca
     dashboard_page.wait_for_selector("#start-button", timeout=15_000)
     assert dashboard_page.evaluate(_STICKY_WS_SILENT_STATE), "ws_dash_bridge drain object not present"
 
-    # Demo mode auto-starts a training run at boot; make sure one is running
-    # so the history keeps growing while we observe.
-    if not _status(canopy_url).get("is_running"):
-        dashboard_page.click("#start-button")
-        _wait_status(canopy_url, lambda s: s.get("is_running") is True)
+    # Demo mode auto-starts a training run at boot, but it may already have
+    # converged — establish a live run the FSM-legal way (see the helper).
+    _ensure_running_run(dashboard_page, canopy_url)
 
     drain = _attach_store_collector(dashboard_page, _METRICS_STORE_OUTPUT)
 
@@ -163,9 +186,7 @@ def test_populated_store_survives_poll_after_stop(dashboard_page, canopy_url):
     dashboard_page.wait_for_selector("#stop-button", timeout=15_000)
     assert dashboard_page.evaluate(_STICKY_WS_SILENT_STATE), "ws_dash_bridge drain object not present"
 
-    if not _status(canopy_url).get("is_running"):
-        dashboard_page.click("#start-button")
-        _wait_status(canopy_url, lambda s: s.get("is_running") is True)
+    _ensure_running_run(dashboard_page, canopy_url)
 
     drain = _attach_store_collector(dashboard_page, _METRICS_STORE_OUTPUT)
 
@@ -196,6 +217,11 @@ def test_topology_store_fetches_on_tab_switch_with_ws_silent(dashboard_page, can
     ``no_update`` here, leaving the visualizer starved."""
     dashboard_page.wait_for_selector("#visualization-tabs", timeout=15_000)
     assert dashboard_page.evaluate(_STICKY_WS_SILENT_STATE), "ws_dash_bridge drain object not present"
+
+    # A live run guarantees a real network behind /api/topology; the
+    # converged post-run state is where this test went red in CI (its store
+    # dispatches carried null payloads there — unreachable with a live run).
+    _ensure_running_run(dashboard_page, canopy_url)
 
     drain = _attach_store_collector(dashboard_page, _TOPOLOGY_STORE_OUTPUT)
     dashboard_page.locator("#visualization-tabs >> a:has-text('Network Topology')").first.click()
