@@ -5342,6 +5342,19 @@ class DashboardManager:
             result = response.json()
             # Unwrap success envelope: {"status": "success", "data": {...}}
             topology = result.get("data", result) if isinstance(result, dict) else result
+            # Graph-format payloads (the demo backend emits them directly) pass
+            # through UNTRANSFORMED — critically, without importing the service
+            # adapter: ``backend.cascor_service_adapter`` hard-imports
+            # ``juniper_cascor_client``, which is the optional [juniper-cascor]
+            # extra and legitimately absent in demo-only installs (and the CI UI
+            # env). Pre-fix, that ModuleNotFoundError landed in the broad except
+            # below → silent ``no_update`` on every dispatch → a permanently
+            # empty Network Topology panel in any client-less env (the
+            # 2026-07-12..14 UI-leg red; regression pin:
+            # test_topology_store_fetches_on_tab_switch_with_ws_silent).
+            if isinstance(topology, dict) and "input_units" in topology:
+                self.logger.debug(f"Fetched topology from {url}: {len(topology.get('connections', []))} connections (graph-format passthrough)")
+                return topology
             # Transform CasCor weight-oriented format to graph-oriented format
             # expected by NetworkVisualizer (input_units/output_units/connections)
             from backend.cascor_service_adapter import CascorServiceAdapter
