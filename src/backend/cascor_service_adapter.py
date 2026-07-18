@@ -1902,16 +1902,27 @@ class CascorServiceAdapter:
     # Snapshot REST delegation
     # ------------------------------------------------------------------
 
-    def save_snapshot(self, path: str, description: str = "") -> None:
+    def save_snapshot(self, path: str, description: str = "") -> Dict[str, Any]:
         """Save current network state via CasCor /v1/snapshots endpoint.
 
         Args:
             path: Local path hint (ignored — CasCor manages storage server-side).
             description: Optional description for the snapshot.
+
+        Returns:
+            CasCor's snapshot-create response (success envelope or bare data
+            dict; ``{}`` if the client returned something non-dict) so the
+            caller can report the SERVER-side snapshot metadata. The local
+            ``path`` never exists in service mode — canopy shares no
+            filesystem with cascor (the deploy stack mounts no snapshot
+            volume into canopy) — so callers must not stat it (wave-1 E2E
+            finding 2026-07-18: doing so turned every successful save into
+            a 500).
         """
         try:
-            self._client.save_snapshot(description=description)
+            resp = self._client.save_snapshot(description=description)
             logger.info("Snapshot saved via CasCor service (description=%r)", description)
+            return resp if isinstance(resp, dict) else {}
         except JuniperCascorClientError as e:
             logger.error("Failed to save snapshot: %s", e)
             raise
