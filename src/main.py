@@ -2154,7 +2154,29 @@ async def create_snapshot(
             # N4 (plan I-3): normalize a ``None`` description to "" at the seam — the
             # adapter defaults to "" and the cascor-client would otherwise POST
             # ``{"description": null}``, which cascor rejects with a 422.
-            backend._adapter.save_snapshot(str(snapshot_path), description=description or "")
+            #
+            # Wave-1 E2E finding (2026-07-18): the local ``snapshot_path`` is a
+            # hint the adapter deliberately IGNORES — cascor names and stores
+            # the snapshot server-side, and canopy shares no filesystem with it
+            # (the deploy stack mounts no snapshot volume into canopy). The
+            # former post-save ``snapshot_path.stat()`` therefore raised ENOENT
+            # and turned every SUCCESSFUL service-mode save into a 500. Build
+            # the response from cascor's own metadata instead; the local stat
+            # now lives only in the h5py fallback branch, which really writes
+            # the file it stats.
+            result = backend._adapter.save_snapshot(str(snapshot_path), description=description or "")
+            data = result.get("data", result) if isinstance(result, dict) else {}
+            if not isinstance(data, dict):
+                data = {}
+            server_id = data.get("id") or snapshot_id
+            snapshot = {
+                "id": server_id,
+                "name": f"{server_id}.h5",
+                "timestamp": data.get("timestamp") or f"{now.replace(microsecond=0).isoformat()}Z",
+                "size_bytes": data.get("size_bytes", 0),
+                "description": data.get("description", description),
+                "path": data.get("path", ""),
+            }
         else:
             # Fallback: create a minimal HDF5 file with current state
             try:
@@ -2186,18 +2208,20 @@ async def create_snapshot(
                     detail="h5py not available for creating HDF5 snapshots",
                 ) from e
 
-        # Get file stats after creation
-        stat = snapshot_path.stat()
-        ts = datetime.fromtimestamp(stat.st_mtime, tz=UTC).replace(microsecond=0)
+            # Get file stats after creation (the fallback genuinely wrote this
+            # file locally, so the stat is valid here — the service branch
+            # above never reaches this).
+            stat = snapshot_path.stat()
+            ts = datetime.fromtimestamp(stat.st_mtime, tz=UTC).replace(microsecond=0)
 
-        snapshot = {
-            "id": snapshot_id,
-            "name": snapshot_name,
-            "timestamp": f"{ts.isoformat()}Z",
-            "size_bytes": stat.st_size,
-            "description": description,
-            "path": str(snapshot_path.absolute()),
-        }
+            snapshot = {
+                "id": snapshot_id,
+                "name": snapshot_name,
+                "timestamp": f"{ts.isoformat()}Z",
+                "size_bytes": stat.st_size,
+                "description": description,
+                "path": str(snapshot_path.absolute()),
+            }
 
         # Include dataset versioning metadata for reproducibility
         status = backend.get_status()
@@ -2209,12 +2233,12 @@ async def create_snapshot(
         # Log the activity
         _log_snapshot_activity(
             action="create",
-            snapshot_id=snapshot_id,
-            details={"name": snapshot_name, "size_bytes": stat.st_size, "mode": "real"},
+            snapshot_id=snapshot["id"],
+            details={"name": snapshot["name"], "size_bytes": snapshot["size_bytes"], "mode": "real"},
             message="Snapshot created successfully",
         )
 
-        system_logger.info("Created snapshot: %s at %s", snapshot_id, snapshot_path)
+        system_logger.info("Created snapshot: %s at %s", snapshot["id"], snapshot["path"] or snapshot_path)
 
         return {
             **snapshot,

@@ -158,6 +158,60 @@ class TestCreateSnapshot:
         assert result["dataset_version"] == "2026.1"
 
     @pytest.mark.asyncio
+    async def test_service_create_uses_cascor_metadata_never_local_stat(self, restore_backend, tmp_path, monkeypatch):
+        """Wave-1 E2E finding (2026-07-18): in service mode the local snapshot
+        path is a hint the adapter deliberately ignores — cascor names and
+        stores the file server-side and canopy shares no filesystem with it.
+        The route must build its response from cascor's metadata; the former
+        post-save ``snapshot_path.stat()`` raised ENOENT and turned every
+        successful save into a 500. The snapshots dir here holds NO file and
+        the test must still get a clean result."""
+        monkeypatch.setattr(main, "_snapshots_dir", str(tmp_path / "empty-snapshots"))
+        backend = MagicMock()
+        backend.backend_type = "service"
+        backend.get_status.return_value = {"dataset_name": "mnist", "dataset_version": "1.0.1"}
+        backend._adapter.save_snapshot.return_value = {
+            "status": "success",
+            "data": {
+                "id": "snapshot_20260718T120930Z",
+                "path": "/remote/cascor/snapshots/snapshot_20260718T120930Z.h5",
+                "timestamp": "20260718T120930Z",
+                "description": "",
+            },
+        }
+        _install_backend(backend)
+        result = await main.create_snapshot(description=None)
+        # Description normalized at the seam (N4): the adapter must see "".
+        assert backend._adapter.save_snapshot.call_args.kwargs["description"] == ""
+        # Response carries cascor's server-side identity, not a local path.
+        assert result["id"] == "snapshot_20260718T120930Z"
+        assert result["path"] == "/remote/cascor/snapshots/snapshot_20260718T120930Z.h5"
+        assert result["timestamp"] == "20260718T120930Z"
+        assert result["dataset_name"] == "mnist"
+        # No local file was ever required.
+        assert not any((tmp_path / "empty-snapshots").glob("*.h5"))
+
+    @pytest.mark.asyncio
+    async def test_service_create_tolerates_bare_dict_and_empty_responses(self, restore_backend, tmp_snapshots):
+        """Adapter responses without the success envelope (bare data dict) or
+        empty ({}) must still produce a well-formed result — falling back to
+        the locally generated id/timestamp, still with no local stat."""
+        backend = MagicMock()
+        backend.backend_type = "service"
+        backend.get_status.return_value = {}
+        backend._adapter.save_snapshot.return_value = {"id": "srv_bare", "path": "/r/srv_bare.h5"}
+        _install_backend(backend)
+        result = await main.create_snapshot(name="ignored_locally", description="d")
+        assert result["id"] == "srv_bare"
+        assert result["path"] == "/r/srv_bare.h5"
+
+        backend._adapter.save_snapshot.return_value = {}
+        result = await main.create_snapshot(name="local_fallback_id", description="d")
+        assert result["id"] == "local_fallback_id"
+        assert result["name"] == "local_fallback_id.h5"
+        assert result["size_bytes"] == 0
+
+    @pytest.mark.asyncio
     async def test_real_fallback_writes_meta_params_group(self, restore_backend, tmp_snapshots):
         # recurrence backend is non-demo AND non-service -> h5py fallback path.
         backend = MagicMock()
