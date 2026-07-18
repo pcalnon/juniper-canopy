@@ -2141,6 +2141,15 @@ async def create_snapshot(
     # Real mode: create actual HDF5 file via backend
     try:
         snapshot_path = Path(_snapshots_dir) / snapshot_name
+        # Path-containment guard: defense-in-depth over
+        # ``_sanitize_snapshot_name`` (which already 400s traversal
+        # sequences), and the explicit taint barrier CodeQL's
+        # py/path-injection query recognizes — the resolved target must stay
+        # inside the snapshots directory.
+        snapshots_base = await asyncio.to_thread(Path(_snapshots_dir).resolve)
+        snapshot_path = await asyncio.to_thread(snapshot_path.resolve)
+        if not snapshot_path.is_relative_to(snapshots_base):
+            raise HTTPException(status_code=400, detail="Invalid snapshot name")
         # ``mkdir`` is a sync syscall — push to a worker thread so a slow
         # disk doesn't stall the event loop. ``exist_ok=True`` keeps the
         # call idempotent on a hot path that may run frequently.
