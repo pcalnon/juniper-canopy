@@ -235,6 +235,27 @@ async def lifespan(app: FastAPI):
 
     enforce_dependency_floors(distribution="juniper-canopy", logger=system_logger)
 
+    # SEC-F01 (HO-2): boot-time auth-posture self-check, the security companion to
+    # the floor check above. An empty/placeholder CANOPY_API_KEY secret silently
+    # disables APIKeyAuth (security.py computes ``[api_key] if api_key else None``)
+    # and canopy serves its control surface OPEN behind a healthy health check.
+    # Surface that posture loudly at boot: with no real key this logs a prominent
+    # WARNING. require_auth=False because canopy has no require-auth flag today;
+    # flipping to fail-closed (CRITICAL + refuse to start) is the owner-approved
+    # JUNIPER_CANOPY_REQUIRE_AUTH follow-up. Bypass with
+    # JUNIPER_SKIP_AUTH_POSTURE_CHECK=1 (logged loudly).
+    from juniper_service_core import enforce_auth_posture
+
+    from secrets_util import get_secret
+
+    _canopy_api_key = get_secret("CANOPY_API_KEY")
+    enforce_auth_posture(
+        [_canopy_api_key] if _canopy_api_key else [],
+        require_auth=False,
+        service_name="juniper-canopy",
+        logger=system_logger,
+    )
+
     # D2 (SEC-F22): loopback bind-guard. Fail loud + closed here -- before
     # backend init / serving -- when canopy is configured to bind a non-loopback
     # interface with NEITHER bind-posture attestation set, instead of silently
