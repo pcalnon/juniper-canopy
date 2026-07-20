@@ -45,6 +45,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **N5 — Apply-Parameters UX: seeded-value clamping, verbatim rejection toasts,
+  applied/skipped rendering, liveness-gated WS leg (juniper-ml training-runtime
+  defects plan §4 I-4, T1/T3).** Four apply-params defects behind the evening-502
+  session are closed. (1) **Clamp/validate against PATCH bounds** — a new
+  `CascorPatchBounds` (mirroring cascor's `TrainingParamUpdateRequest` in
+  `src/api/models/training.py`, keyed by canopy form key) clamps out-of-range
+  values both when the form seeds from the backend (`init_params_from_backend`)
+  and before every apply, so a backend-echoed default can no longer wholesale-422
+  the whole form the way cascor's pre-C2b `epochs_max`=1e11 did; any clamp is
+  flagged in the toast rather than silently changing the operator's intent.
+  (2) **Verbatim rejection detail** — the failure toast now carries the upstream
+  reason (cascor's specific bound-violation message via canopy's 502 payload,
+  truncated) instead of the bare `Failed to apply (502)` that hid every root
+  cause; same extraction idiom N4's snapshot toast uses. (3) **Render
+  applied/skipped** — the adapter surfaces cascor's C2a `applied` / `skipped`
+  (`{key, reason}`) partition (mapped back to the canopy `nn_*`/`cn_*` namespace;
+  REST-nested and WS-flat shapes both handled), `POST /api/set_params` threads it,
+  and the toast shows what the live network took vs. declined with the reason
+  (e.g. `epochs_max (not-updatable)`). (4) **Liveness-gated WS leg** — the
+  `set_params` WS leg is skipped straight to REST (no burned ack window) when the
+  control stream is not connected, consuming N2/CL2's honest `is_connected`
+  surface; the WS path is retained, only gated. The pre-existing adapter `skipped`
+  (canopy keys with no cascor mapping) contract is unchanged. Regression tests:
+  `tests/unit/test_cascor_patch_bounds.py`, `tests/integration/test_n5_apply_params_ux.py`.
+
 - **N1 — un-gated metrics/topology polls (sticky-gate starvation fix; juniper-ml
   training-runtime defects plan §4 I-1/I-2, posture O2).** The metrics-store poll no longer
   skips REST while the WS bridge reports `connected` + `metricsReceived`, and the topology

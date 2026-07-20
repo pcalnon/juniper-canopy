@@ -1258,7 +1258,7 @@ class CascorServiceAdapter:
                 skipped,
             )
         if not mapped:
-            return {"ok": True, "data": {}, "skipped": skipped, "message": "No cascor-mappable params provided"}
+            return {"ok": True, "data": {}, "skipped": skipped, "applied": [], "skipped_detail": [], "message": "No cascor-mappable params provided"}
 
         from settings import get_settings
 
@@ -1317,8 +1317,55 @@ class CascorServiceAdapter:
                 "skipped": skipped,
             }
 
+        # N5 (I-4/T3): surface cascor's C2a applied/skipped(reason) partition so
+        # the canopy toast can show what actually landed and what the live
+        # network declined (and why) — distinct from the adapter's own
+        # ``skipped`` (canopy keys with no cascor mapping, never sent).
+        applied_keys, skipped_detail = self._extract_cascor_partition(result_data)
         logger.info(f"Cascor params updated: {list(mapped.keys())}")
-        return {"ok": True, "data": result_data, "skipped": skipped}
+        return {"ok": True, "data": result_data, "skipped": skipped, "applied": applied_keys, "skipped_detail": skipped_detail}
+
+    def _extract_cascor_partition(self, result_data: Any) -> Tuple[list, list]:
+        """Pull cascor's C2a applied / skipped(reason) partition out of an apply result.
+
+        C2a (I-4 / T3, cascor#398): ``PATCH /v1/training/params`` and the
+        ``/ws/control`` ``set_params`` ack both report, additively, which
+        submitted keys the live network actually took (``applied: [key, ...]``)
+        and which it could not (``skipped: [{"key", "reason"}, ...]`` — reasons
+        ``not-updatable`` / ``no-such-attribute`` / ``null-value``; ``epochs_max``
+        is the standing ``not-updatable`` case post-C2b). The REST success
+        envelope nests the partition under ``data``; the WS ack carries it flat,
+        so this scans both. cascor keys are mapped back to the canopy
+        ``nn_*``/``cn_*`` namespace so the toast speaks the user's form-field
+        names. Returns ``([], [])`` when the partition is absent (pre-C2a
+        backend, or a no-op apply); never raises.
+        """
+        applied_keys: list = []
+        skipped_detail: list = []
+        if not isinstance(result_data, dict):
+            return applied_keys, skipped_detail
+        containers = [result_data]
+        inner = result_data.get("data")
+        if isinstance(inner, dict):
+            containers.append(inner)
+        for container in containers:
+            raw_applied = container.get("applied")
+            if isinstance(raw_applied, list):
+                for cascor_key in raw_applied:
+                    canopy_key = self._CASCOR_TO_CANOPY_PARAM_MAP.get(cascor_key, cascor_key)
+                    if canopy_key not in applied_keys:
+                        applied_keys.append(canopy_key)
+            raw_skipped = container.get("skipped")
+            if isinstance(raw_skipped, list):
+                for entry in raw_skipped:
+                    # C2a entries are {"key", "reason"} dicts; ignore anything else
+                    # (e.g. a stray list[str] the adapter's own ``skipped`` uses).
+                    if isinstance(entry, dict) and "key" in entry:
+                        canopy_key = self._CASCOR_TO_CANOPY_PARAM_MAP.get(entry.get("key"), entry.get("key"))
+                        detail = {"key": canopy_key, "reason": entry.get("reason", "skipped")}
+                        if detail not in skipped_detail:
+                            skipped_detail.append(detail)
+        return applied_keys, skipped_detail
 
     def _verify_apply_roundtrip(self, mapped: Dict[str, Any]) -> Optional[Dict[str, Dict[str, Any]]]:
         """Confirm the cascor running config matches the values just PATCHed.
@@ -1593,9 +1640,16 @@ class CascorServiceAdapter:
         Uses ``asyncio.run_coroutine_threadsafe`` since apply_params is called
         from a thread (via asyncio.to_thread in the route handler).
         """
+        # N5 (I-4 / T2): liveness gate — skip the WS leg entirely when the
+        # control stream is dead so no apply burns the ``set_params`` ack window
+        # before falling back to REST. Post-N2/CL2 ``is_connected`` reads the
+        # real socket state (a half-open/peer-closed socket reads False), so this
+        # honestly short-circuits the 12-hour-silent-death class of the
+        # 2026-07-10 incident. For /ws/control (command/response, no stale bound)
+        # ``is_connected`` is exactly the ``health == healthy`` predicate.
         supervisor = getattr(self, "_control_supervisor", None)
         if supervisor is None or not supervisor.is_connected:
-            logger.debug("Control stream not connected, hot params will use REST fallback")
+            logger.debug("Control stream not connected (or absent); hot params skip the WS leg and use REST fallback")
             return None
 
         from settings import get_settings

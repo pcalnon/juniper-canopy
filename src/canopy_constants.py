@@ -201,6 +201,125 @@ class TrainingConstants:
     METRICS_HISTORY_MAXLEN: Final[int] = 10000
 
 
+class CascorPatchBounds:
+    """Admissible runtime-apply ranges, MIRRORED from cascor's PATCH request model.
+
+    N5 (juniper-ml training-runtime defects plan §4 I-4 / §7). The ``Apply
+    Parameters`` form seeds itself from the backend (``init_params_from_backend``)
+    and submits the full form to ``PATCH /v1/training/params``. A backend-echoed
+    value that violates cascor's own request-model bounds gets the WHOLE form
+    wholesale-rejected (422) — the exact evening-502 failure the plan diagnosed,
+    where cascor's pre-C2b ``epochs_max`` default (1e11) exceeded its own
+    ``le=1_000_000`` PATCH ceiling. This table lets canopy clamp/flag such values
+    defensively at init and before apply instead of submitting a doomed form.
+
+    Each entry is the range cascor's ``TrainingParamUpdateRequest``
+    (juniper-cascor ``src/api/models/training.py``) declares for that field,
+    keyed by the canopy ``nn_*``/``cn_*`` form key (mapped via the adapter's
+    ``_CANOPY_TO_CASCOR_PARAM_MAP``). ``hi`` is cascor's ``le``; ``lo`` is cascor's
+    ``ge`` — or, for the ``gt=0`` float fields, canopy's own strictly-positive
+    ``MIN_*`` floor (which satisfies ``gt=0``). The cascor field + its raw
+    ``ge``/``gt``/``le`` kwargs are named in the trailing comment so the mirror is
+    auditable against the source model. Keep this in sync when cascor's PATCH
+    bounds change (there is no cross-repo import; drift is guarded by
+    ``tests/unit/test_cascor_patch_bounds.py``).
+    """
+
+    # canopy form key -> {"lo", "hi", "deprecated"} (None = unbounded on that side)
+    BOUNDS: Final[dict] = {
+        # cascor learning_rate: gt=0, le=10.0
+        "nn_learning_rate": {"lo": TrainingConstants.MIN_LEARNING_RATE, "hi": 10.0},
+        # cascor max_hidden_units: ge=1, le=10_000
+        "nn_max_hidden_units": {"lo": 1, "hi": 10_000},
+        # cascor epochs_max: ge=1 (DEPRECATED per C2b/Q1 — derived read-only; a
+        # submitted value is reported skipped(not-updatable), never applied)
+        "nn_max_total_epochs": {"lo": 1, "hi": None, "deprecated": True},
+        # cascor max_iterations: ge=1
+        "nn_max_iterations": {"lo": 1, "hi": None},
+        # cascor output_epochs: ge=1, le=1_000_000
+        "nn_output_epochs": {"lo": 1, "hi": 1_000_000},
+        # cascor convergence_threshold: gt=0
+        "nn_growth_convergence_threshold": {"lo": TrainingConstants.MIN_CONVERGENCE_THRESHOLD, "hi": None},
+        # cascor patience: ge=1, le=100_000
+        "nn_patience": {"lo": 1, "hi": 100_000},
+        # cascor candidate_pool_size: ge=1, le=256
+        "cn_pool_size": {"lo": 1, "hi": 256},
+        # cascor correlation_threshold: gt=0, le=1.0
+        "cn_correlation_threshold": {"lo": TrainingConstants.MIN_CANDIDATE_CORRELATION_THRESHOLD, "hi": 1.0},
+        # cascor candidate_learning_rate: gt=0, le=10.0
+        "cn_candidate_learning_rate": {"lo": TrainingConstants.MIN_LEARNING_RATE, "hi": 10.0},
+        # cascor selected_candidates: ge=1, le=256
+        "cn_selected_candidates": {"lo": 1, "hi": 256},
+        # cascor candidate_epochs: ge=1, le=1_000_000
+        "cn_training_iterations": {"lo": 1, "hi": 1_000_000},
+        # cascor candidate_convergence_threshold: gt=0
+        "cn_training_convergence_threshold": {"lo": TrainingConstants.MIN_CANDIDATE_CONVERGENCE_THRESHOLD, "hi": None},
+        # cascor candidate_patience: ge=1, le=100_000
+        "cn_patience": {"lo": 1, "hi": 100_000},
+        # cascor top_candidates: ge=0, le=256
+        "cn_top_candidates": {"lo": 0, "hi": 256},
+        # cascor random_candidates: ge=0, le=256
+        "cn_random_candidates": {"lo": 0, "hi": 256},
+    }
+
+    @staticmethod
+    def _bound_label(bound: dict) -> str:
+        lo, hi = bound.get("lo"), bound.get("hi")
+        if lo is not None and hi is not None:
+            return f"[{lo}, {hi}]"
+        if hi is not None:
+            return f"<= {hi}"
+        if lo is not None:
+            return f">= {lo}"
+        return ""
+
+    @classmethod
+    def clamp_params(cls, params: dict):
+        """Clamp bounded values into their cascor PATCH range; return ``(clamped, violations)``.
+
+        ``clamped`` is a shallow copy of ``params`` with every out-of-range
+        *bounded* value pulled to the nearest admissible bound. ``violations`` is
+        a list of ``{"key", "requested", "clamped", "bound"}`` for each value that
+        was moved. Keys absent from :attr:`BOUNDS` pass through untouched; a
+        ``None`` / bool / non-numeric bounded value is left as-is (never coerced).
+        Int-valued inputs keep integer type after clamping. Pure/stdlib-only so it
+        is safe to call at init and before every apply without importing the
+        cascor client.
+        """
+        clamped = dict(params)
+        violations: list = []
+        for key, bound in cls.BOUNDS.items():
+            if key not in clamped:
+                continue
+            value = clamped[key]
+            # bool is an int subclass but never a numeric parameter here.
+            if value is None or isinstance(value, bool):
+                continue
+            try:
+                num = float(value)
+            except (TypeError, ValueError):
+                continue
+            lo, hi = bound.get("lo"), bound.get("hi")
+            new = num
+            if hi is not None and num > hi:
+                new = hi
+            elif lo is not None and num < lo:
+                new = lo
+            if new != num:
+                if isinstance(value, int):
+                    new = int(new)
+                clamped[key] = new
+                violations.append(
+                    {
+                        "key": key,
+                        "requested": value,
+                        "clamped": new,
+                        "bound": cls._bound_label(bound),
+                    }
+                )
+        return clamped, violations
+
+
 class DashboardConstants:
     """Dashboard UI constants.
 

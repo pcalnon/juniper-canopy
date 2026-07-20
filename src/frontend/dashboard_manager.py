@@ -44,7 +44,7 @@ import requests
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
-from canopy_constants import DashboardConstants, TrainingConstants
+from canopy_constants import CascorPatchBounds, DashboardConstants, TrainingConstants
 from frontend.internal_api import internal_api_headers
 from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason
 from settings import get_settings
@@ -5850,6 +5850,13 @@ class DashboardManager:
             "nn_init_output_weights": nn_init_output_weights or TrainingConstants.DEFAULT_INIT_OUTPUT_WEIGHTS,
         }
 
+        # N5 (I-4): defensively clamp submitted values to cascor's PATCH bounds
+        # (mirrored in ``CascorPatchBounds``) before the POST, so a single
+        # out-of-range field cannot wholesale-422 the whole form the way cascor's
+        # pre-C2b epochs_max default did. Any clamp is surfaced in the toast
+        # rather than silently changing the operator's intent.
+        params, clamp_violations = CascorPatchBounds.clamp_params(params)
+
         max_retries = DashboardConstants.DASHBOARD_SET_PARAMS_MAX_RETRIES
         last_error = None
         for attempt in range(max_retries):
@@ -5871,28 +5878,13 @@ class DashboardManager:
                     except Exception as ve:
                         self.logger.debug(f"Parameter verification skipped: {ve}")
                     self.logger.info(f"Parameters applied (attempt {attempt + 1}): {params}")
-                    # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1a: if the adapter
-                    # silently dropped any keys, the response now carries a
-                    # ``skipped`` list — surface it in the toast instead of the
-                    # blanket "Parameters applied" lie. Defensive: existing tests
-                    # patch ``requests.post`` with a bare MagicMock, so ``.json()``
-                    # may return a Mock; only treat the value as a list of strings
-                    # if it actually is one.
-                    skipped: list[str] = []
-                    try:
-                        body = response.json()
-                    except (ValueError, AttributeError):
-                        body = None
-                    if isinstance(body, dict):
-                        candidate = body.get("skipped")
-                        if isinstance(candidate, list) and all(isinstance(k, str) for k in candidate):
-                            skipped = candidate
-                    if skipped:
-                        applied_count = max(len(params) - len(skipped), 0)
-                        preview = ", ".join(skipped[:5]) + ("…" if len(skipped) > 5 else "")
-                        msg = f"Applied {applied_count} of {len(params)} parameter(s); {len(skipped)} not yet supported by the backend: {preview}"
-                        return params, msg
-                    return params, "Parameters applied"
+                    # N5 (I-4 / T3 + behavior 1): compose the toast from the
+                    # adapter's own ``skipped`` (canopy keys with no cascor
+                    # mapping — the pre-existing C1a "not yet supported" format),
+                    # cascor's C2a ``applied``/``skipped_detail`` partition (what
+                    # the live network took vs. declined, with the reason), and any
+                    # client-side clamp note. See ``_compose_apply_toast``.
+                    return params, self._compose_apply_toast(response, params, clamp_violations)
                 elif response.status_code == 429:
                     # #2a: rate limited. Back off and retry within the existing
                     # retry budget instead of returning immediately. Honor the
@@ -5913,8 +5905,14 @@ class DashboardManager:
                     self.logger.warning("Rate limited (429) — retries exhausted")
                     return dash.no_update, "Rate limited — please try again in a few seconds"
                 else:
+                    # N5 (I-4 / T1): carry the upstream rejection detail verbatim
+                    # (truncated) into the toast instead of the bare status code —
+                    # the evening-502s hid cascor's specific bound-violation reason
+                    # (e.g. ``epochs_max le=1_000_000``) behind "Failed to apply
+                    # (502)". Same pattern N4's snapshot toast now uses.
+                    detail = self._extract_apply_error_detail(response)
                     self.logger.warning(f"Failed to apply: {response.status_code} {response.text}")
-                    return dash.no_update, f"Failed to apply ({response.status_code})"
+                    return dash.no_update, detail
             except requests.exceptions.Timeout:
                 last_error = "Request timed out"
                 self.logger.warning(f"Timeout on attempt {attempt + 1}/{max_retries}")
@@ -5925,6 +5923,102 @@ class DashboardManager:
                 continue
         self.logger.error(f"All {max_retries} parameter apply attempts failed: {last_error}")
         return dash.no_update, f"Error: {str(last_error)[:40]}"
+
+    @staticmethod
+    def _compose_apply_toast(response, params, clamp_violations):
+        """Build the ``params-status`` toast for a 200 apply (N5, I-4 / T3).
+
+        Renders, in order of specificity:
+
+          * the adapter's own ``skipped`` (canopy keys with no cascor mapping —
+            "not yet supported by the backend", the pre-existing §1.5 C1a
+            format), else
+          * cascor's C2a ``skipped_detail`` (``{key, reason}`` — ``not-updatable``
+            / ``no-such-attribute`` / ``null-value``: what the live network
+            declined and why; ``applied`` gives the took-count), else
+          * the plain success line.
+
+        A client-side clamp note (N5 behavior 1) is appended in every case. All
+        three field reads are type-guarded because existing tests patch
+        ``requests.post`` with a bare ``MagicMock`` whose ``.json()`` may return a
+        Mock; only concretely-typed values are used, so a stubbed response falls
+        through to "Parameters applied".
+        """
+        body = None
+        try:
+            body = response.json()
+        except (ValueError, AttributeError):
+            body = None
+
+        adapter_skipped: list = []
+        applied: list = []
+        skipped_detail: list = []
+        if isinstance(body, dict):
+            cand = body.get("skipped")
+            if isinstance(cand, list) and all(isinstance(k, str) for k in cand):
+                adapter_skipped = cand
+            cand = body.get("applied")
+            if isinstance(cand, list) and all(isinstance(k, str) for k in cand):
+                applied = cand
+            cand = body.get("skipped_detail")
+            if isinstance(cand, list) and all(isinstance(e, dict) and "key" in e for e in cand):
+                skipped_detail = cand
+
+        clamp_note = ""
+        if clamp_violations:
+            cparts = [f"{v['key']}→{v['clamped']}" for v in clamp_violations[:3]]
+            clamp_note = f" (clamped to bounds: {', '.join(cparts)}" + ("…" if len(clamp_violations) > 3 else "") + ")"
+
+        total = len(params)
+        if adapter_skipped:
+            applied_count = max(total - len(adapter_skipped), 0)
+            preview = ", ".join(adapter_skipped[:5]) + ("…" if len(adapter_skipped) > 5 else "")
+            return f"Applied {applied_count} of {total} parameter(s); {len(adapter_skipped)} not yet supported by the backend: {preview}{clamp_note}"
+        if skipped_detail:
+            applied_count = len(applied) if applied else max(total - len(skipped_detail), 0)
+            parts = [f"{e['key']} ({e.get('reason', 'skipped')})" for e in skipped_detail[:5]]
+            preview = ", ".join(parts) + ("…" if len(skipped_detail) > 5 else "")
+            return f"Applied {applied_count} parameter(s); {len(skipped_detail)} skipped: {preview}{clamp_note}"
+        return f"Parameters applied{clamp_note}"
+
+    @staticmethod
+    def _extract_apply_error_detail(response) -> str:
+        """Best-effort verbatim rejection reason for a non-2xx apply (N5, I-4 / T1).
+
+        Mirrors ``_extract_training_error_detail`` but reads a ``requests.Response``
+        (the apply flow holds a response, not an exception). Prefers a structured
+        backend message — canopy's ``/api/set_params`` 502 payload carries
+        ``{"error": "Backend rejected parameters: <cascor detail>"}`` and cascor's
+        own 4xx bodies use ``{"error": {"message": ...}}`` / ``detail`` — then
+        falls back to the raw body text (truncated), then the bare status code.
+        Never raises; error surfacing must not itself fail.
+        """
+        status = getattr(response, "status_code", None)
+        message = None
+        try:
+            payload = response.json()
+            if isinstance(payload, dict):
+                err = payload.get("error")
+                if isinstance(err, dict):
+                    message = err.get("message") or err.get("detail")
+                elif isinstance(err, str):
+                    message = err
+                message = message or payload.get("detail") or payload.get("message")
+        except Exception:
+            message = None
+        if not message:
+            try:
+                body = (response.text or "").strip()
+                message = body[:300] if body else None
+            except Exception:
+                message = None
+        if message and status is not None:
+            return f"Failed to apply (HTTP {status}): {str(message)[:300]}"
+        if message:
+            return f"Failed to apply: {str(message)[:300]}"
+        if status is not None:
+            return f"Failed to apply ({status})"
+        return "Failed to apply"
 
     def _parse_retry_after(self, value):
         """Parse a ``Retry-After`` header into an (uncapped) sleep in seconds.
@@ -6042,6 +6136,34 @@ class DashboardManager:
                     "nn_optimizer_type": nn_optimizer_type,
                     "nn_activation_function_name": nn_activation_function,
                 }
+
+                # N5 (I-4): clamp backend-seeded values into cascor's PATCH bounds
+                # (``CascorPatchBounds``) before they populate the form, so a
+                # backend that echoes an out-of-range default (the pre-C2b
+                # ``epochs_max``=1e11 class) can't seed a form that is doomed to a
+                # wholesale 422 on the first apply. Re-read the bounded locals so
+                # BOTH the visible inputs and the applied-params store carry the
+                # clamped (admissible) value — otherwise they would disagree and
+                # falsely show "unsaved changes".
+                applied, seed_violations = CascorPatchBounds.clamp_params(applied)
+                if seed_violations:
+                    self.logger.warning(f"init_params_from_backend: clamped {len(seed_violations)} backend-seeded value(s) to PATCH bounds: {seed_violations}")
+                    nn_max_iter = applied["nn_max_iterations"]
+                    nn_max_epochs = applied["nn_max_total_epochs"]
+                    nn_lr = applied["nn_learning_rate"]
+                    nn_max_hu = applied["nn_max_hidden_units"]
+                    nn_growth_conv_thresh = applied["nn_growth_convergence_threshold"]
+                    nn_patience = applied["nn_patience"]
+                    nn_output_epochs = applied["nn_output_epochs"]
+                    cn_pool_size = applied["cn_pool_size"]
+                    cn_corr_thresh = applied["cn_correlation_threshold"]
+                    cn_selected = applied["cn_selected_candidates"]
+                    cn_training_iter = applied["cn_training_iterations"]
+                    cn_training_conv_thresh = applied["cn_training_convergence_threshold"]
+                    cn_patience = applied["cn_patience"]
+                    cn_top_cands = applied["cn_top_candidates"]
+                    cn_random_cands = applied["cn_random_candidates"]
+
                 return (
                     nn_max_iter,
                     nn_max_epochs,
