@@ -102,7 +102,7 @@ class ServiceBackend:
         "nn_spiral_number": TrainingConstants.DEFAULT_SPIRAL_NUMBER,
     }
 
-    def start_training(self, reset: bool = True, **kwargs: Any) -> ControlResult:
+    def start_training(self, reset: bool = True, start_fresh: bool = False, **kwargs: Any) -> ControlResult:
         if self._adapter.is_training_in_progress():
             return ControlResult(ok=False, error="Training already in progress")
         if self._adapter.network is None:
@@ -113,7 +113,13 @@ class ServiceBackend:
             failure = self._ensure_first_start_dataset()
             if failure is not None:
                 return ControlResult(ok=False, error=failure)
-        started, error = self._adapter.start_training_background(**kwargs)
+        # N3 / Q4 / cascor C5: forward ``start_fresh`` to cascor's POST
+        # /v1/training/start body field (default False = continue the current
+        # model, retaining metrics/history). The legacy ``reset`` query flag is
+        # not forwarded — cascor's start consumes any staged dataset and rebuilds
+        # the network from its dims regardless, and start_fresh now carries the
+        # explicit model-discard semantics.
+        started, error = self._adapter.start_training_background(start_fresh=start_fresh, **kwargs)
         if not started:
             return ControlResult(ok=False, error=error or "Failed to start training")
         return ControlResult(ok=True, is_training=True)

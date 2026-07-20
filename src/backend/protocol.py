@@ -228,8 +228,16 @@ class BackendProtocol(Protocol):
 
     # --- Training control ---
 
-    def start_training(self, reset: bool = True, **kwargs: Any) -> ControlResult:
-        """Start or restart training. Returns new training state."""
+    def start_training(self, reset: bool = True, start_fresh: bool = False, **kwargs: Any) -> ControlResult:
+        """Start or restart training. Returns new training state.
+
+        ``start_fresh`` (N3 / Q4 / cascor C5): when True, discard the current
+        model and its retained metrics/history for a clean-launch run (snapshots
+        preserved); when False (default) continue the current model, retaining
+        metrics/history (cross-dataset continual training). Backends translate it
+        to their engine's semantics (service → cascor's ``start_fresh`` body
+        field; demo → its reset path).
+        """
         ...
 
     def stop_training(self) -> ControlResult:
