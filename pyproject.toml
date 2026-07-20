@@ -114,7 +114,9 @@ dependencies = [
     # *prevention* companion to the E-2 env-floor-drift *detector* (``make
     # check-env`` / ``juniper-env-drift-check``), catching the "green tests /
     # dead app" class at first boot. Unconditional (the check must always run).
-    "juniper-service-core>=0.4.0",
+    # 0.5.0 floor: adds ``enforce_auth_posture`` (SEC-F01 / HO-2), the boot-time
+    # auth-posture self-check the lifespan calls right after the floor check.
+    "juniper-service-core>=0.5.0",
     # METRICS-MON R2.2.5 / seed-05: WS frame schema validation. Pinned
     # at the first stable release; pulled in transitively by
     # juniper-cascor-client too, but pinned explicitly here so the
