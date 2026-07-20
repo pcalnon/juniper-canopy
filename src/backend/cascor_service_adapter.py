@@ -42,6 +42,7 @@ import time
 from typing import Any, Callable, Dict, Optional, Tuple, Union, cast
 
 from juniper_cascor_client import CascorControlStream, CascorTrainingStream, JuniperCascorClient, JuniperCascorClientError
+from juniper_cascor_client.constants import ENDPOINT_TRAINING_START
 from juniper_cascor_client.exceptions import JuniperCascorConnectionError
 
 from backend.circuit_breaker import CircuitBreaker
@@ -1055,7 +1056,7 @@ class CascorServiceAdapter:
     # Training control
     # ------------------------------------------------------------------
 
-    def start_training_background(self, *args, **kwargs) -> "Tuple[bool, Optional[str]]":
+    def start_training_background(self, *args, start_fresh: bool = False, **kwargs) -> "Tuple[bool, Optional[str]]":
         """Kick off training via REST. Returns ``(started, error_message)``.
 
         PR-B2 (training-start diagnosis 2026-07-09): the cascor 409 detail
@@ -1063,9 +1064,23 @@ class CascorServiceAdapter:
         be flattened to a bare ``False`` here, so the §S10 surfacing could only
         show a generic failure. The message now rides back to ServiceBackend's
         ControlResult.
+
+        N3 / Q4 / cascor C5: ``start_fresh=True`` forwards the top-level
+        ``start_fresh`` body field to ``POST /v1/training/start`` (cascor#408 —
+        discard the model + retained metrics/history, snapshots preserved). The
+        cascor-client 0.7.0 ``start_training()`` cannot carry that field yet, so
+        the fresh path posts through the client's own transport (reusing its
+        base_url / auth headers / error mapping — this avoids the I-3
+        headers-in-comment class of auth-drift bug). This ``_post`` reach-in is a
+        documented CL2 swap seam: when the client exposes ``start_fresh`` on its
+        public ``start_training`` surface (CL2 + Fake parity), collapse this back
+        onto the ``else`` branch.
         """
         try:
-            self._client.start_training(**kwargs)
+            if start_fresh:
+                self._client._post(ENDPOINT_TRAINING_START, json={"start_fresh": True})
+            else:
+                self._client.start_training(**kwargs)
             return True, None
         except JuniperCascorClientError as e:
             logger.error(f"Failed to start training: {e}")

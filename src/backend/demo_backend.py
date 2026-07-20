@@ -77,8 +77,15 @@ class DemoBackend:
 
     # --- Training control ---
 
-    def start_training(self, reset: bool = True, **kwargs: Any) -> ControlResult:
-        return cast(ControlResult, self._demo.start(reset=reset))
+    def start_training(self, reset: bool = True, start_fresh: bool = False, **kwargs: Any) -> ControlResult:
+        # N3 / Q4 / cascor C5: demo mode has no cascor ``start_fresh`` body field,
+        # so a fresh start maps onto DemoMode's reset path (clears epoch/metrics
+        # history for a clean run). ``start_fresh`` OR the legacy ``reset`` flag
+        # drives it; ``start_fresh=False`` with ``reset=False`` continues the
+        # current demo run (retaining history) — the Q4 use-case-1 default. The
+        # demo FSM now auto-resets from a terminal (COMPLETED/FAILED) state, so a
+        # continue restart from a converged demo run is no longer refused.
+        return cast(ControlResult, self._demo.start(reset=bool(reset or start_fresh)))
 
     def stop_training(self) -> ControlResult:
         self._demo.stop()

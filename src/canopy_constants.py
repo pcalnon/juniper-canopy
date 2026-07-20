@@ -369,6 +369,10 @@ class DashboardConstants:
     # Long POST timeout for set_params with retry. Higher because the backend
     # may need to reconfigure the cascor session.
     DASHBOARD_LONG_POST_TIMEOUT: Final[int] = 10
+    # N3: the /api/train/restart POST orchestrates stop → await stopped (bounded
+    # by RESTART_STOP_WAIT_TIMEOUT_SECONDS) → start, so its client-side timeout
+    # must exceed that server-side await budget with headroom for the start leg.
+    DASHBOARD_RESTART_POST_TIMEOUT: Final[int] = 30
     # GET timeout for state verification reads.
     DASHBOARD_GET_TIMEOUT: Final[int] = 5
     # Maximum retries for set_params operations.
@@ -620,6 +624,18 @@ class BackendConstants:
     # ── Demo mode timing ──
     DEMO_THREAD_JOIN_TIMEOUT: Final[float] = 5.0
     DEMO_MAIN_LOOP_SLEEP: Final[int] = 30
+
+    # ── N3 restart orchestration (cold-swap: stop → await stopped → start) ──
+    # E-2 pin: a start against an ACTIVE run 409s immediately (staging survives),
+    # so the restart route stops the current run and waits (bounded) for it to
+    # settle before starting. On timeout the caller keeps the pending banner open
+    # with a retriable error (plan §8 stop→start race).
+    RESTART_STOP_WAIT_TIMEOUT_SECONDS: Final[float] = 15.0
+    RESTART_STOP_WAIT_POLL_SECONDS: Final[float] = 0.5
+    # Best-effort peek after a successful start to surface an instant-convergence
+    # (epoch-0, empty-history) run truthfully rather than as a frozen dashboard
+    # (plan folded finding 2). Never authoritative — live status polling corrects.
+    RESTART_INSTANT_COMPLETE_PEEK_SECONDS: Final[float] = 1.0
 
 
 # Convenience imports at module level for commonly used constants

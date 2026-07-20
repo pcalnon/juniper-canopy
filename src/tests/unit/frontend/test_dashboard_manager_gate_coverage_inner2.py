@@ -49,33 +49,42 @@ def _resp(*, status=200, json_value=None, text=""):
 # apply_dataset (4128-4161)
 # ---------------------------------------------------------------------------
 class TestApplyDatasetInner:
+    # N3 (T4): apply_dataset now returns ``(banner_is_open, stage_outcome_alert)``
+    # — a staging failure that used to be silent (``return dash.no_update``) now
+    # also surfaces a danger alert. Every branch asserts both outputs.
     def test_no_click(self, dm):
         cb = raw_cb(dm, "apply_dataset")
-        assert cb(None, "spirals", 100, 0.1, 1.5, 2) is dash.no_update
+        assert cb(None, "spirals", 100, 0.1, 1.5, 2) == (dash.no_update, dash.no_update)
 
     @patch("requests.post")
     def test_success_opens_banner(self, mock_post, dm):
         mock_post.return_value = _resp(status=200)
         cb = raw_cb(dm, "apply_dataset")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            assert cb(1, "spirals", 100, 0.1, 1.5, 2) is True
+            banner, alert = cb(1, "spirals", 100, 0.1, 1.5, 2)
+        assert banner is True
+        assert alert is None  # success clears any prior staging error
         # dataset_type + all four optional numeric/spiral fields were forwarded
         payload = mock_post.call_args.kwargs["json"]
         assert payload["nn_dataset_type"] == "spirals"
         assert payload["nn_dataset_elements"] == 100
 
     @patch("requests.post")
-    def test_non_200_no_update(self, mock_post, dm):
+    def test_non_200_surfaces_alert(self, mock_post, dm):
         mock_post.return_value = _resp(status=500, text="err")
         cb = raw_cb(dm, "apply_dataset")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            assert cb(1, "spirals", None, None, None, None) is dash.no_update
+            banner, alert = cb(1, "spirals", None, None, None, None)
+        assert banner is dash.no_update
+        assert alert is not None and alert.color == "danger"
 
     @patch("requests.post", side_effect=requests.ConnectionError("down"))
-    def test_exception_no_update(self, _mock_post, dm):
+    def test_exception_surfaces_alert(self, _mock_post, dm):
         cb = raw_cb(dm, "apply_dataset")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            assert cb(1, "spirals", 100, 0.1, 1.5, 2) is dash.no_update
+            banner, alert = cb(1, "spirals", 100, 0.1, 1.5, 2)
+        assert banner is dash.no_update
+        assert alert is not None and alert.color == "danger"
 
 
 # ---------------------------------------------------------------------------
@@ -108,32 +117,33 @@ class TestCancelPendingDatasetInner:
 
 
 # ---------------------------------------------------------------------------
-# restart_with_new_dataset (4202-4218)
+# open_restart_confirm_modal (N3 — replaced the feedback-free
+# ``restart_with_new_dataset`` closure: the "Stop & Restart" button now opens
+# the confirm modal (Q3/Q4) instead of POSTing ``/api/train/start?reset=true``).
 # ---------------------------------------------------------------------------
-class TestRestartWithNewDatasetInner:
+class TestOpenRestartConfirmModalInner:
     def test_no_click(self, dm):
-        cb = raw_cb(dm, "restart_with_new_dataset")
-        assert cb(None) is dash.no_update
+        cb = raw_cb(dm, "open_restart_confirm_modal")
+        assert cb(None, "spirals", 100, 0.1, 1.5, 2) == (dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update)
 
-    @patch("requests.post")
-    def test_success_closes_banner(self, mock_post, dm):
-        mock_post.return_value = _resp(status=200)
-        cb = raw_cb(dm, "restart_with_new_dataset")
+    @patch("requests.get")
+    def test_click_opens_modal_with_defaults_off(self, mock_get, dm):
+        mock_get.return_value = _resp(status=200, json_value={"current_epoch": 5})
+        cb = raw_cb(dm, "open_restart_confirm_modal")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            assert cb(1) is False
+            is_open, summary, granular, toggle_value, collapse_open = cb(1, "spirals", 100, 0.1, 1.5, 2)
+        assert is_open is True
+        # Q4 default OFF + Q3 verify section collapsed on every open.
+        assert toggle_value is False
+        assert collapse_open is False
+        assert summary is not None and granular is not None
 
-    @patch("requests.post")
-    def test_non_200_no_update(self, mock_post, dm):
-        mock_post.return_value = _resp(status=500, text="err")
-        cb = raw_cb(dm, "restart_with_new_dataset")
+    @patch("requests.get", side_effect=requests.ConnectionError("down"))
+    def test_click_opens_even_when_status_unreachable(self, _mock_get, dm):
+        cb = raw_cb(dm, "open_restart_confirm_modal")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            assert cb(1) is dash.no_update
-
-    @patch("requests.post", side_effect=requests.ConnectionError("down"))
-    def test_exception_no_update(self, _mock_post, dm):
-        cb = raw_cb(dm, "restart_with_new_dataset")
-        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            assert cb(1) is dash.no_update
+            is_open = cb(1, "moons", None, None, None, None)[0]
+        assert is_open is True
 
 
 # ---------------------------------------------------------------------------

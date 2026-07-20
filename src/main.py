@@ -67,7 +67,7 @@ from pydantic import BaseModel, Field, SecretStr
 # from backend.data_adapter import DataAdapter  trunk-ignore(ruff/E402)
 # from backend.training_monitor import TrainingMonitor  trunk-ignore(ruff/E402)
 from backend.training_monitor import TrainingState  # trunk-ignore(ruff/E402)
-from canopy_constants import TrainingConstants  # trunk-ignore(ruff/E402)
+from canopy_constants import BackendConstants, TrainingConstants  # trunk-ignore(ruff/E402)
 from communication.websocket_manager import create_command_response_message, websocket_manager
 from frontend.dashboard_manager import DashboardManager
 from health import DependencyStatus, ErrorResponse, ReadinessResponse, probe_dependency
@@ -3237,6 +3237,10 @@ async def api_train_start(reset: bool = False, body: _TrainStartBody | None = No
 
     # A1-iii-a: forward a one-shot dataset-ref + hyperparameters for recurrence; cascor/demo
     # keep the bare reset-only call (no extra kwargs reach their start_training).
+    # N3 note: the start-fresh toggle (Q4) is driven exclusively through the
+    # dedicated POST /api/train/restart orchestration route, which calls
+    # ``backend.start_training(reset=..., start_fresh=...)`` directly — the plain
+    # Start route keeps its existing signature (start_fresh defaults to False).
     start_kwargs = _recurrence_start_kwargs(body.model_dump()) if (backend.backend_type == "recurrence" and body is not None) else {}
     result = backend.start_training(reset=reset, **start_kwargs)
     failure = _control_result_failure(result)
@@ -3341,6 +3345,126 @@ async def api_train_status():
         Training status dictionary with network info and training state.
     """
     return {"backend": backend.backend_type, "execution": backend.execution, **backend.get_status()}
+
+
+class _TrainRestartBody(BaseModel):
+    """Body for ``POST /api/train/restart`` (N3 cold-swap restart orchestration)."""
+
+    # N3 / Q4 / cascor C5: start-fresh toggle (default off) — see _TrainStartBody.
+    start_fresh: bool = False
+    # Legacy network-reset flag, forwarded to the backend for demo parity (cascor
+    # consumes the staged dataset + rebuilds regardless; start_fresh carries the
+    # explicit model-discard semantics for the service path).
+    reset: bool = True
+
+
+async def _await_training_stopped(timeout_s: float, poll: float) -> bool:
+    """Poll (bounded) until the backend reports training is no longer active.
+
+    Returns True once stopped, False on timeout. Status reads run off the event
+    loop (``asyncio.to_thread``) so a slow cascor cannot stall the single uvicorn
+    worker while we wait out the current run (plan §8 stop→start race).
+    """
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while True:
+        if not await asyncio.to_thread(backend.is_training_active):
+            return True
+        if asyncio.get_running_loop().time() >= deadline:
+            return False
+        await asyncio.sleep(poll)
+
+
+async def _peek_training_completed(budget: float, poll: float) -> bool:
+    """Best-effort: did the just-started run already reach a terminal state?
+
+    Folded finding 2 (2026-07-19 live pass): a ``start_fresh`` rebuild on a tiny
+    dataset can converge at epoch 0 with empty history. This bounded peek lets the
+    restart outcome read truthfully ("converged immediately") instead of looking
+    frozen — it exits fast once the run is genuinely progressing (``is_running``
+    with ``current_epoch > 0``) and swallows every error so it can NEVER turn a
+    successful restart into a failure. Live status polling (N1/N2) remains the
+    real source of truth.
+    """
+    try:
+        deadline = asyncio.get_running_loop().time() + budget
+        while True:
+            status = await asyncio.to_thread(backend.get_status)
+            if isinstance(status, dict):
+                if status.get("completed") or status.get("failed"):
+                    return True
+                if status.get("is_running") and (status.get("current_epoch") or 0) > 0:
+                    return False
+            if asyncio.get_running_loop().time() >= deadline:
+                return False
+            await asyncio.sleep(poll)
+    except Exception:  # pragma: no cover - the peek must never break a restart
+        return False
+
+
+@app.post("/api/train/restart", dependencies=[Depends(require_browser_control_auth)])
+async def api_train_restart(body: _TrainRestartBody | None = None):
+    """N3 (canopy training-runtime defects plan, I-6): cold-swap restart with the
+    staged dataset, surfacing every step's outcome.
+
+    Sequence (E-2 pin — a start against an ACTIVE run 409s immediately while the
+    staged dataset config survives): stop (if a run is active) → await stopped
+    (bounded) → start(start_fresh). Idle / completed / failed runs skip straight
+    to start (cascor's engine FSM and the demo FSM both auto-reset from a terminal
+    state on start), so no stop step is issued there.
+
+    Replaces the pre-N3 fire-and-forget ``POST /api/train/start?reset=true``
+    callback that returned only the banner ``is_open`` — three cold-swaps trained
+    to completion invisibly in the 2026-07-11 incident. Returns a structured,
+    per-step result so the dashboard renders a truthful outcome::
+
+        {"success": bool, "steps": [{"step","ok","detail"}, ...], "was_active": bool,
+         "start_fresh": bool, "instant_complete": bool, "status": "restarted"}
+
+    A stop-await timeout returns 504 with ``retriable: True`` and leaves the staged
+    dataset intact so the caller keeps the pending banner open and can retry.
+    """
+    from communication.websocket_manager import create_control_ack_message
+
+    start_fresh = bool(body.start_fresh) if body is not None else False
+    reset = bool(body.reset) if body is not None else True
+    steps: list[dict] = []
+
+    was_active = await asyncio.to_thread(backend.is_training_active)
+    if was_active:
+        stop_result = backend.stop_training()
+        stop_failure = _control_result_failure(stop_result)
+        if stop_failure is not None:
+            steps.append({"step": "stop", "ok": False, "detail": stop_failure})
+            system_logger.warning("Restart: stop rejected: %s", stop_failure)
+            schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", False, stop_failure)))
+            return JSONResponse({"success": False, "steps": steps, "was_active": True, "start_fresh": start_fresh, "message": f"Could not stop the current run: {stop_failure}"}, status_code=409)
+        steps.append({"step": "stop", "ok": True, "detail": "Training stop requested"})
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("stop", True, "Training stopped")))
+
+        stopped = await _await_training_stopped(BackendConstants.RESTART_STOP_WAIT_TIMEOUT_SECONDS, BackendConstants.RESTART_STOP_WAIT_POLL_SECONDS)
+        if not stopped:
+            steps.append({"step": "await_stopped", "ok": False, "detail": f"still running after {BackendConstants.RESTART_STOP_WAIT_TIMEOUT_SECONDS:.0f}s"})
+            system_logger.warning("Restart: timed out waiting for training to stop")
+            return JSONResponse(
+                {"success": False, "steps": steps, "was_active": True, "start_fresh": start_fresh, "retriable": True, "message": "Timed out waiting for the current run to stop — the dataset change is still staged; try Restart again."},
+                status_code=504,
+            )
+        steps.append({"step": "await_stopped", "ok": True, "detail": "Training stopped"})
+
+    # Start consumes the staged dataset; start_fresh discards the model when set.
+    start_result = backend.start_training(reset=reset, start_fresh=start_fresh)
+    start_failure = _control_result_failure(start_result)
+    if start_failure is not None:
+        steps.append({"step": "start", "ok": False, "detail": start_failure})
+        system_logger.warning("Restart: start rejected: %s", start_failure)
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, start_failure)))
+        return JSONResponse({"success": False, "steps": steps, "was_active": was_active, "start_fresh": start_fresh, "message": f"Could not start the new run: {start_failure}"}, status_code=409)
+    steps.append({"step": "start", "ok": True, "detail": "Training started (start-fresh)" if start_fresh else "Training started"})
+    schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", True, "Training started")))
+
+    instant_complete = await _peek_training_completed(BackendConstants.RESTART_INSTANT_COMPLETE_PEEK_SECONDS, BackendConstants.RESTART_STOP_WAIT_POLL_SECONDS)
+
+    return {"success": True, "steps": steps, "was_active": was_active, "start_fresh": start_fresh, "instant_complete": instant_complete, "status": "restarted"}
 
 
 class _ModelSelectBody(BaseModel):

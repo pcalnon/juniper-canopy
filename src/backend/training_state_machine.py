@@ -164,6 +164,16 @@ class TrainingStateMachine:
             return self._stop_to_start_transition()
         elif self._status == TrainingStatus.PAUSED:
             return self._check_for_paused_state("State transition: Paused → Started (")
+        elif self._status in (TrainingStatus.COMPLETED, TrainingStatus.FAILED):
+            # N3 (canopy training-runtime defects plan, folded finding 1): auto-reset
+            # from a terminal state before START, mirroring the cascor engine FSM
+            # (juniper-cascor src/api/lifecycle/state_machine.py:171-173). Without
+            # this, START — or an N3 restart — from a converged/failed demo run was
+            # silently refused, asymmetric with the service backend (cascor auto-
+            # resets and starts). Only the FSM status is reset here; the demo network
+            # is untouched, so a start_fresh=False continue keeps the current model.
+            self.logger.info(f"Auto-resetting from terminal state {self._status.name} before start")
+            return self._stop_to_start_transition()
         elif self._status == TrainingStatus.STARTED:
             # Already started, ignore
             self.logger.warning("Invalid transition: START while already Started")
