@@ -729,11 +729,15 @@ class DashboardManager:
                                                             " | ",
                                                             style={"color": "var(--text-muted)", "marginRight": "8px"},
                                                         ),
-                                                        # Epoch display
+                                                        # Step display — completed training steps
+                                                        # (``current_epoch``); NOT an inner output epoch.
+                                                        # N6/C2b: relabelled from "Epoch" to "Step" to
+                                                        # match the C2b counter contract (the S12
+                                                        # "Epoch: 10000 vs 12" confusion).
                                                         html.Span(
                                                             [
                                                                 html.Span(
-                                                                    "Epoch: ",
+                                                                    "Step: ",
                                                                     style={"color": "var(--text-muted)"},
                                                                 ),
                                                                 html.Span(
@@ -748,11 +752,18 @@ class DashboardManager:
                                                             " | ",
                                                             style={"color": "var(--text-muted)", "marginRight": "8px"},
                                                         ),
-                                                        # Iteration (Hidden Units) display
+                                                        # Hidden Units display — installed cascade units
+                                                        # vs the reconciled ``max_hidden_units`` cap.
+                                                        # N6/C2b: relabelled from "Iteration" to "Hidden
+                                                        # Units"; this segment (id ``top-hidden-units-display``)
+                                                        # always showed the unit count — only the label was
+                                                        # wrong (S12's "Iteration: 0 / 10000"). The true
+                                                        # growth "Iteration" (grow_iteration/grow_max) lives
+                                                        # in the Network Info panel.
                                                         html.Span(
                                                             [
                                                                 html.Span(
-                                                                    "Iteration: ",
+                                                                    "Hidden Units: ",
                                                                     style={"color": "var(--text-muted)"},
                                                                 ),
                                                                 html.Span(
@@ -762,7 +773,9 @@ class DashboardManager:
                                                                 ),
                                                             ],
                                                             # A1-iii-b1: id so a one_shot (recurrence) model can hide
-                                                            # this cascade-only "Iteration" (hidden-units) segment.
+                                                            # this cascade-only hidden-units segment. The id keeps its
+                                                            # historical name (``status-iteration-segment``) so the
+                                                            # ``toggle_iteration_segment`` callback wiring is stable.
                                                             id="status-iteration-segment",
                                                             style={"marginRight": "20px"},
                                                         ),
@@ -2249,7 +2262,7 @@ class DashboardManager:
             prevent_initial_call=True,
         )
         def toggle_iteration_segment(model_class):
-            """Hide the status-bar 'Iteration' (hidden-units) segment for a one_shot model."""
+            """Hide the status-bar Hidden Units segment (cascade-only) for a one_shot model."""
             base = {"marginRight": "20px"}
             return {**base, "display": "none"} if model_class == "one_shot" else base
 
@@ -5317,6 +5330,83 @@ class DashboardManager:
             "max_iterations": "max iterations",
         }.get(reason)
 
+    @staticmethod
+    def _counter_displays(status):
+        """N6 (training-runtime-defects plan §4 I-1c / §5 S12): map the reconciled
+        cascor status surface to the dashboard's Step / Hidden-Units / Iteration /
+        Epoch display strings, per the C2b counter contract.
+
+        Field meanings are the single source of truth documented in juniper-cascor
+        ``docs/api/JUNIPER_CASCOR_API_REFERENCE.md`` ("Counter semantics (C2b)"):
+
+        - ``current_epoch`` / ``current_step`` — completed **training steps** (one
+          initial output-training pass plus one per cascade growth iteration), NOT
+          inner output-training epochs; single-writer and monotonic. Rendered as
+          "Step" (the pre-C2b "Epoch" label conflated this with an inner epoch —
+          the S12 "Epoch: 10000 vs 12" confusion).
+        - ``hidden_units`` / ``max_hidden_units`` — installed cascade units vs the
+          growth-capacity cap (C2b reconciled ``max_hidden_units`` to the live
+          network's effective value; pre-C2b the divergent surfaces showed a stale
+          ``10000`` denominator).
+        - ``grow_iteration`` / ``grow_max`` — cascade growth iteration vs
+          ``max_iterations``. The TRUE "Iteration" counter, distinct from the
+          hidden-unit count it was previously conflated with.
+        - ``output_epoch`` / ``candidate_epoch`` (with ``*_total_epochs``) — live
+          within-pass inner-epoch progress, phase-qualified. These reset to 0 at
+          each phase entry BY DESIGN, so "0 / N" is the correct render, not a
+          regression or a blank.
+        - ``max_epochs`` is the C2b DERIVED total-epoch budget — a whole-run budget
+          in inner-epoch units. It is deliberately NOT paired with the (step-unit)
+          "Step" counter as a fraction (they are different units); it is surfaced
+          as the Parameters panel's "Maximum Total Epochs" budget instead.
+
+        Returns display strings under the keys ``step``, ``hidden_units``,
+        ``iteration`` and ``phase_epoch``. Missing fields (e.g. a pre-C2b cascor,
+        or demo mode which has no within-pass output epoch) degrade to a plain
+        count or the em-dash placeholder rather than raising.
+        """
+        status = status if isinstance(status, dict) else {}
+
+        # Step — completed training steps (monotonic). ``current_epoch`` is the
+        # canonical field; ``current_step`` is its alias.
+        step_val = status.get("current_epoch")
+        if step_val is None:
+            step_val = status.get("current_step", 0)
+        step = str(step_val if step_val is not None else 0)
+
+        # Hidden Units — installed / capacity (reconciled denominator).
+        hidden = status.get("hidden_units", 0) or 0
+        max_hidden = status.get("max_hidden_units")
+        hidden_units = f"{hidden} / {max_hidden}" if max_hidden else str(hidden)
+
+        # Iteration — the true cascade growth iteration vs its ``max_iterations``
+        # cap (``grow_max``); NOT the hidden-unit count.
+        grow_iteration = status.get("grow_iteration")
+        grow_max = status.get("grow_max")
+        if grow_iteration is not None and grow_max:
+            iteration = f"{grow_iteration} / {grow_max}"
+        elif grow_iteration is not None:
+            iteration = str(grow_iteration)
+        else:
+            iteration = "—"
+
+        # Epoch — the phase-qualified within-pass inner epoch ("Epoch 12 (output)"),
+        # which is what "epoch" genuinely means here. Resets to 0 at phase entry by
+        # design; "0 / N (phase)" must render (never blank) so the reset does not
+        # read as a regression.
+        phase = (status.get("phase") or "").lower()
+        phase_epoch = "—"
+        if phase == "output":
+            total = status.get("output_total_epochs")
+            if total:
+                phase_epoch = f"{status.get('output_epoch') or 0} / {total} (output)"
+        elif phase == "candidate":
+            total = status.get("candidate_total_epochs")
+            if total:
+                phase_epoch = f"{status.get('candidate_epoch') or 0} / {total} (candidate)"
+
+        return {"step": step, "hidden_units": hidden_units, "iteration": iteration, "phase_epoch": phase_epoch}
+
     def _build_unified_status_bar_content(self, status_response, latency_ms):
         """Build unified status bar content from /api/status response."""
         status_data = status_response.json()
@@ -5358,9 +5448,11 @@ class DashboardManager:
         is_completed = status_data.get("completed", False)
         is_failed = status_data.get("failed", False)
         raw_phase = status_data.get("phase", "idle")
-        epoch = status_data.get("current_epoch", 0)
-        hidden_units = status_data.get("hidden_units", 0)
-        max_hidden_units = status_data.get("max_hidden_units")
+        # N6/C2b: derive the header counter strings from the reconciled surface.
+        # ``step`` = completed training steps (``current_epoch``); ``hidden_units``
+        # = installed / capacity with the reconciled denominator. See
+        # ``_counter_displays`` for the full contract.
+        counters = self._counter_displays(status_data)
 
         # Determine display status (terminal states take priority)
         if is_failed:
@@ -5425,8 +5517,8 @@ class DashboardManager:
             status_style,
             phase,
             phase_style,
-            str(epoch),
-            f"{hidden_units} / {max_hidden_units}" if max_hidden_units else str(hidden_units),
+            counters["step"],
+            counters["hidden_units"],
         )
 
     def _update_network_info_handler(self, n=None):
@@ -5440,6 +5532,15 @@ class DashboardManager:
                 return self._network_info_error_div("Network Info", status_label, detail)
             status = response.json()
 
+            # N6/C2b: derive each counter's display against its correct
+            # denominator from the reconciled status surface (see
+            # ``_counter_displays``): Hidden Units carries the reconciled
+            # ``max_hidden_units`` cap, Iteration is the true growth iteration
+            # (``grow_iteration``/``grow_max``, previously mislabelled as the
+            # unit count), and the phase-qualified within-pass Epoch renders
+            # "N / M (phase)".
+            counters = self._counter_displays(status)
+
             return html.Div(
                 [
                     html.P(
@@ -5451,7 +5552,7 @@ class DashboardManager:
                     html.P(
                         [
                             html.Strong("Hidden Units: "),
-                            str(status.get("hidden_units", 0)),
+                            counters["hidden_units"],
                         ]
                     ),
                     html.P(
@@ -5464,13 +5565,19 @@ class DashboardManager:
                     html.P(
                         [
                             html.Strong("Training Step: "),
-                            str(status.get("current_epoch", 0)),
+                            counters["step"],
                         ]
                     ),
                     html.P(
                         [
-                            html.Strong("Current Iteration: "),
-                            str(status.get("hidden_units", 0)),
+                            html.Strong("Epoch (in phase): "),
+                            counters["phase_epoch"],
+                        ]
+                    ),
+                    html.P(
+                        [
+                            html.Strong("Iteration: "),
+                            counters["iteration"],
                         ]
                     ),
                     html.P(
