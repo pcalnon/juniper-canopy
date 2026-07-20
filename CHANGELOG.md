@@ -116,7 +116,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Tests: `src/tests/unit/frontend/test_n6_counter_semantics.py` (mapping helper,
   header, Network Info panel, tile `kind`-discrimination + candidate-freeze, and
   the `get_status` surface).
-  
+
 - **N1 — un-gated metrics/topology polls (sticky-gate starvation fix; juniper-ml
   training-runtime defects plan §4 I-1/I-2, posture O2).** The metrics-store poll no longer
   skips REST while the WS bridge reports `connected` + `metricsReceived`, and the topology
