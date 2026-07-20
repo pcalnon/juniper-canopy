@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **CL2 — cascor-client `>=0.7.0` floor; adapter liveness seams onto the client
+  surface; manual-pong retirement; stream-liveness suite gated in CI (juniper-ml
+  training-runtime defects plan §7/§13).** Bumped the `[juniper-cascor]` extra
+  floor to `juniper-cascor-client>=0.7.0` (was `>=0.6.0`) and regenerated
+  `requirements.lock`, adopting the CL1 liveness surface the client shipped in
+  0.7.0 (cascor-client#92). `CascorServiceAdapter`'s three documented CL1 swap
+  seams now consume that surface: the `ControlStreamSupervisor.is_connected`
+  property reads the stream's own `is_connected` bool (an identical transport-state
+  test) instead of reaching into `_ws`; `_probe_liveness` prefers the stream's
+  passive `is_alive(window)` frame-recency view over an active `ws.ping()` (0.7.0's
+  eager control recv-loop already answers cascor's heartbeat, so the
+  canopy-originated ping — and its `_ws` reach-in — is retired); and the metrics
+  relay drops the manual `if msg_type == "ping": stream._ws.send(pong)` workaround
+  because 0.7.0's `CascorTrainingStream` auto-pongs and never yields `ping` frames.
+  Each seam keeps a `getattr` / `_ws_open` fallback for fakes and pre-CL1 clients
+  (only a real `bool` is trusted, so the N2 mock streams still exercise the
+  fallback), and the N2 one-line-per-disconnect/reconnect logging contract is
+  preserved. Because the client now consumes heartbeat pings, `ping` leaves the
+  relay's `StreamHealth` frame census (dropped from the summary's core-type
+  roster); to keep a healthy-but-idle relay from drifting to `degraded` (or
+  churning needless reconnects), the relay now polls the client's `is_alive`
+  surface at the heartbeat cadence (`RELAY_LIVENESS_POLL_SECONDS`, 30 s) and feeds
+  its liveness clock from that plus data/ack frames. Also wired the
+  `[juniper-cascor]` extra into the CI unit-tests lane so
+  `src/tests/unit/backend/test_stream_liveness.py` — which `importorskip`s the real
+  client — actually executes in a required CI lane (previously it ran only in
+  client-equipped local envs). Tests: CL2 seam-swap units, a real
+  `FakeCascorTrainingStream` pong-consumption pin, and an idle-but-alive re-arm
+  regression (`src/tests/unit/backend/test_stream_liveness.py`); the version-floor
+  guard (`src/tests/unit/test_client_version_floors.py`) tracks the bumped floor
+  automatically.
+
 ### Fixed
 
 - **N1 — un-gated metrics/topology polls (sticky-gate starvation fix; juniper-ml

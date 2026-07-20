@@ -480,12 +480,21 @@ class BackendConstants:
     # ── Training metrics buffer ──
     MAX_METRICS_BUFFER_SIZE: Final[int] = 10000
 
-    # ── N2: canopy→cascor stream liveness (cascor_service_adapter) ──
+    # ── N2/CL2: canopy→cascor stream liveness (cascor_service_adapter) ──
     # Age of the last inbound frame beyond which a *connected* relay stream is
-    # classified "degraded" (cascor pings every 30 s, so 60 s = two missed
-    # pings). Full liveness expiry (close + reconnect) is governed separately
-    # by ``settings.ws_stream_liveness_timeout_seconds``.
+    # classified "degraded". Full liveness expiry (close + reconnect) is governed
+    # separately by ``settings.ws_stream_liveness_timeout_seconds``.
+    # CL2 (training-runtime defects plan §7): cascor-client >=0.7.0 auto-pongs and
+    # consumes cascor's heartbeat pings at the transport layer, so they no longer
+    # reach the relay to feed its clock — the relay now polls the client's
+    # ``is_alive`` surface every ``RELAY_LIVENESS_POLL_SECONDS`` (below the stale
+    # bound) to keep a healthy-but-idle stream fresh instead of drifting to
+    # "degraded" or churning needless reconnects.
     RELAY_STALE_AFTER_SECONDS: Final[float] = 60.0
+    # CL2: cadence at which the relay polls the client's ``is_alive`` surface
+    # between (sparse) data frames — the cascor heartbeat interval (~30 s), kept
+    # below RELAY_STALE_AFTER_SECONDS so the health clock never falsely goes stale.
+    RELAY_LIVENESS_POLL_SECONDS: Final[float] = 30.0
     # Pong deadline for the control-stream protocol-level keepalive probe.
     CONTROL_PROBE_PONG_TIMEOUT_SECONDS: Final[float] = 10.0
 

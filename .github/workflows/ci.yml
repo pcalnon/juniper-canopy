@@ -155,8 +155,16 @@ jobs:
           fi
           # Install all other CI dependencies
           pip install -r conf/requirements_ci.txt
-          # Install project as editable so source-tree path resolution works
-          pip install -e .
+          # Install project as editable so source-tree path resolution works.
+          # CL2 (juniper-ml training-runtime defects plan §7/§13): install the
+          # [juniper-cascor] extra so the REAL juniper-cascor-client (>=0.7.0) is
+          # present in this required lane. Without it src/tests/conftest.py injects
+          # a stub and src/tests/unit/backend/test_stream_liveness.py (the 510-line
+          # N2 stream-liveness + CL2 seam suite) silently importorskips — it had
+          # only ever run in client-equipped local envs. With the extra the suite
+          # executes here, and the floor-drift preflight + coverage gate below both
+          # exercise the real cascor-client seam path.
+          pip install -e ".[juniper-cascor]"
           # h5py is an OPTIONAL runtime dependency: the HDF5 snapshot routes in
           # src/main.py lazy-import it and soft-fail with a 500 "h5py not
           # available" guard when it is absent, so it is intentionally NOT a hard
