@@ -69,7 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   surface; the WS path is retained, only gated. The pre-existing adapter `skipped`
   (canopy keys with no cascor mapping) contract is unchanged. Regression tests:
   `tests/unit/test_cascor_patch_bounds.py`, `tests/integration/test_n5_apply_params_ux.py`.
-  
+
 - **N3 — restart orchestration: confirm modal (Q3/Q4), stop → await → start(staged),
   outcomes surfaced (juniper-ml training-runtime defects plan §4 I-6, T1/T4, U-1).**
   The sidebar "Stop & Restart with new dataset" button no longer fires a
