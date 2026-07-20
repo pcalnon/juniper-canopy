@@ -194,6 +194,35 @@ class ServiceBackend:
                 "learning_rate": ts.get("learning_rate", 0.0),
                 "max_hidden_units": ts.get("max_hidden_units", 0),
                 "max_epochs": ts.get("max_epochs", 0),
+                # N6 / C2b (training-runtime-defects plan §4 I-1c / §5 S12):
+                # carry through the reconciled counter surface so the header +
+                # network-info panels can render each counter against its
+                # correct denominator. Field meanings are the C2b contract
+                # documented in juniper-cascor
+                # ``docs/api/JUNIPER_CASCOR_API_REFERENCE.md`` ("Counter
+                # semantics"): ``current_step`` aliases ``current_epoch``
+                # (completed training steps); ``grow_iteration``/``grow_max`` is
+                # the cascade growth-iteration counter vs ``max_iterations`` (the
+                # true "Iteration", distinct from the hidden-unit count);
+                # ``output_epoch``/``candidate_epoch`` (+ their ``*_total_epochs``)
+                # are the live within-pass inner-epoch progress that resets to 0
+                # at each phase entry by design. Nested under ``training_state``
+                # in the cascor payload (``grow_iteration`` etc.), so read from
+                # ``ts``. Absent on a pre-C2b cascor → ``None`` → the consumer
+                # renders a graceful placeholder.
+                "current_step": _first_defined(
+                    ts.get("current_step"),
+                    monitor.get("current_step"),
+                    monitor.get("current_epoch"),
+                    ts.get("current_epoch"),
+                    default=0,
+                ),
+                "grow_iteration": ts.get("grow_iteration"),
+                "grow_max": ts.get("grow_max"),
+                "output_epoch": ts.get("output_epoch"),
+                "output_total_epochs": ts.get("output_total_epochs"),
+                "candidate_epoch": ts.get("candidate_epoch"),
+                "candidate_total_epochs": ts.get("candidate_total_epochs"),
                 # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1 / Issue #3 Phase 1 —
                 # surface the cascor-side staged dataset config so the canopy
                 # banner can react without a separate poll. Cascor #242 added

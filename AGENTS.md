@@ -5,7 +5,7 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.5.0
-**Last Updated**: 2026-07-07
+**Last Updated**: 2026-07-20
 
 ---
 
@@ -451,6 +451,22 @@ juniper_canopy/
    - `DashboardManager` orchestrates all UI components
    - 13 specialized panel components in `frontend/components/`
    - Interactive real-time plotting via Plotly/Dash callbacks
+   - **Training counter semantics (Step / Epoch / Iteration / Hidden Units).** The
+     header, Network Info panel and metrics tiles render cascor's training counters,
+     whose meanings are the **C2b contract** (single source of truth: juniper-cascor
+     [`docs/api/JUNIPER_CASCOR_API_REFERENCE.md`](https://github.com/pcalnon/juniper-cascor/blob/main/docs/api/JUNIPER_CASCOR_API_REFERENCE.md)
+     — "Counter semantics (C2b)"; reconciled in cascor#400). Do not conflate them:
+     `current_epoch`/`current_step` = completed **training steps** (one initial output
+     pass + one per growth iteration), rendered "Step" — **not** an inner epoch;
+     `grow_iteration`/`grow_max` = the true growth **"Iteration"** (vs `max_iterations`),
+     distinct from the hidden-unit count; `hidden_units`/`max_hidden_units` = installed
+     units vs capacity; `output_epoch`/`candidate_epoch` (+ `*_total_epochs`) = the
+     phase-qualified within-pass **"Epoch"** (resets to 0 at each phase entry by design);
+     `max_epochs` = the **derived display budget** (`output_epochs + min(max_iterations,
+     max_hidden_units) * (candidate_epochs + output_epochs)`), surfaced as the Parameters
+     panel's "Maximum Total Epochs" — **not** an `Epoch: X / Y` fraction against the step
+     counter (different units). `DashboardManager._counter_displays()` is the shared
+     mapping helper; regressions live in `src/tests/unit/frontend/test_n6_counter_semantics.py`.
 
 4. **Backend Protocol & Factory** (`src/backend/protocol.py`, `src/backend/__init__.py`)
    - `BackendProtocol` defines the typing interface for all backends
