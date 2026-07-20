@@ -426,6 +426,14 @@ class Settings(BaseSettings):
     # verification is possible.
     auth_proxy_attested: bool = False
 
+    # SEC-F01: the INTENDED auth posture, fed to enforce_auth_posture in
+    # ``main.lifespan`` (env ``JUNIPER_CANOPY_REQUIRE_AUTH``). False (default)
+    # = an unset/placeholder CANOPY_API_KEY only WARNs at boot (control
+    # surface runs open -- bare/dev profile); True = boot REFUSES (CRITICAL +
+    # AuthPostureError) when no real key is configured. Set true wherever
+    # secrets are provisioned (the composed juniper-deploy stack).
+    require_auth: bool = False
+
     @property
     def ws_bridge_enabled(self) -> bool:
         """Runtime check: bridge is active only when dev-flipped ON and not kill-switched."""

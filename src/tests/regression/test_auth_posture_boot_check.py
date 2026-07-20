@@ -42,15 +42,31 @@ _MAIN_PY = Path(__file__).resolve().parents[2] / "main.py"
 
 def test_lifespan_wires_auth_posture_check():
     """The lifespan must call ``enforce_auth_posture(..., service_name="juniper-canopy")``
-    with require_auth=False (the loud-WARNING posture) and do so BEFORE ``create_backend``."""
+    with the settings-driven posture and do so BEFORE ``create_backend``."""
     src = _MAIN_PY.read_text(encoding="utf-8")
     assert "from juniper_service_core import enforce_auth_posture" in src, "canopy must import enforce_auth_posture from juniper_service_core"
     assert 'service_name="juniper-canopy"' in src, "the posture check must identify itself as juniper-canopy"
-    assert "require_auth=False" in src, "this wave runs the loud-WARNING posture; flipping to fail-closed is the JUNIPER_CANOPY_REQUIRE_AUTH follow-up"
+    assert "require_auth=settings.require_auth" in src, "the intended posture must come from settings (JUNIPER_CANOPY_REQUIRE_AUTH), not a literal"
     # The check must consume the real resolved key, mirroring security.get_api_key_auth.
     assert 'get_secret("CANOPY_API_KEY")' in src, "the posture check must consume the resolved CANOPY_API_KEY secret"
     # Ordering: posture check must precede backend initialization / binding.
     assert src.index("enforce_auth_posture(") < src.index("create_backend"), "the auth-posture check must run before create_backend"
+
+
+def test_require_auth_defaults_to_false():
+    """The flag defaults to False (the loud-WARNING posture) so bare/dev runs
+    keep starting; deployments opt in to fail-closed explicitly."""
+    from settings import Settings
+
+    assert Settings.model_fields["require_auth"].default is False
+
+
+def test_env_flag_flips_posture(monkeypatch):
+    """JUNIPER_CANOPY_REQUIRE_AUTH=true wires through the standard env prefix."""
+    from settings import Settings
+
+    monkeypatch.setenv("JUNIPER_CANOPY_REQUIRE_AUTH", "true")
+    assert Settings().require_auth is True
 
 
 def test_no_key_and_not_required_warns_open(monkeypatch, caplog):

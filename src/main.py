@@ -239,10 +239,11 @@ async def lifespan(app: FastAPI):
     # the floor check above. An empty/placeholder CANOPY_API_KEY secret silently
     # disables APIKeyAuth (security.py computes ``[api_key] if api_key else None``)
     # and canopy serves its control surface OPEN behind a healthy health check.
-    # Surface that posture loudly at boot: with no real key this logs a prominent
-    # WARNING. require_auth=False because canopy has no require-auth flag today;
-    # flipping to fail-closed (CRITICAL + refuse to start) is the owner-approved
-    # JUNIPER_CANOPY_REQUIRE_AUTH follow-up. Bypass with
+    # Surface that posture loudly at boot. The intended posture comes from
+    # JUNIPER_CANOPY_REQUIRE_AUTH (settings.require_auth; default false): false =
+    # loud WARNING only (bare/dev profile), true = a missing/placeholder key is a
+    # boot FAILURE (CRITICAL + AuthPostureError) — set true wherever secrets are
+    # provisioned (the composed juniper-deploy stack). Bypass with
     # JUNIPER_SKIP_AUTH_POSTURE_CHECK=1 (logged loudly).
     from juniper_service_core import enforce_auth_posture
 
@@ -251,7 +252,7 @@ async def lifespan(app: FastAPI):
     _canopy_api_key = get_secret("CANOPY_API_KEY")
     enforce_auth_posture(
         [_canopy_api_key] if _canopy_api_key else [],
-        require_auth=False,
+        require_auth=settings.require_auth,
         service_name="juniper-canopy",
         logger=system_logger,
     )
