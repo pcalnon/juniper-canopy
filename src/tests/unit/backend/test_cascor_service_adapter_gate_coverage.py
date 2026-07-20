@@ -33,7 +33,6 @@ in-process (no live cascor service or WebSocket is contacted).
 
 import asyncio
 import contextlib
-import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -464,11 +463,17 @@ class TestMetricsRelayLoop:
         # training_complete drove a Completed state update.
         callback.assert_any_call(status="Completed", phase="Idle")
 
-    async def test_ping_triggers_pong(self, adapter):
+    async def test_ping_frame_is_not_manually_ponged(self, adapter):
+        # CL2 (training-runtime defects plan §7): the relay's manual heartbeat-pong
+        # workaround is retired — cascor-client >=0.7.0 auto-pongs and consumes
+        # ``ping`` frames at the transport layer, so a ping never reaches the relay
+        # and, were one to, the relay no longer reaches into ``stream._ws`` to
+        # answer it. (That the client itself consumes pings is pinned in
+        # test_stream_liveness.py::TestPongRetirement.)
         pong_ws = SimpleNamespace(send=AsyncMock())
         first = _FakeStream(messages=[{"type": "ping"}], ws=pong_ws)
         await _drive_relay(adapter, [first, _cancel_stream()])
-        pong_ws.send.assert_awaited_once_with(json.dumps({"type": "pong"}))
+        pong_ws.send.assert_not_awaited()  # manual pong retired in CL2
 
     async def test_cascade_add_broadcasts_topology_and_survives_error(self, adapter):
         adapter.extract_network_topology = MagicMock(return_value={"nodes": ["n0"]})

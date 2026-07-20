@@ -36,7 +36,6 @@
 
 import asyncio
 import contextlib
-import json
 import logging
 import threading
 import time
@@ -96,6 +95,32 @@ def _ws_open(ws: Any) -> bool:
     if state is None:
         return True
     return getattr(state, "name", None) == "OPEN"
+
+
+def _stream_is_alive(stream: Any, window_sec: float) -> bool:
+    """Consult a cascor-client stream's CL1 ``is_alive(window)`` frame-recency surface.
+
+    CL2 (training-runtime defects plan §7): cascor-client >=0.7.0 answers cascor's
+    heartbeat pings at the transport layer (auto-pong) and records every inbound
+    frame, exposing :meth:`is_alive` — connected AND a frame seen within
+    ``window_sec``. This is the half-open detector that survives the pings no
+    longer reaching canopy's own iterators once the client consumes them.
+
+    Returns the client's own liveness verdict only when the stream exposes the
+    surface as a real ``bool`` (the real streams and ``FakeCascorTrainingStream``
+    from cascor-client >=0.7.0). Fakes / pre-CL1 clients without the surface — and
+    test doubles whose attribute auto-vivifies (``MagicMock``) — return ``False``,
+    preserving the pre-CL2 reconnect-on-timeout behaviour those doubles rely on.
+    """
+    is_alive = getattr(stream, "is_alive", None)
+    if is_alive is None:
+        return False
+    try:
+        alive = is_alive(window_sec)
+    except TypeError:
+        # A surface that takes no window argument — still honour it.
+        alive = is_alive()
+    return alive if isinstance(alive, bool) else False
 
 
 class StreamHealth:
@@ -226,6 +251,9 @@ class ControlStreamSupervisor:
         # here keep direct ``_connect_loop()`` invocation in tests working).
         self._probe_interval: float = 30.0
         self._probe_pong_timeout: float = BackendConstants.CONTROL_PROBE_PONG_TIMEOUT_SECONDS
+        # CL2: window (seconds) for the client's passive ``is_alive`` frame-recency
+        # probe — three cascor heartbeats by default (matches the relay's bound).
+        self._liveness_window: float = 90.0
         # N2: health snapshot for /api/stream_health + the degraded-mode badge.
         # No stale_after bound: /ws/control is command/response — quiet-but-open
         # is its normal state, so "connected" alone classifies healthy.
@@ -237,10 +265,22 @@ class ControlStreamSupervisor:
 
         Pre-N2 this was ``self._stream._ws is not None``, which stayed True for
         12+ hours after cascor closed the socket (2026-07-10 incident).
-        CL1 seam: swap the ``_ws`` reach-in for the cascor-client liveness
-        surface once roadmap unit CL1 ships it.
+        CL2 (training-runtime defects plan §7): consume the cascor-client CL1
+        liveness surface (``CascorControlStream.is_connected``, >=0.7.0) instead
+        of reaching into ``_ws``. The client property applies the identical
+        transport-state test (protocol state is OPEN), so this is a like-for-like
+        swap onto the owned surface. Falls back to ``_ws_open`` for fakes /
+        pre-CL1 clients that do not expose it; only a real ``bool`` is trusted so
+        the N2 suite's ``SimpleNamespace`` / ``MagicMock`` stubs (whose attribute
+        would auto-vivify) still exercise the ``_ws`` fallback.
         """
-        return self._stream is not None and _ws_open(self._stream._ws)
+        stream = self._stream
+        if stream is None:
+            return False
+        client_liveness = getattr(stream, "is_connected", None)
+        if isinstance(client_liveness, bool):
+            return client_liveness
+        return _ws_open(getattr(stream, "_ws", None))
 
     async def start(self) -> None:
         """Start the supervisor background connect loop."""
@@ -250,6 +290,8 @@ class ControlStreamSupervisor:
 
         app_settings = get_settings()
         self._probe_interval = float(getattr(app_settings, "ws_stream_probe_interval_seconds", self._probe_interval))
+        # CL2: the passive-probe window mirrors the relay's liveness bound.
+        self._liveness_window = float(getattr(app_settings, "ws_stream_liveness_timeout_seconds", self._liveness_window))
         self._connect_task = asyncio.create_task(self._connect_loop())
 
     async def stop(self) -> None:
@@ -274,14 +316,38 @@ class ControlStreamSupervisor:
         return result if isinstance(result, dict) else {}
 
     async def _probe_liveness(self) -> bool:
-        """Protocol-level keepalive probe: ping the socket and await the pong.
+        """Liveness probe for the persistent control channel.
 
-        Returns True when the pong arrives within the deadline (marking
-        activity), or when no probe surface exists (fakes / future CL1 client
-        objects) — in that case the ``is_connected`` state check remains the
-        authoritative signal. Returns False on a missed pong or send failure.
+        CL2 (training-runtime defects plan §7): when the stream exposes the
+        cascor-client CL1 liveness surface (>=0.7.0 — whose eager control
+        recv-loop answers cascor's ~30s heartbeat and records every inbound
+        frame), prefer its passive ``is_alive(window)`` frame-recency view over
+        an active protocol ping. This retires the canopy-originated ``ws.ping()``
+        reach-in: with auto-pong the client already keeps the socket read and
+        answered, so a redundant ping from canopy would race the client's own
+        recv loop on the same connection.
+
+        Falls back to the historical active ``ws.ping()`` keepalive for fakes /
+        pre-CL1 clients lacking ``is_alive`` (only a real ``bool`` result is
+        trusted, so the N2 suite's ``SimpleNamespace`` / ``MagicMock`` stubs
+        still drive the active-ping path). Returns True when alive (marking
+        activity), True when no probe surface exists at all (``is_connected``
+        remains authoritative), and False on a missed pong / send failure /
+        stale frame-recency window.
         """
         stream = self._stream
+        # CL2 fast path: the client's own frame-recency surface.
+        is_alive = getattr(stream, "is_alive", None) if stream is not None else None
+        if is_alive is not None:
+            try:
+                alive = is_alive(self._liveness_window)
+            except TypeError:
+                alive = is_alive()
+            if isinstance(alive, bool):
+                if alive:
+                    self.health.mark_activity()
+                return alive
+        # Fallback: active protocol-level keepalive ping (pre-CL1 clients / fakes).
         ws = getattr(stream, "_ws", None) if stream is not None else None
         ping = getattr(ws, "ping", None)
         if ws is None or ping is None or not callable(ping):
@@ -572,20 +638,45 @@ class CascorServiceAdapter:
                     attempt = 0
                     last_training_seq = None
                     # N2: pull frames through an explicit iterator so each wait is
-                    # bounded by the liveness window — with a bare ``async for`` a
-                    # half-open socket parks the relay on ``recv()`` forever (the
-                    # 2026-07-10 silent-death class).
+                    # bounded — with a bare ``async for`` a half-open socket parks
+                    # the relay on ``recv()`` forever (the 2026-07-10 silent-death
+                    # class).
+                    # CL2 (training-runtime defects plan §7): poll the frame wait at
+                    # the cascor heartbeat cadence (not the full liveness window) so
+                    # the client's ``is_alive`` surface can keep the relay-health
+                    # clock fresh between sparse data frames. With >=0.7.0 auto-pong
+                    # consuming cascor's heartbeat pings, those pings no longer reach
+                    # this iterator to feed the clock, so a healthy-but-idle stream
+                    # would otherwise drift to "degraded" (and, unbounded, churn
+                    # reconnects) — ``is_alive`` is the replacement liveness signal.
                     disconnect_reason = "stream ended (peer closed)"
+                    liveness_poll = min(liveness_timeout, BackendConstants.RELAY_LIVENESS_POLL_SECONDS) if liveness_timeout > 0 else 0.0
                     frame_iter = stream.stream().__aiter__()
                     while True:
                         try:
-                            if liveness_timeout > 0:
-                                message = await asyncio.wait_for(frame_iter.__anext__(), timeout=liveness_timeout)
+                            if liveness_poll > 0:
+                                message = await asyncio.wait_for(frame_iter.__anext__(), timeout=liveness_poll)
                             else:
                                 message = await frame_iter.__anext__()
                         except StopAsyncIteration:
                             break
                         except asyncio.TimeoutError:
+                            # No frame this poll. If the client confirms the socket
+                            # saw a frame (heartbeat included) within the full
+                            # liveness window, the stream is healthy-but-idle: feed
+                            # the relay clock (no per-type bump), re-arm the iterator
+                            # on the same live connection, and keep relaying — no
+                            # reconnect. The timed-out recv had no frame in flight
+                            # (the timeout fired because it was still pending), so
+                            # re-arming loses nothing. Only a truly silent peer
+                            # (is_alive False past the window) — or a fake / pre-CL1
+                            # client without the surface — counts as liveness expiry.
+                            if _stream_is_alive(stream, liveness_timeout):
+                                self.relay_health.mark_activity()
+                                with contextlib.suppress(Exception):
+                                    await frame_iter.aclose()
+                                frame_iter = stream.stream().__aiter__()
+                                continue
                             disconnect_reason = f"liveness expired (no frames in {liveness_timeout:.0f}s)"
                             break
                         # METRICS-MON R2.2.5 / seed-05: validate the inbound
@@ -633,18 +724,26 @@ class CascorServiceAdapter:
 
                         msg_type = message.get("type", "")
 
-                        # N2: every inbound frame (pings included) feeds the
-                        # liveness clock and the per-type counters — so the
-                        # periodic summary can show e.g. ``ping=2, metrics=0``,
-                        # the exact heartbeat-only signature of the 2026-07-10
-                        # incident that had zero diagnostic surface before.
+                        # N2/CL2: every inbound frame feeds the liveness clock and
+                        # the per-type counters. cascor-client >=0.7.0 consumes
+                        # heartbeat pings at the transport layer (they never reach
+                        # here), so the census now reflects real data/ack frames —
+                        # metric silence surfaces as ``metrics=0`` in the summary,
+                        # and true socket silence is caught by the client's
+                        # ``is_alive`` surface (the TimeoutError arm above), not by
+                        # counting heartbeat pings the relay no longer receives.
                         self.relay_health.mark_activity(msg_type or "untyped")
 
-                        # Phase F: respond to cascor heartbeat pings with pong
-                        if msg_type == "ping":
-                            if stream._ws:
-                                await stream._ws.send(json.dumps({"type": "pong"}))
-                            continue
+                        # CL2 (training-runtime defects plan §7): the manual
+                        # heartbeat-pong workaround is retired. cascor-client
+                        # >=0.7.0's ``CascorTrainingStream`` auto-pongs and consumes
+                        # ``ping`` frames at the transport layer, so a ``ping`` never
+                        # reaches this relay — canopy no longer reaches into
+                        # ``stream._ws`` to answer it. ``ping`` therefore drops out
+                        # of the relay's frame census (StreamHealth's per-type
+                        # counters simply stop seeing it); the liveness clock is fed
+                        # by data/ack frames plus the client's own ``is_alive``
+                        # surface (the TimeoutError arm above).
 
                         data = message.get("data", message)
 
@@ -792,7 +891,13 @@ class CascorServiceAdapter:
         # a starved stream was indistinguishable from a quiet one. Counts are
         # per-type since the last summary, zero-counts included: silence is
         # itself the signal.
-        _SUMMARY_CORE_TYPES = ("metrics", "state", "topology", "ping")
+        # CL2 (training-runtime defects plan §7): ``ping`` retired from the
+        # core-types roster — cascor-client >=0.7.0 consumes heartbeat pings at
+        # the transport layer, so the relay never sees them and a forced
+        # ``ping=0`` would be a permanently-misleading zero. The remaining core
+        # types still print explicit zeros so metric silence stays visible; any
+        # other observed type is appended (sorted) as before.
+        _SUMMARY_CORE_TYPES = ("metrics", "state", "topology")
 
         async def _relay_summary_loop(interval: float):
             while True:

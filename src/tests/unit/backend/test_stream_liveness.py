@@ -32,6 +32,16 @@ if getattr(_jcc, "_is_stub", False):
 
 from juniper_cascor_client.exceptions import JuniperCascorConnectionError
 
+# CL2: pre-import the websocket_manager singleton at collection time (with real
+# settings) so this suite's relay tests — which patch ``settings.get_settings`` to
+# a bare ``SimpleNamespace`` — are order-independent. The relay loop lazily does
+# ``from communication.websocket_manager import websocket_manager``; that module's
+# import-time ``WebSocketManager()`` reads ``settings.websocket``, so triggering it
+# under the patched settings raises ``AttributeError: 'SimpleNamespace' object has
+# no attribute 'websocket'``. In the full CI unit lane an earlier test imports it
+# first, masking the ordering dependency — this explicit pre-import makes the CL2
+# CI-home target (this file) reliably runnable on its own too.
+import communication.websocket_manager  # noqa: E402,F401
 from backend.cascor_service_adapter import CascorServiceAdapter, ControlStreamSupervisor, StreamHealth, _ws_open
 
 ADAPTER_LOGGER = "juniper_canopy.backend.cascor_service_adapter"
@@ -190,6 +200,21 @@ class TestSupervisorLiveness:
         supervisor._stream = SimpleNamespace(_ws=_FakeWs("CLOSED", close_code=1011))
         assert supervisor.is_connected is False
 
+    def test_is_connected_prefers_client_surface_over_ws(self):
+        """CL2 (training-runtime defects plan §7): the supervisor consumes the
+        cascor-client's own ``is_connected`` bool (>=0.7.0) in preference to the
+        ``_ws`` reach-in. A real-bool surface is authoritative even when the raw
+        socket state would read the other way — proving the seam actually swapped
+        onto the owned client surface (the ``_ws`` fallback remains only for fakes
+        / pre-CL1 clients that do not expose the bool)."""
+        supervisor = ControlStreamSupervisor(ws_url="ws://fake:8200")
+        # Client reports connected though the raw socket reads CLOSED: surface wins.
+        supervisor._stream = SimpleNamespace(is_connected=True, _ws=_FakeWs("CLOSED", close_code=1011))
+        assert supervisor.is_connected is True
+        # Client reports disconnected though the raw socket reads OPEN: surface wins.
+        supervisor._stream = SimpleNamespace(is_connected=False, _ws=_FakeWs("OPEN"))
+        assert supervisor.is_connected is False
+
     async def test_probe_liveness_pong_ok_marks_activity(self):
         supervisor = ControlStreamSupervisor(ws_url="ws://fake:8200")
 
@@ -230,6 +255,25 @@ class TestSupervisorLiveness:
         supervisor = ControlStreamSupervisor(ws_url="ws://fake:8200")
         supervisor._stream = SimpleNamespace(_ws=_FakeWs("OPEN"))  # no ping attr
         assert await supervisor._probe_liveness() is True
+
+    async def test_probe_liveness_prefers_client_is_alive(self):
+        """CL2 (training-runtime defects plan §7): when the stream exposes the
+        cascor-client ``is_alive`` surface (>=0.7.0, whose eager control recv-loop
+        answers cascor's heartbeat and records frames), the probe consumes it and
+        does NOT reach into ``ws.ping()``. The ``_ws`` here has no ``ping``: were
+        the probe to fall through to the active-ping fallback, the no-ping branch
+        would return True even for the dead case — so a ``False`` result proves
+        the passive ``is_alive`` path was taken."""
+        alive = ControlStreamSupervisor(ws_url="ws://fake:8200")
+        alive._liveness_window = 90.0
+        alive._stream = SimpleNamespace(is_alive=lambda window_sec=90.0: True, _ws=SimpleNamespace())
+        assert await alive._probe_liveness() is True
+        assert alive.health.snapshot()["last_activity_age_seconds"] is not None  # marked activity
+
+        dead = ControlStreamSupervisor(ws_url="ws://fake:8200")
+        dead._liveness_window = 90.0
+        dead._stream = SimpleNamespace(is_alive=lambda window_sec=90.0: False, _ws=SimpleNamespace())
+        assert await dead._probe_liveness() is False
 
     async def test_half_open_socket_triggers_logged_reconnect(self, caplog):
         """The full incident loop: socket dies half-open → one WARNING with the
@@ -350,10 +394,15 @@ class TestRelayLiveness:
         return CascorServiceAdapter(service_url="http://localhost:8200", client=MagicMock())
 
     async def test_frames_counted_by_type(self, adapter):
+        # CL2 (training-runtime defects plan §7): cascor-client >=0.7.0 auto-pongs
+        # and consumes heartbeat pings at the transport layer, so a ``ping`` never
+        # reaches the relay — the census reflects real data frames only. (The
+        # client-level proof that pings are consumed lives in
+        # TestPongRetirement.test_fake_training_stream_consumes_ping.)
         frames = [
             {"type": "metrics", "data": {"loss": 0.1}, "seq": 1},
-            {"type": "ping"},
-            {"type": "state", "data": {"status": "training"}, "seq": 2},
+            {"type": "event", "data": {"event": "phase_change"}, "seq": 2},
+            {"type": "state", "data": {"status": "training"}, "seq": 3},
         ]
         stream1 = _make_stream(frames=frames, hang_after_frames=True)
 
@@ -362,7 +411,7 @@ class TestRelayLiveness:
             try:
                 assert await _wait_until(lambda: adapter.relay_health.snapshot()["frames_forwarded_total"] >= 3)
                 snap = adapter.relay_health.snapshot()
-                assert snap["frames_by_type"] == {"metrics": 1, "ping": 1, "state": 1}
+                assert snap["frames_by_type"] == {"metrics": 1, "event": 1, "state": 1}
                 assert snap["status"] == "healthy"
                 assert snap["connected"] is True
             finally:
@@ -418,7 +467,7 @@ class TestRelayLiveness:
 
     async def test_stream_end_reconnects_with_log(self, adapter, caplog):
         """The peer-closed path used to reconnect silently with no backoff."""
-        stream1 = _make_stream(frames=[{"type": "ping"}])  # generator ends after one frame
+        stream1 = _make_stream(frames=[{"type": "metrics", "data": {}}])  # generator ends after one frame
         stream2 = _make_stream(frames=[], hang_after_frames=True)
 
         with _patch_settings(), patch("backend.cascor_service_adapter.CascorTrainingStream", side_effect=[stream1, stream2]), caplog.at_level(logging.WARNING, logger=ADAPTER_LOGGER):
@@ -430,21 +479,72 @@ class TestRelayLiveness:
 
         assert "stream ended" in caplog.text
 
-    async def test_summary_emitted_with_zero_counts(self, adapter, caplog):
-        """§5 T5: the periodic INFO summary makes silence visible — it emits
-        even when nothing was forwarded, and core types show explicit zeros
-        (the heartbeat-only incident signature is ``ping=N, metrics=0``)."""
-        stream1 = _make_stream(frames=[{"type": "ping"}], hang_after_frames=True)
+    async def test_idle_but_alive_rearms_without_reconnect(self, adapter, caplog):
+        """CL2 (training-runtime defects plan §7): with heartbeat pings consumed by
+        the client (>=0.7.0 auto-pong), a healthy-but-idle stream produces no
+        frames for a poll window. The relay must consult the client's ``is_alive``
+        surface and, when it confirms liveness, re-arm the SAME connection (feeding
+        the health clock) rather than churn a reconnect — the pre-CL2 relay would
+        have declared "liveness expired" and reconnected every window."""
+
+        class _IdleAliveStream:
+            """Real-bool ``is_alive`` surface; ``stream()`` drains one queued batch
+            per call then idles (mirrors a live socket whose heartbeat keeps the
+            client alive while metrics are sparse)."""
+
+            def __init__(self, batches):
+                self._batches = list(batches)
+                self._ws = _FakeWs("OPEN")
+                self.connect = AsyncMock()
+                self.disconnect = AsyncMock()
+
+            def is_alive(self, window_sec=90.0):
+                return True
+
+            async def stream(self):
+                batch = self._batches.pop(0) if self._batches else []
+                for frame in batch:
+                    yield frame
+                await asyncio.Event().wait()  # idle: no more frames, socket alive
+
+        # Two metrics in separate batches: the second only relays after a re-arm
+        # following the first idle-poll timeout — proving re-arm on the same stream.
+        stream1 = _IdleAliveStream([[{"type": "metrics", "data": {"loss": 0.1}}], [{"type": "metrics", "data": {"loss": 0.2}}]])
+
+        with _patch_settings(ws_stream_liveness_timeout_seconds=0.05), patch("backend.cascor_service_adapter.CascorTrainingStream", side_effect=[stream1]), caplog.at_level(logging.WARNING, logger=ADAPTER_LOGGER):
+            await adapter.start_metrics_relay()
+            try:
+                assert await _wait_until(lambda: adapter.relay_health.snapshot()["frames_forwarded_total"] >= 2)
+                snap = adapter.relay_health.snapshot()
+                assert snap["reconnect_count"] == 0  # never reconnected — same connection
+                assert snap["connected"] is True
+            finally:
+                await adapter.stop_metrics_relay()
+
+        assert "liveness expired" not in caplog.text
+        assert "Reconnecting" not in caplog.text
+
+    async def test_summary_emitted_with_activity_and_zero_metrics(self, adapter, caplog):
+        """§5 T5 / CL2: the periodic INFO summary makes silence visible — it emits
+        during metric silence, with core types showing explicit zeros.
+
+        Pre-CL2 the heartbeat-only incident signature was ``ping=N, metrics=0``;
+        cascor-client >=0.7.0 now consumes heartbeat pings at the transport layer
+        (they never reach the relay), so ``ping`` has left the census. The
+        equivalent signal is ``metrics=0`` alongside whatever non-metric frames did
+        arrive — here a ``state`` frame — with true socket silence caught by the
+        client's ``is_alive`` surface rather than by counting pings."""
+        stream1 = _make_stream(frames=[{"type": "state", "data": {"status": "training"}}], hang_after_frames=True)
 
         with _patch_settings(ws_relay_summary_interval_seconds=0.05), patch("backend.cascor_service_adapter.CascorTrainingStream", side_effect=[stream1]), caplog.at_level(logging.INFO, logger=ADAPTER_LOGGER):
             await adapter.start_metrics_relay()
             try:
-                assert await _wait_until(lambda: "Metrics relay summary" in caplog.text)
+                assert await _wait_until(lambda: "state=1" in caplog.text)
             finally:
                 await adapter.stop_metrics_relay()
 
-        assert "metrics=0" in caplog.text  # zero-count core type is explicit
-        assert "ping=1" in caplog.text
+        assert "Metrics relay summary" in caplog.text
+        assert "metrics=0" in caplog.text  # zero-count core type stays explicit
 
     async def test_stop_metrics_relay_cancels_summary_task(self, adapter):
         stream1 = _make_stream(frames=[], hang_after_frames=True)
@@ -508,3 +608,37 @@ class TestGetStreamHealth:
     def test_relay_health_lazy_property_for_new_created_instances(self):
         adapter = CascorServiceAdapter.__new__(CascorServiceAdapter)
         assert isinstance(adapter.relay_health, StreamHealth)
+
+
+# ===================================================================
+# Pong retirement — the premise for removing the relay's manual pong
+# ===================================================================
+
+
+@pytest.mark.unit
+class TestPongRetirement:
+    """CL2 (training-runtime defects plan §7): the relay's manual heartbeat-pong
+    workaround (``if msg_type == "ping": await stream._ws.send(...)``) is retired
+    because cascor-client >=0.7.0 answers and consumes ``ping`` frames at the
+    transport layer. This drives the real ``FakeCascorTrainingStream`` (full 0.7.0
+    liveness parity) to pin that premise: a ``ping`` is never yielded to the relay,
+    so the relay has nothing to answer and ``ping`` leaves its frame census."""
+
+    async def test_fake_training_stream_consumes_ping(self):
+        from juniper_cascor_client.testing import FakeCascorTrainingStream
+
+        stream = FakeCascorTrainingStream(delay=0.01)  # auto_pong=True by default; tiny non-zero delay (0.0 spins the fake queue)
+        await stream.connect()
+        stream.inject_message({"type": "metrics", "data": {"loss": 0.1}})
+        stream.inject_message({"type": "ping"})  # heartbeat — consumed, never yielded
+        stream.inject_message({"type": "state", "data": {"status": "training"}})
+        stream.inject_message(None)  # sentinel: end the stream
+
+        seen = [message async for message in stream.stream()]
+        types = [message.get("type") for message in seen]
+
+        assert "ping" not in types  # auto-pong consumed it at the transport layer
+        assert types == ["metrics", "state"]
+        assert stream.pongs_sent == 1  # the client answered the heartbeat itself
+        assert stream.is_connected is True
+        assert stream.is_alive(90.0) is True  # a frame arrived within the window

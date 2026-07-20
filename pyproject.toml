@@ -149,13 +149,17 @@ juniper-data = [
     "requests>=2.28.0",
 ]
 juniper-cascor = [
-    # Floor 0.6.0: FakeCascorClient gained ``_request`` in-memory parity
-    # (cascor-client#91) for the staging + experimental-functions routes that
-    # CascorServiceAdapter drives through the real client's private escape
-    # hatch. Canopy's fake-backed suites (test_fake_service_backend etc.)
-    # crash with AttributeError under any earlier release, so the floor is
-    # the oldest version those tests can run against.
-    "juniper-cascor-client>=0.6.0",
+    # Floor 0.7.0 (CL2, juniper-ml training-runtime defects plan §7/§13): the
+    # CascorServiceAdapter liveness seams consume the cascor-client CL1 surface
+    # shipped in 0.7.0 (cascor-client#92) — the stream classes' ``is_connected``
+    # / ``is_alive(window_sec)`` liveness properties and WS auto-pong — and the
+    # metrics relay retires its manual heartbeat-pong workaround because 0.7.0's
+    # ``CascorTrainingStream`` auto-pongs and never yields ``ping`` frames.
+    # ``FakeCascorTrainingStream`` gained matching liveness parity in 0.7.0.
+    # Earlier releases lack the surface, so the floor is the oldest version the
+    # adapter can run against. (Prior floor 0.6.0: FakeCascorClient ``_request``
+    # in-memory parity, cascor-client#91.)
+    "juniper-cascor-client>=0.7.0",
 ]
 observability = [
     # prometheus-client moved to [project] dependencies on 2026-05-10
