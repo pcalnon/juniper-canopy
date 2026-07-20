@@ -70,6 +70,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (canopy keys with no cascor mapping) contract is unchanged. Regression tests:
   `tests/unit/test_cascor_patch_bounds.py`, `tests/integration/test_n5_apply_params_ux.py`.
 
+- **N6 — header/tile counter mappings + denominators per the reconciled C2b
+  semantics (juniper-ml training-runtime defects plan §4 I-1c / §5 S12; closes
+  I-1c / S12).** The dashboard's Epoch/Step/Iteration/Hidden-Units displays were
+  mislabelled and wrongly denominated against the pre-C2b divergent surfaces.
+  Corrected each mapping to the C2b counter contract (juniper-cascor
+  `docs/api/JUNIPER_CASCOR_API_REFERENCE.md`, "Counter semantics"; cascor#400):
+  - The status-bar segment labelled **"Epoch"** actually showed `current_epoch`,
+    which C2b defines as completed **training steps** (one initial output pass +
+    one per growth iteration), NOT an inner output epoch — relabelled to **"Step"**
+    (the S12 "Epoch: 10000 vs 12" confusion; the value was already `current_epoch`).
+  - The status-bar segment labelled **"Iteration"** actually showed
+    `hidden_units / max_hidden_units` — relabelled to **"Hidden Units"** (the
+    segment id `top-hidden-units-display` was always the unit count; only the
+    label was wrong, and C2b reconciled the `max_hidden_units` denominator, fixing
+    S12's stale `/ 10000`).
+  - The Network Info panel's **"Current Iteration"** showed the hidden-unit count;
+    now shows the TRUE growth iteration `grow_iteration / grow_max`
+    (vs `max_iterations`), added a phase-qualified within-pass **"Epoch (in phase)"**
+    (`output_epoch`/`candidate_epoch` — "N / M (output|candidate)", rendering
+    "0 / N" on the by-design phase-entry reset rather than blank), and gave
+    "Hidden Units" the reconciled `/ max_hidden_units` denominator.
+  - The metrics **"Training Step"** tile read the latest metrics row's `epoch`
+    blind to C2b's `kind` discriminator, so a throttled within-pass `output_epoch`
+    row displayed as the step count (the tile-level "10000 vs 12" flip-flop); it
+    now prefers the latest `training_step` row (or the authoritative
+    `training_state.current_epoch`) and holds the last step value through a
+    candidate-phase metrics freeze.
+  - `ServiceBackend.get_status` now carries the reconciled counter surface
+    (`current_step`, `grow_iteration`, `grow_max`, `output_epoch`/`output_total_epochs`,
+    `candidate_epoch`/`candidate_total_epochs`) through to the header/panel
+    consumers; missing fields (pre-C2b cascor) degrade to a graceful placeholder.
+  The `max_epochs` derived budget is deliberately NOT rendered as an
+  `Epoch: X / Y` fraction against the step counter (different units — steps vs
+  inner-epochs); it remains the Parameters panel's "Maximum Total Epochs" budget.
+  Tests: `src/tests/unit/frontend/test_n6_counter_semantics.py` (mapping helper,
+  header, Network Info panel, tile `kind`-discrimination + candidate-freeze, and
+  the `get_status` surface).
+
 - **N1 — un-gated metrics/topology polls (sticky-gate starvation fix; juniper-ml
   training-runtime defects plan §4 I-1/I-2, posture O2).** The metrics-store poll no longer
   skips REST while the WS bridge reports `connected` + `metricsReceived`, and the topology

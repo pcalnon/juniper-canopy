@@ -1187,8 +1187,10 @@ class MetricsPanel(BaseComponent):
             return hidden_style, 0, "", 0, ""
 
         grow_iter = state.get("grow_iteration")
-        # Use max_hidden_units as meaningful progress target; fall back to grow_max
-        # (grow_max is max_epochs from grow_network, which is a theoretical limit)
+        # Use max_hidden_units as the practical growth-progress target (units are
+        # added one per admitted iteration), falling back to grow_max. N6/C2b: grow_max
+        # is ``max_iterations`` (the cascade growth-iteration cap), NOT max_epochs —
+        # the effective growth ceiling is ``min(max_iterations, max_hidden_units)``.
         grow_max = state.get("max_hidden_units") or state.get("grow_max")
         cand_epoch = state.get("candidate_epoch")
         cand_total = state.get("candidate_total_epochs")
@@ -1309,7 +1311,24 @@ class MetricsPanel(BaseComponent):
 
         # Get current values
         latest = metrics_data[-1]
-        current_epoch = latest.get("epoch", 0)
+        # N6/C2b: metrics rows carry a ``kind`` discriminator — ``training_step``
+        # rows number ``epoch`` as completed training steps; ``output_epoch`` rows
+        # number ``epoch`` as the within-pass inner epoch (sampled ~every 25th
+        # epoch). The "Training Step" tile must show the completed-step count, so
+        # prefer the latest ``training_step`` row (or the authoritative
+        # ``training_state.current_epoch``); never a within-pass inner epoch — that
+        # was the tile-level "Training Step: 10000 vs 12" flip-flop (S12/I-1c).
+        # Rows without ``kind`` default to ``training_step`` (pre-C2b / demo rows
+        # used step numbering), so legacy payloads are unaffected. During a
+        # candidate phase no new ``training_step`` rows arrive (metrics freeze), so
+        # this holds the last step value instead of blanking.
+        step_rows = [m for m in metrics_data if m.get("kind", "training_step") == "training_step"]
+        if step_rows:
+            current_epoch = step_rows[-1].get("epoch", 0)
+        elif isinstance(training_state, dict) and training_state.get("current_epoch") is not None:
+            current_epoch = training_state.get("current_epoch")
+        else:
+            current_epoch = latest.get("epoch", 0)
         current_loss = latest.get("metrics", {}).get("loss", 0)
         current_accuracy = latest.get("metrics", {}).get("accuracy", 0)
         hidden_units = latest.get("network_topology", {}).get("hidden_units", 0)
