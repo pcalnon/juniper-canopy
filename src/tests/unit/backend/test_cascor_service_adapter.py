@@ -291,10 +291,15 @@ class TestCanopyParamsMapping:
         # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1a — apply_params now always
         # surfaces dropped (canopy-only) keys via the ``skipped`` field so the
         # toast can flag them. canopy_only_param has no cascor mapping.
+        # N5 (I-4/T3): the return additionally always carries cascor's C2a
+        # ``applied`` / ``skipped_detail`` partition (empty here — the mock's
+        # ``{"ok": True}`` echo has no C2a fields).
         assert result == {
             "ok": True,
             "data": {"ok": True},
             "skipped": ["canopy_only_param"],
+            "applied": [],
+            "skipped_detail": [],
         }
 
     def test_param_map_values_are_unique(self):

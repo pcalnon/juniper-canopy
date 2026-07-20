@@ -743,9 +743,11 @@ class TestApplyParamsMoreBranches:
 
     def test_no_mappable_params_short_circuits(self, adapter, mock_client):
         # A canopy-local param maps to nothing on cascor and is NOT reported skipped.
+        # N5 (I-4/T3): the early-return shape additionally carries the always-present
+        # C2a ``applied`` / ``skipped_detail`` partition (empty — no cascor call).
         with _settings_no_ws():
             result = adapter.apply_params(nn_spiral_rotations=3)
-        assert result == {"ok": True, "data": {}, "skipped": [], "message": "No cascor-mappable params provided"}
+        assert result == {"ok": True, "data": {}, "skipped": [], "applied": [], "skipped_detail": [], "message": "No cascor-mappable params provided"}
         mock_client.update_params.assert_not_called()
 
     def test_unclassified_param_defaults_to_rest(self, adapter, mock_client):

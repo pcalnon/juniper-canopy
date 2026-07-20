@@ -3715,6 +3715,13 @@ async def api_set_params(body: SetParamsRequest):
         # Forward all params to backend FIRST (offloaded to thread for sync backends)
         result = await asyncio.to_thread(backend.apply_params, **backend_updates)
         skipped: list = []
+        # N5 (I-4 / T3): cascor's C2a applied/skipped(reason) partition — which
+        # submitted keys the live network actually took vs. declined (with the
+        # reason). Distinct from ``skipped`` above (canopy keys with no cascor
+        # mapping, never sent). Threaded into the response so the dashboard toast
+        # can render both. Absent on a pre-C2a backend → empty lists.
+        applied_detail: list = []
+        skipped_detail: list = []
         if isinstance(result, dict):
             if not result.get("ok", True):
                 error_msg = result.get("error", "unknown")
@@ -3728,6 +3735,8 @@ async def api_set_params(body: SetParamsRequest):
                     err_payload["skipped"] = result["skipped"]
                 return JSONResponse(err_payload, status_code=502)
             skipped = list(result.get("skipped") or [])  # type: ignore[call-overload]  # pre-existing: dict.get() is object-typed, runtime value is a list (surfaced by the A1-iv-2 main.py mypy re-check)
+            applied_detail = list(result.get("applied") or [])  # type: ignore[call-overload]  # runtime value is list[str] (C2a applied, canopy-keyed)
+            skipped_detail = list(result.get("skipped_detail") or [])  # type: ignore[call-overload]  # runtime value is list[{key, reason}] (C2a skipped, canopy-keyed)
 
         # Only update TrainingState AFTER backend confirms success
         if ts_updates:
@@ -3745,6 +3754,11 @@ async def api_set_params(body: SetParamsRequest):
         response: dict = {"status": "success", "state": training_state.get_state()}
         if skipped:
             response["skipped"] = skipped
+        # N5: additive C2a partition (both empty on a pre-C2a backend).
+        if applied_detail:
+            response["applied"] = applied_detail
+        if skipped_detail:
+            response["skipped_detail"] = skipped_detail
         return response
     except Exception as exc:
         # SEC-14: return an opaque error_id; full traceback goes to logs only.
