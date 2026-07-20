@@ -1882,6 +1882,95 @@ class DashboardManager:
                 # Outcome alert — opens after the swap POST resolves
                 # (success / cancelled / error). Auto-dismisses after 5s.
                 html.Div(id="live-switch-outcome-alert", style={"position": "fixed", "top": "5rem", "right": "1rem", "zIndex": 1060, "minWidth": "20rem"}),
+                # N3 (I-6): Restart-with-new-dataset confirm modal (Q3/Q4).
+                # Replaces the pre-N3 fire-and-forget cold-swap — the sidebar
+                # "Stop & Restart with new dataset" banner button now opens this
+                # confirm dialog instead of silently POSTing. A simple confirm by
+                # default (assumes all other meta-parameters / structures /
+                # processes unchanged), leading with a start-fresh toggle (Q4,
+                # default OFF) and an expandable granular VERIFY section (Q3;
+                # read-only here — in-place MODIFY is deferred to N3b, which
+                # intersects N5's apply contract). Confirm →
+                # POST /api/train/restart (stop → await stopped → start(staged));
+                # every step's outcome renders in restart-outcome-alert (T4).
+                # ``backdrop="static"`` + ``keyboard=False`` force an explicit
+                # choice — N3 turns a button that stopped nothing into one that can
+                # kill a multi-hour run (plan §11 skeptic #11).
+                dbc.Modal(
+                    [
+                        dbc.ModalHeader(dbc.ModalTitle("Confirm restart with new dataset")),
+                        dbc.ModalBody(
+                            [
+                                dbc.Alert(
+                                    "This stops the current run (if one is active), waits for it to settle, then restarts training with the staged dataset. All other meta-parameters, structures, and processes are left unchanged.",
+                                    color="info",
+                                    className="mb-3",
+                                ),
+                                html.P("Dataset to be applied:", className="mb-1 fw-semibold"),
+                                dbc.ListGroup([], id="restart-confirm-summary", flush=True, className="mb-3"),
+                                dbc.Switch(
+                                    id="restart-start-fresh-toggle",
+                                    label="Start fresh — discard the current model and its retained metrics/history (snapshots preserved)",
+                                    value=False,
+                                ),
+                                html.Div(
+                                    "Off (default): continue the current model, retaining metrics/history for cross-dataset continuity. On: rebuild a vanilla, untrained network — functionally a clean stack launch (on-disk snapshots are kept).",
+                                    className="text-muted mb-3",
+                                    style={"fontSize": "0.85em"},
+                                ),
+                                dbc.Button(
+                                    "▸ Verify what will happen",
+                                    id="restart-granular-toggle",
+                                    color="link",
+                                    size="sm",
+                                    className="p-0 mb-2",
+                                ),
+                                dbc.Collapse(
+                                    dbc.Card(dbc.CardBody(html.Div(id="restart-granular-content"))),
+                                    id="restart-granular-collapse",
+                                    is_open=False,
+                                ),
+                            ]
+                        ),
+                        dbc.ModalFooter(
+                            [
+                                dbc.Button("Cancel", id="restart-cancel-button", color="secondary", outline=True),
+                                dbc.Button("Confirm & Restart", id="restart-confirm-button", color="primary"),
+                            ]
+                        ),
+                    ],
+                    id="restart-confirm-modal",
+                    is_open=False,
+                    backdrop="static",
+                    keyboard=False,
+                    centered=True,
+                ),
+                # N3: restart progress alert — opens on Confirm (spinner while the
+                # bounded stop → await → start POST is in flight). Split from the
+                # outcome callback so the spinner shows before the POST returns.
+                dbc.Alert(
+                    [
+                        dbc.Spinner(size="sm", color="light"),
+                        html.Span(" Restarting training…", className="ms-2"),
+                    ],
+                    id="restart-progress-alert",
+                    is_open=False,
+                    color="info",
+                    dismissable=False,
+                    style={"position": "fixed", "top": "13rem", "right": "1rem", "zIndex": 1060, "minWidth": "20rem"},
+                ),
+                # N3: restart outcome alert — success (incl. instant-convergence)
+                # or per-step failure (stop / await / start) with the upstream
+                # detail. Mirrors the live-switch / training-control *-outcome-alert
+                # idiom, but a DEDICATED surface (not the failure-only
+                # training-control renderer) so a truthful SUCCESS outcome can be
+                # shown too — the epoch-0 instant-convergence case must not read as
+                # frozen (folded finding 2). Sequential with the progress alert
+                # above (same slot: progress closes as this renders).
+                html.Div(id="restart-outcome-alert", style={"position": "fixed", "top": "13rem", "right": "1rem", "zIndex": 1060, "minWidth": "20rem"}),
+                # N3 (T4): Apply-Dataset staging outcome — surfaces a staging
+                # failure that was previously silent (``return dash.no_update``).
+                html.Div(id="dataset-stage-outcome-alert", style={"position": "fixed", "top": "17rem", "right": "1rem", "zIndex": 1060, "minWidth": "20rem"}),
                 # Model-selection surface (A1b-1; design D7/§5.2): a dedicated full-width modal
                 # opened from the sidebar "▸ change" button. ``toggle_model_modal`` fills the body
                 # container with a custom ``dbc.Table`` (status badge + compatibility cell + a
@@ -2086,6 +2175,7 @@ class DashboardManager:
         self._setup_backend_callbacks()  # Define backend callbacks
         self._setup_experimental_functions_callbacks()  # P2-4 (Issue #3)
         self._setup_live_dataset_switch_callbacks()  # P2-5 (Issue #3)
+        self._setup_restart_orchestration_callbacks()  # N3 (I-6): cold-swap confirm modal + stop→await→start
         self._setup_dataset_swap_observers_callbacks()  # P2-7 (Issue #3)
         self._setup_model_class_callbacks()  # A1-iii-b1: cascade-panel suppression for one-shot models
         self._setup_model_selection_callbacks()  # A1-iv-3a: sidebar model picker -> runtime backend swap
@@ -4179,7 +4269,12 @@ class DashboardManager:
         # Apply Dataset / Cancel pending dataset change / banner visibility.
 
         @self.app.callback(
-            Output("pending-dataset-banner", "is_open", allow_duplicate=True),
+            [
+                Output("pending-dataset-banner", "is_open", allow_duplicate=True),
+                # N3 (T4): staging failures were silent (return dash.no_update);
+                # surface them instead of leaving the operator guessing.
+                Output("dataset-stage-outcome-alert", "children"),
+            ],
             Input("apply-dataset-button", "n_clicks"),
             [
                 dash.dependencies.State("nn-dataset-type-dropdown", "value"),
@@ -4193,7 +4288,7 @@ class DashboardManager:
         def apply_dataset(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals):
             """POST /api/stage_dataset with the current dataset-form values."""
             if not n_clicks:
-                return dash.no_update
+                return dash.no_update, dash.no_update
             # dataset_type is ALWAYS sent — cascor `_reload_dataset` hard-requires
             # it (RuntimeError otherwise). The optional numeric / spiral fields
             # are included only when present. Force-blur on the Apply-Dataset
@@ -4220,12 +4315,13 @@ class DashboardManager:
                 )
                 if resp.status_code == 200:
                     self.logger.info("Dataset staged: %s", payload)
-                    return True  # open banner
-                self.logger.warning("Stage dataset failed: %s %s", resp.status_code, resp.text[:200])
-                return dash.no_update
+                    return True, None  # open banner; clear any prior staging error
+                detail = resp.text[:300] if resp.text else f"HTTP {resp.status_code}"
+                self.logger.warning("Stage dataset failed: %s %s", resp.status_code, detail)
+                return dash.no_update, dbc.Alert(f"Could not stage the dataset change: {detail}", color="danger", duration=8000, dismissable=True)
             except requests.RequestException as exc:
                 self.logger.warning("Stage dataset exception: %s", exc)
-                return dash.no_update
+                return dash.no_update, dbc.Alert(f"Backend unreachable while staging the dataset: {exc}", color="danger", duration=8000, dismissable=True)
 
         @self.app.callback(
             Output("pending-dataset-banner", "is_open", allow_duplicate=True),
@@ -4251,38 +4347,14 @@ class DashboardManager:
                 self.logger.warning("Cancel pending dataset exception: %s", exc)
                 return dash.no_update
 
-        @self.app.callback(
-            Output("pending-dataset-banner", "is_open", allow_duplicate=True),
-            Input("restart-with-new-dataset-button", "n_clicks"),
-            prevent_initial_call=True,
-        )
-        def restart_with_new_dataset(n_clicks):
-            """POST /api/train/start?reset=true (cold-swap restart); close the banner.
-
-            Companion to ``cancel_pending_dataset``: instead of discarding the
-            staged dataset change, this commits it by restarting training with a
-            network reset. ``start_training(reset=True)`` consumes the staged
-            dataset and clears the backend ``pending_dataset`` (mirrored in demo
-            mode by ``DemoMode.start``), which ``reconcile_pending_dataset_banner``
-            also observes; we close the banner immediately for responsiveness.
-            """
-            if not n_clicks:
-                return dash.no_update
-            try:
-                resp = requests.post(
-                    self._api_url("/api/train/start"),
-                    params={"reset": "true"},
-                    timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
-                    headers=internal_api_headers(),
-                )
-                if resp.status_code == 200:
-                    self.logger.info("Cold-swap restart with staged dataset")
-                    return False  # close banner
-                self.logger.warning("Restart with new dataset failed: %s %s", resp.status_code, resp.text[:200])
-                return dash.no_update
-            except requests.RequestException as exc:
-                self.logger.warning("Restart with new dataset exception: %s", exc)
-                return dash.no_update
+        # N3 (I-6): the "Stop & Restart with new dataset" button
+        # (``restart-with-new-dataset-button``) is now wired in
+        # ``_setup_restart_orchestration_callbacks`` — it opens the confirm modal
+        # (Q3/Q4) instead of firing the pre-N3 feedback-free
+        # ``POST /api/train/start?reset=true``. The confirm flow runs the promised
+        # stop → await stopped → start(staged) sequence and surfaces every step's
+        # outcome. ``reconcile_pending_dataset_banner`` (below) still closes the
+        # banner once cascor clears ``pending_dataset`` after a successful restart.
 
         @self.app.callback(
             Output("pending-dataset-banner", "is_open", allow_duplicate=True),
@@ -4548,6 +4620,228 @@ class DashboardManager:
         )
         def cancel_live_switch(n_clicks):
             return self._cancel_live_switch_handler(n_clicks=n_clicks)
+
+    def _setup_restart_orchestration_callbacks(self):
+        """N3 (canopy training-runtime defects plan, I-6): the cold-swap restart
+        confirm modal (Q3/Q4) + the stop → await stopped → start(staged)
+        orchestration that replaces the pre-N3 feedback-free callback.
+
+        Five thin callbacks, each delegating to a class-level ``_*_handler`` so the
+        branch logic is unit-testable by direct invocation:
+
+        1. Open the confirm modal on the banner's "Stop & Restart" button; populate
+           the read-only dataset summary + granular verify section and reset the
+           start-fresh toggle to its default OFF (Q4) and the verify section closed.
+        2. Toggle the expandable granular verify section (Q3).
+        3. Cancel — close the modal.
+        4. Open the progress spinner the instant Confirm is clicked (split so the
+           spinner shows before the bounded stop→await→start POST returns).
+        5. Execute — POST /api/train/restart {start_fresh, reset}; render every
+           step's outcome (success incl. instant-convergence, or per-step failure
+           with the upstream detail); close the modal + progress; keep the pending
+           banner open on failure, close it on success.
+        """
+
+        @self.app.callback(
+            [
+                Output("restart-confirm-modal", "is_open", allow_duplicate=True),
+                Output("restart-confirm-summary", "children"),
+                Output("restart-granular-content", "children"),
+                Output("restart-start-fresh-toggle", "value", allow_duplicate=True),
+                Output("restart-granular-collapse", "is_open", allow_duplicate=True),
+            ],
+            Input("restart-with-new-dataset-button", "n_clicks"),
+            [
+                dash.dependencies.State("nn-dataset-type-dropdown", "value"),
+                dash.dependencies.State("nn-dataset-elements-input", "value"),
+                dash.dependencies.State("nn-dataset-noise-input", "value"),
+                dash.dependencies.State("nn-spiral-rotations-input", "value"),
+                dash.dependencies.State("nn-spiral-number-input", "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def open_restart_confirm_modal(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals):
+            return self._open_restart_confirm_modal_handler(n_clicks=n_clicks, dataset_type=dataset_type, n_samples=n_samples, noise=noise, rotations=rotations, n_spirals=n_spirals)
+
+        @self.app.callback(
+            Output("restart-granular-collapse", "is_open", allow_duplicate=True),
+            Input("restart-granular-toggle", "n_clicks"),
+            dash.dependencies.State("restart-granular-collapse", "is_open"),
+            prevent_initial_call=True,
+        )
+        def toggle_restart_granular(n_clicks, is_open):
+            if not n_clicks:
+                return dash.no_update
+            return not is_open
+
+        @self.app.callback(
+            Output("restart-confirm-modal", "is_open", allow_duplicate=True),
+            Input("restart-cancel-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def cancel_restart_confirm(n_clicks):
+            if not n_clicks:
+                return dash.no_update
+            return False
+
+        @self.app.callback(
+            Output("restart-progress-alert", "is_open", allow_duplicate=True),
+            Input("restart-confirm-button", "n_clicks"),
+            prevent_initial_call=True,
+        )
+        def open_restart_progress(n_clicks):
+            if not n_clicks:
+                return dash.no_update
+            return True
+
+        @self.app.callback(
+            [
+                Output("restart-confirm-modal", "is_open", allow_duplicate=True),
+                Output("restart-progress-alert", "is_open", allow_duplicate=True),
+                Output("restart-outcome-alert", "children"),
+                Output("pending-dataset-banner", "is_open", allow_duplicate=True),
+            ],
+            Input("restart-confirm-button", "n_clicks"),
+            dash.dependencies.State("restart-start-fresh-toggle", "value"),
+            prevent_initial_call=True,
+        )
+        def execute_restart(n_clicks, start_fresh):
+            return self._execute_restart_handler(n_clicks=n_clicks, start_fresh=start_fresh)
+
+    # ------------------------------------------------------------------
+    # N3 (I-6) restart-orchestration handlers — extracted from the
+    # ``_setup_restart_orchestration_callbacks`` closures so each branch is
+    # unit-testable via direct invocation (mirrors the P2-5/P2-6 live-switch
+    # handler pattern). See tests/unit/frontend/test_restart_orchestration_handlers.py.
+    # ------------------------------------------------------------------
+
+    def _open_restart_confirm_modal_handler(self, n_clicks=None, dataset_type=None, n_samples=None, noise=None, rotations=None, n_spirals=None):
+        """Open the confirm modal + populate the read-only summary / verify section.
+
+        Returns ``(modal_open, summary_rows, granular_content, start_fresh_value,
+        granular_open)``. The start-fresh toggle is reset to its ratified default
+        OFF (Q4) and the granular section collapsed on every open. Q3: the summary
+        shows "what will be applied" and the verify section shows the current
+        engine params (best-effort — a status hiccup degrades to dataset-only,
+        never blocks the modal). In-place MODIFY is deferred to N3b.
+        """
+        if not n_clicks:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        rows = []
+        for label, value in (
+            ("Dataset type", dataset_type),
+            ("Samples", n_samples),
+            ("Noise", noise),
+            ("Spiral rotations", rotations),
+            ("Spirals", n_spirals),
+        ):
+            if value is None:
+                continue
+            rows.append(dbc.ListGroupItem([html.Strong(f"{label}: "), html.Span(str(value))]))
+        if not rows:
+            rows = [dbc.ListGroupItem(html.Em("No dataset config selected in the sidebar — the currently staged change will be applied."), color="warning")]
+        granular = self._build_restart_verify_content(dataset_type=dataset_type, n_samples=n_samples, noise=noise, rotations=rotations, n_spirals=n_spirals)
+        return True, rows, granular, False, False
+
+    def _build_restart_verify_content(self, dataset_type=None, n_samples=None, noise=None, rotations=None, n_spirals=None):
+        """Read-only Q3 verify body: current engine params + the restart plan.
+
+        Best-effort ``/api/status`` read (bounded, defensive) so the operator can
+        verify the model/meta-params that will carry over on a continue, or be
+        discarded on a start-fresh. Never raises — a status hiccup degrades to the
+        dataset-only view. In-place MODIFY of these values is N3b (it intersects
+        N5's apply contract).
+        """
+        items = [
+            dbc.ListGroupItem([html.Strong("Action: "), html.Span("stop the current run (if active), wait for it to settle, then start with the staged dataset.")]),
+            dbc.ListGroupItem([html.Strong("Start fresh OFF: "), html.Span("continue the current model, retaining metrics/history (cross-dataset continuity).")]),
+            dbc.ListGroupItem([html.Strong("Start fresh ON: "), html.Span("discard the model + retained metrics/history for a vanilla rebuild (snapshots preserved).")]),
+        ]
+        try:
+            resp = requests.get(
+                self._api_url("/api/status"),
+                timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
+                headers=internal_api_headers(),
+            )
+            if resp.status_code == 200:
+                status = resp.json() or {}
+                for label, key in (
+                    ("Current epoch", "current_epoch"),
+                    ("Hidden units", "hidden_units"),
+                    ("Learning rate", "learning_rate"),
+                    ("Max hidden units", "max_hidden_units"),
+                    ("Max epochs", "max_epochs"),
+                ):
+                    if status.get(key) is not None:
+                        items.append(dbc.ListGroupItem([html.Strong(f"{label}: "), html.Span(str(status.get(key)))]))
+        except requests.RequestException:
+            items.append(dbc.ListGroupItem(html.Em("Current engine parameters unavailable (backend not reachable)."), color="warning"))
+        return dbc.ListGroup(items, flush=True)
+
+    def _execute_restart_handler(self, n_clicks=None, start_fresh=None):
+        """POST /api/train/restart and reconcile the UI to the structured outcome.
+
+        Returns ``(modal_open, progress_open, outcome_alert, banner_open)``.
+        Success → close the modal + progress, render a green outcome (with an
+        instant-convergence note when the new run already completed), and close the
+        pending banner. Failure (409 stop/start refusal, 504 stop-await timeout, or
+        an unreachable backend) → render a red outcome carrying the upstream detail
+        and keep the pending banner OPEN (``dash.no_update``) so the staged change
+        survives and the operator can retry (plan §8 stop→start race, T1/T4).
+        """
+        if not n_clicks:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        payload = {"start_fresh": bool(start_fresh), "reset": True}
+        try:
+            resp = requests.post(
+                self._api_url("/api/train/restart"),
+                json=payload,
+                timeout=DashboardConstants.DASHBOARD_RESTART_POST_TIMEOUT,
+                headers=internal_api_headers(),
+            )
+            data = {}
+            try:
+                data = resp.json() or {}
+            except ValueError:
+                data = {}
+            if resp.status_code == 200 and data.get("success"):
+                self.logger.info("Restart orchestration succeeded: %s", data.get("steps"))
+                return False, False, self._render_restart_outcome(data, ok=True), False
+            detail = data.get("message") or (resp.text[:300] if resp.text else f"HTTP {resp.status_code}")
+            self.logger.warning("Restart orchestration failed (%s): %s", resp.status_code, detail)
+            return False, False, self._render_restart_outcome(data if data else {"message": detail}, ok=False), dash.no_update
+        except requests.RequestException as exc:
+            self.logger.warning("Restart orchestration exception: %s", exc)
+            return False, False, dbc.Alert([html.Strong("Restart failed. "), html.Span(f"Backend unreachable: {exc}")], color="danger", dismissable=True, duration=10000), dash.no_update
+
+    @staticmethod
+    def _render_restart_outcome(data, ok):
+        """Build the restart outcome alert from the route's structured result.
+
+        ``ok`` is the success flag (200 + ``success``). On success the alert
+        enumerates the steps that ran (stop/await/start) and — folded finding 2 —
+        notes an instant-convergence run truthfully instead of letting it read as
+        frozen. On failure the alert carries the upstream ``message`` (the 409
+        refusal reason, the 504 stop-await timeout, etc.) verbatim (T1), and flags
+        a retriable timeout so the operator knows the staged change survived.
+        """
+        data = data if isinstance(data, dict) else {}
+        if ok:
+            start_fresh = bool(data.get("start_fresh"))
+            was_active = bool(data.get("was_active"))
+            parts = ["Restart complete. "]
+            if was_active:
+                parts.append("Stopped the running model, then ")
+            else:
+                parts.append("Started ")
+            parts.append("a fresh model." if start_fresh else "continued the current model.")
+            if data.get("instant_complete"):
+                parts.append(" The new run converged immediately (epoch 0) — see the metrics panel for its final values.")
+            return dbc.Alert([html.Strong("Restart succeeded. "), html.Span("".join(parts))], color="success", dismissable=True, duration=8000)
+        detail = str(data.get("message") or "the backend rejected the restart.").strip()
+        if data.get("retriable"):
+            detail += " The dataset change is still staged — you can retry."
+        return dbc.Alert([html.Strong("Restart failed. "), html.Span(detail)], color="danger", dismissable=True, duration=10000)
 
     def _setup_dataset_swap_observers_callbacks(self):
         """Phase 2 P2-7 (Issue #3): poll ``dataset-swap-events-store``.

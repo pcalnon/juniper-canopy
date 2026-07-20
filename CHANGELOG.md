@@ -45,6 +45,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **N3 — restart orchestration: confirm modal (Q3/Q4), stop → await → start(staged),
+  outcomes surfaced (juniper-ml training-runtime defects plan §4 I-6, T1/T4, U-1).**
+  The sidebar "Stop & Restart with new dataset" button no longer fires a
+  feedback-free `POST /api/train/start?reset=true` whose only output was the
+  banner (three cold-swaps trained to completion **invisibly** in the 2026-07-11
+  incident, and an active-run swap would have 409'd silently). It now opens a
+  **confirm modal** (Q3): a simple confirm by default — assuming all other
+  meta-parameters/structures/processes unchanged — leading with a **start-fresh
+  toggle (Q4, default OFF)** and an expandable granular **verify** section
+  (read-only current engine params; in-place *modify* is deferred to **N3b**,
+  which intersects N5's apply contract). Confirm runs a new
+  **`POST /api/train/restart`** orchestration route that, per the E-2 live pin
+  (a start against an ACTIVE run 409s immediately while the staged config
+  survives), performs **stop → await stopped (bounded) → start(staged)** for an
+  active run and skips straight to start when idle/terminal. **Every step's
+  outcome is surfaced** (T1/T4): a dedicated `restart-outcome-alert` renders a
+  truthful success (including an **instant-convergence / epoch-0** run, folded
+  finding 2) or a per-step failure carrying the upstream detail — the previously
+  silent 409 refusal, a retriable 504 stop-await timeout (staged change kept, the
+  pending banner stays open), and stop/start refusals. `start_fresh` (Q4) is
+  forwarded to cascor's C5 body field `{"start_fresh": true}` (cascor#408) through
+  the backend stack (`ServiceBackend`/`DemoBackend` → adapter; the 0.7.0 client
+  can't carry the field yet, so the adapter posts it through the client's own
+  transport — a documented CL2 swap seam); OFF continues the current model,
+  retaining metrics/history (Q4 use-case 1, preserving N1's chart retention). The
+  demo FSM now **auto-resets from a terminal (COMPLETED/FAILED) state on START**,
+  mirroring the cascor engine FSM (`state_machine.py:171-173`) — a
+  start/restart from a converged demo run is no longer silently refused (folded
+  finding 1; the asymmetry that turned canopy's CI UI leg red, §13 N2 addendum).
+  Apply-Dataset staging failures, previously swallowed, now surface too (T4).
+  Tests: the `/api/train/restart` route (idle/active/stop-await-timeout/refusal/
+  instant-convergence), the confirm-modal + outcome handlers, `start_fresh`
+  forwarding across every backend layer, and the demo-FSM start-from-terminal fix.
+
 - **N6 — header/tile counter mappings + denominators per the reconciled C2b
   semantics (juniper-ml training-runtime defects plan §4 I-1c / §5 S12; closes
   I-1c / S12).** The dashboard's Epoch/Step/Iteration/Hidden-Units displays were
@@ -82,6 +116,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Tests: `src/tests/unit/frontend/test_n6_counter_semantics.py` (mapping helper,
   header, Network Info panel, tile `kind`-discrimination + candidate-freeze, and
   the `get_status` surface).
+
 - **N1 — un-gated metrics/topology polls (sticky-gate starvation fix; juniper-ml
   training-runtime defects plan §4 I-1/I-2, posture O2).** The metrics-store poll no longer
   skips REST while the WS bridge reports `connected` + `metricsReceived`, and the topology

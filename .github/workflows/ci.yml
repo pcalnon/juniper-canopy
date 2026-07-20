@@ -306,7 +306,13 @@ jobs:
           python -m pip install --upgrade "pip>=26.1.1"
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r conf/requirements_ci.txt
-          pip install -e .
+          # N3: the adapter now imports juniper_cascor_client.constants at
+          # module level (ENDPOINT_TRAINING_START for the start_fresh POST),
+          # so the integration lane needs the real >=0.7.0 client — the same
+          # [juniper-cascor] extra CL2 (#453) added to the unit lane. Without
+          # it this env resolved an ancient client and the adapter import
+          # (hence three integration modules) failed to collect.
+          pip install -e ".[juniper-cascor]"
 
       - name: Create required directories
         run: |
