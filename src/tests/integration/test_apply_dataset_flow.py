@@ -80,6 +80,15 @@ class TestAdapterStageCancelGetPending:
         body = adapter._client._request.call_args.kwargs["json"]
         assert body == {"dataset_type": "xor"}, body  # n_samples=None dropped
 
+    def test_stage_dataset_maps_generic_params_channel(self, adapter):
+        # N7 (I-7): a non-spiral generator's schema-driven params ride the generic
+        # ``nn_dataset_params`` canopy key -> cascor's StageDatasetRequest.params, alongside the
+        # typed convenience fields, so the staging dialect is preserved.
+        adapter._client._request.return_value = {"data": {"status": "staged"}}
+        adapter.stage_dataset(nn_dataset_type="mnist", nn_dataset_params={"dataset": "fashion_mnist", "n_samples": 512})
+        body = adapter._client._request.call_args.kwargs["json"]
+        assert body == {"dataset_type": "mnist", "params": {"dataset": "fashion_mnist", "n_samples": 512}}, body
+
     def test_stage_dataset_surfaces_client_error(self, adapter):
         from juniper_cascor_client import JuniperCascorClientError
 
@@ -153,3 +162,33 @@ class TestDemoBackendStageCancelGetPending:
         result = demo.stage_dataset()
         assert result["data"]["status"] == "cleared"
         assert demo.get_pending_dataset()["pending"] is None
+
+
+# ---------------------------------------------------------------------------
+# Layer 3 — route (N7 generic-params staging channel through the real request model)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestStageDatasetRouteGenericParams:
+    """N7 (I-7): POST /api/stage_dataset accepts the generic ``nn_dataset_params`` dict.
+
+    Exercises the real ``StageDatasetRequest`` (the field addition) + route through canopy's demo
+    backend (which mirrors the cascor stage shape), proving a non-spiral generator's schema-driven
+    params survive validation and reach the backend unflattened.
+    """
+
+    def test_route_accepts_and_forwards_generic_params(self, client):
+        body = {"nn_dataset_type": "mnist", "nn_dataset_params": {"dataset": "fashion_mnist", "n_samples": 512, "flatten": True}}
+        resp = client.post("/api/stage_dataset", json=body)
+        assert resp.status_code == 200, resp.text
+        config = resp.json()["data"]["config"]
+        assert config["nn_dataset_type"] == "mnist"
+        assert config["nn_dataset_params"] == {"dataset": "fashion_mnist", "n_samples": 512, "flatten": True}
+
+    def test_route_still_accepts_legacy_spiral_body(self, client):
+        # Back-compat: the legacy typed-only body is unchanged (no params key required).
+        resp = client.post("/api/stage_dataset", json={"nn_dataset_type": "spirals", "nn_dataset_elements": 200})
+        assert resp.status_code == 200, resp.text
+        config = resp.json()["data"]["config"]
+        assert config == {"nn_dataset_type": "spirals", "nn_dataset_elements": 200}

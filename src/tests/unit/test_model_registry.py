@@ -379,9 +379,11 @@ def test_get_dataset_spec_resolves_and_misses():
 
 
 def test_dataset_model_hint_names_the_constraint_per_dataset():
-    # spirals = 2-D -> "2-D models only"; equities_seq = 3-D irregular -> "3-D Δt-aware models only".
-    assert dataset_model_hint("spirals") == "2-D models only"
-    assert dataset_model_hint("equities_seq") == "3-D Δt-aware models only"
+    # N7 (I-7): rank-clarifying phrasing — spirals = rank-2 (tabular); equities_seq = rank-3
+    # (sequence) irregular-Δt. The "rank-N (<shape>)" wording replaces the pre-N7 "N-D models only"
+    # that read as a feature-count constraint (misleading for MNIST, a rank-2 784-feature tensor).
+    assert dataset_model_hint("spirals") == "rank-2 (tabular) models only"
+    assert dataset_model_hint("equities_seq") == "rank-3 (sequence) Δt-aware models only"
 
 
 def test_dataset_model_hint_none_without_a_dataset():

@@ -674,10 +674,13 @@ class TestDatasetApplyNumericCommit:
         nn_dataset_type unconditionally (cascor _reload_dataset requires it) and
         add optional fields only when present — no blanket None-drop that could
         strip dataset_type or the (now force-blurred) numerics."""
-        idx = dashboard_manager_source.find("def apply_dataset(")
+        # N7: apply_dataset now delegates to the _apply_dataset_handler method (so the schema-driven
+        # gen-params can be read + routed via the generic ``params`` channel); the payload-building
+        # contract this test guards moved there. Search the handler, not the closure.
+        idx = dashboard_manager_source.find("def _apply_dataset_handler(")
         assert idx != -1
-        window = dashboard_manager_source[idx : idx + 1400]
-        assert 'payload = {"nn_dataset_type": dataset_type}' in window
+        window = dashboard_manager_source[idx : idx + 1600]
+        assert 'payload: dict = {"nn_dataset_type": dataset_type}' in window
         assert "if _value is not None:" in window
         assert "{k: v for k, v in payload.items() if v is not None}" not in window
 

@@ -1437,6 +1437,9 @@ class CascorServiceAdapter:
         "nn_dataset_noise": "noise",
         "nn_spiral_rotations": "rotations",
         "nn_spiral_number": "n_spirals",
+        # N7 (I-7): generic schema-driven params for non-spiral generators -> cascor's
+        # StageDatasetRequest.params channel (forwarded verbatim to juniper-data create_dataset).
+        "nn_dataset_params": "params",
     }
 
     def stage_dataset(self, **canopy_params: Any) -> Dict[str, Any]:

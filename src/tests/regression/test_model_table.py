@@ -269,16 +269,17 @@ def test_table_non_degenerate_returns_bare_table():
 
 
 def test_dataset_model_hint_handler_text_and_clear(manager):
-    assert manager._dataset_model_hint_handler("equities_seq") == "3-D Δt-aware models only"
-    assert manager._dataset_model_hint_handler("spirals") == "2-D models only"
+    # N7 (I-7): rank-clarifying phrasing (was "3-D / 2-D models only" pre-N7).
+    assert manager._dataset_model_hint_handler("equities_seq") == "rank-3 (sequence) Δt-aware models only"
+    assert manager._dataset_model_hint_handler("spirals") == "rank-2 (tabular) models only"
     # no / unknown dataset -> "" so the annotation clears (never renders "None")
     assert manager._dataset_model_hint_handler("") == ""
     assert manager._dataset_model_hint_handler("does-not-exist") == ""
 
 
 def test_initial_dataset_model_hint_seeds_default_dataset(manager):
-    # DEFAULT_DATASET_TYPE = spirals (2-D) -> "2-D models only" at first paint.
-    assert manager._initial_dataset_model_hint() == "2-D models only"
+    # DEFAULT_DATASET_TYPE = spirals (rank-2) -> "rank-2 (tabular) models only" at first paint (N7).
+    assert manager._initial_dataset_model_hint() == "rank-2 (tabular) models only"
 
 
 def test_dataset_hint_callback_is_registered(manager):
