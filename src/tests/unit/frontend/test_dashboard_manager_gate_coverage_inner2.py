@@ -120,23 +120,28 @@ class TestCancelPendingDatasetInner:
 # open_restart_confirm_modal (N3 — replaced the feedback-free
 # ``restart_with_new_dataset`` closure: the "Stop & Restart" button now opens
 # the confirm modal (Q3/Q4) instead of POSTing ``/api/train/start?reset=true``).
+# N3b: the open handler now returns a 17-tuple — modal-open, summary, toggle/
+# collapse resets, context, the 5 editable dataset field values, the 6 editable
+# param field values, and the baseline store.
 # ---------------------------------------------------------------------------
 class TestOpenRestartConfirmModalInner:
     def test_no_click(self, dm):
         cb = raw_cb(dm, "open_restart_confirm_modal")
-        assert cb(None, "spirals", 100, 0.1, 1.5, 2) == (dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update)
+        assert cb(None, "spirals", 100, 0.1, 1.5, 2) == (dash.no_update,) * 17
 
     @patch("requests.get")
     def test_click_opens_modal_with_defaults_off(self, mock_get, dm):
         mock_get.return_value = _resp(status=200, json_value={"current_epoch": 5})
         cb = raw_cb(dm, "open_restart_confirm_modal")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            is_open, summary, granular, toggle_value, collapse_open = cb(1, "spirals", 100, 0.1, 1.5, 2)
-        assert is_open is True
-        # Q4 default OFF + Q3 verify section collapsed on every open.
-        assert toggle_value is False
-        assert collapse_open is False
-        assert summary is not None and granular is not None
+            result = cb(1, "spirals", 100, 0.1, 1.5, 2)
+        assert len(result) == 17
+        assert result[0] is True  # modal open
+        # Q4 default OFF (index 2) + Q3 verify/modify section collapsed (index 3).
+        assert result[2] is False
+        assert result[3] is False
+        assert result[1] is not None  # summary
+        assert result[16] and "dataset" in result[16] and "params" in result[16]  # baseline
 
     @patch("requests.get", side_effect=requests.ConnectionError("down"))
     def test_click_opens_even_when_status_unreachable(self, _mock_get, dm):
