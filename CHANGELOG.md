@@ -104,6 +104,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instant-convergence), the confirm-modal + outcome handlers, `start_fresh`
   forwarding across every backend layer, and the demo-FSM start-from-terminal fix.
 
+- **N3b — restart modal granular modify: staging edits + N5-machinery param apply
+  before orchestration (juniper-ml training-runtime defects plan §4 I-6, §12 Q3,
+  §13; split from N3).** The N3 confirm modal's expandable granular section was
+  read-only **verify**; N3b makes it **modify** — the ratified Q3 design ("simple
+  confirm + expandable granular verify/modify"). Inside the section the operator
+  can now, before confirming: (1) edit the **staged dataset config** — exactly the
+  `StageDatasetRequest` fields (`dataset_type`/`n_samples`/`noise`/`rotations`/
+  `n_spirals`), defaulting to the currently staged / current values; an edit
+  re-stages via the existing `/api/stage_dataset` route before the restart
+  proceeds; and (2) edit a focused, restart-relevant set of **training parameters**
+  (learning rate, max hidden units, patience, candidate pool size, selected
+  candidates, correlation threshold — every one governed by N5's
+  `CascorPatchBounds`). Applying those params reuses N5's merged machinery
+  end-to-end — the same `CascorPatchBounds` clamp → `/api/set_params` →
+  applied/skipped partition path as the params panel (a shared
+  `_apply_params_via_backend` core now backs both call sites, so the bounds and
+  toast logic are called into, never duplicated) — and is **sequenced BEFORE** the
+  N3 stop → await → start orchestration. The **start-fresh toggle** stays as N3
+  built it, and the granular section shows its C5 consequence text (retained
+  history discarded, snapshots preserved). Every in-place edit is reflected in the
+  **"Restart plan" summary** before Confirm (dataset config + per-param `old → new`
+  deltas), and the `restart-outcome-alert` reports what was re-staged / applied as
+  part of the restart result. A re-stage or param-apply failure **aborts** the
+  restart (never restart on a stale dataset or with un-applied params), surfaces the
+  verbatim reason, and keeps the pending banner open so the staged change survives;
+  an untouched Confirm skips both modify phases (the ratified simple-confirm
+  default). The `/api/train/restart` route is unchanged — no new route parameters.
+  Tests: modal-handler units (dataset-edit round-trip, param path delegates to the
+  N5 core, summary reflects edits, abort-on-failure, the open-handler field/baseline
+  seeding + clamp), plus an integration file pinning layout wiring, the
+  param-field ⊆ `CascorPatchBounds` coherence guard, and route acceptance of the
+  modal payloads. No `get_layout()` snapshot regeneration (the restart modal is in
+  the manager layout, not the snapshot-pinned `metrics_panel`/`dataset_plotter`).
+
 - **N6 — header/tile counter mappings + denominators per the reconciled C2b
   semantics (juniper-ml training-runtime defects plan §4 I-1c / §5 S12; closes
   I-1c / S12).** The dashboard's Epoch/Step/Iteration/Hidden-Units displays were

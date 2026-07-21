@@ -386,6 +386,34 @@ TAB_HEADER_MAP = {
 _CASCADE_ONLY_TAB_IDS = frozenset({"candidates", "topology", "evolution", "boundaries", "workers"})
 
 
+# N3b (canopy training-runtime defects plan, I-6 / Q3): the restart confirm modal's
+# expandable granular section allows in-place MODIFICATION of what the restart will do
+# (N3 shipped it read-only VERIFY). These tuples are the single source of truth wiring
+# each modal field id to its logical key + display label, shared by the layout builders,
+# the open/summary/execute handlers, and the tests — so the field set cannot drift.
+#
+# Dataset = exactly the fields ``StageDatasetRequest`` carries (an edit re-stages via the
+# existing ``/api/stage_dataset`` route). Params = a focused, restart-relevant subset of
+# the training meta-params, every one governed by N5's ``CascorPatchBounds`` so the same
+# clamp → apply → applied/skipped machinery handles them (no duplicated bounds/toast
+# logic). (field_id, key, label).
+RESTART_MODAL_DATASET_FIELDS = (
+    ("restart-ds-type", "dataset_type", "Dataset type"),
+    ("restart-ds-samples", "n_samples", "Samples"),
+    ("restart-ds-noise", "noise", "Noise"),
+    ("restart-ds-rotations", "rotations", "Spiral rotations"),
+    ("restart-ds-spirals", "n_spirals", "Spirals"),
+)
+RESTART_MODAL_PARAM_FIELDS = (
+    ("restart-p-nn-learning-rate", "nn_learning_rate", "Learning rate"),
+    ("restart-p-nn-max-hidden-units", "nn_max_hidden_units", "Max hidden units"),
+    ("restart-p-nn-patience", "nn_patience", "Patience"),
+    ("restart-p-cn-pool-size", "cn_pool_size", "Candidate pool size"),
+    ("restart-p-cn-selected", "cn_selected_candidates", "Selected candidates"),
+    ("restart-p-cn-corr-thresh", "cn_correlation_threshold", "Correlation threshold"),
+)
+
+
 class DashboardManager:
     """
     Central dashboard manager for Juniper Canopy.
@@ -1888,9 +1916,13 @@ class DashboardManager:
                 # confirm dialog instead of silently POSTing. A simple confirm by
                 # default (assumes all other meta-parameters / structures /
                 # processes unchanged), leading with a start-fresh toggle (Q4,
-                # default OFF) and an expandable granular VERIFY section (Q3;
-                # read-only here — in-place MODIFY is deferred to N3b, which
-                # intersects N5's apply contract). Confirm →
+                # default OFF) and an expandable granular VERIFY/MODIFY section
+                # (Q3). N3b turns that section from read-only into in-place MODIFY:
+                # the staged dataset config (re-staged via /api/stage_dataset) and
+                # a focused set of restart-relevant training params (clamped +
+                # applied through N5's CascorPatchBounds / /api/set_params
+                # machinery) are editable before Confirm. Confirm →
+                # (re-stage if edited) → (apply params if edited) →
                 # POST /api/train/restart (stop → await stopped → start(staged));
                 # every step's outcome renders in restart-outcome-alert (T4).
                 # ``backdrop="static"`` + ``keyboard=False`` force an explicit
@@ -1902,11 +1934,11 @@ class DashboardManager:
                         dbc.ModalBody(
                             [
                                 dbc.Alert(
-                                    "This stops the current run (if one is active), waits for it to settle, then restarts training with the staged dataset. All other meta-parameters, structures, and processes are left unchanged.",
+                                    "This stops the current run (if one is active), waits for it to settle, then restarts training with the staged dataset. Expand the section below to change the dataset or key training parameters before confirming; anything you leave unchanged is applied as-is.",
                                     color="info",
                                     className="mb-3",
                                 ),
-                                html.P("Dataset to be applied:", className="mb-1 fw-semibold"),
+                                html.P("Restart plan:", className="mb-1 fw-semibold"),
                                 dbc.ListGroup([], id="restart-confirm-summary", flush=True, className="mb-3"),
                                 dbc.Switch(
                                     id="restart-start-fresh-toggle",
@@ -1919,17 +1951,57 @@ class DashboardManager:
                                     style={"fontSize": "0.85em"},
                                 ),
                                 dbc.Button(
-                                    "▸ Verify what will happen",
+                                    "▸ Verify / modify what will happen",
                                     id="restart-granular-toggle",
                                     color="link",
                                     size="sm",
                                     className="p-0 mb-2",
                                 ),
                                 dbc.Collapse(
-                                    dbc.Card(dbc.CardBody(html.Div(id="restart-granular-content"))),
+                                    dbc.Card(
+                                        dbc.CardBody(
+                                            [
+                                                # N3b: read-only context (current engine
+                                                # state, populated on open) + the C5
+                                                # start-fresh consequence semantics.
+                                                html.Div(id="restart-granular-context", className="mb-2"),
+                                                html.Div(
+                                                    [
+                                                        html.Div([html.Strong("Start fresh OFF: "), "continue the current model, retaining metrics/history (cross-dataset continuity)."], className="text-muted", style={"fontSize": "0.82em"}),
+                                                        html.Div([html.Strong("Start fresh ON: "), "discard the model + retained metrics/history for a vanilla rebuild (snapshots preserved)."], className="text-muted mb-2", style={"fontSize": "0.82em"}),
+                                                    ]
+                                                ),
+                                                html.Hr(className="my-2"),
+                                                # N3b: editable staged-dataset config — the
+                                                # StageDatasetRequest fields, defaulting to the
+                                                # currently staged / current values; an edit
+                                                # re-stages via /api/stage_dataset before the
+                                                # restart proceeds.
+                                                html.P("Dataset for the restart", className="fw-semibold mb-1"),
+                                                self._build_restart_dataset_fields(),
+                                                html.Hr(className="my-2"),
+                                                # N3b: editable restart-relevant training params
+                                                # — clamped + applied through N5's machinery
+                                                # (CascorPatchBounds + /api/set_params partition)
+                                                # BEFORE the stop→await→start orchestration.
+                                                html.P("Key training parameters", className="fw-semibold mb-1"),
+                                                html.Div(
+                                                    "Edited values are clamped to the backend's accepted ranges and applied before the restart; unchanged fields are left as-is.",
+                                                    className="text-muted mb-2",
+                                                    style={"fontSize": "0.8em"},
+                                                ),
+                                                self._build_restart_param_fields(),
+                                            ]
+                                        )
+                                    ),
                                     id="restart-granular-collapse",
                                     is_open=False,
                                 ),
+                                # N3b: baseline captured on open (staged dataset + current
+                                # params) so Confirm re-stages / applies ONLY what the
+                                # operator actually changed, and the verify summary can show
+                                # the diff.
+                                dcc.Store(id="restart-modal-baseline", data={}),
                             ]
                         ),
                         dbc.ModalFooter(
@@ -4645,10 +4717,25 @@ class DashboardManager:
         @self.app.callback(
             [
                 Output("restart-confirm-modal", "is_open", allow_duplicate=True),
-                Output("restart-confirm-summary", "children"),
-                Output("restart-granular-content", "children"),
+                Output("restart-confirm-summary", "children", allow_duplicate=True),
                 Output("restart-start-fresh-toggle", "value", allow_duplicate=True),
                 Output("restart-granular-collapse", "is_open", allow_duplicate=True),
+                Output("restart-granular-context", "children"),
+                # N3b: editable staged-dataset field values (defaults on open).
+                Output("restart-ds-type", "value"),
+                Output("restart-ds-samples", "value"),
+                Output("restart-ds-noise", "value"),
+                Output("restart-ds-rotations", "value"),
+                Output("restart-ds-spirals", "value"),
+                # N3b: editable training-param field values (backend-seeded, clamped).
+                Output("restart-p-nn-learning-rate", "value"),
+                Output("restart-p-nn-max-hidden-units", "value"),
+                Output("restart-p-nn-patience", "value"),
+                Output("restart-p-cn-pool-size", "value"),
+                Output("restart-p-cn-selected", "value"),
+                Output("restart-p-cn-corr-thresh", "value"),
+                # N3b: the baseline captured on open for the Confirm-time diff.
+                Output("restart-modal-baseline", "data"),
             ],
             Input("restart-with-new-dataset-button", "n_clicks"),
             [
@@ -4673,6 +4760,34 @@ class DashboardManager:
             if not n_clicks:
                 return dash.no_update
             return not is_open
+
+        # N3b: keep the "Restart plan" summary in sync with the operator's in-place
+        # edits — any change to a dataset or param field re-renders the summary so
+        # every modification is reflected before Confirm (plan §4 I-6 item 4). The
+        # baseline (captured on open) is read as State so the summary shows param
+        # deltas, not just current values.
+        @self.app.callback(
+            Output("restart-confirm-summary", "children", allow_duplicate=True),
+            [
+                Input("restart-ds-type", "value"),
+                Input("restart-ds-samples", "value"),
+                Input("restart-ds-noise", "value"),
+                Input("restart-ds-rotations", "value"),
+                Input("restart-ds-spirals", "value"),
+                Input("restart-p-nn-learning-rate", "value"),
+                Input("restart-p-nn-max-hidden-units", "value"),
+                Input("restart-p-nn-patience", "value"),
+                Input("restart-p-cn-pool-size", "value"),
+                Input("restart-p-cn-selected", "value"),
+                Input("restart-p-cn-corr-thresh", "value"),
+            ],
+            dash.dependencies.State("restart-modal-baseline", "data"),
+            prevent_initial_call=True,
+        )
+        def refresh_restart_summary(ds_type, ds_samples, ds_noise, ds_rot, ds_spirals, p_lr, p_hu, p_pat, p_pool, p_sel, p_corr, baseline):
+            dataset_vals = {"dataset_type": ds_type, "n_samples": ds_samples, "noise": ds_noise, "rotations": ds_rot, "n_spirals": ds_spirals}
+            param_vals = {"nn_learning_rate": p_lr, "nn_max_hidden_units": p_hu, "nn_patience": p_pat, "cn_pool_size": p_pool, "cn_selected_candidates": p_sel, "cn_correlation_threshold": p_corr}
+            return self._build_restart_summary(dataset_vals, param_vals, baseline)
 
         @self.app.callback(
             Output("restart-confirm-modal", "is_open", allow_duplicate=True),
@@ -4702,11 +4817,28 @@ class DashboardManager:
                 Output("pending-dataset-banner", "is_open", allow_duplicate=True),
             ],
             Input("restart-confirm-button", "n_clicks"),
-            dash.dependencies.State("restart-start-fresh-toggle", "value"),
+            [
+                dash.dependencies.State("restart-start-fresh-toggle", "value"),
+                # N3b: the operator's in-place edits + the open-time baseline.
+                dash.dependencies.State("restart-ds-type", "value"),
+                dash.dependencies.State("restart-ds-samples", "value"),
+                dash.dependencies.State("restart-ds-noise", "value"),
+                dash.dependencies.State("restart-ds-rotations", "value"),
+                dash.dependencies.State("restart-ds-spirals", "value"),
+                dash.dependencies.State("restart-p-nn-learning-rate", "value"),
+                dash.dependencies.State("restart-p-nn-max-hidden-units", "value"),
+                dash.dependencies.State("restart-p-nn-patience", "value"),
+                dash.dependencies.State("restart-p-cn-pool-size", "value"),
+                dash.dependencies.State("restart-p-cn-selected", "value"),
+                dash.dependencies.State("restart-p-cn-corr-thresh", "value"),
+                dash.dependencies.State("restart-modal-baseline", "data"),
+            ],
             prevent_initial_call=True,
         )
-        def execute_restart(n_clicks, start_fresh):
-            return self._execute_restart_handler(n_clicks=n_clicks, start_fresh=start_fresh)
+        def execute_restart(n_clicks, start_fresh, ds_type, ds_samples, ds_noise, ds_rot, ds_spirals, p_lr, p_hu, p_pat, p_pool, p_sel, p_corr, baseline):
+            dataset_vals = {"dataset_type": ds_type, "n_samples": ds_samples, "noise": ds_noise, "rotations": ds_rot, "n_spirals": ds_spirals}
+            param_vals = {"nn_learning_rate": p_lr, "nn_max_hidden_units": p_hu, "nn_patience": p_pat, "cn_pool_size": p_pool, "cn_selected_candidates": p_sel, "cn_correlation_threshold": p_corr}
+            return self._execute_restart_handler(n_clicks=n_clicks, start_fresh=start_fresh, dataset_vals=dataset_vals, param_vals=param_vals, baseline=baseline)
 
     # ------------------------------------------------------------------
     # N3 (I-6) restart-orchestration handlers — extracted from the
@@ -4715,82 +4847,315 @@ class DashboardManager:
     # handler pattern). See tests/unit/frontend/test_restart_orchestration_handlers.py.
     # ------------------------------------------------------------------
 
-    def _open_restart_confirm_modal_handler(self, n_clicks=None, dataset_type=None, n_samples=None, noise=None, rotations=None, n_spirals=None):
-        """Open the confirm modal + populate the read-only summary / verify section.
+    # ------------------------------------------------------------------
+    # N3b (I-6 / Q3) restart-modal granular-MODIFY builders + helpers.
+    # The N3 granular section was read-only VERIFY; N3b makes the staged
+    # dataset config and a focused set of restart-relevant training params
+    # editable in place. Layout builders are static (fields exist in the
+    # tree at registration time; values are populated on open); the diff /
+    # re-stage / apply logic is factored into unit-testable helpers.
+    # ------------------------------------------------------------------
 
-        Returns ``(modal_open, summary_rows, granular_content, start_fresh_value,
-        granular_open)``. The start-fresh toggle is reset to its ratified default
-        OFF (Q4) and the granular section collapsed on every open. Q3: the summary
-        shows "what will be applied" and the verify section shows the current
-        engine params (best-effort — a status hiccup degrades to dataset-only,
-        never blocks the modal). In-place MODIFY is deferred to N3b.
+    @staticmethod
+    def _build_restart_dataset_fields():
+        """Editable staged-dataset config (the ``StageDatasetRequest`` fields).
+
+        Distinct ids from the sidebar's ``nn-dataset-*`` inputs (Dash ids are
+        global). Populated on open from the currently staged / current values; an
+        edit re-stages via the existing ``/api/stage_dataset`` route on Confirm.
+        """
+
+        def _num(label, _id, step, minimum=None):
+            return html.Div(
+                [
+                    dbc.Label(label, html_for=_id, size="sm", className="mb-0"),
+                    dbc.Input(id=_id, type="number", step=step, min=minimum, size="sm", debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS, className="mb-2"),
+                ]
+            )
+
+        return html.Div(
+            [
+                dbc.Label("Type", html_for="restart-ds-type", size="sm", className="mb-0"),
+                dcc.Dropdown(id="restart-ds-type", options=gated_dataset_options(DEFAULT_MODEL_KEY), value=DEFAULT_DATASET_TYPE, clearable=False, className="mb-2"),
+                _num("Samples", "restart-ds-samples", 100, 1),
+                _num("Noise", "restart-ds-noise", 0.05, 0),
+                _num("Spiral rotations", "restart-ds-rotations", 0.5, 0),
+                _num("Spirals", "restart-ds-spirals", 1, 1),
+            ]
+        )
+
+    @staticmethod
+    def _build_restart_param_fields():
+        """Editable, restart-relevant training params (all CascorPatchBounds-governed).
+
+        Grouped Network / Candidate. Values are backend-seeded (clamped) on open;
+        an edit is clamped + applied through N5's ``/api/set_params`` machinery
+        before the stop→await→start orchestration.
+        """
+
+        def _num(label, _id, step, minimum=None):
+            return html.Div(
+                [
+                    dbc.Label(label, html_for=_id, size="sm", className="mb-0"),
+                    dbc.Input(id=_id, type="number", step=step, min=minimum, size="sm", debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS, className="mb-2"),
+                ]
+            )
+
+        return html.Div(
+            [
+                html.Div("Network", className="fw-semibold small text-muted mb-1"),
+                _num("Learning rate", "restart-p-nn-learning-rate", 0.01, 0),
+                _num("Max hidden units", "restart-p-nn-max-hidden-units", 1, 1),
+                _num("Patience", "restart-p-nn-patience", 1, 1),
+                html.Div("Candidate", className="fw-semibold small text-muted mb-1 mt-2"),
+                _num("Candidate pool size", "restart-p-cn-pool-size", 1, 1),
+                _num("Selected candidates", "restart-p-cn-selected", 1, 1),
+                _num("Correlation threshold", "restart-p-cn-corr-thresh", 0.05, 0),
+            ]
+        )
+
+    def _open_restart_confirm_modal_handler(self, n_clicks=None, dataset_type=None, n_samples=None, noise=None, rotations=None, n_spirals=None):
+        """Open the confirm modal + seed the editable dataset / param fields.
+
+        Returns the 17-tuple wired in ``_setup_restart_orchestration_callbacks``:
+        ``(modal_open, summary_rows, start_fresh_value, granular_open, context,
+        ds_type, ds_samples, ds_noise, ds_rotations, ds_spirals, p_lr, p_hu,
+        p_patience, p_pool, p_selected, p_corr, baseline)``.
+
+        The start-fresh toggle resets to its ratified default OFF (Q4) and the
+        granular section collapses on every open. The dataset fields default to
+        the sidebar selection (the currently staged / current config); the param
+        fields are seeded from a best-effort ``/api/state`` read, clamped to
+        cascor's PATCH bounds via N5's ``CascorPatchBounds`` (a status hiccup
+        degrades to blank param fields — the modal still opens, and an untouched
+        field is never applied). The baseline captures both so Confirm acts on
+        exactly what the operator changed.
         """
         if not n_clicks:
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
-        rows = []
-        for label, value in (
-            ("Dataset type", dataset_type),
-            ("Samples", n_samples),
-            ("Noise", noise),
-            ("Spiral rotations", rotations),
-            ("Spirals", n_spirals),
-        ):
-            if value is None:
-                continue
-            rows.append(dbc.ListGroupItem([html.Strong(f"{label}: "), html.Span(str(value))]))
-        if not rows:
-            rows = [dbc.ListGroupItem(html.Em("No dataset config selected in the sidebar — the currently staged change will be applied."), color="warning")]
-        granular = self._build_restart_verify_content(dataset_type=dataset_type, n_samples=n_samples, noise=noise, rotations=rotations, n_spirals=n_spirals)
-        return True, rows, granular, False, False
+            return (dash.no_update,) * 17
+        dataset_vals = {"dataset_type": dataset_type, "n_samples": n_samples, "noise": noise, "rotations": rotations, "n_spirals": n_spirals}
+        param_vals, context = self._read_restart_param_seed()
+        baseline = {"dataset": dict(dataset_vals), "params": dict(param_vals)}
+        summary = self._build_restart_summary(dataset_vals, param_vals, baseline)
+        return (
+            True,
+            summary,
+            False,
+            False,
+            context,
+            dataset_vals["dataset_type"],
+            dataset_vals["n_samples"],
+            dataset_vals["noise"],
+            dataset_vals["rotations"],
+            dataset_vals["n_spirals"],
+            param_vals.get("nn_learning_rate"),
+            param_vals.get("nn_max_hidden_units"),
+            param_vals.get("nn_patience"),
+            param_vals.get("cn_pool_size"),
+            param_vals.get("cn_selected_candidates"),
+            param_vals.get("cn_correlation_threshold"),
+            baseline,
+        )
 
-    def _build_restart_verify_content(self, dataset_type=None, n_samples=None, noise=None, rotations=None, n_spirals=None):
-        """Read-only Q3 verify body: current engine params + the restart plan.
+    def _read_restart_param_seed(self):
+        """Best-effort backend read for the modal's editable params + context line.
 
-        Best-effort ``/api/status`` read (bounded, defensive) so the operator can
-        verify the model/meta-params that will carry over on a continue, or be
-        discarded on a start-fresh. Never raises — a status hiccup degrades to the
-        dataset-only view. In-place MODIFY of these values is N3b (it intersects
-        N5's apply contract).
+        Returns ``(param_vals, context_component)``. Reads ``/api/state`` (the
+        ``nn_*``/``cn_*`` surface the params panel also seeds from) and clamps each
+        exposed value to cascor's PATCH bounds via N5's ``CascorPatchBounds`` so a
+        backend-echoed out-of-range default seeds an admissible value. Never
+        raises — an unreachable backend yields blank fields (``None``) and an
+        "unavailable" context note; the modal still opens and unchanged fields are
+        not applied on Confirm.
         """
-        items = [
-            dbc.ListGroupItem([html.Strong("Action: "), html.Span("stop the current run (if active), wait for it to settle, then start with the staged dataset.")]),
-            dbc.ListGroupItem([html.Strong("Start fresh OFF: "), html.Span("continue the current model, retaining metrics/history (cross-dataset continuity).")]),
-            dbc.ListGroupItem([html.Strong("Start fresh ON: "), html.Span("discard the model + retained metrics/history for a vanilla rebuild (snapshots preserved).")]),
-        ]
+        keys = [key for _id, key, _label in RESTART_MODAL_PARAM_FIELDS]
         try:
             resp = requests.get(
-                self._api_url("/api/status"),
+                self._api_url("/api/state"),
                 timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
                 headers=internal_api_headers(),
             )
             if resp.status_code == 200:
-                status = resp.json() or {}
-                for label, key in (
-                    ("Current epoch", "current_epoch"),
-                    ("Hidden units", "hidden_units"),
-                    ("Learning rate", "learning_rate"),
-                    ("Max hidden units", "max_hidden_units"),
-                    ("Max epochs", "max_epochs"),
-                ):
-                    if status.get(key) is not None:
-                        items.append(dbc.ListGroupItem([html.Strong(f"{label}: "), html.Span(str(status.get(key)))]))
+                state = resp.json() or {}
+                raw = {key: state.get(key) for key in keys if state.get(key) is not None}
+                clamped, _ = CascorPatchBounds.clamp_params(raw)
+                param_vals = {key: clamped.get(key) for key in keys}
+                ctx_items = []
+                for label, key in (("Current epoch", "current_epoch"), ("Hidden units", "hidden_units"), ("Status", "status")):
+                    if state.get(key) is not None:
+                        ctx_items.append(html.Span(f"{label}: {state.get(key)}", className="me-3"))
+                context = html.Div(ctx_items or [html.Em("Current model state read from the backend.")], className="text-muted", style={"fontSize": "0.85em"})
+                return param_vals, context
         except requests.RequestException:
-            items.append(dbc.ListGroupItem(html.Em("Current engine parameters unavailable (backend not reachable)."), color="warning"))
-        return dbc.ListGroup(items, flush=True)
+            pass
+        context = html.Div(html.Em("Current parameters unavailable (backend not reachable) — fields left blank; unchanged fields are not applied."), className="text-muted", style={"fontSize": "0.85em"})
+        return dict.fromkeys(keys), context
 
-    def _execute_restart_handler(self, n_clicks=None, start_fresh=None):
-        """POST /api/train/restart and reconcile the UI to the structured outcome.
+    @staticmethod
+    def _values_differ(a, b):
+        """Tolerant equality for modal edits: numeric-aware (``300`` == ``300.0``),
+        string fallback (``"xor"`` != ``"moons"``), ``None``-aware."""
+        if a is None and b is None:
+            return False
+        if a is None or b is None:
+            return True
+        try:
+            return float(a) != float(b)
+        except (TypeError, ValueError):
+            return str(a) != str(b)
 
-        Returns ``(modal_open, progress_open, outcome_alert, banner_open)``.
-        Success → close the modal + progress, render a green outcome (with an
-        instant-convergence note when the new run already completed), and close the
-        pending banner. Failure (409 stop/start refusal, 504 stop-await timeout, or
-        an unreachable backend) → render a red outcome carrying the upstream detail
-        and keep the pending banner OPEN (``dash.no_update``) so the staged change
-        survives and the operator can retry (plan §8 stop→start race, T1/T4).
+    @classmethod
+    def _restart_dataset_changed(cls, dataset_vals, baseline_dataset):
+        """True iff the operator edited any staged-dataset field vs. the baseline."""
+        dataset_vals = dataset_vals or {}
+        baseline_dataset = baseline_dataset or {}
+        return any(cls._values_differ(dataset_vals.get(key), baseline_dataset.get(key)) for _id, key, _label in RESTART_MODAL_DATASET_FIELDS)
+
+    @classmethod
+    def _restart_param_updates(cls, param_vals, baseline_params):
+        """The ``{canopy_key: value}`` subset the operator actually edited.
+
+        Only fields that differ from the open-time baseline AND are non-``None``
+        are included — so an untouched Confirm applies nothing (the simple-confirm
+        default), and a param the backend could not seed (blank field) is not
+        forced onto cascor.
+        """
+        param_vals = param_vals or {}
+        baseline_params = baseline_params or {}
+        updates = {}
+        for _id, key, _label in RESTART_MODAL_PARAM_FIELDS:
+            new = param_vals.get(key)
+            if new is None:
+                continue
+            if cls._values_differ(new, baseline_params.get(key)):
+                updates[key] = new
+        return updates
+
+    @classmethod
+    def _build_restart_summary(cls, dataset_vals, param_vals, baseline):
+        """Render the "Restart plan" summary — reflects every in-place edit (item 4).
+
+        Lists the dataset config that will be applied plus, when the operator has
+        changed a param field from its open-time baseline, a "Parameter changes"
+        block showing ``old → new``. Returns a list of ``dbc.ListGroupItem`` (the
+        ``restart-confirm-summary`` ListGroup children).
+        """
+        dataset_vals = dataset_vals or {}
+        baseline = baseline if isinstance(baseline, dict) else {}
+        baseline_params = baseline.get("params") or {}
+        rows = []
+        for _id, key, label in RESTART_MODAL_DATASET_FIELDS:
+            value = dataset_vals.get(key)
+            if value is None:
+                continue
+            rows.append(dbc.ListGroupItem([html.Strong(f"{label}: "), html.Span(str(value))]))
+        if not rows:
+            rows = [dbc.ListGroupItem(html.Em("No dataset config selected — the currently staged change will be applied."), color="warning")]
+        changes = []
+        for _id, key, label in RESTART_MODAL_PARAM_FIELDS:
+            new = (param_vals or {}).get(key)
+            if new is None:
+                continue
+            if cls._values_differ(new, baseline_params.get(key)):
+                old = baseline_params.get(key)
+                changes.append(dbc.ListGroupItem([html.Strong(f"{label}: "), html.Span(f"{old} → {new}")], color="info"))
+        if changes:
+            rows.append(dbc.ListGroupItem(html.Em("Parameter changes to apply before restart:"), className="fw-semibold"))
+            rows.extend(changes)
+        return rows
+
+    @staticmethod
+    def _describe_dataset(dataset_vals):
+        """Short human label for a re-staged dataset (outcome-alert note)."""
+        dataset_vals = dataset_vals or {}
+        dtype = dataset_vals.get("dataset_type") or "current"
+        n = dataset_vals.get("n_samples")
+        return f"{dtype} ({n} samples)" if n is not None else str(dtype)
+
+    def _restage_dataset(self, dataset_vals):
+        """Re-stage the (edited) dataset via the existing ``/api/stage_dataset`` route.
+
+        Returns ``(ok, detail)``. Mirrors the ``apply_dataset`` callback's payload
+        contract: ``nn_dataset_type`` is always sent; the optional numeric / spiral
+        fields only when present. N3b uses the ROUTE (not a new staging path) so
+        the cascor-side ``StageDatasetRequest`` stays the single authoritative
+        validator.
+        """
+        dataset_vals = dataset_vals or {}
+        payload = {}
+        dtype = dataset_vals.get("dataset_type")
+        if dtype is not None:
+            payload["nn_dataset_type"] = dtype
+        for key, pkey in (("n_samples", "nn_dataset_elements"), ("noise", "nn_dataset_noise"), ("rotations", "nn_spiral_rotations"), ("n_spirals", "nn_spiral_number")):
+            value = dataset_vals.get(key)
+            if value is not None:
+                payload[pkey] = value
+        try:
+            resp = requests.post(
+                self._api_url("/api/stage_dataset"),
+                json=payload,
+                timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
+                headers=internal_api_headers(),
+            )
+            if resp.status_code == 200:
+                self.logger.info("Restart modal re-staged dataset: %s", payload)
+                return True, ""
+            detail = resp.text[:300] if resp.text else f"HTTP {resp.status_code}"
+            self.logger.warning("Restart modal re-stage failed: %s %s", resp.status_code, detail)
+            return False, detail
+        except requests.RequestException as exc:
+            self.logger.warning("Restart modal re-stage exception: %s", exc)
+            return False, f"backend unreachable: {exc}"
+
+    def _execute_restart_handler(self, n_clicks=None, start_fresh=None, dataset_vals=None, param_vals=None, baseline=None):
+        """Confirm: (re-stage edited dataset) → (apply edited params) → restart.
+
+        Returns ``(modal_open, progress_open, outcome_alert, banner_open)``. N3b
+        sequences the two modify phases BEFORE the N3 stop→await→start
+        orchestration and reports what each did in the outcome:
+
+        1. If the operator edited a dataset field, re-stage via
+           ``/api/stage_dataset``. A staging failure aborts the restart (banner
+           stays open, reason surfaced) — never restart with a stale dataset.
+        2. If the operator edited a param field, clamp + apply through N5's shared
+           apply core (``_apply_params_via_backend`` → ``CascorPatchBounds`` +
+           ``/api/set_params`` + applied/skipped toast). An apply failure aborts
+           the restart, carrying the verbatim rejection detail (T1); any re-stage
+           already done survives.
+        3. ``POST /api/train/restart`` (unchanged N3 orchestration). Success closes
+           the modal + banner; a 409/504/unreachable failure keeps the banner open
+           so the staged change survives and the operator can retry (plan §8).
+
+        An untouched Confirm skips phases 1-2 entirely — the ratified simple-confirm
+        default (assumes all other params/structures unchanged).
         """
         if not n_clicks:
             return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        baseline = baseline if isinstance(baseline, dict) else {}
+        dataset_vals = dataset_vals if isinstance(dataset_vals, dict) else {}
+        param_vals = param_vals if isinstance(param_vals, dict) else {}
+        restage_note = None
+        apply_note = None
+
+        # Phase 1 — re-stage the dataset if edited.
+        if self._restart_dataset_changed(dataset_vals, baseline.get("dataset") or {}):
+            ok, detail = self._restage_dataset(dataset_vals)
+            if not ok:
+                outcome = self._render_restart_outcome({"message": f"Could not re-stage the dataset change: {detail}"}, ok=False)
+                return False, False, outcome, dash.no_update
+            restage_note = self._describe_dataset(dataset_vals)
+
+        # Phase 2 — apply edited params through N5's machinery, before orchestration.
+        param_updates = self._restart_param_updates(param_vals, baseline.get("params") or {})
+        if param_updates:
+            applied, toast = self._apply_params_via_backend(param_updates)
+            if applied is dash.no_update:
+                msg = f"Re-staged dataset to {restage_note}, but could not apply parameters: {toast}" if restage_note else f"Could not apply parameters: {toast}"
+                outcome = self._render_restart_outcome({"message": msg}, ok=False)
+                return False, False, outcome, dash.no_update
+            apply_note = toast
+
+        # Phase 3 — the N3 stop → await stopped → start(staged) orchestration.
         payload = {"start_fresh": bool(start_fresh), "reset": True}
         try:
             resp = requests.post(
@@ -4806,26 +5171,34 @@ class DashboardManager:
                 data = {}
             if resp.status_code == 200 and data.get("success"):
                 self.logger.info("Restart orchestration succeeded: %s", data.get("steps"))
-                return False, False, self._render_restart_outcome(data, ok=True), False
+                return False, False, self._render_restart_outcome(data, ok=True, restage_note=restage_note, apply_note=apply_note), False
             detail = data.get("message") or (resp.text[:300] if resp.text else f"HTTP {resp.status_code}")
             self.logger.warning("Restart orchestration failed (%s): %s", resp.status_code, detail)
-            return False, False, self._render_restart_outcome(data if data else {"message": detail}, ok=False), dash.no_update
+            return False, False, self._render_restart_outcome(data if data else {"message": detail}, ok=False, restage_note=restage_note, apply_note=apply_note), dash.no_update
         except requests.RequestException as exc:
             self.logger.warning("Restart orchestration exception: %s", exc)
             return False, False, dbc.Alert([html.Strong("Restart failed. "), html.Span(f"Backend unreachable: {exc}")], color="danger", dismissable=True, duration=10000), dash.no_update
 
     @staticmethod
-    def _render_restart_outcome(data, ok):
+    def _render_restart_outcome(data, ok, restage_note=None, apply_note=None):
         """Build the restart outcome alert from the route's structured result.
 
-        ``ok`` is the success flag (200 + ``success``). On success the alert
-        enumerates the steps that ran (stop/await/start) and — folded finding 2 —
-        notes an instant-convergence run truthfully instead of letting it read as
-        frozen. On failure the alert carries the upstream ``message`` (the 409
-        refusal reason, the 504 stop-await timeout, etc.) verbatim (T1), and flags
-        a retriable timeout so the operator knows the staged change survived.
+        ``ok`` is the success flag (200 + ``success``). N3b prepends what the modal
+        re-staged / applied (``restage_note`` / ``apply_note``) so the outcome
+        reports the full restart result (item 4). On success the alert enumerates
+        the steps that ran (stop/await/start) and — folded finding 2 — notes an
+        instant-convergence run truthfully instead of letting it read as frozen. On
+        failure the alert carries the upstream ``message`` (the 409 refusal reason,
+        the 504 stop-await timeout, etc.) verbatim (T1), and flags a retriable
+        timeout so the operator knows the staged change survived.
         """
         data = data if isinstance(data, dict) else {}
+        prelude = []
+        if restage_note:
+            prelude.append(f"Re-staged dataset to {restage_note}. ")
+        if apply_note:
+            prelude.append(f"{apply_note}. ")
+        prefix = "".join(prelude)
         if ok:
             start_fresh = bool(data.get("start_fresh"))
             was_active = bool(data.get("was_active"))
@@ -4837,11 +5210,11 @@ class DashboardManager:
             parts.append("a fresh model." if start_fresh else "continued the current model.")
             if data.get("instant_complete"):
                 parts.append(" The new run converged immediately (epoch 0) — see the metrics panel for its final values.")
-            return dbc.Alert([html.Strong("Restart succeeded. "), html.Span("".join(parts))], color="success", dismissable=True, duration=8000)
+            return dbc.Alert([html.Strong("Restart succeeded. "), html.Span(prefix + "".join(parts))], color="success", dismissable=True, duration=8000)
         detail = str(data.get("message") or "the backend rejected the restart.").strip()
         if data.get("retriable"):
             detail += " The dataset change is still staged — you can retry."
-        return dbc.Alert([html.Strong("Restart failed. "), html.Span(detail)], color="danger", dismissable=True, duration=10000)
+        return dbc.Alert([html.Strong("Restart failed. "), html.Span(prefix + detail)], color="danger", dismissable=True, duration=10000)
 
     def _setup_dataset_swap_observers_callbacks(self):
         """Phase 2 P2-7 (Issue #3): poll ``dataset-swap-events-store``.
@@ -6251,6 +6624,24 @@ class DashboardManager:
             "nn_init_output_weights": nn_init_output_weights or TrainingConstants.DEFAULT_INIT_OUTPUT_WEIGHTS,
         }
 
+        # N5 (I-4) / N3b: apply through the shared clamp → POST → applied/skipped
+        # core so the params panel and the N3b restart modal go through identical
+        # machinery (CascorPatchBounds clamp, ``_compose_apply_toast``, verbatim
+        # rejection detail) — never a duplicated bounds/toast path.
+        return self._apply_params_via_backend(params)
+
+    def _apply_params_via_backend(self, params):
+        """Shared apply core: clamp to cascor's PATCH bounds, POST /api/set_params
+        (with the retry/backoff budget), return ``(applied_or_no_update, toast)``.
+
+        Behind BOTH ``_apply_parameters_handler`` (the params panel) and the N3b
+        restart modal's granular param apply, so N5's clamp (``CascorPatchBounds``),
+        the applied/skipped toast (``_compose_apply_toast``), and the verbatim
+        rejection detail (``_extract_apply_error_detail``) are called into once,
+        never duplicated. ``applied`` is the clamped params dict on success
+        (truthy) or ``dash.no_update`` on any failure; ``toast`` always carries the
+        human-readable result / reason.
+        """
         # N5 (I-4): defensively clamp submitted values to cascor's PATCH bounds
         # (mirrored in ``CascorPatchBounds``) before the POST, so a single
         # out-of-range field cannot wholesale-422 the whole form the way cascor's
