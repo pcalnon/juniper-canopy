@@ -45,6 +45,7 @@ from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
 from canopy_constants import CascorPatchBounds, DashboardConstants, TrainingConstants
+from dataset_schema import apply_availability_gate, generator_name_for_type, is_generator_available, parse_schema_fields, unavailable_reason
 from frontend.internal_api import internal_api_headers
 from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason
 from settings import get_settings
@@ -1161,7 +1162,10 @@ class DashboardManager:
                                                                             html.H6(
                                                                                 [
                                                                                     html.Span("▼", id="ctx-spiral-dataset-icon", className="collapse-icon"),
-                                                                                    "Current Dataset",
+                                                                                    # N7 (U-6): the section title is renamed per selected dataset type
+                                                                                    # (e.g. "Current Dataset — MNIST") by ``render_dataset_params`` so the
+                                                                                    # left menu reflects the actually-selected type, not a fixed Spiral view.
+                                                                                    html.Span(self._initial_dataset_section_title(), id="nn-dataset-section-title"),
                                                                                 ],
                                                                                 id="ctx-spiral-dataset-header",
                                                                                 className="collapsible-header",
@@ -1169,55 +1173,65 @@ class DashboardManager:
                                                                             dbc.Collapse(
                                                                                 html.Div(
                                                                                     [
-                                                                                        html.P("Spiral:", className="mb-1 fw-bold mt-1"),
-                                                                                        html.P("Rotations:", className="mb-1 ms-3"),
-                                                                                        dbc.Input(
-                                                                                            id="nn-spiral-rotations-input",
-                                                                                            type="number",
-                                                                                            value=TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
-                                                                                            step=0.5,
-                                                                                            min=TrainingConstants.MIN_SPIRAL_ROTATIONS,
-                                                                                            max=TrainingConstants.MAX_SPIRAL_ROTATIONS,
-                                                                                            className="mb-2 ms-3",
-                                                                                            debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
-                                                                                            style={"width": "calc(100% - 1rem)"},
-                                                                                        ),
-                                                                                        html.P("Number:", className="mb-1 ms-3"),
-                                                                                        dbc.Input(
-                                                                                            id="nn-spiral-number-input",
-                                                                                            type="number",
-                                                                                            value=TrainingConstants.DEFAULT_SPIRAL_NUMBER,
-                                                                                            step=1,
-                                                                                            min=TrainingConstants.MIN_SPIRAL_NUMBER,
-                                                                                            max=TrainingConstants.MAX_SPIRAL_NUMBER,
-                                                                                            className="mb-2 ms-3",
-                                                                                            debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
-                                                                                            style={"width": "calc(100% - 1rem)"},
-                                                                                        ),
-                                                                                        html.P("Dataset:", className="mb-1 fw-bold mt-2"),
-                                                                                        html.P("Elements:", className="mb-1 ms-3"),
-                                                                                        dbc.Input(
-                                                                                            id="nn-dataset-elements-input",
-                                                                                            type="number",
-                                                                                            value=TrainingConstants.DEFAULT_DATASET_ELEMENTS,
-                                                                                            step=100,
-                                                                                            min=TrainingConstants.MIN_DATASET_ELEMENTS,
-                                                                                            max=TrainingConstants.MAX_DATASET_ELEMENTS,
-                                                                                            className="mb-2 ms-3",
-                                                                                            debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
-                                                                                            style={"width": "calc(100% - 1rem)"},
-                                                                                        ),
-                                                                                        html.P("Noise:", className="mb-1 ms-3"),
-                                                                                        dbc.Input(
-                                                                                            id="nn-dataset-noise-input",
-                                                                                            type="number",
-                                                                                            value=TrainingConstants.DEFAULT_DATASET_NOISE,
-                                                                                            step=0.05,
-                                                                                            min=TrainingConstants.MIN_DATASET_NOISE,
-                                                                                            max=TrainingConstants.MAX_DATASET_NOISE,
-                                                                                            className="mb-2 ms-3",
-                                                                                            debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
-                                                                                            style={"width": "calc(100% - 1rem)"},
+                                                                                        # N7 (I-7): the four spiral-form typed inputs render only for the
+                                                                                        # spiral generator; ``render_dataset_params`` hides this block for
+                                                                                        # other types, which render schema-driven fields into
+                                                                                        # ``nn-dataset-schema-params`` and forward them via the generic
+                                                                                        # ``params`` staging channel (not these typed fields).
+                                                                                        html.Div(
+                                                                                            [
+                                                                                                html.P("Spiral:", className="mb-1 fw-bold mt-1"),
+                                                                                                html.P("Rotations:", className="mb-1 ms-3"),
+                                                                                                dbc.Input(
+                                                                                                    id="nn-spiral-rotations-input",
+                                                                                                    type="number",
+                                                                                                    value=TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
+                                                                                                    step=0.5,
+                                                                                                    min=TrainingConstants.MIN_SPIRAL_ROTATIONS,
+                                                                                                    max=TrainingConstants.MAX_SPIRAL_ROTATIONS,
+                                                                                                    className="mb-2 ms-3",
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
+                                                                                                    style={"width": "calc(100% - 1rem)"},
+                                                                                                ),
+                                                                                                html.P("Number:", className="mb-1 ms-3"),
+                                                                                                dbc.Input(
+                                                                                                    id="nn-spiral-number-input",
+                                                                                                    type="number",
+                                                                                                    value=TrainingConstants.DEFAULT_SPIRAL_NUMBER,
+                                                                                                    step=1,
+                                                                                                    min=TrainingConstants.MIN_SPIRAL_NUMBER,
+                                                                                                    max=TrainingConstants.MAX_SPIRAL_NUMBER,
+                                                                                                    className="mb-2 ms-3",
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
+                                                                                                    style={"width": "calc(100% - 1rem)"},
+                                                                                                ),
+                                                                                                html.P("Dataset:", className="mb-1 fw-bold mt-2"),
+                                                                                                html.P("Elements:", className="mb-1 ms-3"),
+                                                                                                dbc.Input(
+                                                                                                    id="nn-dataset-elements-input",
+                                                                                                    type="number",
+                                                                                                    value=TrainingConstants.DEFAULT_DATASET_ELEMENTS,
+                                                                                                    step=100,
+                                                                                                    min=TrainingConstants.MIN_DATASET_ELEMENTS,
+                                                                                                    max=TrainingConstants.MAX_DATASET_ELEMENTS,
+                                                                                                    className="mb-2 ms-3",
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
+                                                                                                    style={"width": "calc(100% - 1rem)"},
+                                                                                                ),
+                                                                                                html.P("Noise:", className="mb-1 ms-3"),
+                                                                                                dbc.Input(
+                                                                                                    id="nn-dataset-noise-input",
+                                                                                                    type="number",
+                                                                                                    value=TrainingConstants.DEFAULT_DATASET_NOISE,
+                                                                                                    step=0.05,
+                                                                                                    min=TrainingConstants.MIN_DATASET_NOISE,
+                                                                                                    max=TrainingConstants.MAX_DATASET_NOISE,
+                                                                                                    className="mb-2 ms-3",
+                                                                                                    debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS,
+                                                                                                    style={"width": "calc(100% - 1rem)"},
+                                                                                                ),
+                                                                                            ],
+                                                                                            id="nn-dataset-typed-fields",
                                                                                         ),
                                                                                         # FRONTEND_ISSUES_PLAN_2026-05-09 §3.5.1
                                                                                         # Issue #3 Phase 1 — dataset_type selector
@@ -1233,6 +1247,12 @@ class DashboardManager:
                                                                                             className="mb-2 ms-3",
                                                                                             style={"width": "calc(100% - 1rem)"},
                                                                                         ),
+                                                                                        # N7 (I-7 / U-6): schema-driven parameter inputs for the selected
+                                                                                        # non-spiral generator, rebuilt by ``render_dataset_params`` from the
+                                                                                        # generator's JSON schema (labels/bounds/defaults). Each input carries a
+                                                                                        # pattern-matching id ``{"type": "nn-gen-param", "name": <field>}`` and is
+                                                                                        # read directly by ``apply_dataset`` into the generic ``params`` channel.
+                                                                                        html.Div(id="nn-dataset-schema-params", className="ms-3"),
                                                                                         dbc.Button(
                                                                                             "Apply Dataset",
                                                                                             id="apply-dataset-button",
@@ -2387,15 +2407,35 @@ class DashboardManager:
         def select_model(n_clicks_list):
             return self._select_model_from_table_handler(n_clicks_list, dash.callback_context.triggered_id)
 
+        # N7 (I-5): also fires once on mount (params-init-interval) so the availability gate is
+        # applied at first paint, not only after a model change — an unavailable generator (its
+        # optional data extra absent) is greyed with a reworded reason from the start.
         @self.app.callback(
             Output("nn-dataset-type-dropdown", "options"),
             Output("nn-dataset-type-dropdown", "value"),
             Input("model-selection-store", "data"),
+            Input("params-init-interval", "n_intervals"),
             State("nn-dataset-type-dropdown", "value"),
             prevent_initial_call=True,
         )
-        def gate_dataset_options(model_key, current_value):
+        def gate_dataset_options(model_key, _init_intervals, current_value):
             return self._gate_dataset_options_handler(model_key, current_value)
+
+        # N7 (I-7 / U-6): drive the sidebar dataset params from the SELECTED generator's schema.
+        # Fires on dataset change AND once on mount (params-init-interval) so the panel is correct at
+        # first paint. Renames the section per type (U-6), hides the spiral typed-field block for
+        # non-spiral types, and renders schema-derived inputs into nn-dataset-schema-params (read by
+        # apply_dataset into the generic ``params`` staging channel — the typed fields stay spiral-only).
+        @self.app.callback(
+            Output("nn-dataset-section-title", "children"),
+            Output("nn-dataset-typed-fields", "style"),
+            Output("nn-dataset-schema-params", "children"),
+            Input("nn-dataset-type-dropdown", "value"),
+            Input("params-init-interval", "n_intervals"),
+            prevent_initial_call=True,
+        )
+        def render_dataset_params(dataset_value, _init_intervals):
+            return self._render_dataset_params_handler(dataset_value)
 
         # A1-iv-3c: resolve the one-shot Start dataset-ref body in ONE place from the model-class
         # flag + the (gated) dataset generator, so both training-button transports forward the
@@ -2454,20 +2494,193 @@ class DashboardManager:
         return {"dataset": dataset_ref}
 
     def _gate_dataset_options_handler(self, model_key, current_value):
-        """Gate the dataset dropdown against the selected model (A1-iv-3b).
+        """Gate the dataset dropdown against the selected model (A1-iv-3b) AND availability (N7 / I-5).
 
-        Returns ``(options, value)``: incompatible datasets are disabled with a reason-suffix
-        label (D2); if the current selection became incompatible, snap to the first compatible
-        one (dataset-primary conflict policy, D5) so a recurrence fit never starts from a
-        stranded, greyed dataset. Both are ``dash.no_update`` when there is no model yet.
+        Composes the model-compatibility gate (``gated_dataset_options`` — the D5 correctness gate:
+        an incompatible dataset is disabled with a reason suffix) with the deployment-availability
+        gate (``apply_availability_gate`` — a generator whose optional data extra is absent is
+        disabled with a reworded reason). A missing/older availability surface degrades to
+        all-available (flag-absent fallback). If the current selection became disabled, snap to the
+        first enabled option (dataset-primary conflict policy, D5). Returns ``(no_update, no_update)``
+        when there is no model yet (unchanged contract); the mount-time pass runs against the seeded
+        ``model-selection-store`` (``DEFAULT_MODEL_KEY``), so the availability gate still applies at
+        first paint.
         """
         if not model_key:
             return dash.no_update, dash.no_update
-        options = gated_dataset_options(model_key)
+        options = apply_availability_gate(gated_dataset_options(model_key), self._fetch_generators())
         enabled = [option["value"] for option in options if not option.get("disabled")]
         if current_value in enabled or not enabled:
             return options, dash.no_update
         return options, enabled[0]
+
+    # N7 (I-7 / U-6 / I-5): schema-driven dataset-panel plumbing. The generator list (name /
+    # available / schema dicts) is fetched from canopy's own /api/dataset/generators proxy and
+    # TTL-cached so the render + gate callbacks don't each pay a round-trip.
+    _GENERATORS_CACHE_TTL_S: float = 30.0
+
+    def _fetch_generators(self):
+        """Return the /api/dataset/generators list (name/available/schema dicts), short-TTL-cached.
+
+        Reuses canopy's own proxy route (which fetches juniper-data's /v1/generators via httpx and
+        falls back to a built-in list when the service is down). Any error yields an empty list — the
+        availability helpers then treat every generator as available (flag-absent fallback), so a
+        down/older data service never greys the panel or hides its params.
+        """
+        now = time.monotonic()
+        cached = getattr(self, "_generators_cache", None)
+        if cached is not None and (now - cached[0]) < self._GENERATORS_CACHE_TTL_S:
+            return cached[1]
+        generators: list = []
+        try:
+            resp = requests.get(self._api_url("/api/dataset/generators"), timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT, headers=internal_api_headers())
+            if resp.ok:
+                payload = resp.json()
+                generators = payload.get("generators", []) if isinstance(payload, dict) else []
+        except Exception as exc:  # noqa: BLE001 — a generator-fetch failure must never break the panel; degrade to all-available.
+            self.logger.debug("Failed to fetch dataset generators: %s", exc)
+            generators = []
+        self._generators_cache = (now, generators or [])
+        return self._generators_cache[1]
+
+    @staticmethod
+    def _generator_schema(gen_name, generators):
+        """Return the JSON schema dict for generator ``gen_name`` from a /v1/generators list, or {}."""
+        for entry in generators or ():
+            if isinstance(entry, dict) and entry.get("name") == gen_name:
+                schema = entry.get("schema")
+                return schema if isinstance(schema, dict) else {}
+        return {}
+
+    def _initial_dataset_section_title(self):
+        """Seed text for the U-6 dataset section title at first paint (renamed per type by callback)."""
+        return self._dataset_section_title(DEFAULT_DATASET_TYPE)
+
+    @staticmethod
+    def _dataset_section_title(dataset_value):
+        """'Current Dataset — <Label>' for U-6 (falls back to the raw value, then a bare title)."""
+        spec = get_dataset_spec(dataset_value)
+        label = spec.label if spec is not None else (dataset_value or "")
+        return f"Current Dataset — {label}" if label else "Current Dataset"
+
+    def _render_dataset_params_handler(self, dataset_value, generators=None):
+        """Drive the U-6 title + spiral-block visibility + schema-driven params for the selected type (N7).
+
+        Returns ``(section_title, typed_fields_style, schema_children)``:
+        - spiral -> title, typed block shown, empty schema container (spiral keeps its typed fields);
+        - other  -> title, typed block hidden, schema-derived inputs (pattern-matching ids) that
+          ``apply_dataset`` forwards via the generic ``params`` channel. An unavailable generator
+          still renders a reworded reason note (I-5). ``generators`` is injectable for tests.
+        """
+        if generators is None:
+            generators = self._fetch_generators()
+        title = self._dataset_section_title(dataset_value)
+        gen_name = generator_name_for_type(dataset_value)
+        if gen_name == "spiral":
+            return title, {"display": "block"}, []
+        fields = parse_schema_fields(self._generator_schema(gen_name, generators))
+        available = is_generator_available(dataset_value, generators)
+        return title, {"display": "none"}, self._build_schema_param_inputs(dataset_value, fields, available)
+
+    @staticmethod
+    def _build_schema_param_inputs(dataset_value, fields, available):
+        """Build the schema-driven param inputs (+ unavailable/empty note) for a non-spiral type (N7).
+
+        Each field becomes a labelled control with a pattern-matching id
+        ``{"type": "nn-gen-param", "name": <field>}`` carrying its schema-derived label/bounds/default,
+        so ``apply_dataset`` reads them via ``State({"type": "nn-gen-param", "name": ALL}, ...)`` into
+        the generic ``params`` payload. number -> dbc.Input(type=number); boolean -> dbc.Checkbox;
+        enum -> dcc.Dropdown; string -> dbc.Input(type=text).
+        """
+        children: list = []
+        if not available:
+            children.append(dbc.Alert(f"This dataset is {unavailable_reason(dataset_value)} — it cannot be staged until the deployment provides it.", color="warning", className="py-1 px-2 small mb-2"))
+        if not fields:
+            children.append(html.P("No adjustable parameters — sensible generator defaults are used.", className="mb-1 small text-muted fst-italic"))
+            return children
+        for gen_field in fields:
+            field_id = {"type": "nn-gen-param", "name": gen_field.name}
+            children.append(html.P(f"{gen_field.label}:", className="mb-1 ms-1 small"))
+            if gen_field.input_type == "checkbox":
+                children.append(dbc.Checkbox(id=field_id, value=bool(gen_field.default), className="mb-2 ms-1"))
+            elif gen_field.input_type == "select":
+                children.append(dcc.Dropdown(id=field_id, options=[{"label": choice, "value": choice} for choice in gen_field.options], value=gen_field.default, clearable=False, className="mb-2 ms-1", style={"width": "calc(100% - 0.5rem)"}))
+            elif gen_field.input_type == "number":
+                number_kwargs: dict = {}
+                if gen_field.minimum is not None:
+                    number_kwargs["min"] = gen_field.minimum
+                if gen_field.maximum is not None:
+                    number_kwargs["max"] = gen_field.maximum
+                if gen_field.step is not None:
+                    number_kwargs["step"] = gen_field.step
+                children.append(dbc.Input(id=field_id, type="number", value=gen_field.default, debounce=DashboardConstants.NUMERIC_INPUT_DEBOUNCE_MS, className="mb-2 ms-1", style={"width": "calc(100% - 0.5rem)"}, **number_kwargs))
+            else:
+                children.append(dbc.Input(id=field_id, type="text", value=(gen_field.default if gen_field.default is not None else ""), debounce=True, className="mb-2 ms-1", style={"width": "calc(100% - 0.5rem)"}))
+            if gen_field.description:
+                children.append(html.P(gen_field.description, className="mb-2 ms-1 text-muted", style={"fontSize": "0.7rem"}))
+        return children
+
+    @staticmethod
+    def _collect_generator_params(gen_values, gen_ids):
+        """Zip pattern-matching (id, value) pairs into a ``{name: value}`` params dict, dropping blanks.
+
+        ``None`` (a cleared Optional field) and ``""`` (a blank text field) are dropped so the
+        generator falls back to its own schema default rather than being sent an empty value.
+        """
+        params: dict = {}
+        for gen_id, value in zip(gen_ids or [], gen_values or [], strict=False):
+            if not isinstance(gen_id, dict):
+                continue
+            name = gen_id.get("name")
+            if not name or value is None or value == "":
+                continue
+            params[name] = value
+        return params
+
+    def _apply_dataset_handler(self, n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values=None, gen_ids=None):
+        """POST /api/stage_dataset with the current dataset-form values (N7 schema-aware).
+
+        ``dataset_type`` is ALWAYS sent — cascor's ``_reload_dataset`` hard-requires it. For the
+        spiral generator the typed convenience fields (elements/noise/rotations/number) are forwarded
+        as before (the force-blur clientside callback commits the numeric inputs first, so they arrive
+        as numbers, not Dash/React ``null`` — Issue #4). For any other generator the typed fields are
+        omitted and the schema-driven inputs are collected into the generic ``nn_dataset_params``
+        channel, which the adapter maps to cascor's ``StageDatasetRequest.params`` (cascor #396 merges
+        typed + generic before ``create_dataset``) — so the staging dialect is preserved and non-spiral
+        generators pass schema-true params without widening the typed fields.
+        """
+        if not n_clicks:
+            return dash.no_update, dash.no_update
+        payload: dict = {"nn_dataset_type": dataset_type}
+        if generator_name_for_type(dataset_type) == "spiral":
+            for _key, _value in (
+                ("nn_dataset_elements", n_samples),
+                ("nn_dataset_noise", noise),
+                ("nn_spiral_rotations", rotations),
+                ("nn_spiral_number", n_spirals),
+            ):
+                if _value is not None:
+                    payload[_key] = _value
+        else:
+            params = self._collect_generator_params(gen_values, gen_ids)
+            if params:
+                payload["nn_dataset_params"] = params
+        try:
+            resp = requests.post(
+                self._api_url("/api/stage_dataset"),
+                json=payload,
+                timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
+                headers=internal_api_headers(),
+            )
+            if resp.status_code == 200:
+                self.logger.info("Dataset staged: %s", payload)
+                return True, None  # open banner; clear any prior staging error
+            detail = resp.text[:300] if resp.text else f"HTTP {resp.status_code}"
+            self.logger.warning("Stage dataset failed: %s %s", resp.status_code, detail)
+            return dash.no_update, dbc.Alert(f"Could not stage the dataset change: {detail}", color="danger", duration=8000, dismissable=True)
+        except requests.RequestException as exc:
+            self.logger.warning("Stage dataset exception: %s", exc)
+            return dash.no_update, dbc.Alert(f"Backend unreachable while staging the dataset: {exc}", color="danger", duration=8000, dismissable=True)
 
     def _select_model_handler(self, model_key):
         """Apply a model selection via ``POST /api/model/select`` and mirror the result.
@@ -4354,46 +4567,15 @@ class DashboardManager:
                 dash.dependencies.State("nn-dataset-noise-input", "value"),
                 dash.dependencies.State("nn-spiral-rotations-input", "value"),
                 dash.dependencies.State("nn-spiral-number-input", "value"),
+                # N7 (I-7): the schema-driven inputs for a non-spiral generator (read directly, so
+                # there is no store-race with the Apply click). Empty for spiral / no-param types.
+                dash.dependencies.State({"type": "nn-gen-param", "name": dash.ALL}, "value"),
+                dash.dependencies.State({"type": "nn-gen-param", "name": dash.ALL}, "id"),
             ],
             prevent_initial_call=True,
         )
-        def apply_dataset(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals):
-            """POST /api/stage_dataset with the current dataset-form values."""
-            if not n_clicks:
-                return dash.no_update, dash.no_update
-            # dataset_type is ALWAYS sent — cascor `_reload_dataset` hard-requires
-            # it (RuntimeError otherwise). The optional numeric / spiral fields
-            # are included only when present. Force-blur on the Apply-Dataset
-            # click (clientside callback above) commits the numeric inputs first,
-            # so n_samples / noise now arrive as numbers instead of the
-            # Dash/React `null` that the old blanket None-drop silently discarded
-            # (Issue #4). Spiral fields stay conditional — irrelevant for
-            # non-spiral dataset types.
-            payload = {"nn_dataset_type": dataset_type}
-            for _key, _value in (
-                ("nn_dataset_elements", n_samples),
-                ("nn_dataset_noise", noise),
-                ("nn_spiral_rotations", rotations),
-                ("nn_spiral_number", n_spirals),
-            ):
-                if _value is not None:
-                    payload[_key] = _value
-            try:
-                resp = requests.post(
-                    self._api_url("/api/stage_dataset"),
-                    json=payload,
-                    timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
-                    headers=internal_api_headers(),
-                )
-                if resp.status_code == 200:
-                    self.logger.info("Dataset staged: %s", payload)
-                    return True, None  # open banner; clear any prior staging error
-                detail = resp.text[:300] if resp.text else f"HTTP {resp.status_code}"
-                self.logger.warning("Stage dataset failed: %s %s", resp.status_code, detail)
-                return dash.no_update, dbc.Alert(f"Could not stage the dataset change: {detail}", color="danger", duration=8000, dismissable=True)
-            except requests.RequestException as exc:
-                self.logger.warning("Stage dataset exception: %s", exc)
-                return dash.no_update, dbc.Alert(f"Backend unreachable while staging the dataset: {exc}", color="danger", duration=8000, dismissable=True)
+        def apply_dataset(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values, gen_ids):
+            return self._apply_dataset_handler(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values, gen_ids)
 
         @self.app.callback(
             Output("pending-dataset-banner", "is_open", allow_duplicate=True),

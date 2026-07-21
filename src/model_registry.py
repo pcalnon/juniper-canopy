@@ -372,13 +372,22 @@ def model_reason(model: ModelSpec, dataset: DatasetTypeSpec) -> str | None:
     return None
 
 
+# N7 (I-7): tensor-rank nouns for the reverse-gate hint. The pre-N7 phrasing ("2-D models only")
+# read as a feature-count constraint and misled — e.g. MNIST is ``ndim=2`` (a rank-2 tabular tensor
+# of 784 features), so "2-D" wrongly suggested MNIST was excluded. Naming the rank AND its shape
+# noun ("rank-2 (tabular)") makes clear the discriminator is tensor rank, not the number of features.
+_RANK_NOUNS: dict[int, str] = {2: "tabular", 3: "sequence"}
+
+
 def dataset_model_hint(dataset_value: str, *, models: tuple[ModelSpec, ...] = MODELS) -> str | None:
     """Sidebar reverse-gate hint naming the model constraint the selected dataset imposes (A1b-2; §5.3).
 
     Given the selected dataset, a short positive phrase describing what KIND of model it admits —
     so the user sees, at rest in the sidebar, why some models are greyed in the table. This is the
     dataset-side mirror of the table's per-row ``model_reason`` greying (the reverse gate, §5.3):
-    it names the structural discriminators (``ndim``, plus Δt-awareness for irregular sequences).
+    it names the structural discriminators (tensor ``ndim``, plus Δt-awareness for irregular
+    sequences). N7 (I-7) rewords the rank clause from "N-D" to "rank-N (<shape>)" so it reads as a
+    tensor-rank constraint (which it is) rather than a feature-count one (which confused for MNIST).
 
     Returns ``None`` when no dataset is selected (so the caller clears the annotation); a
     ``"no compatible models"`` warning when the compatible set is empty (the degenerate state,
@@ -389,7 +398,8 @@ def dataset_model_hint(dataset_value: str, *, models: tuple[ModelSpec, ...] = MO
         return None
     if not compatible_models(spec, models=models):
         return "no compatible models"
-    parts = [f"{spec.ndim}-D"]
+    noun = _RANK_NOUNS.get(spec.ndim)
+    parts = [f"rank-{spec.ndim} ({noun})" if noun else f"rank-{spec.ndim}"]
     if spec.temporal == "irregular":
         parts.append("Δt-aware")
     return f"{' '.join(parts)} models only"

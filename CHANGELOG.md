@@ -9,6 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **N7 — Schema-driven dataset panel, availability gating, per-type
+  Current-Dataset section (juniper-ml training-runtime defects plan §4 I-7 / §4-U
+  U-6 / I-5 UX).** The sidebar Dataset sub-section no longer shows the
+  spiral-centric typed fields for every dataset type. A new pure module
+  `src/dataset_schema.py` turns a juniper-data generator's JSON schema (surfaced
+  by `GET /v1/generators` as of juniper-data 0.10.0 / D1) into ordered renderable
+  field descriptors — excluding split/seed/cache infrastructure fields and
+  preserving each field's type/label/bounds/default/enum — and reads the additive
+  per-generator `available` flag with a **flag-absent-means-available** fallback
+  (older juniper-data degrades to all-available). (1) **Schema-driven params
+  (I-7):** `render_dataset_params` renames the section per selected type (U-6),
+  hides the spiral typed-field block for non-spiral types, and renders
+  schema-derived inputs (pattern-matching `{"type": "nn-gen-param", "name": …}`
+  ids) into `nn-dataset-schema-params`. Spiral keeps its typed convenience fields;
+  every other generator forwards its schema-true params through the **generic
+  `params` staging channel** — a new `nn_dataset_params` key on canopy's
+  `StageDatasetRequest` mapped to cascor's `StageDatasetRequest.params` (adapter
+  `_DATASET_PARAM_MAP`), so the staging dialect (cascor #396) is preserved and no
+  typed fields are widened. `apply_dataset` reads the schema inputs directly (no
+  store-race) and drops the now-hidden typed fields for non-spiral generators.
+  (2) **Capability gating (I-5 UX):** the training-dataset dropdown composes the
+  existing model-compatibility gate with an availability gate — an unavailable
+  generator (its optional data extra absent) renders disabled with a reworded
+  reason, and the gate runs on mount (not only after a model change). (3) **U-6:**
+  the "Current Dataset" left-menu sub-section is retitled per selected type
+  ("Current Dataset — MNIST") and populated with that type's schema-relevant
+  params. (4) **Hint rewording (I-7):** `dataset_model_hint` now reads "rank-2
+  (tabular) models only" / "rank-3 (sequence) Δt-aware models only" instead of
+  "2-D / 3-D models only", so the constraint reads as tensor rank rather than a
+  feature count (MNIST, a rank-2 784-feature tensor, is no longer implied to be
+  excluded). **No `juniper-data-client` floor bump:** canopy reads `/v1/generators`
+  via direct httpx (raw-dict passthrough), so the availability/schema surface needs
+  no client-library change; the client floor stays `>=0.4.1` (the juniper-data
+  *service* floor for the availability surface is a juniper-deploy concern, out of
+  scope here). Tests: `tests/unit/test_dataset_schema.py` (schema→fields mapping,
+  availability incl. flag-absent, alias, gate composition),
+  `tests/unit/frontend/test_n7_dataset_panel.py` (render/gate/apply handlers, U-6),
+  and `tests/integration/test_apply_dataset_flow.py` (adapter `params` mapping +
+  the `/api/stage_dataset` route accepting `nn_dataset_params`).
+
 ### Changed
 
 - **CL2 — cascor-client `>=0.7.0` floor; adapter liveness seams onto the client

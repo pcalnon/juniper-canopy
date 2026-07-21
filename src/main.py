@@ -3791,6 +3791,13 @@ class StageDatasetRequest(BaseModel):
     nn_dataset_noise: Optional[float] = None
     nn_spiral_rotations: Optional[float] = None
     nn_spiral_number: Optional[int] = None
+    # N7 (I-7): generic generator params for non-spiral generators whose inputs are not covered by
+    # the typed convenience fields above (e.g. mnist: dataset/flatten; equities: regression_target).
+    # Forwarded verbatim to cascor's StageDatasetRequest.params channel (the adapter maps the canopy
+    # key -> cascor ``params``), which cascor merges into its create_dataset call. Keeps the legacy
+    # spiral/xor bodies unchanged (no key present) while letting schema-driven generators pass
+    # arbitrary params without widening the typed fields.
+    nn_dataset_params: Optional[dict[str, Any]] = None
 
 
 @app.post("/api/stage_dataset")
