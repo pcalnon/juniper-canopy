@@ -65,6 +65,37 @@ class MetricsPanel(BaseComponent):
     - Current network statistics
     """
 
+    # ------------------------------------------------------------------
+    # N9 (training-runtime defects plan §4-U U-2/U-3/U-4 display) — the
+    # classification-metrics series contract (SINGLE SOURCE OF TRUTH).
+    # ------------------------------------------------------------------
+    # Trace 0 of each plot is the WS-bridge ``extendTraces`` target (appended
+    # by index in the clientside callback in ``register_callbacks``); every
+    # other series (validation overlays + the C7 scalars below) is looked up by
+    # its exact display *name*. The names here MUST match the ``findTraceIndex``
+    # lookups in that JS — a mismatch would silently mis-append WS points to the
+    # wrong trace. ``test_n9_metrics_visualization`` pins both sides together.
+    OUTPUT_TRACE_NAME = "Output Training"  # loss plot, trace 0
+    ACCURACY_TRACE_NAME = "Accuracy"  # classification plot, trace 0
+    ACCURACY_COLOR = "#28a745"  # green — matches the Accuracy tile
+
+    # C7 (U-4) scalar classification metrics rendered on the classification
+    # (accuracy) plot, in trace order *after* "Accuracy". Each tuple is
+    # ``(row key, Plotly trace display name, series color)``. The row key is the
+    # flat scalar name in cascor's C7 contract
+    # (``classification_metrics.METRIC_KEYS`` — f1/precision/recall/roc_auc);
+    # the metrics panel reads it from each row's nested ``metrics`` dict
+    # (REST path) and the WS clientside callback reads the same flat field off
+    # the frame. Colors are chosen for mutual contrast and legibility on both
+    # the light (#f8f9fa/#ffffff) and dark (#242424) figure backgrounds. All are
+    # bounded to [0, 1] so they share the accuracy plot's percentage y-axis.
+    SCALAR_SERIES: Tuple[Tuple[str, str, str], ...] = (
+        ("f1", "F1", "#6f42c1"),  # violet
+        ("precision", "Precision", "#fd7e14"),  # orange
+        ("recall", "Recall", "#0dcaf0"),  # cyan
+        ("roc_auc", "ROC-AUC", "#d63384"),  # magenta
+    )
+
     def __init__(self, config: Dict[str, Any], component_id: str = "metrics-panel"):
         """
         Initialize metrics panel component.
@@ -769,6 +800,11 @@ class MetricsPanel(BaseComponent):
                 var events = wsBuffer.events;
                 var epochs = [], losses = [], accuracies = [];
                 var valEpochs = [], valLosses = [], valAccs = [];
+                // N9 (C7/U-4): parallel arrays for the scalar classification
+                // metrics, pushed under the SAME gate as loss/accuracy so every
+                // series stays x-aligned with accuracy trace 0 (a length skew
+                // would silently mis-append WS points). null => gap, never 0.
+                var f1s = [], precisions = [], recalls = [], rocAucs = [];
                 for (var i = 0; i < events.length; i++) {
                     var e = events[i];
                     var epoch = e.epoch || e.current_epoch || i;
@@ -778,6 +814,13 @@ class MetricsPanel(BaseComponent):
                         epochs.push(epoch);
                         losses.push(loss);
                         accuracies.push(acc !== undefined && acc !== null ? acc : 0);
+                        // N9 (C7/U-4): read each scalar flat off the frame under
+                        // the loss gate; null (missing / candidate phase / the
+                        // ~every-25th-epoch sparsity) becomes a gap, not a zero.
+                        f1s.push((e.f1 !== undefined && e.f1 !== null) ? e.f1 : null);
+                        precisions.push((e.precision !== undefined && e.precision !== null) ? e.precision : null);
+                        recalls.push((e.recall !== undefined && e.recall !== null) ? e.recall : null);
+                        rocAucs.push((e.roc_auc !== undefined && e.roc_auc !== null) ? e.roc_auc : null);
                     }
                     // GAP-WS-14: collect validation values when present so the
                     // overlay traces stay in sync without forcing a rebuild.
@@ -830,6 +873,21 @@ class MetricsPanel(BaseComponent):
                         try {
                             Plotly.extendTraces(accEl, {x: [epochs], y: [accuracies]}, [0], 5000);
                         } catch(e) {}
+                        // N9 (C7/U-4): extend each scalar series by name. Names
+                        // MUST match MetricsPanel.SCALAR_SERIES display names.
+                        // Absent traces (metric disabled / all-null at build
+                        // time) are skipped; the 1 Hz REST rebuild adds the
+                        // trace once real values land, then WS extends keep it
+                        // live. Shares [epochs] so it stays aligned with acc[0].
+                        var n9Series = [{n: "F1", v: f1s}, {n: "Precision", v: precisions}, {n: "Recall", v: recalls}, {n: "ROC-AUC", v: rocAucs}];
+                        for (var s = 0; s < n9Series.length; s++) {
+                            var n9Idx = findTraceIndex(accEl, n9Series[s].n);
+                            if (n9Idx >= 0) {
+                                try {
+                                    Plotly.extendTraces(accEl, {x: [epochs], y: [n9Series[s].v]}, [n9Idx], 5000);
+                                } catch(e) {}
+                            }
+                        }
                     }
                     if (valEpochs.length > 0) {
                         var valAccIdx = findTraceIndex(accEl, "Validation Accuracy");
@@ -1723,9 +1781,10 @@ class MetricsPanel(BaseComponent):
                     x=output_epochs,
                     y=output_losses,
                     mode="lines+markers",
-                    name="Output Training",
+                    name=self.OUTPUT_TRACE_NAME,
                     line={"color": "#1f77b4", "width": 2},
                     marker={"size": 6},
+                    hovertemplate="%{fullData.name}: %{y:.4f}<extra></extra>",
                 )
             )
         return fig
@@ -1740,6 +1799,7 @@ class MetricsPanel(BaseComponent):
                     name="Candidate Training",
                     line={"color": "#ff7f0e", "width": 2},
                     marker={"size": 6},
+                    hovertemplate="%{fullData.name}: %{y:.4f}<extra></extra>",
                 )
             )
 
@@ -1774,6 +1834,96 @@ class MetricsPanel(BaseComponent):
                 )
             )
         return fig
+
+    @staticmethod
+    def _add_scalar_series(fig: go.Figure, metrics_data: List[Dict[str, Any]], field_name: str, trace_name: str, color: str) -> go.Figure:
+        """Add one bounded-[0,1] C7 scalar classification series (N9 / U-4).
+
+        Reads the flat scalar ``field_name`` from each row's nested ``metrics``
+        dict (the REST-path shape produced by the adapter / demo). Rows where
+        the value is missing or ``None`` become **gaps** (``None`` y +
+        ``connectgaps=False``) — never zeros — so a metric that is only
+        computed on the terminal ~every-25th-epoch training-step row (and is
+        ``None`` through candidate phases) stays an honest sparse series rather
+        than a line dragged to the floor. Drawn as ``lines+markers`` so those
+        sparse points stay legible. The trace is added only when at least one
+        row carries a real value, so a disabled/unavailable metric does not
+        clutter the legend (mirrors ``_add_validation_overlay``). ``bool`` is
+        excluded from the numeric check because ``True``/``False`` are ints.
+        """
+        epochs: List[Any] = []
+        values: List[Any] = []
+        has_value = False
+        for m in metrics_data:
+            val = m.get("metrics", {}).get(field_name) if isinstance(m, dict) else None
+            epochs.append(m.get("epoch", 0) if isinstance(m, dict) else 0)
+            if isinstance(val, (int, float)) and not isinstance(val, bool):
+                values.append(val)
+                has_value = True
+            else:
+                values.append(None)  # gap, not zero
+        if not has_value:
+            return fig
+        fig.add_trace(
+            go.Scatter(
+                x=epochs,
+                y=values,
+                mode="lines+markers",
+                name=trace_name,
+                line={"color": color, "width": 2},
+                marker={"size": 6},
+                connectgaps=False,
+                hovertemplate="%{fullData.name}: %{y:.1%}<extra></extra>",
+            )
+        )
+        return fig
+
+    @staticmethod
+    def _latest_eval_metrics(metrics_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Return the most-recent non-empty ``eval_metrics`` block, or ``None``.
+
+        C7's self-describing metadata (``average``/``split``/``n_samples``/
+        ``n_classes``/``undefined``) rides the ``GET /v1/metrics`` snapshot and
+        demo rows, but NOT every history row (cascor's monitor rows carry only
+        the flat scalars). Scan newest-first and return the first block found so
+        the annotation reflects the latest eval; return ``None`` when absent —
+        the ``average``/``split`` metadata is reported, never guessed.
+        """
+        for m in reversed(metrics_data):
+            eval_metrics = m.get("eval_metrics") if isinstance(m, dict) else None
+            if isinstance(eval_metrics, dict) and eval_metrics:
+                return eval_metrics
+        return None
+
+    @staticmethod
+    def _eval_metrics_legend_title(eval_metrics: Dict[str, Any]) -> str:
+        """Legend title carrying the eval ``average`` + ``split`` (or ``None``).
+
+        Places the C7 averaging strategy and evaluation split *in the legend*
+        (per the plan: "the average/split metadata belongs in the legend/hover,
+        not guessed"). Returns ``None`` when no metadata is available so the
+        legend stays untitled rather than inventing a strategy.
+        """
+        if not isinstance(eval_metrics, dict) or not eval_metrics:
+            return None
+        parts = [str(eval_metrics[k]) for k in ("average", "split") if eval_metrics.get(k)]
+        return "Metrics · " + " · ".join(parts) if parts else None
+
+    @staticmethod
+    def _eval_metrics_undefined_note(eval_metrics: Dict[str, Any]) -> str:
+        """Unobtrusive note listing any undefined metric + reason (or ``None``).
+
+        Surfaces C7's ``undefined`` map (e.g. ``roc_auc: single_class``) as a
+        small annotation so a metric that reads as absent is explained rather
+        than mysterious — visible but unobtrusive.
+        """
+        if not isinstance(eval_metrics, dict):
+            return None
+        undefined = eval_metrics.get("undefined")
+        if not isinstance(undefined, dict) or not undefined:
+            return None
+        items = ", ".join(f"{key}: {reason}" for key, reason in sorted(undefined.items()))
+        return f"undefined — {items}"
 
     @staticmethod
     def _phase_band_color(phase: str) -> str:
@@ -1864,15 +2014,22 @@ class MetricsPanel(BaseComponent):
         return fig
 
     def _training_loss_per_time(self, fig: go.Figure = None, theme: str = "light") -> go.Figure:
+        # N9 (U-3 readability): loss keeps its own unbounded y-axis (loss is not
+        # bounded to [0, 1] like the classification metrics, so it never shares
+        # their axis). Subtle gridlines + an ``x unified`` hover let the operator
+        # read every series at a given training step without chasing points.
         is_dark = theme == "dark"
+        grid_color = "#3a3a3a" if is_dark else "#e9ecef"
         fig.update_layout(
             title="Training Loss Over Time",
             xaxis_title="Iteration",
             yaxis_title="Loss",
-            hovermode="closest",
+            xaxis={"showgrid": True, "gridcolor": grid_color, "zeroline": False},
+            yaxis={"showgrid": True, "gridcolor": grid_color, "zeroline": False, "rangemode": "tozero"},
+            hovermode="x unified",
             showlegend=True,
-            legend={"x": 0.7, "y": 0.95},
-            margin={"l": 50, "r": 20, "t": 40, "b": 40},
+            legend={"x": 0.7, "y": 0.95, "bgcolor": "rgba(0,0,0,0)"},
+            margin={"l": 55, "r": 20, "t": 40, "b": 40},
             template="plotly_dark" if is_dark else "plotly",
             plot_bgcolor="#242424" if is_dark else "#f8f9fa",
             paper_bgcolor="#242424" if is_dark else "#ffffff",
@@ -1881,81 +2038,122 @@ class MetricsPanel(BaseComponent):
         return fig
 
     def _create_accuracy_plot(self, metrics_data: List[Dict[str, Any]], theme: str = "light") -> go.Figure:
-        """
-        Create accuracy plot from metrics data.
+        """Create the classification-metrics plot (N9 / U-2/U-3/U-4 display).
+
+        Trace 0 is **Accuracy** — the WS-bridge ``extendTraces`` target
+        (appended by index; keep it first). Layered on top, where present, are
+        the C7 scalar classification metrics (F1 / precision / recall / ROC-AUC
+        from :data:`SCALAR_SERIES`), the dashed validation-accuracy overlay, the
+        output/candidate phase bands, and the hidden-unit growth markers. Every
+        series here is bounded to [0, 1] and shares one percentage y-axis
+        (loss keeps its own unbounded axis on the separate loss plot) — the
+        scaling/overlap fix from U-3. Accuracy renders only on output-training
+        rows (gaps through candidate phases); the C7 scalars render as honest
+        gaps wherever they are ``None`` (never dragged to zero).
 
         Args:
-            metrics_data: List of metrics dictionaries
-            theme: Current theme ("light" or "dark")
+            metrics_data: List of metrics dictionaries.
+            theme: Current theme ("light" or "dark").
 
         Returns:
-            Plotly figure object
+            Plotly figure object.
         """
-        epochs = []
-        accuracies = []
-        phases = []
+        epochs: List[Any] = []
+        accuracies: List[Any] = []
+        phases: List[Any] = []
 
         for metric in metrics_data:
             epochs.append(metric.get("epoch", 0))
             acc = metric.get("metrics", {}).get("accuracy", 0)
             phases.append(metric.get("phase", "unknown"))
-            # Only include accuracy for output training phases
+            # Accuracy is only meaningful during output-training phases; leave a
+            # gap (None) through candidate phases so the line breaks cleanly.
             if "output" in metric.get("phase", ""):
                 accuracies.append(acc)
             else:
-                accuracies.append(None)  # Gap in plot for candidate training
+                accuracies.append(None)
 
         fig = go.Figure()
 
+        # Trace 0 — Accuracy (WS-bridge extendTraces target; must stay first).
+        # N9 (U-3): the old solid fill under this trace obscured the overlaid
+        # C7 series, so it is dropped in favour of a clean line+markers.
         fig.add_trace(
             go.Scatter(
                 x=epochs,
                 y=accuracies,
                 mode="lines+markers",
-                name="Accuracy",
-                line={"color": "#28a745", "width": 2},
+                name=self.ACCURACY_TRACE_NAME,
+                line={"color": self.ACCURACY_COLOR, "width": 2},
                 marker={"size": 6},
-                fill="tozeroy",
-                fillcolor="rgba(40, 167, 69, 0.1)",
+                connectgaps=False,
+                hovertemplate="%{fullData.name}: %{y:.1%}<extra></extra>",
             )
         )
 
+        # C7 (U-4) scalar classification metrics, in SCALAR_SERIES order, each
+        # added only when it carries at least one real value.
+        for field_name, trace_name, color in self.SCALAR_SERIES:
+            self._add_scalar_series(fig, metrics_data, field_name, trace_name, color)
+
+        # Dashed validation-accuracy overlay (looked up by name in the WS bridge).
         self._add_validation_overlay(fig, metrics_data, "val_accuracy", "Validation Accuracy", "#82e0aa")
 
-        # Add phase background bands (reuse shared method)
+        # Phase background bands + hidden-unit growth markers (shared helpers).
         fig = self._add_phase_bg_bands(fig=fig, epochs=epochs, phases=phases)
+        fig = self._hidden_unit_addition_markers(metrics_data=metrics_data, fig=fig, theme=theme)
 
-        # Add hidden unit addition markers
-        for i in range(1, len(metrics_data)):
-            prev_hidden = metrics_data[i - 1].get("network_topology", {}).get("hidden_units", 0)
-            curr_hidden = metrics_data[i].get("network_topology", {}).get("hidden_units", 0)
+        return self._classification_layout(fig=fig, metrics_data=metrics_data, theme=theme)
 
-            if curr_hidden > prev_hidden:
-                epoch = metrics_data[i].get("epoch", 0)
-                # Add vertical line
-                fig.add_vline(
-                    x=epoch,
-                    line_dash="dash",
-                    line_color="#17a2b8",
-                    line_width=2,
-                    annotation_text=f"+Unit #{curr_hidden}",
-                    annotation_position="top",
-                )
+    def _classification_layout(self, fig: go.Figure, metrics_data: List[Dict[str, Any]], theme: str = "light") -> go.Figure:
+        """Apply the shared classification-plot layout (N9 / U-2/U-3).
 
+        Bounded percentage y-axis (accuracy presentation + axis bounds, U-2),
+        subtle gridlines and an ``x unified`` hover for readability (U-3), and
+        the C7 ``eval_metrics`` metadata surfaced without guessing: the
+        ``average``/``split`` in the legend title and any ``undefined`` reasons
+        in an unobtrusive annotation.
+        """
         is_dark = theme == "dark"
+        grid_color = "#3a3a3a" if is_dark else "#e9ecef"
+        eval_metrics = self._latest_eval_metrics(metrics_data)
+
+        legend: Dict[str, Any] = {"x": 0.7, "y": 0.98, "bgcolor": "rgba(0,0,0,0)"}
+        legend_title = self._eval_metrics_legend_title(eval_metrics)
+        if legend_title:
+            legend["title"] = {"text": legend_title}
+
         fig.update_layout(
-            title="Training Accuracy Over Time",
+            title="Classification Metrics",
             xaxis_title="Iteration",
-            yaxis_title="Accuracy",
-            yaxis={"range": [0, 1.0]},
-            hovermode="closest",
-            margin={"l": 50, "r": 20, "t": 40, "b": 40},
+            yaxis_title="Score",
+            # U-2: accuracy/metric presentation — bounded [0, 1] on a percentage
+            # axis so accuracy reads as a percentage and every bounded metric
+            # shares one honest scale.
+            yaxis={"range": [0, 1.0], "tickformat": ".0%", "showgrid": True, "gridcolor": grid_color, "zeroline": False},
+            xaxis={"showgrid": True, "gridcolor": grid_color, "zeroline": False},
+            hovermode="x unified",
+            showlegend=True,
+            legend=legend,
+            margin={"l": 55, "r": 20, "t": 40, "b": 40},
             template="plotly_dark" if is_dark else "plotly",
             plot_bgcolor="#242424" if is_dark else "#f8f9fa",
             paper_bgcolor="#242424" if is_dark else "#ffffff",
             font={"color": "#e9ecef" if is_dark else "#212529"},
         )
 
+        undefined_note = self._eval_metrics_undefined_note(eval_metrics)
+        if undefined_note:
+            fig.add_annotation(
+                text=undefined_note,
+                xref="paper",
+                yref="paper",
+                x=0.0,
+                y=1.08,
+                showarrow=False,
+                xanchor="left",
+                font={"size": 11, "color": "#adb5bd" if is_dark else "#6c757d"},
+            )
         return fig
 
     def _get_status_style(self, phase: str) -> Dict[str, str]:

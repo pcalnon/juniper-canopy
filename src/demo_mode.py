@@ -1379,6 +1379,26 @@ class DemoMode:
             self.network.history["val_accuracy"].append(val_accuracy)
 
             phase_name = self.state_machine.get_phase().name.lower()
+
+            # N9 (C7 display / U-4): additive scalar classification metrics so the
+            # DEFAULT demo surface exercises the metrics-visualization overhaul —
+            # the F1/precision/recall/ROC-AUC series and the eval_metrics
+            # legend/annotation. Derived from the demo accuracy on output-training
+            # rows (where accuracy is meaningful) and left as None through
+            # candidate phases, mirroring the real cascor gap/sparsity behavior.
+            # Best-effort n_samples; never raises.
+            if "output" in phase_name:
+                precision = float(min(1.0, max(0.0, accuracy + np.random.randn() * 0.02)))
+                recall = float(min(1.0, max(0.0, accuracy + np.random.randn() * 0.02)))
+                f1 = float(2.0 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+                roc_auc = float(min(1.0, max(0.5, 0.5 + 0.5 * accuracy + np.random.randn() * 0.01)))
+            else:
+                precision = recall = f1 = roc_auc = None
+            try:
+                n_samples = int(len(self.network.train_y)) if getattr(self.network, "train_y", None) is not None else None
+            except (TypeError, AttributeError):
+                n_samples = None
+
             metrics = {
                 "epoch": self.current_epoch,
                 "iteration": self.current_iteration,
@@ -1387,6 +1407,11 @@ class DemoMode:
                     "accuracy": float(accuracy),
                     "val_loss": float(val_loss),
                     "val_accuracy": float(val_accuracy),
+                    # C7 (U-4) scalar classification metrics (nullable).
+                    "f1": f1,
+                    "precision": precision,
+                    "recall": recall,
+                    "roc_auc": roc_auc,
                 },
                 "network_topology": {
                     "input_units": self.network.input_size,
@@ -1395,6 +1420,15 @@ class DemoMode:
                 },
                 "phase": phase_name,
                 "timestamp": datetime.now().isoformat(),
+                # C7 (U-4) self-describing metadata for the scalar metrics.
+                "eval_metrics": {
+                    "enabled": True,
+                    "average": "binary",
+                    "split": "training",
+                    "n_samples": n_samples,
+                    "n_classes": 2,
+                    "undefined": {},
+                },
             }
             self.metrics_history.append(metrics)
 

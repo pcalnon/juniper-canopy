@@ -45,6 +45,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   snapshot is unchanged (no pinned `get_layout()` touched). Closes I-1 (target
   architecture), Q6.
 
+- **N9 — Metrics-visualization overhaul: C7 scalar rendering + U-2/U-3
+  presentation (juniper-ml training-runtime defects plan §4-U U-2/U-3/U-4
+  display half).** The metrics panel's accuracy plot becomes a bounded-[0, 1]
+  **Classification Metrics** plot that renders C7's new scalar evaluation
+  metrics (`juniper-cascor` #419) alongside accuracy. (1) **C7 scalar series
+  (U-4 display):** F1, precision, recall and ROC-AUC render as additional
+  series where accuracy renders today, driven by a single
+  `MetricsPanel.SCALAR_SERIES` source of truth (row key → trace name → color).
+  Nullable values become **honest gaps** (`None` y + `connectgaps=False`),
+  never zeros, so the ~every-25th-epoch sparsity and candidate-phase gaps read
+  correctly; each series draws `lines+markers` so sparse points stay legible;
+  a series with no real value adds no trace (no legend clutter). The C7
+  `eval_metrics` metadata is surfaced without guessing — `average`/`split` in
+  the legend title, any `undefined` reasons (e.g. `roc_auc: single_class`) in
+  an unobtrusive annotation — present only when the data carries the block.
+  (2) **U-2/U-3 presentation:** percentage y-axis bounded to [0, 1]
+  (`tickformat=".0%"`), a coherent light/dark-legible series palette, subtle
+  gridlines, per-series hover formatting, and an `x unified` hover; loss keeps
+  its own unbounded axis (the scaling/overlap fix — bounded metrics never share
+  loss's scale). (3) **Trace-index contract (BOTH data paths):** loss-plot
+  trace 0 stays `Output Training` and classification-plot trace 0 stays
+  `Accuracy` (the WS bridge's `extendTraces` positional targets); the C7
+  series + validation overlays are looked up by name. The WS clientside
+  callback reads each scalar flat off the frame under the **same push-gate as
+  loss/accuracy** and shares the `[epochs]` axis, so every series stays
+  x-aligned (a length skew would silently corrupt WS appends). The
+  figure-builder names and the bridge lookups are pinned together in
+  `test_n9_metrics_visualization`. (4) **Data path:** the C7 flat scalars +
+  `eval_metrics` block thread through both adapter metric normalizers
+  (`_normalize_metric` / `_to_dashboard_metric`, additive/nullable — the
+  golden-shape contract is preserved) and the demo emission, so the series
+  render in both service and demo mode. `get_layout()` is unchanged (the
+  `metrics_panel` layout snapshot is unaffected).
+
+- **N10 — Workers tab shows local + remote workers (juniper-ml training-runtime
+  defects plan §4-U U-5).** After a read-only discovery pass over the
+  worker-registration surface (cascor `src/api/workers/registry.py` +
+  `src/api/routes/workers.py`; cascor-worker `/ws/v1/workers` registration), the
+  Workers tab now distinguishes worker locality honestly. **Discovery finding:**
+  cascor's registry models **remote** WebSocket-registered workers only and
+  carries no locality field; the local in-process candidate pool
+  (`src/parallelism/task_distributor.py`) is tracked separately and is not
+  individually enumerated by any REST route. **Build (honest hybrid, no fabricated
+  data):** (1) the `GET /api/v1/workers/list` proxy annotates each cascor worker
+  with `kind="remote"` (a backend-supplied `kind` is honored for forward-compat)
+  and a `local_reported` flag (`False` in service mode); demo mode returns one
+  clearly-labeled `local` + one `remote` synthetic worker with `local_reported:
+  true`. (2) The panel is now **store-driven**: a new `worker-panel-workers-store`
+  is filled by a dashboard-owned, **tab-gated** slow-interval poll
+  (`_update_workers_store_handler`, the topology-tab N1 posture — only polls when
+  the Workers tab is active, empty-guarded with `dash.no_update` so a transient
+  upstream hiccup never blanks the roster), replacing the panel's former always-on
+  5 s self-interval. (3) The roster renders as a table (Worker ID, Kind, Status,
+  Health, Last Heartbeat, Current Task) with a local/remote badge; when the backend
+  does not individually report local workers an honest note is shown rather than
+  fabricating local records. Cascade-only tab suppression for one-shot (recurrence)
+  models is unchanged. A cascor-side follow-up (surface the local MP pool via
+  `/v1/workers/stats` or a `/v1/workers/local` route) is proposed for the local
+  half. Regression coverage: store-driven render states, table/row rendering,
+  heartbeat formatting, the tab-gated + empty-guarded store handler, and the
+  extended demo-route contract.
+
 - **N7 — Schema-driven dataset panel, availability gating, per-type
   Current-Dataset section (juniper-ml training-runtime defects plan §4 I-7 / §4-U
   U-6 / I-5 UX).** The sidebar Dataset sub-section no longer shows the

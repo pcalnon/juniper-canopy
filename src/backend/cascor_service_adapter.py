@@ -1760,6 +1760,22 @@ class CascorServiceAdapter:
         hidden_units = entry.get("hidden_units", 0)
         epoch = entry.get("epoch", 0)
 
+        # C7 (U-4) scalar classification metrics (additive, nullable). The flat
+        # f1/precision/recall/roc_auc fields sit at the top level of cascor's
+        # metric entry; carry them into the nested ``metrics`` dict where the
+        # metrics panel reads them (``m["metrics"][key]``) and keep flat
+        # top-level copies for ``_to_dashboard_metric``. ``eval_metrics`` (the
+        # self-describing average/split/n_samples/n_classes/undefined block) is
+        # present on the ``GET /v1/metrics`` snapshot and ``None`` on plain
+        # history rows — carried through when present, never synthesized.
+        # ``.get`` yields ``None`` for pre-C7 cascor, preserving the additive
+        # contract (and the golden-shape test's superset semantics).
+        f1 = entry.get("f1")
+        precision = entry.get("precision")
+        recall = entry.get("recall")
+        roc_auc = entry.get("roc_auc")
+        eval_metrics = entry.get("eval_metrics")
+
         return {
             # Legacy dashboard shape used by metrics panel rendering.
             "epoch": epoch,
@@ -1768,6 +1784,11 @@ class CascorServiceAdapter:
                 "accuracy": train_accuracy,
                 "val_loss": val_loss,
                 "val_accuracy": val_accuracy,
+                # C7 (U-4): scalar classification metrics, where the panel reads them.
+                "f1": f1,
+                "precision": precision,
+                "recall": recall,
+                "roc_auc": roc_auc,
             },
             "network_topology": {"hidden_units": hidden_units},
             # Canonical normalized names retained for API/client compatibility.
@@ -1778,6 +1799,12 @@ class CascorServiceAdapter:
             "hidden_units": hidden_units,
             "phase": entry.get("phase"),
             "timestamp": entry.get("timestamp"),
+            # C7 (U-4): flat scalars (for _to_dashboard_metric) + metadata block.
+            "f1": f1,
+            "precision": precision,
+            "recall": recall,
+            "roc_auc": roc_auc,
+            "eval_metrics": eval_metrics,
         }
 
     @staticmethod
@@ -1796,12 +1823,22 @@ class CascorServiceAdapter:
                 "accuracy": flat.get("train_accuracy"),
                 "val_loss": flat.get("val_loss"),
                 "val_accuracy": flat.get("val_accuracy"),
+                # C7 (U-4): scalar classification metrics (nullable), where the
+                # metrics panel reads them. Carried from _normalize_metric's flat
+                # top-level copies.
+                "f1": flat.get("f1"),
+                "precision": flat.get("precision"),
+                "recall": flat.get("recall"),
+                "roc_auc": flat.get("roc_auc"),
             },
             "network_topology": {
                 "hidden_units": flat.get("hidden_units", 0),
             },
             "phase": flat.get("phase"),
             "timestamp": flat.get("timestamp"),
+            # C7 (U-4): self-describing average/split/undefined metadata block
+            # (present on /v1/metrics snapshot rows; None on plain history rows).
+            "eval_metrics": flat.get("eval_metrics"),
         }
 
     # ------------------------------------------------------------------
