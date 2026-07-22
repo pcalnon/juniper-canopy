@@ -11,6 +11,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **N10 — Workers tab shows local + remote workers (juniper-ml training-runtime
+  defects plan §4-U U-5).** After a read-only discovery pass over the
+  worker-registration surface (cascor `src/api/workers/registry.py` +
+  `src/api/routes/workers.py`; cascor-worker `/ws/v1/workers` registration), the
+  Workers tab now distinguishes worker locality honestly. **Discovery finding:**
+  cascor's registry models **remote** WebSocket-registered workers only and
+  carries no locality field; the local in-process candidate pool
+  (`src/parallelism/task_distributor.py`) is tracked separately and is not
+  individually enumerated by any REST route. **Build (honest hybrid, no fabricated
+  data):** (1) the `GET /api/v1/workers/list` proxy annotates each cascor worker
+  with `kind="remote"` (a backend-supplied `kind` is honored for forward-compat)
+  and a `local_reported` flag (`False` in service mode); demo mode returns one
+  clearly-labeled `local` + one `remote` synthetic worker with `local_reported:
+  true`. (2) The panel is now **store-driven**: a new `worker-panel-workers-store`
+  is filled by a dashboard-owned, **tab-gated** slow-interval poll
+  (`_update_workers_store_handler`, the topology-tab N1 posture — only polls when
+  the Workers tab is active, empty-guarded with `dash.no_update` so a transient
+  upstream hiccup never blanks the roster), replacing the panel's former always-on
+  5 s self-interval. (3) The roster renders as a table (Worker ID, Kind, Status,
+  Health, Last Heartbeat, Current Task) with a local/remote badge; when the backend
+  does not individually report local workers an honest note is shown rather than
+  fabricating local records. Cascade-only tab suppression for one-shot (recurrence)
+  models is unchanged. A cascor-side follow-up (surface the local MP pool via
+  `/v1/workers/stats` or a `/v1/workers/local` route) is proposed for the local
+  half. Regression coverage: store-driven render states, table/row rendering,
+  heartbeat formatting, the tab-gated + empty-guarded store handler, and the
+  extended demo-route contract.
 - **N7 — Schema-driven dataset panel, availability gating, per-type
   Current-Dataset section (juniper-ml training-runtime defects plan §4 I-7 / §4-U
   U-6 / I-5 UX).** The sidebar Dataset sub-section no longer shows the
