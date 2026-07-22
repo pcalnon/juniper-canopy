@@ -614,7 +614,10 @@ class TestWorkerStatsAndList:
         backend._adapter._client.list_workers.return_value = {"data": {"workers": [], "count": 0}}
         with use_backend(backend):
             result = await main.get_worker_list()
-        assert result == {"workers": [], "count": 0}
+        # N10: the route now annotates the response with local_reported
+        # (False until cascor exposes the local pool) and defaults each
+        # worker's kind — with no workers, only the flag is added.
+        assert result == {"workers": [], "count": 0, "local_reported": False}
 
     @pytest.mark.asyncio
     async def test_worker_list_service_failure_returns_error_id(self):
