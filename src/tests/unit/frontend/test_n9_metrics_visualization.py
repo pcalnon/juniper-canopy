@@ -29,6 +29,8 @@ Covers the juniper-ml training-runtime defects plan §4-U (U-2/U-3 presentation
   the demo emission (default demo surface).
 """
 
+import types
+
 import pytest
 
 from backend.cascor_service_adapter import CascorServiceAdapter
@@ -351,13 +353,6 @@ class TestAdapterNormalizerScalars:
 class TestDemoEmission:
     """The default demo surface emits the C7 scalars + eval_metrics."""
 
-    import collections
-
-    # class _FakePhase(collections.namedtuple("Phase", ["name"])):
-    class _FakePhase(collections.namedtuple):  # noqa: B903
-        def __init__(self, name):
-            self.name = name
-
     def _demo(self):
         from demo_mode import DemoMode
 
@@ -375,7 +370,7 @@ class TestDemoEmission:
 
     def test_demo_output_phase_emits_numeric_scalars(self):
         demo = self._demo()
-        demo.state_machine.get_phase = lambda: self._FakePhase("OUTPUT")
+        demo.state_machine.get_phase = lambda: types.SimpleNamespace(name="OUTPUT")
         demo._emit_training_metrics()
         metrics = demo.metrics_history[-1]["metrics"]
         for key in SCALAR_KEYS:
@@ -384,7 +379,7 @@ class TestDemoEmission:
 
     def test_demo_candidate_phase_emits_gaps(self):
         demo = self._demo()
-        demo.state_machine.get_phase = lambda: self._FakePhase("CANDIDATE")
+        demo.state_machine.get_phase = lambda: types.SimpleNamespace(name="CANDIDATE")
         demo._emit_training_metrics()
         metrics = demo.metrics_history[-1]["metrics"]
         for key in SCALAR_KEYS:
