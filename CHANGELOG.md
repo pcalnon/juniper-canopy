@@ -11,6 +11,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **N9 — Metrics-visualization overhaul: C7 scalar rendering + U-2/U-3
+  presentation (juniper-ml training-runtime defects plan §4-U U-2/U-3/U-4
+  display half).** The metrics panel's accuracy plot becomes a bounded-[0, 1]
+  **Classification Metrics** plot that renders C7's new scalar evaluation
+  metrics (`juniper-cascor` #419) alongside accuracy. (1) **C7 scalar series
+  (U-4 display):** F1, precision, recall and ROC-AUC render as additional
+  series where accuracy renders today, driven by a single
+  `MetricsPanel.SCALAR_SERIES` source of truth (row key → trace name → color).
+  Nullable values become **honest gaps** (`None` y + `connectgaps=False`),
+  never zeros, so the ~every-25th-epoch sparsity and candidate-phase gaps read
+  correctly; each series draws `lines+markers` so sparse points stay legible;
+  a series with no real value adds no trace (no legend clutter). The C7
+  `eval_metrics` metadata is surfaced without guessing — `average`/`split` in
+  the legend title, any `undefined` reasons (e.g. `roc_auc: single_class`) in
+  an unobtrusive annotation — present only when the data carries the block.
+  (2) **U-2/U-3 presentation:** percentage y-axis bounded to [0, 1]
+  (`tickformat=".0%"`), a coherent light/dark-legible series palette, subtle
+  gridlines, per-series hover formatting, and an `x unified` hover; loss keeps
+  its own unbounded axis (the scaling/overlap fix — bounded metrics never share
+  loss's scale). (3) **Trace-index contract (BOTH data paths):** loss-plot
+  trace 0 stays `Output Training` and classification-plot trace 0 stays
+  `Accuracy` (the WS bridge's `extendTraces` positional targets); the C7
+  series + validation overlays are looked up by name. The WS clientside
+  callback reads each scalar flat off the frame under the **same push-gate as
+  loss/accuracy** and shares the `[epochs]` axis, so every series stays
+  x-aligned (a length skew would silently corrupt WS appends). The
+  figure-builder names and the bridge lookups are pinned together in
+  `test_n9_metrics_visualization`. (4) **Data path:** the C7 flat scalars +
+  `eval_metrics` block thread through both adapter metric normalizers
+  (`_normalize_metric` / `_to_dashboard_metric`, additive/nullable — the
+  golden-shape contract is preserved) and the demo emission, so the series
+  render in both service and demo mode. `get_layout()` is unchanged (the
+  `metrics_panel` layout snapshot is unaffected).
+
 - **N10 — Workers tab shows local + remote workers (juniper-ml training-runtime
   defects plan §4-U U-5).** After a read-only discovery pass over the
   worker-registration surface (cascor `src/api/workers/registry.py` +
@@ -38,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   half. Regression coverage: store-driven render states, table/row rendering,
   heartbeat formatting, the tab-gated + empty-guarded store handler, and the
   extended demo-route contract.
+
 - **N7 — Schema-driven dataset panel, availability gating, per-type
   Current-Dataset section (juniper-ml training-runtime defects plan §4 I-7 / §4-U
   U-6 / I-5 UX).** The sidebar Dataset sub-section no longer shows the
