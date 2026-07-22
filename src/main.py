@@ -3073,24 +3073,42 @@ async def get_worker_stats():
 @app.get("/api/v1/workers/list")
 async def get_worker_list():
     """
-    List all registered remote workers with status (CAN-HIGH-005).
+    List registered workers with status, kind (local/remote), and heartbeat (CAN-HIGH-005; N10 / U-5).
 
-    In service mode, delegates to JuniperCascor /v1/workers endpoint.
-    In demo mode, returns synthetic worker data.
+    In service mode, delegates to JuniperCascor ``GET /v1/workers``. Per the N10
+    worker-registration discovery, cascor's registry (``src/api/workers/registry.py``)
+    models **remote** WebSocket-registered workers only and carries no locality field;
+    the local in-process candidate pool (``src/parallelism/task_distributor.py``) is
+    tracked separately and is not individually enumerated by any REST route. Each
+    returned worker is therefore annotated ``kind="remote"`` (a backend-supplied
+    ``kind`` is honored for forward-compatibility), and ``local_reported`` is ``False``
+    so the Workers tab renders an honest "local workers not individually reported"
+    note instead of fabricating local records.
+
+    In demo mode, returns synthetic workers — one ``local`` and one ``remote`` — so
+    the tab exercises both kinds (a clearly-labeled demo mock).
     """
     if backend.backend_type == "service" and hasattr(backend, "_adapter"):
         try:
             result = backend._adapter._client.list_workers()
-            return result.get("data", result)
+            data = result.get("data", result)
+            if isinstance(data, dict):
+                for worker in data.get("workers", []) or []:
+                    if isinstance(worker, dict):
+                        # cascor exposes only remote WS workers; label them as such
+                        # without overwriting a future backend-supplied kind.
+                        worker.setdefault("kind", "remote")
+                data.setdefault("local_reported", False)
+            return data
         except Exception:
             # SEC-14: return an opaque error_id instead of the exception message.
             error_id = uuid.uuid4().hex[:12]
             system_logger.warning("Failed to fetch worker list from CasCor [error_id=%s]", error_id)
-            return {"workers": [], "count": 0, "error": "Upstream error", "error_id": error_id}
+            return {"workers": [], "count": 0, "local_reported": False, "error": "Upstream error", "error_id": error_id}
 
     # A1-iii-a: recurrence (one-shot LMU) has no worker pool — empty list, not demo fixtures.
     if backend.backend_type == "recurrence":
-        return {"workers": [], "count": 0}
+        return {"workers": [], "count": 0, "local_reported": False}
 
     import time
 
@@ -3098,6 +3116,7 @@ async def get_worker_list():
         "workers": [
             {
                 "worker_id": "worker-demo-01",
+                "kind": "local",
                 "capabilities": {"cpu_cores": 8, "gpu": False, "python": "3.13"},
                 "connected_at": time.time() - 600,
                 "last_heartbeat": time.time() - 2,
@@ -3109,6 +3128,7 @@ async def get_worker_list():
             },
             {
                 "worker_id": "worker-demo-02",
+                "kind": "remote",
                 "capabilities": {"cpu_cores": 4, "gpu": True, "python": "3.13"},
                 "connected_at": time.time() - 300,
                 "last_heartbeat": time.time() - 1,
@@ -3120,6 +3140,7 @@ async def get_worker_list():
             },
         ],
         "count": 2,
+        "local_reported": True,
     }
 
 

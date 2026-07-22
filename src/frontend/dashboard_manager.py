@@ -3705,6 +3705,22 @@ class DashboardManager:
             """Fetch dataset from API and update dataset plotter store."""
             return self._update_dataset_store_handler(n=n, active_tab=active_tab)
 
+        # PERF-CN-01: prevent_initial_call=False — must hit the workers API on
+        # mount (when the Workers tab is active) so the roster renders before the
+        # first interval tick.
+        # N10 (training-runtime defects plan §4-U U-5): the Workers tab polls on
+        # the shared slow interval and is tab-gated to "workers" (the topology-tab
+        # N1 posture), replacing the panel's former always-on 5 s self-interval.
+        @self.app.callback(
+            Output("worker-panel-workers-store", "data"),
+            Input("slow-update-interval", "n_intervals"),
+            Input("visualization-tabs", "active_tab"),
+            prevent_initial_call=False,
+        )
+        def update_workers_store(n, active_tab):
+            """Fetch worker roster + aggregate stats and update the worker store."""
+            return self._update_workers_store_handler(n=n, active_tab=active_tab)
+
         # PERF-CN-01: prevent_initial_call=False — must hit /api/decision-boundary
         # on mount when the decision-boundary tab is active so the plot has data
         # before the first interval tick.
@@ -6337,6 +6353,56 @@ class DashboardManager:
         except Exception as e:
             self.logger.warning(f"Failed to fetch raw topology from API: {type(e).__name__}: {e}")
             return dash.no_update
+
+    def _update_workers_store_handler(self, n=None, active_tab=None):
+        """Fetch the worker roster (+ aggregate stats) and update the worker store (N10, U-5).
+
+        Tab-gated to the Workers tab and empty-guarded: any upstream error or a
+        non-OK roster response returns ``dash.no_update`` (same last-known-good
+        posture as the topology/metrics N1 handlers) so a transient hiccup never
+        blanks the roster. The proxy (``GET /api/v1/workers/list``) already annotates
+        each worker's ``kind`` and a ``local_reported`` honesty flag — cascor models
+        remote WS workers only, so ``local_reported`` is ``False`` in service mode and
+        the panel renders an honest "local not individually reported" note. Aggregate
+        stats are best-effort: the roster table renders even if ``/stats`` is down.
+        """
+        if active_tab != "workers":
+            return dash.no_update
+
+        try:
+            list_resp = requests.get(self._api_url("/api/v1/workers/list"), timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
+            if not list_resp.ok:
+                self.logger.warning(f"Workers list API returned {list_resp.status_code}")
+                return dash.no_update
+            list_data = list_resp.json()
+        except Exception as e:
+            self.logger.warning(f"Failed to fetch worker list from API: {type(e).__name__}: {e}")
+            return dash.no_update
+
+        if not isinstance(list_data, dict):
+            return dash.no_update
+
+        workers = list_data.get("workers", []) or []
+        payload = {
+            "workers": workers,
+            "count": list_data.get("count", len(workers)),
+            "local_reported": bool(list_data.get("local_reported", False)),
+            "error": list_data.get("error"),
+            "stats": {},
+        }
+
+        # Aggregate stats are non-fatal — cascor computes ``stale`` from its own
+        # heartbeat-timeout, so we prefer its numbers over recomputing client-side.
+        try:
+            stats_resp = requests.get(self._api_url("/api/v1/workers/stats"), timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
+            if stats_resp.ok:
+                stats_data = stats_resp.json()
+                if isinstance(stats_data, dict):
+                    payload["stats"] = stats_data
+        except Exception as e:
+            self.logger.debug(f"Worker stats fetch failed (non-fatal): {type(e).__name__}: {e}")
+
+        return payload
 
     def _update_dataset_store_handler(self, n=None, active_tab=None):
         """Fetch dataset from API and update dataset plotter store."""
