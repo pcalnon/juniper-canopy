@@ -1,4 +1,4 @@
-"""N1 (training-runtime defects plan §4 I-1/I-2): WS-silent poll liveness.
+"""N1 → N8 (training-runtime defects plan §4 I-1/I-2): WS liveness of the store polls.
 
 Pre-N1, the metrics/topology store polls were suppressed by sticky WS flags
 (``metricsReceived`` / ``topologyReceived`` + ``connected``): once a tab had
@@ -6,15 +6,26 @@ seen a single WS metrics frame, its REST polls stopped forever — even when no
 further frames arrived — freezing tiles and charts on long-lived tabs until a
 manual refresh (the 2026-07-10 session's frozen-dashboard symptom).
 
-These tests simulate exactly that starvation state in the browser: the bridge's
-connection flags claim ``connected`` + frames-received while the WS delivers
-nothing (the ring buffers stay empty). The assertions observe the Dash
-callback wire (``_dash-update-component`` responses for the store outputs):
+N1 un-gated the polls; N8 made the metrics/state stores WS-PRIMARY with the poll
+demoted to a **liveness-gated** fallback (posture O3+O1). The gate is a LIVE
+freshness signal — the age of the last WS frame (``ws_dash_bridge.js``'s
+``_lastMetricsFrameMs`` / ``_lastStateFrameMs`` via ``peekLiveness``) vs
+``WS_LIVENESS_WINDOW_MS`` — and deliberately NOT the sticky ``metricsReceived``
+flag N1 retired. So the starvation contract these tests encode still holds, now
+expressed against the N8 gate:
 
-- pre-N1, the sticky gate makes the store callbacks return ``no_update``
-  (HTTP 204 / empty responses) under this state — the store starves;
-- post-N1, data-bearing 200s keep flowing every poll tick, and a stopped
-  run's populated store is never wiped by the continuing 1 Hz poll.
+- **WS-silent** (``_WS_SILENT_STATE``): the demo backend keeps broadcasting, so
+  faithfully simulating "no fresh WS data reaching the gate" means neutralizing the
+  WS *data path* itself — the drains yield nothing and ``peekLiveness`` reports a
+  stale age (NOT merely toggling the sticky flag, which the gate ignores). Under
+  this state the metrics store MUST stay live via the REST poll, and a stopped
+  run's populated store is never wiped (empty-guard). This is the preserved
+  anti-starvation protection.
+- **WS-fresh** (``_ws_fresh_state``): fresh frames + a fresh ``peekLiveness`` age
+  drive the WS-primary path; a sentinel-epoch injected frame proves the store is
+  fed from the WS buffer (a value REST could never produce), and the liveness store
+  flips ``metrics_live`` false again within a tick the moment the age goes stale —
+  the anti-sticky reset, end-to-end.
 
 The store wire is the deliberate observable: the store is the single source
 for tiles and charts, and asserting on it keeps these tests independent of a
@@ -28,27 +39,52 @@ import time
 import pytest
 import requests
 
-_STICKY_WS_SILENT_STATE = """
+# N8: neutralize the WS *data path* so the liveness gate reads stale and the
+# buffers yield nothing — the faithful WS-silent starvation state. The demo
+# backend keeps emitting frames, so overriding only the sticky flags (which the
+# N8 gate ignores) would leave the real frames feeding _lastMetricsFrameMs and the
+# store WS-primary; we therefore also stub the drains (empty) and peekLiveness
+# (stale age). The sticky flags + peekConnectionStatus stay overridden to prove the
+# gate does NOT consult them.
+_WS_SILENT_STATE = """
 () => {
     const d = window._juniperWsDrain;
     if (!d) { return false; }
-    // The starvation state from plan §4 I-1 root cause 1: the WS layer
-    // reports connected + frames-received while no frames are flowing (the
-    // ring buffers stay empty). peekConnectionStatus is overridden (not just
-    // the fields) because websocket_client.js replaces _connectionStatus
-    // wholesale on every status change — the harness's failing socket would
-    // otherwise flip `connected` back to false within a tick. The peek
-    // clientside callback copies this into the ws-connection-status store on
-    // the next fast tick, which is exactly the State the pre-N1 sticky gates
-    // consumed.
     d._metricsReceived = true;
     d._topologyReceived = true;
     d.peekConnectionStatus = function() {
         return {connected: true, reconnecting: false, mode: "live", metricsReceived: true, topologyReceived: true};
     };
+    // The load-bearing N8 change: stale the LIVE freshness signal + drain nothing,
+    // so ws_live is false and no WS events reach the store — the poll must carry it.
+    d.drainMetrics = function() { return []; };
+    d.drainState = function() { return null; };
+    d.peekLiveness = function() { return {metrics_age_ms: 999999, state_age_ms: 999999}; };
     return true;
 }
 """
+
+# Back-compat alias for the historical name used elsewhere / in muscle memory.
+_STICKY_WS_SILENT_STATE = _WS_SILENT_STATE
+
+
+def _ws_fresh_state(sentinel_epoch: int) -> str:
+    """JS injector: drive the WS-primary path deterministically (bridge-state
+    independent). ``peekLiveness`` reports a fresh age (gate → live) and
+    ``drainMetrics`` yields one nested sentinel-epoch metric frame per drain, so the
+    metrics store accumulates a value REST could never mint — proving WS-primary."""
+    return """
+    () => {
+        const d = window._juniperWsDrain;
+        if (!d) { return false; }
+        d.peekLiveness = function() { return {metrics_age_ms: 50, state_age_ms: 50}; };
+        d.drainMetrics = function() {
+            return [{epoch: %d, metrics: {loss: 0.0123, accuracy: 0.987}, network_topology: {hidden_units: 3}, phase: "output"}];
+        };
+        return true;
+    }
+    """ % sentinel_epoch
+
 
 _METRICS_STORE_OUTPUT = "metrics-panel-metrics-store.data"
 _TOPOLOGY_STORE_OUTPUT = "network-visualizer-topology-store.data"
@@ -106,7 +142,12 @@ def _attach_store_collector(page, output_name):
                 except Exception:
                     memo[i] = ("nonmatch",)
                     continue
-                if out != output_name:
+                # N8: a Dash ``allow_duplicate`` output is encoded as
+                # ``<id.prop>@<hash>`` on the wire. The N8 metrics/state store is now
+                # co-owned by the liveness-gated poll (plain output) AND the WS-primary
+                # append callback (``@hash`` output); accept both so this collector sees
+                # the store's data regardless of which callback wrote it.
+                if out != output_name and not out.startswith(output_name + "@"):
                     memo[i] = ("nonmatch",)
                     continue
                 inputs[i] = {inp.get("id"): inp.get("value") for inp in req.get("inputs", []) if isinstance(inp, dict)}
@@ -188,13 +229,15 @@ def _ensure_running_run(dashboard_page, canopy_url):
 
 @pytest.mark.ui
 def test_metrics_store_polls_on_long_lived_tab_with_ws_silent(dashboard_page, canopy_url):
-    """The N1 regression pin: a long-lived tab whose WS claims connected +
-    metricsReceived (but delivers nothing) still hydrates the metrics store
-    via the 1 Hz REST poll. Pre-N1 the sticky gate returned ``no_update`` for
-    every tick in this state, starving the store (and everything it feeds)
-    until a manual refresh."""
+    """The starvation-protection pin, expressed against the N8 gate: a long-lived
+    tab whose WS claims connected + metricsReceived but delivers NO fresh data (the
+    drains yield nothing and ``peekLiveness`` reads stale) still hydrates the metrics
+    store via the REST poll. Pre-N1 the sticky gate starved it forever; under N8 the
+    liveness gate reads stale (never the sticky flag), so the poll re-engages — REST
+    is the ONLY possible source here (the WS drains are stubbed empty), so
+    data-bearing writes prove REST liveness."""
     dashboard_page.wait_for_selector("#start-button", timeout=15_000)
-    assert dashboard_page.evaluate(_STICKY_WS_SILENT_STATE), "ws_dash_bridge drain object not present"
+    assert dashboard_page.evaluate(_WS_SILENT_STATE), "ws_dash_bridge drain object not present"
 
     # Demo mode auto-starts a training run at boot, but it may already have
     # converged — establish a live run the FSM-legal way (see the helper).
@@ -204,13 +247,13 @@ def test_metrics_store_polls_on_long_lived_tab_with_ws_silent(dashboard_page, ca
 
     # Liveness: within a handful of fast ticks the poll must deliver at least
     # two data-bearing store writes (epochs advancing), despite the sticky
-    # connected+metricsReceived state.
+    # connected+metricsReceived state and with the WS data path silenced.
     def data_writes():
         writes = [p for s, p in drain() if s == 200 and isinstance(p, list) and p]
         return writes if len(writes) >= 2 else None
 
     writes = _wait_for(data_writes, timeout=12.0, page=dashboard_page)
-    assert writes, f"metrics-store poll starved under WS-silent sticky state; captured={[(s, type(p).__name__) for s, p in drain()]}"
+    assert writes, f"metrics-store poll starved under WS-silent state; captured={[(s, type(p).__name__) for s, p in drain()]}"
     epochs = [w[-1].get("epoch") for w in writes if isinstance(w[-1], dict)]
     assert any(isinstance(e, int) and e > 0 for e in epochs), f"store writes carried no advancing epochs: {epochs}"
 
@@ -225,18 +268,18 @@ def test_populated_store_survives_poll_after_stop(dashboard_page, canopy_url):
     ``no_update``/204 (backend cleared history and the empty-guard preserved
     the store) — but an empty-list 200 write is the chart-wipe regression."""
     dashboard_page.wait_for_selector("#stop-button", timeout=15_000)
-    assert dashboard_page.evaluate(_STICKY_WS_SILENT_STATE), "ws_dash_bridge drain object not present"
+    assert dashboard_page.evaluate(_WS_SILENT_STATE), "ws_dash_bridge drain object not present"
 
     _ensure_running_run(dashboard_page, canopy_url)
 
     drain = _attach_store_collector(dashboard_page, _METRICS_STORE_OUTPUT)
 
-    # Pre-stop: the un-gated poll must populate the store under the sticky
-    # WS-silent state (pre-N1 this starves and the test fails here).
+    # Pre-stop: the liveness-gated REST poll must populate the store under the
+    # WS-silent state (WS drains stubbed empty + stale age → REST is the source).
     def populated_write():
         return [p for s, p in drain() if s == 200 and isinstance(p, list) and p] or None
 
-    assert _wait_for(populated_write, timeout=12.0, page=dashboard_page), f"store never populated under WS-silent sticky state; captured={[(s, type(p).__name__) for s, p in drain()]}"
+    assert _wait_for(populated_write, timeout=12.0, page=dashboard_page), f"store never populated under WS-silent state; captured={[(s, type(p).__name__) for s, p in drain()]}"
     pre_stop_count = len(drain())
 
     dashboard_page.click("#stop-button")
@@ -252,12 +295,13 @@ def test_populated_store_survives_poll_after_stop(dashboard_page, canopy_url):
 
 @pytest.mark.ui
 def test_topology_store_fetches_on_tab_switch_with_ws_silent(dashboard_page, canopy_url):
-    """I-2 companion: with the WS quiet (sticky topologyReceived + connected,
-    no cascade_add frames), switching to the Network Topology tab must fetch
-    REST topology into the store — pre-N1 the sticky gate returned
-    ``no_update`` here, leaving the visualizer starved."""
+    """I-2 companion (topology stays N1 — N8 does not change the tab-gated slow poll):
+    with the WS quiet (topologyReceived + connected, no cascade_add frames),
+    switching to the Network Topology tab must fetch REST topology into the store —
+    pre-N1 the sticky gate returned ``no_update`` here, leaving the visualizer
+    starved."""
     dashboard_page.wait_for_selector("#visualization-tabs", timeout=15_000)
-    assert dashboard_page.evaluate(_STICKY_WS_SILENT_STATE), "ws_dash_bridge drain object not present"
+    assert dashboard_page.evaluate(_WS_SILENT_STATE), "ws_dash_bridge drain object not present"
 
     # A live run guarantees a real network behind /api/topology; the
     # converged post-run state is where this test went red in CI (its store
@@ -312,5 +356,64 @@ def test_topology_store_fetches_on_tab_switch_with_ws_silent(dashboard_page, can
                 wire_info = (wire.status_code, "no_update" if comp is None else f"nodes={len((comp.get('data') or {}).get('nodes') or [])}")
         except Exception as exc:
             wire_info = f"wire probe failed: {exc}"
-        raise AssertionError(f"topology store never received a REST fetch under WS-silent sticky state; dispatches (status, payload, active_tab)={dispatches}; direct GET /api/topology={route_info}; forced wire dispatch={wire_info}")
+        raise AssertionError(f"topology store never received a REST fetch under WS-silent state; dispatches (status, payload, active_tab)={dispatches}; direct GET /api/topology={route_info}; forced wire dispatch={wire_info}")
     assert writes[-1].get("connections") is not None, "transformed topology payload missing connections"
+
+
+@pytest.mark.ui
+def test_metrics_store_ws_primary_feeds_store_when_fresh(dashboard_page, canopy_url):
+    """N8 WS-primary pin: when the WS metrics stream is fresh, the store is fed from
+    the WS buffer via the ``allow_duplicate`` append callback (not the REST poll). A
+    sentinel-epoch frame injected through the drain lands in the metrics store — a
+    value the REST /api/metrics/history poll could never mint — so its presence proves
+    the WS-primary path drove the tiles."""
+    dashboard_page.wait_for_selector("#start-button", timeout=15_000)
+    sentinel = 987654
+    assert dashboard_page.evaluate(_ws_fresh_state(sentinel)), "ws_dash_bridge drain object not present"
+    _ensure_running_run(dashboard_page, canopy_url)
+
+    # The collector accepts both the poll (plain) and append (``@hash``) outputs, so a
+    # WS-primary write is visible here.
+    drain = _attach_store_collector(dashboard_page, _METRICS_STORE_OUTPUT)
+
+    def sentinel_write():
+        for _s, payload in drain():
+            if isinstance(payload, list) and any(isinstance(row, dict) and row.get("epoch") == sentinel for row in payload):
+                return payload
+        return None
+
+    hit = _wait_for(sentinel_write, timeout=12.0, page=dashboard_page)
+    assert hit, f"WS-primary sentinel epoch {sentinel} never reached the metrics store; captured={[(s, type(p).__name__) for s, p in drain()]}"
+
+
+@pytest.mark.ui
+def test_poll_resumes_rest_when_ws_goes_stale(dashboard_page, canopy_url):
+    """N8 anti-sticky pin (end-to-end): WS-primary sentinels fill the store while fresh,
+    then the moment the frame age goes stale the liveness-gated REST poll re-engages and
+    OVERWRITES the store with real /api/metrics/history rows (no sentinel). The revert
+    from WS-injected values to REST values is the categorical break from the N1-era
+    sticky gate that latched off forever."""
+    dashboard_page.wait_for_selector("#start-button", timeout=15_000)
+    sentinel = 987654
+    assert dashboard_page.evaluate(_ws_fresh_state(sentinel)), "ws_dash_bridge drain object not present"
+    _ensure_running_run(dashboard_page, canopy_url)
+
+    drain = _attach_store_collector(dashboard_page, _METRICS_STORE_OUTPUT)
+
+    # Phase 1 — fresh: the WS-primary append must land the sentinel.
+    def sentinel_write():
+        return next((p for _s, p in drain() if isinstance(p, list) and any(isinstance(r, dict) and r.get("epoch") == sentinel for r in p)), None)
+
+    assert _wait_for(sentinel_write, timeout=12.0, page=dashboard_page), "WS-primary never fed the sentinel before the stale transition"
+    boundary = len(drain())
+
+    # Phase 2 — stale: no WS events + stale age → append stops, poll re-engages REST.
+    dashboard_page.evaluate(_WS_SILENT_STATE)
+    _ensure_running_run(dashboard_page, canopy_url)  # keep a live run so REST has rows
+
+    def rest_write_after():
+        after = drain()[boundary:]
+        rest = [p for _s, p in after if isinstance(p, list) and p and not any(isinstance(r, dict) and r.get("epoch") == sentinel for r in p)]
+        return rest or None
+
+    assert _wait_for(rest_write_after, timeout=15.0, page=dashboard_page), "the REST poll never re-engaged after the WS went stale (the store kept only WS " f"sentinels — sticky regression); post-stale writes={[(s, type(p).__name__) for s, p in drain()[boundary:]]}"
