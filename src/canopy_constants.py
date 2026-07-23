@@ -348,6 +348,22 @@ class DashboardConstants:
     # interval); a display-mode switch still triggers an immediate fetch.
     FULL_HISTORY_POLL_TICK_MODULUS: Final[int] = 5
 
+    # N8 (training-runtime defects plan §4 I-1, posture O3+O1 / Q6): WS-data
+    # freshness window for the liveness-gated poll fallback. The browser bridge
+    # timestamps each ``metrics`` / ``state`` frame arrival (``_lastMetricsFrameMs``
+    # / ``_lastStateFrameMs`` in ws_dash_bridge.js — a LIVE age, never the sticky
+    # ``metricsReceived`` flag N1 retired). A stream is "live" while its last frame
+    # is within this window; the metrics/state polls then skip their REST fetch and
+    # the WS buffers feed the tiles/state directly (O3). The instant frames stop for
+    # longer than this window the age exceeds it, the stream reads stale, and the
+    # REST poll resumes on the next tick (O1) — the anti-sticky guarantee (a genuinely
+    # dead stream can freeze the surfaces for at most this window before REST re-engages).
+    # ~5× the 1 s metrics cadence: generous enough to ride typical inter-frame gaps
+    # (e.g. the every-25th-epoch output-phase emission, brief candidate phases where
+    # ``metrics`` frames pause) without flapping to REST, short enough that a dead
+    # socket recovers promptly.
+    WS_LIVENESS_WINDOW_MS: Final[int] = 5000
+
     DEFAULT_METRICS_HISTORY: Final[int] = 50
     DEFAULT_DATA_POINTS: Final[int] = 1000
     DEFAULT_SLIDING_WINDOW_SIZE: Final[int] = 500

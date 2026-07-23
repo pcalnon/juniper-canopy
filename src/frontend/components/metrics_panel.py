@@ -592,13 +592,45 @@ class MetricsPanel(BaseComponent):
 
         # PERF-CN-01: prevent_initial_call=False — must hit the API on mount to
         # populate training state before the first interval tick.
+        # N8 (training-runtime defects plan §4 I-1, posture O1 / Q6): the O1 half — a
+        # liveness-gated REST poll that fires on EVERY stats tick (the interval is the
+        # sole trigger, so it can never be starved) and reads the liveness signal as
+        # STATE. While the state stream is fresh (state_live) it returns ``no_update``
+        # (the WS-primary append callback below owns the store); when stale it polls
+        # /api/state (with an empty-guard).
+        #
+        # CRITICAL (Dash execution model): ws-state-buffer is deliberately NOT an Input
+        # here. Its clientside producer no_updates while the WS is quiet, and a chained
+        # Input whose producer no_updates makes Dash SKIP this interval-only callback
+        # for that tick — silently re-creating the I-1 starvation. The WS buffer is
+        # consumed by a separate ``allow_duplicate`` append callback triggered ONLY by
+        # ws-state-buffer; ws-liveness-store rides as State for the same reason.
         @app.callback(
             Output(f"{self.component_id}-training-state-store", "data"),
             [Input(f"{self.component_id}-stats-update-interval", "n_intervals")],
+            [
+                State("ws-liveness-store", "data"),
+                State(f"{self.component_id}-training-state-store", "data"),
+            ],
             prevent_initial_call=False,
         )
-        def fetch_training_state(n_intervals):
-            return self._fetch_training_state_handler(n_intervals=n_intervals)
+        def fetch_training_state(n_intervals, ws_liveness, current_state):
+            ws_live = bool(ws_liveness and ws_liveness.get("state_live"))
+            return self._fetch_training_state_handler(n_intervals=n_intervals, ws_live=ws_live, current_state=current_state)
+
+        # N8 (posture O3 half): WS-PRIMARY state. Triggered ONLY by a ws-state-buffer
+        # change (the clientside drainState emits it only when a real ``state`` frame
+        # arrived), so this is the sole path that writes WS state into the store; when
+        # the stream is quiet it does not fire and the poll above carries the store.
+        # ``allow_duplicate`` co-owns the Output with the poll (prevent_initial_call
+        # required). Latest-only (replace, not accumulate) since state is a snapshot.
+        @app.callback(
+            Output(f"{self.component_id}-training-state-store", "data", allow_duplicate=True),
+            [Input("ws-state-buffer", "data")],
+            prevent_initial_call=True,
+        )
+        def append_ws_training_state(ws_state_buffer):
+            return self._append_ws_training_state_handler(ws_state_buffer=ws_state_buffer)
 
         # Candidate pool callbacks moved to CandidateMetricsPanel (candidate_metrics_panel.py)
 
@@ -1167,26 +1199,86 @@ class MetricsPanel(BaseComponent):
 
         return {}
 
-    def _fetch_training_state_handler(self, n_intervals=None):
+    @staticmethod
+    def _extract_ws_training_state(ws_state_buffer):
+        """Unwrap the training-state dict from a ws-state-buffer frame (N8).
+
+        The WS ``state`` payload is either the flat training-state dict
+        (``broadcast_state_change`` / on-connect / relay forward) or a wrapper
+        carrying it under ``training_state`` (snapshot restore, main.py). Returns a
+        non-empty state dict, or ``None`` when the frame carries no usable state (so
+        the caller preserves the last-known-good store rather than blanking it).
         """
-        Fetch training state from API periodically.
+        if not isinstance(ws_state_buffer, dict):
+            return None
+        inner = ws_state_buffer.get("training_state")
+        if isinstance(inner, dict) and inner:
+            return inner
+        # Flat state dict: accept only when it carries recognizable state fields, so a
+        # bare wrapper ({action, snapshot_id}) or an empty {} is not promoted.
+        if any(key in ws_state_buffer for key in ("status", "phase", "current_epoch", "learning_rate")):
+            return ws_state_buffer
+        return None
+
+    def _append_ws_training_state_handler(self, ws_state_buffer=None):
+        """N8 (posture O3): feed the training-state store from a WS ``state`` push.
+
+        Runs only when ``ws-state-buffer`` changes (a real ``state`` frame arrived).
+        Returns the unwrapped state (latest-only replace), or ``dash.no_update`` when
+        the frame carries no usable state so the last-known-good store is preserved.
+        Because it is triggered ONLY by real WS pushes it can never starve the store
+        when the stream is quiet — the liveness-gated poll is the sole writer then.
+        """
+        import dash
+
+        state = self._extract_ws_training_state(ws_state_buffer)
+        return state if state else dash.no_update
+
+    def _fetch_training_state_handler(self, n_intervals=None, ws_live=None, current_state=None):
+        """Liveness-gated REST poll for the training-state store (N8 posture O1).
+
+        Fires on every stats-interval tick (the interval is the sole trigger, so the
+        callback can never be starved — see the callback's Dash-model note on why the
+        WS buffer must NOT be an Input here). Two regimes:
+
+        - **Demoted while WS-primary is live**: when the state stream is fresh
+          (``ws_live``), return ``dash.no_update`` — the /api/state poll is SKIPPED and
+          the ``allow_duplicate`` append callback (``_append_ws_training_state_handler``)
+          owns the store from the WS buffer.
+        - **Liveness-gated REST fallback (O1)**: when the stream is stale/absent
+          (``ws_live`` falsy — the default for every non-WS caller, so the pre-N8
+          behavior is preserved), poll /api/state, guarded so a transient upstream
+          error never wipes a populated store. ``ws_live`` is derived from the bridge's
+          state-frame arrival age (never a sticky flag), so a quiet stream flips stale
+          within ``WS_LIVENESS_WINDOW_MS`` and the poll re-engages next tick — the
+          anti-sticky guarantee.
 
         Args:
-            n_intervals: Number of intervals elapsed
+            n_intervals: Number of intervals elapsed.
+            ws_live: Whether the state stream is fresh per ws-liveness-store.
+            current_state: The store's current value (for the empty-guard).
 
         Returns:
-            Training state dictionary
+            Training state dictionary, or ``dash.no_update`` to preserve the store.
         """
+        import dash
         import requests
+
+        # N8 poll demotion (O1): while WS-primary is live, skip REST — the append
+        # callback carries the store from the WS buffer.
+        if ws_live:
+            return dash.no_update
 
         try:
             response = requests.get(f"{self._api_base_url}/api/state", timeout=2, headers=internal_api_headers())
             if response.status_code == 200:
                 return response.json()
+            self.logger.debug(f"Training state API returned {response.status_code}")
         except Exception as e:
             self.logger.debug(f"Failed to fetch training state: {e}")
 
-        return {}
+        # Empty-guard: never wipe a populated store on a transient failure/non-200.
+        return dash.no_update if current_state else {}
 
     def _update_progress_detail_handler(self, state=None):
         """Build inline progress text from training state progress fields."""

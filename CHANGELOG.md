@@ -11,6 +11,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **N8 — WS-primary tiles/state with a liveness-gated poll fallback (juniper-ml
+  training-runtime defects plan §4 I-1, posture O3+O1 / Q6).** The metrics tiles
+  (via `metrics-panel-metrics-store`) and the training-state status strip (via
+  `metrics-panel-training-state-store`) now consume the WebSocket buffers FIRST
+  while the stream is demonstrably fresh, with N1's REST polls demoted to a
+  liveness-gated fallback. **The gate is a LIVE freshness signal, never a sticky
+  flag** — `ws_dash_bridge.js` stamps each `metrics` / `state` frame arrival
+  (`_lastMetricsFrameMs` / `_lastStateFrameMs`) and `peekLiveness()` reports the
+  *age*; a fast-tick clientside callback compares it to the new
+  `DashboardConstants.WS_LIVENESS_WINDOW_MS` (5000 ms) and writes booleans to a
+  new `ws-liveness-store`. The retired sticky `metricsReceived`/`topologyReceived`
+  flags are deliberately NOT consulted, so a stream that goes quiet flips stale
+  within the window and the poll re-engages on the next tick (the anti-sticky
+  reset that ended the N1-era starvation). **Two-callback split per store** (the
+  load-bearing correctness detail): a WS buffer must NOT be an *Input* of the
+  interval poll — a chained input whose clientside producer `no_update`s makes
+  Dash skip the interval-only callback for that tick, silently re-creating the
+  I-1 starvation. So each store is co-owned by (a) a liveness-gated REST poll
+  (interval Input only; liveness read as State) that returns `no_update` while
+  WS-primary is live and polls when stale, and (b) an `allow_duplicate` append
+  callback triggered ONLY by the WS buffer (accumulates metrics into a bounded
+  scrolling window; latest-only replace for state) that is the sole WS writer and
+  can never starve the store when the stream is quiet. History-analysis display
+  modes (`full` / `hidden_units`) stay on REST (Q6: polling for non-real-time
+  surfaces). Also re-created the `ws-state-buffer` store + `drainState` drain that
+  N1 removed as write-only, and **fixed a latent dead handler** — the bridge
+  listened on the never-emitted `state_change` type while the server broadcasts
+  training state as `state` (`broadcast_state_change`, relay forward, on-connect),
+  so `_stateBuffer` had never populated. The header status bar (`/api/status`,
+  N6's reconciled counters) and topology (N1 tab-gated slow poll) are intentionally
+  unchanged; §8 chart/tile-wipe guard and empty-guard preserved. The UI layout
+  snapshot is unchanged (no pinned `get_layout()` touched). Closes I-1 (target
+  architecture), Q6.
+
 - **N9 — Metrics-visualization overhaul: C7 scalar rendering + U-2/U-3
   presentation (juniper-ml training-runtime defects plan §4-U U-2/U-3/U-4
   display half).** The metrics panel's accuracy plot becomes a bounded-[0, 1]

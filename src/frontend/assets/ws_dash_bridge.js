@@ -42,7 +42,7 @@
     window._juniperWsDrain = {
         // Bounded ring buffers
         _metricsBuffer: [],           // max MAX_METRICS
-        _stateBuffer: null,           // latest only (single object); server-side drain removed by N1 — N8 (wave 4) re-wires it
+        _stateBuffer: null,           // latest only (single object); drainState re-wired to ws-state-buffer by N8
         _topologyBuffer: null,        // latest only
         _cascadeAddBuffer: [],        // max MAX_CASCADE_ADD
         _candidateProgressBuffer: [], // max MAX_CANDIDATE_PROGRESS; server-side drain removed by N1 — N8 (wave 4) re-wires it
@@ -63,6 +63,17 @@
         // server-side REST gate here too — the tab-gated slow-interval poll
         // now always runs; this flag stays for N8.
         _topologyReceived: false,
+        // N8 (training-runtime defects plan §4 I-1, posture O1): LIVE frame-arrival
+        // clocks for the liveness-gated poll fallback. Each is set to Date.now()
+        // ONLY when a real frame of that class arrives (metrics/initial_metrics for
+        // _lastMetricsFrameMs, state for _lastStateFrameMs). Unlike the sticky
+        // _metricsReceived / _topologyReceived flags above (set once, never reset —
+        // the N1-retired starvation gate), these are timestamps that AGE: peekLiveness
+        // reports the age, and when it exceeds WS_LIVENESS_WINDOW_MS the stream reads
+        // stale and the REST poll resumes. 0 = "no frame of this class seen yet"
+        // (treated as stale → poll runs), so a fresh tab is never starved.
+        _lastMetricsFrameMs: 0,
+        _lastStateFrameMs: 0,
         _gen: 0,                      // drain generation counter
 
         // ── Drain methods (called by Dash clientside callbacks) ──
@@ -135,6 +146,23 @@
                 mode: status.mode || "live",
                 metricsReceived: !!this._metricsReceived,
                 topologyReceived: !!this._topologyReceived
+            };
+        },
+
+        // N8 (posture O1): report the age in ms of the most recent metrics / state
+        // frame (Date.now() - last-arrival), or null when none has arrived yet. The
+        // liveness clientside callback compares these against WS_LIVENESS_WINDOW_MS
+        // to decide whether the WS path is fresh enough to feed the tiles/state (and
+        // suppress the REST poll). This is a browser-local delta — clock-skew-free —
+        // and, being derived from real frame arrivals, can never latch "live": if the
+        // stream goes quiet the age keeps growing and the poll re-engages. Contrast
+        // peekConnectionStatus's sticky metricsReceived/topologyReceived, which the
+        // liveness gate deliberately does NOT consult.
+        peekLiveness: function() {
+            var now = Date.now();
+            return {
+                metrics_age_ms: (this._lastMetricsFrameMs > 0) ? (now - this._lastMetricsFrameMs) : null,
+                state_age_ms: (this._lastStateFrameMs > 0) ? (now - this._lastStateFrameMs) : null
             };
         }
     };
@@ -215,6 +243,8 @@
             drain._metricsBuffer.push(data);
             // GAP-WS-16: first live metrics frame arrives — REST poll can quiet down.
             drain._metricsReceived = true;
+            // N8: stamp the live arrival clock for the liveness gate.
+            drain._lastMetricsFrameMs = Date.now();
         });
 
         // GAP-WS-16: initial_metrics burst — server delivers up to N most-recent
@@ -233,11 +263,24 @@
                 drain._metricsBuffer.push(data.metrics[i]);
             }
             drain._metricsReceived = true;
+            // N8: an initial_metrics burst is a live delivery — stamp the clock.
+            drain._lastMetricsFrameMs = Date.now();
         });
 
-        window.cascorWS.on("state_change", function(data) {
-            // Latest only — overwrites previous
+        // N8: the server broadcasts training-state frames as type "state"
+        // (websocket_manager.broadcast_state_change → {"type": "state", ...},
+        // the relay's forward of cascor's "state" frame, and main.py's on-connect
+        // and snapshot-restore sends). The prior handler registered on the
+        // never-emitted "state_change" type, so _stateBuffer was dead — N8 wires it
+        // to the real type so ws-state-buffer feeds the training-state store.
+        window.cascorWS.on("state", function(data) {
+            // Latest only — overwrites previous. The payload is either the flat
+            // training-state dict (broadcast_state_change / on-connect) or a wrapper
+            // carrying it under `training_state` (snapshot-restore); the server-side
+            // consumer unwraps either shape.
             drain._stateBuffer = data;
+            // N8: stamp the live arrival clock for the liveness gate.
+            drain._lastStateFrameMs = Date.now();
         });
 
         window.cascorWS.on("topology", function(data) {

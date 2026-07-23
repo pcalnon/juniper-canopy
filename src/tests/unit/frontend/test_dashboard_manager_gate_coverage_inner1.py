@@ -249,26 +249,28 @@ class TestDatastoreInner:
     def test_update_metrics_store_delegates(self, mock_get, dm):
         # Called outside a Dash callback context: the wrapper's
         # MissingCallbackContextException branch maps that to trigger="" (a
-        # mount/mode-switch-style fetch). Third positional arg is the
-        # current store contents (N1 empty-guard State).
+        # mount/mode-switch-style fetch). N8 args: (n, display_mode_state,
+        # ws_liveness, current_metrics). ws_liveness=None → stale → the REST poll
+        # runs (the liveness-gated O1 fallback); current_metrics=None (empty-guard).
         mock_get.return_value = _resp(ok=True, json_value={"history": [{"epoch": 1}]})
         cb = raw_cb(dm, "update_metrics_store")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = cb(1, {"mode": "window", "window_size": 100}, None)
+            result = cb(1, {"mode": "window", "window_size": 100}, None, None)
         assert result == [{"epoch": 1}]
 
     @patch("requests.get")
     def test_update_metrics_store_interval_trigger_in_callback_context(self, mock_get, dm):
-        # N1: exercise the wrapper's happy ctx path — an interval-tick trigger
-        # inside a (mocked) callback context reaches the handler with the
-        # interval prop_id, and window mode fetches on every tick.
+        # N8: exercise the wrapper's happy ctx path — an interval-tick trigger
+        # inside a (mocked) callback context reaches the handler with the interval
+        # prop_id; with the WS stream stale (ws_liveness=None) window mode fetches on
+        # every tick (the O1 fallback).
         mock_get.return_value = _resp(ok=True, json_value={"history": [{"epoch": 2}]})
         cb = raw_cb(dm, "update_metrics_store")
         fake_ctx = MagicMock()
         fake_ctx.triggered = [{"prop_id": "fast-update-interval.n_intervals"}]
         with patch.object(dmmod.dash, "callback_context", fake_ctx):
             with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-                result = cb(1, {"mode": "window", "window_size": 100}, None)
+                result = cb(1, {"mode": "window", "window_size": 100}, None, None)
         assert result == [{"epoch": 2}]
 
     def test_update_topology_store_ws_complete(self, dm):

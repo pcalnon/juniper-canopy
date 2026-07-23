@@ -1774,12 +1774,23 @@ class DashboardManager:
                 # callback's output.
                 dcc.Store(id="apply-blur-sink", data=None),
                 # Phase B: WebSocket drain stores (structured objects, D-07)
-                # N1: the dead-end ws-state-buffer / ws-candidate-progress-buffer
-                # stores (drained but never consumed by any Input) were removed;
-                # the bridge-side ring buffers in ws_dash_bridge.js stay so N8
-                # (WS-primary wiring, wave 4) can re-attach them.
+                # N1 removed the then-dead-end ws-state-buffer / ws-candidate-progress
+                # stores; N8 (WS-primary wiring, wave 4) re-attaches ws-state-buffer as
+                # a live consumer — the drainState clientside callback below hydrates it
+                # and the metrics-panel training-state store prefers it while WS is fresh.
                 dcc.Store(id="ws-metrics-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
                 dcc.Store(id="ws-topology-buffer", data=None),
+                # N8: latest-only training-state frame (mirrors ws-topology-buffer's
+                # shape). Fed by drainState; consumed by fetch_training_state as the
+                # WS-primary source for the metrics-panel status strip.
+                dcc.Store(id="ws-state-buffer", data=None),
+                # N8: WS-data liveness (booleans only, so the value changes only on a
+                # live↔stale transition). A fast-interval clientside callback computes
+                # {metrics_live, state_live} from the bridge's frame-arrival clocks vs
+                # WS_LIVENESS_WINDOW_MS. The metrics / training-state polls read this to
+                # decide WS-primary (skip REST) vs REST fallback. Defaults stale so the
+                # mount fetch and any WS-quiet tab always poll (anti-starvation).
+                dcc.Store(id="ws-liveness-store", data={"metrics_live": False, "state_live": False}),
                 dcc.Store(id="ws-cascade-add-buffer", data={"events": [], "gen": 0, "last_drain_ms": 0}),
                 # P2-7 follow-up: WS push buffer for dataset_swap events.
                 # Hydrated by a clientside drain of
@@ -3405,9 +3416,23 @@ class DashboardManager:
             prevent_initial_call=True,
         )
 
-        # N1: the ws-state-buffer drain callback was removed — the store had no
-        # Input consumer, so the drain was write-only dead machinery. The JS
-        # ring buffer (ws_dash_bridge.js drainState) stays for N8 (wave 4).
+        # N8: re-attach the ws-state-buffer drain (N1 removed it as write-only dead
+        # machinery). Latest-only, mirroring the topology drain: hand the freshest
+        # training-state frame to fetch_training_state, which prefers it over the REST
+        # /api/state poll while the state stream is live.
+        self.app.clientside_callback(
+            """
+            function(n) {
+                if (!window._juniperWsDrain) return window.dash_clientside.no_update;
+                var s = window._juniperWsDrain.drainState();
+                if (!s) return window.dash_clientside.no_update;
+                return s;
+            }
+            """,
+            Output("ws-state-buffer", "data"),
+            Input("fast-update-interval", "n_intervals"),
+            prevent_initial_call=True,
+        )
 
         # Drain cascade_add buffer → ws-cascade-add-buffer store
         self.app.clientside_callback(
@@ -3457,6 +3482,34 @@ class DashboardManager:
             }
             """,
             Output("ws-connection-status", "data"),
+            Input("fast-update-interval", "n_intervals"),
+            prevent_initial_call=True,
+        )
+
+        # N8: WS-data liveness → ws-liveness-store. Each fast tick, compare the
+        # bridge's per-class frame-arrival age (peekLiveness) against
+        # WS_LIVENESS_WINDOW_MS and emit BOOLEANS ONLY, so the store value changes
+        # only on a live↔stale transition (a fresh age of, say, 120 ms one tick and
+        # 340 ms the next must not churn the store and re-trigger every downstream
+        # poll). A null age (no frame of that class ever seen) reads stale, so a fresh
+        # tab polls REST until the WS actually delivers — the anti-starvation posture.
+        # This deliberately consults ONLY the ageing clocks, never the sticky
+        # metricsReceived/topologyReceived flags that caused the N1 starvation.
+        self.app.clientside_callback(
+            f"""
+            function(n) {{
+                if (!window._juniperWsDrain || !window._juniperWsDrain.peekLiveness) {{
+                    return window.dash_clientside.no_update;
+                }}
+                var live = window._juniperWsDrain.peekLiveness();
+                var W = {DashboardConstants.WS_LIVENESS_WINDOW_MS};
+                return {{
+                    metrics_live: (live.metrics_age_ms !== null && live.metrics_age_ms <= W),
+                    state_live: (live.state_age_ms !== null && live.state_age_ms <= W)
+                }};
+            }}
+            """,
+            Output("ws-liveness-store", "data"),
             Input("fast-update-interval", "n_intervals"),
             prevent_initial_call=True,
         )
@@ -3599,26 +3652,64 @@ class DashboardManager:
         # PERF-CN-01: prevent_initial_call=False — must hit /api/metrics/history
         # on mount to populate the metrics store before the first interval tick
         # (also drives the metrics panel's plots and stats).
-        # N1 (training-runtime defects plan §4 I-1, posture O2): the poll runs on
-        # every fast-interval tick — the Phase-B sticky WS gate is gone (see
-        # _update_metrics_store_handler for why, and for the guard rails).
-        # display-mode-store is an Input so a mode switch refetches immediately;
-        # the metrics store itself rides along as State for the empty-guard.
+        # N8 (training-runtime defects plan §4 I-1, posture O1 / Q6): the O1 half —
+        # a liveness-gated REST poll. It fires on EVERY fast tick (the interval Input
+        # is the sole trigger, so it can never be starved) and reads the liveness
+        # signal as STATE: while the metrics stream is fresh (metrics_live) in the
+        # real-time window view it returns ``no_update`` (the WS-primary append
+        # callback below owns the store), and the instant the stream goes stale it
+        # re-engages the N1 REST poll on the next tick — the anti-sticky reset.
+        #
+        # CRITICAL (Dash execution model): ws-metrics-buffer is deliberately NOT an
+        # Input here. Its clientside producer returns ``no_update`` whenever the WS is
+        # quiet, and a chained Input whose producer no_updates makes Dash SKIP this
+        # interval-only callback for that tick — which silently re-creates the I-1
+        # starvation (the poll would fire only on WS pushes). The WS buffer is instead
+        # consumed by a separate ``allow_duplicate`` append callback triggered ONLY by
+        # ws-metrics-buffer. ws-liveness-store rides as State (never as an Input) for
+        # the same reason.
         @self.app.callback(
             Output("metrics-panel-metrics-store", "data"),
             Input("fast-update-interval", "n_intervals"),
             Input("metrics-panel-display-mode-store", "data"),
+            dash.dependencies.State("ws-liveness-store", "data"),
             dash.dependencies.State("metrics-panel-metrics-store", "data"),
             prevent_initial_call=False,
         )
-        def update_metrics_store(n, display_mode_state, current_metrics):
-            """Fetch metrics history from API and update metrics panel store (1 Hz poll)."""
+        def update_metrics_store(n, display_mode_state, ws_liveness, current_metrics):
+            """Liveness-gated REST poll for the metrics store (N8 O1 half)."""
             try:
                 ctx = dash.callback_context
                 trigger = ctx.triggered[0]["prop_id"] if ctx.triggered else ""
             except dash.exceptions.MissingCallbackContextException:
                 trigger = ""  # direct invocation (tests) — treated like a mount/mode-switch fetch
-            return self._update_metrics_store_handler(n=n, display_mode_state=display_mode_state, current_metrics=current_metrics, trigger=trigger)
+            ws_live = bool(ws_liveness and ws_liveness.get("metrics_live"))
+            return self._update_metrics_store_handler(
+                n=n,
+                display_mode_state=display_mode_state,
+                current_metrics=current_metrics,
+                trigger=trigger,
+                ws_live=ws_live,
+            )
+
+        # N8 (posture O3 half): WS-PRIMARY append. Triggered ONLY by a ws-metrics-buffer
+        # change — which the clientside drain emits only when it actually drained events
+        # (a WS frame arrived). So this callback fires exactly on WS pushes and is the
+        # sole path that writes WS data into the store; when the WS is quiet it simply
+        # does not fire (and the poll above carries the store). ``allow_duplicate`` lets
+        # it co-own the store's Output with the poll; ``prevent_initial_call=True`` is
+        # required for duplicate outputs. History-analysis modes (full/hidden_units)
+        # opt out (Q6: they are non-real-time and want the complete REST history).
+        @self.app.callback(
+            Output("metrics-panel-metrics-store", "data", allow_duplicate=True),
+            Input("ws-metrics-buffer", "data"),
+            dash.dependencies.State("metrics-panel-display-mode-store", "data"),
+            dash.dependencies.State("metrics-panel-metrics-store", "data"),
+            prevent_initial_call=True,
+        )
+        def append_ws_metrics_store(ws_metrics_buffer, display_mode_state, current_metrics):
+            """Accumulate drained WS metrics onto the store (N8 O3 half)."""
+            return self._append_ws_metrics_store_handler(ws_metrics_buffer=ws_metrics_buffer, display_mode_state=display_mode_state, current_metrics=current_metrics)
 
         # PERF-CN-01: prevent_initial_call=False — must hit /api/network/topology
         # on mount (when the topology tab is active) so the network visualizer
@@ -6209,25 +6300,57 @@ class DashboardManager:
             self.logger.warning(f"Failed to fetch network stats: {e}")
             return self._network_info_error_div("Network Stats", "Error", f"{type(e).__name__}: {e}")
 
-    def _update_metrics_store_handler(self, n=None, display_mode_state=None, current_metrics=None, trigger=None):
-        """Fetch metrics history from API and update metrics panel store.
+    def _append_ws_metrics_store_handler(self, ws_metrics_buffer=None, display_mode_state=None, current_metrics=None):
+        """N8 (posture O3): accumulate drained WS metrics onto the store.
 
-        N1 (training-runtime defects plan §4 I-1, posture O2): the poll runs on
-        every fast-interval tick (1 Hz at ``FAST_UPDATE_INTERVAL_MS`` = 1000 ms).
-        The former Phase-B sticky WS gate (skip REST while ``ws_status`` reported
-        ``connected`` + ``metricsReceived``) starved long-lived tabs indefinitely
-        once WS metrics frames stopped arriving, freezing tiles and charts at
-        stale values. This un-gated poll is the correctness BRIDGE until the
-        WS-primary target lands (Q6/C6/N8): N8 wires the WS buffers into the
-        tile/state Outputs and demotes this poll to a liveness-gated fallback.
+        Runs only when ``ws-metrics-buffer`` changes — i.e. the clientside drain
+        actually produced events (a WS frame arrived). Appends them onto the
+        last-known-good store, bounded to the display window so the figure rebuild +
+        tiles track a scrolling live window (matching the REST window fetch's
+        ``limit=window_size``). Because it is triggered ONLY by real WS pushes it can
+        never starve the store when the stream is quiet — the liveness-gated poll
+        (``_update_metrics_store_handler``) is the sole writer then. History-analysis
+        modes (``full`` / ``hidden_units``) opt out: they are non-real-time and want
+        the complete REST history, which a WS window would truncate.
+        """
+        mode_state = display_mode_state if isinstance(display_mode_state, dict) else {}
+        if mode_state.get("mode", "window") in ("full", "hidden_units"):
+            return dash.no_update
+        ws_events = [e for e in ((ws_metrics_buffer or {}).get("events") or []) if isinstance(e, dict)]
+        if not ws_events:
+            return dash.no_update
+        window_size = mode_state.get("window_size", 100) or 100
+        merged = (current_metrics if isinstance(current_metrics, list) else []) + ws_events
+        return merged[-window_size:] if len(merged) > window_size else merged
+
+    def _update_metrics_store_handler(self, n=None, display_mode_state=None, current_metrics=None, trigger=None, ws_live=None):
+        """Liveness-gated REST poll for the metrics-panel store (N8 posture O1).
+
+        Fires on every fast-interval tick (the interval is the sole trigger, so the
+        callback can never be starved — see the callback's Dash-model note on why the
+        WS buffer must NOT be an Input here). Two regimes:
+
+        1. **Demoted while WS-primary is live** — when the metrics stream is fresh
+           (``ws_live``) in the real-time ``window`` view, return ``dash.no_update``:
+           the REST fetch is SKIPPED and the ``allow_duplicate`` append callback
+           (``_append_ws_metrics_store_handler``) owns the store from the WS buffer.
+        2. **Liveness-gated REST fallback (O1)** — when the stream is stale/absent
+           (``ws_live`` falsy — the default for every non-WS caller, so the N1 poll is
+           preserved exactly), poll ``/api/metrics/history``. ``ws_live`` is derived
+           from the bridge's frame-arrival age (never the sticky ``metricsReceived``
+           flag), so a stream that goes quiet flips stale within
+           ``WS_LIVENESS_WINDOW_MS`` and this poll re-engages on the next tick — the
+           anti-sticky guarantee that killed the N1-era starvation.
+           ``full`` / ``hidden_units`` (history-analysis) modes are NOT WS-gated: they
+           always poll (Q6: polling is correct for non-real-time surfaces).
 
         Guard rails (both validation-mandated, plan §8 rows 1-2):
 
         - **Empty-guard**: when the fetch is empty or errored AND the store
           already holds data, return ``dash.no_update`` so the last-known-good
-          store survives — cascor clears metrics post-run, and an un-gated
-          1 Hz poll would otherwise blank a completed run's charts. A genuinely
-          empty fetch with an empty store passes through unchanged.
+          store survives — cascor clears metrics post-run, and a 1 Hz poll would
+          otherwise blank a completed run's charts. A genuinely empty fetch with an
+          empty store passes through unchanged.
         - **Bounded full-history fetch**: ``full`` / ``hidden_units`` display
           modes fetch the complete history (``limit=0`` → up to 10k rows), so
           interval-driven ticks only refetch every
@@ -6237,6 +6360,13 @@ class DashboardManager:
         mode_state = display_mode_state if isinstance(display_mode_state, dict) else {}
         mode = mode_state.get("mode", "window")
         full_fetch = mode in ("full", "hidden_units")
+
+        # N8 poll demotion (O1): while WS-primary is live in the real-time window view,
+        # skip the REST fetch — the append callback carries the store. History-analysis
+        # modes ignore the gate and always poll.
+        if ws_live and not full_fetch:
+            return dash.no_update
+
         if full_fetch and trigger and trigger.startswith("fast-update-interval") and n and n % DashboardConstants.FULL_HISTORY_POLL_TICK_MODULUS != 0:
             return dash.no_update
 
