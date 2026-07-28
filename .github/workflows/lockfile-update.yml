@@ -8,7 +8,7 @@
 # Version:       0.1.0
 #
 # Date Created:  2026-03-02
-# Last Modified: 2026-03-02
+# Last Modified: 2026-07-27
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-2026 Paul Calnon
@@ -28,6 +28,17 @@
 #    main and develop are excluded from the pull_request trigger by branch
 #    targeting (PRs targeting these branches still trigger; the regen pushes to
 #    the PR head branch, never to main/develop directly).
+#
+#    Dependabot caveat (2026-07-27): Dependabot-triggered runs use the
+#    Dependabot secret store ("Secret source: Dependabot"), so the repo-scoped
+#    CROSS_REPO_DISPATCH_TOKEN is EMPTY there and the checkout hard-failed on
+#    every dependabot/pip/** push (runs 29749713997 / 29866415598 /
+#    30274100485). The token-availability gate below turns that arm into a
+#    loud green no-op (the Lockfile Freshness CI gate still enforces staleness)
+#    until the owner registers the same PAT under Settings -> Secrets ->
+#    Dependabot, which re-enables full auto-regen for Dependabot pushes with
+#    no further workflow change. A missing PAT on a NON-Dependabot run still
+#    fails loudly (secret misconfiguration must not pass silently).
 #
 # References:
 #    - Step 7.5.2: Dependency Update Workflow (POLYREPO_MIGRATION_PLAN.md)
@@ -56,7 +67,25 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
+      - name: Gate on CROSS_REPO_DISPATCH_TOKEN availability
+        id: gate
+        env:
+          # Secrets are not readable in job/step `if:` expressions, so surface
+          # presence (never the value) through env for the shell to branch on.
+          HAVE_PAT: ${{ secrets.CROSS_REPO_DISPATCH_TOKEN != '' }}
+        run: |
+          if [[ "${HAVE_PAT}" == "true" ]]; then
+            echo "proceed=true" >> "${GITHUB_OUTPUT}"
+          elif [[ "${{ github.actor }}" == "dependabot[bot]" ]]; then
+            echo "::notice::CROSS_REPO_DISPATCH_TOKEN is not available to Dependabot-triggered runs (Dependabot secret store). Skipping auto-regen; the Lockfile Freshness CI gate still enforces staleness. Register the PAT under Settings -> Secrets -> Dependabot to re-enable."
+            echo "proceed=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::error::CROSS_REPO_DISPATCH_TOKEN is missing for a non-Dependabot run — secret misconfiguration."
+            exit 1
+          fi
+
       - name: Checkout Code
+        if: steps.gate.outputs.proceed == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           token: ${{ secrets.CROSS_REPO_DISPATCH_TOKEN }}
@@ -67,14 +96,17 @@ jobs:
           ref: ${{ github.head_ref || github.ref }}
 
       - name: Set up Python
+        if: steps.gate.outputs.proceed == 'true'
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.14"
 
       - name: Install uv
+        if: steps.gate.outputs.proceed == 'true'
         run: pip install uv==0.11.8
 
       - name: Regenerate requirements.lock
+        if: steps.gate.outputs.proceed == 'true'
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
           echo "║       Juniper Canopy - Regenerate Lockfile                 ║"
@@ -92,6 +124,7 @@ jobs:
             -o requirements.lock
 
       - name: Commit updated lockfile
+        if: steps.gate.outputs.proceed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
