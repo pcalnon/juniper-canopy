@@ -50,7 +50,7 @@ torch
 
 # Core dependencies - using flexible versions for Python 3.14 compatibility
 a2wsgi>=1.10
-annotated-types>=0.7
+annotated-types>=0.8.0
 anyio>=4.14.2
 attrs>=25.0
 certifi
@@ -95,7 +95,7 @@ pillow>=12.3.0
 platformdirs>=4.11.0
 plotly>=6.0
 pluggy>=1.0
-pre_commit>=4.6.0
+pre_commit>=4.6.1
 psutil>=7.0
 pydantic>=2.0
 Pygments>=2.0
