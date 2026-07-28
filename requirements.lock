@@ -2,9 +2,9 @@
 #    uv pip compile pyproject.toml --extra juniper-data --extra juniper-cascor --extra observability -o requirements.lock
 a2wsgi==1.10.10
     # via juniper-canopy (pyproject.toml)
-annotated-doc==0.0.4
+annotated-doc==0.0.5
     # via fastapi
-annotated-types==0.7.0
+annotated-types==0.8.0
     # via pydantic
 anyio==4.14.2
     # via
@@ -13,7 +13,7 @@ anyio==4.14.2
     #   watchfiles
 blinker==1.9.0
     # via flask
-certifi==2026.6.17
+certifi==2026.7.22
     # via
     #   httpcore
     #   httpx
@@ -27,13 +27,15 @@ click==8.4.2
     #   uvicorn
 colorama==0.4.6
     # via juniper-canopy (pyproject.toml)
-dash==4.4.0
+comm==0.2.3
+    # via dash
+dash==4.4.1
     # via
     #   juniper-canopy (pyproject.toml)
     #   dash-bootstrap-components
 dash-bootstrap-components==2.0.4
     # via juniper-canopy (pyproject.toml)
-fastapi==0.139.2
+fastapi==0.140.13
     # via
     #   juniper-canopy (pyproject.toml)
     #   juniper-service-core
@@ -102,7 +104,7 @@ plotly==6.9.0
     # via
     #   juniper-canopy (pyproject.toml)
     #   dash
-prometheus-client==0.25.0
+prometheus-client==0.26.0
     # via juniper-canopy (pyproject.toml)
 psutil==7.2.2
     # via juniper-canopy (pyproject.toml)
@@ -141,7 +143,7 @@ retrying==1.4.2
     # via dash
 scipy==1.18.0
     # via juniper-canopy (pyproject.toml)
-sentry-sdk==2.66.0
+sentry-sdk==2.66.1
     # via juniper-canopy (pyproject.toml)
 setuptools==83.0.0
     # via dash
