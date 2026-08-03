@@ -35,7 +35,7 @@ dash==4.4.1
     #   dash-bootstrap-components
 dash-bootstrap-components==2.0.4
     # via juniper-canopy (pyproject.toml)
-fastapi==0.140.13
+fastapi==0.141.1
     # via
     #   juniper-canopy (pyproject.toml)
     #   juniper-service-core
@@ -169,13 +169,13 @@ urllib3==2.7.0
     #   juniper-data-client
     #   requests
     #   sentry-sdk
-uvicorn==0.51.0
+uvicorn==0.52.1
     # via juniper-canopy (pyproject.toml)
 uvloop==0.22.1
     # via uvicorn
 watchfiles==1.2.0
     # via uvicorn
-websockets==16.1.1
+websockets==17.0.1
     # via
     #   juniper-canopy (pyproject.toml)
     #   juniper-cascor-client
