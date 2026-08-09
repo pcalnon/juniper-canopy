@@ -98,7 +98,7 @@ numpy==2.5.1
     #   juniper-data-client
     #   juniper-service-core
     #   scipy
-packaging==26.2
+packaging==26.3
     # via plotly
 plotly==6.9.0
     # via
@@ -119,7 +119,7 @@ pydantic==2.13.4
     #   pydantic-settings
 pydantic-core==2.46.4
     # via pydantic
-pydantic-settings==2.14.2
+pydantic-settings==2.15.0
     # via
     #   juniper-canopy (pyproject.toml)
     #   juniper-service-core
@@ -145,9 +145,9 @@ scipy==1.18.0
     # via juniper-canopy (pyproject.toml)
 sentry-sdk==2.66.1
     # via juniper-canopy (pyproject.toml)
-setuptools==83.0.0
+setuptools==84.0.0
     # via dash
-starlette==1.3.1
+starlette==1.6.0
     # via
     #   fastapi
     #   juniper-observability
