@@ -5,7 +5,7 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.6.0
-**Last Updated**: 2026-07-28
+**Last Updated**: 2026-08-08
 
 ---
 
@@ -272,6 +272,8 @@ Tests touching these collectors should use `juniper_observability.testing.reset_
 | Lockfile Update | `lockfile-update.yml` | Automated dependency lock updates |
 | Publish | `publish.yml` | Release publishing automation |
 | Security Scan | `security-scan.yml` | Security vulnerability scanning |
+| Sequence Safety (Advisory) | `sequence-safety.yml` | Per-PR advisory compositional-loss screen (AST symbol-loss + docs deletion-magnitude, `src/**/*.py` symbol scope) via the packaged `juniper-ci-tools` console scripts; standalone, never a required check |
+| Post-Merge Main Verification | `main-verify.yml` | Bypass-proof post-merge sequence-safety net (screens-only; per-SHA no-cancel; catch-up base; stable-title tracking-issue notify) |
 
 ```bash
 # Local CI simulation (requires act - optional)
