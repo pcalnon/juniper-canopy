@@ -145,9 +145,9 @@ scipy==1.18.0
     # via juniper-canopy (pyproject.toml)
 sentry-sdk==2.66.1
     # via juniper-canopy (pyproject.toml)
-setuptools==83.0.0
+setuptools==84.0.0
     # via dash
-starlette==1.5.0
+starlette==1.6.0
     # via
     #   fastapi
     #   juniper-observability
