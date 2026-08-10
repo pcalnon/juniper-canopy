@@ -66,17 +66,17 @@ jinja2==3.1.6
     # via flask
 juniper-cascor-client==0.7.0
     # via juniper-canopy (pyproject.toml)
-juniper-cascor-protocol==0.1.0
+juniper-cascor-protocol==0.2.0
     # via
     #   juniper-canopy (pyproject.toml)
     #   juniper-cascor-client
 juniper-data-client==0.4.2
     # via juniper-canopy (pyproject.toml)
-juniper-model-core==0.3.0
+juniper-model-core==0.3.1
     # via juniper-service-core
 juniper-observability==0.4.0
     # via juniper-canopy (pyproject.toml)
-juniper-service-core==0.5.0
+juniper-service-core==0.5.1
     # via juniper-canopy (pyproject.toml)
 markupsafe==3.0.3
     # via
@@ -91,7 +91,7 @@ nest-asyncio==1.6.0
     #   dash
 networkx==3.6.1
     # via juniper-canopy (pyproject.toml)
-numpy==2.5.1
+numpy==2.5.2
     # via
     #   juniper-canopy (pyproject.toml)
     #   juniper-cascor-protocol
@@ -143,7 +143,7 @@ retrying==1.4.2
     # via dash
 scipy==1.18.0
     # via juniper-canopy (pyproject.toml)
-sentry-sdk==2.66.1
+sentry-sdk==2.67.1
     # via juniper-canopy (pyproject.toml)
 setuptools==84.0.0
     # via dash
@@ -158,7 +158,7 @@ typing-extensions==4.16.0
     #   pydantic
     #   pydantic-core
     #   typing-inspection
-typing-inspection==0.4.2
+typing-inspection==0.4.3
     # via
     #   fastapi
     #   pydantic
