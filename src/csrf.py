@@ -12,7 +12,7 @@ import logging
 import secrets
 import threading
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 logger = logging.getLogger("juniper_canopy.csrf")
 
@@ -26,9 +26,32 @@ class CsrfTokenStore:
     and automatically pruned when stale. Thread-safe.
     """
 
-    def __init__(self, ttl_seconds: int = _DEFAULT_TTL, max_tokens: int = 10000):
+    def __init__(
+        self,
+        ttl_seconds: int = _DEFAULT_TTL,
+        max_tokens: int = 10000,
+        clock: Callable[[], float] = time.monotonic,
+    ):
+        """
+        Args:
+            ttl_seconds: Sliding TTL applied on mint and refreshed on each
+                successful ``validate()``.
+            max_tokens: Cap on stored tokens; the oldest is evicted past it.
+            clock: Monotonic time source, in seconds. Injectable so tests can
+                drive expiry deterministically instead of sleeping. Production
+                callers never pass this.
+
+                This exists because the sliding-TTL tests previously asserted
+                against ``time.sleep`` on a real clock, which made them a
+                genuine flake on loaded macOS CI runners: the sleeps overshot
+                the TTL and a still-valid token read as expired. The margins had
+                already been widened 5x and it still flaked intermittently.
+                Injecting the clock removes the race outright rather than
+                widening the window again.
+        """
         self._ttl = ttl_seconds
         self._max_tokens = max_tokens
+        self._clock = clock
         self._tokens: dict[str, float] = {}  # token -> expiry_time
         self._lock = threading.Lock()
 
@@ -39,7 +62,7 @@ class CsrfTokenStore:
             The newly minted token string.
         """
         token = secrets.token_urlsafe(32)
-        now = time.monotonic()
+        now = self._clock()
         with self._lock:
             self._prune(now)
             if len(self._tokens) >= self._max_tokens:
@@ -60,7 +83,7 @@ class CsrfTokenStore:
         """
         if not token:
             return False
-        now = time.monotonic()
+        now = self._clock()
         with self._lock:
             for stored_token, expiry in list(self._tokens.items()):
                 if expiry < now:

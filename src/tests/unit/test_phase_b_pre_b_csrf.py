@@ -1,10 +1,33 @@
 """Tests for Phase B-pre-b CSRF + audit: token store, endpoint, WS auth, adapter validation."""
 
 import hmac
-import time
 from unittest.mock import patch
 
 import pytest
+
+
+class _FakeClock:
+    """Deterministic monotonic clock, injected into ``CsrfTokenStore``.
+
+    The TTL tests below used to sleep against the real clock. That made
+    ``test_validate_refreshes_ttl`` a genuine flake on the loaded macOS CI leg:
+    ``time.sleep`` overshoots under scheduling pressure, so a token that should
+    still have been inside its refreshed window read as expired and the assertion
+    flipped. The margins had already been widened 5x (0.1/0.05/0.07s -> 0.5/0.25/0.35s)
+    and it still failed intermittently — widening a race does not close it.
+
+    Driving time explicitly removes the race entirely, makes the assertions exact
+    rather than approximate, and drops ~0.6s of real sleeping from the suite.
+    """
+
+    def __init__(self, start: float = 1000.0) -> None:
+        self._now = float(start)
+
+    def __call__(self) -> float:
+        return self._now
+
+    def advance(self, seconds: float) -> None:
+        self._now += seconds
 
 
 @pytest.mark.unit
@@ -41,32 +64,54 @@ class TestCsrfTokenStore:
         assert store.validate(None) is False
 
     def test_validate_expired_token(self):
+        """A token past its TTL is rejected."""
         from csrf import CsrfTokenStore
 
-        store = CsrfTokenStore(ttl_seconds=0.01)
-        token = store.mint()
-        time.sleep(0.02)
+        clock = _FakeClock()
+        store = CsrfTokenStore(ttl_seconds=10, clock=clock)
+        token = store.mint()  # expires at t+10
+
+        clock.advance(10.001)
         assert store.validate(token) is False
 
     def test_validate_refreshes_ttl(self):
-        """Valid token gets sliding TTL refresh.
+        """A successful validate slides the TTL forward.
 
-        Bumped the TTL and sleep durations 5x off the original 0.1/0.05/0.07s
-        budget. macOS CI runners under load see ~30-50ms scheduling jitter
-        on `time.sleep`, so the original margins (refresh at 0.05, expire
-        at 0.15, second check at 0.12) flipped into the expired window
-        intermittently. The 0.5/0.25/0.35s budget here keeps the same
-        sliding-refresh shape with a comfortable >100ms slack to either side.
+        Driven by an injected clock rather than ``time.sleep`` — see ``_FakeClock``.
+        The middle assertion is the one that proves the refresh happened: t=12 is
+        past the ORIGINAL expiry (t+10), so the token can only still be valid
+        because validating at t=5 pushed expiry out to t+15.
         """
         from csrf import CsrfTokenStore
 
-        store = CsrfTokenStore(ttl_seconds=0.5)
+        clock = _FakeClock()
+        store = CsrfTokenStore(ttl_seconds=10, clock=clock)
+        token = store.mint()  # expires at t+10
+
+        clock.advance(5)  # t=5
+        assert store.validate(token) is True  # refresh -> expires at t+15
+
+        clock.advance(7)  # t=12, past the original t+10 expiry
+        assert store.validate(token) is True  # only valid because it refreshed
+
+    def test_refreshed_token_still_expires(self):
+        """The sliding window slides, it does not make a token immortal.
+
+        The previous sleep-based test stopped after proving the refresh, so
+        nothing covered expiry *after* a refresh. Cheap to assert now that time
+        is driven explicitly.
+        """
+        from csrf import CsrfTokenStore
+
+        clock = _FakeClock()
+        store = CsrfTokenStore(ttl_seconds=10, clock=clock)
         token = store.mint()
-        time.sleep(0.25)
-        assert store.validate(token) is True  # refresh
-        time.sleep(0.35)
-        # Should still be valid (refreshed at 0.25, expires at 0.75)
-        assert store.validate(token) is True
+
+        clock.advance(5)
+        assert store.validate(token) is True  # refresh -> expires at t+15
+
+        clock.advance(10.001)  # t=15.001, past the refreshed expiry
+        assert store.validate(token) is False
 
     def test_revoke_removes_token(self):
         from csrf import CsrfTokenStore
