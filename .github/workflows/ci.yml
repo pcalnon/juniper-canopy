@@ -32,11 +32,18 @@ name: CI/CD Pipeline
 
 on:
   push:
+    # Topic-branch globs (feature/**, fix/**) removed 2026-08-13: once a PR is open,
+    # `push` and `pull_request` BOTH fire for the same commit, so every job ran twice.
+    # The concurrency group is keyed on github.ref, which differs between a branch push
+    # (refs/heads/...) and a PR (refs/pull/N/merge), so cancel-in-progress never
+    # collapsed the pair. canopy has the fleet's longest suite (~10 min incl. the
+    # Playwright UI sub-suite and four Unit Tests + Coverage legs), so the duplicate was
+    # the most expensive in the ecosystem. Same fix as juniper-recurrence#108 and
+    # juniper-ml#1076. `pull_request` covers every commit once a PR exists;
+    # workflow_dispatch remains for a branch with no PR.
     branches:
       - main
       - develop
-      - feature/**
-      - fix/**
   pull_request:
     branches:
       - main
