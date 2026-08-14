@@ -1158,7 +1158,13 @@ class TestParameterHandlers:
         assert result == (dash.no_update, dash.no_update)
 
     def test_apply_parameters_handler_with_none_values(self, dashboard_manager):
-        """Test apply parameters handler with None values uses defaults."""
+        """None numeric States refuse the apply — they do NOT become defaults.
+
+        Previously asserted the default-substitution that turned out to be
+        F-CANOPY-017: a numeric input failing HTML5 validity hands Dash
+        ``None``, and defaulting it silently overwrote the operator's live
+        value. See src/tests/integration/test_apply_params_invalid_refused.py.
+        """
         with patch("requests.post") as mock_post:
             mock_response = Mock()
             mock_response.status_code = 200
@@ -1193,11 +1199,10 @@ class TestParameterHandlers:
                     cn_random_cands=None,
                 )
 
-            assert result[0]["nn_learning_rate"] == 0.01  # default
-            assert result[0]["nn_max_hidden_units"] == 1000  # default (TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS)
-            assert result[0]["nn_max_total_epochs"] == 1000000  # default (TrainingConstants.DEFAULT_TRAINING_EPOCHS)
-            assert result[0]["nn_multi_node_layers"] is False  # None -> empty list -> False
-            assert result[0]["nn_growth_convergence_threshold"] == 0.001  # default
+            assert result[0] is dash.no_update, "an all-None apply must not write the applied-params store"
+            assert mock_post.call_count == 0, "an all-None apply must not POST /api/set_params"
+            assert "Nothing applied" in result[1], result[1]
+            assert "Learning Rate" in result[1], result[1]
 
     # ── #2a: 429 Retry-After backoff (the half #345 deferred) ────────────
     # Before #2a the 429 branch returned immediately, ignoring both the retry

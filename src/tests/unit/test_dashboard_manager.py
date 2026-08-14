@@ -445,9 +445,38 @@ class TestApplyInFlightWatchdogE3:
         semantics, fatal as the sole clamp release (the pre-fix design)."""
         import dash
 
+        # Valid inputs, not all-None: since F-CANOPY-017 a None numeric State
+        # refuses the apply before any POST, so an all-None call would never
+        # reach the 5xx branch this test is about.
+        valid = (
+            1000,
+            600,
+            0.015,
+            25,
+            [],
+            "convergence",
+            50,
+            0.001,
+            50,
+            1.5,
+            2,
+            1000,
+            0.25,
+            100,
+            0.001,
+            1,
+            "preset_epochs",
+            500,
+            0.0001,
+            30,
+            [],
+            None,
+            1,
+            1,
+        )
         mock_response = MagicMock(status_code=502, text="Bad Gateway")
         with patch("requests.post", return_value=mock_response):
-            store_value, status_msg = dashboard._apply_parameters_handler(1, *([None] * 24))
+            store_value, status_msg = dashboard._apply_parameters_handler(1, *valid)
         assert store_value is dash.no_update
         assert "502" in status_msg
 

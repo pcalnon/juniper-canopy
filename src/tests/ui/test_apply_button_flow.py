@@ -8,48 +8,50 @@ request is server-internal (Dash callback runs in the canopy process and
 browser network) — instead we read back through ``/api/state``, which
 is what the user actually observes.
 
-PR-10 root-cause note. The xfail below pins a real harness-level
-incompatibility, not a Dash callback bug:
+RESOLVED 2026-08-14 — this was a PRODUCT bug, not a harness wall.
 
-  * The Apply click DOES fire the Dash apply callback (verified via
-    ``_dash-update-component`` request capture).
-  * BUT the State payload sent to the callback contains
-    ``"nn-learning-rate-input": null`` even when the DOM input element
-    shows ``"0.0123"`` after Playwright's ``fill()``.
+This test carried a ``strict`` xfail for months, attributed to Playwright
+being unable to drive Dash's React-controlled ``dbc.Input(type=number)``.
+That diagnosis was wrong, and the evidence that looked like a harness
+limitation was the product defect reporting itself:
 
-Tried fixes (none worked):
+  * The Apply click DOES fire the callback, and the State payload really
+    did contain ``"nn-learning-rate-input": null`` — both true.
+  * But the null did not come from a swallowed React event. The widget
+    declared ``min=0.0001, step=0.001``, and **HTML5 evaluates ``step``
+    validity relative to ``min``**, so the only admissible values were
+    ``0.0001 + n*0.001``. The probe ``0.0123`` is off that grid
+    (``n = 12.2``) — ``el.validity.stepMismatch`` was true, an invalid
+    number input reports no usable value, and Dash therefore received
+    ``null``.
+  * ``_apply_parameters_handler`` then substituted
+    ``TrainingConstants.DEFAULT_LEARNING_RATE``. That is precisely the
+    "Apply pushed the **default** 0.01, not the set 0.0123" observation
+    recorded here on 2026-06-16 — the handler doing exactly what it was
+    written to do, with a null it should never have been given.
 
-  * ``page.fill()`` + Tab
-  * ``page.type()`` with per-keystroke delay + Tab
-  * React-friendly ``HTMLInputElement.prototype.value`` setter +
-    ``input``/``change`` event dispatch
-  * The *canonical* corrected native-setter (native prototype value
-    setter + **bubbling** ``input``+``change`` + blur + 350 ms debounce
-    wait — the documented React workaround in
-    ``juniper-ml/papers/react-controlled-input-onchange.md``).
-    Re-verified 2026-06-16: Apply pushed the **default** 0.01, not the
-    set 0.0123, so ``dbc.Input``'s own value-tracking swallows the
-    synthetic event just as it does ``el.value = x``.
-  * Slow keystroke typing with 2 s post-typing settle
-  * ``Locator.click(force=True)`` / ``dispatch_event('click')`` /
-    ``evaluate('el.click()')``
+Two details that made the misattribution so convincing, both explained by
+the same cause:
 
-Inputs that aren't touched by Playwright show their initial values in
-the State block, so the bug is specifically "Playwright value-set
-does not propagate to Dash's React-controlled ``dbc.Input(type=number)``
-internal state". Manual browser sessions work end-to-end.
+  * "Inputs that aren't touched by Playwright show their initial values" —
+    Dash seeds those through props, which bypasses the browser's
+    validity-gated input path, so an untouched widget keeps a real value
+    however off-grid it is.
+  * "Manual browser sessions work end-to-end" — the spinner arrows snap to
+    the step grid, so a human clicking them can only ever produce a valid
+    value. Typing an arbitrary one by hand would have failed identically.
 
-Resolution (L3 POC, 2026-06-16): the Playwright native-setter path
-(POC #2) is a confirmed dead end for ``dbc.Input``. The working path is
-``dash.testing``/``dash_duo`` (POC #1), which drives inputs via Selenium
-``send_keys`` — real keystrokes that fire React's onChange natively — but
-that needs ``selenium`` + ``multiprocess`` + ``chromedriver`` added to the
-env plus its own ``make test-ui-dash`` job (deferred follow-up). The
-Apply -> ``/api/set_params`` -> ``/api/state`` contract this test targets
-is already proven deterministically by L2
-(``test_control_manifest_behavioral`` ``apply-params-button`` row), so this
-browser leg is a redundancy, not a coverage gap. This xfail documents the
-harness wall.
+No harness change was needed. ``selenium``/``dash_duo`` would not have
+fixed it either: real keystrokes hit the same grid. The fix (F-CANOPY-017)
+gives float params ``step="any"`` and makes a ``None`` numeric State refuse
+the apply instead of silently defaulting, so ``page.fill()`` propagates and
+this test passes on its original code path.
+
+We still don't intercept the server-side ``POST /api/set_params`` from the
+Dash callback — that request is server-internal (the callback runs in the
+canopy process and ``requests.post`` never crosses the browser network) —
+so the assertion reads back through ``/api/state``, which is what the user
+actually observes.
 """
 
 import time
@@ -59,19 +61,11 @@ import requests
 
 
 @pytest.mark.ui
-@pytest.mark.xfail(
-    strict=True,
-    reason="Harness-level: Playwright fills DOM but Dash dbc.Input(type=number) never "
-    "sees the React onChange — apply callback receives State value=null. PR-10 "
-    "investigation confirmed: Apply click DOES fire the callback (visible in "
-    "_dash-update-component requests); the State payload itself is wrong. "
-    "Tried fill/type/React-setter/long-wait — none propagate. The corrected "
-    "native-setter (bubbling input+change+blur+debounce; 2026-06-16) also fails: "
-    "Apply pushes the default, not the set value. Manual browser sessions work. "
-    "Un-xfail via dash[testing]/dash_duo (Selenium send_keys), which needs "
-    "selenium+multiprocess+chromedriver added to the env (deferred follow-up).",
-)
 def test_apply_pushes_typed_learning_rate_into_backend(dashboard_page, canopy_url):
+    # 0.0123 is deliberately kept from the xfail era: it is the exact probe
+    # that used to arrive as the 0.01 default, and it is off the old
+    # min=0.0001/step=0.001 grid. With step="any" it must now survive
+    # verbatim, so this value is the regression guard for F-CANOPY-017.
     typed = 0.0123
 
     dashboard_page.wait_for_selector("#nn-learning-rate-input", timeout=15_000)

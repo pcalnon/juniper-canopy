@@ -50,7 +50,11 @@ class TestConvergenceLayoutComponents:
         assert inp.value == TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD
         assert inp.min == TrainingConstants.MIN_CONVERGENCE_THRESHOLD
         assert inp.max == TrainingConstants.MAX_CONVERGENCE_THRESHOLD
-        assert inp.step == 0.0001
+        # F-CANOPY-017: float params use step="any". A numeric step is evaluated
+        # relative to ``min``, so step=0.0001 with min=MIN_CONVERGENCE_THRESHOLD
+        # rejected ordinary typed values as stepMismatch — the widget then hands
+        # Dash None. See src/tests/regression/test_numeric_input_step_grid.py.
+        assert inp.step == "any"
 
     def test_apply_button_exists(self, reset_singletons):
         """Apply button exists with correct ID."""
