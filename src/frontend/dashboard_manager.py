@@ -398,6 +398,11 @@ _CASCADE_ONLY_TAB_IDS = frozenset({"candidates", "topology", "evolution", "bound
 # the training meta-params, every one governed by N5's ``CascorPatchBounds`` so the same
 # clamp → apply → applied/skipped machinery handles them (no duplicated bounds/toast
 # logic). (field_id, key, label).
+# F-CANOPY-017: distinguishes "caller omitted this optional kwarg" from "the
+# widget delivered None". Only the latter is an invalid-input signal; see
+# ``_apply_parameters_handler``.
+_UNSET = object()
+
 RESTART_MODAL_DATASET_FIELDS = (
     ("restart-ds-type", "dataset_type", "Dataset type"),
     ("restart-ds-samples", "n_samples", "Samples"),
@@ -923,7 +928,7 @@ class DashboardManager:
                                                                                 id="nn-max-iterations-input",
                                                                                 type="number",
                                                                                 value=self.training_defaults.get("max_iterations", TrainingConstants.DEFAULT_MAX_GROWTH_ITERATIONS),
-                                                                                step=100,
+                                                                                step=1,
                                                                                 min=TrainingConstants.MIN_MAX_GROWTH_ITERATIONS,
                                                                                 max=TrainingConstants.MAX_MAX_GROWTH_ITERATIONS,
                                                                                 className="mb-2",
@@ -934,7 +939,7 @@ class DashboardManager:
                                                                                 id="nn-max-total-epochs-input",
                                                                                 type="number",
                                                                                 value=self.training_defaults.get("epochs", TrainingConstants.DEFAULT_TRAINING_EPOCHS),
-                                                                                step=1000,
+                                                                                step=1,
                                                                                 min=self._settings.get_training_param_config("epochs")["min"],
                                                                                 max=self._settings.get_training_param_config("epochs")["max"],
                                                                                 className="mb-2",
@@ -980,7 +985,7 @@ class DashboardManager:
                                                                                 id="nn-learning-rate-input",
                                                                                 type="number",
                                                                                 value=self.training_defaults.get("learning_rate", TrainingConstants.DEFAULT_LEARNING_RATE),
-                                                                                step=0.001,
+                                                                                step="any",
                                                                                 min=self._settings.get_training_param_config("learning_rate")["min"],
                                                                                 max=self._settings.get_training_param_config("learning_rate")["max"],
                                                                                 className="mb-2",
@@ -1059,7 +1064,7 @@ class DashboardManager:
                                                                                                     id="nn-growth-preset-epochs-input",
                                                                                                     type="number",
                                                                                                     value=self.training_defaults.get("preset_epochs", TrainingConstants.DEFAULT_PRESET_EPOCHS),
-                                                                                                    step=10,
+                                                                                                    step=1,
                                                                                                     min=TrainingConstants.MIN_PRESET_EPOCHS,
                                                                                                     max=TrainingConstants.MAX_PRESET_EPOCHS,
                                                                                                     className="mb-2 ms-4",
@@ -1077,7 +1082,7 @@ class DashboardManager:
                                                                                                     id="nn-growth-convergence-threshold-input",
                                                                                                     type="number",
                                                                                                     value=TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD,
-                                                                                                    step=0.0001,
+                                                                                                    step="any",
                                                                                                     min=TrainingConstants.MIN_CONVERGENCE_THRESHOLD,
                                                                                                     max=TrainingConstants.MAX_CONVERGENCE_THRESHOLD,
                                                                                                     className="mb-2 ms-4",
@@ -1186,7 +1191,7 @@ class DashboardManager:
                                                                                                     id="nn-spiral-rotations-input",
                                                                                                     type="number",
                                                                                                     value=TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
-                                                                                                    step=0.5,
+                                                                                                    step="any",
                                                                                                     min=TrainingConstants.MIN_SPIRAL_ROTATIONS,
                                                                                                     max=TrainingConstants.MAX_SPIRAL_ROTATIONS,
                                                                                                     className="mb-2 ms-3",
@@ -1211,7 +1216,7 @@ class DashboardManager:
                                                                                                     id="nn-dataset-elements-input",
                                                                                                     type="number",
                                                                                                     value=TrainingConstants.DEFAULT_DATASET_ELEMENTS,
-                                                                                                    step=100,
+                                                                                                    step=1,
                                                                                                     min=TrainingConstants.MIN_DATASET_ELEMENTS,
                                                                                                     max=TrainingConstants.MAX_DATASET_ELEMENTS,
                                                                                                     className="mb-2 ms-3",
@@ -1223,7 +1228,7 @@ class DashboardManager:
                                                                                                     id="nn-dataset-noise-input",
                                                                                                     type="number",
                                                                                                     value=TrainingConstants.DEFAULT_DATASET_NOISE,
-                                                                                                    step=0.05,
+                                                                                                    step="any",
                                                                                                     min=TrainingConstants.MIN_DATASET_NOISE,
                                                                                                     max=TrainingConstants.MAX_DATASET_NOISE,
                                                                                                     className="mb-2 ms-3",
@@ -1330,7 +1335,7 @@ class DashboardManager:
                                                                                 id="cn-correlation-threshold-input",
                                                                                 type="number",
                                                                                 value=TrainingConstants.DEFAULT_CANDIDATE_CORRELATION_THRESHOLD,
-                                                                                step=0.0001,
+                                                                                step="any",
                                                                                 min=TrainingConstants.MIN_CANDIDATE_CORRELATION_THRESHOLD,
                                                                                 max=TrainingConstants.MAX_CANDIDATE_CORRELATION_THRESHOLD,
                                                                                 className="mb-2",
@@ -1392,7 +1397,7 @@ class DashboardManager:
                                                                                                     id="cn-training-iterations-input",
                                                                                                     type="number",
                                                                                                     value=TrainingConstants.DEFAULT_CANDIDATE_TRAINING_ITERATIONS,
-                                                                                                    step=10,
+                                                                                                    step=1,
                                                                                                     min=TrainingConstants.MIN_CANDIDATE_TRAINING_ITERATIONS,
                                                                                                     max=TrainingConstants.MAX_CANDIDATE_TRAINING_ITERATIONS,
                                                                                                     className="mb-2 ms-4",
@@ -1410,7 +1415,7 @@ class DashboardManager:
                                                                                                     id="cn-training-convergence-threshold-input",
                                                                                                     type="number",
                                                                                                     value=TrainingConstants.DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD,
-                                                                                                    step=0.00001,
+                                                                                                    step="any",
                                                                                                     min=TrainingConstants.MIN_CANDIDATE_CONVERGENCE_THRESHOLD,
                                                                                                     max=TrainingConstants.MAX_CANDIDATE_CONVERGENCE_THRESHOLD,
                                                                                                     className="mb-2 ms-4",
@@ -5166,9 +5171,9 @@ class DashboardManager:
             [
                 dbc.Label("Type", html_for="restart-ds-type", size="sm", className="mb-0"),
                 dcc.Dropdown(id="restart-ds-type", options=gated_dataset_options(DEFAULT_MODEL_KEY), value=DEFAULT_DATASET_TYPE, clearable=False, className="mb-2"),
-                _num("Samples", "restart-ds-samples", 100, 1),
-                _num("Noise", "restart-ds-noise", 0.05, 0),
-                _num("Spiral rotations", "restart-ds-rotations", 0.5, 0),
+                _num("Samples", "restart-ds-samples", 1, 1),
+                _num("Noise", "restart-ds-noise", "any", 0),
+                _num("Spiral rotations", "restart-ds-rotations", "any", 0),
                 _num("Spirals", "restart-ds-spirals", 1, 1),
             ]
         )
@@ -5193,13 +5198,13 @@ class DashboardManager:
         return html.Div(
             [
                 html.Div("Network", className="fw-semibold small text-muted mb-1"),
-                _num("Learning rate", "restart-p-nn-learning-rate", 0.01, 0),
+                _num("Learning rate", "restart-p-nn-learning-rate", "any", 0),
                 _num("Max hidden units", "restart-p-nn-max-hidden-units", 1, 1),
                 _num("Patience", "restart-p-nn-patience", 1, 1),
                 html.Div("Candidate", className="fw-semibold small text-muted mb-1 mt-2"),
                 _num("Candidate pool size", "restart-p-cn-pool-size", 1, 1),
                 _num("Selected candidates", "restart-p-cn-selected", 1, 1),
-                _num("Correlation threshold", "restart-p-cn-corr-thresh", 0.05, 0),
+                _num("Correlation threshold", "restart-p-cn-corr-thresh", "any", 0),
             ]
         )
 
@@ -6957,10 +6962,10 @@ class DashboardManager:
         cn_cand_selection,
         cn_top_cands,
         cn_random_cands,
-        nn_output_epochs=None,
-        nn_optimizer_type=None,
-        nn_activation_function=None,
-        nn_init_output_weights=None,
+        nn_output_epochs=_UNSET,
+        nn_optimizer_type=_UNSET,
+        nn_activation_function=_UNSET,
+        nn_init_output_weights=_UNSET,
     ):
         """Apply parameters to backend and update applied store."""
         if not n_clicks:
@@ -6969,38 +6974,80 @@ class DashboardManager:
         def checkbox_to_bool(v):
             return "enabled" in (v or [])
 
+        # ── F-CANOPY-017 ──────────────────────────────────────────────────
+        # A numeric ``dbc.Input`` whose current content fails HTML5 validity
+        # (out of range, or — before the step sweep below — off the step grid)
+        # delivers ``None`` as its Dash State. ``None`` therefore means "this
+        # widget holds no committed value", NEVER "restore the factory
+        # default". Substituting ``TrainingConstants.DEFAULT_*`` for it, as
+        # this dict did, silently replaced the operator's live backend value
+        # with a hardcoded constant: typing 0.0733 into the learning rate and
+        # clicking Apply POSTed 0.01, which is neither the typed value nor the
+        # 0.0789 that was live. The dirty tracker had already lit the Apply
+        # button and shown "Unsaved changes", so it read as a pending edit.
+        #
+        # Refuse loudly instead. Omitting the keys is not an option: the
+        # backend contract is the full form (see the 27-key body in
+        # src/tests/ui/test_param_roundtrip_visible.py), so a partial payload
+        # risks a wholesale 422.
+        # ``_UNSET`` (the four late-added kwargs' default) means "this caller did
+        # not supply the argument at all" — a signature contract, distinct from
+        # ``None``, which means "the widget delivered no value". Only the latter
+        # is the defect above; an omitted kwarg keeps its documented default.
+        invalid_fields: list[str] = []
+
+        def _num(value, label, cast, default=None):
+            if value is _UNSET:
+                return default
+            if value is None:
+                invalid_fields.append(label)
+                return None
+            try:
+                return cast(value)
+            except (TypeError, ValueError):
+                invalid_fields.append(label)
+                return None
+
+        def _choice(value, default):
+            return default if value is _UNSET or not value else value
+
         params = {
-            "nn_max_iterations": int(nn_max_iter) if nn_max_iter is not None else TrainingConstants.DEFAULT_MAX_GROWTH_ITERATIONS,
-            "nn_max_total_epochs": int(nn_max_epochs) if nn_max_epochs is not None else TrainingConstants.DEFAULT_TRAINING_EPOCHS,
-            "nn_learning_rate": float(nn_lr) if nn_lr is not None else TrainingConstants.DEFAULT_LEARNING_RATE,
-            "nn_max_hidden_units": int(nn_max_hu) if nn_max_hu is not None else TrainingConstants.DEFAULT_MAX_HIDDEN_UNITS,
+            "nn_max_iterations": _num(nn_max_iter, "Maximum Iterations", int),
+            "nn_max_total_epochs": _num(nn_max_epochs, "Maximum Total Epochs", int),
+            "nn_learning_rate": _num(nn_lr, "Learning Rate", float),
+            "nn_max_hidden_units": _num(nn_max_hu, "Maximum Hidden Units", int),
             "nn_multi_node_layers": checkbox_to_bool(nn_multi_node),
             "nn_growth_trigger": nn_growth_trigger or TrainingConstants.DEFAULT_GROWTH_TRIGGER,
-            "nn_growth_preset_epochs": int(nn_growth_epochs) if nn_growth_epochs is not None else TrainingConstants.DEFAULT_PRESET_EPOCHS,
-            "nn_growth_convergence_threshold": float(nn_growth_conv_thresh) if nn_growth_conv_thresh is not None else TrainingConstants.DEFAULT_CONVERGENCE_THRESHOLD,
-            "nn_patience": int(nn_patience) if nn_patience is not None else TrainingConstants.DEFAULT_PATIENCE,
-            "nn_spiral_rotations": float(nn_spiral_rot) if nn_spiral_rot is not None else TrainingConstants.DEFAULT_SPIRAL_ROTATIONS,
-            "nn_spiral_number": int(nn_spiral_num) if nn_spiral_num is not None else TrainingConstants.DEFAULT_SPIRAL_NUMBER,
+            "nn_growth_preset_epochs": _num(nn_growth_epochs, "Growth: Number of Epochs", int),
+            "nn_growth_convergence_threshold": _num(nn_growth_conv_thresh, "Growth: Convergence Threshold", float),
+            "nn_patience": _num(nn_patience, "Patience", int),
+            "nn_spiral_rotations": _num(nn_spiral_rot, "Spiral Rotations", float),
+            "nn_spiral_number": _num(nn_spiral_num, "Spiral Number", int),
             # #2b: nn_dataset_* are canopy-local and travel on /api/stage_dataset
             # (Issue #4 cold-swap), so they're no longer duplicated onto the
             # set_params payload (they were never mapped to cascor from here).
-            "cn_pool_size": int(cn_pool_size) if cn_pool_size is not None else TrainingConstants.DEFAULT_CANDIDATE_POOL_SIZE,
-            "cn_correlation_threshold": float(cn_corr_thresh) if cn_corr_thresh is not None else TrainingConstants.DEFAULT_CANDIDATE_CORRELATION_THRESHOLD,
-            "cn_selected_candidates": int(cn_selected) if cn_selected is not None else TrainingConstants.DEFAULT_SELECTED_CANDIDATES,
+            "cn_pool_size": _num(cn_pool_size, "Candidate Pool Size", int),
+            "cn_correlation_threshold": _num(cn_corr_thresh, "Correlation Threshold", float),
+            "cn_selected_candidates": _num(cn_selected, "Selected Candidates", int),
             # #2b: cn_training_complete is a read-only status flag, not an
             # editable parameter — dropped from the set_params payload.
-            "cn_training_iterations": int(cn_training_iter) if cn_training_iter is not None else TrainingConstants.DEFAULT_CANDIDATE_TRAINING_ITERATIONS,
-            "cn_training_convergence_threshold": float(cn_training_conv_thresh) if cn_training_conv_thresh is not None else TrainingConstants.DEFAULT_CANDIDATE_CONVERGENCE_THRESHOLD,
-            "cn_patience": int(cn_patience) if cn_patience is not None else TrainingConstants.DEFAULT_CN_PATIENCE,
+            "cn_training_iterations": _num(cn_training_iter, "Candidate Training Iterations", int),
+            "cn_training_convergence_threshold": _num(cn_training_conv_thresh, "Candidate Convergence Threshold", float),
+            "cn_patience": _num(cn_patience, "Candidate Patience", int),
             "cn_multi_candidate": checkbox_to_bool(cn_multi_cand),
             "cn_candidate_selection": cn_cand_selection,
-            "cn_top_candidates": int(cn_top_cands) if cn_top_cands is not None else TrainingConstants.DEFAULT_TOP_CANDIDATES_COUNT,
-            "cn_random_candidates": int(cn_random_cands) if cn_random_cands is not None else TrainingConstants.DEFAULT_RANDOM_CANDIDATES_COUNT,
-            "nn_output_epochs": int(nn_output_epochs) if nn_output_epochs is not None else TrainingConstants.DEFAULT_OUTPUT_EPOCHS,
-            "nn_optimizer_type": nn_optimizer_type or TrainingConstants.DEFAULT_OPTIMIZER_TYPE,
-            "nn_activation_function_name": nn_activation_function or TrainingConstants.DEFAULT_ACTIVATION_FUNCTION,
-            "nn_init_output_weights": nn_init_output_weights or TrainingConstants.DEFAULT_INIT_OUTPUT_WEIGHTS,
+            "cn_top_candidates": _num(cn_top_cands, "Top Candidates", int),
+            "cn_random_candidates": _num(cn_random_cands, "Random Candidates", int),
+            "nn_output_epochs": _num(nn_output_epochs, "Output Epochs (per pass)", int, TrainingConstants.DEFAULT_OUTPUT_EPOCHS),
+            "nn_optimizer_type": _choice(nn_optimizer_type, TrainingConstants.DEFAULT_OPTIMIZER_TYPE),
+            "nn_activation_function_name": _choice(nn_activation_function, TrainingConstants.DEFAULT_ACTIVATION_FUNCTION),
+            "nn_init_output_weights": _choice(nn_init_output_weights, TrainingConstants.DEFAULT_INIT_OUTPUT_WEIGHTS),
         }
+
+        if invalid_fields:
+            preview = ", ".join(invalid_fields[:5]) + ("…" if len(invalid_fields) > 5 else "")
+            self.logger.warning(f"Apply refused — {len(invalid_fields)} field(s) hold no valid value: {invalid_fields}")
+            return dash.no_update, f"Nothing applied — {len(invalid_fields)} field(s) hold no valid value: {preview}. Correct them and Apply again."
 
         # N5 (I-4) / N3b: apply through the shared clamp → POST → applied/skipped
         # core so the params panel and the N3b restart modal go through identical

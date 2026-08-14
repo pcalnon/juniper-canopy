@@ -526,10 +526,18 @@ class TestApplyParametersHandler:
     """Test apply parameters handler variations."""
 
     def test_apply_parameters_with_none_values(self, dashboard_manager, mocker):
-        """Test apply parameters with None values uses defaults."""
+        """None numeric States refuse the apply — they do NOT become defaults.
+
+        This test previously asserted ``result["nn_learning_rate"] == 0.01``
+        for an all-None call, codifying what turned out to be F-CANOPY-017: a
+        numeric input that fails HTML5 validity hands Dash ``None``, and
+        substituting ``DEFAULT_LEARNING_RATE`` for it silently overwrote the
+        operator's live backend value (observed live: 0.0789 → typed 0.0733 →
+        applied 0.01). The handler now refuses and names the fields instead.
+        """
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mocker.patch("requests.post", return_value=mock_response)
+        mock_post = mocker.patch("requests.post", return_value=mock_response)
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result, msg = dashboard_manager._apply_parameters_handler(
@@ -559,11 +567,10 @@ class TestApplyParametersHandler:
                 None,
                 None,
             )
-            assert result["nn_learning_rate"] == 0.01
-            assert result["nn_max_hidden_units"] == 1000
-            assert result["nn_max_total_epochs"] == 1000000
-            assert result["nn_multi_node_layers"] is False
-            assert result["nn_growth_convergence_threshold"] == 0.001
+            assert result is dash.no_update, "an all-None apply must not write the applied-params store"
+            assert mock_post.call_count == 0, "an all-None apply must not POST /api/set_params"
+            assert "Nothing applied" in msg, msg
+            assert "Learning Rate" in msg, msg
 
 
 class TestInitParamsAlreadyInitialized:
