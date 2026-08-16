@@ -181,12 +181,31 @@ class TrainingConstants:
     MAX_CANDIDATE_CONVERGENCE_THRESHOLD: Final[float] = 0.01
 
     # ── Candidate Nodes: Multi candidate selection ──
+    #
+    # F-CANOPY-024: these feed the (S, T, R) invariant triple cascor enforces in
+    # ``_validate_candidate_pool_triple`` (juniper-cascor
+    # ``src/api/lifecycle/manager.py:225``), where S = DEFAULT_SELECTED_CANDIDATES:
+    #
+    #     T > 0 and R > 0  ->  T + R must equal S
+    #     R == 0           ->  T must equal S
+    #     T == 0           ->  R must equal S
+    #     T == R == 0      ->  rejected
+    #
+    # This shipped as S=1, T=1, R=1 — so T+R=2 != S=1 and the FIRST Apply on a
+    # fresh dashboard always failed validation, client-side and at cascor. The
+    # operator could not correct it in place either, because T and R both ship
+    # disabled behind ``cn-multi-candidate-checkbox``.
+    #
+    # The MINs were also stricter than the backend: cascor declares
+    # ``top_candidates``/``random_candidates`` as ``ge=0``
+    # (``src/api/models/training.py:161-162``, ``:329-330``), so a floor of 1 made
+    # the valid single-strategy config (T=S, R=0) unreachable from the UI.
     DEFAULT_MULTI_CANDIDATE_ENABLED: Final[bool] = False
     DEFAULT_TOP_CANDIDATES_COUNT: Final[int] = 1
-    MIN_TOP_CANDIDATES_COUNT: Final[int] = 1
+    MIN_TOP_CANDIDATES_COUNT: Final[int] = 0
     MAX_TOP_CANDIDATES_COUNT: Final[int] = 20
-    DEFAULT_RANDOM_CANDIDATES_COUNT: Final[int] = 1
-    MIN_RANDOM_CANDIDATES_COUNT: Final[int] = 1
+    DEFAULT_RANDOM_CANDIDATES_COUNT: Final[int] = 0
+    MIN_RANDOM_CANDIDATES_COUNT: Final[int] = 0
     MAX_RANDOM_CANDIDATES_COUNT: Final[int] = 20
 
     # ── Cascade correlation internal constants (Phase 6 — matches CasCor reference) ──
