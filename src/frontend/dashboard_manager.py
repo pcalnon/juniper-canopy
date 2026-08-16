@@ -1468,7 +1468,12 @@ class DashboardManager:
                                                                                     dbc.RadioItems(
                                                                                         id="cn-candidate-selection-radio",
                                                                                         options=[
-                                                                                            {"label": "Add Top Tier Candidates", "value": "top_tier"},
+                                                                                            # F-CANOPY-022: value MUST be one of cascor's
+                                                                                            # Literal["top","random","mixed"] (juniper-cascor
+                                                                                            # api/models/training.py:159,:327). This shipped as
+                                                                                            # "top_tier", which cascor rejected with a pydantic
+                                                                                            # literal_error, so this option could never be applied.
+                                                                                            {"label": "Add Top Tier Candidates", "value": "top"},
                                                                                             {"label": "Add Random Candidates", "value": "random"},
                                                                                         ],
                                                                                         value=None,
@@ -6813,8 +6818,14 @@ class DashboardManager:
         return True, False
 
     def _toggle_cn_selection_inputs_handler(self, selection_mode):
-        """Enable/disable sub-inputs based on candidate selection mode."""
-        if selection_mode == "top_tier":
+        """Enable/disable sub-inputs based on candidate selection mode.
+
+        F-CANOPY-022: ``top_tier`` is the pre-fix value of this radio and is
+        still accepted here so a persisted ``applied-params-store`` (or a
+        browser session open across the upgrade) keeps gating correctly. The
+        shipped option value is now ``top``, matching cascor's schema.
+        """
+        if selection_mode in ("top", "top_tier"):
             return False, True
         elif selection_mode == "random":
             return True, False
