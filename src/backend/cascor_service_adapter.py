@@ -1250,6 +1250,22 @@ class CascorServiceAdapter:
         }
     )
 
+    # F-CANOPY-023 — cascor params that are DERIVED read-only. cascor accepts
+    # them at the request boundary so a full-form canopy apply keeps working,
+    # then reports them as ``skipped(not-updatable)`` rather than storing them,
+    # so their post-PATCH value is EXPECTED to differ from what was sent.
+    #
+    # ``epochs_max`` is the standing case (cascor C2b / Q1 outcome (c),
+    # juniper-cascor ``src/api/lifecycle/manager.py:1618-1640``): it is derived
+    # as ``output_epochs + effective_iterations * (candidate_epochs +
+    # output_epochs)`` from the granular limits that actually gate training.
+    #
+    # This is the STATIC backstop; the primary rule is data-driven off cascor's
+    # own C2a skipped partition (see ``_verify_apply_roundtrip``). It exists for
+    # a backend that returns no partition, where the data-driven rule alone
+    # would let one expected divergence fail every apply.
+    _DERIVED_READONLY_CASCOR_PARAMS: frozenset = frozenset({"epochs_max"})
+
     # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C3 — params whose verify step uses
     # math.isclose(rel_tol=1e-6) instead of equality. Float round-trips through
     # JSON / pydantic / numpy lose enough precision that exact equality is the
@@ -1341,6 +1357,17 @@ class CascorServiceAdapter:
                 logger.error(f"Failed to update cascor params via REST: {e}")
                 return {"ok": False, "error": str(e), "skipped": skipped}
 
+        # N5 (I-4/T3): surface cascor's C2a applied/skipped(reason) partition so
+        # the canopy toast can show what actually landed and what the live
+        # network declined (and why) — distinct from the adapter's own
+        # ``skipped`` (canopy keys with no cascor mapping, never sent).
+        #
+        # F-CANOPY-023: this MUST be extracted before the roundtrip verify below,
+        # which consumes it. Extracting it afterwards meant the verify compared
+        # keys cascor had explicitly declined and failed the whole apply on a
+        # divergence cascor had already explained.
+        applied_keys, skipped_detail = self._extract_cascor_partition(result_data)
+
         # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C3 — roundtrip verify. Confirm
         # the running cascor config moved to the requested values; surface any
         # divergence via ``mismatches`` so the canopy toast can route it
@@ -1349,7 +1376,7 @@ class CascorServiceAdapter:
         # write — the PATCH already returned 200; if cascor's GET broke we
         # still want the user to see "applied", just without the second-line
         # confirmation.
-        verify = self._verify_apply_roundtrip(mapped)
+        verify = self._verify_apply_roundtrip(mapped, skipped_detail=skipped_detail)
         if verify is not None:
             logger.warning("apply_params verify mismatch: %s", verify)
             return {
@@ -1358,12 +1385,6 @@ class CascorServiceAdapter:
                 "mismatches": verify,
                 "skipped": skipped,
             }
-
-        # N5 (I-4/T3): surface cascor's C2a applied/skipped(reason) partition so
-        # the canopy toast can show what actually landed and what the live
-        # network declined (and why) — distinct from the adapter's own
-        # ``skipped`` (canopy keys with no cascor mapping, never sent).
-        applied_keys, skipped_detail = self._extract_cascor_partition(result_data)
         logger.info(f"Cascor params updated: {list(mapped.keys())}")
         return {"ok": True, "data": result_data, "skipped": skipped, "applied": applied_keys, "skipped_detail": skipped_detail}
 
@@ -1409,7 +1430,11 @@ class CascorServiceAdapter:
                             skipped_detail.append(detail)
         return applied_keys, skipped_detail
 
-    def _verify_apply_roundtrip(self, mapped: Dict[str, Any]) -> Optional[Dict[str, Dict[str, Any]]]:
+    def _verify_apply_roundtrip(
+        self,
+        mapped: Dict[str, Any],
+        skipped_detail: Optional[list] = None,
+    ) -> Optional[Dict[str, Dict[str, Any]]]:
         """Confirm the cascor running config matches the values just PATCHed.
 
         Returns ``None`` on full match (or when the verify call itself fails —
@@ -1418,6 +1443,18 @@ class CascorServiceAdapter:
 
         Float-tolerant comparison (``math.isclose(rel_tol=1e-6)``) for the
         params in ``_FLOAT_TOLERANT_PARAMS``; everything else uses ``!=``.
+
+        F-CANOPY-023: a key the live network *declined* is expected to differ
+        from what was sent, and is not a verification failure. Two exclusions,
+        because a divergence here fails the ENTIRE apply — including the keys
+        that did land:
+
+        * ``skipped_detail`` — cascor's own C2a ``skipped(reason)`` partition
+          (canopy-namespaced by ``_extract_cascor_partition``). Data-driven, so
+          any future not-updatable key is handled without a code change.
+        * ``_DERIVED_READONLY_CASCOR_PARAMS`` — the static backstop for a
+          backend that returns no partition (pre-C2a, or an ack that omits it),
+          where the data-driven rule alone would still fail every apply.
         """
         try:
             # juniper-cascor-client returns ``{"data": {...}}``; the inner
@@ -1432,8 +1469,23 @@ class CascorServiceAdapter:
 
         import math
 
+        # F-CANOPY-023: keys the live network declined. ``skipped_detail`` is
+        # canopy-namespaced, so map back to cascor names to compare with
+        # ``mapped``.
+        declined: set = set(self._DERIVED_READONLY_CASCOR_PARAMS)
+        for entry in skipped_detail or []:
+            if isinstance(entry, dict) and "key" in entry:
+                canopy_key = entry.get("key")
+                declined.add(self._CANOPY_TO_CASCOR_PARAM_MAP.get(canopy_key, canopy_key))
+
         mismatches: Dict[str, Dict[str, Any]] = {}
         for key, requested in mapped.items():
+            if key in declined:
+                # cascor reported this key as not-updatable (or it is a known
+                # derived read-only value). Its post-PATCH value is EXPECTED to
+                # differ from what was sent — comparing it would fail an apply
+                # in which every operator edit actually landed.
+                continue
             if key not in applied_raw:
                 # Not all PATCH targets are echoed by GET; absence means the
                 # server didn't surface it, not that it was rejected. Skip.
