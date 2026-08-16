@@ -1182,6 +1182,24 @@ class CascorServiceAdapter:
 
     _CASCOR_TO_CANOPY_PARAM_MAP = {v: k for k, v in _CANOPY_TO_CASCOR_PARAM_MAP.items()}
 
+    # F-CANOPY-022 — VALUE vocabulary translation, keyed by CASCOR param name.
+    # The map above renames canopy's form fields to cascor's parameter names;
+    # a field can additionally disagree on the VALUE vocabulary, and the key
+    # rename alone then ships a value cascor's schema rejects.
+    #
+    # ``candidate_selection`` is the standing case: canopy's radio shipped
+    # ``top_tier`` while cascor declares Literal["top","random","mixed"]
+    # (juniper-cascor api/models/training.py:159,:327), so selecting "Add Top
+    # Tier Candidates" and applying returned a pydantic literal_error that the
+    # dashboard surfaced as HTTP 502 — the option could never be applied. The
+    # radio now ships ``top``; this map is the back-compat leg, so a persisted
+    # ``applied-params-store``, a browser session open across the upgrade, or a
+    # direct ``POST /api/set_params`` caller using the old value still lands.
+    # ``random`` matches on both sides and needs no entry.
+    _CANOPY_TO_CASCOR_VALUE_MAP: Dict[str, Dict[Any, Any]] = {
+        "candidate_selection": {"top_tier": "top"},
+    }
+
     # Phase C: hot params route over /ws/control; cold stay on REST PATCH (§S9)
     _HOT_CASCOR_PARAMS: frozenset = frozenset(
         {
@@ -1259,6 +1277,15 @@ class CascorServiceAdapter:
         hot params fall back to REST unconditionally.
         """
         mapped = {self._CANOPY_TO_CASCOR_PARAM_MAP[k]: v for k, v in params.items() if k in self._CANOPY_TO_CASCOR_PARAM_MAP}
+        # F-CANOPY-022: translate legacy VALUE vocabulary after the key rename.
+        # Unmapped values pass through verbatim so cascor stays authoritative on
+        # what it will accept; an unhashable value simply is not a legacy token.
+        for cascor_key, value_map in self._CANOPY_TO_CASCOR_VALUE_MAP.items():
+            if cascor_key in mapped:
+                try:
+                    mapped[cascor_key] = value_map.get(mapped[cascor_key], mapped[cascor_key])
+                except TypeError:
+                    pass
         # FRONTEND_ISSUES_PLAN_2026-05-09 §1.5 C1a (Issue #1) + #2b: surface
         # GENUINELY-unsupported keys (neither cascor-mappable nor known
         # canopy-local) so they aren't silently dropped — but exclude
