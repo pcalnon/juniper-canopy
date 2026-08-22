@@ -19,6 +19,7 @@ import dash
 import pytest
 
 import frontend.dashboard_manager as dmmod
+from frontend.callback_context import CallbackContextAdapter
 from frontend.dashboard_manager import DashboardManager
 
 
@@ -372,19 +373,38 @@ class TestDatastoreInner:
             result = cb(1, "boundaries")
         assert result == {"inputs": []}
 
+    # F-CANOPY-029: these two fakes MUST be spec'd to CallbackContextAdapter.
+    # They previously used a bare MagicMock() and set ``fake_ctx.triggered_id`` --
+    # an attribute the adapter has never had. A bare MagicMock fabricates any
+    # attribute on demand, so both tests passed green while every real click
+    # raised AttributeError and Dash returned 500, leaving the dataset generate
+    # modal permanently unopenable. With spec= the mock rejects the wrong name,
+    # so this class of drift fails the test instead of shipping.
     def test_toggle_generate_modal_open(self, dm):
         cb = raw_cb(dm, "toggle_generate_modal")
-        fake_ctx = MagicMock()
-        fake_ctx.triggered_id = "dataset-plotter-generate-btn"
+        fake_ctx = MagicMock(spec=CallbackContextAdapter)
+        fake_ctx.get_triggered_id.return_value = "dataset-plotter-generate-btn"
         with patch.object(dmmod, "get_callback_context", return_value=fake_ctx):
             assert cb(1, None, None, None, None, False) is True
 
     def test_toggle_generate_modal_close(self, dm):
         cb = raw_cb(dm, "toggle_generate_modal")
-        fake_ctx = MagicMock()
-        fake_ctx.triggered_id = "dataset-plotter-gen-cancel"
+        fake_ctx = MagicMock(spec=CallbackContextAdapter)
+        fake_ctx.get_triggered_id.return_value = "dataset-plotter-gen-cancel"
         with patch.object(dmmod, "get_callback_context", return_value=fake_ctx):
             assert cb(None, 1, None, None, None, True) is False
+
+    def test_toggle_generate_modal_rejects_raw_dash_attribute(self, dm):
+        """Anti-regression for F-CANOPY-029 itself.
+
+        The adapter exposes get_triggered_id() and NOT dash's ``.triggered_id``.
+        Pin that so a future edit cannot reintroduce the raw-dash attribute read
+        on the adapter object without a test failing.
+        """
+        assert hasattr(CallbackContextAdapter, "get_triggered_id")
+        assert not hasattr(CallbackContextAdapter, "triggered_id")
+        with pytest.raises(AttributeError):
+            MagicMock(spec=CallbackContextAdapter).triggered_id
 
     @patch("requests.post")
     def test_generate_dataset_delegates(self, mock_post, dm):
@@ -528,7 +548,8 @@ class TestServerSideTrainingButtonsInner:
         with patch.object(dmmod, "get_settings", return_value=flipped):
             dm = DashboardManager({})
         cb = raw_cb(dm, "handle_training_buttons")
-        fake_ctx = MagicMock()
+        # spec'd for the same reason as the toggle_generate_modal fakes (F-CANOPY-029)
+        fake_ctx = MagicMock(spec=CallbackContextAdapter)
         fake_ctx.get_triggered_id.return_value = "start-button"
         button_states = {"start": {"disabled": False, "loading": False, "timestamp": 0}}
         with patch.object(dmmod, "get_callback_context", return_value=fake_ctx), patch("requests.post") as mock_post:

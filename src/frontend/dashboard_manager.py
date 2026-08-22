@@ -3867,7 +3867,12 @@ class DashboardManager:
         )
         def toggle_generate_modal(open_clicks, cancel_clicks, confirm_clicks, import_file_clicks, import_url_clicks, is_open):
             ctx = get_callback_context()
-            trigger = ctx.triggered_id
+            # F-CANOPY-029: this is a CallbackContextAdapter (frontend/callback_context.py),
+            # NOT dash.callback_context -- it exposes get_triggered_id(), and reading the
+            # raw-dash ``.triggered_id`` attribute on it raised AttributeError on every
+            # click, so Dash returned 500 and this modal could never open. The adapter
+            # swallows the underlying dash lookup's errors internally and returns None.
+            trigger = ctx.get_triggered_id()
             if trigger == "dataset-plotter-generate-btn":
                 return True
             return False
