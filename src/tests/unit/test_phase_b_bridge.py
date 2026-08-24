@@ -131,8 +131,17 @@ class TestMetricsPollUngated:
 
         assert result is dash.no_update
 
-    def test_empty_fetch_with_empty_store_passes_through(self):
-        """Genuinely-empty-and-store-empty passes through (no data to preserve)."""
+    def test_empty_fetch_with_empty_store_is_no_op_suppressed(self):
+        """Genuinely-empty fetch with an empty store is now ``no_update``.
+
+        Stage 2 (design §13 row 4) supersedes the old "passes through
+        unchanged" arm: ``[]`` over ``[]`` is the definition of a no-op write,
+        and an unchanged write still fires every downstream consumer. The
+        empty-GUARD (don't blank a populated store) is untouched — see the
+        populated-store case above.
+        """
+        import dash
+
         dm = self._dm()
 
         with patch("frontend.dashboard_manager.requests") as mock_requests:
@@ -141,7 +150,7 @@ class TestMetricsPollUngated:
             mock_resp.json.return_value = {"history": []}
             result = dm._update_metrics_store_handler(n=1, current_metrics=[])
 
-        assert result == []
+        assert result is dash.no_update
 
     def test_non_ok_with_populated_store_returns_no_update(self):
         """A non-ok fetch preserves the last-known-good store."""

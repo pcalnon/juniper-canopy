@@ -219,19 +219,35 @@ class TestThemeInner:
 class TestStatusAndNetworkInner:
     @patch("requests.get")
     def test_update_unified_status_bar(self, mock_get, dm):
+        # Stage 2 (design §13 row 1): the bar callback also owns training-status-store,
+        # so the tuple grew 9 -> 10; the store element carries {is_running, phase}.
         mock_get.return_value = _resp(ok=True, status=200, json_value={"is_running": False, "phase": "idle", "current_epoch": 0, "hidden_units": 0})
         cb = raw_cb(dm, "update_unified_status_bar")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = cb(1)
-        assert len(result) == 9
+            result = cb(1, None)
+        assert len(result) == 10
+        assert result[9] == {"is_running": False, "phase": "idle"}
+
+    @patch("requests.get")
+    def test_update_unified_status_bar_suppresses_unchanged_training_status(self, mock_get, dm):
+        # Stage 2 (design §13 row 1): unchanged {is_running, phase} -> the store
+        # element is no_update, so its consumers only re-run on real transitions.
+        mock_get.return_value = _resp(ok=True, status=200, json_value={"is_running": True, "phase": "output"})
+        cb = raw_cb(dm, "update_unified_status_bar")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            result = cb(1, {"is_running": True, "phase": "output"})
+        assert result[9] is dash.no_update
 
     @patch("requests.get")
     def test_update_network_info(self, mock_get, dm):
+        # Stage 2 (design §13 row 2): the panel is now element [0] of the merged
+        # update_system_panels callback (network info / details / stream health / banner).
         mock_get.return_value = _resp(ok=True, json_value={"input_size": 2, "hidden_units": 1, "output_size": 1})
-        cb = raw_cb(dm, "update_network_info")
+        cb = raw_cb(dm, "update_system_panels")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = cb(1)
-        assert result is not None
+            info, details, health, banner = cb(1)
+        assert info is not None
+        assert details is not None
 
     def test_toggle_network_info(self, dm):
         cb = raw_cb(dm, "toggle_network_info")
@@ -247,11 +263,12 @@ class TestStatusAndNetworkInner:
 
     @patch("requests.get")
     def test_update_network_info_details(self, mock_get, dm):
+        # Stage 2 (design §13 row 2): details is element [1] of update_system_panels.
         mock_get.return_value = _resp(ok=True, json_value={"total_weights": 5})
-        cb = raw_cb(dm, "update_network_info_details")
+        cb = raw_cb(dm, "update_system_panels")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = cb(1)
-        assert result is not None
+            _info, details, _health, _banner = cb(1)
+        assert details is not None
 
 
 # ---------------------------------------------------------------------------
@@ -382,10 +399,12 @@ class TestDatastoreInner:
 
     @patch("requests.get")
     def test_update_boundary_store_delegates(self, mock_get, dm):
+        # Stage 2 (design §13 row 5): the feeder holds its own store as State so
+        # an identical fetch suppresses to no_update; a changed one still lands.
         mock_get.return_value = _resp(ok=True, json_value={"grid": []})
         cb = raw_cb(dm, "update_boundary_store")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = cb(1, "boundaries", None, 50)
+            result = cb(1, "boundaries", None, 50, None)
         assert result == {"grid": []}
 
     @patch("requests.get")
@@ -393,7 +412,7 @@ class TestDatastoreInner:
         mock_get.return_value = _resp(ok=True, json_value={"inputs": []})
         cb = raw_cb(dm, "update_boundary_dataset_store")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = cb(1, "boundaries")
+            result = cb(1, "boundaries", None)
         assert result == {"inputs": []}
 
     # F-CANOPY-029: these two fakes MUST be spec'd to CallbackContextAdapter.
