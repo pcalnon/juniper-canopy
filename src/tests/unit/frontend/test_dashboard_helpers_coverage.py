@@ -317,8 +317,8 @@ class TestUnifiedStatusBarHandler:
         with manager.app.server.request_context(env):
             result = manager._update_unified_status_bar_handler(n_intervals=1)
 
-        # Returns tuple of 9 elements for unified status bar
-        assert len(result) == 9
+        # Returns tuple of 10 elements for unified status bar
+        assert len(result) == 10  # Stage 2: +training-status-store element (design §13 row 1)
         (
             indicator_style,
             connection_status,
@@ -329,6 +329,7 @@ class TestUnifiedStatusBarHandler:
             phase_style,
             epoch,
             hidden_units,
+            training_status_store,
         ) = result
         assert "color" in indicator_style
         assert status == "Running"
@@ -336,6 +337,8 @@ class TestUnifiedStatusBarHandler:
         assert "ms" in latency_text
         assert epoch == "10"
         assert hidden_units == "3"
+        # Stage 2 (design §13 row 1): the merged store element carries {is_running, phase}.
+        assert set(training_status_store) == {"is_running", "phase"}
 
     @patch("requests.get")
     def test_error_response(self, mock_get, reset_singletons):
@@ -359,7 +362,7 @@ class TestUnifiedStatusBarHandler:
             result = manager._update_unified_status_bar_handler(n_intervals=1)
 
         # Returns 9 elements with error indicators
-        assert len(result) == 9
+        assert len(result) == 10  # Stage 2: +training-status-store element (design §13 row 1)
         indicator_style = result[0]
         status = result[3]
         status_style = result[4]

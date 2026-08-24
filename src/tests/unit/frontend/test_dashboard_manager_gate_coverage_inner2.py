@@ -153,35 +153,42 @@ class TestOpenRestartConfirmModalInner:
 
 
 # ---------------------------------------------------------------------------
-# reconcile_pending_dataset_banner (4233-4244)
+# pending-dataset banner reconciliation — Stage 2 (design §13 row 2): merged
+# into ``update_system_panels``; the banner is element [3] of its 4-tuple.
+# Same contract as the old ``reconcile_pending_dataset_banner``: bool(pending)
+# on 200, ``no_update`` on non-200 / network error.
 # ---------------------------------------------------------------------------
 class TestReconcilePendingDatasetBannerInner:
+    @staticmethod
+    def _banner(dm, cb_result):
+        return cb_result[3]
+
     @patch("requests.get")
     def test_pending_true(self, mock_get, dm):
         mock_get.return_value = _resp(status=200, json_value={"pending_dataset": {"nn_dataset_type": "xor"}})
-        cb = raw_cb(dm, "reconcile_pending_dataset_banner")
+        cb = raw_cb(dm, "update_system_panels")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            assert cb(1) is True
+            assert self._banner(dm, cb(1)) is True
 
     @patch("requests.get")
     def test_pending_false(self, mock_get, dm):
         mock_get.return_value = _resp(status=200, json_value={"pending_dataset": None})
-        cb = raw_cb(dm, "reconcile_pending_dataset_banner")
+        cb = raw_cb(dm, "update_system_panels")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            assert cb(1) is False
+            assert self._banner(dm, cb(1)) is False
 
     @patch("requests.get")
     def test_non_200_no_update(self, mock_get, dm):
         mock_get.return_value = _resp(status=500)
-        cb = raw_cb(dm, "reconcile_pending_dataset_banner")
+        cb = raw_cb(dm, "update_system_panels")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            assert cb(1) is dash.no_update
+            assert self._banner(dm, cb(1)) is dash.no_update
 
     @patch("requests.get", side_effect=requests.ConnectionError("down"))
     def test_exception_no_update(self, _mock_get, dm):
-        cb = raw_cb(dm, "reconcile_pending_dataset_banner")
+        cb = raw_cb(dm, "update_system_panels")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            assert cb(1) is dash.no_update
+            assert self._banner(dm, cb(1)) is dash.no_update
 
 
 # ---------------------------------------------------------------------------
@@ -260,11 +267,13 @@ class TestExperimentalFunctionsInner:
 class TestLiveDatasetSwitchInner:
     @patch("requests.get")
     def test_update_training_status_store(self, mock_get, dm):
+        # Stage 2 (design §13 row 1): the store's dedicated poller merged into
+        # update_unified_status_bar; the store payload is element [9] of its tuple.
         mock_get.return_value = _resp(status=200, json_value={"is_running": True, "phase": "output"})
-        cb = raw_cb(dm, "update_training_status_store")
+        cb = raw_cb(dm, "update_unified_status_bar")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = cb(1)
-        assert result == {"is_running": True, "phase": "output"}
+            result = cb(1, None)
+        assert result[9] == {"is_running": True, "phase": "output"}
 
     def test_gate_live_switch_button(self, dm):
         cb = raw_cb(dm, "gate_live_switch_button")
@@ -313,10 +322,11 @@ class TestLiveDatasetSwitchInner:
 class TestDatasetSwapObserversInner:
     @patch("requests.get")
     def test_poll_dataset_swap_events(self, mock_get, dm):
+        # Stage 2 (design §13 row 3): the poller holds its own store as State.
         mock_get.return_value = _resp(status=200, json_value={"data": {"events": [{"timestamp": "t1"}]}})
         cb = raw_cb(dm, "poll_dataset_swap_events")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = cb(1)
+            result = cb(1, None)
         assert result == {"events": [{"timestamp": "t1"}]}
 
     def test_hydrate_loaded_snapshot_swap_events_no_session(self, dm):
