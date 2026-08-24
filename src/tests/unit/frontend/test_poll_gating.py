@@ -68,6 +68,7 @@ EXPECTED_GATED_INTERVALS = (
     ("cassandra-panel-interval", "cassandra"),
     ("redis-panel-refresh-interval", "redis"),
     ("hdf5-snapshots-panel-refresh-interval", "snapshots"),
+    ("network-editor-panel-fsm-poll", "network-editor"),
 )
 
 # Every poller that is scoped to one panel and therefore must NOT ride a shared lane.
