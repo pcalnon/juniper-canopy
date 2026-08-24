@@ -580,15 +580,17 @@ class MetricsPanel(BaseComponent):
             app: Dash application instance
         """
 
-        # PERF-CN-01: prevent_initial_call=False — must hit the API on mount to
-        # populate network stats before the first interval tick.
-        @app.callback(
-            Output(f"{self.component_id}-network-stats-store", "data"),
-            [Input(f"{self.component_id}-stats-update-interval", "n_intervals")],
-            prevent_initial_call=False,
-        )
-        def fetch_network_stats(n_intervals):
-            return self._fetch_network_stats_handler(n_intervals=n_intervals)
+        # F-CANOPY-027: the ``fetch_network_stats`` poller that used to live here was DEAD
+        # WORK. It GET /api/network/stats every 5 s and wrote
+        # ``metrics-panel-network-stats-store`` — a store with no Input and no State consumer
+        # anywhere in src/ (verified repo-wide; the only other reference is its own
+        # ``dcc.Store`` declaration). Under dash-renderer's 12-slot concurrency cap that was a
+        # permanently-occupied slot bought for nothing, so it is removed rather than gated.
+        #
+        # The ``dcc.Store`` itself is deliberately RETAINED (it is inert, and the layout
+        # regression snapshot pins it); removing the store is tracked separately as
+        # F-CANOPY-034 so this PR's diff stays reviewable. ``_fetch_network_stats_handler``
+        # is likewise retained — it is exercised by existing unit tests.
 
         # PERF-CN-01: prevent_initial_call=False — must hit the API on mount to
         # populate training state before the first interval tick.

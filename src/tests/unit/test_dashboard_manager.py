@@ -399,21 +399,26 @@ class TestApplyInFlightIntervalPause:
         assert 'Output("apply-in-flight", "data", allow_duplicate=True)' in dashboard_manager_source
         assert 'Input("applied-params-store", "data")' in dashboard_manager_source
 
-    def test_in_flight_drives_interval_disabled(self, dashboard_manager_source):
-        """The `apply-in-flight` store toggles the `disabled` prop on both
-        update intervals."""
-        assert 'Output("fast-update-interval", "disabled")' in dashboard_manager_source
-        assert 'Output("slow-update-interval", "disabled")' in dashboard_manager_source
-        # Direct Input on apply-in-flight from the third callback in the
-        # CAN-000 cluster.
-        idx = dashboard_manager_source.find('Output("fast-update-interval", "disabled")')
-        assert idx != -1
-        # The Input("apply-in-flight", "data") line must appear in close
-        # proximity to the disabled Outputs (within ~500 chars), proving the
-        # CAN-000 cluster is wired together rather than being three unrelated
-        # callbacks that happen to share names.
-        window = dashboard_manager_source[idx : idx + 500]
-        assert 'Input("apply-in-flight", "data")' in window
+    def test_in_flight_drives_interval_disabled(self, dashboard):
+        """The `apply-in-flight` store toggles the `disabled` prop on both update intervals.
+
+        Pinned BEHAVIOURALLY against the built app rather than by grepping the source.
+        F-CANOPY-027 moved these Outputs into ``_setup_poll_gating``, where the CAN-000
+        clamp and the per-tab poll gate are fused into one clientside callback — Dash
+        permits only one un-duplicated writer per prop, so two competing writers would
+        race. The source-text form of this assertion pinned the old literal
+        ``Output("fast-update-interval", "disabled")`` spelling, which a comprehension
+        legitimately no longer produces; the contract it was protecting is unchanged and
+        is asserted directly here.
+        """
+        for interval_id in ("fast-update-interval", "slow-update-interval"):
+            target = f"{interval_id}.disabled"
+            writers = [entry for entry in dashboard.app._callback_list if target in str(entry["output"])]
+            assert len(writers) == 1, f"{target} must have exactly one writer, found {len(writers)}"
+            inputs = {f"{dep['id']}.{dep['property']}" for dep in writers[0]["inputs"] if isinstance(dep.get("id"), str)}
+            # The CAN-000 cluster must be wired together, not three callbacks that
+            # happen to share names: the clamp store feeds the writer directly.
+            assert "apply-in-flight.data" in inputs, f"{target} writer does not read apply-in-flight"
 
 
 class TestApplyInFlightWatchdogE3:

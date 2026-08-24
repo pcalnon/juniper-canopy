@@ -33,10 +33,11 @@
 #
 #####################################################################################################################################################################################################
 
+import json
 import logging
 import os
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, Final, List, Optional, Tuple
 
 import dash
 import dash_bootstrap_components as dbc
@@ -385,6 +386,48 @@ TAB_HEADER_MAP = {
 # A1-iii-b1: viz tabs that are cascade-network-specific and meaningless for a one-shot
 # (recurrence / LMU) model — hidden when the active model's execution is "one_shot".
 _CASCADE_ONLY_TAB_IDS = frozenset({"candidates", "topology", "evolution", "boundaries", "workers"})
+
+
+# F-CANOPY-027 (callback starvation): every poller ``dcc.Interval`` whose ``disabled``
+# prop this dashboard owns, paired with the tab that arms it. ``None`` means the
+# interval carries GLOBAL consumers (status bar, training status, button acks) and is
+# therefore never tab-gated — it is clamped only by apply-in-flight (CAN-000).
+#
+# WHY THIS EXISTS. dash-renderer runs at most 12 callbacks concurrently — a hard-coded
+# literal in the renderer bundle (``dash_renderer.dev.js:2846``):
+#
+#     available = Math.max(0, 12 - executing.length - watched.length);
+#
+# and it will not promote a queued callback while any of its Inputs is an output claimed
+# by a still-pending callback. Canopy ran 22 perpetual pollers against those 12 slots
+# (~10.8 callback-starts/s against a measured 3.7 completions/s), so the pool sat full
+# 83.6% of the time and the lowest-priority callbacks — the terminal render callbacks of
+# the Candidate Metrics, Decision Boundary and Dataset View panels — never got a slot at
+# all. Those three panels held their mount defaults through entire live runs.
+#
+# Gating on the SERVER does not help: a handler that returns ``dash.no_update`` because
+# its tab is inactive has already spent the round-trip and the slot to decide that. The
+# gate has to be on the CLIENT, which is what ``_setup_poll_gating`` does.
+#
+# Design of record: notes/JUNIPER_2026-08-23_JUNIPER-CANOPY_CALLBACK-STARVATION-REMEDIATION-DESIGN.md
+# Evidence:         juniper-ml notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md
+_GATED_POLL_INTERVALS: Final[Tuple[Tuple[str, Optional[str]], ...]] = (
+    # shared lanes — global consumers, apply-clamped only (CAN-000)
+    ("fast-update-interval", None),
+    ("slow-update-interval", None),
+    # dashboard-owned per-tab lanes (live OUTSIDE visualization-tabs, so the
+    # A1-iii-b1 children rebuild cannot reset their gate)
+    ("tabpoll-topology", "topology"),
+    ("tabpoll-dataset", "dataset"),
+    ("tabpoll-workers", "workers"),
+    ("tabpoll-boundaries", "boundaries"),
+    # panel-owned intervals, gated in place
+    ("candidate-metrics-panel-update-interval", "candidates"),
+    ("metrics-panel-stats-update-interval", "metrics"),
+    ("cassandra-panel-interval", "cassandra"),
+    ("redis-panel-refresh-interval", "redis"),
+    ("hdf5-snapshots-panel-refresh-interval", "snapshots"),
+)
 
 
 # N3b (canopy training-runtime defects plan, I-6 / Q3): the restart confirm modal's
@@ -1766,6 +1809,17 @@ class DashboardManager:
                 # Update intervals
                 dcc.Interval(id="fast-update-interval", interval=DashboardConstants.FAST_UPDATE_INTERVAL_MS, n_intervals=0),
                 dcc.Interval(id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0),
+                # F-CANOPY-027: per-tab poll lanes. These carry the panel-scoped pollers that
+                # used to ride the shared fast/slow intervals, so an inactive tab costs ZERO
+                # renderer slots instead of one round-trip per tick per poller. They start
+                # ``disabled=True`` and are armed by ``_setup_poll_gating``'s clientside gate,
+                # which fires on mount. Deliberately declared HERE, outside ``visualization-tabs``,
+                # so the A1-iii-b1 ``suppress_cascade_tabs`` children rebuild cannot reset them.
+                # See ``_GATED_POLL_INTERVALS`` for the full rationale.
+                dcc.Interval(id="tabpoll-topology", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0, disabled=True),
+                dcc.Interval(id="tabpoll-dataset", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0, disabled=True),
+                dcc.Interval(id="tabpoll-workers", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0, disabled=True),
+                dcc.Interval(id="tabpoll-boundaries", interval=DashboardConstants.FAST_UPDATE_INTERVAL_MS, n_intervals=0, disabled=True),
                 # One-shot interval for parameter initialization (fires once, 1s after load)
                 dcc.Interval(id="params-init-interval", interval=1000, max_intervals=1, n_intervals=0),
                 # CAN-000: pause periodic update intervals while the Apply Parameters
@@ -2171,6 +2225,76 @@ class DashboardManager:
         """
         return f"{self._api_base_url}/{path.lstrip('/')}"
 
+    def _resolve_model_class(self) -> str:
+        """Read the active backend's execution paradigm from ``/api/train/status``.
+
+        Returns ``"one_shot"`` for a recurrence / LMU fit, else ``"live"``. A transport
+        hiccup resolves to ``"live"`` (render the full dashboard) — the safe default.
+
+        Extracted from ``hydrate_model_class`` so the resolved value can be compared against
+        the store's current value before writing it (F-CANOPY-027: a no-op write rebuilds the
+        whole tab bar), and so the resolution is unit-testable without a Dash context.
+        """
+        try:
+            resp = requests.get(
+                self._api_url("/api/train/status"),
+                timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT,
+                headers=internal_api_headers(),
+            )
+            if resp.ok and resp.json().get("execution") == "one_shot":
+                return "one_shot"
+        except Exception as exc:
+            # Transport hiccup → keep the default "live" (render the full dashboard).
+            self.logger.debug("model-class hydration failed; defaulting to 'live': %s", exc)
+        return "live"
+
+    def _setup_poll_gating(self):
+        """F-CANOPY-027 + CAN-000: the single owner of every poller interval's ``disabled`` prop.
+
+        Two concerns, deliberately fused into ONE clientside callback because Dash allows only
+        one un-duplicated writer per prop and two competing writers would race:
+
+        * **CAN-000 (apply clamp)** — while the Apply Parameters roundtrip is in flight, every
+          poller is silenced so the write is not raced by interval-driven REST polls. This is
+          the behaviour the previous two-output callback provided; it is preserved exactly.
+        * **F-CANOPY-027 (tab gate)** — a panel-scoped poller is silenced while its tab is
+          inactive, so it costs no renderer slot at all. Server-side ``dash.no_update`` gating
+          does NOT achieve this: the round-trip and the slot are already spent by then.
+
+        Clientside is required, not merely preferred — a server-side gate would itself consume
+        one of the 12 slots this exists to conserve, and would react a full round-trip late.
+
+        KNOWN LIMITATION (accepted for Stage 1, tracked in the design doc §6.1). The five
+        panel-owned intervals live inside ``visualization-tabs``, which ``suppress_cascade_tabs``
+        rebuilds once on model-class hydration. That rebuild resets their ``disabled`` prop to
+        its declared default. The default is ``False`` (enabled) — i.e. it fails SAFE, to exactly
+        today's behaviour — and the next ``active_tab`` change re-arms the gate. The redundant
+        rebuild is separately suppressed in ``hydrate_model_class`` below, so on the common
+        "live" path it does not happen at all. The four dashboard-owned ``tabpoll-*`` lanes are
+        declared outside the tabs container and are immune.
+        """
+        tab_for_interval = [tab for _interval_id, tab in _GATED_POLL_INTERVALS]
+
+        self.app.clientside_callback(
+            f"""
+            function(inFlight, activeTab) {{
+                // CAN-000: the apply clamp silences everything, tab-gated or not.
+                var clamped = Boolean(inFlight);
+                var tabs = {json.dumps(tab_for_interval)};
+                return tabs.map(function (tab) {{
+                    // tab === null -> shared lane with global consumers; never tab-gated.
+                    return clamped || (tab !== null && tab !== activeTab);
+                }});
+            }}
+            """,
+            [Output(interval_id, "disabled") for interval_id, _tab in _GATED_POLL_INTERVALS],
+            [
+                Input("apply-in-flight", "data"),
+                Input("visualization-tabs", "active_tab"),
+            ],
+            prevent_initial_call=False,
+        )
+
     def _all_visualization_tabs(self):
         """Return the full ordered list of right-panel ``dbc.Tab``s (A1-iii-b1).
 
@@ -2343,22 +2467,21 @@ class DashboardManager:
         @self.app.callback(
             Output("model-class-store", "data"),
             Input("params-init-interval", "n_intervals"),
+            State("model-class-store", "data"),
             prevent_initial_call=True,
         )
-        def hydrate_model_class(_n_intervals):
-            """Read the active backend's execution paradigm from /api/train/status (once on mount)."""
-            try:
-                resp = requests.get(
-                    self._api_url("/api/train/status"),
-                    timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT,
-                    headers=internal_api_headers(),
-                )
-                if resp.ok and resp.json().get("execution") == "one_shot":
-                    return "one_shot"
-            except Exception as exc:
-                # Transport hiccup → keep the default "live" (render the full dashboard).
-                self.logger.debug("model-class hydration failed; defaulting to 'live': %s", exc)
-            return "live"
+        def hydrate_model_class(_n_intervals, current_model_class):
+            """Read the active backend's execution paradigm from /api/train/status (once on mount).
+
+            F-CANOPY-027: returns ``no_update`` when the resolved class already matches the
+            store. On the common "live" path the store is seeded "live" and hydration resolves
+            "live", so the old unconditional write re-triggered ``suppress_cascade_tabs`` and
+            rebuilt the entire 15-tab bar for no change — which also reset the ``disabled`` prop
+            of every panel-owned poller interval inside it. Suppressing the no-op write removes
+            both costs. A genuine live→one_shot (or back) transition still writes and rebuilds.
+            """
+            resolved = self._resolve_model_class()
+            return dash.no_update if resolved == current_model_class else resolved
 
         @self.app.callback(
             Output("visualization-tabs", "children"),
@@ -3220,20 +3343,7 @@ class DashboardManager:
             Input("applied-params-store", "data"),
             prevent_initial_call=True,
         )
-        self.app.clientside_callback(
-            """
-            function(inFlight) {
-                var disabled = Boolean(inFlight);
-                return [disabled, disabled];
-            }
-            """,
-            [
-                Output("fast-update-interval", "disabled"),
-                Output("slow-update-interval", "disabled"),
-            ],
-            Input("apply-in-flight", "data"),
-            prevent_initial_call=False,
-        )
+        self._setup_poll_gating()
         # E-3: clientside watchdog — force-release a stuck clamp. Runs on its
         # own always-enabled interval (the clamp disables the fast/slow
         # intervals, so neither can host its own rescue).
@@ -3726,7 +3836,7 @@ class DashboardManager:
         # has data before the first interval tick.
         @self.app.callback(
             Output("network-visualizer-topology-store", "data"),
-            Input("slow-update-interval", "n_intervals"),
+            Input("tabpoll-topology", "n_intervals"),  # F-CANOPY-027: was slow-update-interval
             Input("ws-topology-buffer", "data"),
             Input("visualization-tabs", "active_tab"),
             prevent_initial_call=False,
@@ -3774,7 +3884,7 @@ class DashboardManager:
         # selected, so the heatmap renders before the first interval tick.
         @self.app.callback(
             Output("network-visualizer-raw-topology-store", "data"),
-            Input("slow-update-interval", "n_intervals"),
+            Input("tabpoll-topology", "n_intervals"),  # F-CANOPY-027: was slow-update-interval
             Input("visualization-tabs", "active_tab"),
             State("network-visualizer-view-mode", "value"),
             prevent_initial_call=False,
@@ -3798,7 +3908,7 @@ class DashboardManager:
         # the first interval tick.
         @self.app.callback(
             Output("dataset-plotter-dataset-store", "data"),
-            Input("slow-update-interval", "n_intervals"),
+            Input("tabpoll-dataset", "n_intervals"),  # F-CANOPY-027: was slow-update-interval
             Input("visualization-tabs", "active_tab"),
             prevent_initial_call=False,
         )
@@ -3814,7 +3924,7 @@ class DashboardManager:
         # N1 posture), replacing the panel's former always-on 5 s self-interval.
         @self.app.callback(
             Output("worker-panel-workers-store", "data"),
-            Input("slow-update-interval", "n_intervals"),
+            Input("tabpoll-workers", "n_intervals"),  # F-CANOPY-027: was slow-update-interval
             Input("visualization-tabs", "active_tab"),
             prevent_initial_call=False,
         )
@@ -3827,7 +3937,7 @@ class DashboardManager:
         # before the first interval tick.
         @self.app.callback(
             Output("decision-boundary-boundary-data", "data"),
-            Input("fast-update-interval", "n_intervals"),
+            Input("tabpoll-boundaries", "n_intervals"),  # F-CANOPY-027: was fast-update-interval
             Input("visualization-tabs", "active_tab"),
             Input("decision-boundary-refresh-btn", "n_clicks"),
             Input("decision-boundary-resolution-slider", "value"),
@@ -3842,7 +3952,7 @@ class DashboardManager:
         # the underlying scatter data before the first interval tick.
         @self.app.callback(
             Output("decision-boundary-dataset-data", "data"),
-            Input("fast-update-interval", "n_intervals"),
+            Input("tabpoll-boundaries", "n_intervals"),  # F-CANOPY-027: was fast-update-interval
             Input("visualization-tabs", "active_tab"),
             prevent_initial_call=False,
         )
