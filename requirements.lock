@@ -83,7 +83,7 @@ markupsafe==3.0.3
     #   flask
     #   jinja2
     #   werkzeug
-narwhals==2.24.0
+narwhals==2.25.0
     # via plotly
 nest-asyncio==1.6.0
     # via
@@ -141,9 +141,9 @@ requests==2.34.2
     #   juniper-data-client
 retrying==1.4.2
     # via dash
-scipy==1.18.0
+scipy==1.18.1
     # via juniper-canopy (pyproject.toml)
-sentry-sdk==2.68.0
+sentry-sdk==2.68.1
     # via juniper-canopy (pyproject.toml)
 setuptools==84.0.0
     # via dash
@@ -169,7 +169,7 @@ urllib3==2.7.0
     #   juniper-data-client
     #   requests
     #   sentry-sdk
-uvicorn==0.52.3
+uvicorn==0.52.4
     # via juniper-canopy (pyproject.toml)
 uvloop==0.22.1
     # via uvicorn
