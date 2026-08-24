@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 
 import dash
 import pytest
+import requests
 
 from canopy_constants import DashboardConstants
 from frontend.dashboard_manager import DashboardManager
@@ -145,3 +146,131 @@ class TestLever3BoundariesCadence:
         boundaries = intervals.get("tabpoll-boundaries")
         assert boundaries is not None, "tabpoll-boundaries interval missing from the layout"
         assert boundaries.interval == DashboardConstants.SLOW_UPDATE_INTERVAL_MS, "tabpoll-boundaries must ride the SLOW cadence: at FAST its two feeders' round-trips cover their own period, so the panel's render callback is never promoted after mount (design §12.6 / §13 row 5)"
+
+
+class TestLever1StoreHiccupNeverBlanks:
+    """Stage 2 (design §13 row 1): the LIVE writer of ``training-status-store``
+    is ``_update_unified_status_bar_handler`` element [9], not the leftover
+    ``_update_training_status_store_handler``. A hiccup must leave the store
+    alone — writing ``None`` / ``{is_running: False, phase: idle}`` would
+    re-fire ``gate_live_switch_button`` and every other consumer, which is the
+    exact F-CANOPY-027 class Stage 2 was written to close.
+
+    Existing error-path tests assert tuple length and the status *label*; they
+    do not pin that the store element is ``no_update``.
+    """
+
+    STORE = 9
+
+    @patch("requests.get")
+    def test_non_200_leaves_the_store_alone(self, mock_get, dm):
+        mock_get.return_value = _resp(status=503)
+        result = dm._update_unified_status_bar_handler(n_intervals=1, prev_training_status={"is_running": True, "phase": "output"})
+        assert len(result) == 10
+        assert result[self.STORE] is dash.no_update
+
+    @patch("requests.get")
+    def test_rate_limit_leaves_the_store_alone(self, mock_get, dm):
+        mock_get.return_value = _resp(status=429)
+        result = dm._update_unified_status_bar_handler(n_intervals=1, prev_training_status={"is_running": True, "phase": "output"})
+        assert result[3] == "Rate Limited"
+        assert result[self.STORE] is dash.no_update
+
+    @patch("requests.get", side_effect=requests.Timeout("slow"))
+    def test_timeout_leaves_the_store_alone(self, _mock_get, dm):
+        result = dm._update_unified_status_bar_handler(n_intervals=1, prev_training_status={"is_running": True, "phase": "output"})
+        assert result[3] == "Backend Timeout"
+        assert result[self.STORE] is dash.no_update
+
+    @patch("requests.get", side_effect=requests.ConnectionError("down"))
+    def test_connection_error_leaves_the_store_alone(self, _mock_get, dm):
+        result = dm._update_unified_status_bar_handler(n_intervals=1, prev_training_status={"is_running": True, "phase": "output"})
+        assert result[3] == "Unreachable"
+        assert result[self.STORE] is dash.no_update
+
+    @patch("requests.get", side_effect=RuntimeError("boom"))
+    def test_generic_exception_leaves_the_store_alone(self, _mock_get, dm):
+        result = dm._update_unified_status_bar_handler(n_intervals=1, prev_training_status={"is_running": True, "phase": "output"})
+        assert result[3] == "Error"
+        assert result[self.STORE] is dash.no_update
+
+
+class TestLever1StatusCoercionThenSuppress:
+    """``bool(is_running)`` / ``str(phase)`` run BEFORE the equality check, so a
+    truthy-int / missing-phase payload must normalize once and then suppress.
+    Without the coercion a later ``{True, \"idle\"}`` prev would never match
+    ``{1, missing}`` and the store would rewrite every tick.
+    """
+
+    STORE = 9
+
+    @patch("requests.get")
+    def test_truthy_int_and_missing_phase_normalize(self, mock_get, dm):
+        mock_get.return_value = _resp(json_value={"is_running": 1})
+        result = dm._update_unified_status_bar_handler(n_intervals=1, prev_training_status=None)
+        assert result[self.STORE] == {"is_running": True, "phase": "idle"}
+
+    @patch("requests.get")
+    def test_normalized_payload_suppresses_against_typed_prev(self, mock_get, dm):
+        mock_get.return_value = _resp(json_value={"is_running": 1})
+        result = dm._update_unified_status_bar_handler(n_intervals=1, prev_training_status={"is_running": True, "phase": "idle"})
+        assert result[self.STORE] is dash.no_update
+
+    @patch("requests.get")
+    def test_real_transition_still_writes(self, mock_get, dm):
+        mock_get.return_value = _resp(json_value={"is_running": False, "phase": "idle"})
+        result = dm._update_unified_status_bar_handler(n_intervals=1, prev_training_status={"is_running": True, "phase": "output"})
+        assert result[self.STORE] == {"is_running": False, "phase": "idle"}
+
+
+class TestLever1SystemPanelsFailureIsolation:
+    """Stage 2 (design §13 row 2): one ``/api/status`` fetch serves network-info
+    + the pending banner, but details and stream-health keep their own handlers.
+    A status-fetch failure must degrade those two surfaces independently —
+    wrapping the whole 4-tuple in one ``try`` would turn a /api/status timeout
+    into a blank Network Stats panel and a stale stream-health badge.
+    """
+
+    def _run_status_failure(self, dm, mock_get):
+        details_sentinel = object()
+        health_sentinel = {"stream": "ok"}
+        with patch.object(dm, "_update_network_info_details_handler", return_value=details_sentinel) as mock_details, patch.object(dm, "_update_stream_health_handler", return_value=health_sentinel) as mock_health:
+            info, details, health, banner = dm._update_system_panels_handler(n=1)
+        mock_details.assert_called_once_with(n=1)
+        mock_health.assert_called_once_with(1)
+        return info, details, health, banner, details_sentinel, health_sentinel
+
+    @staticmethod
+    def _info_text(info):
+        texts = []
+        for child in getattr(info, "children", []) or []:
+            texts.append(str(getattr(child, "children", child)))
+        return " ".join(texts)
+
+    @patch("requests.get", side_effect=requests.Timeout("slow"))
+    def test_timeout_isolates_banner_and_info_from_details_health(self, mock_get, dm):
+        info, details, health, banner, details_sentinel, health_sentinel = self._run_status_failure(dm, mock_get)
+        assert banner is dash.no_update
+        assert "Backend Timeout" in self._info_text(info)
+        assert details is details_sentinel
+        assert health is health_sentinel
+
+    @patch("requests.get")
+    def test_non_200_isolates_banner_and_info_from_details_health(self, mock_get, dm):
+        mock_get.return_value = _resp(status=503)
+        info, details, health, banner, details_sentinel, health_sentinel = self._run_status_failure(dm, mock_get)
+        assert banner is dash.no_update
+        assert "Backend Error" in self._info_text(info)
+        assert details is details_sentinel
+        assert health is health_sentinel
+
+    @patch("requests.get")
+    def test_json_decode_failure_isolates_banner_and_info(self, mock_get, dm):
+        broken = _resp(status=200, json_value={"pending_dataset": {"nn_dataset_type": "xor"}})
+        broken.json.side_effect = ValueError("not json")
+        mock_get.return_value = broken
+        info, details, health, banner, details_sentinel, health_sentinel = self._run_status_failure(dm, mock_get)
+        assert banner is dash.no_update
+        assert "ValueError" in self._info_text(info)
+        assert details is details_sentinel
+        assert health is health_sentinel
