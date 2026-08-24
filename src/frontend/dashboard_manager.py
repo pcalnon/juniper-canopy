@@ -427,6 +427,7 @@ _GATED_POLL_INTERVALS: Final[Tuple[Tuple[str, Optional[str]], ...]] = (
     ("cassandra-panel-interval", "cassandra"),
     ("redis-panel-refresh-interval", "redis"),
     ("hdf5-snapshots-panel-refresh-interval", "snapshots"),
+    ("network-editor-panel-fsm-poll", "network-editor"),
 )
 
 
