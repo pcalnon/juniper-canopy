@@ -1,8 +1,8 @@
 # CI/CD Quick Start
 
-**Last Updated:** 2026-04-05  
+**Last Updated:** 2026-08-24  
 **Time to Complete:** ~5 minutes  
-**Version:** 0.26.0  
+**Version:** 0.27.0  
 **Status:** Current
 
 ## Prerequisites
@@ -96,6 +96,10 @@ Open the PR checks and confirm these gates complete:
 - `Documentation Links`
 - `Docker Build & Smoke Test`
 - `Quality Gate`
+- `Analyze (python)` (CodeQL; standalone workflow, required)
+- `Sequence Safety` and `Guard PR base branch` (standalone required checks)
+
+`Quality Gate` does **not** include CodeQL. A green Quality Gate with a red `Analyze (python)` is not merge-safe.
 
 ## Common Pitfalls
 
@@ -105,6 +109,10 @@ Open the PR checks and confirm these gates complete:
   Run `scripts/check_doc_links.py` locally with the same excludes used in CI.
 - Local tests pass but CI fails:
   Re-run on Python `3.14` and use the same marker filters as the workflow.
+- Dependabot `ci: bump the codeql-action group` PR looks like a CodeQL-only change but also edits `ci.yml`:
+  The group pattern `github/codeql-action*` covers `init` / `autobuild` / `analyze` **and** `upload-sarif` (Bandit SARIF). Review both files; keep the SHA comments in lockstep.
+- Waiting only on `Security Scans` (Bandit / pip-audit / Gitleaks) for a SAST signal:
+  Semantic CodeQL is `Analyze (python)` from `.github/workflows/codeql.yml`.
 
 ## Next Steps
 

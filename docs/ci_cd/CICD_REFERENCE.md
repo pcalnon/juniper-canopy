@@ -1,7 +1,7 @@
 # CI/CD Technical Reference
 
-**Last Updated:** 2026-05-04
-**Version:** 0.27.0
+**Last Updated:** 2026-08-24
+**Version:** 0.28.0
 **Status:** Current
 
 ## Table of Contents
@@ -175,12 +175,19 @@ lint:
 
 ## Workflow Inventory
 
-| Workflow File                           | Trigger                                                            | Primary Purpose                      |
-|-----------------------------------------|--------------------------------------------------------------------|--------------------------------------|
-| `.github/workflows/ci.yml`              | `push`, `pull_request`, `repository_dispatch`, `workflow_dispatch` | Full quality pipeline and merge gate |
-| `.github/workflows/security-scan.yml`   | weekly cron + manual                                               | Scheduled security posture scan      |
-| `.github/workflows/lockfile-update.yml` | Dependabot push branches                                           | Auto-refresh `requirements.lock`     |
-| `.github/workflows/publish.yml`         | release published                                                  | Build + TestPyPI + PyPI publish      |
+| Workflow File                               | Trigger                                                              | Primary Purpose                                      |
+|---------------------------------------------|----------------------------------------------------------------------|------------------------------------------------------|
+| `.github/workflows/ci.yml`                  | `push`, `pull_request`, `repository_dispatch`, `workflow_dispatch`   | Full quality pipeline and merge gate                 |
+| `.github/workflows/codeql.yml`              | push `main`/`develop`, PR to `main`, weekly Mon 06:00 UTC            | CodeQL SAST; required check `Analyze (python)`       |
+| `.github/workflows/security-scan.yml`       | weekly cron + manual                                                 | Scheduled Bandit + pip-audit                         |
+| `.github/workflows/lockfile-update.yml`     | Dependabot push branches                                             | Auto-refresh `requirements.lock`                     |
+| `.github/workflows/publish.yml`             | release published                                                    | Build + TestPyPI + PyPI publish                      |
+| `.github/workflows/sequence-safety.yml`     | `pull_request` to `main`/`develop`                                   | Compositional-loss screens (standalone job)          |
+| `.github/workflows/main-verify.yml`         | push to `main`                                                       | Post-merge sequence-safety net                       |
+| `.github/workflows/pr-base-branch-guard.yml` | `pull_request` + `merge_group`                                       | Fail if PR base is not the default branch            |
+| `.github/workflows/scheduled-tests.yml`     | daily cron + manual                                                  | Slow / integration tests                             |
+| `.github/workflows/agents-md-touch-up.yml`  | PR paths `AGENTS.md`                                                 | Verify `Last Updated` date (does not rewrite)        |
+| `.github/workflows/claude.yml`              | issue/PR comments containing `@claude`                               | Optional Claude Code assistant                       |
 
 ## Main CI Workflow (`ci.yml`)
 
@@ -425,6 +432,17 @@ This catches broken internal file and heading links without requiring sibling re
 
 ## Auxiliary Workflows
 
+### `codeql.yml`
+
+- Triggers: `push` to `main`/`develop`, `pull_request` to `main`, weekly Monday `06:00 UTC`
+- Job name: `Analyze`; matrix `language: python` → required check **`Analyze (python)`**
+- Steps: SHA-pinned `github/codeql-action` `init` / `autobuild` / `analyze`
+- `init` inputs: `languages: ${{ matrix.language }}`, `queries: +security-and-quality`
+- No `config-file` input and no `.github/codeql-config.yml` in this repo
+- Permissions: `actions: read`, `contents: read`, `security-events: write`
+- Dependabot group `codeql-action` (`github/codeql-action*`) also bumps `ci.yml` `upload-sarif` (Bandit SARIF) to the same SHA
+- Ruleset `juniper-canopy-rules` additionally gates CodeQL **errors** and **high-or-higher** security alerts
+
 ### `security-scan.yml`
 
 - Scheduled: Mondays at `06:00 UTC`
@@ -463,6 +481,8 @@ This catches broken internal file and heading links without requiring sibling re
 | Coverage thresholds         | `pyproject.toml` and `ci.yml` job args         |
 | CI dependencies             | `conf/requirements_ci.txt`                     |
 | Security scan excludes      | `.bandit.yml` + workflow commands              |
+| CodeQL action pins          | SHA comments on `codeql.yml` + `ci.yml` `upload-sarif` |
+| Dependabot action groups    | `.github/dependabot.yml` (`codeql-action`)     |
 | Doc-link validation rules   | `scripts/check_doc_links.py`                   |
 
 ## Documentation Link Validation
@@ -695,7 +715,7 @@ curl https://codecov.io/api/v2/repos/OWNER/REPO/coverage
 
 ---
 
-**Last Updated:** 2026-05-04
-**Version:** 0.27.0
+**Last Updated:** 2026-08-24
+**Version:** 0.28.0
 **Maintained By:** Development Team
 **Status:** ✅ Current

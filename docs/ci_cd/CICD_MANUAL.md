@@ -1,7 +1,7 @@
 # CI/CD Manual
 
-**Last Updated:** 2026-04-05
-**Version:** 0.26.0
+**Last Updated:** 2026-08-24
+**Version:** 0.27.0
 **Status:** Current
 
 ## Table of Contents
@@ -651,9 +651,11 @@ This manual describes how the current GitHub Actions pipeline works and how to o
 It is source-verified against:
 
 - `.github/workflows/ci.yml`
+- `.github/workflows/codeql.yml`
 - `.github/workflows/security-scan.yml`
 - `.github/workflows/lockfile-update.yml`
 - `.github/workflows/publish.yml`
+- `.github/dependabot.yml`
 - `pyproject.toml`
 - `scripts/check_doc_links.py`
 
@@ -662,7 +664,7 @@ It is source-verified against:
 The pipeline enforces three outcomes:
 
 - Code quality and test safety (`pre-commit`, `unit-tests`, `integration-tests`)
-- Supply-chain and security hygiene (`security`, lockfile, scheduled scan)
+- Supply-chain and security hygiene (`security`, lockfile, scheduled scan, CodeQL)
 - Operational correctness of artifacts and docs (`build`, `docker-build`, `docs`, `dependency-docs`)
 
 Primary workflow (`ci.yml`) flow:
@@ -758,6 +760,46 @@ Operational constraints:
 
 Use this runbook after dependency updates to confirm no new vulnerabilities are introduced.
 
+### Runbook: CodeQL analysis
+
+`codeql.yml` is the fleet Python SAST workflow. It is **standalone** (not a `ci.yml` job). The GitHub check name is **`Analyze (python)`** — that context is a required status check on `main`.
+
+**Triggers**
+
+- `push` to `main` / `develop`
+- `pull_request` targeting `main`
+- Weekly Monday `06:00 UTC` (same window as `security-scan.yml`)
+
+**What it runs**
+
+1. `github/codeql-action/init` with `languages: python` and `queries: +security-and-quality`
+2. `github/codeql-action/autobuild`
+3. `github/codeql-action/analyze` with `category: /language:python`
+
+Queries are set in the workflow. This repo does **not** ship `.github/codeql-config.yml` and does not pass `config-file`.
+
+**SHA pins and the Dependabot `codeql-action` group**
+
+Every `github/codeql-action/*` use is SHA-pinned with a `# v4.x.y` comment:
+
+- `codeql.yml`: `init`, `autobuild`, `analyze`
+- `ci.yml` job `Security Scans`: `upload-sarif` for Bandit SARIF (`reports/security/bandit.sarif`)
+
+`.github/dependabot.yml` groups `github/codeql-action*` as `codeql-action`. One Dependabot PR therefore updates **both** files (four action uses). Do not land only one file, and do not retarget pins to floating `@v2` / `@v4` tags.
+
+**Two merge layers**
+
+1. Required check `Analyze (python)` must succeed.
+2. The `juniper-canopy-rules` code-scanning rule blocks on CodeQL **errors** and **high-or-higher** security alerts.
+
+Review findings at GitHub Security → Code scanning. The `ci.yml` `Quality Gate` job does not include this workflow.
+
+**Constraints**
+
+- Workflow permissions: `actions: read`, `contents: read`, `security-events: write`.
+- Language matrix is Python only.
+- `ci.yml` `upload-sarif` uses `continue-on-error: true`, so a failed Bandit SARIF upload does not fail `Security Scans`. A failed CodeQL analyze step **does** fail `Analyze (python)`.
+
 ### Runbook: Release publishing
 
 `publish.yml` is release-triggered (`release: published`) and uses OIDC:
@@ -771,9 +813,10 @@ Do not bypass TestPyPI stage; production publish is intentionally downstream.
 
 ## Quality Gates and Merge Criteria
 
-PRs are merge-safe when `Quality Gate` succeeds.
+The `ci.yml` `Quality Gate` job is necessary but not sufficient.
+The `juniper-canopy-rules` ruleset also requires standalone checks, including `Analyze (python)` (CodeQL), `Sequence Safety`, and `Guard PR base branch`.
 
-`required-checks` enforces:
+`ci.yml` `required-checks` enforces:
 
 - Must succeed:
   - `pre-commit`
@@ -1489,29 +1532,36 @@ matrix:
 **Example:**
 
 ```yaml
-# .github/dependabot.yml
+# .github/dependabot.yml — github-actions excerpt
 version: 2
 updates:
-  - package-ecosystem: "pip"
+  - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
 ```
+
+The `codeql-action` group updates `init` / `autobuild` / `analyze` in `codeql.yml` and `upload-sarif` in `ci.yml` together. Pip updates remain a separate `package-ecosystem: pip` entry.
 
 ### Code Scanning
 
-**GitHub Advanced Security:**
+**Live workflow:** `.github/workflows/codeql.yml` (SHA-pinned `github/codeql-action` v4, not a floating `@v2` tag).
 
-1. Enable code scanning
-2. Run CodeQL analysis
-3. Review and fix findings
+1. Confirm `Analyze (python)` is green on the PR.
+2. Open GitHub Security → Code scanning and clear **error** / **high-or-higher** alerts (ruleset `code_scanning` gate).
+3. When Dependabot opens a `codeql-action` group PR, review **both** `codeql.yml` and `ci.yml` (Bandit `upload-sarif` shares the pin).
 
 ```yaml
-# .github/workflows/codeql.yml
+# .github/workflows/codeql.yml — pins are SHAs; Dependabot updates the comment.
 - name: Initialize CodeQL
-  uses: github/codeql-action/init@v2
+  uses: github/codeql-action/init@SHA  # v4.x.y
   with:
-    languages: python
+    languages: ${{ matrix.language }}
+    queries: +security-and-quality
 ```
 
 ---
@@ -1673,6 +1723,13 @@ Fix by: 2025-11-12
 
 - For Bandit: review `reports/security/bandit.txt` and prioritize medium/high findings.
 - For pip-audit: update vulnerable dependencies and regenerate lockfile.
+
+### `Analyze (python)` fails (CodeQL)
+
+- This check comes from `.github/workflows/codeql.yml`, not from the `ci.yml` `Security Scans` job.
+- Open the workflow log for the `Perform CodeQL Analysis` step, then GitHub Security → Code scanning for alert details.
+- Do not "fix" a red CodeQL pin bump by reverting only `codeql.yml` or only `ci.yml` — Dependabot groups every `github/codeql-action*` use onto one SHA.
+- A green `Quality Gate` with a red `Analyze (python)` is **not** merge-safe.
 
 ## References
 

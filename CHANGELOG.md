@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **CodeQL / SAST operator docs.** CI manuals now describe the live
+  SHA-pinned `github/codeql-action` v4 workflow (`.github/workflows/codeql.yml`),
+  the required check name `Analyze (python)`, the Dependabot `codeql-action`
+  group that also bumps `ci.yml` Bandit `upload-sarif`, and the ruleset
+  code-scanning gate (errors + high-or-higher alerts). Replaces the stale
+  `init@v2` snippet.
+
 ## [0.6.0] - 2026-07-28
 
 ### Added

@@ -1,7 +1,7 @@
 # CI/CD Environment Setup
 
-**Last Updated:** 2026-05-04
-**Version:** 0.27.0
+**Last Updated:** 2026-08-24
+**Version:** 0.28.0
 **Status:** Current
 
 ## Table of Contents
@@ -19,6 +19,7 @@ This project's CI runs on GitHub-hosted `ubuntu-latest` runners with a pip-first
 The workflow definitions are:
 
 - `.github/workflows/ci.yml`
+- `.github/workflows/codeql.yml`
 - `.github/workflows/security-scan.yml`
 - `.github/workflows/publish.yml`
 - `.github/workflows/lockfile-update.yml`
@@ -99,7 +100,8 @@ pip install -e .
 
 ### Workflow permissions
 
-- `ci.yml`: `contents: read` globally, with `security-events: write` in the security job for SARIF upload
+- `ci.yml`: `contents: read` globally, with `security-events: write` in the security job for Bandit SARIF upload (`github/codeql-action/upload-sarif`, SHA-pinned with the CodeQL family)
+- `codeql.yml`: `actions: read`, `contents: read`, `security-events: write` for CodeQL analyze
 - `publish.yml`: `id-token: write` for OIDC trusted publishing
 - `lockfile-update.yml`: `contents: write` for bot lockfile commits
 
@@ -160,6 +162,10 @@ Run the exact command from the workflow and inspect the reported file/anchor pat
 ### Matrix-only failures (for example Python 3.12)
 
 Reproduce with that interpreter locally and run the same marker filters used in `ci.yml`.
+
+### `Analyze (python)` is red after a GitHub Actions bump
+
+Confirm `.github/workflows/codeql.yml` and the `ci.yml` `upload-sarif` step share the same `github/codeql-action` SHA comment. Dependabot groups those uses; splitting the pins is the usual review mistake.
 
 ## References
 
