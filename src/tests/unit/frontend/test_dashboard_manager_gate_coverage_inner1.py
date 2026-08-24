@@ -83,25 +83,48 @@ class TestSidebarVisibilityInner:
 # _setup_model_class_callbacks (2122-2133, 2142, 2151-2152)
 # ---------------------------------------------------------------------------
 class TestModelClassInner:
+    # F-CANOPY-027: hydrate_model_class now takes the store's CURRENT value as State and
+    # returns ``no_update`` when the resolved class already matches it. A no-op write
+    # re-triggered ``suppress_cascade_tabs`` and rebuilt the whole 15-tab bar for nothing,
+    # which also reset the ``disabled`` prop of every poller interval living inside it.
+    # These three cases pass ``None`` as the current value, so the resolved class is
+    # always written and their original intent is preserved exactly.
     @patch("requests.get")
     def test_hydrate_model_class_one_shot(self, mock_get, dm):
         mock_get.return_value = _resp(ok=True, json_value={"execution": "one_shot"})
         cb = raw_cb(dm, "hydrate_model_class")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            assert cb(1) == "one_shot"
+            assert cb(1, None) == "one_shot"
 
     @patch("requests.get")
     def test_hydrate_model_class_live_when_not_one_shot(self, mock_get, dm):
         mock_get.return_value = _resp(ok=True, json_value={"execution": "live"})
         cb = raw_cb(dm, "hydrate_model_class")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            assert cb(1) == "live"
+            assert cb(1, None) == "live"
 
     @patch("requests.get", side_effect=Exception("down"))
     def test_hydrate_model_class_exception_defaults_live(self, _mock_get, dm):
         cb = raw_cb(dm, "hydrate_model_class")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            assert cb(1) == "live"
+            assert cb(1, None) == "live"
+
+    @patch("requests.get")
+    def test_hydrate_model_class_suppresses_noop_rewrite(self, mock_get, dm):
+        """F-CANOPY-027: the common path — store already "live" and the backend says
+        "live" — must NOT write, so the tab bar is never rebuilt for no change."""
+        mock_get.return_value = _resp(ok=True, json_value={"execution": "live"})
+        cb = raw_cb(dm, "hydrate_model_class")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            assert cb(1, "live") is dash.no_update
+
+    @patch("requests.get")
+    def test_hydrate_model_class_writes_on_genuine_transition(self, mock_get, dm):
+        """A real live → one_shot transition still writes, and so still rebuilds."""
+        mock_get.return_value = _resp(ok=True, json_value={"execution": "one_shot"})
+        cb = raw_cb(dm, "hydrate_model_class")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            assert cb(1, "live") == "one_shot"
 
     def test_suppress_cascade_tabs_one_shot_fewer(self, dm):
         cb = raw_cb(dm, "suppress_cascade_tabs")
