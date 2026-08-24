@@ -351,7 +351,13 @@ class NetworkVisualizer(BaseComponent):
                 Input("metrics-panel-metrics-store", "data"),
                 Input("theme-state", "data"),
                 Input(f"{self.component_id}-selected-nodes", "data"),
-                Input("fast-update-interval", "n_intervals"),
+                # F-CANOPY-027: was ``fast-update-interval``, which forced a full topology
+                # re-render at 1 Hz from EVERY tab and held a renderer slot to do it. The
+                # gated lane only ticks while the Topology tab is active. NOTE this callback
+                # is still chained off ``metrics-panel-metrics-store`` (a global 1 Hz store),
+                # so gating the interval reduces but does not eliminate its off-tab work —
+                # that chained-store class is Stage 2.
+                Input("tabpoll-topology", "n_intervals"),
                 Input("ws-cascade-add-buffer", "data"),  # D-06: WS cascade_add events trigger topo refresh
             ],
             [

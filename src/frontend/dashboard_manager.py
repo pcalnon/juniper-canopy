@@ -33,10 +33,11 @@
 #
 #####################################################################################################################################################################################################
 
+import json
 import logging
 import os
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, Final, List, Optional, Tuple
 
 import dash
 import dash_bootstrap_components as dbc
@@ -385,6 +386,49 @@ TAB_HEADER_MAP = {
 # A1-iii-b1: viz tabs that are cascade-network-specific and meaningless for a one-shot
 # (recurrence / LMU) model — hidden when the active model's execution is "one_shot".
 _CASCADE_ONLY_TAB_IDS = frozenset({"candidates", "topology", "evolution", "boundaries", "workers"})
+
+
+# F-CANOPY-027 (callback starvation): every poller ``dcc.Interval`` whose ``disabled``
+# prop this dashboard owns, paired with the tab that arms it. ``None`` means the
+# interval carries GLOBAL consumers (status bar, training status, button acks) and is
+# therefore never tab-gated — it is clamped only by apply-in-flight (CAN-000).
+#
+# WHY THIS EXISTS. dash-renderer runs at most 12 callbacks concurrently — a hard-coded
+# literal in the renderer bundle (``dash_renderer.dev.js:2846``):
+#
+#     available = Math.max(0, 12 - executing.length - watched.length);
+#
+# and it will not promote a queued callback while any of its Inputs is an output claimed
+# by a still-pending callback. Canopy ran 22 perpetual pollers against those 12 slots
+# (~10.8 callback-starts/s against a measured 3.7 completions/s), so the pool sat full
+# 83.6% of the time and the lowest-priority callbacks — the terminal render callbacks of
+# the Candidate Metrics, Decision Boundary and Dataset View panels — never got a slot at
+# all. Those three panels held their mount defaults through entire live runs.
+#
+# Gating on the SERVER does not help: a handler that returns ``dash.no_update`` because
+# its tab is inactive has already spent the round-trip and the slot to decide that. The
+# gate has to be on the CLIENT, which is what ``_setup_poll_gating`` does.
+#
+# Design of record: notes/JUNIPER_2026-08-23_JUNIPER-CANOPY_CALLBACK-STARVATION-REMEDIATION-DESIGN.md
+# Evidence:         juniper-ml notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md
+_GATED_POLL_INTERVALS: Final[Tuple[Tuple[str, Optional[str]], ...]] = (
+    # shared lanes — global consumers, apply-clamped only (CAN-000)
+    ("fast-update-interval", None),
+    ("slow-update-interval", None),
+    # dashboard-owned per-tab lanes (live OUTSIDE visualization-tabs, so the
+    # A1-iii-b1 children rebuild cannot reset their gate)
+    ("tabpoll-topology", "topology"),
+    ("tabpoll-dataset", "dataset"),
+    ("tabpoll-workers", "workers"),
+    ("tabpoll-boundaries", "boundaries"),
+    # panel-owned intervals, gated in place
+    ("candidate-metrics-panel-update-interval", "candidates"),
+    ("metrics-panel-stats-update-interval", "metrics"),
+    ("cassandra-panel-interval", "cassandra"),
+    ("redis-panel-refresh-interval", "redis"),
+    ("hdf5-snapshots-panel-refresh-interval", "snapshots"),
+    ("network-editor-panel-fsm-poll", "network-editor"),
+)
 
 
 # N3b (canopy training-runtime defects plan, I-6 / Q3): the restart confirm modal's
@@ -1766,6 +1810,24 @@ class DashboardManager:
                 # Update intervals
                 dcc.Interval(id="fast-update-interval", interval=DashboardConstants.FAST_UPDATE_INTERVAL_MS, n_intervals=0),
                 dcc.Interval(id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0),
+                # F-CANOPY-027: per-tab poll lanes. These carry the panel-scoped pollers that
+                # used to ride the shared fast/slow intervals, so an inactive tab costs ZERO
+                # renderer slots instead of one round-trip per tick per poller. They start
+                # ``disabled=True`` and are armed by ``_setup_poll_gating``'s clientside gate,
+                # which fires on mount. Deliberately declared HERE, outside ``visualization-tabs``,
+                # so the A1-iii-b1 ``suppress_cascade_tabs`` children rebuild cannot reset them.
+                # See ``_GATED_POLL_INTERVALS`` for the full rationale.
+                dcc.Interval(id="tabpoll-topology", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0, disabled=True),
+                dcc.Interval(id="tabpoll-dataset", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0, disabled=True),
+                dcc.Interval(id="tabpoll-workers", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0, disabled=True),
+                # Stage 2 lever 3 (design §12.6 / §13 row 5): SLOW cadence. At the fast
+                # cadence both boundary feeders' round-trips covered their own 1 s
+                # period, so the panel's render callback — whose Inputs they claim —
+                # was never promoted again after mount (80 fills vs 1 render / 115 s,
+                # run 20260824T080426Z). The dataset panel proves slow-lane feeders
+                # leave promotion gaps. Tab activation and the refresh button still
+                # fetch immediately (both are Inputs of the feeders).
+                dcc.Interval(id="tabpoll-boundaries", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0, disabled=True),
                 # One-shot interval for parameter initialization (fires once, 1s after load)
                 dcc.Interval(id="params-init-interval", interval=1000, max_intervals=1, n_intervals=0),
                 # CAN-000: pause periodic update intervals while the Apply Parameters
@@ -2171,6 +2233,76 @@ class DashboardManager:
         """
         return f"{self._api_base_url}/{path.lstrip('/')}"
 
+    def _resolve_model_class(self) -> str:
+        """Read the active backend's execution paradigm from ``/api/train/status``.
+
+        Returns ``"one_shot"`` for a recurrence / LMU fit, else ``"live"``. A transport
+        hiccup resolves to ``"live"`` (render the full dashboard) — the safe default.
+
+        Extracted from ``hydrate_model_class`` so the resolved value can be compared against
+        the store's current value before writing it (F-CANOPY-027: a no-op write rebuilds the
+        whole tab bar), and so the resolution is unit-testable without a Dash context.
+        """
+        try:
+            resp = requests.get(
+                self._api_url("/api/train/status"),
+                timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT,
+                headers=internal_api_headers(),
+            )
+            if resp.ok and resp.json().get("execution") == "one_shot":
+                return "one_shot"
+        except Exception as exc:
+            # Transport hiccup → keep the default "live" (render the full dashboard).
+            self.logger.debug("model-class hydration failed; defaulting to 'live': %s", exc)
+        return "live"
+
+    def _setup_poll_gating(self):
+        """F-CANOPY-027 + CAN-000: the single owner of every poller interval's ``disabled`` prop.
+
+        Two concerns, deliberately fused into ONE clientside callback because Dash allows only
+        one un-duplicated writer per prop and two competing writers would race:
+
+        * **CAN-000 (apply clamp)** — while the Apply Parameters roundtrip is in flight, every
+          poller is silenced so the write is not raced by interval-driven REST polls. This is
+          the behaviour the previous two-output callback provided; it is preserved exactly.
+        * **F-CANOPY-027 (tab gate)** — a panel-scoped poller is silenced while its tab is
+          inactive, so it costs no renderer slot at all. Server-side ``dash.no_update`` gating
+          does NOT achieve this: the round-trip and the slot are already spent by then.
+
+        Clientside is required, not merely preferred — a server-side gate would itself consume
+        one of the 12 slots this exists to conserve, and would react a full round-trip late.
+
+        KNOWN LIMITATION (accepted for Stage 1, tracked in the design doc §6.1). The five
+        panel-owned intervals live inside ``visualization-tabs``, which ``suppress_cascade_tabs``
+        rebuilds once on model-class hydration. That rebuild resets their ``disabled`` prop to
+        its declared default. The default is ``False`` (enabled) — i.e. it fails SAFE, to exactly
+        today's behaviour — and the next ``active_tab`` change re-arms the gate. The redundant
+        rebuild is separately suppressed in ``hydrate_model_class`` below, so on the common
+        "live" path it does not happen at all. The four dashboard-owned ``tabpoll-*`` lanes are
+        declared outside the tabs container and are immune.
+        """
+        tab_for_interval = [tab for _interval_id, tab in _GATED_POLL_INTERVALS]
+
+        self.app.clientside_callback(
+            f"""
+            function(inFlight, activeTab) {{
+                // CAN-000: the apply clamp silences everything, tab-gated or not.
+                var clamped = Boolean(inFlight);
+                var tabs = {json.dumps(tab_for_interval)};
+                return tabs.map(function (tab) {{
+                    // tab === null -> shared lane with global consumers; never tab-gated.
+                    return clamped || (tab !== null && tab !== activeTab);
+                }});
+            }}
+            """,
+            [Output(interval_id, "disabled") for interval_id, _tab in _GATED_POLL_INTERVALS],
+            [
+                Input("apply-in-flight", "data"),
+                Input("visualization-tabs", "active_tab"),
+            ],
+            prevent_initial_call=False,
+        )
+
     def _all_visualization_tabs(self):
         """Return the full ordered list of right-panel ``dbc.Tab``s (A1-iii-b1).
 
@@ -2343,22 +2475,21 @@ class DashboardManager:
         @self.app.callback(
             Output("model-class-store", "data"),
             Input("params-init-interval", "n_intervals"),
+            State("model-class-store", "data"),
             prevent_initial_call=True,
         )
-        def hydrate_model_class(_n_intervals):
-            """Read the active backend's execution paradigm from /api/train/status (once on mount)."""
-            try:
-                resp = requests.get(
-                    self._api_url("/api/train/status"),
-                    timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT,
-                    headers=internal_api_headers(),
-                )
-                if resp.ok and resp.json().get("execution") == "one_shot":
-                    return "one_shot"
-            except Exception as exc:
-                # Transport hiccup → keep the default "live" (render the full dashboard).
-                self.logger.debug("model-class hydration failed; defaulting to 'live': %s", exc)
-            return "live"
+        def hydrate_model_class(_n_intervals, current_model_class):
+            """Read the active backend's execution paradigm from /api/train/status (once on mount).
+
+            F-CANOPY-027: returns ``no_update`` when the resolved class already matches the
+            store. On the common "live" path the store is seeded "live" and hydration resolves
+            "live", so the old unconditional write re-triggered ``suppress_cascade_tabs`` and
+            rebuilt the entire 15-tab bar for no change — which also reset the ``disabled`` prop
+            of every panel-owned poller interval inside it. Suppressing the no-op write removes
+            both costs. A genuine live→one_shot (or back) transition still writes and rebuilds.
+            """
+            resolved = self._resolve_model_class()
+            return dash.no_update if resolved == current_model_class else resolved
 
         @self.app.callback(
             Output("visualization-tabs", "children"),
@@ -3094,6 +3225,14 @@ class DashboardManager:
         # PERF-CN-01: prevent_initial_call=False — must populate the unified
         # status bar (connection, latency, phase, epoch, hidden units) on mount
         # before the first interval tick.
+        #
+        # Stage 2 (design §13 row 1): this callback ALSO owns ``training-status-store``.
+        # The store's old dedicated poller (``update_training_status_store``) fetched
+        # ``/api/status`` on the same fast tick this callback already fetches it —
+        # one renderer slot and one HTTP round-trip per second spent re-reading the
+        # same payload. The store output is suppressed to ``no_update`` while
+        # ``{is_running, phase}`` is unchanged, so its consumers (the Live Switch
+        # gate) only re-run on real transitions.
         @self.app.callback(
             [
                 Output("status-indicator", "style"),
@@ -3105,27 +3244,45 @@ class DashboardManager:
                 Output("top-phase-display", "style"),
                 Output("top-epoch-display", "children"),
                 Output("top-hidden-units-display", "children"),
+                Output("training-status-store", "data"),
             ],
             Input("fast-update-interval", "n_intervals"),
+            dash.dependencies.State("training-status-store", "data"),
             prevent_initial_call=False,
         )
-        def update_unified_status_bar(n_intervals):
-            """Update unified status bar with all state info."""
-            return self._update_unified_status_bar_handler(n_intervals=n_intervals)
+        def update_unified_status_bar(n_intervals, prev_training_status):
+            """Update unified status bar with all state info (+ the training-status store)."""
+            return self._update_unified_status_bar_handler(n_intervals=n_intervals, prev_training_status=prev_training_status)
 
     # Define Network callbacks
     def _setup_network_callbacks(self):
 
-        # PERF-CN-01: prevent_initial_call=False — must populate the network
-        # info panel from the API on mount before the first interval tick.
+        # PERF-CN-01: must populate the network info panel from the API on mount
+        # before the first interval tick (``initial_duplicate`` keeps that mount
+        # fire while permitting the banner's duplicate output).
+        #
+        # Stage 2 (design §13 row 2): ONE slow-lane slot for the four global
+        # system surfaces that previously each held their own —
+        # ``update_network_info`` + ``update_network_info_details`` +
+        # ``update_stream_health`` + ``reconcile_pending_dataset_banner``.
+        # Network-info and the banner both read ``/api/status`` (one fetch now
+        # serves both), details reads ``/api/network/stats``, stream health is an
+        # in-memory snapshot. Four slow-lane slots and four HTTP round-trips per
+        # tick become one slot and three (the banner's ``/api/status`` was the
+        # dashboard's FOURTH poller of that endpoint).
         @self.app.callback(
-            Output("network-info-panel", "children"),
+            [
+                Output("network-info-panel", "children"),
+                Output("network-info-details-panel", "children"),
+                Output("stream-health-store", "data"),
+                Output("pending-dataset-banner", "is_open", allow_duplicate=True),
+            ],
             Input("slow-update-interval", "n_intervals"),
-            prevent_initial_call=False,
+            prevent_initial_call="initial_duplicate",
         )
-        def update_network_info(n):
-            """Update network information panel from API."""
-            return self._update_network_info_handler(n=n)
+        def update_system_panels(n):
+            """One slow-lane poll for network info, details, stream health and the pending banner."""
+            return self._update_system_panels_handler(n=n)
 
         @self.app.callback(
             Output("network-info-collapse", "is_open"),
@@ -3152,16 +3309,8 @@ class DashboardManager:
             icon = "▼" if new_state else "▶"
             return new_state, icon
 
-        # PERF-CN-01: prevent_initial_call=False — must populate the network
-        # info details panel from the API on mount before the first interval tick.
-        @self.app.callback(
-            Output("network-info-details-panel", "children"),
-            Input("slow-update-interval", "n_intervals"),
-            prevent_initial_call=False,
-        )
-        def update_network_info_details(n):
-            """Update detailed network information panel from API."""
-            return self._update_network_info_details_handler(n=n)
+        # (Stage 2, design §13 row 2: the dedicated ``update_network_info_details``
+        # slow-lane poller merged into ``update_system_panels`` above.)
 
     # Component data store updaters
     def _setup_datastore_callbacks(self):
@@ -3220,20 +3369,7 @@ class DashboardManager:
             Input("applied-params-store", "data"),
             prevent_initial_call=True,
         )
-        self.app.clientside_callback(
-            """
-            function(inFlight) {
-                var disabled = Boolean(inFlight);
-                return [disabled, disabled];
-            }
-            """,
-            [
-                Output("fast-update-interval", "disabled"),
-                Output("slow-update-interval", "disabled"),
-            ],
-            Input("apply-in-flight", "data"),
-            prevent_initial_call=False,
-        )
+        self._setup_poll_gating()
         # E-3: clientside watchdog — force-release a stuck clamp. Runs on its
         # own always-enabled interval (the clamp disables the fast/slow
         # intervals, so neither can host its own rescue).
@@ -3524,18 +3660,10 @@ class DashboardManager:
             prevent_initial_call=True,
         )
 
-        # N2: poll canopy→cascor stream health into stream-health-store on the
-        # slow interval. Server-side (not a clientside peek) because the truth
-        # lives in the backend relay/supervisor liveness state, not in the
-        # browser bridge.
-        @self.app.callback(
-            Output("stream-health-store", "data"),
-            Input("slow-update-interval", "n_intervals"),
-            prevent_initial_call=True,
-        )
-        def update_stream_health(n):
-            """Fetch /api/stream_health for the degraded-mode badge dimension."""
-            return self._update_stream_health_handler(n)
+        # N2: stream health rides the consolidated ``update_system_panels``
+        # slow-lane callback (Stage 2, design §13 row 2). It stays server-side
+        # (not a clientside peek) because the truth lives in the backend
+        # relay/supervisor liveness state, not in the browser bridge.
 
         # Phase B: Connection indicator badge (4-state: connected/reconnecting/offline/demo,
         # N2: + upstream stream-health dimension — degraded/reconnecting downgrade a green badge)
@@ -3726,7 +3854,7 @@ class DashboardManager:
         # has data before the first interval tick.
         @self.app.callback(
             Output("network-visualizer-topology-store", "data"),
-            Input("slow-update-interval", "n_intervals"),
+            Input("tabpoll-topology", "n_intervals"),  # F-CANOPY-027: was slow-update-interval
             Input("ws-topology-buffer", "data"),
             Input("visualization-tabs", "active_tab"),
             prevent_initial_call=False,
@@ -3774,7 +3902,7 @@ class DashboardManager:
         # selected, so the heatmap renders before the first interval tick.
         @self.app.callback(
             Output("network-visualizer-raw-topology-store", "data"),
-            Input("slow-update-interval", "n_intervals"),
+            Input("tabpoll-topology", "n_intervals"),  # F-CANOPY-027: was slow-update-interval
             Input("visualization-tabs", "active_tab"),
             State("network-visualizer-view-mode", "value"),
             prevent_initial_call=False,
@@ -3798,7 +3926,7 @@ class DashboardManager:
         # the first interval tick.
         @self.app.callback(
             Output("dataset-plotter-dataset-store", "data"),
-            Input("slow-update-interval", "n_intervals"),
+            Input("tabpoll-dataset", "n_intervals"),  # F-CANOPY-027: was slow-update-interval
             Input("visualization-tabs", "active_tab"),
             prevent_initial_call=False,
         )
@@ -3814,7 +3942,7 @@ class DashboardManager:
         # N1 posture), replacing the panel's former always-on 5 s self-interval.
         @self.app.callback(
             Output("worker-panel-workers-store", "data"),
-            Input("slow-update-interval", "n_intervals"),
+            Input("tabpoll-workers", "n_intervals"),  # F-CANOPY-027: was slow-update-interval
             Input("visualization-tabs", "active_tab"),
             prevent_initial_call=False,
         )
@@ -3827,28 +3955,30 @@ class DashboardManager:
         # before the first interval tick.
         @self.app.callback(
             Output("decision-boundary-boundary-data", "data"),
-            Input("fast-update-interval", "n_intervals"),
+            Input("tabpoll-boundaries", "n_intervals"),  # F-CANOPY-027: was fast-update-interval; Stage 2: SLOW cadence (§13 row 5)
             Input("visualization-tabs", "active_tab"),
             Input("decision-boundary-refresh-btn", "n_clicks"),
             Input("decision-boundary-resolution-slider", "value"),
+            State("decision-boundary-boundary-data", "data"),
             prevent_initial_call=False,
         )
-        def update_boundary_store(n, active_tab, refresh_clicks, resolution):
+        def update_boundary_store(n, active_tab, refresh_clicks, resolution, current_data):
             """Fetch decision boundary from API and update decision boundary store."""
-            return self._update_boundary_store_handler(n=n, active_tab=active_tab, resolution=resolution)
+            return self._update_boundary_store_handler(n=n, active_tab=active_tab, resolution=resolution, current_data=current_data)
 
         # PERF-CN-01: prevent_initial_call=False — must populate the decision-
         # boundary's dataset on mount when the tab is active so the plot has
         # the underlying scatter data before the first interval tick.
         @self.app.callback(
             Output("decision-boundary-dataset-data", "data"),
-            Input("fast-update-interval", "n_intervals"),
+            Input("tabpoll-boundaries", "n_intervals"),  # F-CANOPY-027: was fast-update-interval; Stage 2: SLOW cadence (§13 row 5)
             Input("visualization-tabs", "active_tab"),
+            State("decision-boundary-dataset-data", "data"),
             prevent_initial_call=False,
         )
-        def update_boundary_dataset_store(n, active_tab):
+        def update_boundary_dataset_store(n, active_tab, current_data):
             """Sync dataset data to decision boundary component."""
-            return self._update_boundary_dataset_store_handler(n=n, active_tab=active_tab)
+            return self._update_boundary_dataset_store_handler(n=n, active_tab=active_tab, current_data=current_data)
 
         # ── Dataset generation modal callbacks ──
 
@@ -4732,31 +4862,13 @@ class DashboardManager:
         # outcome. ``reconcile_pending_dataset_banner`` (below) still closes the
         # banner once cascor clears ``pending_dataset`` after a successful restart.
 
-        @self.app.callback(
-            Output("pending-dataset-banner", "is_open", allow_duplicate=True),
-            Input("slow-update-interval", "n_intervals"),
-            prevent_initial_call=True,
-        )
-        def reconcile_pending_dataset_banner(n_intervals):
-            """Poll /api/status; reflect cascor-side pending_dataset state.
-
-            Catches the case where the staged config was cleared by a successful
-            ``start_training`` (cold-swap completed) or by another tab — keeps
-            the banner in sync with the source of truth without us having to
-            also wire it from the start/stop callbacks.
-            """
-            try:
-                resp = requests.get(
-                    self._api_url("/api/status"),
-                    timeout=DashboardConstants.FAST_API_TIMEOUT_SECONDS,
-                    headers=internal_api_headers(),
-                )
-                if resp.status_code != 200:
-                    return dash.no_update
-                pending = resp.json().get("pending_dataset")
-                return bool(pending)
-            except requests.RequestException:
-                return dash.no_update
+        # Stage 2 (design §13 row 2): the banner's dedicated slow-lane
+        # ``/api/status`` poller (``reconcile_pending_dataset_banner``) merged
+        # into ``update_system_panels`` — the same reconciliation now rides the
+        # network-info fetch of the same endpoint. Semantics preserved: the
+        # banner still reflects cascor-side ``pending_dataset`` each slow tick,
+        # catching a staged config cleared by a successful ``start_training``
+        # (cold-swap completed) or by another tab.
 
     def _setup_experimental_functions_callbacks(self):
         """Phase 2 P2-4 (Issue #3): Experimental Functions gate UI <-> cascor.
@@ -4888,13 +5000,12 @@ class DashboardManager:
         and the P2-5 PR (#275).
         """
 
-        @self.app.callback(
-            Output("training-status-store", "data"),
-            Input("fast-update-interval", "n_intervals"),
-            prevent_initial_call=False,
-        )
-        def update_training_status_store(n_intervals):
-            return self._update_training_status_store_handler(n_intervals=n_intervals)
+        # Stage 2 (design §13 row 1): ``training-status-store``'s dedicated
+        # fast-lane poller merged into ``update_unified_status_bar`` — one
+        # ``/api/status`` fetch per tick now feeds the bar AND the store, and the
+        # store write is suppressed while ``{is_running, phase}`` is unchanged.
+        # ``_update_training_status_store_handler`` remains as the directly
+        # invocable single-store form (unit-test surface / parity reference).
 
         @self.app.callback(
             Output("live-dataset-switch-button", "disabled"),
@@ -5536,10 +5647,11 @@ class DashboardManager:
         @self.app.callback(
             Output("dataset-swap-events-store", "data"),
             Input("slow-update-interval", "n_intervals"),
+            State("dataset-swap-events-store", "data"),
             prevent_initial_call=False,
         )
-        def poll_dataset_swap_events(n_intervals):
-            return self._poll_dataset_swap_events_handler(n_intervals=n_intervals)
+        def poll_dataset_swap_events(n_intervals, current_store):
+            return self._poll_dataset_swap_events_handler(n_intervals=n_intervals, current_store=current_store)
 
         # P2-7 follow-up: hydrate the per-snapshot swap history store on
         # ``replay-player-session`` changes. We only fetch when the
@@ -5581,12 +5693,20 @@ class DashboardManager:
     # See ``tests/unit/frontend/test_live_dataset_switch_handlers.py``.
     # ------------------------------------------------------------------
 
-    def _poll_dataset_swap_events_handler(self, n_intervals=None):
+    def _poll_dataset_swap_events_handler(self, n_intervals=None, current_store=None):
         """Hydrate the ``dataset-swap-events-store`` from the canopy proxy.
 
         Returns ``{"events": [...]}`` on success — list always present,
         empty when no swaps yet. ``dash.no_update`` on backend hiccup so
         the prior store value (typically the same events) stays put.
+
+        Stage 2 (design §13 row 3): also ``dash.no_update`` when the fetched
+        events equal the store's current events — an unchanged write still
+        fires every downstream consumer (three panels re-render on every tab,
+        and ``update_snapshots_table`` re-fetches the whole snapshot list),
+        so the no-op rewrite this made every 5 s was pure fan-out load. All
+        three consumers are value-driven (none keys off the write itself);
+        ``update_snapshots_table``'s freshness rides its own refresh interval.
         """
         try:
             resp = requests.get(
@@ -5598,6 +5718,8 @@ class DashboardManager:
                 return dash.no_update
             data = (resp.json() or {}).get("data", {}) or {}
             events = data.get("events", []) or []
+            if isinstance(current_store, dict) and current_store.get("events") == list(events):
+                return dash.no_update
             return {"events": list(events)}
         except requests.RequestException:
             return dash.no_update
@@ -5951,11 +6073,11 @@ class DashboardManager:
             "--",
         )
 
-    def _update_unified_status_bar_handler(self, n_intervals=None):
+    def _update_unified_status_bar_handler(self, n_intervals=None, prev_training_status=None):
         """
         Update unified status bar with all state info from /api/status.
 
-        Returns tuple of 9 elements:
+        Returns tuple of 10 elements:
         - status_indicator style (latency color)
         - connection_status children (hidden, for backward compat)
         - latency_display children
@@ -5965,6 +6087,10 @@ class DashboardManager:
         - top_phase_display style
         - top_epoch_display children
         - top_hidden_units_display children
+        - training-status-store data (Stage 2, design §13 row 1: this callback
+          absorbed the store's dedicated /api/status poller; ``no_update`` while
+          ``{is_running, phase}`` is unchanged so consumers only re-run on real
+          transitions, and on every error path so a hiccup never blanks it)
         """
         try:
             # Single request: /api/status provides all needed info and doubles as health check.
@@ -5974,20 +6100,26 @@ class DashboardManager:
             latency_ms = (time.time() - start_time) * 1000
 
             if status_response.status_code == 200:
-                return self._build_unified_status_bar_content(status_response, latency_ms)
+                payload = status_response.json() or {}
+                training_status = {
+                    "is_running": bool(payload.get("is_running", False)),
+                    "phase": str(payload.get("phase", "idle")),
+                }
+                store_out = dash.no_update if training_status == prev_training_status else training_status
+                return (*self._build_unified_status_bar_content(status_response, latency_ms), store_out)
             # Non-200: surface a specific, actionable label instead of a bare "Error"
             # so a transient rate limit isn't confused with a real backend outage.
             # Dominant "Error" cause on the deployed stack: canopy's own rate
             # limiter throttling the dashboard's own polling (see #2a).
             status_label, detail = self._classify_response_failure(status_response)
-            return self._status_bar_error_tuple(status_label, detail)
+            return (*self._status_bar_error_tuple(status_label, detail), dash.no_update)
         except (requests.Timeout, requests.ConnectionError) as e:
             self.logger.warning(f"Status bar update failed: {type(e).__name__}")
             status_label, detail = self._classify_exception_failure(e)
-            return self._status_bar_error_tuple(status_label, detail)
+            return (*self._status_bar_error_tuple(status_label, detail), dash.no_update)
         except Exception as e:
             self.logger.warning(f"Status bar update failed: {type(e).__name__}: {e}")
-            return self._status_bar_error_tuple("Error", "Connection Error")
+            return (*self._status_bar_error_tuple("Error", "Connection Error"), dash.no_update)
 
     @staticmethod
     def _completion_reason_label(reason):
@@ -6198,8 +6330,53 @@ class DashboardManager:
             counters["hidden_units"],
         )
 
+    def _update_system_panels_handler(self, n=None):
+        """Stage 2 (design §13 row 2): one slow-lane slot for four global surfaces.
+
+        Returns ``(network_info_children, network_details_children,
+        stream_health_data, pending_banner_is_open)``. One ``/api/status`` fetch
+        serves BOTH the network-info panel and the pending-dataset banner
+        reconciliation; details and stream health reuse their existing
+        single-surface handlers unchanged. Every failure arm degrades exactly as
+        the four separate callbacks did (error div for the info panel,
+        ``dash.no_update`` for the banner, and the sub-handlers' own error
+        posture for the other two).
+        """
+        try:
+            url = self._api_url("/api/status")
+            response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
+            # ``status_code != 200`` (not ``.ok``) — parity with the banner's old
+            # reconciliation poller; /api/status has exactly one success code.
+            if response.status_code != 200:
+                self.logger.warning(f"Status API returned {response.status_code}")
+                status_label, detail = self._classify_response_failure(response)
+                info = self._network_info_error_div("Network Info", status_label, detail)
+                banner = dash.no_update
+            else:
+                status = response.json()
+                info = self._render_network_info(status)
+                banner = bool(status.get("pending_dataset"))
+        except (requests.Timeout, requests.ConnectionError) as e:
+            self.logger.warning(f"Failed to fetch network info: {type(e).__name__}")
+            status_label, detail = self._classify_exception_failure(e)
+            info = self._network_info_error_div("Network Info", status_label, detail)
+            banner = dash.no_update
+        except Exception as e:
+            self.logger.warning(f"Failed to fetch network info: {e}")
+            info = self._network_info_error_div("Network Info", "Error", f"{type(e).__name__}: {e}")
+            banner = dash.no_update
+        details = self._update_network_info_details_handler(n=n)
+        health = self._update_stream_health_handler(n)
+        return info, details, health, banner
+
     def _update_network_info_handler(self, n=None):
-        """Update network information panel from API."""
+        """Update network information panel from API.
+
+        Stage 2 note: the dedicated slow-lane callback that invoked this merged
+        into ``update_system_panels`` (one shared ``/api/status`` fetch); this
+        single-panel form remains the directly invocable unit-test surface and
+        delegates its rendering to the same ``_render_network_info``.
+        """
         try:
             url = self._api_url("/api/status")
             response = requests.get(url, timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
@@ -6207,85 +6384,7 @@ class DashboardManager:
                 self.logger.warning(f"Status API returned {response.status_code}")
                 status_label, detail = self._classify_response_failure(response)
                 return self._network_info_error_div("Network Info", status_label, detail)
-            status = response.json()
-
-            # N6/C2b: derive each counter's display against its correct
-            # denominator from the reconciled status surface (see
-            # ``_counter_displays``): Hidden Units carries the reconciled
-            # ``max_hidden_units`` cap, Iteration is the true growth iteration
-            # (``grow_iteration``/``grow_max``, previously mislabelled as the
-            # unit count), and the phase-qualified within-pass Epoch renders
-            # "N / M (phase)".
-            counters = self._counter_displays(status)
-
-            return html.Div(
-                [
-                    html.P(
-                        [
-                            html.Strong("Input Nodes: "),
-                            str(status.get("input_size", 0)),
-                        ]
-                    ),
-                    html.P(
-                        [
-                            html.Strong("Hidden Units: "),
-                            counters["hidden_units"],
-                        ]
-                    ),
-                    html.P(
-                        [
-                            html.Strong("Output Nodes: "),
-                            str(status.get("output_size", 0)),
-                        ]
-                    ),
-                    html.Hr(),
-                    html.P(
-                        [
-                            html.Strong("Training Step: "),
-                            counters["step"],
-                        ]
-                    ),
-                    html.P(
-                        [
-                            html.Strong("Epoch (in phase): "),
-                            counters["phase_epoch"],
-                        ]
-                    ),
-                    html.P(
-                        [
-                            html.Strong("Iteration: "),
-                            counters["iteration"],
-                        ]
-                    ),
-                    html.P(
-                        [
-                            html.Strong("Training Phase: "),
-                            status.get("current_phase", "Idle"),
-                        ]
-                    ),
-                    html.P(
-                        [
-                            html.Strong("Network Connected: "),
-                            "Yes" if status.get("network_connected") else "No",
-                        ]
-                    ),
-                    html.P(
-                        [
-                            html.Strong("Monitoring: "),
-                            ("Active" if status.get("monitoring_active") else "Inactive"),
-                        ]
-                    ),
-                ]
-                + (
-                    [
-                        html.Hr(),
-                        html.P([html.Strong("Dataset: "), str(status.get("dataset_name", ""))]),
-                    ]
-                    + ([html.P([html.Strong("Version: "), str(status["dataset_version"])])] if status.get("dataset_version") else [])
-                    if status.get("dataset_name")
-                    else []
-                )
-            )
+            return self._render_network_info(response.json())
         except (requests.Timeout, requests.ConnectionError) as e:
             self.logger.warning(f"Failed to fetch network info: {type(e).__name__}")
             status_label, detail = self._classify_exception_failure(e)
@@ -6293,6 +6392,86 @@ class DashboardManager:
         except Exception as e:
             self.logger.warning(f"Failed to fetch network info: {e}")
             return self._network_info_error_div("Network Info", "Error", f"{type(e).__name__}: {e}")
+
+    def _render_network_info(self, status):
+        """Render the Network Information panel body from an ``/api/status`` payload."""
+        # N6/C2b: derive each counter's display against its correct
+        # denominator from the reconciled status surface (see
+        # ``_counter_displays``): Hidden Units carries the reconciled
+        # ``max_hidden_units`` cap, Iteration is the true growth iteration
+        # (``grow_iteration``/``grow_max``, previously mislabelled as the
+        # unit count), and the phase-qualified within-pass Epoch renders
+        # "N / M (phase)".
+        counters = self._counter_displays(status)
+
+        return html.Div(
+            [
+                html.P(
+                    [
+                        html.Strong("Input Nodes: "),
+                        str(status.get("input_size", 0)),
+                    ]
+                ),
+                html.P(
+                    [
+                        html.Strong("Hidden Units: "),
+                        counters["hidden_units"],
+                    ]
+                ),
+                html.P(
+                    [
+                        html.Strong("Output Nodes: "),
+                        str(status.get("output_size", 0)),
+                    ]
+                ),
+                html.Hr(),
+                html.P(
+                    [
+                        html.Strong("Training Step: "),
+                        counters["step"],
+                    ]
+                ),
+                html.P(
+                    [
+                        html.Strong("Epoch (in phase): "),
+                        counters["phase_epoch"],
+                    ]
+                ),
+                html.P(
+                    [
+                        html.Strong("Iteration: "),
+                        counters["iteration"],
+                    ]
+                ),
+                html.P(
+                    [
+                        html.Strong("Training Phase: "),
+                        status.get("current_phase", "Idle"),
+                    ]
+                ),
+                html.P(
+                    [
+                        html.Strong("Network Connected: "),
+                        "Yes" if status.get("network_connected") else "No",
+                    ]
+                ),
+                html.P(
+                    [
+                        html.Strong("Monitoring: "),
+                        ("Active" if status.get("monitoring_active") else "Inactive"),
+                    ]
+                ),
+            ]
+            + (
+                [
+                    html.Hr(),
+                    html.P([html.Strong("Dataset: "), str(status.get("dataset_name", ""))]),
+                ]
+                + ([html.P([html.Strong("Version: "), str(status["dataset_version"])])] if status.get("dataset_version") else [])
+                if status.get("dataset_name")
+                else []
+            )
+        )
 
     def _update_network_info_details_handler(self, n=None):
         """Update detailed network information panel from API."""
@@ -6434,6 +6613,15 @@ class DashboardManager:
                 except (TypeError, AttributeError):
                     pass
 
+            # Stage 2 (design §13 row 4): suppress the no-op rewrite. Post-run /
+            # idle, this poll re-fetches an IDENTICAL history list every fast tick
+            # and every write re-fires 4+ consumers — the tiles, the model-class
+            # styles, the replay UI and the 8-output topology renderer (whose own
+            # comment marks this chained-store class as Stage 2). Identical fetch
+            # ⇒ ``no_update``; anything new lands exactly as before.
+            if isinstance(current_metrics, list) and metrics == current_metrics:
+                return dash.no_update
+
             return metrics
         except Exception as e:
             self.logger.warning(f"Failed to fetch metrics from API: {type(e).__name__}: {e}")
@@ -6568,8 +6756,15 @@ class DashboardManager:
             self.logger.warning(f"Failed to fetch dataset from API: {type(e).__name__}: {e}")
             return dash.no_update
 
-    def _update_boundary_store_handler(self, n=None, active_tab=None, resolution=None):
-        """Fetch decision boundary from API and update decision boundary store."""
+    def _update_boundary_store_handler(self, n=None, active_tab=None, resolution=None, current_data=None):
+        """Fetch decision boundary from API and update decision boundary store.
+
+        Stage 2 lever 3 (design §13 row 5): ``no_update`` when the fetched mesh
+        equals the store's current value — post-run this feeder re-fetched an
+        IDENTICAL mesh every tick, and each rewrite re-fired the panel's render
+        chain. A resolution change or a network change produces a different
+        payload and lands exactly as before.
+        """
         # Only update if boundaries tab is active
         if active_tab != "boundaries":
             return dash.no_update
@@ -6583,14 +6778,21 @@ class DashboardManager:
                 self.logger.warning(f"Decision boundary API returned {response.status_code}")
                 return dash.no_update
             boundary_data = response.json()
+            if current_data is not None and boundary_data == current_data:
+                return dash.no_update
             self.logger.debug(f"Fetched decision boundary from {url}")
             return boundary_data
         except Exception as e:
             self.logger.warning(f"Failed to fetch decision boundary from API: {type(e).__name__}: {e}")
             return dash.no_update
 
-    def _update_boundary_dataset_store_handler(self, n=None, active_tab=None):
-        """Sync dataset data to decision boundary component."""
+    def _update_boundary_dataset_store_handler(self, n=None, active_tab=None, current_data=None):
+        """Sync dataset data to decision boundary component.
+
+        Stage 2 lever 3 (design §13 row 5): ``no_update`` when the fetched
+        dataset equals the store's current value — the full sample arrays were
+        being rewritten identically every tick while the dataset never changed.
+        """
         # Only update if boundaries tab is active
         if active_tab != "boundaries":
             return dash.no_update
@@ -6601,7 +6803,10 @@ class DashboardManager:
             if not response.ok:
                 self.logger.warning(f"Boundary dataset API returned {response.status_code}")
                 return dash.no_update
-            return response.json()
+            dataset = response.json()
+            if current_data is not None and dataset == current_data:
+                return dash.no_update
+            return dataset
         except Exception as e:
             self.logger.warning(f"Failed to fetch dataset for boundary from API: {type(e).__name__}: {e}")
             return dash.no_update
