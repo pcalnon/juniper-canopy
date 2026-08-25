@@ -1872,15 +1872,34 @@ def _list_snapshot_files():
 
 
 @app.get("/api/v1/snapshots")
-async def get_snapshots():
+async def get_snapshots(limit: Optional[int] = None, offset: int = 0):
     """
     List available HDF5 snapshots.
 
+    F-CANOPY-031: the shared corpus holds 27,903+ snapshots (10.4 MB / ~4.9 s
+    as one payload) and the S-2 retention ruling is no-deletion, so unbounded
+    listing only gets worse. ``limit``/``offset`` slice the (already
+    newest-first) list server-side; ``total`` always reports the pre-slice
+    count so callers can render an honest "newest N of TOTAL". Omitting
+    ``limit`` preserves the legacy full-list behaviour for existing callers.
+
+    Args:
+        limit: Maximum snapshots to return (newest first). ``None`` = all.
+        offset: Skip this many (after the newest-first sort) before returning.
+
     Returns:
         JSON object with:
-            - snapshots: list of snapshot metadata objects
+            - snapshots: list of snapshot metadata objects (sliced)
+            - total: pre-slice count for this backend mode
             - message: optional status message
     """
+
+    def _slice(items):
+        start = max(offset, 0)
+        if limit is None or limit <= 0:
+            return items[start:] if start else items
+        return items[start : start + limit]
+
     try:
         snapshots = _list_snapshot_files()
     except Exception as e:
@@ -1901,12 +1920,12 @@ async def get_snapshots():
             if mock["id"] not in existing_ids:
                 combined.append(mock)
 
-        return {"snapshots": combined, "message": "Demo mode: showing simulated snapshots"}
+        return {"snapshots": _slice(combined), "total": len(combined), "message": "Demo mode: showing simulated snapshots"}
 
     if not snapshots:
-        return {"snapshots": [], "message": "No snapshots available"}
+        return {"snapshots": [], "total": 0, "message": "No snapshots available"}
 
-    return {"snapshots": snapshots}
+    return {"snapshots": _slice(snapshots), "total": len(snapshots)}
 
 
 @app.get("/api/v1/snapshots/history")
