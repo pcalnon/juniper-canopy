@@ -52,6 +52,13 @@ from ..base_component import BaseComponent
 # Default refresh interval in milliseconds
 DEFAULT_REFRESH_INTERVAL_MS = 10000  # 10 seconds
 
+# F-CANOPY-031: the shared corpus holds 27,903+ snapshots under a no-deletion
+# retention ruling. The table renders the newest page only — an unbounded fetch
+# was a 10.4 MB payload the panel died rendering (one html.Tr with two buttons
+# and a four-item dropdown per snapshot), and the status line reports
+# "newest N of TOTAL" so truncation is never silent.
+SNAPSHOT_TABLE_PAGE_SIZE = 200
+
 
 class HDF5SnapshotsPanel(BaseComponent):
     """
@@ -437,40 +444,50 @@ class HDF5SnapshotsPanel(BaseComponent):
             n_intervals: Interval count (unused, for callback compatibility)
 
         Returns:
-            Dict with 'snapshots' list and optional 'message'
+            Dict with 'snapshots' list (the newest page), 'total' (pre-slice
+            corpus size) and optional 'message'
         """
         try:
             return dict(self._parse_snapshots_response())
         except requests.exceptions.Timeout:
             self.logger.warning("Snapshots API request timed out")
-            return {"snapshots": [], "message": "Request timed out"}
+            return {"snapshots": [], "total": 0, "message": "Request timed out"}
         except requests.exceptions.ConnectionError:
             self.logger.warning("Cannot connect to snapshots API")
-            return {"snapshots": [], "message": "Service unavailable"}
+            return {"snapshots": [], "total": 0, "message": "Service unavailable"}
         except Exception as e:
             self.logger.warning(f"Failed to fetch snapshots: {e}")
-            return {"snapshots": [], "message": "Snapshot service unavailable"}
+            return {"snapshots": [], "total": 0, "message": "Snapshot service unavailable"}
 
     def _parse_snapshots_response(self):
         """
         Parse snapshots list from backend API.
 
+        F-CANOPY-031: fetch only the newest ``SNAPSHOT_TABLE_PAGE_SIZE``
+        entries (server-side slice) and carry ``total`` through so the table's
+        status line can report the truncation. The timeout gets the same
+        ``+ 3`` headroom the snapshot-create path already uses — the corpus
+        directory scan alone is seconds-scale at 27,903 files, and the old
+        bare ``api_timeout`` (2 s) lost the race to the unbounded listing.
+
         Returns:
-            Dict with 'snapshots' list and optional 'message'
+            Dict with 'snapshots' list, 'total' and optional 'message'
         """
         self.logger.info("Fetching snapshots from API")
         resp = requests.get(
             f"{self._api_base_url}/api/v1/snapshots",
-            timeout=self.api_timeout,
+            params={"limit": SNAPSHOT_TABLE_PAGE_SIZE},
+            timeout=self.api_timeout + 3,
             headers=internal_api_headers(),
         )
         if resp.status_code != 200:
             self.logger.warning(f"Snapshots API returned status {resp.status_code}")
-            return {"snapshots": [], "message": f"API error {resp.status_code}"}
+            return {"snapshots": [], "total": 0, "message": f"API error {resp.status_code}"}
         data = resp.json()
         snapshots = data.get("snapshots", [])
         message = data.get("message")
-        return {"snapshots": snapshots, "message": message}
+        total = data.get("total", len(snapshots))
+        return {"snapshots": snapshots, "total": total, "message": message}
 
     def _fetch_snapshot_detail_handler(self, snapshot_id: str) -> Dict[str, Any]:
         """
@@ -870,6 +887,7 @@ class HDF5SnapshotsPanel(BaseComponent):
             result = self._fetch_snapshots_handler(n_intervals)
             snapshots = result.get("snapshots", [])
             message = result.get("message")
+            total = result.get("total", len(snapshots))
 
             # P2-7: build the snapshot-id → role map from the dataset_swap
             # events. A snapshot may be tagged "Pre-swap" (matched a
@@ -969,7 +987,12 @@ class HDF5SnapshotsPanel(BaseComponent):
 
             # Status text
             if snapshots:
-                status_text = f"{len(snapshots)} snapshot(s) found"
+                # F-CANOPY-031: never let truncation be silent — against the
+                # no-deletion corpus the table shows the newest page only.
+                if total > len(snapshots):
+                    status_text = f"Showing newest {len(snapshots)} of {total} snapshot(s)"
+                else:
+                    status_text = f"{len(snapshots)} snapshot(s) found"
                 if message:
                     status_text += f" • {message}"
                 empty_style = {"display": "none"}

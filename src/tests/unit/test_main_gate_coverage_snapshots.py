@@ -109,7 +109,8 @@ class TestGetSnapshotsRealNonEmpty:
             lambda: [{"id": "s1", "name": "s1.h5", "timestamp": "t", "size_bytes": 10, "path": "/x/s1.h5"}],
         )
         result = await main.get_snapshots()
-        assert result == {"snapshots": [{"id": "s1", "name": "s1.h5", "timestamp": "t", "size_bytes": 10, "path": "/x/s1.h5"}]}
+        # F-CANOPY-031: the route now always reports the pre-slice ``total``.
+        assert result == {"snapshots": [{"id": "s1", "name": "s1.h5", "timestamp": "t", "size_bytes": 10, "path": "/x/s1.h5"}], "total": 1}
 
 
 # =============================================================================
