@@ -58,8 +58,14 @@ class TestClientsideJsContract:
 
         assert "restFallback" in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
         assert "/api/train/" in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
-        # Rejection handler must call the fallback with a reason string.
-        assert "WS rejected" in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+        # F-CANOPY-005: the fallback fires ONLY on transport-class failures
+        # (err.transport, set by websocket_client.js); a business rejection is
+        # surfaced to the operator instead of re-POSTing an adjudicated
+        # state-changing command (the observed resume->409 double-fire).
+        assert "err.transport" in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+        assert "WS transport failure" in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+        assert "WS business rejection" in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+        assert "WS rejected" not in PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
 
     def test_js_maps_all_five_training_buttons(self):
         from frontend.dashboard_manager import PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS

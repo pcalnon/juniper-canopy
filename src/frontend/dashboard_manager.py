@@ -236,7 +236,19 @@ function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, l
                         console.log('[Phase D] WS command success:', command, data && data.command_id);
                     })
                     .catch(function(err) {
-                        restFallback('WS rejected: ' + (err && err.message));
+                        // F-CANOPY-005: fall back ONLY on transport-class failures
+                        // (timeout / socket closed / send threw — err.transport is
+                        // set by websocket_client.js). A business rejection means
+                        // the server RECEIVED and adjudicated the command; a REST
+                        // retry re-issues a state-changing command the backend
+                        // already answered (the observed resume->409 double-fire),
+                        // so surface it to the operator instead.
+                        if (err && err.transport) {
+                            restFallback('WS transport failure: ' + (err && err.message));
+                        } else {
+                            console.warn('[Phase D] WS business rejection (' + command + '):', err && err.message);
+                            reportFailure((err && err.message) || 'command rejected');
+                        }
                     });
             } else {
                 // send() returned something non-thenable — treat as failure.

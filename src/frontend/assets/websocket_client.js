@@ -420,13 +420,37 @@ class CascorWebSocket {
         return new Promise(function(resolve, reject) {
             if (!self.ws || self.ws.readyState !== WebSocket.OPEN) {
                 console.warn('[CascorWS] Cannot send message: not connected');
-                reject(new Error('WebSocket not connected'));
+                var notConnected = new Error('WebSocket not connected');
+                notConnected.transport = true;
+                reject(notConnected);
                 return;
             }
-            var timeoutHandle = setTimeout(function() {
+            // F-CANOPY-005: the expired-timer task can BEAT the queued
+            // `message` task carrying an ack that ALREADY ARRIVED — under
+            // main-thread congestion a command was observed acked at +18 ms
+            // yet rejected at its 3 s ceiling, and the REST fallback then
+            // re-POSTed a state-changing command the backend had executed
+            // (409). On first expiry, re-arm ONCE for a short grace window:
+            // the already-queued ack task runs before the second timer and
+            // resolves the command; a genuinely lost command just fails
+            // GRACE_MS later.
+            var GRACE_MS = 250;
+            var onTimeout = function() {
+                var pending = self._pendingCommands.get(commandId);
+                if (!pending) {
+                    return; // ack landed while this timer task was queued
+                }
+                if (!pending.graceUsed) {
+                    pending.graceUsed = true;
+                    pending.timeoutHandle = setTimeout(onTimeout, GRACE_MS);
+                    return;
+                }
                 self._pendingCommands.delete(commandId);
-                reject(new Error('Command timeout (no command_response for ' + commandId + ')'));
-            }, perCommandTimeoutMs);
+                var timeoutErr = new Error('Command timeout (no command_response for ' + commandId + ')');
+                timeoutErr.transport = true;
+                reject(timeoutErr);
+            };
+            var timeoutHandle = setTimeout(onTimeout, perCommandTimeoutMs);
             self._pendingCommands.set(commandId, {
                 resolve: resolve,
                 reject: reject,
@@ -439,6 +463,9 @@ class CascorWebSocket {
             } catch (err) {
                 clearTimeout(timeoutHandle);
                 self._pendingCommands.delete(commandId);
+                if (err && typeof err === 'object') {
+                    err.transport = true;
+                }
                 reject(err);
             }
         });
@@ -459,6 +486,11 @@ class CascorWebSocket {
             var err = new Error(data.error || 'Command failed');
             err.code = data.code;
             err.command_id = data.command_id;
+            // F-CANOPY-005: the server RECEIVED and ADJUDICATED this command —
+            // a business rejection, not a transport failure. The Phase-D
+            // fallback keys off this flag: re-POSTing an adjudicated
+            // state-changing command re-issues it (the observed 409 class).
+            err.transport = false;
             pending.reject(err);
         } else {
             pending.resolve(data);
@@ -478,6 +510,9 @@ class CascorWebSocket {
             clearTimeout(pending.timeoutHandle);
             var err = new Error(reason);
             err.command_id = commandId;
+            // F-CANOPY-005: a closed socket is a genuine transport failure —
+            // the REST fallback is the right response here.
+            err.transport = true;
             pending.reject(err);
         });
         this._pendingCommands.clear();
