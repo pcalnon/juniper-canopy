@@ -400,15 +400,18 @@ class NetworkEditorPanel(BaseComponent):
     def _is_investigating(status: Dict[str, Any]) -> bool:
         """Return True iff the cascor FSM is in ``Investigating``.
 
-        ``/api/status`` returns the lifecycle's full status dict which
-        nests the FSM summary under ``state_machine``; we tolerate
-        both the unwrapped shape and a top-level ``status`` field for
-        older / partial responses.
+        Canopy's ``/api/status`` is a FLAT dict whose FSM field is
+        ``fsm_status``. F-CANOPY-011: this panel used to read only the
+        nested ``state_machine.status`` shape -- cascor's own
+        ``/v1/training/status`` schema, which canopy never returns -- so
+        it was inert regardless of the real FSM state. The nested and
+        top-level ``status`` shapes stay tolerated for cascor-shaped or
+        partial payloads.
         """
         if not isinstance(status, dict):
             return False
         sm = status.get("state_machine") or {}
-        name = (sm.get("status") or status.get("status") or "").upper()
+        name = (status.get("fsm_status") or sm.get("status") or status.get("status") or "").upper()
         return name == "INVESTIGATING"
 
     @staticmethod
@@ -485,7 +488,7 @@ class NetworkEditorPanel(BaseComponent):
         def poll_fsm_and_topology(_n):
             """Poll /api/status; flip idle/active visibility on Investigating.
 
-            Also pulls /api/network/topology when active so the
+            Also pulls /api/topology when active so the
             readout + remove-unit dropdown stay current.
             """
             try:
@@ -498,8 +501,10 @@ class NetworkEditorPanel(BaseComponent):
             except Exception:  # noqa: BLE001
                 status = {}
 
+            # F-CANOPY-011: canopy's /api/status carries the FSM as flat fsm_status
+            # (the nested shape is cascor's and never reaches this panel).
             sm = status.get("state_machine") or {}
-            fsm_name = (sm.get("status") or status.get("status") or "Unknown").title()
+            fsm_name = (status.get("fsm_status") or sm.get("status") or status.get("status") or "Unknown").title()
             badge_text = f"FSM: {fsm_name}"
 
             if not self._is_investigating(status):
@@ -511,10 +516,14 @@ class NetworkEditorPanel(BaseComponent):
                 )
 
             # Active — fetch topology for the readout / remove picker.
+            # D-0 (E2E ledger): this fetched /api/network/topology, a route
+            # canopy does not serve (404); the live route is /api/topology,
+            # whose {input_units, output_units, hidden_units} shape
+            # render_topology already consumes.
             topology: Optional[Dict[str, Any]] = None
             try:
                 topo_resp = requests.get(
-                    f"{self._api_base_url}/api/network/topology",
+                    f"{self._api_base_url}/api/topology",
                     timeout=self.api_timeout,
                     headers=internal_api_headers(),
                 )
