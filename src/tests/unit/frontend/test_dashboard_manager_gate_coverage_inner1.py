@@ -219,24 +219,40 @@ class TestThemeInner:
 class TestStatusAndNetworkInner:
     @patch("requests.get")
     def test_update_unified_status_bar(self, mock_get, dm):
-        # Stage 2 (design §13 row 1): the bar callback also owns training-status-store,
-        # so the tuple grew 9 -> 10; the store element carries {is_running, phase}.
+        # Stage 2 (design §13 row 1) + F-CANOPY-025: the bar callback owns
+        # training-status-store AND the Live Switch gate, so the tuple is 11;
+        # the store element carries {is_running, phase}, the gate element the
+        # button's disabled state (idle + no flag -> disabled True).
         mock_get.return_value = _resp(ok=True, status=200, json_value={"is_running": False, "phase": "idle", "current_epoch": 0, "hidden_units": 0})
         cb = raw_cb(dm, "update_unified_status_bar")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = cb(1, None)
-        assert len(result) == 10
+            result = cb(1, None, None, None)
+        assert len(result) == 11
         assert result[9] == {"is_running": False, "phase": "idle"}
+        assert result[10] is True
 
     @patch("requests.get")
     def test_update_unified_status_bar_suppresses_unchanged_training_status(self, mock_get, dm):
         # Stage 2 (design §13 row 1): unchanged {is_running, phase} -> the store
-        # element is no_update, so its consumers only re-run on real transitions.
+        # element is no_update; F-CANOPY-025: unchanged gate value likewise.
         mock_get.return_value = _resp(ok=True, status=200, json_value={"is_running": True, "phase": "output"})
         cb = raw_cb(dm, "update_unified_status_bar")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = cb(1, {"is_running": True, "phase": "output"})
+            result = cb(1, {"is_running": True, "phase": "output"}, None, True)
         assert result[9] is dash.no_update
+        assert result[10] is dash.no_update
+
+    @patch("requests.get")
+    def test_update_unified_status_bar_opens_the_live_switch_gate(self, mock_get, dm):
+        # F-CANOPY-025 allow arm: flag ON + running -> the gate element writes
+        # disabled=False. The standalone gate callback could NEVER execute
+        # during a run (its Input store is claimed by this very feeder while in
+        # flight every fast tick), which hid this arm for the whole arc.
+        mock_get.return_value = _resp(ok=True, status=200, json_value={"is_running": True, "phase": "output"})
+        cb = raw_cb(dm, "update_unified_status_bar")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            result = cb(1, None, {"experimental_functions": True}, True)
+        assert result[10] is False
 
     @patch("requests.get")
     def test_update_network_info(self, mock_get, dm):

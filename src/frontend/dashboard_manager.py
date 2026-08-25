@@ -3231,8 +3231,20 @@ class DashboardManager:
         # ``/api/status`` on the same fast tick this callback already fetches it —
         # one renderer slot and one HTTP round-trip per second spent re-reading the
         # same payload. The store output is suppressed to ``no_update`` while
-        # ``{is_running, phase}`` is unchanged, so its consumers (the Live Switch
-        # gate) only re-run on real transitions.
+        # ``{is_running, phase}`` is unchanged, so its consumers only re-run on real
+        # transitions.
+        #
+        # F-CANOPY-025: this callback ALSO owns ``live-dataset-switch-button.disabled``.
+        # The old standalone gate (``gate_live_switch_button``, Input on this very
+        # store) was starved of promotion whenever THIS callback was in flight —
+        # dash-renderer will not promote a callback while any of its Inputs is an
+        # output claimed by a pending callback, and this feeder runs every fast tick
+        # with round-trips that cover the tick under run congestion. The gate is
+        # only USEFUL during a run (its allow arm needs ``is_running``), which is
+        # exactly when it could never execute: measured live post-Stage-2, the gate
+        # fired at idle mount and ZERO times across 80 s of training. Computing the
+        # gate IN the feeder removes the race atomically; the experimental flag
+        # rides as State, so a flag flip lands within one fast tick.
         @self.app.callback(
             [
                 Output("status-indicator", "style"),
@@ -3245,14 +3257,22 @@ class DashboardManager:
                 Output("top-epoch-display", "children"),
                 Output("top-hidden-units-display", "children"),
                 Output("training-status-store", "data"),
+                Output("live-dataset-switch-button", "disabled"),
             ],
             Input("fast-update-interval", "n_intervals"),
             dash.dependencies.State("training-status-store", "data"),
+            dash.dependencies.State("experimental-flags-store", "data"),
+            dash.dependencies.State("live-dataset-switch-button", "disabled"),
             prevent_initial_call=False,
         )
-        def update_unified_status_bar(n_intervals, prev_training_status):
-            """Update unified status bar with all state info (+ the training-status store)."""
-            return self._update_unified_status_bar_handler(n_intervals=n_intervals, prev_training_status=prev_training_status)
+        def update_unified_status_bar(n_intervals, prev_training_status, experimental_flags, prev_switch_disabled):
+            """Update unified status bar (+ the training-status store and the Live Switch gate)."""
+            return self._update_unified_status_bar_handler(
+                n_intervals=n_intervals,
+                prev_training_status=prev_training_status,
+                experimental_flags=experimental_flags,
+                prev_switch_disabled=prev_switch_disabled,
+            )
 
     # Define Network callbacks
     def _setup_network_callbacks(self):
@@ -4896,15 +4916,25 @@ class DashboardManager:
                 Output("experimental-functions-alert", "children", allow_duplicate=True),
             ],
             Input("params-init-interval", "n_intervals"),
+            State("experimental-functions-toggle", "value"),
             prevent_initial_call="initial_duplicate",
         )
-        def load_reconcile_experimental_functions(n_intervals):
+        def load_reconcile_experimental_functions(n_intervals, current_toggle):
             """Page-load sync against cascor's authoritative gate state.
 
             ``params-init-interval`` is the canonical one-shot-on-mount
             trigger used elsewhere in the dashboard (e.g., params load).
             Fires once per session; ``max_intervals=1`` on the Interval
             component caps additional fires.
+
+            F-CANOPY-025 (echo clobber): an UNCHANGED toggle write here still
+            fires ``handle_experimental_functions_toggle`` (an unchanged write
+            fires every consumer — the Stage-2 lesson), which then POSTs the
+            mount-time value back to cascor — so every page load re-wrote the
+            server-side gate, racing and reverting any operator change made
+            since that page's mount. The toggle write is now suppressed when
+            the authoritative value already matches (the handler additionally
+            carries its own echo guard).
             """
             try:
                 resp = requests.get(
@@ -4917,12 +4947,13 @@ class DashboardManager:
                     # show the toggle as OFF (F2.10 safe default) and surface
                     # a soft warning so the user knows the toggle is local-only.
                     self.logger.warning("Experimental functions load failed: %s %s", resp.status_code, resp.text[:200])
-                    return False, {"experimental_functions": False}, dbc.Alert("Could not reach backend; experimental functions disabled.", color="warning", duration=5000, dismissable=True)
+                    return (dash.no_update if not current_toggle else False), {"experimental_functions": False}, dbc.Alert("Could not reach backend; experimental functions disabled.", color="warning", duration=5000, dismissable=True)
                 authoritative = bool(resp.json().get("data", {}).get("enabled", False))
-                return authoritative, {"experimental_functions": authoritative}, None
+                toggle_out = dash.no_update if authoritative == bool(current_toggle) else authoritative
+                return toggle_out, {"experimental_functions": authoritative}, None
             except requests.RequestException as exc:
                 self.logger.warning("Experimental functions load exception: %s", exc)
-                return False, {"experimental_functions": False}, dbc.Alert("Backend unreachable; experimental functions disabled.", color="warning", duration=5000, dismissable=True)
+                return (dash.no_update if not current_toggle else False), {"experimental_functions": False}, dbc.Alert("Backend unreachable; experimental functions disabled.", color="warning", duration=5000, dismissable=True)
 
         @self.app.callback(
             [
@@ -4937,10 +4968,21 @@ class DashboardManager:
         def handle_experimental_functions_toggle(switch_value, store_data):
             """POST the new toggle value to cascor and reconcile UI state.
 
+            F-CANOPY-025 (echo guard): fire the POST only when the value
+            actually DIFFERS from the store's last-known state. Without this,
+            any programmatic write of the toggle (the load reconciliation, a
+            revert) re-POSTed the same value to cascor — and a mount-time echo
+            of a stale read could clobber an operator change made since.
+            A real user flip always differs from the store (the store is only
+            written alongside a completed reconcile/POST), so it always POSTs.
+
             F2.10 server-authoritative: the response's ``enabled`` value is
             what the UI must reflect, even if it differs from the request.
             """
             requested = bool(switch_value)
+            if requested == bool((store_data or {}).get("experimental_functions", False)):
+                # Echo, not a user flip — the store already reflects this value.
+                return dash.no_update, dash.no_update, dash.no_update
             try:
                 resp = requests.post(
                     self._api_url("/api/admin/experimental_functions"),
@@ -5007,14 +5049,15 @@ class DashboardManager:
         # ``_update_training_status_store_handler`` remains as the directly
         # invocable single-store form (unit-test surface / parity reference).
 
-        @self.app.callback(
-            Output("live-dataset-switch-button", "disabled"),
-            Input("experimental-flags-store", "data"),
-            Input("training-status-store", "data"),
-            prevent_initial_call=False,
-        )
-        def gate_live_switch_button(flags, status):
-            return self._gate_live_switch_button_handler(flags=flags, status=status)
+        # F-CANOPY-025: the standalone gate callback that used to live here
+        # (``gate_live_switch_button``, Inputs experimental-flags-store +
+        # training-status-store) could NEVER execute during a run — its
+        # training-status Input is an output the unified-status-bar feeder
+        # claims while in flight on every fast tick, so the gate lost the
+        # promotion race exactly when its allow arm was reachable. The gate is
+        # now computed inside ``update_unified_status_bar`` from the same
+        # payload (``_gate_live_switch_button_handler`` still holds the truth
+        # table and stays directly invocable for tests).
 
         @self.app.callback(
             [
@@ -6073,11 +6116,11 @@ class DashboardManager:
             "--",
         )
 
-    def _update_unified_status_bar_handler(self, n_intervals=None, prev_training_status=None):
+    def _update_unified_status_bar_handler(self, n_intervals=None, prev_training_status=None, experimental_flags=None, prev_switch_disabled=None):
         """
         Update unified status bar with all state info from /api/status.
 
-        Returns tuple of 10 elements:
+        Returns tuple of 11 elements:
         - status_indicator style (latency color)
         - connection_status children (hidden, for backward compat)
         - latency_display children
@@ -6091,6 +6134,11 @@ class DashboardManager:
           absorbed the store's dedicated /api/status poller; ``no_update`` while
           ``{is_running, phase}`` is unchanged so consumers only re-run on real
           transitions, and on every error path so a hiccup never blanks it)
+        - live-dataset-switch-button disabled (F-CANOPY-025: computed IN the
+          feeder from the same payload — the standalone gate could never win
+          promotion against this callback's own in-flight claim on the store;
+          same gate truth table as ``_gate_live_switch_button_handler``;
+          ``no_update`` while unchanged and on every error path)
         """
         try:
             # Single request: /api/status provides all needed info and doubles as health check.
@@ -6106,20 +6154,22 @@ class DashboardManager:
                     "phase": str(payload.get("phase", "idle")),
                 }
                 store_out = dash.no_update if training_status == prev_training_status else training_status
-                return (*self._build_unified_status_bar_content(status_response, latency_ms), store_out)
+                switch_disabled = self._gate_live_switch_button_handler(flags=experimental_flags, status=training_status)
+                switch_out = dash.no_update if switch_disabled == prev_switch_disabled else switch_disabled
+                return (*self._build_unified_status_bar_content(status_response, latency_ms), store_out, switch_out)
             # Non-200: surface a specific, actionable label instead of a bare "Error"
             # so a transient rate limit isn't confused with a real backend outage.
             # Dominant "Error" cause on the deployed stack: canopy's own rate
             # limiter throttling the dashboard's own polling (see #2a).
             status_label, detail = self._classify_response_failure(status_response)
-            return (*self._status_bar_error_tuple(status_label, detail), dash.no_update)
+            return (*self._status_bar_error_tuple(status_label, detail), dash.no_update, dash.no_update)
         except (requests.Timeout, requests.ConnectionError) as e:
             self.logger.warning(f"Status bar update failed: {type(e).__name__}")
             status_label, detail = self._classify_exception_failure(e)
-            return (*self._status_bar_error_tuple(status_label, detail), dash.no_update)
+            return (*self._status_bar_error_tuple(status_label, detail), dash.no_update, dash.no_update)
         except Exception as e:
             self.logger.warning(f"Status bar update failed: {type(e).__name__}: {e}")
-            return (*self._status_bar_error_tuple("Error", "Connection Error"), dash.no_update)
+            return (*self._status_bar_error_tuple("Error", "Connection Error"), dash.no_update, dash.no_update)
 
     @staticmethod
     def _completion_reason_label(reason):
