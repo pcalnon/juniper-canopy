@@ -172,12 +172,23 @@ class CascorWebSocket {
     }
 
     /**
-     * Register handler for specific message type
+     * Register handler for specific message type.
+     *
+     * F-CANOPY-002: the registry is a per-type LIST, not a single slot. The
+     * old direct single-slot assignment silently REPLACED any prior
+     * registration — asset load order guaranteed ws_latency.js registered its
+     * `metrics` sampler after ws_dash_bridge.js and clobbered the bridge's
+     * metrics intake, so the WS metrics fast path was dead in every live run
+     * while sibling types on the same socket flowed normally.
+     *
      * @param {string} type - Message type to handle
      * @param {function} handler - Handler function(data)
      */
     on(type, handler) {
-        this.handlers[type] = handler;
+        if (!this.handlers[type]) {
+            this.handlers[type] = [];
+        }
+        this.handlers[type].push(handler);
     }
 
     /**
@@ -254,12 +265,17 @@ class CascorWebSocket {
             this.messageBuffer.shift();
         }
 
-        // Dispatch to registered handler
-        if (this.handlers[type]) {
-            try {
-                this.handlers[type](data);
-            } catch (err) {
-                console.error(`[CascorWS] Handler error for type '${type}':`, err);
+        // Dispatch to every registered handler (F-CANOPY-002 fan-out).
+        // Iterate a copy so a handler calling off() mid-dispatch is safe;
+        // one handler throwing must not starve its siblings.
+        const typeHandlers = this.handlers[type];
+        if (typeHandlers && typeHandlers.length) {
+            for (const handler of typeHandlers.slice()) {
+                try {
+                    handler(data);
+                } catch (err) {
+                    console.error(`[CascorWS] Handler error for type '${type}':`, err);
+                }
             }
         }
     }
@@ -485,12 +501,21 @@ class CascorWebSocket {
     }
 
     /**
-     * Remove handler for specific message type
+     * Remove handler for specific message type (identity match, as before —
+     * F-CANOPY-002 kept the identity guard, now against the per-type list).
      * @param {string} type - Message type
      * @param {function} handler - Handler function to remove
      */
     off(type, handler) {
-        if (this.handlers[type] === handler) {
+        const typeHandlers = this.handlers[type];
+        if (!typeHandlers) {
+            return;
+        }
+        const idx = typeHandlers.indexOf(handler);
+        if (idx !== -1) {
+            typeHandlers.splice(idx, 1);
+        }
+        if (typeHandlers.length === 0) {
             delete this.handlers[type];
         }
     }
