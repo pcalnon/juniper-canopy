@@ -187,7 +187,7 @@ class TestStatusBarHandlers:
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_unified_status_bar_handler(n_intervals=1)
 
-        assert len(result) == 10  # Stage 2: +training-status-store element (design §13 row 1)
+        assert len(result) == 11  # Stage 2 + F-CANOPY-025: +training-status-store and +live-switch-gate elements
         assert result[3] == "Running"
         assert result[5] == "Output Training"
 
@@ -244,7 +244,7 @@ class TestStatusBarHandlers:
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_unified_status_bar_handler(n_intervals=1)
 
-        assert len(result) == 10  # Stage 2: +training-status-store element (design §13 row 1)
+        assert len(result) == 11  # Stage 2 + F-CANOPY-025: +training-status-store and +live-switch-gate elements
         assert result[3] == "Backend Error"
 
     @patch("requests.get")
