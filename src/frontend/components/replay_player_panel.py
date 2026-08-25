@@ -43,6 +43,7 @@ import requests
 from dash import Input, Output, State, dcc, html
 
 from frontend.internal_api import internal_api_headers
+from settings import get_settings
 
 from ..base_component import BaseComponent
 
@@ -77,7 +78,14 @@ class ReplayPlayerPanel(BaseComponent):
 
     def __init__(self, config: Dict[str, Any], component_id: str = "replay-player-panel"):
         super().__init__(config, component_id)
-        self._api_base_url = config.get("api_base_url", "")
+        # F-CANOPY-014: the empty-string fallback built every control URL as a
+        # schemeless path ("/api/v1/snapshots/<id>/replay/control"), which
+        # requests rejects with "No scheme supplied" -- and the runtime config
+        # never supplies api_base_url, so the whole replay control surface was
+        # dead. Mirror the sibling panels (network_editor_panel,
+        # hdf5_snapshots_panel): fall back to this service's own port.
+        _settings = get_settings()
+        self._api_base_url = config.get("api_base_url", f"http://127.0.0.1:{_settings.server.port}")
         self.api_timeout = float(config.get("api_timeout", 5))
 
     # ------------------------------------------------------------------
