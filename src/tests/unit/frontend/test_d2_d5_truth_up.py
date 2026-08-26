@@ -94,6 +94,43 @@ class TestD2InitOutputWeightsIsDirtyTracked:
 
 
 @pytest.mark.unit
+class TestD2MountHydrationSeedsTheField:
+    """The regression the first cut of D-2 introduced (caught by the UI sub-suite):
+    the mount hydration seeded a fixed 27-key applied store, so once the tracker
+    compared ``nn_init_output_weights`` every fresh session read "unsaved
+    changes". The seed now carries the key and hydrates the dropdown."""
+
+    def _hydrate(self, dashboard_manager, state):
+        from unittest.mock import MagicMock, patch
+
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = state
+        with patch("frontend.dashboard_manager.requests.get", return_value=resp):
+            return dashboard_manager._init_params_from_backend_handler(1, None)
+
+    def test_seed_carries_the_key_and_hydrates_the_dropdown(self, dashboard_manager):
+        result = self._hydrate(dashboard_manager, {"nn_init_output_weights": "zeros"})
+        assert len(result) == 29
+        assert result[27] == "zeros"  # the hydrated dropdown value
+        assert result[-1]["nn_init_output_weights"] == "zeros"  # the applied store stays last
+
+    def test_fresh_session_is_clean_on_mount(self, dashboard_manager):
+        from canopy_constants import TrainingConstants
+
+        result = self._hydrate(dashboard_manager, {})
+        seeded = result[-1]
+        assert seeded["nn_init_output_weights"] == TrainingConstants.DEFAULT_INIT_OUTPUT_WEIGHTS
+        current = [seeded[k] for k in ("nn_max_iterations", "nn_max_total_epochs", "nn_learning_rate", "nn_max_hidden_units")]
+        current += [["enabled"] if seeded["nn_multi_node_layers"] else []]
+        current += [seeded[k] for k in ("nn_growth_trigger", "nn_growth_preset_epochs", "nn_growth_convergence_threshold", "nn_patience", "nn_spiral_rotations", "nn_spiral_number", "nn_dataset_elements", "nn_dataset_noise", "cn_pool_size", "cn_correlation_threshold", "cn_selected_candidates", "cn_training_complete", "cn_training_iterations", "cn_training_convergence_threshold", "cn_patience")]
+        current += [["enabled"] if seeded["cn_multi_candidate"] else []]
+        current += [seeded[k] for k in ("cn_candidate_selection", "cn_top_candidates", "cn_random_candidates")]
+        disabled, status = dashboard_manager._track_param_changes_handler(*current, nn_output_epochs=seeded["nn_output_epochs"], nn_optimizer_type=seeded["nn_optimizer_type"], nn_activation_function=seeded["nn_activation_function_name"], applied=seeded, nn_init_output_weights=result[27])
+        assert disabled is True
+        assert status is dash.no_update
+
+
+@pytest.mark.unit
 class TestD5PhaseDCommentMatchesTheDefault:
     def test_flag_defaults_on_and_the_comment_says_so(self):
         import frontend.dashboard_manager as dm_module

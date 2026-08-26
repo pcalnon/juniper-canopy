@@ -66,11 +66,11 @@ class TestInitParamsFromBackendNon200:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(1, None)
-            # 28-tuple after canopy#204/205/206 added output_epochs,
+            # 29-tuple after canopy#204/205/206 added output_epochs (+ the D-2 dropdown),
             # optimizer_type, and activation_function to the
             # init-from-backend handler. Mirror NUM_OUTPUTS in
             # dashboard_manager._init_params_from_backend_handler.
-            assert result == (dash.no_update,) * 28
+            assert result == (dash.no_update,) * 29
 
     def test_init_params_from_backend_404_status(self, dashboard_manager, mocker):
         """Test init_params_from_backend returns no_update on 404 status."""
@@ -80,7 +80,7 @@ class TestInitParamsFromBackendNon200:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(1, None)
-            assert result == (dash.no_update,) * 28
+            assert result == (dash.no_update,) * 29
 
 
 class TestTrainingButtonsDebounce:
@@ -510,7 +510,7 @@ class TestInitParamsFromBackendHandler:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=None)
-            # Returns 28-tuple: (nn_max_iter, nn_max_epochs, nn_lr, nn_max_hu, ...)
+            # Returns 29-tuple (D-2 dropdown at 27, applied dict at 28): (nn_max_iter, nn_max_epochs, nn_lr, nn_max_hu, ...)
             # — output_epochs, optimizer_type, activation_function added by
             # canopy#204/205/206. The applied-params dict is the LAST
             # element (index 27 since canopy#206).
@@ -519,7 +519,7 @@ class TestInitParamsFromBackendHandler:
             assert result[1] == 1000000  # default nn_max_total_epochs (TrainingConstants.DEFAULT_TRAINING_EPOCHS)
             assert result[7] == 0.001  # default nn_growth_convergence_threshold
             assert result[9] == 1.5  # nn_spiral_rotations default
-            assert result[27]["nn_learning_rate"] == 0.01
+            assert result[28]["nn_learning_rate"] == 0.01
 
 
 class TestApplyParametersHandler:
@@ -580,7 +580,7 @@ class TestInitParamsAlreadyInitialized:
         """Test init params returns no_update when applied-params-store already has data."""
         current_applied = {"nn_learning_rate": 0.05}
         result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=current_applied)
-        assert result == (dash.no_update,) * 28
+        assert result == (dash.no_update,) * 29
 
 
 class TestTrackParamChangesEdgeCases:
