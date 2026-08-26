@@ -38,7 +38,7 @@
 #
 #####################################################################################################################################################################################################
 import time
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import dash
 import dash_bootstrap_components as dbc
@@ -53,6 +53,11 @@ from ..base_component import BaseComponent, create_empty_plot
 
 # Maximum number of historical pool entries to retain in memory
 MAX_POOL_HISTORY_ENTRIES = 20
+
+# F-CANOPY-035: the dashboard-level metrics-history store (owned by the metrics
+# panel; fed by the liveness-gated /api/metrics/history poll and the WS append
+# path). The candidate loss figure consumes it instead of adding a poller.
+SHARED_METRICS_STORE_ID = "metrics-panel-metrics-store"
 
 
 class CandidateMetricsPanel(BaseComponent):
@@ -319,10 +324,20 @@ class CandidateMetricsPanel(BaseComponent):
             [
                 Input(f"{self.component_id}-training-state-store", "data"),
                 Input("theme-state", "data"),
+                # F-CANOPY-035: the per-epoch candidate losses live in the shared
+                # metrics-history store -- NOT in /api/state, which never carries
+                # epochs/losses/phases in any lane, so the figure was structurally
+                # empty. Consuming the existing store adds no poller (the
+                # F-CANOPY-027 rule).
+                Input(SHARED_METRICS_STORE_ID, "data"),
             ],
             prevent_initial_call=False,
         )
-        def update_loss_plot(state, theme):
+        def update_loss_plot(state, theme, history=None):
+            series = self._candidate_series_from_history(history)
+            if series:
+                return self._create_candidate_loss_figure(series, theme=theme or "light")
+            # Fallback: the state-store shape, should a backend ever provide it.
             return self._create_candidate_loss_figure(state, theme=theme or "light")
 
         # ── Toggle pool details collapse ──
@@ -548,6 +563,43 @@ class CandidateMetricsPanel(BaseComponent):
                 pool_metrics_table,
             ]
         )
+
+    @staticmethod
+    def _candidate_series_from_history(history: Any) -> Dict[str, List[Any]]:
+        """Derive the ``epochs`` / ``losses`` / ``phases`` series the loss figure
+        consumes from the shared metrics-history store (F-CANOPY-035).
+
+        Entries are the dashboard's nested shape (``{"epoch", "metrics": {"loss"},
+        "phase"}`` -- produced by both the demo backend and the cascor adapter's
+        ``_to_dashboard_metric``); a flat ``loss`` / ``train_loss`` +
+        ``cascade_phase`` entry is tolerated too. Only candidate-phase entries with
+        an epoch and a numeric loss are kept; an empty dict means "nothing to plot".
+        """
+        if not isinstance(history, list):
+            return {}
+        epochs: List[Any] = []
+        losses: List[float] = []
+        phases: List[str] = []
+        for entry in history:
+            if not isinstance(entry, dict):
+                continue
+            phase = str(entry.get("phase") or entry.get("cascade_phase") or "")
+            if "candidate" not in phase.lower():
+                continue
+            raw_metrics = entry.get("metrics")
+            nested: Dict[str, Any] = raw_metrics if isinstance(raw_metrics, dict) else {}
+            loss = nested.get("loss")
+            if loss is None:
+                loss = entry.get("loss", entry.get("train_loss"))
+            epoch = entry.get("epoch")
+            if epoch is None or isinstance(loss, bool) or not isinstance(loss, (int, float)):
+                continue
+            epochs.append(epoch)
+            losses.append(float(loss))
+            phases.append(phase)
+        if not epochs:
+            return {}
+        return {"epochs": epochs, "losses": losses, "phases": phases}
 
     def _create_candidate_loss_figure(self, state: Dict[str, Any] = None, theme: str = "light") -> go.Figure:
         """
