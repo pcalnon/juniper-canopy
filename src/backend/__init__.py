@@ -113,9 +113,18 @@ def _try_create_recurrence_backend(nn_model: str, settings: "Settings") -> Optio
 
     Returns ``None`` (so ``create_backend`` falls through to the demo/cascor resolution)
     when ``nn_model`` is not a recurrence-provider model, or when it is but
-    ``recurrence_service_url`` is unset — the latter is logged loudly. The A1 selection UI
-    (A1-iv) gates an unconfigured recurrence model out of the picker, so the unset-URL path
-    is a safety net rather than the normal flow.
+    ``recurrence_service_url`` is unset — the latter is logged loudly.
+
+    D-8 (canopy E2E arc, plan §7.5): the unset-URL branch is a REACHABLE normal path, not a
+    mere safety net. Nothing gates an unconfigured recurrence model out of selection —
+    ``model_is_trainable`` (``model_registry.py``) gates on the registry ``status`` only, and
+    the recurrence spec is hardcoded ``status="live"``, so the A1 picker shows it as trainable
+    and ``POST /api/model/select`` accepts it (HTTP 200) whether or not ``recurrence_service_url``
+    is configured. When it is unset the selection is recorded but the live backend stays the
+    default cascor/demo backend (``_swap_backend`` treats the target type as unchanged), so the
+    user is shown a successful selection of a model that is not actually active. Making the
+    unset-URL case gate selection or flip the spec status is a deliberate behaviour change
+    tracked in the arc ledger, not a docstring's to assume.
     """
     from model_registry import RECURRENCE_PROVIDER, get_model_spec
 
