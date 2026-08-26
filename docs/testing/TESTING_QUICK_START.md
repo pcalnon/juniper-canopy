@@ -9,7 +9,7 @@ Get up and running with tests in **5 minutes**.
 
 ```bash
 # Activate conda environment
-conda activate JuniperPython
+conda activate JuniperCanopy1
 
 # Verify pytest is installed
 pytest --version
@@ -85,11 +85,11 @@ pytest --tb=short -v
 
 ```bash
 # Ensure conda environment is active
-conda activate JuniperPython
+conda activate JuniperCanopy1
 
 # Verify Python path
 which python
-# Should be: /opt/miniforge3/envs/JuniperPython/bin/python
+# Should be: /opt/miniforge3/envs/JuniperCanopy1/bin/python
 ```
 
 ### Test Discovery Failures

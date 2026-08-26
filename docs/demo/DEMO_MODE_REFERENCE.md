@@ -644,13 +644,30 @@ def background_worker():
 
 ## Configuration System
 
-### ConfigManager
+### Settings (current)
 
-**Location:** `src/config_manager.py`
+**Location:** `src/settings.py` — `Settings`, a `pydantic-settings` `BaseSettings`
 
-**Purpose:** Hierarchical configuration with environment overrides
+**Purpose:** Typed, validated configuration; demo mode reads the same settings as every other mode
 
-#### Configuration Hierarchy
+**Hierarchy** (highest priority first): environment variables (`JUNIPER_CANOPY_<KEY>`, or
+`JUNIPER_CANOPY_<SECTION>__<KEY>` for nested sections), then a `.env` file in the working directory,
+then the defaults on the settings models. The legacy `CASCOR_DEMO_MODE`, `CASCOR_DEMO_UPDATE_INTERVAL`,
+`CASCOR_DEMO_CASCADE_EVERY`, `CASCOR_SERVICE_URL`, `CASCOR_BACKEND_PATH` and `CASCOR_LOG_LEVEL` names
+are accepted by validator fallbacks that emit a deprecation warning. Demo-specific fields: `demo_mode`,
+`demo_cascade_every` (the fallback cascade schedule) and `demo_update_interval` — the last is declared
+but not applied: the backend factory creates the demo backend with a fixed 1.0 s epoch interval (a
+tracked divergence).
+
+### ConfigManager (legacy)
+
+**Location:** `src/config_manager.py` — read only by the optional Redis client; the application
+settings no longer come from it
+
+**Purpose:** Hierarchical YAML configuration with environment overrides (the pre-`pydantic-settings`
+design)
+
+#### Configuration Hierarchy (legacy)
 
 1. Hard-coded defaults
 2. YAML file (`conf/app_config.yaml`)
@@ -851,13 +868,12 @@ async def test_websocket_broadcasting():
 
 ### Metrics
 
-**Update Frequency:** 100ms (10 Hz)
+**Update Frequency:** one simulated epoch per second (1 Hz)
 
-- Configurable via `CASCOR_DEMO_UPDATE_INTERVAL`
+- `DemoMode(update_interval=…)` is the knob; the application's backend factory passes a fixed `1.0`,
+  so the `JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL` setting is not applied today (a tracked divergence)
 
-**Epoch Duration:** 50ms per epoch
-
-- Configurable via `CASCOR_DEMO_EPOCH_DURATION`
+**Epoch Duration:** equal to the update interval — one metrics broadcast per simulated epoch
 
 **WebSocket Latency:** <10ms
 
@@ -888,16 +904,19 @@ async def test_websocket_broadcasting():
 
 ### Optimization Tips
 
-**Reduce Update Frequency:**
+**Change the Update Frequency:**
 
-```bash
-export CASCOR_DEMO_UPDATE_INTERVAL=0.5  # 500ms (2 Hz)
+```python
+# The interval is a DemoMode constructor argument; the application pins it at 1.0 s
+from demo_mode import get_demo_mode
+
+demo = get_demo_mode(update_interval=0.5)  # 500 ms (2 Hz) — the first call wins (module singleton)
 ```
 
-**Faster Training Simulation:**
+**Faster Cascade Growth:**
 
 ```bash
-export CASCOR_DEMO_EPOCH_DURATION=0.01  # 10ms per epoch (10x faster)
+export JUNIPER_CANOPY_DEMO_CASCADE_EVERY=10  # add a cascade unit every 10 epochs
 ```
 
 **Limit History:**

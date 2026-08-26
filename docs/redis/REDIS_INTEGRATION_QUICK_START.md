@@ -49,7 +49,7 @@ Redis integration is configured in `conf/app_config.yaml` but the implementation
 - [ ] **Redis Server** installed and running (6.x or higher)
 - [ ] **redis-py** Python client library
 - [ ] **Juniper Canopy** running successfully in demo mode
-- [ ] **Python 3.11+** with JuniperPython conda environment
+- [ ] **Python 3.11+** with the live `JuniperCanopy1` conda environment (the name is versioned; see AGENTS.md)
 
 **Check Redis availability:**
 
@@ -102,7 +102,7 @@ redis-cli ping
 
 ```bash
 # Activate conda environment
-conda activate JuniperPython
+conda activate JuniperCanopy1
 
 # Install redis-py
 pip install redis
@@ -327,7 +327,7 @@ ModuleNotFoundError: No module named 'redis'
 
 ```bash
 # Activate conda environment
-conda activate JuniperPython
+conda activate JuniperCanopy1
 
 # Install redis-py
 pip install redis
