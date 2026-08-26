@@ -794,12 +794,14 @@ the [Network Evolution](#network-evolution-tab) weight-norm traces.
 
 ## Configuration
 
-### Configuration Sources
+### Configuration Files
 
-Settings are typed `pydantic-settings` models in `src/settings.py`. Precedence, highest first:
+Settings are typed `pydantic-settings` models in `src/settings.py`; the only configuration *file* the
+application reads is an optional `.env` in the working directory (`.env.example` documents every
+key). Precedence, highest first:
 
 1. Environment variables (`JUNIPER_CANOPY_*`, see below)
-2. A `.env` file in the working directory (`.env.example` documents every key)
+2. The `.env` file
 3. The defaults in `src/settings.py`
 
 `conf/app_config.yaml` is **legacy**: the application settings no longer come from it (only the
@@ -811,20 +813,20 @@ Every setting has a `JUNIPER_CANOPY_`-prefixed environment variable; nested sect
 underscore:
 
 ```bash
-# Server (a non-loopback host needs a SEC-F22 attestation — see .env.example)
-export JUNIPER_CANOPY_SERVER__HOST=0.0.0.0
+# Server configuration
 export JUNIPER_CANOPY_SERVER__PORT=8051
-export JUNIPER_CANOPY_SERVER__DEBUG=true
+export JUNIPER_CANOPY_SERVER__HOST=0.0.0.0   # a non-loopback host needs a SEC-F22 attestation — see .env.example
 
 # Demo mode
 export JUNIPER_CANOPY_DEMO_MODE=1
 
-# Backends
+# Backend path
 export JUNIPER_CANOPY_CASCOR_SERVICE_URL=http://localhost:8201    # juniper-cascor service (service mode)
 export JUNIPER_DATA_URL=http://localhost:8100                      # juniper-data (shared, unprefixed)
 export JUNIPER_CANOPY_BACKEND_PATH=/custom/path/to/juniper-cascor  # in-process cascor checkout (legacy path)
 
-# Logging
+# Debug mode
+export JUNIPER_CANOPY_SERVER__DEBUG=true
 export JUNIPER_CANOPY_LOG_LEVEL=DEBUG
 export JUNIPER_CANOPY_LOG_FORMAT=json
 
@@ -846,7 +848,12 @@ are read by nothing** — exporting them has no effect; use the `JUNIPER_CANOPY_
 The sidebar's training defaults additionally honour the unprefixed `CASCOR_TRAINING_LEARNING_RATE`,
 `CASCOR_TRAINING_HIDDEN_UNITS` and `CASCOR_TRAINING_EPOCHS`.
 
-### Key Settings
+### Key Configuration Sections
+
+Every setting below lives on `Settings` in `src/settings.py`; the environment name is the field name
+upper-cased under the `JUNIPER_CANOPY_` prefix, with `__` between a nested section and its key.
+
+#### Application Settings
 
 | Setting (`src/settings.py`)                   | Environment variable                                             | Default                        |
 |-----------------------------------------------|------------------------------------------------------------------|--------------------------------|
@@ -855,12 +862,25 @@ The sidebar's training defaults additionally honour the unprefixed `CASCOR_TRAIN
 | `cascor_service_url`                          | `JUNIPER_CANOPY_CASCOR_SERVICE_URL`                              | unset (demo fallback)          |
 | `juniper_data_url`                            | `JUNIPER_DATA_URL` (or `JUNIPER_CANOPY_JUNIPER_DATA_URL`)        | `http://localhost:8100`        |
 | `recurrence_service_url`                      | `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL`                          | unset                          |
-| `log_level` / `log_format`                    | `JUNIPER_CANOPY_LOG_LEVEL` / `JUNIPER_CANOPY_LOG_FORMAT`         | `INFO` / `text`                |
 | `training.<param>.{min,max,default}`          | `JUNIPER_CANOPY_TRAINING__<PARAM>__{MIN,MAX,DEFAULT}`            | see `TrainingSettings`         |
 | `demo_cascade_every`                          | `JUNIPER_CANOPY_DEMO_CASCADE_EVERY`                              | `30`                           |
 | `demo_update_interval`                        | `JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL` — declared, **not applied** (fixed 1.0 s) | `1.0`           |
-| `metrics_enabled`                             | `JUNIPER_CANOPY_METRICS_ENABLED`                                 | `false`                        |
+
+#### Frontend Settings
+
+| Setting                                       | Environment variable                                             | Default                        |
+|-----------------------------------------------|------------------------------------------------------------------|--------------------------------|
+| `enable_ws_control_buttons`                   | `JUNIPER_CANOPY_ENABLE_WS_CONTROL_BUTTONS`                       | `true`                         |
 | `dataset_import_url_enabled`                  | `JUNIPER_CANOPY_DATASET_IMPORT_URL_ENABLED`                      | `false`                        |
+| Snapshots-table refresh (panel-local)         | `JUNIPER_CANOPY_SNAPSHOTS_REFRESH_INTERVAL_MS`                   | `10000`                        |
+
+#### Logging Settings
+
+| Setting                                       | Environment variable                                             | Default                        |
+|-----------------------------------------------|------------------------------------------------------------------|--------------------------------|
+| `log_level` / `log_format`                    | `JUNIPER_CANOPY_LOG_LEVEL` / `JUNIPER_CANOPY_LOG_FORMAT`         | `INFO` / `text`                |
+| `sentry_dsn`                                  | `JUNIPER_CANOPY_SENTRY_DSN`                                      | unset                          |
+| `metrics_enabled`                             | `JUNIPER_CANOPY_METRICS_ENABLED`                                 | `false`                        |
 
 ### Applying Configuration Changes
 

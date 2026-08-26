@@ -86,15 +86,21 @@ export JUNIPER_CANOPY_LOG_LEVEL=DEBUG
 export JUNIPER_CANOPY_BACKEND_PATH=/path/to/juniper-cascor
 ```
 
-The legacy `CASCOR_DEMO_MODE`, `CASCOR_DEMO_UPDATE_INTERVAL`, `CASCOR_DEMO_CASCADE_EVERY`,
-`CASCOR_BACKEND_PATH` and `CASCOR_LOG_LEVEL` names still work, with a deprecation warning.
+### Method 2: Configuration File
+
+The only configuration file the application reads is a `.env` file:
+
+```bash
+# Copy the template next to main.py (the directory canopy runs from) and edit the keys above
+cp .env.example src/.env
+```
+
+The file is read at startup, below any exported variable.
+
+**Legacy names.** `CASCOR_DEMO_MODE`, `CASCOR_DEMO_UPDATE_INTERVAL`, `CASCOR_DEMO_CASCADE_EVERY`,
+`CASCOR_BACKEND_PATH` and `CASCOR_LOG_LEVEL` still work, with a deprecation warning.
 `CASCOR_SERVER_*`, `CASCOR_DEBUG`, `CASCOR_DEMO_EPOCH_DURATION`, `CASCOR_DEMO_CASCADE_INTERVAL`,
 `CASCOR_DEMO_MAX_HIDDEN_UNITS`, `CASCOR_DATA_DIR` and `CASCOR_LOG_DIR` are read by nothing.
-
-### Method 2: `.env` File
-
-Copy `.env.example` to `src/.env` (the directory canopy runs from) and edit the keys above; the file
-is read at startup, below any exported variable.
 
 ### Method 3: Launch Script
 
