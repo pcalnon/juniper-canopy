@@ -157,18 +157,19 @@ Technical reference for the demo mode simulation system.
 | [DEMO_MODE_REFERENCE.md](demo/DEMO_MODE_REFERENCE.md) | Demo mode technical reference | ~895 |
 | [DEMO_MODE_ENVIRONMENT_SETUP.md](demo/DEMO_MODE_ENVIRONMENT_SETUP.md) | Demo environment configuration | ~340 |
 
-**Activation:** `CASCOR_DEMO_MODE=1` (set automatically by `./demo` script)
+**Activation:** `JUNIPER_CANOPY_DEMO_MODE=1` (set automatically by the `./demo` script; the legacy `CASCOR_DEMO_MODE` alias still works, with a deprecation warning)
 
 ---
 
 ## Integration References
 
-Planned integration documentation for future subsystems.
+Documentation for the shipped Redis and Cassandra monitoring tabs, and for the planned Kubernetes
+deployment.
 
 | Document | Purpose | Status |
 |----------|---------|--------|
-| [REDIS_INTEGRATION_REFERENCE.md](redis/REDIS_INTEGRATION_REFERENCE.md) | Redis cache integration | Planned |
-| [CASSANDRA_INTEGRATION_REFERENCE.md](cassandra/CASSANDRA_INTEGRATION_REFERENCE.md) | Cassandra persistence integration | Planned |
+| [REDIS_INTEGRATION_REFERENCE.md](redis/REDIS_INTEGRATION_REFERENCE.md) | Redis cache integration | Shipped — read-only **Redis** tab backed by `GET /api/v1/redis/status` and `GET /api/v1/redis/metrics` |
+| [CASSANDRA_INTEGRATION_REFERENCE.md](cassandra/CASSANDRA_INTEGRATION_REFERENCE.md) | Cassandra persistence integration | Shipped — read-only **Cassandra** tab backed by `GET /api/v1/cassandra/status` and `GET /api/v1/cassandra/metrics` |
 | [KUBERNETES_DEPLOYMENT_PLAN.md](deployment/KUBERNETES_DEPLOYMENT_PLAN.md) | Kubernetes deployment architecture | Planning |
 
 ---
