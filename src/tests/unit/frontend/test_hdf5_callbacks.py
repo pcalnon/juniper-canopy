@@ -27,7 +27,7 @@ src_dir = Path(__file__).parents[3]
 sys.path.insert(0, str(src_dir))
 
 import pytest
-from dash import html
+from dash import html, no_update
 
 from frontend.components.hdf5_snapshots_panel import HDF5SnapshotsPanel
 
@@ -258,12 +258,12 @@ class TestSelectSnapshotCallback:
     """Test select_snapshot callback function."""
 
     def test_no_clicks_returns_none(self, registered_panel):
-        """Should return None when no button clicked."""
+        """Should leave the selection alone when no button clicked (F-CANOPY-009)."""
         result = registered_panel._cb_select_snapshot(None, [])
-        assert result is None
+        assert result is no_update
 
     def test_all_zeros_returns_none(self, registered_panel):
-        """Should return None when all click counts are zero."""
+        """Should leave the selection alone when all click counts are zero (F-CANOPY-009)."""
         n_clicks_list = [0, 0, 0]
         ids = [
             {"type": "test-hdf5-snapshots-view-btn", "index": "snap_001"},
@@ -272,7 +272,7 @@ class TestSelectSnapshotCallback:
         ]
 
         result = registered_panel._cb_select_snapshot(n_clicks_list, ids)
-        assert result is None
+        assert result is no_update
 
     def test_selects_clicked_button(self, registered_panel):
         """Should return snapshot ID of clicked button."""
@@ -294,7 +294,7 @@ class TestSelectSnapshotCallback:
         assert result == "snap_002"
 
     def test_no_triggered_returns_none(self, registered_panel):
-        """Should return None when callback_context has no triggered."""
+        """Should leave the selection alone when callback_context has no triggered (F-CANOPY-009)."""
         import frontend.components.hdf5_snapshots_panel as panel_module
 
         n_clicks_list = [1, 0, 0]
@@ -306,7 +306,7 @@ class TestSelectSnapshotCallback:
         with patch.object(panel_module, "callback_context", fake_ctx):
             result = registered_panel._cb_select_snapshot(n_clicks_list, ids)
 
-        assert result is None
+        assert result is no_update
 
     def test_fallback_to_max_clicks(self, registered_panel):
         """Should fallback to button with max clicks on parse error."""
@@ -414,7 +414,7 @@ class TestOpenRestoreModalCallback:
     """Test open_restore_modal callback function (P3-2)."""
 
     def test_no_clicks_returns_closed(self, registered_panel):
-        """Should return closed modal when no button clicked.
+        """Should leave the modal alone when no button clicked (F-CANOPY-010).
 
         Updated for B-5: callback now reads ``callback_context.triggered``
         unconditionally, so we patch it to an empty-trigger ctx.
@@ -425,12 +425,11 @@ class TestOpenRestoreModalCallback:
         with patch.object(panel_module, "callback_context", empty_ctx):
             result = registered_panel._cb_open_restore_modal(None, None, False)
 
-        assert result[0] is False  # Modal closed
-        assert result[1] == ""  # Empty body
-        assert result[2] is None  # No pending ID
+        assert len(result) == 3
+        assert all(r is no_update for r in result)  # is_open / body / pending all untouched
 
     def test_all_zeros_returns_closed(self, registered_panel):
-        """Should return closed modal when triggered value is zero."""
+        """Should leave the modal alone when triggered value is zero (F-CANOPY-010)."""
         import frontend.components.hdf5_snapshots_panel as panel_module
 
         # CAN-015e: ids now include an ``op`` discriminator.
@@ -440,9 +439,8 @@ class TestOpenRestoreModalCallback:
         with patch.object(panel_module, "callback_context", empty_ctx):
             result = registered_panel._cb_open_restore_modal(n_clicks_list, None, False)
 
-        assert result[0] is False
-        assert result[1] == ""
-        assert result[2] is None
+        assert len(result) == 3
+        assert all(r is no_update for r in result)
 
     def test_opens_modal_with_snapshot_id(self, registered_panel):
         """Should open modal with correct snapshot ID + operation (B-5)."""
