@@ -1882,6 +1882,87 @@ def _list_snapshot_files():
     return snapshots
 
 
+def _panel_entry_from_backend_snapshot(entry: dict) -> Optional[dict]:
+    """Normalize one cascor snapshot record to the panel's list shape (F-CANOPY-007)."""
+    snapshot_id = entry.get("id")
+    if not snapshot_id:
+        return None
+    path = str(entry.get("path") or "")
+    name = Path(path).name if path else f"{snapshot_id}.h5"
+    return {
+        "id": str(snapshot_id),
+        "name": name,
+        "timestamp": str(entry.get("modified") or entry.get("timestamp") or ""),
+        "size_bytes": int(entry.get("size_bytes") or 0),
+        "path": path,
+        "source": "cascor",
+    }
+
+
+def _backend_snapshot_inventory() -> Optional[list]:
+    """F-CANOPY-007: list snapshots from the backend that CREATES them.
+
+    Canopy proxies snapshot creation (and every restore / replay / resume /
+    retrain) to cascor, but this module listed and resolved snapshots off its
+    own local directory (``_snapshots_dir``). That only agrees with cascor when
+    the two processes share a filesystem -- the shipped compose topology
+    co-mounts one volume, which is why it was never seen -- and on any split
+    deployment (two host processes with different CWDs, a split-host deploy)
+    the list was SILENTLY empty while the create reported success. In service
+    mode the inventory therefore comes from cascor's ``GET /v1/snapshots``.
+
+    Returns the panel-shaped list, newest first, or ``None`` when the backend
+    cannot answer (not service mode, no adapter, transport failure) so the
+    caller falls back to the local directory listing.
+    """
+    if getattr(backend, "backend_type", None) != "service":
+        return None
+    adapter = getattr(backend, "_adapter", None)
+    lister = getattr(adapter, "list_snapshots", None)
+    if adapter is None or not callable(lister):
+        return None
+    try:
+        result = lister()
+    except Exception as e:  # noqa: BLE001 -- the adapter already logged; never break the route
+        system_logger.error("Backend snapshot inventory failed: %s", e)
+        return None
+    if not isinstance(result, dict) or not result.get("ok") or not isinstance(result.get("snapshots"), list):
+        return None
+    entries = []
+    for raw in result["snapshots"]:
+        entry = _panel_entry_from_backend_snapshot(raw) if isinstance(raw, dict) else None
+        if entry is not None:
+            entries.append(entry)
+    entries.sort(key=lambda item: item["timestamp"], reverse=True)
+    return entries
+
+
+def _backend_snapshot_detail(snapshot_id: str) -> Optional[dict]:
+    """F-CANOPY-007 companion for the detail route.
+
+    Returns ``{"found": bool, "snapshot": <panel-shaped dict or None>}`` from
+    cascor, or ``None`` when the backend cannot answer (not service mode, no
+    adapter, transport failure) so the caller falls back to its local lookup.
+    """
+    if getattr(backend, "backend_type", None) != "service":
+        return None
+    adapter = getattr(backend, "_adapter", None)
+    getter = getattr(adapter, "get_snapshot", None)
+    if adapter is None or not callable(getter):
+        return None
+    try:
+        result = getter(snapshot_id)
+    except Exception as e:  # noqa: BLE001
+        system_logger.error("Backend snapshot detail failed for %s: %s", snapshot_id, e)
+        return None
+    if not isinstance(result, dict) or not result.get("ok"):
+        return None
+    snapshot = result.get("snapshot")
+    if not isinstance(snapshot, dict):
+        return {"found": False, "snapshot": None}
+    return {"found": True, "snapshot": _panel_entry_from_backend_snapshot(snapshot)}
+
+
 @app.get("/api/v1/snapshots")
 async def get_snapshots(limit: Optional[int] = None, offset: int = 0):
     """
@@ -1911,11 +1992,17 @@ async def get_snapshots(limit: Optional[int] = None, offset: int = 0):
             return items[start:] if start else items
         return items[start : start + limit]
 
-    try:
-        snapshots = _list_snapshot_files()
-    except Exception as e:
-        system_logger.error("Failed to list snapshots: %s", e)
-        snapshots = []
+    # F-CANOPY-007: in service mode the inventory comes from the backend that
+    # created the files; the local directory is only the fallback.
+    inventory = await asyncio.to_thread(_backend_snapshot_inventory)
+    if inventory is not None:
+        snapshots = inventory
+    else:
+        try:
+            snapshots = _list_snapshot_files()
+        except Exception as e:
+            system_logger.error("Failed to list snapshots: %s", e)
+            snapshots = []
 
     # Demo mode → return mock data. (A1-iii-a: gate on ``== "demo"`` rather than
     # ``!= "service"`` so a non-cascor, non-demo backend — e.g. recurrence — does NOT
@@ -2024,26 +2111,40 @@ async def get_snapshot_detail(snapshot_id: str):
 
         raise HTTPException(status_code=404, detail="Snapshot not found")
 
-    # Real mode: find file in snapshots directory. The directory walk and
-    # ``stat`` syscall are bundled into ``_find_snapshot_file`` and run on a
-    # worker thread so the FastAPI event loop stays responsive on slow disks.
-    snapshot_file, stat, directory_missing = await asyncio.to_thread(_find_snapshot_file, _snapshots_dir, snapshot_id)
+    # F-CANOPY-007: in service mode cascor is the authority on which snapshots
+    # exist (it created them); a local copy, when also visible here (shared
+    # volume), only enriches the record with its HDF5 attributes.
+    remote = await asyncio.to_thread(_backend_snapshot_detail, snapshot_id)
+    if remote is not None:
+        if not remote.get("found"):
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+        detail: dict = dict(remote.get("snapshot") or {})
+        detail.setdefault("attributes", None)
+        snapshot_file, _stat, _directory_missing = await asyncio.to_thread(_find_snapshot_file, _snapshots_dir, snapshot_id)
+        if snapshot_file is None:
+            return detail
+    else:
+        # Real mode without a backend inventory: find the file in the local
+        # snapshots directory. The directory walk and ``stat`` syscall are
+        # bundled into ``_find_snapshot_file`` and run on a worker thread so
+        # the FastAPI event loop stays responsive on slow disks.
+        snapshot_file, stat, directory_missing = await asyncio.to_thread(_find_snapshot_file, _snapshots_dir, snapshot_id)
 
-    if directory_missing:
-        raise HTTPException(status_code=404, detail="Snapshot directory not found")
-    if snapshot_file is None or stat is None:
-        raise HTTPException(status_code=404, detail="Snapshot not found")
+        if directory_missing:
+            raise HTTPException(status_code=404, detail="Snapshot directory not found")
+        if snapshot_file is None or stat is None:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
 
-    ts = datetime.fromtimestamp(stat.st_mtime, tz=UTC).replace(microsecond=0)
+        ts = datetime.fromtimestamp(stat.st_mtime, tz=UTC).replace(microsecond=0)
 
-    detail = {
-        "id": snapshot_file.stem,
-        "name": snapshot_file.name,
-        "timestamp": f"{ts.isoformat()}Z",
-        "size_bytes": stat.st_size,
-        "path": str(snapshot_file.absolute()),
-        "attributes": None,
-    }
+        detail = {
+            "id": snapshot_file.stem,
+            "name": snapshot_file.name,
+            "timestamp": f"{ts.isoformat()}Z",
+            "size_bytes": stat.st_size,
+            "path": str(snapshot_file.absolute()),
+            "attributes": None,
+        }
 
     # Optional: if h5py is available, read HDF5 root attributes
     try:
