@@ -37,7 +37,6 @@
 #
 #####################################################################################################################################################################################################
 import asyncio
-import importlib.metadata
 import ipaddress
 import json
 import os
@@ -67,7 +66,7 @@ from pydantic import BaseModel, Field, SecretStr
 # from backend.data_adapter import DataAdapter  trunk-ignore(ruff/E402)
 # from backend.training_monitor import TrainingMonitor  trunk-ignore(ruff/E402)
 from backend.training_monitor import TrainingState  # trunk-ignore(ruff/E402)
-from canopy_constants import BackendConstants, TrainingConstants  # trunk-ignore(ruff/E402)
+from canopy_constants import APP_VERSION, BackendConstants, TrainingConstants  # trunk-ignore(ruff/E402)
 from communication.websocket_manager import create_command_response_message, websocket_manager
 from frontend.dashboard_manager import DashboardManager
 from health import DependencyStatus, ErrorResponse, ReadinessResponse, probe_dependency
@@ -106,11 +105,10 @@ from security import settings_with_uvicorn_cli_bind
 
 settings = settings_with_uvicorn_cli_bind(settings)
 
-# Application version from package metadata
-try:
-    APP_VERSION = importlib.metadata.version("juniper-canopy")
-except importlib.metadata.PackageNotFoundError:
-    APP_VERSION = "0.5.0"
+# Application version: resolved ONCE in canopy_constants (installed package
+# metadata, pyproject fallback) and shared with the About panel -- E2E arc
+# OBS-1 found the two surfaces reporting different versions. ``APP_VERSION``
+# is imported with the other canopy_constants names above.
 
 # Initialize loggers
 system_logger = get_system_logger()

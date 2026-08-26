@@ -4324,8 +4324,11 @@ class DashboardManager:
         # buttons route through ``window.cascorControlWS.send()`` via a Dash
         # clientside callback. The browser decides WS-vs-REST per click with
         # automatic REST fallback if the send() promise rejects. When the flag
-        # is off (default), the pre-Phase-D server-side handler is registered
-        # instead and keeps the existing behavior plus test fixtures untouched.
+        # is off (it has defaulted to True since the D-49 flag flip -- see
+        # settings.enable_ws_control_buttons; the E2E ledger's D-5 corrected
+        # this comment's stale "off (default)" wording), the pre-Phase-D
+        # server-side handler is registered instead and keeps the existing
+        # behavior plus test fixtures untouched.
         if getattr(self._settings, "enable_ws_control_buttons", False):
             self.app.clientside_callback(
                 PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS,
@@ -4624,6 +4627,11 @@ class DashboardManager:
                 Input("nn-optimizer-type-dropdown", "value"),
                 # Phase 6E A-3: activation_function_name (hidden-unit activation)
                 Input("nn-activation-function-dropdown", "value"),
+                # D-2 (E2E ledger, C2.6-05 / C2.9-04): init_output_weights travelled
+                # on the apply gather as a State but sat outside this dirty set, so
+                # changing it alone never enabled Apply while its value still
+                # applied on the next unrelated Apply.
+                Input("nn-init-output-weights-dropdown", "value"),
                 # Store
                 Input("applied-params-store", "data"),
             ],
@@ -4660,6 +4668,7 @@ class DashboardManager:
             nn_output_epochs,
             nn_optimizer_type,
             nn_activation_function,
+            nn_init_output_weights,
             applied,
         ):
             """Enable Apply button when parameters differ from applied values."""
@@ -4692,6 +4701,7 @@ class DashboardManager:
                 nn_optimizer_type,
                 nn_activation_function,
                 applied,
+                nn_init_output_weights=nn_init_output_weights,
             )
 
         # ── Handle Apply button click ──
@@ -7200,6 +7210,9 @@ class DashboardManager:
         nn_optimizer_type=None,
         nn_activation_function=None,
         applied=None,
+        # D-2: appended AFTER ``applied`` so every existing positional caller
+        # (the wrapper passes it by keyword) keeps its argument positions.
+        nn_init_output_weights=None,
     ):
         """Enable Apply button when parameters differ from applied values."""
         if not applied:
@@ -7244,6 +7257,9 @@ class DashboardManager:
             (nn_output_epochs, "nn_output_epochs", "int"),
             (nn_optimizer_type, "nn_optimizer_type", "str"),
             (nn_activation_function, "nn_activation_function_name", "str"),
+            # D-2: the apply handler stores this key (``_choice(...)`` above the
+            # payload), so the dirty set can finally compare it.
+            (nn_init_output_weights, "nn_init_output_weights", "str"),
         ]
 
         has_changes = False
