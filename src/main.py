@@ -835,10 +835,23 @@ async def websocket_control_endpoint(websocket: WebSocket):
         return
 
     # Phase B-pre-b: CSRF first-frame authentication (M-SEC-02)
+    #
+    # F-CANOPY-008: connect() has already SUCCEEDED at this point, so the socket
+    # holds a per-IP + per-session slot, an active_connections entry and a count
+    # on the {channel="control"} gauge. A reject arm that only close()s and
+    # returns leaks all three: five stale-token rejections (a canopy restart
+    # with a dashboard tab open is enough -- the client's auto-reconnect burns
+    # them in ~10 s) locked the control plane for every client behind that IP
+    # until canopy restarted. Every rejection therefore funnels through ONE
+    # teardown that calls websocket_manager.disconnect(), the full rollback
+    # (slots + registration + gauge). Any gate added after this block must do
+    # the same -- release_connection_limits() alone is NOT enough once
+    # connect() has registered the socket.
     if settings.csrf_enabled:
         from audit_log import log_ws_csrf_rejected
 
         client_ip = websocket.client[0] if websocket.client else "unknown"
+        csrf_reject_reason: str | None = None
         try:
             raw_auth = await asyncio.wait_for(
                 websocket.receive_text(),
@@ -846,21 +859,19 @@ async def websocket_control_endpoint(websocket: WebSocket):
             )
             auth_msg = json.loads(raw_auth)
             if auth_msg.get("type") != "auth" or not auth_msg.get("csrf_token"):
-                log_ws_csrf_rejected("/ws/control", client_ip, "missing_or_invalid_frame")
-                await websocket.close(code=1008, reason="Policy violation")
-                return
-            csrf_store = get_csrf_store()
-            if not csrf_store.validate(auth_msg["csrf_token"]):
-                log_ws_csrf_rejected("/ws/control", client_ip, "invalid_token")
-                await websocket.close(code=1008, reason="Policy violation")
-                return
+                csrf_reject_reason = "missing_or_invalid_frame"
+            elif not get_csrf_store().validate(auth_msg["csrf_token"]):
+                csrf_reject_reason = "invalid_token"
         except asyncio.TimeoutError:
-            log_ws_csrf_rejected("/ws/control", client_ip, "auth_timeout")
-            await websocket.close(code=1008, reason="Policy violation")
-            return
+            csrf_reject_reason = "auth_timeout"
         except (json.JSONDecodeError, Exception):
-            log_ws_csrf_rejected("/ws/control", client_ip, "malformed_auth")
-            await websocket.close(code=1008, reason="Policy violation")
+            csrf_reject_reason = "malformed_auth"
+        if csrf_reject_reason is not None:
+            log_ws_csrf_rejected("/ws/control", client_ip, csrf_reject_reason)
+            try:
+                await websocket.close(code=1008, reason="Policy violation")
+            finally:
+                websocket_manager.disconnect(websocket)
             return
 
     _valid_commands = {"start", "stop", "pause", "resume", "reset", "set_params"}

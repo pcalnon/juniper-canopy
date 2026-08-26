@@ -938,6 +938,11 @@ class HDF5SnapshotsPanel(BaseComponent):
                                         dbc.Button(
                                             "View Details",
                                             id={"type": f"{self.component_id}-view-btn", "index": snapshot_id},
+                                            # F-CANOPY-009: match the four op items below -- without an
+                                            # explicit n_clicks=0 the rebuilt button reports None and
+                                            # every 10 s rebuild re-fires select_snapshot with a
+                                            # falsy list.
+                                            n_clicks=0,
                                             size="sm",
                                             color="info",
                                             outline=True,
@@ -1016,23 +1021,29 @@ class HDF5SnapshotsPanel(BaseComponent):
             prevent_initial_call=True,
         )
         def select_snapshot(n_clicks_list, ids):
+            # F-CANOPY-009: the 10 s table rebuild re-fires this callback with a
+            # falsy n_clicks list (before the View Details button carried
+            # n_clicks=0 it arrived as [None]). Every early-out below means
+            # "nothing meaningful triggered me" and must leave the selection
+            # ALONE: returning None here wiped the selected-id store -- and the
+            # detail panel with it -- within one tick of every click.
             """Handle snapshot selection from table."""
             if not n_clicks_list or not any(n_clicks_list):
-                return None
+                return dash.no_update
 
             ctx = callback_context
             if not ctx.triggered:
-                return None
+                return dash.no_update
 
             # Find which button was clicked
             triggered = ctx.triggered[0]
             if not triggered.get("value"):
-                return None
+                return dash.no_update
 
             # Extract the snapshot ID from the triggered button
             prop_id = triggered.get("prop_id", "")
             if not prop_id:
-                return None
+                return dash.no_update
 
             # Parse the pattern-matching ID
             # Format: '{"index":"snapshot_id","type":"component-id-view-btn"}.n_clicks'
@@ -1185,17 +1196,23 @@ class HDF5SnapshotsPanel(BaseComponent):
             grows to include the operation so the confirm callback
             knows which endpoint to call.
             """
+            # F-CANOPY-010: the same 10 s rebuild reconstructs the dropdown items
+            # and re-fires this callback with n_clicks == 0. Returning
+            # (False, "", None) from an early-out slammed the OPEN confirmation
+            # modal shut, blanked its body and discarded the pending operation
+            # ~3.6 s after the operator opened it. An early-out must not touch
+            # the modal at all.
             ctx = callback_context
             if not ctx.triggered:
-                return False, "", None
+                return dash.no_update, dash.no_update, dash.no_update
 
             triggered = ctx.triggered[0]
             if not triggered.get("value"):
-                return False, "", None
+                return dash.no_update, dash.no_update, dash.no_update
 
             prop_id = triggered.get("prop_id", "")
             if not prop_id:
-                return False, "", None
+                return dash.no_update, dash.no_update, dash.no_update
 
             import json
 
@@ -1218,7 +1235,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                     operation = id_dict.get("op")
 
             if not snapshot_id or operation not in ("restore", "replay", "resume", "retrain"):
-                return False, "", None
+                return dash.no_update, dash.no_update, dash.no_update
 
             modal_body = self._build_op_confirm_body(snapshot_id, operation)
             return True, modal_body, {"id": snapshot_id, "operation": operation}
