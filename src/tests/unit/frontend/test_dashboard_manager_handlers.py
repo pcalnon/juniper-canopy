@@ -1324,10 +1324,10 @@ class TestParameterHandlers:
         assert result[1] == 200  # nn_max_total_epochs
         assert result[5] == "convergence"  # nn_growth_trigger
         assert result[7] == 0.001  # nn_growth_convergence_threshold
-        # NUM_OUTPUTS=28 since canopy#204/205/206; applied dict is the
-        # last element at index 27.
-        assert result[27]["nn_learning_rate"] == 0.01
-        assert result[27]["nn_growth_trigger"] == "convergence"
+        # NUM_OUTPUTS=29 since canopy#204/205/206 + the D-2 dropdown; applied dict is the
+        # last element at index 28.
+        assert result[28]["nn_learning_rate"] == 0.01
+        assert result[28]["nn_growth_trigger"] == "convergence"
 
     def test_init_params_from_backend_handler_already_set(self, dashboard_manager):
         """Test init params from backend when already set."""
@@ -1335,9 +1335,9 @@ class TestParameterHandlers:
 
         result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=current_applied)
 
-        # 28-tuple after canopy#204/205/206 (output_epochs / optimizer_type
+        # 29-tuple after canopy#204/205/206 (output_epochs / optimizer_type
         # / activation_function); mirrors NUM_OUTPUTS in the handler.
-        assert result == (dash.no_update,) * 28
+        assert result == (dash.no_update,) * 29
 
     @patch("requests.get")
     def test_init_params_from_backend_handler_failure(self, mock_get, dashboard_manager):
@@ -1347,7 +1347,7 @@ class TestParameterHandlers:
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-        assert result == (dash.no_update,) * 28
+        assert result == (dash.no_update,) * 29
 
 
 # =============================================================================
@@ -1379,8 +1379,8 @@ class TestInitParamsFromBackendHandlers:
         assert result[1] == 300  # nn_max_epochs
         assert result[4] == []  # nn_multi_node_layers=False -> empty checklist
         assert result[7] == 0.01  # nn_growth_conv_thresh
-        # NUM_OUTPUTS=28 since canopy#204/205/206; applied dict at index 27.
-        assert result[27]["nn_multi_node_layers"] is False
+        # NUM_OUTPUTS=29 (D-2 dropdown at 27); applied dict at index 28.
+        assert result[28]["nn_multi_node_layers"] is False
 
     @patch("requests.get")
     def test_init_params_from_backend_with_partial_state(self, mock_get, dashboard_manager):

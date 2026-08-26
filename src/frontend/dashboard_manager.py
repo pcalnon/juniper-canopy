@@ -4324,8 +4324,11 @@ class DashboardManager:
         # buttons route through ``window.cascorControlWS.send()`` via a Dash
         # clientside callback. The browser decides WS-vs-REST per click with
         # automatic REST fallback if the send() promise rejects. When the flag
-        # is off (default), the pre-Phase-D server-side handler is registered
-        # instead and keeps the existing behavior plus test fixtures untouched.
+        # is off (it has defaulted to True since the D-49 flag flip -- see
+        # settings.enable_ws_control_buttons; the E2E ledger's D-5 corrected
+        # this comment's stale "off (default)" wording), the pre-Phase-D
+        # server-side handler is registered instead and keeps the existing
+        # behavior plus test fixtures untouched.
         if getattr(self._settings, "enable_ws_control_buttons", False):
             self.app.clientside_callback(
                 PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS,
@@ -4624,6 +4627,11 @@ class DashboardManager:
                 Input("nn-optimizer-type-dropdown", "value"),
                 # Phase 6E A-3: activation_function_name (hidden-unit activation)
                 Input("nn-activation-function-dropdown", "value"),
+                # D-2 (E2E ledger, C2.6-05 / C2.9-04): init_output_weights travelled
+                # on the apply gather as a State but sat outside this dirty set, so
+                # changing it alone never enabled Apply while its value still
+                # applied on the next unrelated Apply.
+                Input("nn-init-output-weights-dropdown", "value"),
                 # Store
                 Input("applied-params-store", "data"),
             ],
@@ -4660,6 +4668,7 @@ class DashboardManager:
             nn_output_epochs,
             nn_optimizer_type,
             nn_activation_function,
+            nn_init_output_weights,
             applied,
         ):
             """Enable Apply button when parameters differ from applied values."""
@@ -4692,6 +4701,7 @@ class DashboardManager:
                 nn_optimizer_type,
                 nn_activation_function,
                 applied,
+                nn_init_output_weights=nn_init_output_weights,
             )
 
         # ── Handle Apply button click ──
@@ -4850,7 +4860,10 @@ class DashboardManager:
                 Output("nn-optimizer-type-dropdown", "value"),
                 # Phase 6E A-3: activation_function_name (hidden-unit activation)
                 Output("nn-activation-function-dropdown", "value"),
-                # Store
+                # D-2: hydrate the init-output-weights dropdown too, so the form and
+                # the applied store agree on mount now that the field is dirty-tracked.
+                Output("nn-init-output-weights-dropdown", "value"),
+                # Store (kept LAST so ``result[-1]`` stays the applied dict)
                 Output("applied-params-store", "data", allow_duplicate=True),
             ],
             Input("params-init-interval", "n_intervals"),
@@ -7200,6 +7213,9 @@ class DashboardManager:
         nn_optimizer_type=None,
         nn_activation_function=None,
         applied=None,
+        # D-2: appended AFTER ``applied`` so every existing positional caller
+        # (the wrapper passes it by keyword) keeps its argument positions.
+        nn_init_output_weights=None,
     ):
         """Enable Apply button when parameters differ from applied values."""
         if not applied:
@@ -7244,6 +7260,9 @@ class DashboardManager:
             (nn_output_epochs, "nn_output_epochs", "int"),
             (nn_optimizer_type, "nn_optimizer_type", "str"),
             (nn_activation_function, "nn_activation_function_name", "str"),
+            # D-2: the apply handler stores this key (``_choice(...)`` above the
+            # payload), so the dirty set can finally compare it.
+            (nn_init_output_weights, "nn_init_output_weights", "str"),
         ]
 
         has_changes = False
@@ -7619,7 +7638,7 @@ class DashboardManager:
 
     def _init_params_from_backend_handler(self, n, current_applied):
         """Initialize input values and applied params from backend on first load."""
-        NUM_OUTPUTS = 28
+        NUM_OUTPUTS = 29  # 27 inputs + the D-2 init-output-weights dropdown + the applied store
         if current_applied:
             return (dash.no_update,) * NUM_OUTPUTS
         try:
@@ -7653,6 +7672,9 @@ class DashboardManager:
                 nn_output_epochs = state.get("nn_output_epochs", TrainingConstants.DEFAULT_OUTPUT_EPOCHS)
                 nn_optimizer_type = state.get("nn_optimizer_type", TrainingConstants.DEFAULT_OPTIMIZER_TYPE)
                 nn_activation_function = state.get("nn_activation_function_name", TrainingConstants.DEFAULT_ACTIVATION_FUNCTION)
+                # D-2: seed the field the dirty tracker now compares; without it a
+                # fresh session read "unsaved changes" on mount.
+                nn_init_output_weights = state.get("nn_init_output_weights", TrainingConstants.DEFAULT_INIT_OUTPUT_WEIGHTS)
 
                 applied = {
                     "nn_max_iterations": nn_max_iter,
@@ -7682,6 +7704,7 @@ class DashboardManager:
                     "nn_output_epochs": nn_output_epochs,
                     "nn_optimizer_type": nn_optimizer_type,
                     "nn_activation_function_name": nn_activation_function,
+                    "nn_init_output_weights": nn_init_output_weights,
                 }
 
                 # N5 (I-4): clamp backend-seeded values into cascor's PATCH bounds
@@ -7739,6 +7762,7 @@ class DashboardManager:
                     nn_output_epochs,
                     nn_optimizer_type,
                     nn_activation_function,
+                    nn_init_output_weights,
                     applied,
                 )
         except Exception as e:

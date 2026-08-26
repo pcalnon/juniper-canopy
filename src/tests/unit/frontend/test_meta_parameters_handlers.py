@@ -353,9 +353,9 @@ class TestInitParamsFromBackend:
 
     def test_already_initialized_returns_no_update(self, dm):
         result = dm._init_params_from_backend_handler(1, {"some": "data"})
-        # NUM_OUTPUTS=28 since canopy#204/205/206 added output_epochs /
+        # NUM_OUTPUTS=29 since canopy#204/205/206 (+ the D-2 dropdown) added output_epochs /
         # optimizer_type / activation_function to the handler.
-        assert len(result) == 28
+        assert len(result) == 29
         assert all(r is dash.no_update for r in result)
 
     @patch("frontend.dashboard_manager.requests.get")
@@ -366,8 +366,8 @@ class TestInitParamsFromBackend:
         )
         dm._api_url = MagicMock(return_value="http://test/api/state")
         result = dm._init_params_from_backend_handler(1, {})
-        # NUM_OUTPUTS=28 since canopy#204/205/206.
-        assert len(result) == 28
+        # NUM_OUTPUTS=29 since canopy#204/205/206 + the D-2 dropdown.
+        assert len(result) == 29
         # Last element is the applied dict
         assert isinstance(result[-1], dict)
         assert "nn_learning_rate" in result[-1]
@@ -377,6 +377,6 @@ class TestInitParamsFromBackend:
         mock_get.side_effect = Exception("connection error")
         dm._api_url = MagicMock(return_value="http://test/api/state")
         result = dm._init_params_from_backend_handler(1, {})
-        # NUM_OUTPUTS=28 since canopy#204/205/206.
-        assert len(result) == 28
+        # NUM_OUTPUTS=29 since canopy#204/205/206 + the D-2 dropdown.
+        assert len(result) == 29
         assert all(r is dash.no_update for r in result)

@@ -332,8 +332,8 @@ class TestB53NoPeriodicMetaParameterRefresh:
         # Simulate already-initialized state
         current_applied = {"learning_rate": 0.01, "max_hidden_units": 10}
         result = manager._init_params_from_backend_handler(n=1, current_applied=current_applied)
-        # 28-tuple after canopy#204/205/206; mirrors NUM_OUTPUTS in the handler.
-        assert result == (dash.no_update,) * 28
+        # 29-tuple after canopy#204/205/206 + the D-2 dropdown; mirrors NUM_OUTPUTS in the handler.
+        assert result == (dash.no_update,) * 29
 
     @pytest.mark.regression
     def test_no_backend_params_store_in_layout(self, reset_singletons):

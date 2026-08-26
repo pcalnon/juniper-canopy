@@ -1238,7 +1238,7 @@ class TestParameterHandlers:
         import dash
 
         result = dashboard_manager._init_params_from_backend_handler(1, {"nn_learning_rate": 0.01})
-        assert result == (dash.no_update,) * 28
+        assert result == (dash.no_update,) * 29
 
     def test_init_params_from_backend_success(self, dashboard_manager, mocker):
         """Test init_params_from_backend fetches from backend when empty."""
@@ -1255,14 +1255,14 @@ class TestParameterHandlers:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(1, None)
-            # 28-tuple: (nn_max_iter, nn_max_epochs, nn_lr, nn_max_hu, ..., nn_output_epochs, nn_optimizer_type, nn_activation_function, applied)
+            # 29-tuple: (nn_max_iter, nn_max_epochs, nn_lr, nn_max_hu, ..., nn_output_epochs, nn_optimizer_type, nn_activation_function, nn_init_output_weights (D-2), applied)
             assert result[2] == 0.02  # nn_learning_rate
             assert result[3] == 15  # nn_max_hidden_units
             assert result[1] == 300  # nn_max_total_epochs
             assert result[5] == "convergence"  # nn_growth_trigger
             assert result[7] == 0.001  # nn_growth_convergence_threshold
-            assert result[27]["nn_learning_rate"] == 0.02
-            assert result[27]["nn_growth_trigger"] == "convergence"
+            assert result[28]["nn_learning_rate"] == 0.02
+            assert result[28]["nn_growth_trigger"] == "convergence"
 
     def test_init_params_from_backend_error(self, dashboard_manager, mocker):
         """Test init_params_from_backend returns no_update on error."""
@@ -1272,7 +1272,7 @@ class TestParameterHandlers:
 
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(1, None)
-            assert result == (dash.no_update,) * 28
+            assert result == (dash.no_update,) * 29
 
     def test_track_param_changes_none_values(self, dashboard_manager):
         """Test track_param_changes handles None values in float comparison."""
