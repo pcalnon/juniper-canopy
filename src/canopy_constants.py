@@ -28,7 +28,27 @@
 # COMPLETED:
 #
 #####################################################################################################################################################################################################
+import importlib.metadata
 from typing import Final
+
+
+def resolve_app_version(fallback: str = "0.6.0") -> str:
+    """Resolve the application version from the installed package metadata.
+
+    The single source for every surface that shows a version -- ``/v1/health``,
+    the build-info metric and the About panel. E2E arc OBS-1: the About panel
+    carried its own ``"2.2.0"`` literal ("should match pyproject.toml" -- it never
+    did) and rendered it while ``/v1/health`` served the installed version. The
+    ``fallback`` is for a source checkout that was never ``pip install``ed and
+    must track ``pyproject.toml`` (pinned by a test).
+    """
+    try:
+        return importlib.metadata.version("juniper-canopy")
+    except importlib.metadata.PackageNotFoundError:
+        return fallback
+
+
+APP_VERSION: Final[str] = resolve_app_version()
 
 
 class TrainingConstants:

@@ -39,10 +39,14 @@ from typing import Any, Dict
 import dash_bootstrap_components as dbc
 from dash import html
 
+# OBS-1 (canopy E2E arc): the version is resolved ONCE from the installed
+# package metadata in canopy_constants -- the same source /v1/health reports.
+# This module used to carry its own "2.2.0" literal and rendered it while
+# /v1/health served the real installed version.
+from canopy_constants import APP_VERSION
+
 from ..base_component import BaseComponent
 
-# Version information - should match pyproject.toml
-APP_VERSION = "2.2.0"
 APP_NAME = "Juniper Canopy"
 COPYRIGHT_YEAR = "2024-2026"
 
