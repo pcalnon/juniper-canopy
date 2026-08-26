@@ -162,6 +162,28 @@ function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, l
         }
     }
 
+    // F-CANOPY-003: the success ack never reached the dashboard -- the WS success
+    // path only logged and the REST path did nothing on 2xx -- so a button stayed
+    // on its optimistic loading state until the interval-driven timeout sweep
+    // landed (30 s to minutes under callback congestion; a wedged button blocked
+    // the next command for the rest of a run). Report the ack the same way
+    // failures are reported AND clear this button's loading state directly: the
+    // ack is the primary release, the sweep stays as the backstop.
+    function reportSuccess(transport, commandId) {
+        try {
+            if (dc && typeof dc.set_props === 'function') {
+                dc.set_props('training-control-action', {
+                    data: { last: triggerId, ts: Date.now() / 1000.0, success: true, command: command, transport: transport, command_id: commandId }
+                });
+                var cleared = Object.assign({}, newStates);
+                cleared[command] = { disabled: false, loading: false, timestamp: 0 };
+                dc.set_props('button-states', { data: cleared });
+            }
+        } catch (e) {
+            console.error('[Phase D] reportSuccess failed for ' + command + ':', e);
+        }
+    }
+
     function restFallback(reason) {
         if (reason) {
             console.warn('[Phase D] REST fallback (' + command + '):', reason);
@@ -184,6 +206,10 @@ function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, l
             }
             fetch('/api/train/' + command, fetchOpts)
                 .then(function(resp) {
+                    if (resp.ok) {
+                        reportSuccess('rest', null);
+                        return;
+                    }
                     if (!resp.ok) {
                         console.warn('[Phase D] REST /api/train/' + command + ' returned ' + resp.status);
                         resp.text().then(function(body) {
@@ -234,6 +260,7 @@ function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, l
                 sendPromise
                     .then(function(data) {
                         console.log('[Phase D] WS command success:', command, data && data.command_id);
+                        reportSuccess('ws', (data && data.command_id) || commandId);
                     })
                     .catch(function(err) {
                         // F-CANOPY-005: fall back ONLY on transport-class failures
@@ -4430,7 +4457,7 @@ class DashboardManager:
             prevent_initial_call=True,
         )
         def handle_button_timeout_and_acks(action, n_intervals, button_states):
-            """Re-enable buttons after timeout (5s) or on control acknowledgment."""
+            """Re-enable a button on its success ack, or after DASHBOARD_TIMEOUT_THRESHOLD (F-CANOPY-003)."""
             return self._handle_button_timeout_and_acks_handler(action=action, n_intervals=n_intervals, button_states=button_states)
 
     # Define backend callbacks
@@ -7051,7 +7078,16 @@ class DashboardManager:
         )
 
     def _handle_button_timeout_and_acks_handler(self, action=None, n_intervals=None, button_states=None, **kwargs):
-        """Re-enable buttons after the dashboard timeout based on their individual timestamps."""
+        """Re-enable a loading button on its success ack, or after the dashboard timeout.
+
+        F-CANOPY-003: the "and_acks" half never existed -- only the interval-driven
+        timeout sweep (``DASHBOARD_TIMEOUT_THRESHOLD``) ever released a button, and
+        under callback congestion that sweep lands 30 s to minutes late. An ack is a
+        ``training-control-action`` write with ``success`` True, a ``command`` and a
+        ``ts`` not older than that button's click timestamp (a stale ack from an
+        earlier click must not release a newer one). The timeout stays as the
+        backstop.
+        """
         if not button_states:
             return dash.no_update
 
@@ -7059,11 +7095,22 @@ class DashboardManager:
         new_states = {}
         changed = False
 
+        acked_cmd = None
+        acked_ts = 0.0
+        if isinstance(action, dict) and action.get("success") and action.get("command") and action.get("ts") is not None:
+            acked_cmd = action.get("command")
+            acked_ts = float(action.get("ts") or 0)
+
         for cmd, state in button_states.items():
             timestamp = state.get("timestamp", 0)
             is_loading = state.get("loading", False)
 
             if is_loading and timestamp > 0:
+                if cmd == acked_cmd and acked_ts >= timestamp:
+                    new_states[cmd] = {"disabled": False, "loading": False, "timestamp": 0}
+                    changed = True
+                    self.logger.debug(f"Button {cmd} released by its success ack")
+                    continue
                 elapsed = current_time - timestamp
                 # Reset after the configured timeout threshold
                 if elapsed > DashboardConstants.DASHBOARD_TIMEOUT_THRESHOLD:
