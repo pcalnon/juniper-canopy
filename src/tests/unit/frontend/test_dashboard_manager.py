@@ -291,15 +291,16 @@ class TestDashboardManagerHandlers:
 
     def test_toggle_dark_mode_handler_light_to_dark(self, dashboard_manager):
         """Test dark mode toggle returns dark when current is light."""
-        is_dark, icon = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=False)
+        is_dark = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=False)
         assert is_dark is True
-        assert icon == "☀️"
+        # F-CANOPY-001: the glyph is derived from the flag, not returned by the toggle.
+        assert dashboard_manager._dark_mode_icon(is_dark) == "☀️"
 
     def test_toggle_dark_mode_handler_dark_to_light(self, dashboard_manager):
         """Test dark mode toggle returns light when current is dark."""
-        is_dark, icon = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=True)
+        is_dark = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=True)
         assert is_dark is False
-        assert icon == "🌙"
+        assert dashboard_manager._dark_mode_icon(is_dark) == "🌙"
 
     def test_update_theme_state_handler_dark(self, dashboard_manager):
         """Test theme state handler returns 'dark' when is_dark=True."""

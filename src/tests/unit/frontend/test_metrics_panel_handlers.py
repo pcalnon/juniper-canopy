@@ -86,63 +86,10 @@ def sample_metrics_data():
     return [{"epoch": i, "metrics": {"loss": 0.5 - i * 0.01, "accuracy": 0.5 + i * 0.02}} for i in range(50)]
 
 
-@pytest.mark.unit
-class TestFetchNetworkStatsHandler:
-    """Tests for _fetch_network_stats_handler method."""
-
-    def test_fetch_network_stats_success(self, metrics_panel):
-        """Should return network stats on successful API call."""
-        with patch("requests.get") as mock_get:
-            mock_response = Mock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {"nodes": 5, "connections": 12}
-            mock_get.return_value = mock_response
-
-            result = metrics_panel._fetch_network_stats_handler()
-
-            assert result == {"nodes": 5, "connections": 12}
-            mock_get.assert_called_once_with("http://127.0.0.1:8050/api/network/stats", timeout=2, headers=internal_api_headers())
-
-    def test_fetch_network_stats_non_200_status(self, metrics_panel):
-        """Should return empty dict on non-200 status code."""
-        with patch("requests.get") as mock_get:
-            mock_response = Mock()
-            mock_response.status_code = 500
-            mock_get.return_value = mock_response
-
-            result = metrics_panel._fetch_network_stats_handler()
-
-            assert result == {}
-
-    def test_fetch_network_stats_connection_error(self, metrics_panel):
-        """Should return empty dict on connection error."""
-        with patch("requests.get") as mock_get:
-            mock_get.side_effect = ConnectionError("Connection refused")
-
-            result = metrics_panel._fetch_network_stats_handler()
-
-            assert result == {}
-
-    def test_fetch_network_stats_timeout(self, metrics_panel):
-        """Should return empty dict on timeout."""
-        with patch("requests.get") as mock_get:
-            mock_get.side_effect = TimeoutError("Request timed out")
-
-            result = metrics_panel._fetch_network_stats_handler()
-
-            assert result == {}
-
-    def test_fetch_network_stats_with_n_intervals(self, metrics_panel):
-        """Should accept n_intervals parameter."""
-        with patch("requests.get") as mock_get:
-            mock_response = Mock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {"nodes": 3}
-            mock_get.return_value = mock_response
-
-            result = metrics_panel._fetch_network_stats_handler(n_intervals=10)
-
-            assert result == {"nodes": 3}
+# F-CANOPY-034: TestFetchNetworkStatsHandler was removed with the handler it covered.
+# ``_fetch_network_stats_handler`` lost its callback to the dead-poller removal
+# (F-CANOPY-027 / canopy#507) and was thereafter called by nothing in src/ — these
+# five tests were the only thing keeping it reachable.
 
 
 @pytest.mark.unit
