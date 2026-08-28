@@ -1363,7 +1363,21 @@ class MetricsPanel(BaseComponent):
         try:
             started = datetime.fromisoformat(phase_started)
             if started.tzinfo is None:
-                started = started.replace(tzinfo=timezone.utc)
+                # F-CANOPY-026: a naive stamp is LOCAL, not UTC. cascor used to emit
+                # ``datetime.now().isoformat()`` here (fixed upstream to tz-aware UTC),
+                # and stamping that as UTC shifted it by the whole host offset: a phase
+                # 2m29s old rendered as "Phase Duration: 302m 29s" on a CDT box —
+                # 18000 s out, exactly -0500. East of UTC the same error runs the other
+                # way, pushing ``started`` into the future so the ``< 0`` guard below
+                # blanks the readout entirely.
+                #
+                # ``astimezone()`` on a naive value interprets it as local and returns
+                # an aware one, which is right whenever canopy and cascor share a clock
+                # (the co-located case, where this was observed). Split hosts in
+                # different zones cannot be repaired from this side at all — that is why
+                # the real fix is upstream, and why this branch is only a compat path
+                # for a dashboard pointed at an un-upgraded cascor.
+                started = started.astimezone()
             elapsed = datetime.now(timezone.utc) - started
             total_seconds = int(elapsed.total_seconds())
             if total_seconds < 0:
