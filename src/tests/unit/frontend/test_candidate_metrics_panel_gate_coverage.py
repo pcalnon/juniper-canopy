@@ -50,21 +50,45 @@ class TestApiUrl:
 
 
 class TestFetchTrainingStateCallback:
+    """F-CANOPY-036: this callback now carries the pool history too, so it returns a
+    (state, history) pair. The history half rides here rather than on a poller of its
+    own -- no new interval, no new renderer slot."""
+
     def test_non_candidate_tab_returns_no_update(self, callbacks):
-        result = callbacks["fetch_training_state"](3, "metrics")
-        assert result is dash.no_update
+        state, history = callbacks["fetch_training_state"](3, "metrics", [])
+        assert state is dash.no_update
+        assert history is dash.no_update
 
     def test_candidate_tab_fetches_state_on_200(self, panel, callbacks):
-        resp = MagicMock(status_code=200)
-        resp.json.return_value = {"candidate_pool_status": "Active"}
-        with patch("requests.get", return_value=resp):
-            result = callbacks["fetch_training_state"](1, "candidates")
-        assert result == {"candidate_pool_status": "Active"}
+        def fake_get(url, **kwargs):
+            resp = MagicMock(status_code=200)
+            resp.json.return_value = {"history": [{"epoch": 1}]} if "pool-history" in url else {"candidate_pool_status": "Active"}
+            return resp
+
+        with patch("requests.get", side_effect=fake_get):
+            state, history = callbacks["fetch_training_state"](1, "candidates", [])
+        assert state == {"candidate_pool_status": "Active"}
+        assert history == [{"epoch": 1}]
+
+    def test_identical_history_is_not_rewritten(self, panel, callbacks):
+        """Stage 2's no-op-write rule: an unchanged history must not re-fire its
+        consumers every tick."""
+
+        def fake_get(url, **kwargs):
+            resp = MagicMock(status_code=200)
+            resp.json.return_value = {"history": [{"epoch": 1}]} if "pool-history" in url else {}
+            return resp
+
+        with patch("requests.get", side_effect=fake_get):
+            _state, history = callbacks["fetch_training_state"](1, "candidates", [{"epoch": 1}])
+        assert history is dash.no_update
 
     def test_fetch_swallows_exception_and_returns_empty(self, panel, callbacks):
         with patch("requests.get", side_effect=RuntimeError("boom")):
-            result = callbacks["fetch_training_state"](1, "candidates")
-        assert result == {}
+            state, history = callbacks["fetch_training_state"](1, "candidates", [{"epoch": 1}])
+        assert state == {}
+        # Last-known-good: an unreachable server must not blank a populated history.
+        assert history is dash.no_update
 
     def test_fetch_non_200_returns_empty(self, panel):
         resp = MagicMock(status_code=503)
@@ -157,30 +181,31 @@ class TestTogglePoolDetailsCallback:
         assert icon == "▼"
 
 
-class TestPoolHistoryCallback:
-    def test_empty_state_returns_existing_history(self, callbacks):
-        assert callbacks["update_pool_history"](None, [{"epoch": 1}]) == [{"epoch": 1}]
+class TestPoolHistoryIsNoLongerBuiltInTheBrowser:
+    """F-CANOPY-036: ``update_pool_history`` was removed.
 
-    def test_inactive_pool_keeps_history(self, callbacks):
-        result = callbacks["update_pool_history"]({"candidate_pool_status": "Inactive", "current_epoch": 3}, [])
-        assert result == []
+    It appended in the browser from an Input fed by a ~1 Hz store, so dash-renderer
+    ran it against the store's CURRENT value whenever the feeder won the race -- any
+    pool state shorter-lived than the promotion delay was unrecordable, and the panel
+    rendered zero cards across five training runs. The accumulation now happens in
+    ``TrainingState.update_state`` under the state lock; see
+    ``src/tests/unit/test_f036_server_side_pool_history.py`` for its coverage.
+    """
 
-    def test_active_pool_appends_snapshot(self, callbacks):
-        state = {
-            "candidate_pool_status": "Active",
-            "current_epoch": 7,
-            "candidate_pool_phase": "candidate_training",
-            "top_candidate_id": "c1",
-        }
-        result = callbacks["update_pool_history"](state, [])
-        assert len(result) == 1
-        assert result[0]["epoch"] == 7
+    def test_the_client_side_append_callback_is_gone(self, callbacks):
+        assert "update_pool_history" not in callbacks, "the client-side append is back; it cannot see short-lived pool states"
 
-    def test_active_pool_existing_epoch_not_duplicated(self, callbacks):
-        state = {"candidate_pool_status": "Active", "current_epoch": 7}
-        history = [{"epoch": 7, "status": "Active"}]
-        result = callbacks["update_pool_history"](state, history)
-        assert result == history
+    def test_the_history_store_has_exactly_one_writer(self, panel):
+        """And it is the tab-gated fetch, not a second racing appender."""
+        import dash as _dash
+        from dash import html as _html
+
+        app = _dash.Dash(__name__)
+        app.layout = _html.Div([panel.get_layout()])
+        panel.register_callbacks(app)
+        target = f"{panel.component_id}-pool-history-store.data"
+        writers = [e for e in app._callback_list if target in str(e["output"])]
+        assert len(writers) == 1, f"expected exactly one writer of the pool-history store, found {len(writers)}"
 
 
 class TestRenderPoolHistoryCallback:

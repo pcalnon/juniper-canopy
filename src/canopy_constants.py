@@ -633,6 +633,13 @@ class BackendConstants:
     # ── Default CasCor service base URL ──
     DEFAULT_CASCOR_SERVICE_URL: Final[str] = "http://localhost:8200"
 
+    # ── Candidate-pool history (F-CANOPY-036) ──
+    # Cap on the server-side pool-history accumulator in ``TrainingState``. Lives
+    # here rather than in the panel because the accumulation moved to the backend;
+    # ``candidate_metrics_panel.MAX_POOL_HISTORY_ENTRIES`` re-exports this so the
+    # panel keeps one source of truth for how much history exists.
+    MAX_POOL_HISTORY_ENTRIES: Final[int] = 20
+
     # ── Circuit breaker (cascor service adapter) ──
     CIRCUIT_BREAKER_NAME: Final[str] = "cascor"
     CIRCUIT_BREAKER_FAILURE_THRESHOLD: Final[int] = 5
