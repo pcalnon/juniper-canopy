@@ -4149,19 +4149,26 @@ class DashboardManager:
         # every checkbox's value + id without enumerating per-key
         # dependencies. The store is the source of truth for both the
         # Parameters tab table re-render and the sidebar mirror below.
+        # F-CANOPY-018 / F-CANOPY-028: this writer collects the state of EVERY pin
+        # checkbox and replaces the store wholesale, so it asserts "not pinned" for
+        # every key whose checkbox it cannot see. The rendered set is not always the
+        # full set: the Parameters tables are rebuilt on every params-store change,
+        # and any render that happens while the store is empty or stale (mount before
+        # ``storage_type="local"`` hydration, a tab whose tables are not in the DOM)
+        # produces a values/ids pair that under-reports the real pin set — and the
+        # next toggle then persists that under-report, silently discarding pins made
+        # before a reload. It now writes only what it can actually observe and
+        # preserves the rest.
         @self.app.callback(
             Output("pinned-params-store", "data"),
             Input({"type": "param-pin", "key": dash.ALL}, "value"),
             dash.dependencies.State({"type": "param-pin", "key": dash.ALL}, "id"),
+            dash.dependencies.State("pinned-params-store", "data"),
             prevent_initial_call=True,
         )
-        def update_pinned_params_store(values, ids):
-            """Build the pinned-keys list from current checkbox state."""
-            pinned = []
-            for v, id_dict in zip(values or [], ids or [], strict=False):
-                if v:
-                    pinned.append(id_dict.get("key"))
-            return [k for k in pinned if k]
+        def update_pinned_params_store(values, ids, current):
+            """Merge the rendered checkboxes' state into the persisted pin list."""
+            return self._merge_pinned_params(values, ids, current)
 
         # CAN-005: render the sidebar's "Pinned Parameters" mirror.
         # When the pinned list is empty, hide the entire card so the
@@ -6090,6 +6097,37 @@ class DashboardManager:
             return dbc.Alert(f"Cancel failed: {exc}", color="warning", duration=5000, dismissable=True)
 
     # Define event handlers for callbacks
+    @staticmethod
+    def _merge_pinned_params(values, ids, current):
+        """Merge the RENDERED pin checkboxes into the persisted pin list (F-CANOPY-028).
+
+        The pattern-matched writer used to rebuild the whole list from the DOM, which
+        makes "this checkbox is absent" indistinguishable from "this key is not
+        pinned". Any render that under-reports the pin set — a mount before the
+        ``storage_type="local"`` store hydrates, or tables that are not in the DOM —
+        therefore got persisted on the next toggle, discarding earlier pins with no
+        warning.
+
+        Rules:
+
+        - No checkboxes rendered at all → ``no_update``. An empty component set is
+          never evidence that nothing is pinned, and writing ``[]`` there is exactly
+          how a full pin set gets wiped.
+        - Otherwise, keys whose checkbox IS rendered take their state from it (so
+          unpinning still works), and keys that are pinned but NOT rendered are
+          carried through untouched.
+
+        Order is stable: preserved-but-unseen keys first, then the rendered keys in
+        render order, so the sidebar mirror does not reshuffle on every toggle.
+        """
+        rendered = [i.get("key") for i in (ids or []) if isinstance(i, dict) and i.get("key")]
+        if not rendered:
+            return dash.no_update
+        checked = {i.get("key") for v, i in zip(values or [], ids or [], strict=False) if v and isinstance(i, dict)}
+        rendered_set = set(rendered)
+        preserved = [k for k in (current or []) if k and k not in rendered_set]
+        return preserved + [k for k in rendered if k in checked]
+
     def _toggle_dark_mode_handler(self, current_dark_mode=None):
         """Toggle dark mode on button click."""
         is_dark = not current_dark_mode
@@ -7244,12 +7282,27 @@ class DashboardManager:
             (nn_patience, "nn_patience", "int"),
             (nn_spiral_rot, "nn_spiral_rotations", "float"),
             (nn_spiral_num, "nn_spiral_number", "int"),
-            (nn_dataset_elem, "nn_dataset_elements", "int"),
-            (nn_dataset_noise, "nn_dataset_noise", "float"),
+            # F-CANOPY-018 (2 of 3): ``nn_dataset_elements`` / ``nn_dataset_noise`` are
+            # canopy-local and travel on /api/stage_dataset, which the Apply button does
+            # not call — #2b dropped them from the set_params payload for that reason.
+            # Comparing them here was wrong twice over: it latched the form dirty after
+            # every apply (see below), and it lit Apply for an edit Apply cannot make.
+            # NB ``nn_spiral_rotations`` / ``nn_spiral_number`` above ride BOTH payloads,
+            # so they stay compared.
             (cn_pool_size, "cn_pool_size", "int"),
             (cn_corr_thresh, "cn_correlation_threshold", "float"),
             (cn_selected, "cn_selected_candidates", "int"),
-            (cn_training_complete, "cn_training_complete", "str"),
+            # F-CANOPY-018 (3 of 3): ``cn_training_complete`` is deliberately NOT compared.
+            # It is a read-only status flag that #2b dropped from the /api/set_params
+            # payload, so ``_apply_parameters_handler``'s store write cannot carry it.
+            # The MOUNT seed (``_load_current_params_handler``) does carry it, which is
+            # why the form is clean on load and permanently dirty afterwards: the first
+            # successful apply replaces the seeded store with a params dict that has no
+            # such key, ``applied.get(...)`` returns None against a real radio value,
+            # and the dirty check latches True for the rest of the session. That is what
+            # overwrote the "Parameters applied" toast with "⚠️ Unsaved changes" ~900 ms
+            # later, and why the form never returned to clean without a reload.
+            # A key that can never be applied can never be unsaved.
             (cn_training_iter, "cn_training_iterations", "int"),
             (cn_training_conv_thresh, "cn_training_convergence_threshold", "float"),
             (cn_patience, "cn_patience", "int"),

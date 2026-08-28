@@ -496,7 +496,9 @@ class TestDatastoreInner:
         cb = raw_cb(dm, "update_pinned_params_store")
         values = [True, None, False]
         ids = [{"type": "param-pin", "key": "a"}, {"type": "param-pin", "key": "b"}, {"type": "param-pin", "key": "c"}]
-        assert cb(values, ids) == ["a"]
+        # F-CANOPY-028: the writer now takes the persisted list as a third arg so it
+        # can preserve pins whose checkbox is not currently rendered.
+        assert cb(values, ids, []) == ["a"]
 
     def test_render_sidebar_pinned_mirror_empty(self, dm):
         cb = raw_cb(dm, "render_sidebar_pinned_mirror")
