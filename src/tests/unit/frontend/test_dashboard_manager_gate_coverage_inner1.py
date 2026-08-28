@@ -201,15 +201,17 @@ class TestModelSelectionInner:
 # _setup_theme_callbacks (2505, 2517)
 # ---------------------------------------------------------------------------
 class TestThemeInner:
+    # F-CANOPY-001: the toggle writes only dark-mode-store; update_theme_state owns
+    # BOTH theme-state and the toggle glyph, and (unlike the toggle) runs on mount —
+    # which is what makes the glyph survive a reload.
     def test_toggle_dark_mode(self, dm):
         cb = raw_cb(dm, "toggle_dark_mode")
-        is_dark, icon = cb(1, False)
-        assert is_dark is True and icon == "☀️"
+        assert cb(1, False) is True
 
     def test_update_theme_state(self, dm):
         cb = raw_cb(dm, "update_theme_state")
-        assert cb(True) == "dark"
-        assert cb(False) == "light"
+        assert cb(True) == ("dark", "☀️")
+        assert cb(False) == ("light", "🌙")
 
 
 # ---------------------------------------------------------------------------

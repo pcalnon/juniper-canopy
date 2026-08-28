@@ -3082,11 +3082,15 @@ class DashboardManager:
     def _setup_theme_callbacks(self):
         """Set up dashboard theme callbacks."""
 
+        # F-CANOPY-001: the toggle writes only the STORE. It used to also own
+        # ``dark-mode-toggle.children``, but this callback is prevent_initial_call=True,
+        # so the glyph was written only on a click and a reload left it at the layout
+        # default 🌙 under a correctly-restored dark theme. The glyph is now derived
+        # from the store below. Deliberately NOT a second ``allow_duplicate`` writer:
+        # ``dark-mode-toggle.children`` keeps exactly one, per the F-CANOPY-018 /
+        # F-CANOPY-027 two-writer class this arc has been removing.
         @self.app.callback(
-            [
-                Output("dark-mode-store", "data"),
-                Output("dark-mode-toggle", "children"),
-            ],
+            Output("dark-mode-store", "data"),
             Input("dark-mode-toggle", "n_clicks"),
             State("dark-mode-store", "data"),
             prevent_initial_call=True,
@@ -3098,14 +3102,19 @@ class DashboardManager:
         # PERF-CN-01: prevent_initial_call=False — must propagate the initial
         # dark-mode-store value to theme-state on mount so theme-aware components
         # render with the correct theme on first paint.
+        # F-CANOPY-001: the toggle glyph rides the same mount-capable path, so it is
+        # correct on first paint after a reload as well as on every click.
         @self.app.callback(
-            Output("theme-state", "data"),
+            [
+                Output("theme-state", "data"),
+                Output("dark-mode-toggle", "children"),
+            ],
             Input("dark-mode-store", "data"),
             prevent_initial_call=False,
         )
         def update_theme_state(is_dark):
-            """Update theme state based on dark mode store."""
-            return self._update_theme_state_handler(is_dark=is_dark)
+            """Update theme state and the toggle glyph from the dark mode store."""
+            return self._update_theme_state_handler(is_dark=is_dark), self._dark_mode_icon(is_dark)
 
         self.app.clientside_callback(
             """
@@ -6129,10 +6138,28 @@ class DashboardManager:
         return preserved + [k for k in rendered if k in checked]
 
     def _toggle_dark_mode_handler(self, current_dark_mode=None):
-        """Toggle dark mode on button click."""
-        is_dark = not current_dark_mode
-        icon = "☀️" if is_dark else "🌙"
-        return is_dark, icon
+        """Flip the persisted dark-mode flag on button click.
+
+        F-CANOPY-001: this used to return ``(is_dark, icon)`` and own the toggle's
+        glyph directly. Because its callback is ``prevent_initial_call=True``, the
+        glyph was written ONLY on a click — so after a reload the theme restored
+        correctly from ``dark-mode-store`` while the button still rendered the
+        layout default 🌙. The glyph is now derived from the store by
+        ``update_theme_state`` (which does run on mount), and this handler owns
+        only the flag.
+        """
+        return not current_dark_mode
+
+    @staticmethod
+    def _dark_mode_icon(is_dark=None) -> str:
+        """Toggle glyph as a pure function of the persisted flag (F-CANOPY-001).
+
+        The glyph shows the mode the button would switch TO: ☀️ while dark,
+        🌙 while light. Deriving it from the flag — rather than from the click —
+        is what makes it correct on mount, and keeps a single writer for
+        ``dark-mode-toggle.children``.
+        """
+        return "☀️" if is_dark else "🌙"
 
     def _update_theme_state_handler(self, is_dark=None):
         """Update theme state based on dark mode store."""

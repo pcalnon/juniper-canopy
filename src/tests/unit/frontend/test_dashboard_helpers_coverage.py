@@ -216,9 +216,10 @@ class TestThemeHandlers:
         manager = DashboardManager({})
 
         # current_dark_mode=False -> toggled to True (dark mode)
-        is_dark, icon = manager._toggle_dark_mode_handler(current_dark_mode=False)
+        is_dark = manager._toggle_dark_mode_handler(current_dark_mode=False)
         assert is_dark is True
-        assert icon == "☀️"  # Sun icon shows when in dark mode (to switch to light)
+        # F-CANOPY-001: the glyph is derived from the flag, not returned by the toggle.
+        assert manager._dark_mode_icon(is_dark) == "☀️"  # Sun shows while dark (click -> light)
 
     def test_toggle_dark_mode_from_dark_to_light(self, reset_singletons):
         """Test toggling from dark mode (True) to light mode (False)."""
@@ -227,9 +228,9 @@ class TestThemeHandlers:
         manager = DashboardManager({})
 
         # current_dark_mode=True -> toggled to False (light mode)
-        is_dark, icon = manager._toggle_dark_mode_handler(current_dark_mode=True)
+        is_dark = manager._toggle_dark_mode_handler(current_dark_mode=True)
         assert is_dark is False
-        assert icon == "🌙"  # Moon icon shows when in light mode (to switch to dark)
+        assert manager._dark_mode_icon(is_dark) == "🌙"  # Moon shows while light (click -> dark)
 
     def test_toggle_dark_mode_repeated_toggles(self, reset_singletons):
         """Test repeated toggles alternate between dark and light."""
@@ -240,7 +241,7 @@ class TestThemeHandlers:
         # Simulate toggling back and forth
         current = False
         for i in range(1, 5):
-            is_dark, icon = manager._toggle_dark_mode_handler(current_dark_mode=current)
+            is_dark = manager._toggle_dark_mode_handler(current_dark_mode=current)
             expected_dark = not current
             assert is_dark == expected_dark, f"Toggle {i}: expected dark={expected_dark}, got {is_dark}"
             current = is_dark
@@ -252,9 +253,9 @@ class TestThemeHandlers:
         manager = DashboardManager({})
 
         # current_dark_mode=None -> not None = True (dark mode)
-        is_dark, icon = manager._toggle_dark_mode_handler(current_dark_mode=None)
+        is_dark = manager._toggle_dark_mode_handler(current_dark_mode=None)
         assert is_dark is True
-        assert icon == "☀️"
+        assert manager._dark_mode_icon(is_dark) == "☀️"
 
     def test_update_theme_state_dark(self, reset_singletons):
         """Test theme state returns 'dark' when is_dark is True."""
