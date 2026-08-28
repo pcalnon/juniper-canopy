@@ -37,8 +37,7 @@
 # COMPLETED:
 #
 #####################################################################################################################################################################################################
-import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import dash
 import dash_bootstrap_components as dbc
@@ -46,13 +45,17 @@ import plotly.graph_objects as go
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
+from canopy_constants import BackendConstants
 from frontend.internal_api import internal_api_headers
 from settings import get_settings
 
 from ..base_component import BaseComponent, create_empty_plot
 
-# Maximum number of historical pool entries to retain in memory
-MAX_POOL_HISTORY_ENTRIES = 20
+# Maximum number of historical pool entries retained. F-CANOPY-036 moved the
+# accumulation server-side, so the cap now lives with the accumulator and this is
+# a re-export -- the panel and the backend cannot disagree about how much history
+# exists, and the existing import path keeps working.
+MAX_POOL_HISTORY_ENTRIES = BackendConstants.MAX_POOL_HISTORY_ENTRIES
 
 # F-CANOPY-035: the dashboard-level metrics-history store (owned by the metrics
 # panel; fed by the liveness-gated /api/metrics/history poll and the WS append
@@ -237,18 +240,32 @@ class CandidateMetricsPanel(BaseComponent):
         # PERF-CN-01: prevent_initial_call=False — must fetch initial state on mount
         # so the candidate panel populates immediately rather than waiting for the
         # first interval tick.
+        # F-CANOPY-036: the pool-history store rides THIS callback rather than a
+        # client-side append of its own. It costs no new poller and no new renderer
+        # slot (the F-CANOPY-027 rule) — one tab-gated tick now carries both the
+        # state and the history the server accumulated for it.
         @app.callback(
-            Output(f"{self.component_id}-training-state-store", "data"),
+            [
+                Output(f"{self.component_id}-training-state-store", "data"),
+                Output(f"{self.component_id}-pool-history-store", "data"),
+            ],
             [
                 Input(f"{self.component_id}-update-interval", "n_intervals"),
                 Input("visualization-tabs", "active_tab"),
             ],
+            State(f"{self.component_id}-pool-history-store", "data"),
             prevent_initial_call=False,
         )
-        def fetch_training_state(n_intervals, active_tab):
+        def fetch_training_state(n_intervals, active_tab, pool_history):
             if active_tab != "candidates":
-                return dash.no_update
-            return self._fetch_training_state()
+                return dash.no_update, dash.no_update
+            history = self._fetch_pool_history()
+            if history is None or history == (pool_history or []):
+                # Unreachable server, or nothing new: hold the last-known-good store
+                # and do not re-fire the history's consumers on an identical write
+                # (Stage 2's no-op-write rule).
+                return self._fetch_training_state(), dash.no_update
+            return self._fetch_training_state(), history
 
         # ── Update status display ──
         # PERF-CN-01: prevent_initial_call=False — renders default "Inactive" badge
@@ -356,44 +373,19 @@ class CandidateMetricsPanel(BaseComponent):
                 return new_state, "▼" if new_state else "▶"
             return is_open, "▼"
 
-        # ── Update pool history ──
-        # PERF-CN-01: prevent_initial_call=True — only needs to react when
-        # training-state-store changes; on mount the history is already empty.
-        @app.callback(
-            Output(f"{self.component_id}-pool-history-store", "data"),
-            Input(f"{self.component_id}-training-state-store", "data"),
-            State(f"{self.component_id}-pool-history-store", "data"),
-            prevent_initial_call=True,
-        )
-        def update_pool_history(state, history):
-            if not state:
-                return history or []
-
-            pool_status = state.get("candidate_pool_status", "Inactive")
-            current_epoch = state.get("current_epoch", 0)
-
-            if pool_status != "Inactive":
-                pool_snapshot = {
-                    "epoch": current_epoch,
-                    "status": pool_status,
-                    "phase": state.get("candidate_pool_phase", "Idle"),
-                    "size": state.get("candidate_pool_size", 0),
-                    "top_candidate_id": state.get("top_candidate_id", ""),
-                    "top_candidate_score": state.get("top_candidate_score", 0.0),
-                    "second_candidate_id": state.get("second_candidate_id", ""),
-                    "second_candidate_score": state.get("second_candidate_score", 0.0),
-                    "pool_metrics": state.get("pool_metrics", {}),
-                    "timestamp": time.time(),
-                }
-
-                current_history = history or []
-                existing = next((p for p in current_history if p.get("epoch") == current_epoch), None)
-
-                if not existing:
-                    current_history = [pool_snapshot] + current_history[: MAX_POOL_HISTORY_ENTRIES - 1]
-                    return current_history
-
-            return history or []
+        # ── Pool history ──
+        # F-CANOPY-036: the client-side ``update_pool_history`` append lived here.
+        # It took ``training-state-store`` as its Input and rebuilt the list in the
+        # browser, so dash-renderer executed it with the store's CURRENT value (or
+        # superseded the queued trigger outright) whenever the ~1 Hz feeder rewrote
+        # the store first -- making any pool state shorter-lived than the promotion
+        # delay unrecordable. Measured: zero cards across five training runs / ~20
+        # candidate phases, while the SAME store's sibling consumers provably rendered
+        # live pool values in those runs.
+        #
+        # The accumulation is now server-side, in ``TrainingState.update_state`` under
+        # the state lock, and ``fetch_training_state`` above carries it down. There is
+        # no longer a client-side writer of ``-pool-history-store`` to race.
 
         # ── Render pool history ──
         # PERF-CN-01: prevent_initial_call=False — renders empty history section
@@ -433,6 +425,26 @@ class CandidateMetricsPanel(BaseComponent):
         except Exception:
             self.logger.debug("Failed to fetch training state")
         return {}
+
+    def _fetch_pool_history(self) -> Optional[list]:
+        """Fetch the server-accumulated candidate-pool history (F-CANOPY-036).
+
+        Returns ``None`` on any failure so the caller can hold the last-known-good
+        store rather than blanking a populated history on one transient hiccup —
+        the same last-known-good posture the metrics/topology handlers take.
+        """
+        import requests
+
+        try:
+            response = requests.get(self._api_url("/api/v1/candidates/pool-history"), timeout=2, headers=internal_api_headers())
+            if response.status_code == 200:
+                payload = response.json()
+                history = payload.get("history") if isinstance(payload, dict) else payload
+                if isinstance(history, list):
+                    return history
+        except Exception:
+            self.logger.debug("Failed to fetch candidate pool history")
+        return None
 
     # ── Display Builders ──
 

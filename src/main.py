@@ -1135,6 +1135,38 @@ async def readiness_probe() -> ReadinessResponse:
     )
 
 
+def _active_training_state():
+    """The ``TrainingState`` that is authoritative for this backend mode.
+
+    Demo mode keeps its own instance on ``DemoMode``; service mode uses the module
+    global. Both are real ``TrainingState`` objects, so both accumulate pool history.
+    Mirrors the selection ``/api/state`` makes, factored out so the two cannot drift.
+    """
+    if backend.backend_type == "demo" and hasattr(backend, "_demo"):
+        demo = backend._demo
+        if demo.training_state:
+            return demo.training_state
+    return training_state
+
+
+@app.get("/api/v1/candidates/pool-history")
+async def get_candidate_pool_history():
+    """Candidate-pool history, newest first (F-CANOPY-036).
+
+    The dashboard used to accumulate this in the browser, appending from a callback
+    whose Input was a ~1 Hz store — so any pool state shorter-lived than the
+    callback's promotion delay was never recorded, and the panel showed no card
+    across five training runs. The accumulation now happens in ``TrainingState``
+    under the same lock as the state write itself, and this route serves it.
+
+    Returns:
+        ``{"history": [...], "count": N}`` — newest first, capped at
+        ``BackendConstants.MAX_POOL_HISTORY_ENTRIES``.
+    """
+    history = _active_training_state().get_pool_history()
+    return {"history": history, "count": len(history)}
+
+
 @app.get("/api/state")
 async def get_state():
     """
