@@ -560,6 +560,28 @@ class NetworkEditorPanel(BaseComponent):
         return {"success": False, "error": detail}
 
     @staticmethod
+    def _envelope_payload(result: Dict[str, Any]) -> Dict[str, Any]:
+        """Inner payload of a cascor success envelope (F-CANOPY-013).
+
+        ``_post_json`` returns ``{"success": True, "data": <the whole response body>}``
+        — and cascor's body is ITSELF an envelope, ``{"status": …, "data": {…},
+        "meta": …}``. So ``result["data"]["unit_index"]`` reads one level too shallow
+        and resolves to ``None``, which is what produced the observed success message
+        ``Appended unit at index None (now None hidden units)``.
+
+        Unwraps only when the envelope shape is actually present (a ``status`` key
+        alongside a dict ``data``), and passes the body through otherwise, so a flat
+        or differently-proxied payload keeps working.
+        """
+        body = result.get("data")
+        if not isinstance(body, dict):
+            return {}
+        inner = body.get("data")
+        if "status" in body and isinstance(inner, dict):
+            return inner
+        return body
+
+    @staticmethod
     def _status_alert(success: bool, message: str):
         return dbc.Alert(message, color="success" if success else "danger", style={"fontSize": "0.85rem"})
 
@@ -706,7 +728,7 @@ class NetworkEditorPanel(BaseComponent):
                 {"weights": weights, "bias": bias_val, "activation": activation or "Tanh"},
             )
             if result["success"]:
-                data = result["data"]
+                data = self._envelope_payload(result)  # F-CANOPY-013: unwrap cascor's envelope
                 idx = data.get("unit_index")
                 total = data.get("num_hidden_units")
                 return self._status_alert(True, f"Appended unit at index {idx} (now {total} hidden units).")
@@ -803,7 +825,7 @@ class NetworkEditorPanel(BaseComponent):
 
             result = self._post_json("DELETE", f"/api/v1/network/hidden-units/{idx_int}")
             if result["success"]:
-                data = result["data"]
+                data = self._envelope_payload(result)  # F-CANOPY-013: the latent second instance
                 total = data.get("num_hidden_units")
                 msg = f"Removed unit {idx_int} (now {total} hidden units)."
                 if wants_snapshot:

@@ -40,32 +40,34 @@ def dashboard_manager():
 class TestThemeToggleHandlers:
     """Test theme toggle callback handlers."""
 
+    # F-CANOPY-001: the toggle returns the FLAG only; the glyph is derived from the
+    # store by ``update_theme_state`` so it is also correct on mount after a reload.
     def test_toggle_dark_mode_handler_light_to_dark(self, dashboard_manager):
-        """Test dark mode toggle returns (True, sun icon) when current is light."""
+        """Toggle from light returns dark; the glyph derives to the sun."""
         result = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=False)
-        assert result[0] is True
-        assert result[1] == "☀️"
+        assert result is True
+        assert dashboard_manager._dark_mode_icon(result) == "☀️"
 
     def test_toggle_dark_mode_handler_dark_to_light(self, dashboard_manager):
-        """Test dark mode toggle returns (False, moon icon) when current is dark."""
+        """Toggle from dark returns light; the glyph derives to the moon."""
         result = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=True)
-        assert result[0] is False
-        assert result[1] == "🌙"
+        assert result is False
+        assert dashboard_manager._dark_mode_icon(result) == "🌙"
 
     def test_toggle_dark_mode_handler_none_to_dark(self, dashboard_manager):
-        """Test dark mode toggle returns (True, sun icon) when current is None."""
+        """An unset store toggles to dark."""
         result = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=None)
-        assert result[0] is True
-        assert result[1] == "☀️"
+        assert result is True
+        assert dashboard_manager._dark_mode_icon(result) == "☀️"
 
     def test_toggle_dark_mode_handler_roundtrip(self, dashboard_manager):
         """Test dark mode toggle roundtrip: False -> True -> False."""
         result1 = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=False)
-        assert result1[0] is True
-        assert result1[1] == "☀️"
-        result2 = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=result1[0])
-        assert result2[0] is False
-        assert result2[1] == "🌙"
+        assert result1 is True
+        assert dashboard_manager._dark_mode_icon(result1) == "☀️"
+        result2 = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=result1)
+        assert result2 is False
+        assert dashboard_manager._dark_mode_icon(result2) == "🌙"
 
     def test_update_theme_state_handler_dark(self, dashboard_manager):
         """Test theme state update for dark mode returns 'dark'."""
