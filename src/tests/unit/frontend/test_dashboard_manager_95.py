@@ -291,14 +291,12 @@ class TestCallbackWrappersDirectExecution:
 class TestCallbackHandlerReturns:
     """Test callback handler direct returns for complete coverage."""
 
-    def test_toggle_dark_mode_handler_returns_tuple(self, dashboard_manager):
-        """Test toggle dark mode handler returns expected tuple."""
+    def test_toggle_dark_mode_handler_returns_flag_only(self, dashboard_manager):
+        """The toggle owns only the flag; the glyph is derived (F-CANOPY-001)."""
         result = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=False)
-        assert isinstance(result, tuple)
-        assert len(result) == 2
-        is_dark, icon = result
-        assert is_dark is True
-        assert icon == "☀️"
+        assert result is True
+        assert not isinstance(result, tuple), "the glyph must not ride the toggle's return — it is written from the store"
+        assert dashboard_manager._dark_mode_icon(result) == "☀️"
 
     def test_update_theme_state_handler_returns_string(self, dashboard_manager):
         """Test update theme state handler returns string."""
