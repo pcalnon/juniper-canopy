@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Tests pinning Stage 2 (`#511`) live-callback contracts that the original PR's happy-path suite left open: `_update_unified_status_bar_handler` element `[9]` stays `dash.no_update` on every error path (so a hiccup cannot blank `training-status-store` and re-fire its consumers), `{is_running, phase}` is coerced then suppressed, and `_update_system_panels_handler` isolates a `/api/status` Timeout/JSON failure from the details and stream-health surfaces.
 
+### Changed
+
+- **CodeQL / SAST operator docs.** CI manuals now describe the live
+  SHA-pinned `github/codeql-action` v4 workflow (`.github/workflows/codeql.yml`),
+  the required check name `Analyze (python)`, the Dependabot `codeql-action`
+  group that also bumps `ci.yml` Bandit `upload-sarif`, and the ruleset
+  code-scanning gate (errors + high-or-higher alerts). Replaces the stale
+  `init@v2` snippet.
+
 ## [0.6.0] - 2026-07-28
 
 ### Added

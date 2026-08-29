@@ -5,7 +5,7 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.6.0
-**Last Updated**: 2026-08-21
+**Last Updated**: 2026-08-24
 
 ---
 
@@ -269,6 +269,7 @@ Tests touching these collectors should use `juniper_observability.testing.reset_
 | Workflow | File | Purpose |
 |----------|------|---------|
 | Continuous Integration | `ci.yml` | Test, lint, type-check on PR and push |
+| CodeQL Analysis | `codeql.yml` | Python SAST; required check `Analyze (python)`. SHA-pinned v4; Dependabot `codeql-action` group also bumps `ci.yml` Bandit `upload-sarif`. |
 | Lockfile Update | `lockfile-update.yml` | Automated dependency lock updates |
 | Publish | `publish.yml` | Release publishing automation |
 | Security Scan | `security-scan.yml` | Security vulnerability scanning |
