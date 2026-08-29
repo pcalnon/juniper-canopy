@@ -425,13 +425,29 @@ class NetworkVisualizer(BaseComponent):
             """
             import dash
 
-            # Short-circuit: if only the fast-update-interval fired and there's no
-            # active highlight animation, skip the full graph rebuild.
+            # Short-circuit: a bare poll tick with no highlight animation running has
+            # nothing to redraw, so skip the full rebuild.
+            #
+            # F-CANOPY-039: this named ``fast-update-interval`` — the trigger
+            # F-CANOPY-027 REPLACED with ``tabpoll-topology``. The guard has been dead
+            # code ever since: every 5 s tick started a full 1.5-5 s rebuild, and the
+            # NEXT tick retired that invocation before its response could land, so the
+            # renderer discarded a correct 39,319 B figure ~every time. Measured: the
+            # callback's whole lifecycle completing (AddRequested -> LOADING ->
+            # Executed -> LOADED) with no dispatched action ever carrying the figure,
+            # a graph that painted 0 of 5 sessions, and — decisively — an immediate
+            # paint to 181 traces / sig 31152 the moment ``tabpoll-topology`` was
+            # disabled at runtime.
+            #
+            # Both ids are matched so the guard cannot silently die again if the lane
+            # is renamed a second time; the highlight condition is unchanged, so the
+            # P2-1 pulse still animates off the tick while it is running.
             try:
                 ctx = dash.callback_context
                 if ctx.triggered and len(ctx.triggered) == 1:
                     trigger_id = ctx.triggered[0]["prop_id"]
-                    if "fast-update-interval" in trigger_id and not current_highlight:
+                    tick_only = "tabpoll-topology" in trigger_id or "fast-update-interval" in trigger_id
+                    if tick_only and not current_highlight:
                         return (dash.no_update,) * 8
             except Exception:  # nosec B110 — callback_context unavailable outside Dash request
                 pass
