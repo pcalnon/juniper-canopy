@@ -965,11 +965,11 @@ class TestCallbackInvocation:
                     "node_graph",  # display_mode (OF-1)
                     None,  # raw_topology (OF-1)
                     None,  # depth_filter (CAN-020)
-                    [],  # metrics_data
                     "light",  # theme
                     [],  # selected_nodes
                     0,  # n_intervals
                     None,  # ws_cascade_add (D-06)
+                    [],  # metrics_data (F-CANOPY-037: State, after every Input)
                     {"xaxis_range": None, "yaxis_range": None, "dragmode": "pan"},  # view_state
                     None,  # prev_hash
                     None,  # current_highlight
@@ -1022,11 +1022,11 @@ class TestCallbackInvocation:
                     "node_graph",  # display_mode (OF-1)
                     None,  # raw_topology (OF-1)
                     None,  # depth_filter (CAN-020)
-                    [],
                     "light",
                     [],
                     0,  # n_intervals
                     None,  # ws_cascade_add (D-06)
+                    [],  # metrics_data (F-CANOPY-037: State, after every Input)
                     None,  # view_state
                     None,  # prev_hash
                     None,  # current_highlight
@@ -1075,7 +1075,7 @@ class TestCallbackInvocation:
         for key, callback_info in app.callback_map.items():
             if callback_key in key:
                 func = callback_info["callback"]
-                result = func.__wrapped__(simple_topology, "hierarchical", ["show"], "2d", "node_graph", None, None, metrics_data, "light", [], 0, None, None, None, None)
+                result = func.__wrapped__(simple_topology, "hierarchical", ["show"], "2d", "node_graph", None, None, "light", [], 0, None, metrics_data, None, None, None)
                 fig, _config, _, _, _, _, _, new_highlight = result
                 assert isinstance(fig, go.Figure)
                 # Should have detected new unit and created highlight
@@ -1119,7 +1119,7 @@ class TestCallbackInvocation:
         for key, callback_info in app.callback_map.items():
             if callback_key in key:
                 func = callback_info["callback"]
-                result = func.__wrapped__(simple_topology, "hierarchical", [], "2d", "node_graph", None, None, [], "light", [], 0, None, view_state, None, None)
+                result = func.__wrapped__(simple_topology, "hierarchical", [], "2d", "node_graph", None, None, "light", [], 0, None, [], view_state, None, None)
                 fig, _config, _, _, _, _, _, _ = result
                 assert isinstance(fig, go.Figure)
                 break

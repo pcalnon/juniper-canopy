@@ -348,19 +348,35 @@ class NetworkVisualizer(BaseComponent):
                 Input(f"{self.component_id}-display-mode", "value"),  # OF-1: Node Graph / Weight Matrix
                 Input(f"{self.component_id}-raw-topology-store", "data"),  # OF-1: Raw topology for heatmap
                 Input(f"{self.component_id}-depth-slider", "value"),  # CAN-020: hierarchy depth filter
-                Input("metrics-panel-metrics-store", "data"),
                 Input("theme-state", "data"),
                 Input(f"{self.component_id}-selected-nodes", "data"),
                 # F-CANOPY-027: was ``fast-update-interval``, which forced a full topology
                 # re-render at 1 Hz from EVERY tab and held a renderer slot to do it. The
-                # gated lane only ticks while the Topology tab is active. NOTE this callback
-                # is still chained off ``metrics-panel-metrics-store`` (a global 1 Hz store),
-                # so gating the interval reduces but does not eliminate its off-tab work —
-                # that chained-store class is Stage 2.
+                # gated lane only ticks while the Topology tab is active.
                 Input("tabpoll-topology", "n_intervals"),
                 Input("ws-cascade-add-buffer", "data"),  # D-06: WS cascade_add events trigger topo refresh
             ],
             [
+                # F-CANOPY-037: ``metrics-panel-metrics-store`` was an INPUT here — the
+                # Stage 2 "chained store" hazard the F-CANOPY-027 note above flagged and
+                # left open. That global store is rewritten by the 1 Hz ``fast-update-
+                # interval`` poll, so this callback's trigger was re-claimed every
+                # ~1-1.75 s while its own server time is 1.5-5 s: the rebuild could not
+                # finish before it was superseded, and the graph rendered in only 2 of 11
+                # measured live sessions (stats bar stuck at the layout-default "0"s,
+                # ``gd.data == []``). Demoting it to STATE keeps the data — the new-unit
+                # detection below still reads it on every run — while removing the
+                # trigger. The remaining Inputs are the ones that actually mean "the
+                # topology changed": the topology store, the tab-gated 5 s poll (slower
+                # than the 1.5-5 s rebuild, so it cannot starve it) and the WS
+                # ``cascade_add`` buffer.
+                #
+                # NB this is deliberately the fix over "suppress the store's no-op
+                # writes": that lever (``dashboard_manager._update_metrics_store_handler``)
+                # only helps at idle, where the refetch is identical. DURING a run the
+                # store changes legitimately at 1 Hz, so the starvation would survive
+                # exactly when the cascade is growing and the user is watching it.
+                State("metrics-panel-metrics-store", "data"),
                 State(f"{self.component_id}-view-state", "data"),
                 State(f"{self.component_id}-topology-hash", "data"),
                 State(f"{self.component_id}-new-node-highlight", "data"),
@@ -375,11 +391,11 @@ class NetworkVisualizer(BaseComponent):
             display_mode: str,  # OF-1: "node_graph" or "weight_matrix"
             raw_topology: Optional[Dict[str, Any]],  # OF-1: Raw topology for heatmap
             depth_filter: Optional[int],  # CAN-020: hierarchy depth filter (None = no filter)
-            metrics_data: List[Dict[str, Any]],
             theme: str,
             selected_nodes: List[str],
             n_intervals: int,
             ws_cascade_add: Optional[Dict[str, Any]],  # D-06: WS cascade_add events
+            metrics_data: List[Dict[str, Any]],  # F-CANOPY-037: State, not Input (see above)
             view_state: Dict[str, Any],
             prev_hash: str,
             current_highlight: Optional[Dict[str, Any]],
@@ -394,10 +410,12 @@ class NetworkVisualizer(BaseComponent):
                 view_mode: View mode ('2d' or '3d')
                 display_mode: Display mode ('node_graph' or 'weight_matrix')
                 raw_topology: Raw weight-oriented topology for heatmap view
-                metrics_data: Historical metrics data for detecting new units
                 theme: Current theme
                 selected_nodes: List of selected node IDs
                 n_intervals: Current interval count for animation timing
+                ws_cascade_add: WS cascade_add buffer (D-06) — a real topology change
+                metrics_data: Historical metrics data for detecting new units. STATE,
+                    not an Input (F-CANOPY-037) — read on every run, never a trigger.
                 view_state: Stored view state (zoom, pan, dragmode)
                 prev_hash: Previous topology hash
                 current_highlight: Current new-node highlight state
@@ -407,13 +425,29 @@ class NetworkVisualizer(BaseComponent):
             """
             import dash
 
-            # Short-circuit: if only the fast-update-interval fired and there's no
-            # active highlight animation, skip the full graph rebuild.
+            # Short-circuit: a bare poll tick with no highlight animation running has
+            # nothing to redraw, so skip the full rebuild.
+            #
+            # F-CANOPY-039: this named ``fast-update-interval`` — the trigger
+            # F-CANOPY-027 REPLACED with ``tabpoll-topology``. The guard has been dead
+            # code ever since: every 5 s tick started a full 1.5-5 s rebuild, and the
+            # NEXT tick retired that invocation before its response could land, so the
+            # renderer discarded a correct 39,319 B figure ~every time. Measured: the
+            # callback's whole lifecycle completing (AddRequested -> LOADING ->
+            # Executed -> LOADED) with no dispatched action ever carrying the figure,
+            # a graph that painted 0 of 5 sessions, and — decisively — an immediate
+            # paint to 181 traces / sig 31152 the moment ``tabpoll-topology`` was
+            # disabled at runtime.
+            #
+            # Both ids are matched so the guard cannot silently die again if the lane
+            # is renamed a second time; the highlight condition is unchanged, so the
+            # P2-1 pulse still animates off the tick while it is running.
             try:
                 ctx = dash.callback_context
                 if ctx.triggered and len(ctx.triggered) == 1:
                     trigger_id = ctx.triggered[0]["prop_id"]
-                    if "fast-update-interval" in trigger_id and not current_highlight:
+                    tick_only = "tabpoll-topology" in trigger_id or "fast-update-interval" in trigger_id
+                    if tick_only and not current_highlight:
                         return (dash.no_update,) * 8
             except Exception:  # nosec B110 — callback_context unavailable outside Dash request
                 pass

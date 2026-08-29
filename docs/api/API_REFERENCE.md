@@ -57,7 +57,7 @@ http://127.0.0.1:8050
 **Custom Port:**
 
 ```bash
-export CASCOR_SERVER_PORT=8051
+export JUNIPER_CANOPY_SERVER__PORT=8051
 # Base URL: http://127.0.0.1:8051
 ```
 

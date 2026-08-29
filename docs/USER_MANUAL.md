@@ -84,18 +84,26 @@ This will:
 - Begin simulated training automatically
 - Open the dashboard at <http://127.0.0.1:8050/dashboard/>
 
-#### Production Mode (With Real CasCor Backend)
+#### Service Mode (With the juniper-cascor Service)
 
-To connect to a real CasCor training session:
+To monitor real training, point canopy at a running juniper-cascor service (and at
+juniper-data, which supplies the dataset generators):
 
 ```bash
-# Set backend path (if different from default)
-export CASCOR_BACKEND_PATH=/path/to/cascor
+# The juniper-cascor service: host port 8201 in the standard local layout
+# (8200 inside the juniper-deploy containers)
+export JUNIPER_CANOPY_CASCOR_SERVICE_URL=http://localhost:8201
 
-# Run application
+# The juniper-data service (shared, unprefixed name)
+export JUNIPER_DATA_URL=http://localhost:8100
+
+# Run application (the env name is versioned — see Installation)
 cd src
-/opt/miniforge3/envs/JuniperCanopy/bin/python main.py
+/opt/miniforge3/envs/JuniperCanopy1/bin/python main.py
 ```
+
+Without `JUNIPER_CANOPY_CASCOR_SERVICE_URL` canopy logs
+`No CasCor service URL configured — falling back to demo mode` and runs the demo backend.
 
 ### Accessing the Dashboard
 
@@ -212,19 +220,29 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 
 ### Configuration Parameters
 
+The sidebar's **Meta Parameters** cards (Neural Network, Dataset, Candidate Nodes) hold the full
+parameter set — epochs, learning rate, hidden units, multi-node layers, optimizer, activation,
+output-weight initialisation, dataset generator fields and the candidate-pool settings. The two
+below are the ones most often changed. Their bounds come from `TrainingSettings` in
+`src/settings.py`, and their defaults can be overridden per deployment with
+`JUNIPER_CANOPY_TRAINING__LEARNING_RATE__DEFAULT` / `JUNIPER_CANOPY_TRAINING__HIDDEN_UNITS__DEFAULT`
+(see [Configuration](#configuration)). Edits are staged until you click **Apply** — the button
+enables only when a value differs from the last applied set — and the **Parameters** tab shows the
+applied values.
+
 #### Learning Rate
 
-- **Type:** Decimal number (step: 0.001)
+- **Type:** Decimal number (any step)
 - **Default:** 0.01
-- **Range:** 0.001 - 1.0
+- **Range:** 0.0001 - 1.0
 - **Effect:** Controls training speed and convergence
 
-#### Max Hidden Units
+#### Maximum Hidden Units
 
 - **Type:** Integer (step: 1)
-- **Default:** 10
-- **Range:** 1 - 100
-- **Effect:** Limits maximum cascade units added during training
+- **Default:** 1000
+- **Range:** 0 - 10000
+- **Effect:** Caps the number of cascade units added during training
 
 > **Note:** These controls are active in both demo and service modes.
 > In service mode, current values are also exposed through `GET /api/status` and `GET /api/state`.
@@ -233,7 +251,17 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 
 ## Visualization Tabs
 
-### Tab 1: Training Metrics
+The dashboard ships **15 tabs**, in tab-bar order: [Training Metrics](#training-metrics-tab),
+[Candidate Metrics](#candidate-metrics-tab), [Network Topology](#network-topology-tab),
+[Network Evolution](#network-evolution-tab), [Decision Boundary](#decision-boundary-tab),
+[Dataset View](#dataset-view-tab), [Workers](#workers-tab), [Parameters](#parameters-tab),
+[Snapshots](#snapshots-tab), [Replay](#replay-tab), [Network Editor](#network-editor-tab),
+[Redis](#redis-tab), [Cassandra](#cassandra-tab), [Tutorial](#tutorial-tab) and
+[About](#about-tab). The five cascade-only tabs — Candidate Metrics, Network Topology, Network
+Evolution, Decision Boundary and Workers — are hidden while a one-shot model such as
+*Recurrence (LMU)* is selected.
+
+### Training Metrics Tab
 
 **Purpose:** Monitor real-time training progress with loss and accuracy curves
 
@@ -271,6 +299,15 @@ The **Training Controls Panel** (left sidebar) provides real-time control over t
 - Validation loss increases while training loss decreases (overfitting)
 - Erratic fluctuations (learning rate too high)
 - Flat curves (learning rate too low, or convergence)
+
+**Metric Layouts:** name the current zoom/pan view and click **Save Layout**
+(`POST /api/v1/metrics/layouts`); the dropdown lists the saved layouts (`GET /api/v1/metrics/layouts`),
+**Load** re-applies one and **Delete** removes it without a confirmation dialog.
+
+**In-metrics replay:** when training is stopped, paused, completed or failed (never during a live
+run) a replay bar appears under the plots: ⏮ start, ◀ step back, ▶ play / ⏸ pause, step forward,
+⏭ end, a position slider and a `current / max` readout. Playback advances one recorded epoch per
+tick. The base tick is **1000 ms**; the **1x / 2x / 4x** buttons set it to 1000 / 500 / 250 ms.
 
 **Data Source:**
 
@@ -513,12 +550,21 @@ frontend:
 - **Classes:** 2 (binary)
 - **Noise:** Gaussian (σ=0.1)
 
-**Supported Dataset Formats:**
+**Loading a dataset:**
 
-- CSV (with header)
-- JSON (array of objects)
-- NumPy (.npy)
-- HDF5 (.h5)
+- **Service mode (juniper-cascor backend):** datasets come from the juniper-data service. In the
+  sidebar's **Dataset** section pick a generator (the list is `GET /api/dataset/generators`, proxied
+  from juniper-data), fill in its parameters and click **Apply** (`POST /api/stage_dataset`). The
+  staged dataset takes effect through **Restart with new dataset** (`POST /api/train/restart`) or —
+  with **Experimental Functions** enabled and a run in progress — the **Live Switch**
+  (`POST /api/live_dataset_swap`).
+- **Demo mode only:** this tab's **Generate / Upload / URL** modal — `POST /api/dataset/generate`
+  (built-in generators), `POST /api/dataset/import-file` (CSV upload) and
+  `POST /api/dataset/import-url` (a CSV fetched by the server; disabled unless
+  `JUNIPER_CANOPY_DATASET_IMPORT_URL_ENABLED=true`). Both import paths accept **CSV only**: one
+  sample per row, the last column is the integer class label, a header row is auto-detected, and
+  files are capped at 10 MB / 50 000 rows / 100 features. JSON, NumPy `.npy` and HDF5 `.h5` files
+  are **not** accepted. In service mode all three actions are refused with HTTP `400`.
 
 **Data Source:**
 
@@ -544,87 +590,305 @@ frontend:
 
 ---
 
+### Candidate Metrics Tab
+
+**Purpose:** Follow the candidate pool while cascor trains candidate units (the phase between
+output-training passes)
+
+**Display Elements:**
+
+1. **Pool Status Badge**, **Phase** (`Idle` until a pool is active) and **Pool Size**
+2. **Candidate Epoch Progress** — `epoch / total`, shown only while the training state carries
+   `candidate_epoch` and `candidate_total_epochs`
+3. **Current Pool** (collapsible) — "No active candidate pool" or the per-candidate view
+4. **Candidate Loss Plot** — the candidate epochs of the current run, read from the same metrics
+   store as the Training Metrics tab (no extra polling)
+5. **Pool History** (collapsible) — one read-only card per finished pool, capped at the most recent
+   entries
+
+**Data Source:**
+
+- The training-state and metrics stores shared with the Training Metrics tab; the tab's own refresh
+  runs only while it is selected
+
+---
+
+### Network Evolution Tab
+
+**Purpose:** A gallery of the network's cascade growth — one card per hidden unit added during a run
+
+**Display Elements:**
+
+1. **Stats line** — "No snapshots yet" until the first unit is added
+2. **Snapshot grid** — one card per growth step, captured in the browser from the `cascade_add`
+   WebSocket events and the current topology; a step with an unchanged hidden-unit count is skipped,
+   and the gallery clears itself when the input width changes or the hidden-unit count shrinks (a
+   dataset change or a reset)
+3. **Clear** — empties the gallery
+4. **Weight norms** — per-unit weight-norm traces, revealed only while a snapshot replay streams
+   weight samples (see [Replay Tab](#replay-tab))
+
+The sidebar is hidden on this tab.
+
+**Data Source:**
+
+- WebSocket stream `/ws/training` (`cascade_add` events) and the topology store — no polling
+
+---
+
+### Workers Tab
+
+**Purpose:** Read-only view of the cascor worker registry
+
+**Display Elements:**
+
+1. **Status Badge** — `LOADING`, then `NO WORKERS`, `DEGRADED` (stale workers present) or `HEALTHY`
+2. **Degradation alert** — "Worker data degraded: …" when the upstream call fails (dismissable)
+3. **Six tiles** — total, idle, busy, stale, tasks done (`done / failed fail`) and average health
+4. **Roster table** — id, kind (`local` / `remote`), status, health, last heartbeat, current task —
+   or "No workers connected"
+5. **Local-workers note** — cascor's registry reports remote WebSocket workers only; the in-process
+   candidate pool is not listed individually, and the panel says so rather than inventing rows
+
+**Data Source:**
+
+- `GET /api/v1/workers/list` (roster) plus best-effort aggregate stats, polled on the slow interval
+  only while this tab is selected
+
+---
+
+### Parameters Tab
+
+**Purpose:** At-a-glance, read-only summary of the applied meta-parameters
+
+**Display Elements:**
+
+1. **Network Training**, **Dataset** and **Candidate Training** tables — Pin / Parameter / Current /
+   Min / Max / Default; booleans render as `Enabled` / `Disabled`
+2. **Pin checkboxes** — pinned parameters appear as read-only name + value rows in the sidebar's
+   **Pinned** card; the pin set lives in browser local storage, so it survives a reload
+
+Editing happens in the sidebar; the tables re-render after every **Apply**.
+
+**Data Source:**
+
+- The applied-parameters store (filled by the sidebar's **Apply** round-trip) — no polling
+
+---
+
+### Snapshots Tab
+
+**Purpose:** Create, browse and act on HDF5 training-state snapshots
+
+**Display Elements and Controls:**
+
+1. **Create** — optional name and description, then **Create Snapshot** (`POST /api/v1/snapshots`);
+   the form clears on success and the table refreshes
+2. **Snapshot table** — auto-refreshes every 10 s (`JUNIPER_CANOPY_SNAPSHOTS_REFRESH_INTERVAL_MS`)
+   and on **Refresh**; in service mode the list comes from the cascor service that created the
+   snapshots, with canopy's local snapshot directory as the fallback
+3. **View** — opens the detail panel (`GET /api/v1/snapshots/{id}`)
+4. **Restore / Replay / Resume / Retrain** — per row, or from the right-click context menu; each
+   opens a confirmation modal, and **Confirm** posts `POST /api/v1/snapshots/{id}/{op}`. Training
+   must be paused or stopped first: a running run answers `409`, an unknown id `404`, an operation
+   the backend does not support `501`
+5. **Replay** additionally loads the session into the [Replay Tab](#replay-tab) and switches to it
+6. **History** (collapsible) — `GET /api/v1/snapshots/history`
+7. **Dataset swaps** — paired before / after cards for every live dataset swap recorded in the run
+
+**Data Source:**
+
+- `GET /api/v1/snapshots`, `GET /api/v1/snapshots/{id}`, `GET /api/v1/snapshots/history`,
+  `POST /api/v1/snapshots`, `POST /api/v1/snapshots/{id}/{restore|replay|resume|retrain}`
+
+---
+
+### Replay Tab
+
+**Purpose:** Drive a snapshot replay session opened from the Snapshots tab
+
+**Display Elements and Controls:**
+
+1. **Idle placeholder** — "No active replay session" until a replay is confirmed on the Snapshots tab
+2. **Session header** — snapshot id, FSM badge, and a weights badge (`V2 ✓ weights` when the
+   snapshot carries weights, otherwise `V1 (metrics only)`)
+3. **Transport** — ▶ Play, ⏸ Pause, ⏹ Stop
+4. **Epoch scrubber** — drag and release to seek; readout `current / end`
+5. **Speed slider** — −10× … 10×; negative values play backwards, 0 pauses (`Paused (0×)`)
+6. **Time range** — restrict playback to a sub-window of epochs
+7. **Status block** — the result of the last control action
+8. **Dataset-swap events** — markers on a wall-clock axis with a count; hover for details
+
+Every control posts `POST /api/v1/snapshots/{id}/replay/control`, which canopy proxies to the cascor
+service. Weight samples streamed during playback are drained every 500 ms into the buffer that feeds
+the [Network Evolution](#network-evolution-tab) weight-norm traces.
+
+**Data Source:**
+
+- `POST /api/v1/snapshots/{id}/replay/control`; the loaded snapshot's swap history from
+  `GET /api/snapshots/{id}/history/dataset_swaps`
+
+---
+
+### Redis Tab
+
+**Purpose:** Read-only monitoring of the optional Redis cache integration
+
+**Display Elements:**
+
+1. **Status** and **Mode** badges (`DEMO` / `LIVE` / `DISABLED`)
+2. **Unavailable / error display** — when no Redis is deployed the tab shows an unavailable state and
+   leaves the rest of the dashboard untouched
+3. **Eight tiles** — version, uptime, connected clients, latency, memory, ops/sec, hit rate and
+   keyspace (placeholders when unavailable)
+
+**Data Source:**
+
+- `GET /api/v1/redis/status` and `GET /api/v1/redis/metrics`, every 5 s
+
+---
+
+### Cassandra Tab
+
+**Purpose:** Read-only monitoring of the optional Cassandra persistence integration
+
+**Display Elements:**
+
+1. **Status** (`UP` / `DOWN` / `DISABLED` / `UNAVAILABLE`) and **Mode** (`DEMO` / `LIVE` /
+   `DISABLED`) badges
+2. **Error area** — an unavailable render, never a crash, when no cluster is configured
+3. **Cluster overview** — contact points, keyspace, a hosts table, keyspace count, table count and
+   replication strategies (placeholders when unavailable)
+
+**Data Source:**
+
+- `GET /api/v1/cassandra/status` and `GET /api/v1/cassandra/metrics`, every 10 s
+
+---
+
+### Tutorial Tab
+
+**Purpose:** In-app orientation
+
+**Display Elements and Controls:**
+
+1. **▶ Take a guided tour** — launches the walkthrough overlay (Skip / Done to leave it)
+2. **Accordion** — CasCor overview, workflow, UI guide, parameter reference and keyboard shortcuts;
+   sections open independently of each other
+3. Right-clicking a control that has a tooltip offers **View tutorial**, which jumps to this tab
+
+---
+
+### About Tab
+
+**Purpose:** Application information
+
+**Display Elements:**
+
+1. **App Version** — the installed package version, the same value `GET /v1/health` reports
+2. Licence, credits, documentation links and contact information
+3. **System Information** (toggle) — Python version and platform details, built locally without a
+   request
+
+---
+
 ## Configuration
 
 ### Configuration Files
 
-**Primary Config:** `conf/app_config.yaml`
+Settings are typed `pydantic-settings` models in `src/settings.py`; the only configuration *file* the
+application reads is an optional `.env` in the working directory (`.env.example` documents every
+key). Precedence, highest first:
+
+1. Environment variables (`JUNIPER_CANOPY_*`, see below)
+2. The `.env` file
+3. The defaults in `src/settings.py`
+
+`conf/app_config.yaml` is **legacy**: the application settings no longer come from it (only the
+optional Redis client still reads it, through `config_manager.py`).
 
 ### Environment Variables
 
-Override config values using `CASCOR_<SECTION>_<KEY>` format:
+Every setting has a `JUNIPER_CANOPY_`-prefixed environment variable; nested sections use a double
+underscore:
 
 ```bash
 # Server configuration
-export CASCOR_SERVER_PORT=8051
-export CASCOR_SERVER_HOST=0.0.0.0
+export JUNIPER_CANOPY_SERVER__PORT=8051
+export JUNIPER_CANOPY_SERVER__HOST=0.0.0.0   # a non-loopback host needs a SEC-F22 attestation — see .env.example
 
 # Demo mode
-export CASCOR_DEMO_MODE=1
+export JUNIPER_CANOPY_DEMO_MODE=1
 
 # Backend path
-export CASCOR_BACKEND_PATH=/custom/path/to/cascor
+export JUNIPER_CANOPY_CASCOR_SERVICE_URL=http://localhost:8201    # juniper-cascor service (service mode)
+export JUNIPER_DATA_URL=http://localhost:8100                      # juniper-data (shared, unprefixed)
+export JUNIPER_CANOPY_BACKEND_PATH=/custom/path/to/juniper-cascor  # in-process cascor checkout (legacy path)
 
 # Debug mode
-export CASCOR_DEBUG=1
+export JUNIPER_CANOPY_SERVER__DEBUG=true
+export JUNIPER_CANOPY_LOG_LEVEL=DEBUG
+export JUNIPER_CANOPY_LOG_FORMAT=json
+
+# Sidebar defaults for the training parameters
+export JUNIPER_CANOPY_TRAINING__LEARNING_RATE__DEFAULT=0.01
+export JUNIPER_CANOPY_TRAINING__HIDDEN_UNITS__DEFAULT=1000
+export JUNIPER_CANOPY_TRAINING__EPOCHS__DEFAULT=1000000
+
+# Demo-mode pacing
+export JUNIPER_CANOPY_DEMO_CASCADE_EVERY=30      # add a cascade unit every N epochs
+# JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL is declared in settings but not applied: the backend
+# factory creates the demo backend with a fixed 1.0 s epoch interval (a tracked divergence).
 ```
+
+**Legacy `CASCOR_*` names.** `CASCOR_DEMO_MODE`, `CASCOR_SERVICE_URL`, `CASCOR_BACKEND_PATH`,
+`CASCOR_LOG_LEVEL`, `CASCOR_DEMO_UPDATE_INTERVAL` and `CASCOR_DEMO_CASCADE_EVERY` are still honoured,
+with a deprecation warning at startup. **`CASCOR_SERVER_PORT`, `CASCOR_SERVER_HOST` and `CASCOR_DEBUG`
+are read by nothing** — exporting them has no effect; use the `JUNIPER_CANOPY_SERVER__*` names above.
+The sidebar's training defaults additionally honour the unprefixed `CASCOR_TRAINING_LEARNING_RATE`,
+`CASCOR_TRAINING_HIDDEN_UNITS` and `CASCOR_TRAINING_EPOCHS`.
 
 ### Key Configuration Sections
 
+Every setting below lives on `Settings` in `src/settings.py`; the environment name is the field name
+upper-cased under the `JUNIPER_CANOPY_` prefix, with `__` between a nested section and its key.
+
 #### Application Settings
 
-```yaml
-application:
-  server:
-    host: 127.0.0.1      # Server host (use 0.0.0.0 for external access)
-    port: 8050           # Server port
-    debug: true          # Debug mode (verbose logging)
-```
+| Setting (`src/settings.py`)                   | Environment variable                                             | Default                        |
+|-----------------------------------------------|------------------------------------------------------------------|--------------------------------|
+| `server.host` / `server.port` / `server.debug` | `JUNIPER_CANOPY_SERVER__HOST` / `__PORT` / `__DEBUG`            | `127.0.0.1` / `8050` / `false` |
+| `demo_mode`                                   | `JUNIPER_CANOPY_DEMO_MODE`                                       | `false`                        |
+| `cascor_service_url`                          | `JUNIPER_CANOPY_CASCOR_SERVICE_URL`                              | unset (demo fallback)          |
+| `juniper_data_url`                            | `JUNIPER_DATA_URL` (or `JUNIPER_CANOPY_JUNIPER_DATA_URL`)        | `http://localhost:8100`        |
+| `recurrence_service_url`                      | `JUNIPER_CANOPY_RECURRENCE_SERVICE_URL`                          | unset                          |
+| `training.<param>.{min,max,default}`          | `JUNIPER_CANOPY_TRAINING__<PARAM>__{MIN,MAX,DEFAULT}`            | see `TrainingSettings`         |
+| `demo_cascade_every`                          | `JUNIPER_CANOPY_DEMO_CASCADE_EVERY`                              | `30`                           |
+| `demo_update_interval`                        | `JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL` — declared, **not applied** (fixed 1.0 s) | `1.0`           |
 
 #### Frontend Settings
 
-```yaml
-frontend:
-  dashboard:
-    update_interval_ms: 1000  # Fast update interval
-    max_data_points: 10000    # Max points to display
-    theme: plotly_dark        # Plot theme
-
-  training_metrics:
-    smoothing_window: 10      # Rolling average window
-    buffer_size: 5000         # Metrics buffer size
-```
+| Setting                                       | Environment variable                                             | Default                        |
+|-----------------------------------------------|------------------------------------------------------------------|--------------------------------|
+| `enable_ws_control_buttons`                   | `JUNIPER_CANOPY_ENABLE_WS_CONTROL_BUTTONS`                       | `true`                         |
+| `dataset_import_url_enabled`                  | `JUNIPER_CANOPY_DATASET_IMPORT_URL_ENABLED`                      | `false`                        |
+| Snapshots-table refresh (panel-local)         | `JUNIPER_CANOPY_SNAPSHOTS_REFRESH_INTERVAL_MS`                   | `10000`                        |
 
 #### Logging Settings
 
-```yaml
-logging:
-  console:
-    level: DEBUG         # Console log level (DEBUG, INFO, WARNING, ERROR)
-    colored: true        # Colored output
-
-  file:
-    level: DEBUG         # File log level
-    json_format: false   # JSON structured logs
-```
+| Setting                                       | Environment variable                                             | Default                        |
+|-----------------------------------------------|------------------------------------------------------------------|--------------------------------|
+| `log_level` / `log_format`                    | `JUNIPER_CANOPY_LOG_LEVEL` / `JUNIPER_CANOPY_LOG_FORMAT`         | `INFO` / `text`                |
+| `sentry_dsn`                                  | `JUNIPER_CANOPY_SENTRY_DSN`                                      | unset                          |
+| `metrics_enabled`                             | `JUNIPER_CANOPY_METRICS_ENABLED`                                 | `false`                        |
 
 ### Applying Configuration Changes
 
-1. **Edit config file:**
-
-   ```bash
-   nano conf/app_config.yaml
-   ```
-
-2. **Restart application:**
-
-   ```bash
-   ./demo  # or production command
-   ```
-
-3. **Verify changes:**
-   - Check logs in `logs/system.log`
-   - Observe dashboard behavior
+1. Export the variable (or edit `.env`) in the shell that will launch canopy.
+2. Restart the application (`./demo`, or the service-mode command above) — settings are read once at
+   startup.
+3. Verify: the startup log carries a deprecation warning for every legacy name in use, and
+   `GET /v1/health` reports `demo_mode`.
 
 ---
 
@@ -739,7 +1003,7 @@ kill -9 <PID>
 ✅ **Use different port:**
 
 ```bash
-export CASCOR_SERVER_PORT=8051
+export JUNIPER_CANOPY_SERVER__PORT=8051
 ./demo
 ```
 
@@ -1028,9 +1292,10 @@ logs/ui.log        # User interactions
 
 ### Version Information
 
-**Current Version:** 0.25.0
-**Release Date:** January 2026
-**Python:** 3.12+
+The running version comes from the installed package metadata and is shown by `GET /v1/health`
+and the **About** tab (both read the same source); the release history is in `CHANGELOG.md`.
+
+**Python:** 3.11+ (`requires-python` in `pyproject.toml`)
 **License:** MIT
 
 ---

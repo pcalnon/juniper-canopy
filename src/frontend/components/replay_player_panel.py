@@ -43,6 +43,7 @@ import requests
 from dash import Input, Output, State, dcc, html
 
 from frontend.internal_api import internal_api_headers
+from settings import get_settings
 
 from ..base_component import BaseComponent
 
@@ -77,7 +78,14 @@ class ReplayPlayerPanel(BaseComponent):
 
     def __init__(self, config: Dict[str, Any], component_id: str = "replay-player-panel"):
         super().__init__(config, component_id)
-        self._api_base_url = config.get("api_base_url", "")
+        # F-CANOPY-014: the empty-string fallback built every control URL as a
+        # schemeless path ("/api/v1/snapshots/<id>/replay/control"), which
+        # requests rejects with "No scheme supplied" -- and the runtime config
+        # never supplies api_base_url, so the whole replay control surface was
+        # dead. Mirror the sibling panels (network_editor_panel,
+        # hdf5_snapshots_panel): fall back to this service's own port.
+        _settings = get_settings()
+        self._api_base_url = config.get("api_base_url", f"http://127.0.0.1:{_settings.server.port}")
         self.api_timeout = float(config.get("api_timeout", 5))
 
     # ------------------------------------------------------------------
@@ -397,6 +405,27 @@ class ReplayPlayerPanel(BaseComponent):
         return start, end
 
     @staticmethod
+    def _session_summary(session: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """The live session-summary block inside the stored data block (F-CANOPY-015).
+
+        ``confirm_snapshot_op`` stores cascor's ``data`` block as the session store —
+        correct as far as it goes. That block carries ``fsm_state`` / ``time_index`` /
+        ``snapshot_id``, which this panel reads directly and correctly; but ``range``,
+        ``speed`` and ``weights_available`` live one level deeper, in
+        ``data["session"]``. Reading them off the block's top level yields ``None`` for
+        all three. Only one of the three was visible: ``weights_available`` falsy
+        rendered the **V1 (metrics only)** badge for a V2 snapshot, while ``range`` and
+        ``speed`` were masked because their fallbacks coincide with the real values.
+
+        Falls back to the block itself for the flat legacy/test shape, matching
+        ``_session_window``'s tolerance.
+        """
+        if not isinstance(session, dict):
+            return {}
+        inner = session.get("session")
+        return inner if isinstance(inner, dict) else session
+
+    @staticmethod
     def _session_current_index(session: Optional[Dict[str, Any]]) -> int:
         if not session:
             return 0
@@ -465,10 +494,12 @@ class ReplayPlayerPanel(BaseComponent):
 
             start, end = self._session_window(session)
             cur = self._session_current_index(session)
-            range_value = session.get("range") or [start, end]
-            speed = float(session.get("speed", SPEED_DEFAULT))
-            fsm = session.get("fsm_state") or "Replaying"
-            weights_available = bool(session.get("weights_available"))
+            # F-CANOPY-015: these three live in data["session"], not on the data block.
+            summary = self._session_summary(session)
+            range_value = summary.get("range") or [start, end]
+            speed = float(summary.get("speed", SPEED_DEFAULT))
+            fsm = session.get("fsm_state") or "Replaying"  # correctly on the data block
+            weights_available = bool(summary.get("weights_available"))
             badge_text = "V2 ✓ weights" if weights_available else "V1 (metrics only)"
             badge_style = {
                 "marginLeft": "8px",

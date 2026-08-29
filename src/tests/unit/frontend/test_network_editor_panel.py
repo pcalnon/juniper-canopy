@@ -410,15 +410,15 @@ class TestRemoveModalLayout:
 
 class TestPatchWeightsCallback:
     def test_no_target_rejected(self, panel, callbacks):
-        result = callbacks["on_patch_weights"](1, "", None, "1.0, 2.0")
+        result = callbacks["on_patch_weights"](1, "", None, "1.0, 2.0", None)
         assert "patch target" in str(result).lower()
 
     def test_no_values_rejected(self, panel, callbacks):
-        result = callbacks["on_patch_weights"](1, "output_weights", None, "")
+        result = callbacks["on_patch_weights"](1, "output_weights", None, "", None)
         assert "Values are required" in str(result)
 
     def test_hidden_unit_target_requires_idx(self, panel, callbacks):
-        result = callbacks["on_patch_weights"](1, "hidden_unit_weights", None, "1.0, 2.0")
+        result = callbacks["on_patch_weights"](1, "hidden_unit_weights", None, "1.0, 2.0", None)
         assert "hidden_unit_index" in str(result)
 
     def test_output_target_omits_idx(self, panel, callbacks):
@@ -433,13 +433,15 @@ class TestPatchWeightsCallback:
             return {"success": True, "data": {}}
 
         with patch.object(panel, "_post_json", side_effect=fake_post):
-            callbacks["on_patch_weights"](1, "output_weights", None, "0.1, 0.2")
+            callbacks["on_patch_weights"](1, "output_weights", None, "0.1, 0.2\n0.3, 0.4", None)
 
         body = captured["body"]
         assert "hidden_unit_index" not in body
         assert body["target"] == "output"
         assert body["field"] == "weights"
-        assert body["values"] == [0.1, 0.2]
+        # F-CANOPY-012: output_weights is 2-D on the wire. This previously asserted
+        # the flat [0.1, 0.2] that cascor rejects with "expects (12, 2), got (24,)".
+        assert body["values"] == [[0.1, 0.2], [0.3, 0.4]]
         assert body["dtype"] == "float32"
 
     def test_hidden_unit_target_includes_idx(self, panel, callbacks):
@@ -450,7 +452,7 @@ class TestPatchWeightsCallback:
             return {"success": True, "data": {}}
 
         with patch.object(panel, "_post_json", side_effect=fake_post):
-            callbacks["on_patch_weights"](1, "hidden_unit_bias", 3, "0.5")
+            callbacks["on_patch_weights"](1, "hidden_unit_bias", 3, "0.5", None)
 
         body = captured["body"]
         assert body["target"] == "hidden_unit"
@@ -468,8 +470,8 @@ class TestPatchWeightsCallback:
             return {"success": True, "data": {}}
 
         with patch.object(panel, "_post_json", side_effect=fake_post):
-            callbacks["on_patch_weights"](1, "output_bias", None, "0.1")
-            callbacks["on_patch_weights"](1, "hidden_unit_weights", 0, "0.1, 0.2")
+            callbacks["on_patch_weights"](1, "output_bias", None, "0.1", None)
+            callbacks["on_patch_weights"](1, "hidden_unit_weights", 0, "0.1, 0.2", None)
 
         assert captured_bodies[0]["target"] == "output"
         assert captured_bodies[0]["field"] == "bias"
@@ -507,7 +509,7 @@ class TestPatchWeightsWireSchemaConformance:
         # Hidden-unit targets need a valid idx; output targets don't.
         idx = 0 if expected_target == "hidden_unit" else None
         with patch.object(panel, "_post_json", side_effect=fake_post):
-            callbacks["on_patch_weights"](1, dropdown_value, idx, "0.1, 0.2")
+            callbacks["on_patch_weights"](1, dropdown_value, idx, "0.1, 0.2", {"input_size": 1, "output_size": 2, "hidden_units": 0})
 
         body = captured["body"]
         assert body["target"] == expected_target
@@ -522,7 +524,7 @@ class TestPatchWeightsWireSchemaConformance:
         # Defensive — if the dropdown ever ships with a value not in
         # ``_PATCH_TARGET_TO_WIRE``, fail loudly at the panel layer
         # rather than letting cascor reject with a generic 422.
-        result = callbacks["on_patch_weights"](1, "made_up_target", None, "0.1")
+        result = callbacks["on_patch_weights"](1, "made_up_target", None, "0.1", None)
         assert "Unknown patch target" in str(result)
 
 

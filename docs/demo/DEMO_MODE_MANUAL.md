@@ -24,7 +24,7 @@
 
 ### What is Demo Mode?
 
-Demo mode simulates a complete CasCor neural network training session without requiring the actual CasCor C++ backend. It enables:
+Demo mode simulates a complete CasCor neural network training session without requiring a running juniper-cascor service. It enables:
 
 - **UI development** without backend dependency
 - **Feature testing** with realistic data flows
@@ -35,14 +35,14 @@ Demo mode simulates a complete CasCor neural network training session without re
 
 | Feature         | Demo Mode                     | Production Mode                |
 | --------------- | ----------------------------- | ------------------------------ |
-| **Backend**     | Simulated (Python)            | Real CasCor (C++/Python)       |
+| **Backend**     | Simulated (Python)            | juniper-cascor service (Python) |
 | **Dataset**     | Fixed spiral (200 samples)    | Configurable datasets          |
 | **Training**    | Deterministic curves          | Real network training          |
 | **Network**     | Simulated cascade growth      | Actual cascade correlation     |
-| **Performance** | Fixed timing (~100ms updates) | Variable based on computation  |
+| **Performance** | Fixed timing (1 s per epoch)  | Variable based on computation  |
 | **Purpose**     | Development, testing, demos   | Real neural network training   |
 | **Launch**      | `./demo`                      | `cd src && python main.py`     |
-| **Config**      | `CASCOR_DEMO_MODE=1`          | `CASCOR_DEMO_MODE=0` (default) |
+| **Config**      | `JUNIPER_CANOPY_DEMO_MODE=1`  | `JUNIPER_CANOPY_DEMO_MODE=0` (default) |
 
 ### When to Use Demo Mode
 
@@ -72,8 +72,8 @@ Demo mode simulates a complete CasCor neural network training session without re
 
 The demo script:
 
-1. Activates JuniperPython conda environment
-2. Sets `CASCOR_DEMO_MODE=1`
+1. Activates the live `JuniperCanopy*` conda environment (the name is versioned — `JuniperCanopy1` today)
+2. Sets `JUNIPER_CANOPY_DEMO_MODE=1`
 3. Launches FastAPI server on port 8050
 4. Starts Dash dashboard
 5. Initializes demo training simulation
@@ -82,10 +82,10 @@ The demo script:
 
 ```bash
 # Activate conda environment
-conda activate JuniperPython
+conda activate JuniperCanopy1
 
 # Set demo mode
-export CASCOR_DEMO_MODE=1
+export JUNIPER_CANOPY_DEMO_MODE=1
 
 # Launch application
 cd src
@@ -116,7 +116,7 @@ Real-time visualization of training progress:
 
 - Training loss (blue) - Exponential decay from ~0.7 to ~0.05
 - Validation loss (orange) - Similar curve with slight offset
-- Updates every 100ms via WebSocket
+- Updates once per simulated epoch (1 s) via WebSocket
 
 **Accuracy Plot:**
 
@@ -678,8 +678,8 @@ tail -f logs/system.log
 
 **Solutions:**
 
-1. Verify `CASCOR_DEMO_MODE=1` is set
-2. Check `conf/app_config.yaml` has `demo.enabled: true`
+1. Verify `JUNIPER_CANOPY_DEMO_MODE=1` is set (the legacy `CASCOR_DEMO_MODE` alias still works, with a deprecation warning)
+2. Check `GET /v1/health` reports `demo_mode: true` (the YAML file is no longer read for this)
 3. Ensure conda environment activated
 4. Check no port conflicts
 
