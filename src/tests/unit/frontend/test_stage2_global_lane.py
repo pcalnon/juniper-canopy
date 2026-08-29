@@ -170,7 +170,10 @@ class TestLever1StoreHiccupNeverBlanks:
     def test_non_200_leaves_the_store_alone(self, mock_get, dm):
         mock_get.return_value = _resp(status=503)
         result = dm._update_unified_status_bar_handler(n_intervals=1, prev_training_status={"is_running": True, "phase": "output"})
-        assert len(result) == 10
+        # 11 Outputs, not 10: Stage-2 appended live-dataset-switch-button.disabled
+        # at index 10 (after training-status-store.data at STORE=9), so the store
+        # index this class asserts against is unchanged.
+        assert len(result) == 11
         assert result[self.STORE] is dash.no_update
 
     @patch("requests.get")
