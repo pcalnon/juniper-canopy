@@ -1,0 +1,40 @@
+{
+  "_README": [
+    "Character ceilings for always-loaded memory files. Ported from juniper-ml as P5 of",
+    "the shared-session-memory plan (juniper-ml notes/JUNIPER_2026-08-18_JUNIPER-ML_SHARED-SESSION-MEMORY-PLAN.md).",
+    "",
+    "Enforced by util/memory_budget_check.py via the standalone 'Memory Budget' job in",
+    "ci.yml. CHARACTERS, not bytes -- the shipped Claude Code check compares",
+    "content.length.",
+    "",
+    "WHY THE RATE AXIS SHIPS FIRST. juniper-ml's AGENTS.md grew ~20x in six months WHILE",
+    "UNDER FOUR ACTIVE CI GATES: every one enforced structure or currency, none enforced",
+    "size. A cut without a ceiling is undone in ~44 days, and a ceiling set AFTER a cut",
+    "locks in the inflated level. So the ceiling lands first, and the cut comes later.",
+    "",
+    "The ceiling starts at the size on the day the gate landed, so it is satisfiable",
+    "immediately and governs only GROWTH. Ratchet it down after each cut with:",
+    "  python3 util/memory_budget_check.py --ratchet",
+    "",
+    "BUT --ratchet TIGHTENS TO THE EXACT CURRENT SIZE, leaving ZERO headroom, so the very",
+    "next author to add one character fails. It SEEDS; it does not tighten gracefully.",
+    "After a real cut, prefer a hand-edit to a value with DELIBERATE SLACK sized to this",
+    "repo's own measured burn -- see the measurement recorded below, and re-measure rather",
+    "than transcribing it.",
+    "",
+    "RAISING a ceiling FAILS the gate. If a raise is genuinely intended, declare it with an",
+    "  Allow-Ceiling-Raise: <path>  commit trailer -- deliberately NOT the same trailer as",
+    "Allow-Budget-Overrun, because an overrun borrows against a ceiling that still stands",
+    "while a raise moves it and erases the debt for everyone.",
+    "",
+    "docs/REFERENCE.md is deliberately NOT governed. It is the migration DESTINATION;",
+    "capping it would penalise exactly the relocation this plan wants, and it is read on",
+    "demand rather than always loaded -- which is the entire point."
+  ],
+  "files": {
+    "AGENTS.md": {
+      "ceiling_chars": 97133,
+      "_note": "Seeded 2026-08-25 at 95,133 chars, the size of AGENTS.md IN THIS REPO on the day the port landed (zero slack; the job shipped ADVISORY for the soak). RAISED 2026-08-26 to 97,133 (+2,000) under an Allow-Ceiling-Raise: AGENTS.md trailer when --advisory was removed (plan P5 step d): the slack is the largest single AGENTS.md-growing commit re-measured here over the 30 days to 2026-08-26 (max 1,982, median 1,982, ~81 chars/day), floored at 2,000 for the fleet-wide fan-out class that added 1,982 chars to six repos' AGENTS.md at once on 2026-08-21. Growth past the ceiling now FAILS the check; Allow-Budget-Overrun: AGENTS.md is the loan. After a cut, lower it by hand to a value with RE-MEASURED slack -- never bare --ratchet, which leaves zero headroom."
+    }
+  }
+}

@@ -72,6 +72,10 @@ class TestLever1Consolidation:
         assert "update_system_panels" in names
         for gone in ("update_training_status_store", "update_network_info", "update_network_info_details", "update_stream_health", "reconcile_pending_dataset_banner"):
             assert gone not in names, f"{gone} should have merged into a consolidated callback (design §13 rows 1-2)"
+        # F-CANOPY-025: the standalone gate merged into the status-bar feeder —
+        # as a separate callback it could never win promotion against the
+        # feeder's in-flight claim on training-status-store during a run.
+        assert "gate_live_switch_button" not in names, "gate_live_switch_button must stay merged into update_unified_status_bar (F-CANOPY-025)"
 
     def test_global_lane_shape_is_pinned(self, dm):
         """Exactly 3 fast-lane and 2 slow-lane server-side global riders remain."""

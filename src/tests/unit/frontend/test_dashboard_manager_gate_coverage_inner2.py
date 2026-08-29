@@ -200,18 +200,33 @@ class TestExperimentalFunctionsInner:
         mock_get.return_value = _resp(status=200, json_value={"data": {"enabled": True}})
         cb = raw_cb(dm, "load_reconcile_experimental_functions")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            value, store, alert = cb(1)
+            value, store, alert = cb(1, None)
         assert value is True
         assert store == {"experimental_functions": True}
         assert alert is None
+
+    @patch("requests.get")
+    def test_load_reconcile_unchanged_value_suppresses_toggle_write(self, mock_get, dm):
+        # F-CANOPY-025 (echo clobber): when the authoritative value already
+        # matches the toggle, DON'T rewrite it — an unchanged write fires the
+        # toggle handler, which used to POST the mount-time value back to
+        # cascor on every page load, clobbering operator changes.
+        mock_get.return_value = _resp(status=200, json_value={"data": {"enabled": True}})
+        cb = raw_cb(dm, "load_reconcile_experimental_functions")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            value, store, alert = cb(1, True)
+        assert value is dash.no_update
+        assert store == {"experimental_functions": True}
 
     @patch("requests.get")
     def test_load_reconcile_non_200_warns(self, mock_get, dm):
         mock_get.return_value = _resp(status=503, text="down")
         cb = raw_cb(dm, "load_reconcile_experimental_functions")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            value, store, alert = cb(1)
-        assert value is False
+            value, store, alert = cb(1, None)
+        # F-CANOPY-025: the toggle already ships False, so the safe-default
+        # arm suppresses the (unchanged) write instead of echoing it.
+        assert value is dash.no_update
         assert store == {"experimental_functions": False}
         assert alert is not None
 
@@ -219,8 +234,8 @@ class TestExperimentalFunctionsInner:
     def test_load_reconcile_exception(self, _mock_get, dm):
         cb = raw_cb(dm, "load_reconcile_experimental_functions")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            value, store, alert = cb(1)
-        assert value is False
+            value, store, alert = cb(1, None)
+        assert value is dash.no_update  # F-CANOPY-025: unchanged-write suppression
         assert alert is not None
 
     @patch("requests.post")
@@ -252,12 +267,24 @@ class TestExperimentalFunctionsInner:
         assert value is False  # reverted to last-known-good
         assert alert is not None
 
-    @patch("requests.post", side_effect=requests.ConnectionError("down"))
-    def test_toggle_exception_reverts(self, _mock_post, dm):
+    def test_toggle_echo_is_not_posted(self, dm):
+        # F-CANOPY-025 (echo guard): value == store means a programmatic
+        # write (reconcile / revert), not a user flip — no POST, no rewrite.
         cb = raw_cb(dm, "handle_experimental_functions_toggle")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
             value, store, alert = cb(True, {"experimental_functions": True})
-        assert value is True  # reverted to last-known-good
+        assert value is dash.no_update
+        assert store is dash.no_update
+        assert alert is dash.no_update
+
+    @patch("requests.post", side_effect=requests.ConnectionError("down"))
+    def test_toggle_exception_reverts(self, _mock_post, dm):
+        # A REAL user flip (value != store) whose POST dies reverts to the
+        # store's last-known-good value.
+        cb = raw_cb(dm, "handle_experimental_functions_toggle")
+        with dm.app.server.test_request_context(base_url="http://localhost:8050"):
+            value, store, alert = cb(True, {"experimental_functions": False})
+        assert value is False  # reverted to last-known-good
         assert alert is not None
 
 
@@ -272,15 +299,17 @@ class TestLiveDatasetSwitchInner:
         mock_get.return_value = _resp(status=200, json_value={"is_running": True, "phase": "output"})
         cb = raw_cb(dm, "update_unified_status_bar")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = cb(1, None)
+            result = cb(1, None, None, None)
         assert result[9] == {"is_running": True, "phase": "output"}
 
     def test_gate_live_switch_button(self, dm):
-        cb = raw_cb(dm, "gate_live_switch_button")
-        # both conditions met -> not disabled (False)
-        assert cb({"experimental_functions": True}, {"is_running": True}) is False
-        # missing running -> disabled (True)
-        assert cb({"experimental_functions": True}, {"is_running": False}) is True
+        # F-CANOPY-025: the standalone gate callback merged into
+        # update_unified_status_bar (it lost the promotion race against that
+        # feeder's in-flight claim on training-status-store during every run —
+        # the only time its allow arm is reachable). The truth table lives on
+        # in the directly invocable handler the merged path calls.
+        assert dm._gate_live_switch_button_handler(flags={"experimental_functions": True}, status={"is_running": True}) is False
+        assert dm._gate_live_switch_button_handler(flags={"experimental_functions": True}, status={"is_running": False}) is True
 
     def test_open_live_switch_modal(self, dm):
         cb = raw_cb(dm, "open_live_switch_modal")

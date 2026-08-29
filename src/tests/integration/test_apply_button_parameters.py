@@ -525,8 +525,8 @@ class TestApplyButtonDashboardIntegration:
             with manager.app.server.request_context(env):
                 result = manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-            # Result is a 28-tuple: (...27 values..., applied_dict)
-            applied = result[27]
+            # Result is a 29-tuple: (...27 values..., init_output_weights (D-2), applied_dict)
+            applied = result[28]
             assert "nn_max_hidden_units" in applied
             assert "nn_max_total_epochs" in applied
             assert "nn_growth_trigger" in applied
@@ -1300,9 +1300,9 @@ class TestPhase6EA1OutputEpochs:
             with manager.app.server.request_context(env):
                 result = manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-            # NUM_OUTPUTS=28: output_epochs at index 24, optimizer_type at 25, activation at 26, applied dict at 27.
+            # NUM_OUTPUTS=29: output_epochs at index 24, optimizer_type at 25, activation at 26, init_output_weights (D-2) at 27, applied dict at 28.
             assert result[24] == 42
-            applied = result[27]
+            applied = result[28]
             assert applied["nn_output_epochs"] == 42
 
     def test_cascor_adapter_maps_nn_output_epochs(self):
@@ -1548,9 +1548,9 @@ class TestPhase6EA2OptimizerType:
             with manager.app.server.request_context(env):
                 result = manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-            # NUM_OUTPUTS=28: optimizer_type at index 25, applied dict at 27.
+            # NUM_OUTPUTS=29: optimizer_type at index 25, applied dict at 28 (D-2 dropdown at 27).
             assert result[25] == "AdamW"
-            applied = result[27]
+            applied = result[28]
             assert applied["nn_optimizer_type"] == "AdamW"
 
     def test_cascor_adapter_maps_nn_optimizer_type(self):
@@ -1826,9 +1826,9 @@ class TestPhase6EA3ActivationFunction:
             with manager.app.server.request_context(env):
                 result = manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-            # NUM_OUTPUTS=28: activation at index 26, applied dict at 27.
+            # NUM_OUTPUTS=29: activation at index 26, applied dict at 28 (D-2 dropdown at 27).
             assert result[26] == "ReLU"
-            applied = result[27]
+            applied = result[28]
             assert applied["nn_activation_function_name"] == "ReLU"
 
     def test_cascor_adapter_maps_nn_activation_function(self):

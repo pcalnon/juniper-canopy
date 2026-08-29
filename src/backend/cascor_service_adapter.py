@@ -43,7 +43,7 @@ from typing import Any, Callable, Dict, Optional, Tuple, Union, cast
 
 from juniper_cascor_client import CascorControlStream, CascorTrainingStream, JuniperCascorClient, JuniperCascorClientError
 from juniper_cascor_client.constants import ENDPOINT_TRAINING_START
-from juniper_cascor_client.exceptions import JuniperCascorConnectionError
+from juniper_cascor_client.exceptions import JuniperCascorConnectionError, JuniperCascorNotFoundError
 
 from backend.circuit_breaker import CircuitBreaker
 from canopy_constants import BackendConstants
@@ -1702,6 +1702,47 @@ class CascorServiceAdapter:
         except JuniperCascorClientError as e:
             logger.error("get_dataset_swap_events failed: %s", e)
             return {"ok": False, "error": str(e), "events": []}
+
+    def list_snapshots(self) -> Dict[str, Any]:
+        """GET /v1/snapshots -- the inventory of the backend that CREATES the snapshots.
+
+        F-CANOPY-007: canopy proxied snapshot *creation* to cascor but *listed*
+        snapshots off its own local directory, so on any deployment where the two
+        processes do not share a filesystem (two host processes with different
+        CWDs; a split-host deployment) the list was silently empty while the
+        create reported success. The list must come from where the files went.
+
+        Returns ``{"ok": True, "snapshots": [...]}`` (cascor entries carry
+        ``id`` / ``path`` / ``size_bytes`` / ``modified``) or
+        ``{"ok": False, "error": <str>, "snapshots": []}`` on any client failure
+        so the caller can fall back to the local directory listing.
+        """
+        try:
+            result = self._client._request("GET", "/snapshots")
+            data = (result or {}).get("data", []) or []
+            return {"ok": True, "snapshots": [dict(s) for s in data if isinstance(s, dict)]}
+        except JuniperCascorClientError as e:
+            logger.error("list_snapshots failed: %s", e)
+            return {"ok": False, "error": str(e), "snapshots": []}
+
+    def get_snapshot(self, snapshot_id: str) -> Dict[str, Any]:
+        """GET /v1/snapshots/{id} -- one snapshot's metadata from the backend that
+        holds it (F-CANOPY-007 companion to :meth:`list_snapshots`).
+
+        Returns ``{"ok": True, "snapshot": {...}}`` when cascor has it,
+        ``{"ok": True, "snapshot": None}`` when cascor answered 404, and
+        ``{"ok": False, "error": <str>, "snapshot": None}`` on any other client
+        failure (the caller falls back to its local lookup).
+        """
+        try:
+            result = self._client._request("GET", f"/snapshots/{snapshot_id}")
+            data = (result or {}).get("data")
+            return {"ok": True, "snapshot": dict(data) if isinstance(data, dict) else None}
+        except JuniperCascorNotFoundError:
+            return {"ok": True, "snapshot": None}
+        except JuniperCascorClientError as e:
+            logger.error("get_snapshot(%s) failed: %s", snapshot_id, e)
+            return {"ok": False, "error": str(e), "snapshot": None}
 
     def get_snapshot_dataset_swaps(self, snapshot_id: str) -> Dict[str, Any]:
         """GET /v1/snapshots/{id}/history/dataset_swaps — read a stored

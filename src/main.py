@@ -37,7 +37,6 @@
 #
 #####################################################################################################################################################################################################
 import asyncio
-import importlib.metadata
 import ipaddress
 import json
 import os
@@ -67,7 +66,7 @@ from pydantic import BaseModel, Field, SecretStr
 # from backend.data_adapter import DataAdapter  trunk-ignore(ruff/E402)
 # from backend.training_monitor import TrainingMonitor  trunk-ignore(ruff/E402)
 from backend.training_monitor import TrainingState  # trunk-ignore(ruff/E402)
-from canopy_constants import BackendConstants, TrainingConstants  # trunk-ignore(ruff/E402)
+from canopy_constants import APP_VERSION, BackendConstants, TrainingConstants  # trunk-ignore(ruff/E402)
 from communication.websocket_manager import create_command_response_message, websocket_manager
 from frontend.dashboard_manager import DashboardManager
 from health import DependencyStatus, ErrorResponse, ReadinessResponse, probe_dependency
@@ -106,11 +105,10 @@ from security import settings_with_uvicorn_cli_bind
 
 settings = settings_with_uvicorn_cli_bind(settings)
 
-# Application version from package metadata
-try:
-    APP_VERSION = importlib.metadata.version("juniper-canopy")
-except importlib.metadata.PackageNotFoundError:
-    APP_VERSION = "0.5.0"
+# Application version: resolved ONCE in canopy_constants (installed package
+# metadata, pyproject fallback) and shared with the About panel -- E2E arc
+# OBS-1 found the two surfaces reporting different versions. ``APP_VERSION``
+# is imported with the other canopy_constants names above.
 
 # Initialize loggers
 system_logger = get_system_logger()
@@ -835,10 +833,23 @@ async def websocket_control_endpoint(websocket: WebSocket):
         return
 
     # Phase B-pre-b: CSRF first-frame authentication (M-SEC-02)
+    #
+    # F-CANOPY-008: connect() has already SUCCEEDED at this point, so the socket
+    # holds a per-IP + per-session slot, an active_connections entry and a count
+    # on the {channel="control"} gauge. A reject arm that only close()s and
+    # returns leaks all three: five stale-token rejections (a canopy restart
+    # with a dashboard tab open is enough -- the client's auto-reconnect burns
+    # them in ~10 s) locked the control plane for every client behind that IP
+    # until canopy restarted. Every rejection therefore funnels through ONE
+    # teardown that calls websocket_manager.disconnect(), the full rollback
+    # (slots + registration + gauge). Any gate added after this block must do
+    # the same -- release_connection_limits() alone is NOT enough once
+    # connect() has registered the socket.
     if settings.csrf_enabled:
         from audit_log import log_ws_csrf_rejected
 
         client_ip = websocket.client[0] if websocket.client else "unknown"
+        csrf_reject_reason: str | None = None
         try:
             raw_auth = await asyncio.wait_for(
                 websocket.receive_text(),
@@ -846,21 +857,19 @@ async def websocket_control_endpoint(websocket: WebSocket):
             )
             auth_msg = json.loads(raw_auth)
             if auth_msg.get("type") != "auth" or not auth_msg.get("csrf_token"):
-                log_ws_csrf_rejected("/ws/control", client_ip, "missing_or_invalid_frame")
-                await websocket.close(code=1008, reason="Policy violation")
-                return
-            csrf_store = get_csrf_store()
-            if not csrf_store.validate(auth_msg["csrf_token"]):
-                log_ws_csrf_rejected("/ws/control", client_ip, "invalid_token")
-                await websocket.close(code=1008, reason="Policy violation")
-                return
+                csrf_reject_reason = "missing_or_invalid_frame"
+            elif not get_csrf_store().validate(auth_msg["csrf_token"]):
+                csrf_reject_reason = "invalid_token"
         except asyncio.TimeoutError:
-            log_ws_csrf_rejected("/ws/control", client_ip, "auth_timeout")
-            await websocket.close(code=1008, reason="Policy violation")
-            return
+            csrf_reject_reason = "auth_timeout"
         except (json.JSONDecodeError, Exception):
-            log_ws_csrf_rejected("/ws/control", client_ip, "malformed_auth")
-            await websocket.close(code=1008, reason="Policy violation")
+            csrf_reject_reason = "malformed_auth"
+        if csrf_reject_reason is not None:
+            log_ws_csrf_rejected("/ws/control", client_ip, csrf_reject_reason)
+            try:
+                await websocket.close(code=1008, reason="Policy violation")
+            finally:
+                websocket_manager.disconnect(websocket)
             return
 
     _valid_commands = {"start", "stop", "pause", "resume", "reset", "set_params"}
@@ -1124,6 +1133,38 @@ async def readiness_probe() -> ReadinessResponse:
             "training_active": backend.is_training_active(),
         },
     )
+
+
+def _active_training_state():
+    """The ``TrainingState`` that is authoritative for this backend mode.
+
+    Demo mode keeps its own instance on ``DemoMode``; service mode uses the module
+    global. Both are real ``TrainingState`` objects, so both accumulate pool history.
+    Mirrors the selection ``/api/state`` makes, factored out so the two cannot drift.
+    """
+    if backend.backend_type == "demo" and hasattr(backend, "_demo"):
+        demo = backend._demo
+        if demo.training_state:
+            return demo.training_state
+    return training_state
+
+
+@app.get("/api/v1/candidates/pool-history")
+async def get_candidate_pool_history():
+    """Candidate-pool history, newest first (F-CANOPY-036).
+
+    The dashboard used to accumulate this in the browser, appending from a callback
+    whose Input was a ~1 Hz store — so any pool state shorter-lived than the
+    callback's promotion delay was never recorded, and the panel showed no card
+    across five training runs. The accumulation now happens in ``TrainingState``
+    under the same lock as the state write itself, and this route serves it.
+
+    Returns:
+        ``{"history": [...], "count": N}`` — newest first, capped at
+        ``BackendConstants.MAX_POOL_HISTORY_ENTRIES``.
+    """
+    history = _active_training_state().get_pool_history()
+    return {"history": history, "count": len(history)}
 
 
 @app.get("/api/state")
@@ -1871,21 +1912,127 @@ def _list_snapshot_files():
     return snapshots
 
 
+def _panel_entry_from_backend_snapshot(entry: dict) -> Optional[dict]:
+    """Normalize one cascor snapshot record to the panel's list shape (F-CANOPY-007)."""
+    snapshot_id = entry.get("id")
+    if not snapshot_id:
+        return None
+    path = str(entry.get("path") or "")
+    name = Path(path).name if path else f"{snapshot_id}.h5"
+    return {
+        "id": str(snapshot_id),
+        "name": name,
+        "timestamp": str(entry.get("modified") or entry.get("timestamp") or ""),
+        "size_bytes": int(entry.get("size_bytes") or 0),
+        "path": path,
+        "source": "cascor",
+    }
+
+
+def _backend_snapshot_inventory() -> Optional[list]:
+    """F-CANOPY-007: list snapshots from the backend that CREATES them.
+
+    Canopy proxies snapshot creation (and every restore / replay / resume /
+    retrain) to cascor, but this module listed and resolved snapshots off its
+    own local directory (``_snapshots_dir``). That only agrees with cascor when
+    the two processes share a filesystem -- the shipped compose topology
+    co-mounts one volume, which is why it was never seen -- and on any split
+    deployment (two host processes with different CWDs, a split-host deploy)
+    the list was SILENTLY empty while the create reported success. In service
+    mode the inventory therefore comes from cascor's ``GET /v1/snapshots``.
+
+    Returns the panel-shaped list, newest first, or ``None`` when the backend
+    cannot answer (not service mode, no adapter, transport failure) so the
+    caller falls back to the local directory listing.
+    """
+    if getattr(backend, "backend_type", None) != "service":
+        return None
+    adapter = getattr(backend, "_adapter", None)
+    lister = getattr(adapter, "list_snapshots", None)
+    if adapter is None or not callable(lister):
+        return None
+    try:
+        result = lister()
+    except Exception as e:  # noqa: BLE001 -- the adapter already logged; never break the route
+        system_logger.error("Backend snapshot inventory failed: %s", e)
+        return None
+    if not isinstance(result, dict) or not result.get("ok") or not isinstance(result.get("snapshots"), list):
+        return None
+    entries = []
+    for raw in result["snapshots"]:
+        entry = _panel_entry_from_backend_snapshot(raw) if isinstance(raw, dict) else None
+        if entry is not None:
+            entries.append(entry)
+    entries.sort(key=lambda item: item["timestamp"], reverse=True)
+    return entries
+
+
+def _backend_snapshot_detail(snapshot_id: str) -> Optional[dict]:
+    """F-CANOPY-007 companion for the detail route.
+
+    Returns ``{"found": bool, "snapshot": <panel-shaped dict or None>}`` from
+    cascor, or ``None`` when the backend cannot answer (not service mode, no
+    adapter, transport failure) so the caller falls back to its local lookup.
+    """
+    if getattr(backend, "backend_type", None) != "service":
+        return None
+    adapter = getattr(backend, "_adapter", None)
+    getter = getattr(adapter, "get_snapshot", None)
+    if adapter is None or not callable(getter):
+        return None
+    try:
+        result = getter(snapshot_id)
+    except Exception as e:  # noqa: BLE001
+        system_logger.error("Backend snapshot detail failed for %s: %s", snapshot_id, e)
+        return None
+    if not isinstance(result, dict) or not result.get("ok"):
+        return None
+    snapshot = result.get("snapshot")
+    if not isinstance(snapshot, dict):
+        return {"found": False, "snapshot": None}
+    return {"found": True, "snapshot": _panel_entry_from_backend_snapshot(snapshot)}
+
+
 @app.get("/api/v1/snapshots")
-async def get_snapshots():
+async def get_snapshots(limit: Optional[int] = None, offset: int = 0):
     """
     List available HDF5 snapshots.
 
+    F-CANOPY-031: the shared corpus holds 27,903+ snapshots (10.4 MB / ~4.9 s
+    as one payload) and the S-2 retention ruling is no-deletion, so unbounded
+    listing only gets worse. ``limit``/``offset`` slice the (already
+    newest-first) list server-side; ``total`` always reports the pre-slice
+    count so callers can render an honest "newest N of TOTAL". Omitting
+    ``limit`` preserves the legacy full-list behaviour for existing callers.
+
+    Args:
+        limit: Maximum snapshots to return (newest first). ``None`` = all.
+        offset: Skip this many (after the newest-first sort) before returning.
+
     Returns:
         JSON object with:
-            - snapshots: list of snapshot metadata objects
+            - snapshots: list of snapshot metadata objects (sliced)
+            - total: pre-slice count for this backend mode
             - message: optional status message
     """
-    try:
-        snapshots = _list_snapshot_files()
-    except Exception as e:
-        system_logger.error("Failed to list snapshots: %s", e)
-        snapshots = []
+
+    def _slice(items):
+        start = max(offset, 0)
+        if limit is None or limit <= 0:
+            return items[start:] if start else items
+        return items[start : start + limit]
+
+    # F-CANOPY-007: in service mode the inventory comes from the backend that
+    # created the files; the local directory is only the fallback.
+    inventory = await asyncio.to_thread(_backend_snapshot_inventory)
+    if inventory is not None:
+        snapshots = inventory
+    else:
+        try:
+            snapshots = _list_snapshot_files()
+        except Exception as e:
+            system_logger.error("Failed to list snapshots: %s", e)
+            snapshots = []
 
     # Demo mode → return mock data. (A1-iii-a: gate on ``== "demo"`` rather than
     # ``!= "service"`` so a non-cascor, non-demo backend — e.g. recurrence — does NOT
@@ -1901,12 +2048,12 @@ async def get_snapshots():
             if mock["id"] not in existing_ids:
                 combined.append(mock)
 
-        return {"snapshots": combined, "message": "Demo mode: showing simulated snapshots"}
+        return {"snapshots": _slice(combined), "total": len(combined), "message": "Demo mode: showing simulated snapshots"}
 
     if not snapshots:
-        return {"snapshots": [], "message": "No snapshots available"}
+        return {"snapshots": [], "total": 0, "message": "No snapshots available"}
 
-    return {"snapshots": snapshots}
+    return {"snapshots": _slice(snapshots), "total": len(snapshots)}
 
 
 @app.get("/api/v1/snapshots/history")
@@ -1994,26 +2141,40 @@ async def get_snapshot_detail(snapshot_id: str):
 
         raise HTTPException(status_code=404, detail="Snapshot not found")
 
-    # Real mode: find file in snapshots directory. The directory walk and
-    # ``stat`` syscall are bundled into ``_find_snapshot_file`` and run on a
-    # worker thread so the FastAPI event loop stays responsive on slow disks.
-    snapshot_file, stat, directory_missing = await asyncio.to_thread(_find_snapshot_file, _snapshots_dir, snapshot_id)
+    # F-CANOPY-007: in service mode cascor is the authority on which snapshots
+    # exist (it created them); a local copy, when also visible here (shared
+    # volume), only enriches the record with its HDF5 attributes.
+    remote = await asyncio.to_thread(_backend_snapshot_detail, snapshot_id)
+    if remote is not None:
+        if not remote.get("found"):
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+        detail: dict = dict(remote.get("snapshot") or {})
+        detail.setdefault("attributes", None)
+        snapshot_file, _stat, _directory_missing = await asyncio.to_thread(_find_snapshot_file, _snapshots_dir, snapshot_id)
+        if snapshot_file is None:
+            return detail
+    else:
+        # Real mode without a backend inventory: find the file in the local
+        # snapshots directory. The directory walk and ``stat`` syscall are
+        # bundled into ``_find_snapshot_file`` and run on a worker thread so
+        # the FastAPI event loop stays responsive on slow disks.
+        snapshot_file, stat, directory_missing = await asyncio.to_thread(_find_snapshot_file, _snapshots_dir, snapshot_id)
 
-    if directory_missing:
-        raise HTTPException(status_code=404, detail="Snapshot directory not found")
-    if snapshot_file is None or stat is None:
-        raise HTTPException(status_code=404, detail="Snapshot not found")
+        if directory_missing:
+            raise HTTPException(status_code=404, detail="Snapshot directory not found")
+        if snapshot_file is None or stat is None:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
 
-    ts = datetime.fromtimestamp(stat.st_mtime, tz=UTC).replace(microsecond=0)
+        ts = datetime.fromtimestamp(stat.st_mtime, tz=UTC).replace(microsecond=0)
 
-    detail = {
-        "id": snapshot_file.stem,
-        "name": snapshot_file.name,
-        "timestamp": f"{ts.isoformat()}Z",
-        "size_bytes": stat.st_size,
-        "path": str(snapshot_file.absolute()),
-        "attributes": None,
-    }
+        detail = {
+            "id": snapshot_file.stem,
+            "name": snapshot_file.name,
+            "timestamp": f"{ts.isoformat()}Z",
+            "size_bytes": stat.st_size,
+            "path": str(snapshot_file.absolute()),
+            "attributes": None,
+        }
 
     # Optional: if h5py is available, read HDF5 root attributes
     try:

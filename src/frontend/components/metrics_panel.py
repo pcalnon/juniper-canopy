@@ -535,7 +535,11 @@ class MetricsPanel(BaseComponent):
                 # un-gated per N1 (the bridge posture until WS-primary lands,
                 # Q6/C6/N8); the WS extendTraces path remains the chart fast path.
                 dcc.Store(id=f"{self.component_id}-metrics-store", data=[]),
-                dcc.Store(id=f"{self.component_id}-network-stats-store", data={}),
+                # F-CANOPY-034: ``-network-stats-store`` was removed here. Its writer
+                # (the dead ``fetch_network_stats`` poller) went in F-CANOPY-027 /
+                # canopy#507; the store itself was retained then only to keep that PR's
+                # diff free of a layout-snapshot rewrite. It had no Input and no State
+                # consumer anywhere in src/, so nothing reads it.
                 dcc.Store(id=f"{self.component_id}-training-state-store", data={}),
                 # View state store for preserving graph zoom/pan
                 dcc.Store(
@@ -1179,27 +1183,11 @@ class MetricsPanel(BaseComponent):
 
         self.logger.debug(f"Callbacks registered for {self.component_id}")
 
-    def _fetch_network_stats_handler(self, n_intervals=None):
-        # sourcery skip: class-extract-method
-        """
-        Fetch network statistics from API periodically.
-
-        Args:
-            n_intervals: Number of intervals elapsed
-
-        Returns:
-            Network statistics dictionary
-        """
-        import requests
-
-        try:
-            response = requests.get(f"{self._api_base_url}/api/network/stats", timeout=2, headers=internal_api_headers())
-            if response.status_code == 200:
-                return response.json()
-        except Exception as e:
-            self.logger.debug(f"Failed to fetch network stats: {e}")
-
-        return {}
+    # F-CANOPY-034: ``_fetch_network_stats_handler`` was removed here along with its
+    # store. Its callback went with the dead poller in F-CANOPY-027 / canopy#507, after
+    # which nothing in src/ called it — it was reachable only from its own five unit
+    # tests, which is precisely the shape that makes dead code look live. Those tests
+    # went with it. `GET /api/network/stats` itself is untouched and still served.
 
     @staticmethod
     def _extract_ws_training_state(ws_state_buffer):
@@ -1375,7 +1363,21 @@ class MetricsPanel(BaseComponent):
         try:
             started = datetime.fromisoformat(phase_started)
             if started.tzinfo is None:
-                started = started.replace(tzinfo=timezone.utc)
+                # F-CANOPY-026: a naive stamp is LOCAL, not UTC. cascor used to emit
+                # ``datetime.now().isoformat()`` here (fixed upstream to tz-aware UTC),
+                # and stamping that as UTC shifted it by the whole host offset: a phase
+                # 2m29s old rendered as "Phase Duration: 302m 29s" on a CDT box —
+                # 18000 s out, exactly -0500. East of UTC the same error runs the other
+                # way, pushing ``started`` into the future so the ``< 0`` guard below
+                # blanks the readout entirely.
+                #
+                # ``astimezone()`` on a naive value interprets it as local and returns
+                # an aware one, which is right whenever canopy and cascor share a clock
+                # (the co-located case, where this was observed). Split hosts in
+                # different zones cannot be repaired from this side at all — that is why
+                # the real fix is upstream, and why this branch is only a compat path
+                # for a dashboard pointed at an un-upgraded cascor.
+                started = started.astimezone()
             elapsed = datetime.now(timezone.utc) - started
             total_seconds = int(elapsed.total_seconds())
             if total_seconds < 0:

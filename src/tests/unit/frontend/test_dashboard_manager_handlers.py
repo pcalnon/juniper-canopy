@@ -40,32 +40,34 @@ def dashboard_manager():
 class TestThemeToggleHandlers:
     """Test theme toggle callback handlers."""
 
+    # F-CANOPY-001: the toggle returns the FLAG only; the glyph is derived from the
+    # store by ``update_theme_state`` so it is also correct on mount after a reload.
     def test_toggle_dark_mode_handler_light_to_dark(self, dashboard_manager):
-        """Test dark mode toggle returns (True, sun icon) when current is light."""
+        """Toggle from light returns dark; the glyph derives to the sun."""
         result = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=False)
-        assert result[0] is True
-        assert result[1] == "☀️"
+        assert result is True
+        assert dashboard_manager._dark_mode_icon(result) == "☀️"
 
     def test_toggle_dark_mode_handler_dark_to_light(self, dashboard_manager):
-        """Test dark mode toggle returns (False, moon icon) when current is dark."""
+        """Toggle from dark returns light; the glyph derives to the moon."""
         result = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=True)
-        assert result[0] is False
-        assert result[1] == "🌙"
+        assert result is False
+        assert dashboard_manager._dark_mode_icon(result) == "🌙"
 
     def test_toggle_dark_mode_handler_none_to_dark(self, dashboard_manager):
-        """Test dark mode toggle returns (True, sun icon) when current is None."""
+        """An unset store toggles to dark."""
         result = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=None)
-        assert result[0] is True
-        assert result[1] == "☀️"
+        assert result is True
+        assert dashboard_manager._dark_mode_icon(result) == "☀️"
 
     def test_toggle_dark_mode_handler_roundtrip(self, dashboard_manager):
         """Test dark mode toggle roundtrip: False -> True -> False."""
         result1 = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=False)
-        assert result1[0] is True
-        assert result1[1] == "☀️"
-        result2 = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=result1[0])
-        assert result2[0] is False
-        assert result2[1] == "🌙"
+        assert result1 is True
+        assert dashboard_manager._dark_mode_icon(result1) == "☀️"
+        result2 = dashboard_manager._toggle_dark_mode_handler(current_dark_mode=result1)
+        assert result2 is False
+        assert dashboard_manager._dark_mode_icon(result2) == "🌙"
 
     def test_update_theme_state_handler_dark(self, dashboard_manager):
         """Test theme state update for dark mode returns 'dark'."""
@@ -187,7 +189,7 @@ class TestStatusBarHandlers:
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_unified_status_bar_handler(n_intervals=1)
 
-        assert len(result) == 10  # Stage 2: +training-status-store element (design §13 row 1)
+        assert len(result) == 11  # Stage 2 + F-CANOPY-025: +training-status-store and +live-switch-gate elements
         assert result[3] == "Running"
         assert result[5] == "Output Training"
 
@@ -244,7 +246,7 @@ class TestStatusBarHandlers:
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._update_unified_status_bar_handler(n_intervals=1)
 
-        assert len(result) == 10  # Stage 2: +training-status-store element (design §13 row 1)
+        assert len(result) == 11  # Stage 2 + F-CANOPY-025: +training-status-store and +live-switch-gate elements
         assert result[3] == "Backend Error"
 
     @patch("requests.get")
@@ -1324,10 +1326,10 @@ class TestParameterHandlers:
         assert result[1] == 200  # nn_max_total_epochs
         assert result[5] == "convergence"  # nn_growth_trigger
         assert result[7] == 0.001  # nn_growth_convergence_threshold
-        # NUM_OUTPUTS=28 since canopy#204/205/206; applied dict is the
-        # last element at index 27.
-        assert result[27]["nn_learning_rate"] == 0.01
-        assert result[27]["nn_growth_trigger"] == "convergence"
+        # NUM_OUTPUTS=29 since canopy#204/205/206 + the D-2 dropdown; applied dict is the
+        # last element at index 28.
+        assert result[28]["nn_learning_rate"] == 0.01
+        assert result[28]["nn_growth_trigger"] == "convergence"
 
     def test_init_params_from_backend_handler_already_set(self, dashboard_manager):
         """Test init params from backend when already set."""
@@ -1335,9 +1337,9 @@ class TestParameterHandlers:
 
         result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=current_applied)
 
-        # 28-tuple after canopy#204/205/206 (output_epochs / optimizer_type
+        # 29-tuple after canopy#204/205/206 (output_epochs / optimizer_type
         # / activation_function); mirrors NUM_OUTPUTS in the handler.
-        assert result == (dash.no_update,) * 28
+        assert result == (dash.no_update,) * 29
 
     @patch("requests.get")
     def test_init_params_from_backend_handler_failure(self, mock_get, dashboard_manager):
@@ -1347,7 +1349,7 @@ class TestParameterHandlers:
         with dashboard_manager.app.server.test_request_context(base_url="http://localhost:8050"):
             result = dashboard_manager._init_params_from_backend_handler(n=1, current_applied=None)
 
-        assert result == (dash.no_update,) * 28
+        assert result == (dash.no_update,) * 29
 
 
 # =============================================================================
@@ -1379,8 +1381,8 @@ class TestInitParamsFromBackendHandlers:
         assert result[1] == 300  # nn_max_epochs
         assert result[4] == []  # nn_multi_node_layers=False -> empty checklist
         assert result[7] == 0.01  # nn_growth_conv_thresh
-        # NUM_OUTPUTS=28 since canopy#204/205/206; applied dict at index 27.
-        assert result[27]["nn_multi_node_layers"] is False
+        # NUM_OUTPUTS=29 (D-2 dropdown at 27); applied dict at index 28.
+        assert result[28]["nn_multi_node_layers"] is False
 
     @patch("requests.get")
     def test_init_params_from_backend_with_partial_state(self, mock_get, dashboard_manager):

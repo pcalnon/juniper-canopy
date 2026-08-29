@@ -52,6 +52,13 @@ from ..base_component import BaseComponent
 # Default refresh interval in milliseconds
 DEFAULT_REFRESH_INTERVAL_MS = 10000  # 10 seconds
 
+# F-CANOPY-031: the shared corpus holds 27,903+ snapshots under a no-deletion
+# retention ruling. The table renders the newest page only — an unbounded fetch
+# was a 10.4 MB payload the panel died rendering (one html.Tr with two buttons
+# and a four-item dropdown per snapshot), and the status line reports
+# "newest N of TOTAL" so truncation is never silent.
+SNAPSHOT_TABLE_PAGE_SIZE = 200
+
 
 class HDF5SnapshotsPanel(BaseComponent):
     """
@@ -437,40 +444,50 @@ class HDF5SnapshotsPanel(BaseComponent):
             n_intervals: Interval count (unused, for callback compatibility)
 
         Returns:
-            Dict with 'snapshots' list and optional 'message'
+            Dict with 'snapshots' list (the newest page), 'total' (pre-slice
+            corpus size) and optional 'message'
         """
         try:
             return dict(self._parse_snapshots_response())
         except requests.exceptions.Timeout:
             self.logger.warning("Snapshots API request timed out")
-            return {"snapshots": [], "message": "Request timed out"}
+            return {"snapshots": [], "total": 0, "message": "Request timed out"}
         except requests.exceptions.ConnectionError:
             self.logger.warning("Cannot connect to snapshots API")
-            return {"snapshots": [], "message": "Service unavailable"}
+            return {"snapshots": [], "total": 0, "message": "Service unavailable"}
         except Exception as e:
             self.logger.warning(f"Failed to fetch snapshots: {e}")
-            return {"snapshots": [], "message": "Snapshot service unavailable"}
+            return {"snapshots": [], "total": 0, "message": "Snapshot service unavailable"}
 
     def _parse_snapshots_response(self):
         """
         Parse snapshots list from backend API.
 
+        F-CANOPY-031: fetch only the newest ``SNAPSHOT_TABLE_PAGE_SIZE``
+        entries (server-side slice) and carry ``total`` through so the table's
+        status line can report the truncation. The timeout gets the same
+        ``+ 3`` headroom the snapshot-create path already uses — the corpus
+        directory scan alone is seconds-scale at 27,903 files, and the old
+        bare ``api_timeout`` (2 s) lost the race to the unbounded listing.
+
         Returns:
-            Dict with 'snapshots' list and optional 'message'
+            Dict with 'snapshots' list, 'total' and optional 'message'
         """
         self.logger.info("Fetching snapshots from API")
         resp = requests.get(
             f"{self._api_base_url}/api/v1/snapshots",
-            timeout=self.api_timeout,
+            params={"limit": SNAPSHOT_TABLE_PAGE_SIZE},
+            timeout=self.api_timeout + 3,
             headers=internal_api_headers(),
         )
         if resp.status_code != 200:
             self.logger.warning(f"Snapshots API returned status {resp.status_code}")
-            return {"snapshots": [], "message": f"API error {resp.status_code}"}
+            return {"snapshots": [], "total": 0, "message": f"API error {resp.status_code}"}
         data = resp.json()
         snapshots = data.get("snapshots", [])
         message = data.get("message")
-        return {"snapshots": snapshots, "message": message}
+        total = data.get("total", len(snapshots))
+        return {"snapshots": snapshots, "total": total, "message": message}
 
     def _fetch_snapshot_detail_handler(self, snapshot_id: str) -> Dict[str, Any]:
         """
@@ -870,6 +887,7 @@ class HDF5SnapshotsPanel(BaseComponent):
             result = self._fetch_snapshots_handler(n_intervals)
             snapshots = result.get("snapshots", [])
             message = result.get("message")
+            total = result.get("total", len(snapshots))
 
             # P2-7: build the snapshot-id → role map from the dataset_swap
             # events. A snapshot may be tagged "Pre-swap" (matched a
@@ -920,6 +938,11 @@ class HDF5SnapshotsPanel(BaseComponent):
                                         dbc.Button(
                                             "View Details",
                                             id={"type": f"{self.component_id}-view-btn", "index": snapshot_id},
+                                            # F-CANOPY-009: match the four op items below -- without an
+                                            # explicit n_clicks=0 the rebuilt button reports None and
+                                            # every 10 s rebuild re-fires select_snapshot with a
+                                            # falsy list.
+                                            n_clicks=0,
                                             size="sm",
                                             color="info",
                                             outline=True,
@@ -969,7 +992,12 @@ class HDF5SnapshotsPanel(BaseComponent):
 
             # Status text
             if snapshots:
-                status_text = f"{len(snapshots)} snapshot(s) found"
+                # F-CANOPY-031: never let truncation be silent — against the
+                # no-deletion corpus the table shows the newest page only.
+                if total > len(snapshots):
+                    status_text = f"Showing newest {len(snapshots)} of {total} snapshot(s)"
+                else:
+                    status_text = f"{len(snapshots)} snapshot(s) found"
                 if message:
                     status_text += f" • {message}"
                 empty_style = {"display": "none"}
@@ -993,23 +1021,29 @@ class HDF5SnapshotsPanel(BaseComponent):
             prevent_initial_call=True,
         )
         def select_snapshot(n_clicks_list, ids):
+            # F-CANOPY-009: the 10 s table rebuild re-fires this callback with a
+            # falsy n_clicks list (before the View Details button carried
+            # n_clicks=0 it arrived as [None]). Every early-out below means
+            # "nothing meaningful triggered me" and must leave the selection
+            # ALONE: returning None here wiped the selected-id store -- and the
+            # detail panel with it -- within one tick of every click.
             """Handle snapshot selection from table."""
             if not n_clicks_list or not any(n_clicks_list):
-                return None
+                return dash.no_update
 
             ctx = callback_context
             if not ctx.triggered:
-                return None
+                return dash.no_update
 
             # Find which button was clicked
             triggered = ctx.triggered[0]
             if not triggered.get("value"):
-                return None
+                return dash.no_update
 
             # Extract the snapshot ID from the triggered button
             prop_id = triggered.get("prop_id", "")
             if not prop_id:
-                return None
+                return dash.no_update
 
             # Parse the pattern-matching ID
             # Format: '{"index":"snapshot_id","type":"component-id-view-btn"}.n_clicks'
@@ -1162,17 +1196,23 @@ class HDF5SnapshotsPanel(BaseComponent):
             grows to include the operation so the confirm callback
             knows which endpoint to call.
             """
+            # F-CANOPY-010: the same 10 s rebuild reconstructs the dropdown items
+            # and re-fires this callback with n_clicks == 0. Returning
+            # (False, "", None) from an early-out slammed the OPEN confirmation
+            # modal shut, blanked its body and discarded the pending operation
+            # ~3.6 s after the operator opened it. An early-out must not touch
+            # the modal at all.
             ctx = callback_context
             if not ctx.triggered:
-                return False, "", None
+                return dash.no_update, dash.no_update, dash.no_update
 
             triggered = ctx.triggered[0]
             if not triggered.get("value"):
-                return False, "", None
+                return dash.no_update, dash.no_update, dash.no_update
 
             prop_id = triggered.get("prop_id", "")
             if not prop_id:
-                return False, "", None
+                return dash.no_update, dash.no_update, dash.no_update
 
             import json
 
@@ -1195,7 +1235,7 @@ class HDF5SnapshotsPanel(BaseComponent):
                     operation = id_dict.get("op")
 
             if not snapshot_id or operation not in ("restore", "replay", "resume", "retrain"):
-                return False, "", None
+                return dash.no_update, dash.no_update, dash.no_update
 
             modal_body = self._build_op_confirm_body(snapshot_id, operation)
             return True, modal_body, {"id": snapshot_id, "operation": operation}

@@ -130,18 +130,18 @@ class TestRemoveModalGuards:
 
 class TestPatchWeightsGuards:
     def test_no_click_no_update(self, callbacks):
-        assert callbacks["on_patch_weights"](0, "output_weights", None, "1.0") is dash.no_update
+        assert callbacks["on_patch_weights"](0, "output_weights", None, "1.0", None) is dash.no_update
 
     def test_unparseable_values_rejected(self, callbacks):
-        result = callbacks["on_patch_weights"](1, "output_weights", None, "1.0, abc")
+        result = callbacks["on_patch_weights"](1, "output_weights", None, "1.0, abc", None)
         assert "Could not parse values" in str(result)
 
     def test_non_integer_hidden_idx_rejected(self, callbacks):
-        result = callbacks["on_patch_weights"](1, "hidden_unit_weights", "abc", "1.0, 2.0")
+        result = callbacks["on_patch_weights"](1, "hidden_unit_weights", "abc", "1.0, 2.0", None)
         assert "hidden_unit_index must be an integer" in str(result)
 
     def test_backend_failure_surfaced(self, panel, callbacks):
         with patch.object(panel, "_post_json", return_value={"success": False, "error": "shape mismatch"}):
-            result = callbacks["on_patch_weights"](1, "output_weights", None, "1.0, 2.0")
+            result = callbacks["on_patch_weights"](1, "output_weights", None, "1.0, 2.0", {"input_size": 1, "output_size": 2, "hidden_units": 0})
         assert "Patch failed" in str(result)
         assert "shape mismatch" in str(result)

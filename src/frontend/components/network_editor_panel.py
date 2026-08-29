@@ -400,15 +400,18 @@ class NetworkEditorPanel(BaseComponent):
     def _is_investigating(status: Dict[str, Any]) -> bool:
         """Return True iff the cascor FSM is in ``Investigating``.
 
-        ``/api/status`` returns the lifecycle's full status dict which
-        nests the FSM summary under ``state_machine``; we tolerate
-        both the unwrapped shape and a top-level ``status`` field for
-        older / partial responses.
+        Canopy's ``/api/status`` is a FLAT dict whose FSM field is
+        ``fsm_status``. F-CANOPY-011: this panel used to read only the
+        nested ``state_machine.status`` shape -- cascor's own
+        ``/v1/training/status`` schema, which canopy never returns -- so
+        it was inert regardless of the real FSM state. The nested and
+        top-level ``status`` shapes stay tolerated for cascor-shaped or
+        partial payloads.
         """
         if not isinstance(status, dict):
             return False
         sm = status.get("state_machine") or {}
-        name = (sm.get("status") or status.get("status") or "").upper()
+        name = (status.get("fsm_status") or sm.get("status") or status.get("status") or "").upper()
         return name == "INVESTIGATING"
 
     @staticmethod
@@ -429,6 +432,98 @@ class NetworkEditorPanel(BaseComponent):
                 continue
             out.append(float(tok))
         return out
+
+    @staticmethod
+    def _parse_float_rows(text: Optional[str]) -> List[List[float]]:
+        """Parse text into ROWS of floats (F-CANOPY-012).
+
+        Newlines and semicolons separate rows; commas and whitespace separate the
+        values within a row. ``_parse_float_list`` flattens all three separators
+        together, which is right for the 1-D targets and is left untouched for them —
+        this is the 2-D-aware sibling, used only where the wire wants a matrix.
+
+        Blank rows are dropped so a trailing newline is not a row. Raises
+        ``ValueError`` on an unparseable token, like its 1-D sibling.
+        """
+        if not text or not text.strip():
+            return []
+        rows: List[List[float]] = []
+        for line in text.replace(";", "\n").split("\n"):
+            values = [float(tok) for tok in line.replace(",", " ").split() if tok.strip()]
+            if values:
+                rows.append(values)
+        return rows
+
+    def _resolve_patch_values(self, target: str, values_text: Optional[str], topology: Optional[Dict[str, Any]]):
+        """Parse the patch textarea into the shape cascor's route requires (F-CANOPY-012).
+
+        ``output_weights`` is the ONLY 2-D target — cascor wants
+        ``(input_size + num_hidden, output_size)`` — and it is also the dropdown's
+        first and default option, so it was the first thing any operator tried. The
+        panel parsed a flat list and forwarded it verbatim, with no reshape anywhere,
+        so every input a user could type was rejected on the wire:
+        ``shape mismatch: output_weights expects (12, 2), got (24,)``. The sibling
+        targets (``output_bias``, ``hidden_unit_weights``, ``hidden_unit_bias``) are
+        1-D or scalar and round-trip fine; they keep the flat parse untouched.
+
+        Two accepted idioms, so neither habit is punished:
+
+        - **rows** — one row per line (or per ``;``), which needs no topology at all;
+        - **flat** — reshaped to ``(I+H, output_size)`` using the panel's topology
+          store, which is exactly the information D-0 / F-CANOPY-011 used to withhold
+          and now supplies.
+
+        Raises ``ValueError`` with an operator-readable message rather than letting a
+        mis-shaped body reach the wire — the failure was already loud and non-mutating,
+        but it named cascor's internals rather than what to type.
+        """
+        if target != "output_weights":
+            return self._parse_float_list(values_text)
+
+        try:
+            rows = self._parse_float_rows(values_text)
+        except ValueError as e:
+            raise ValueError(f"Could not parse values: {e}") from e
+        if not rows:
+            return []
+
+        if len(rows) > 1:
+            width = len(rows[0])
+            if any(len(r) != width for r in rows):
+                widths = ", ".join(str(len(r)) for r in rows)
+                raise ValueError(f"output_weights rows must all be the same length; got [{widths}]. One row per input/hidden unit, one value per output.")
+            return rows
+
+        flat = rows[0]
+        dims = self._topology_dims(topology)
+        if dims is None:
+            raise ValueError("output_weights is a 2-D parameter and the topology is not loaded, so a flat list cannot be reshaped. Enter one row per input/hidden unit (newline- or semicolon-separated), or wait for the topology readout to populate.")
+
+        input_size, num_hidden, output_size = dims
+        expected_rows = input_size + num_hidden
+        if len(flat) != expected_rows * output_size:
+            raise ValueError(f"output_weights expects ({expected_rows}, {output_size}) = {expected_rows * output_size} values for this network; got {len(flat)}.")
+        return [flat[i * output_size : (i + 1) * output_size] for i in range(expected_rows)]
+
+    @staticmethod
+    def _topology_dims(topology: Optional[Dict[str, Any]]) -> Optional[tuple]:
+        """``(input_size, num_hidden, output_size)`` from a topology payload, or None.
+
+        Tolerates both key spellings the two producers use (``input_size`` /
+        ``input_units``) and both ``hidden_units`` shapes (an int count from the
+        count-only stub, a list of unit records from the full payload) — the same
+        normalisation ``render_topology`` does, factored out so the reshape below and
+        the readout cannot disagree about the network's shape.
+        """
+        if not isinstance(topology, dict):
+            return None
+        input_size = topology.get("input_size") or topology.get("input_units") or 0
+        output_size = topology.get("output_size") or topology.get("output_units") or 0
+        hidden = topology.get("hidden_units")
+        num_hidden = hidden if isinstance(hidden, int) else len(hidden or [])
+        if not input_size or not output_size:
+            return None
+        return int(input_size), int(num_hidden), int(output_size)
 
     def _post_json(self, method: str, path: str, body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Issue a JSON request to a canopy proxy route.
@@ -465,6 +560,28 @@ class NetworkEditorPanel(BaseComponent):
         return {"success": False, "error": detail}
 
     @staticmethod
+    def _envelope_payload(result: Dict[str, Any]) -> Dict[str, Any]:
+        """Inner payload of a cascor success envelope (F-CANOPY-013).
+
+        ``_post_json`` returns ``{"success": True, "data": <the whole response body>}``
+        — and cascor's body is ITSELF an envelope, ``{"status": …, "data": {…},
+        "meta": …}``. So ``result["data"]["unit_index"]`` reads one level too shallow
+        and resolves to ``None``, which is what produced the observed success message
+        ``Appended unit at index None (now None hidden units)``.
+
+        Unwraps only when the envelope shape is actually present (a ``status`` key
+        alongside a dict ``data``), and passes the body through otherwise, so a flat
+        or differently-proxied payload keeps working.
+        """
+        body = result.get("data")
+        if not isinstance(body, dict):
+            return {}
+        inner = body.get("data")
+        if "status" in body and isinstance(inner, dict):
+            return inner
+        return body
+
+    @staticmethod
     def _status_alert(success: bool, message: str):
         return dbc.Alert(message, color="success" if success else "danger", style={"fontSize": "0.85rem"})
 
@@ -485,7 +602,7 @@ class NetworkEditorPanel(BaseComponent):
         def poll_fsm_and_topology(_n):
             """Poll /api/status; flip idle/active visibility on Investigating.
 
-            Also pulls /api/network/topology when active so the
+            Also pulls /api/topology when active so the
             readout + remove-unit dropdown stay current.
             """
             try:
@@ -498,8 +615,10 @@ class NetworkEditorPanel(BaseComponent):
             except Exception:  # noqa: BLE001
                 status = {}
 
+            # F-CANOPY-011: canopy's /api/status carries the FSM as flat fsm_status
+            # (the nested shape is cascor's and never reaches this panel).
             sm = status.get("state_machine") or {}
-            fsm_name = (sm.get("status") or status.get("status") or "Unknown").title()
+            fsm_name = (status.get("fsm_status") or sm.get("status") or status.get("status") or "Unknown").title()
             badge_text = f"FSM: {fsm_name}"
 
             if not self._is_investigating(status):
@@ -511,10 +630,14 @@ class NetworkEditorPanel(BaseComponent):
                 )
 
             # Active — fetch topology for the readout / remove picker.
+            # D-0 (E2E ledger): this fetched /api/network/topology, a route
+            # canopy does not serve (404); the live route is /api/topology,
+            # whose {input_units, output_units, hidden_units} shape
+            # render_topology already consumes.
             topology: Optional[Dict[str, Any]] = None
             try:
                 topo_resp = requests.get(
-                    f"{self._api_base_url}/api/network/topology",
+                    f"{self._api_base_url}/api/topology",
                     timeout=self.api_timeout,
                     headers=internal_api_headers(),
                 )
@@ -605,7 +728,7 @@ class NetworkEditorPanel(BaseComponent):
                 {"weights": weights, "bias": bias_val, "activation": activation or "Tanh"},
             )
             if result["success"]:
-                data = result["data"]
+                data = self._envelope_payload(result)  # F-CANOPY-013: unwrap cascor's envelope
                 idx = data.get("unit_index")
                 total = data.get("num_hidden_units")
                 return self._status_alert(True, f"Appended unit at index {idx} (now {total} hidden units).")
@@ -702,7 +825,7 @@ class NetworkEditorPanel(BaseComponent):
 
             result = self._post_json("DELETE", f"/api/v1/network/hidden-units/{idx_int}")
             if result["success"]:
-                data = result["data"]
+                data = self._envelope_payload(result)  # F-CANOPY-013: the latent second instance
                 total = data.get("num_hidden_units")
                 msg = f"Removed unit {idx_int} (now {total} hidden units)."
                 if wants_snapshot:
@@ -716,17 +839,21 @@ class NetworkEditorPanel(BaseComponent):
             State(f"{component_id}-patch-target", "value"),
             State(f"{component_id}-patch-idx", "value"),
             State(f"{component_id}-patch-values", "value"),
+            # F-CANOPY-012: the topology is what makes the output_weights reshape
+            # possible. It rides as State — the patch fires on the button, never on a
+            # topology refresh.
+            State(f"{component_id}-topology-store", "data"),
             prevent_initial_call=True,
         )
-        def on_patch_weights(n_clicks, target, hidden_idx, values_text):
+        def on_patch_weights(n_clicks, target, hidden_idx, values_text, topology):
             if not n_clicks:
                 return dash.no_update
             if not target:
                 return self._status_alert(False, "Pick a patch target.")
             try:
-                values = self._parse_float_list(values_text)
+                values = self._resolve_patch_values(target, values_text, topology)
             except ValueError as e:
-                return self._status_alert(False, f"Could not parse values: {e}")
+                return self._status_alert(False, str(e))
             if not values:
                 return self._status_alert(False, "Values are required.")
 
@@ -757,5 +884,11 @@ class NetworkEditorPanel(BaseComponent):
 
             result = self._post_json("PATCH", "/api/v1/network/weights", body)
             if result["success"]:
+                # F-CANOPY-012: values may now be a matrix — report the real element
+                # count and the shape, not the row count.
+                if values and isinstance(values[0], list):
+                    shape = f"{len(values)}x{len(values[0])}"
+                    count = sum(len(row) for row in values)
+                    return self._status_alert(True, f"Patched {wire_target}.{wire_field} ({count} values, {shape}).")
                 return self._status_alert(True, f"Patched {wire_target}.{wire_field} ({len(values)} values).")
             return self._status_alert(False, f"Patch failed: {result['error']}")

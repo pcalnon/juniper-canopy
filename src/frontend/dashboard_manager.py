@@ -162,6 +162,28 @@ function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, l
         }
     }
 
+    // F-CANOPY-003: the success ack never reached the dashboard -- the WS success
+    // path only logged and the REST path did nothing on 2xx -- so a button stayed
+    // on its optimistic loading state until the interval-driven timeout sweep
+    // landed (30 s to minutes under callback congestion; a wedged button blocked
+    // the next command for the rest of a run). Report the ack the same way
+    // failures are reported AND clear this button's loading state directly: the
+    // ack is the primary release, the sweep stays as the backstop.
+    function reportSuccess(transport, commandId) {
+        try {
+            if (dc && typeof dc.set_props === 'function') {
+                dc.set_props('training-control-action', {
+                    data: { last: triggerId, ts: Date.now() / 1000.0, success: true, command: command, transport: transport, command_id: commandId }
+                });
+                var cleared = Object.assign({}, newStates);
+                cleared[command] = { disabled: false, loading: false, timestamp: 0 };
+                dc.set_props('button-states', { data: cleared });
+            }
+        } catch (e) {
+            console.error('[Phase D] reportSuccess failed for ' + command + ':', e);
+        }
+    }
+
     function restFallback(reason) {
         if (reason) {
             console.warn('[Phase D] REST fallback (' + command + '):', reason);
@@ -184,6 +206,10 @@ function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, l
             }
             fetch('/api/train/' + command, fetchOpts)
                 .then(function(resp) {
+                    if (resp.ok) {
+                        reportSuccess('rest', null);
+                        return;
+                    }
                     if (!resp.ok) {
                         console.warn('[Phase D] REST /api/train/' + command + ' returned ' + resp.status);
                         resp.text().then(function(body) {
@@ -234,9 +260,22 @@ function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, l
                 sendPromise
                     .then(function(data) {
                         console.log('[Phase D] WS command success:', command, data && data.command_id);
+                        reportSuccess('ws', (data && data.command_id) || commandId);
                     })
                     .catch(function(err) {
-                        restFallback('WS rejected: ' + (err && err.message));
+                        // F-CANOPY-005: fall back ONLY on transport-class failures
+                        // (timeout / socket closed / send threw — err.transport is
+                        // set by websocket_client.js). A business rejection means
+                        // the server RECEIVED and adjudicated the command; a REST
+                        // retry re-issues a state-changing command the backend
+                        // already answered (the observed resume->409 double-fire),
+                        // so surface it to the operator instead.
+                        if (err && err.transport) {
+                            restFallback('WS transport failure: ' + (err && err.message));
+                        } else {
+                            console.warn('[Phase D] WS business rejection (' + command + '):', err && err.message);
+                            reportFailure((err && err.message) || 'command rejected');
+                        }
                     });
             } else {
                 // send() returned something non-thenable — treat as failure.
@@ -3043,11 +3082,15 @@ class DashboardManager:
     def _setup_theme_callbacks(self):
         """Set up dashboard theme callbacks."""
 
+        # F-CANOPY-001: the toggle writes only the STORE. It used to also own
+        # ``dark-mode-toggle.children``, but this callback is prevent_initial_call=True,
+        # so the glyph was written only on a click and a reload left it at the layout
+        # default 🌙 under a correctly-restored dark theme. The glyph is now derived
+        # from the store below. Deliberately NOT a second ``allow_duplicate`` writer:
+        # ``dark-mode-toggle.children`` keeps exactly one, per the F-CANOPY-018 /
+        # F-CANOPY-027 two-writer class this arc has been removing.
         @self.app.callback(
-            [
-                Output("dark-mode-store", "data"),
-                Output("dark-mode-toggle", "children"),
-            ],
+            Output("dark-mode-store", "data"),
             Input("dark-mode-toggle", "n_clicks"),
             State("dark-mode-store", "data"),
             prevent_initial_call=True,
@@ -3059,14 +3102,19 @@ class DashboardManager:
         # PERF-CN-01: prevent_initial_call=False — must propagate the initial
         # dark-mode-store value to theme-state on mount so theme-aware components
         # render with the correct theme on first paint.
+        # F-CANOPY-001: the toggle glyph rides the same mount-capable path, so it is
+        # correct on first paint after a reload as well as on every click.
         @self.app.callback(
-            Output("theme-state", "data"),
+            [
+                Output("theme-state", "data"),
+                Output("dark-mode-toggle", "children"),
+            ],
             Input("dark-mode-store", "data"),
             prevent_initial_call=False,
         )
         def update_theme_state(is_dark):
-            """Update theme state based on dark mode store."""
-            return self._update_theme_state_handler(is_dark=is_dark)
+            """Update theme state and the toggle glyph from the dark mode store."""
+            return self._update_theme_state_handler(is_dark=is_dark), self._dark_mode_icon(is_dark)
 
         self.app.clientside_callback(
             """
@@ -3231,8 +3279,20 @@ class DashboardManager:
         # ``/api/status`` on the same fast tick this callback already fetches it —
         # one renderer slot and one HTTP round-trip per second spent re-reading the
         # same payload. The store output is suppressed to ``no_update`` while
-        # ``{is_running, phase}`` is unchanged, so its consumers (the Live Switch
-        # gate) only re-run on real transitions.
+        # ``{is_running, phase}`` is unchanged, so its consumers only re-run on real
+        # transitions.
+        #
+        # F-CANOPY-025: this callback ALSO owns ``live-dataset-switch-button.disabled``.
+        # The old standalone gate (``gate_live_switch_button``, Input on this very
+        # store) was starved of promotion whenever THIS callback was in flight —
+        # dash-renderer will not promote a callback while any of its Inputs is an
+        # output claimed by a pending callback, and this feeder runs every fast tick
+        # with round-trips that cover the tick under run congestion. The gate is
+        # only USEFUL during a run (its allow arm needs ``is_running``), which is
+        # exactly when it could never execute: measured live post-Stage-2, the gate
+        # fired at idle mount and ZERO times across 80 s of training. Computing the
+        # gate IN the feeder removes the race atomically; the experimental flag
+        # rides as State, so a flag flip lands within one fast tick.
         @self.app.callback(
             [
                 Output("status-indicator", "style"),
@@ -3245,14 +3305,22 @@ class DashboardManager:
                 Output("top-epoch-display", "children"),
                 Output("top-hidden-units-display", "children"),
                 Output("training-status-store", "data"),
+                Output("live-dataset-switch-button", "disabled"),
             ],
             Input("fast-update-interval", "n_intervals"),
             dash.dependencies.State("training-status-store", "data"),
+            dash.dependencies.State("experimental-flags-store", "data"),
+            dash.dependencies.State("live-dataset-switch-button", "disabled"),
             prevent_initial_call=False,
         )
-        def update_unified_status_bar(n_intervals, prev_training_status):
-            """Update unified status bar with all state info (+ the training-status store)."""
-            return self._update_unified_status_bar_handler(n_intervals=n_intervals, prev_training_status=prev_training_status)
+        def update_unified_status_bar(n_intervals, prev_training_status, experimental_flags, prev_switch_disabled):
+            """Update unified status bar (+ the training-status store and the Live Switch gate)."""
+            return self._update_unified_status_bar_handler(
+                n_intervals=n_intervals,
+                prev_training_status=prev_training_status,
+                experimental_flags=experimental_flags,
+                prev_switch_disabled=prev_switch_disabled,
+            )
 
     # Define Network callbacks
     def _setup_network_callbacks(self):
@@ -4090,19 +4158,26 @@ class DashboardManager:
         # every checkbox's value + id without enumerating per-key
         # dependencies. The store is the source of truth for both the
         # Parameters tab table re-render and the sidebar mirror below.
+        # F-CANOPY-018 / F-CANOPY-028: this writer collects the state of EVERY pin
+        # checkbox and replaces the store wholesale, so it asserts "not pinned" for
+        # every key whose checkbox it cannot see. The rendered set is not always the
+        # full set: the Parameters tables are rebuilt on every params-store change,
+        # and any render that happens while the store is empty or stale (mount before
+        # ``storage_type="local"`` hydration, a tab whose tables are not in the DOM)
+        # produces a values/ids pair that under-reports the real pin set — and the
+        # next toggle then persists that under-report, silently discarding pins made
+        # before a reload. It now writes only what it can actually observe and
+        # preserves the rest.
         @self.app.callback(
             Output("pinned-params-store", "data"),
             Input({"type": "param-pin", "key": dash.ALL}, "value"),
             dash.dependencies.State({"type": "param-pin", "key": dash.ALL}, "id"),
+            dash.dependencies.State("pinned-params-store", "data"),
             prevent_initial_call=True,
         )
-        def update_pinned_params_store(values, ids):
-            """Build the pinned-keys list from current checkbox state."""
-            pinned = []
-            for v, id_dict in zip(values or [], ids or [], strict=False):
-                if v:
-                    pinned.append(id_dict.get("key"))
-            return [k for k in pinned if k]
+        def update_pinned_params_store(values, ids, current):
+            """Merge the rendered checkboxes' state into the persisted pin list."""
+            return self._merge_pinned_params(values, ids, current)
 
         # CAN-005: render the sidebar's "Pinned Parameters" mirror.
         # When the pinned list is empty, hide the entire card so the
@@ -4265,8 +4340,11 @@ class DashboardManager:
         # buttons route through ``window.cascorControlWS.send()`` via a Dash
         # clientside callback. The browser decides WS-vs-REST per click with
         # automatic REST fallback if the send() promise rejects. When the flag
-        # is off (default), the pre-Phase-D server-side handler is registered
-        # instead and keeps the existing behavior plus test fixtures untouched.
+        # is off (it has defaulted to True since the D-49 flag flip -- see
+        # settings.enable_ws_control_buttons; the E2E ledger's D-5 corrected
+        # this comment's stale "off (default)" wording), the pre-Phase-D
+        # server-side handler is registered instead and keeps the existing
+        # behavior plus test fixtures untouched.
         if getattr(self._settings, "enable_ws_control_buttons", False):
             self.app.clientside_callback(
                 PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS,
@@ -4398,7 +4476,7 @@ class DashboardManager:
             prevent_initial_call=True,
         )
         def handle_button_timeout_and_acks(action, n_intervals, button_states):
-            """Re-enable buttons after timeout (5s) or on control acknowledgment."""
+            """Re-enable a button on its success ack, or after DASHBOARD_TIMEOUT_THRESHOLD (F-CANOPY-003)."""
             return self._handle_button_timeout_and_acks_handler(action=action, n_intervals=n_intervals, button_states=button_states)
 
     # Define backend callbacks
@@ -4565,6 +4643,11 @@ class DashboardManager:
                 Input("nn-optimizer-type-dropdown", "value"),
                 # Phase 6E A-3: activation_function_name (hidden-unit activation)
                 Input("nn-activation-function-dropdown", "value"),
+                # D-2 (E2E ledger, C2.6-05 / C2.9-04): init_output_weights travelled
+                # on the apply gather as a State but sat outside this dirty set, so
+                # changing it alone never enabled Apply while its value still
+                # applied on the next unrelated Apply.
+                Input("nn-init-output-weights-dropdown", "value"),
                 # Store
                 Input("applied-params-store", "data"),
             ],
@@ -4601,6 +4684,7 @@ class DashboardManager:
             nn_output_epochs,
             nn_optimizer_type,
             nn_activation_function,
+            nn_init_output_weights,
             applied,
         ):
             """Enable Apply button when parameters differ from applied values."""
@@ -4633,6 +4717,7 @@ class DashboardManager:
                 nn_optimizer_type,
                 nn_activation_function,
                 applied,
+                nn_init_output_weights=nn_init_output_weights,
             )
 
         # ── Handle Apply button click ──
@@ -4791,7 +4876,10 @@ class DashboardManager:
                 Output("nn-optimizer-type-dropdown", "value"),
                 # Phase 6E A-3: activation_function_name (hidden-unit activation)
                 Output("nn-activation-function-dropdown", "value"),
-                # Store
+                # D-2: hydrate the init-output-weights dropdown too, so the form and
+                # the applied store agree on mount now that the field is dirty-tracked.
+                Output("nn-init-output-weights-dropdown", "value"),
+                # Store (kept LAST so ``result[-1]`` stays the applied dict)
                 Output("applied-params-store", "data", allow_duplicate=True),
             ],
             Input("params-init-interval", "n_intervals"),
@@ -4896,15 +4984,25 @@ class DashboardManager:
                 Output("experimental-functions-alert", "children", allow_duplicate=True),
             ],
             Input("params-init-interval", "n_intervals"),
+            State("experimental-functions-toggle", "value"),
             prevent_initial_call="initial_duplicate",
         )
-        def load_reconcile_experimental_functions(n_intervals):
+        def load_reconcile_experimental_functions(n_intervals, current_toggle):
             """Page-load sync against cascor's authoritative gate state.
 
             ``params-init-interval`` is the canonical one-shot-on-mount
             trigger used elsewhere in the dashboard (e.g., params load).
             Fires once per session; ``max_intervals=1`` on the Interval
             component caps additional fires.
+
+            F-CANOPY-025 (echo clobber): an UNCHANGED toggle write here still
+            fires ``handle_experimental_functions_toggle`` (an unchanged write
+            fires every consumer — the Stage-2 lesson), which then POSTs the
+            mount-time value back to cascor — so every page load re-wrote the
+            server-side gate, racing and reverting any operator change made
+            since that page's mount. The toggle write is now suppressed when
+            the authoritative value already matches (the handler additionally
+            carries its own echo guard).
             """
             try:
                 resp = requests.get(
@@ -4917,12 +5015,13 @@ class DashboardManager:
                     # show the toggle as OFF (F2.10 safe default) and surface
                     # a soft warning so the user knows the toggle is local-only.
                     self.logger.warning("Experimental functions load failed: %s %s", resp.status_code, resp.text[:200])
-                    return False, {"experimental_functions": False}, dbc.Alert("Could not reach backend; experimental functions disabled.", color="warning", duration=5000, dismissable=True)
+                    return (dash.no_update if not current_toggle else False), {"experimental_functions": False}, dbc.Alert("Could not reach backend; experimental functions disabled.", color="warning", duration=5000, dismissable=True)
                 authoritative = bool(resp.json().get("data", {}).get("enabled", False))
-                return authoritative, {"experimental_functions": authoritative}, None
+                toggle_out = dash.no_update if authoritative == bool(current_toggle) else authoritative
+                return toggle_out, {"experimental_functions": authoritative}, None
             except requests.RequestException as exc:
                 self.logger.warning("Experimental functions load exception: %s", exc)
-                return False, {"experimental_functions": False}, dbc.Alert("Backend unreachable; experimental functions disabled.", color="warning", duration=5000, dismissable=True)
+                return (dash.no_update if not current_toggle else False), {"experimental_functions": False}, dbc.Alert("Backend unreachable; experimental functions disabled.", color="warning", duration=5000, dismissable=True)
 
         @self.app.callback(
             [
@@ -4937,10 +5036,21 @@ class DashboardManager:
         def handle_experimental_functions_toggle(switch_value, store_data):
             """POST the new toggle value to cascor and reconcile UI state.
 
+            F-CANOPY-025 (echo guard): fire the POST only when the value
+            actually DIFFERS from the store's last-known state. Without this,
+            any programmatic write of the toggle (the load reconciliation, a
+            revert) re-POSTed the same value to cascor — and a mount-time echo
+            of a stale read could clobber an operator change made since.
+            A real user flip always differs from the store (the store is only
+            written alongside a completed reconcile/POST), so it always POSTs.
+
             F2.10 server-authoritative: the response's ``enabled`` value is
             what the UI must reflect, even if it differs from the request.
             """
             requested = bool(switch_value)
+            if requested == bool((store_data or {}).get("experimental_functions", False)):
+                # Echo, not a user flip — the store already reflects this value.
+                return dash.no_update, dash.no_update, dash.no_update
             try:
                 resp = requests.post(
                     self._api_url("/api/admin/experimental_functions"),
@@ -5007,14 +5117,15 @@ class DashboardManager:
         # ``_update_training_status_store_handler`` remains as the directly
         # invocable single-store form (unit-test surface / parity reference).
 
-        @self.app.callback(
-            Output("live-dataset-switch-button", "disabled"),
-            Input("experimental-flags-store", "data"),
-            Input("training-status-store", "data"),
-            prevent_initial_call=False,
-        )
-        def gate_live_switch_button(flags, status):
-            return self._gate_live_switch_button_handler(flags=flags, status=status)
+        # F-CANOPY-025: the standalone gate callback that used to live here
+        # (``gate_live_switch_button``, Inputs experimental-flags-store +
+        # training-status-store) could NEVER execute during a run — its
+        # training-status Input is an output the unified-status-bar feeder
+        # claims while in flight on every fast tick, so the gate lost the
+        # promotion race exactly when its allow arm was reachable. The gate is
+        # now computed inside ``update_unified_status_bar`` from the same
+        # payload (``_gate_live_switch_button_handler`` still holds the truth
+        # table and stays directly invocable for tests).
 
         @self.app.callback(
             [
@@ -5995,11 +6106,60 @@ class DashboardManager:
             return dbc.Alert(f"Cancel failed: {exc}", color="warning", duration=5000, dismissable=True)
 
     # Define event handlers for callbacks
+    @staticmethod
+    def _merge_pinned_params(values, ids, current):
+        """Merge the RENDERED pin checkboxes into the persisted pin list (F-CANOPY-028).
+
+        The pattern-matched writer used to rebuild the whole list from the DOM, which
+        makes "this checkbox is absent" indistinguishable from "this key is not
+        pinned". Any render that under-reports the pin set — a mount before the
+        ``storage_type="local"`` store hydrates, or tables that are not in the DOM —
+        therefore got persisted on the next toggle, discarding earlier pins with no
+        warning.
+
+        Rules:
+
+        - No checkboxes rendered at all → ``no_update``. An empty component set is
+          never evidence that nothing is pinned, and writing ``[]`` there is exactly
+          how a full pin set gets wiped.
+        - Otherwise, keys whose checkbox IS rendered take their state from it (so
+          unpinning still works), and keys that are pinned but NOT rendered are
+          carried through untouched.
+
+        Order is stable: preserved-but-unseen keys first, then the rendered keys in
+        render order, so the sidebar mirror does not reshuffle on every toggle.
+        """
+        rendered = [i.get("key") for i in (ids or []) if isinstance(i, dict) and i.get("key")]
+        if not rendered:
+            return dash.no_update
+        checked = {i.get("key") for v, i in zip(values or [], ids or [], strict=False) if v and isinstance(i, dict)}
+        rendered_set = set(rendered)
+        preserved = [k for k in (current or []) if k and k not in rendered_set]
+        return preserved + [k for k in rendered if k in checked]
+
     def _toggle_dark_mode_handler(self, current_dark_mode=None):
-        """Toggle dark mode on button click."""
-        is_dark = not current_dark_mode
-        icon = "☀️" if is_dark else "🌙"
-        return is_dark, icon
+        """Flip the persisted dark-mode flag on button click.
+
+        F-CANOPY-001: this used to return ``(is_dark, icon)`` and own the toggle's
+        glyph directly. Because its callback is ``prevent_initial_call=True``, the
+        glyph was written ONLY on a click — so after a reload the theme restored
+        correctly from ``dark-mode-store`` while the button still rendered the
+        layout default 🌙. The glyph is now derived from the store by
+        ``update_theme_state`` (which does run on mount), and this handler owns
+        only the flag.
+        """
+        return not current_dark_mode
+
+    @staticmethod
+    def _dark_mode_icon(is_dark=None) -> str:
+        """Toggle glyph as a pure function of the persisted flag (F-CANOPY-001).
+
+        The glyph shows the mode the button would switch TO: ☀️ while dark,
+        🌙 while light. Deriving it from the flag — rather than from the click —
+        is what makes it correct on mount, and keeps a single writer for
+        ``dark-mode-toggle.children``.
+        """
+        return "☀️" if is_dark else "🌙"
 
     def _update_theme_state_handler(self, is_dark=None):
         """Update theme state based on dark mode store."""
@@ -6073,11 +6233,11 @@ class DashboardManager:
             "--",
         )
 
-    def _update_unified_status_bar_handler(self, n_intervals=None, prev_training_status=None):
+    def _update_unified_status_bar_handler(self, n_intervals=None, prev_training_status=None, experimental_flags=None, prev_switch_disabled=None):
         """
         Update unified status bar with all state info from /api/status.
 
-        Returns tuple of 10 elements:
+        Returns tuple of 11 elements:
         - status_indicator style (latency color)
         - connection_status children (hidden, for backward compat)
         - latency_display children
@@ -6091,6 +6251,11 @@ class DashboardManager:
           absorbed the store's dedicated /api/status poller; ``no_update`` while
           ``{is_running, phase}`` is unchanged so consumers only re-run on real
           transitions, and on every error path so a hiccup never blanks it)
+        - live-dataset-switch-button disabled (F-CANOPY-025: computed IN the
+          feeder from the same payload — the standalone gate could never win
+          promotion against this callback's own in-flight claim on the store;
+          same gate truth table as ``_gate_live_switch_button_handler``;
+          ``no_update`` while unchanged and on every error path)
         """
         try:
             # Single request: /api/status provides all needed info and doubles as health check.
@@ -6106,20 +6271,22 @@ class DashboardManager:
                     "phase": str(payload.get("phase", "idle")),
                 }
                 store_out = dash.no_update if training_status == prev_training_status else training_status
-                return (*self._build_unified_status_bar_content(status_response, latency_ms), store_out)
+                switch_disabled = self._gate_live_switch_button_handler(flags=experimental_flags, status=training_status)
+                switch_out = dash.no_update if switch_disabled == prev_switch_disabled else switch_disabled
+                return (*self._build_unified_status_bar_content(status_response, latency_ms), store_out, switch_out)
             # Non-200: surface a specific, actionable label instead of a bare "Error"
             # so a transient rate limit isn't confused with a real backend outage.
             # Dominant "Error" cause on the deployed stack: canopy's own rate
             # limiter throttling the dashboard's own polling (see #2a).
             status_label, detail = self._classify_response_failure(status_response)
-            return (*self._status_bar_error_tuple(status_label, detail), dash.no_update)
+            return (*self._status_bar_error_tuple(status_label, detail), dash.no_update, dash.no_update)
         except (requests.Timeout, requests.ConnectionError) as e:
             self.logger.warning(f"Status bar update failed: {type(e).__name__}")
             status_label, detail = self._classify_exception_failure(e)
-            return (*self._status_bar_error_tuple(status_label, detail), dash.no_update)
+            return (*self._status_bar_error_tuple(status_label, detail), dash.no_update, dash.no_update)
         except Exception as e:
             self.logger.warning(f"Status bar update failed: {type(e).__name__}: {e}")
-            return (*self._status_bar_error_tuple("Error", "Connection Error"), dash.no_update)
+            return (*self._status_bar_error_tuple("Error", "Connection Error"), dash.no_update, dash.no_update)
 
     @staticmethod
     def _completion_reason_label(reason):
@@ -6989,7 +7156,16 @@ class DashboardManager:
         )
 
     def _handle_button_timeout_and_acks_handler(self, action=None, n_intervals=None, button_states=None, **kwargs):
-        """Re-enable buttons after the dashboard timeout based on their individual timestamps."""
+        """Re-enable a loading button on its success ack, or after the dashboard timeout.
+
+        F-CANOPY-003: the "and_acks" half never existed -- only the interval-driven
+        timeout sweep (``DASHBOARD_TIMEOUT_THRESHOLD``) ever released a button, and
+        under callback congestion that sweep lands 30 s to minutes late. An ack is a
+        ``training-control-action`` write with ``success`` True, a ``command`` and a
+        ``ts`` not older than that button's click timestamp (a stale ack from an
+        earlier click must not release a newer one). The timeout stays as the
+        backstop.
+        """
         if not button_states:
             return dash.no_update
 
@@ -6997,11 +7173,22 @@ class DashboardManager:
         new_states = {}
         changed = False
 
+        acked_cmd = None
+        acked_ts = 0.0
+        if isinstance(action, dict) and action.get("success") and action.get("command") and action.get("ts") is not None:
+            acked_cmd = action.get("command")
+            acked_ts = float(action.get("ts") or 0)
+
         for cmd, state in button_states.items():
             timestamp = state.get("timestamp", 0)
             is_loading = state.get("loading", False)
 
             if is_loading and timestamp > 0:
+                if cmd == acked_cmd and acked_ts >= timestamp:
+                    new_states[cmd] = {"disabled": False, "loading": False, "timestamp": 0}
+                    changed = True
+                    self.logger.debug(f"Button {cmd} released by its success ack")
+                    continue
                 elapsed = current_time - timestamp
                 # Reset after the configured timeout threshold
                 if elapsed > DashboardConstants.DASHBOARD_TIMEOUT_THRESHOLD:
@@ -7091,6 +7278,9 @@ class DashboardManager:
         nn_optimizer_type=None,
         nn_activation_function=None,
         applied=None,
+        # D-2: appended AFTER ``applied`` so every existing positional caller
+        # (the wrapper passes it by keyword) keeps its argument positions.
+        nn_init_output_weights=None,
     ):
         """Enable Apply button when parameters differ from applied values."""
         if not applied:
@@ -7119,12 +7309,27 @@ class DashboardManager:
             (nn_patience, "nn_patience", "int"),
             (nn_spiral_rot, "nn_spiral_rotations", "float"),
             (nn_spiral_num, "nn_spiral_number", "int"),
-            (nn_dataset_elem, "nn_dataset_elements", "int"),
-            (nn_dataset_noise, "nn_dataset_noise", "float"),
+            # F-CANOPY-018 (2 of 3): ``nn_dataset_elements`` / ``nn_dataset_noise`` are
+            # canopy-local and travel on /api/stage_dataset, which the Apply button does
+            # not call — #2b dropped them from the set_params payload for that reason.
+            # Comparing them here was wrong twice over: it latched the form dirty after
+            # every apply (see below), and it lit Apply for an edit Apply cannot make.
+            # NB ``nn_spiral_rotations`` / ``nn_spiral_number`` above ride BOTH payloads,
+            # so they stay compared.
             (cn_pool_size, "cn_pool_size", "int"),
             (cn_corr_thresh, "cn_correlation_threshold", "float"),
             (cn_selected, "cn_selected_candidates", "int"),
-            (cn_training_complete, "cn_training_complete", "str"),
+            # F-CANOPY-018 (3 of 3): ``cn_training_complete`` is deliberately NOT compared.
+            # It is a read-only status flag that #2b dropped from the /api/set_params
+            # payload, so ``_apply_parameters_handler``'s store write cannot carry it.
+            # The MOUNT seed (``_load_current_params_handler``) does carry it, which is
+            # why the form is clean on load and permanently dirty afterwards: the first
+            # successful apply replaces the seeded store with a params dict that has no
+            # such key, ``applied.get(...)`` returns None against a real radio value,
+            # and the dirty check latches True for the rest of the session. That is what
+            # overwrote the "Parameters applied" toast with "⚠️ Unsaved changes" ~900 ms
+            # later, and why the form never returned to clean without a reload.
+            # A key that can never be applied can never be unsaved.
             (cn_training_iter, "cn_training_iterations", "int"),
             (cn_training_conv_thresh, "cn_training_convergence_threshold", "float"),
             (cn_patience, "cn_patience", "int"),
@@ -7135,6 +7340,9 @@ class DashboardManager:
             (nn_output_epochs, "nn_output_epochs", "int"),
             (nn_optimizer_type, "nn_optimizer_type", "str"),
             (nn_activation_function, "nn_activation_function_name", "str"),
+            # D-2: the apply handler stores this key (``_choice(...)`` above the
+            # payload), so the dirty set can finally compare it.
+            (nn_init_output_weights, "nn_init_output_weights", "str"),
         ]
 
         has_changes = False
@@ -7510,7 +7718,7 @@ class DashboardManager:
 
     def _init_params_from_backend_handler(self, n, current_applied):
         """Initialize input values and applied params from backend on first load."""
-        NUM_OUTPUTS = 28
+        NUM_OUTPUTS = 29  # 27 inputs + the D-2 init-output-weights dropdown + the applied store
         if current_applied:
             return (dash.no_update,) * NUM_OUTPUTS
         try:
@@ -7544,6 +7752,9 @@ class DashboardManager:
                 nn_output_epochs = state.get("nn_output_epochs", TrainingConstants.DEFAULT_OUTPUT_EPOCHS)
                 nn_optimizer_type = state.get("nn_optimizer_type", TrainingConstants.DEFAULT_OPTIMIZER_TYPE)
                 nn_activation_function = state.get("nn_activation_function_name", TrainingConstants.DEFAULT_ACTIVATION_FUNCTION)
+                # D-2: seed the field the dirty tracker now compares; without it a
+                # fresh session read "unsaved changes" on mount.
+                nn_init_output_weights = state.get("nn_init_output_weights", TrainingConstants.DEFAULT_INIT_OUTPUT_WEIGHTS)
 
                 applied = {
                     "nn_max_iterations": nn_max_iter,
@@ -7573,6 +7784,7 @@ class DashboardManager:
                     "nn_output_epochs": nn_output_epochs,
                     "nn_optimizer_type": nn_optimizer_type,
                     "nn_activation_function_name": nn_activation_function,
+                    "nn_init_output_weights": nn_init_output_weights,
                 }
 
                 # N5 (I-4): clamp backend-seeded values into cascor's PATCH bounds
@@ -7630,6 +7842,7 @@ class DashboardManager:
                     nn_output_epochs,
                     nn_optimizer_type,
                     nn_activation_function,
+                    nn_init_output_weights,
                     applied,
                 )
         except Exception as e:
