@@ -231,12 +231,14 @@ class TestSecurityMiddlewareIsExempt:
 
     def test_exact_exempt_paths(self):
         mw = self._make_middleware()
-        for path in ["/", "/health", "/api/health", "/v1/health", "/v1/health/live", "/v1/health/ready", "/docs", "/openapi.json", "/redoc"]:
+        for path in ["/", "/health", "/api/health", "/v1/health", "/v1/health/live", "/v1/health/ready"]:
             assert mw._is_exempt(path), f"{path} should be exempt"
 
     def test_non_exempt_paths(self):
         mw = self._make_middleware()
-        for path in ["/api/metrics", "/api/train/start", "/api/v1/snapshots"]:
+        # The three documentation routes moved here from the exempt loop above
+        # (APD-DATA-024): they must require a key like any other path.
+        for path in ["/api/metrics", "/api/train/start", "/api/v1/snapshots", "/docs", "/openapi.json", "/redoc"]:
             assert not mw._is_exempt(path), f"{path} should NOT be exempt"
 
     def test_dashboard_prefix_exempt(self):
