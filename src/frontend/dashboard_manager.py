@@ -3925,9 +3925,15 @@ class DashboardManager:
             Input("tabpoll-topology", "n_intervals"),  # F-CANOPY-027: was slow-update-interval
             Input("ws-topology-buffer", "data"),
             Input("visualization-tabs", "active_tab"),
+            # F-CANOPY-039: State (never an Input) — this is the callback's own
+            # Output. It exists only so the handler can compare what it fetched
+            # against what the store already holds and suppress an identical
+            # rewrite. As an Input it would self-trigger; the CRITICAL note on
+            # ``update_metrics_store`` above governs the rest of the shape.
+            dash.dependencies.State("network-visualizer-topology-store", "data"),
             prevent_initial_call=False,
         )
-        def update_topology_store(n, ws_topology, active_tab):
+        def update_topology_store(n, ws_topology, active_tab, current_topology):
             """Fetch topology from API or accept WebSocket push.
 
             OI-2: WebSocket topology pushes (from cascade_add events) take
@@ -3956,14 +3962,19 @@ class DashboardManager:
                 # detect a stub, fall through to REST so we get a
                 # structurally complete payload from /api/topology.
                 if not CascorServiceAdapter._is_complete_topology(ws_topology):
-                    return self._update_topology_store_handler(n=n, active_tab=active_tab)
+                    return self._update_topology_store_handler(n=n, active_tab=active_tab, current=current_topology)
+                # Deliberately NOT identity-suppressed: a ``cascade_add`` frame is by
+                # construction a topology CHANGE, so an identical payload here would be
+                # a cascor-side defect rather than the 5 s REST re-fetch this guard
+                # targets. Suppressing it would also risk swallowing a real growth
+                # event if canonicalisation were ever imperfect.
                 return CascorServiceAdapter._transform_topology(ws_topology)
 
             # REST fallback — only poll when topology tab is active. Deliberately
             # NOT WS-gated (N1): the former sticky topologyReceived gate meant
             # neither push nor poll updated the store once cascade_add frames
             # stopped arriving. cascade_add push above remains the fast path.
-            return self._update_topology_store_handler(n=n, active_tab=active_tab)
+            return self._update_topology_store_handler(n=n, active_tab=active_tab, current=current_topology)
 
         # PERF-CN-01: prevent_initial_call=False — must hit the raw-topology API
         # on mount when the topology tab is active and weight-matrix view is
@@ -6794,16 +6805,59 @@ class DashboardManager:
             self.logger.warning(f"Failed to fetch metrics from API: {type(e).__name__}: {e}")
             return dash.no_update if current_metrics else []
 
-    def _update_topology_store_handler(self, n=None, active_tab=None):
+    def _update_topology_store_handler(self, n=None, active_tab=None, current=None):
         """Fetch topology from API and update network visualizer store.
 
         Failure paths deliberately return ``dash.no_update`` (same last-known-good
         posture as the metrics handler's N1 empty-guard) so a transient upstream
         error never blanks the network view.
+
+        F-CANOPY-039 — identity suppression. ``current`` is the store's existing
+        value, threaded from the callback as State. When the freshly fetched
+        topology is canonically identical to it we return ``dash.no_update``
+        instead of rewriting the store, because **Dash fires every consumer of a
+        store on any write, identical or not**, and this poll rewrote a
+        byte-identical 7,059 B payload every 5 s.
+
+        That rewrite is what starved the topology rebuild. It put THREE triggers
+        on ``update_network_graph`` every cycle —
+        ``tabpoll-topology.n_intervals`` + ``…-topology-store.data`` +
+        ``…-depth-slider.value`` (the slider's clientside bounds-sync at
+        ``network_visualizer.py:706`` re-emits ``value`` on every store write,
+        unchanged or not) — so each 1.5-5 s rebuild was superseded before its
+        response could be applied, and canopy#537's ``len(ctx.triggered) == 1``
+        short-circuit could never fire. Suppressing the identical write leaves a
+        bare tick, which that guard then catches.
+
+        ``current=None`` (the default, and what the handler's direct unit tests
+        pass) means "no previous value" and never suppresses.
         """
         # Only update if topology tab is active
         if active_tab != "topology":
             return dash.no_update
+
+        def _suppress_if_unchanged(fetched):
+            """Return ``no_update`` when ``fetched`` matches the store's value.
+
+            Compared canonically (sorted keys) rather than by ``==`` so that a
+            re-serialised payload with reordered dict keys still counts as
+            unchanged. Any comparison failure falls through to the write — a
+            suppressed real update is far worse than a redundant one.
+            """
+            if current is None:
+                return fetched
+            try:
+                if json.dumps(current, sort_keys=True, default=str) == json.dumps(fetched, sort_keys=True, default=str):
+                    return dash.no_update
+            except (TypeError, ValueError):
+                # Deliberately swallowed: an unserialisable payload means we
+                # cannot PROVE the two are identical, and the safe answer to
+                # "are these the same?" is "assume not". Falling through to the
+                # write below costs a redundant rebuild; suppressing on a failed
+                # comparison would drop a real topology update and freeze the
+                # panel — the exact failure this guard exists to fix.
+                pass
+            return fetched
 
         try:
             url = self._api_url("/api/topology")
@@ -6826,14 +6880,14 @@ class DashboardManager:
             # test_topology_store_fetches_on_tab_switch_with_ws_silent).
             if isinstance(topology, dict) and "input_units" in topology:
                 self.logger.debug(f"Fetched topology from {url}: {len(topology.get('connections', []))} connections (graph-format passthrough)")
-                return topology
+                return _suppress_if_unchanged(topology)
             # Transform CasCor weight-oriented format to graph-oriented format
             # expected by NetworkVisualizer (input_units/output_units/connections)
             from backend.cascor_service_adapter import CascorServiceAdapter
 
             topology = CascorServiceAdapter._transform_topology(topology)
             self.logger.debug(f"Fetched topology from {url}: {len(topology.get('connections', []))} connections")
-            return topology
+            return _suppress_if_unchanged(topology)
         except Exception as e:
             self.logger.warning(f"Failed to fetch topology from API: {type(e).__name__}: {e}")
             return dash.no_update

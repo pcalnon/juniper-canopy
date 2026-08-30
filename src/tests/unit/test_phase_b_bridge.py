@@ -1,6 +1,7 @@
 """Tests for Phase B browser WebSocket bridge: two-flag settings, polling toggle, store structure."""
 
 import os
+import re
 from unittest.mock import patch
 
 import pytest
@@ -531,8 +532,23 @@ class TestGapWs25TopologyRestGate:
 
     def test_topology_callback_signature_dropped_ws_status(self, dashboard_manager_source):
         """N1: the topology callback no longer reads ws-connection-status —
-        the gate was its only consumer."""
-        assert "def update_topology_store(n, ws_topology, active_tab):" in dashboard_manager_source
+        the gate was its only consumer.
+
+        Pinned on the ABSENCE of ``ws_status`` and on the first three
+        positional parameters, rather than on the whole signature as one
+        exact string. The exact-string form also failed for signature
+        changes that have nothing to do with this test's subject — it broke
+        when F-CANOPY-039 appended a ``current_topology`` State — which
+        made it a tripwire for edits it was never meant to govern.
+        """
+        match = re.search(r"def update_topology_store\(([^)]*)\):", dashboard_manager_source)
+        assert match is not None, "update_topology_store must still exist"
+        params = [p.strip() for p in match.group(1).split(",") if p.strip()]
+
+        assert "ws_status" not in params, f"N1: ws-connection-status gate must stay gone, got {params}"
+        # The Input order is a real contract — these three map positionally to
+        # tabpoll-topology / ws-topology-buffer / visualization-tabs.
+        assert params[:3] == ["n", "ws_topology", "active_tab"], f"leading Input order changed: {params}"
 
 
 @pytest.mark.unit
