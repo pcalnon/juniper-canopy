@@ -144,6 +144,104 @@ class TestLever2Suppression:
         assert dm._update_boundary_store_handler(n=1, active_tab="metrics", resolution=100, current_data=None) is dash.no_update
 
 
+class TestF039TopologyIdentitySuppression:
+    """F-CANOPY-039 — lever 2, applied to the topology store.
+
+    The topology poll rewrote a byte-identical 7,059 B payload every 5 s. Dash
+    fires every consumer of a store on any write, identical or not, so that
+    rewrite put THREE triggers on ``update_network_graph`` each cycle:
+
+        tabpoll-topology.n_intervals
+        network-visualizer-topology-store.data
+        network-visualizer-depth-slider.value
+
+    The third is the store's own doing — the slider's clientside bounds-sync
+    (``network_visualizer.py:706``) takes the topology store as its ONLY Input
+    and re-emits ``value`` unchanged on every write. Measured on the live trio:
+    8 invocations of the rebuild, 7 of them carrying the correct topology, and
+    the DOM never leaving its mount-time render.
+
+    Two consequences this class pins:
+
+    1. the 1.5-5 s rebuild was superseded before its response could be applied;
+    2. canopy#537's ``len(ctx.triggered) == 1`` short-circuit could NEVER fire,
+       because a poll cycle is never a bare tick. Suppressing the identical
+       write is what leaves a bare tick for that guard to catch — the two are
+       only effective together, which is why each measured 0-of-N alone.
+    """
+
+    STORE = "network-visualizer-topology-store"
+
+    TOPO = {
+        "input_units": 2,
+        "hidden_units": 10,
+        "output_units": 1,
+        "connections": [{"from": "input_0", "to": "hidden_0", "weight": 0.5}],
+        "nodes": [{"id": "input_0", "layer": 0}],
+    }
+
+    @patch("requests.get")
+    def test_identical_fetch_is_no_update(self, mock_get, dm):
+        mock_get.return_value = _resp(json_value={"data": dict(self.TOPO)})
+        assert dm._update_topology_store_handler(n=1, active_tab="topology", current=dict(self.TOPO)) is dash.no_update
+
+    @patch("requests.get")
+    def test_changed_fetch_still_writes(self, mock_get, dm):
+        mock_get.return_value = _resp(json_value={"data": dict(self.TOPO)})
+        stale = dict(self.TOPO, hidden_units=9)
+        assert dm._update_topology_store_handler(n=1, active_tab="topology", current=stale) == self.TOPO
+
+    @patch("requests.get")
+    def test_key_reordered_payload_is_still_suppressed(self, mock_get, dm):
+        """Canonical (sorted-key) comparison, not ``==`` on insertion order.
+
+        A re-serialised payload whose dict keys come back in a different order
+        is the same topology and must not re-trigger the rebuild.
+        """
+        reordered = {k: self.TOPO[k] for k in reversed(list(self.TOPO))}
+        mock_get.return_value = _resp(json_value={"data": reordered})
+        assert dm._update_topology_store_handler(n=1, active_tab="topology", current=dict(self.TOPO)) is dash.no_update
+
+    @patch("requests.get")
+    def test_mount_with_no_prior_value_still_writes(self, mock_get, dm):
+        """``current=None`` means "store empty" — the mount fetch must land.
+
+        This is also the shape every direct unit-test call site uses, so the
+        default must never suppress.
+        """
+        mock_get.return_value = _resp(json_value={"data": dict(self.TOPO)})
+        assert dm._update_topology_store_handler(n=1, active_tab="topology") == self.TOPO
+
+    def test_tab_gate_still_holds(self, dm):
+        assert dm._update_topology_store_handler(n=1, active_tab="metrics", current=None) is dash.no_update
+
+    @patch("requests.get")
+    def test_non_200_leaves_the_store_alone(self, mock_get, dm):
+        """The last-known-good posture survives the new guard."""
+        mock_get.return_value = _resp(status=503)
+        assert dm._update_topology_store_handler(n=1, active_tab="topology", current=dict(self.TOPO)) is dash.no_update
+
+    def test_store_is_declared_as_state_not_input(self, dm):
+        """The suppression's operand must be reachable, and must not self-trigger.
+
+        Declaring the callback's own Output as an Input would make it re-fire on
+        its own write; dropping the State entirely would silently disable the
+        guard (``current`` would be ``None`` forever, which never suppresses) and
+        the failure would be invisible to every other test in this file.
+        """
+        entry = None
+        for key, value in dm.app.callback_map.items():
+            if key.startswith(f"{self.STORE}.data"):
+                entry = value
+                break
+        assert entry is not None, f"no callback writes {self.STORE}"
+
+        state_ids = {s["id"] for s in entry.get("state", [])}
+        input_ids = {i["id"] for i in entry.get("inputs", [])}
+        assert self.STORE in state_ids, f"{self.STORE} must ride as State so the handler can compare against it"
+        assert self.STORE not in input_ids, f"{self.STORE} must NOT be an Input of its own writer"
+
+
 class TestLever3BoundariesCadence:
     def test_tabpoll_boundaries_rides_the_slow_lane(self, dm):
         intervals = {getattr(c, "id", None): c for c in _walk(dm.app.layout) if type(c).__name__ == "Interval"}

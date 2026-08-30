@@ -337,7 +337,7 @@ class TestDatastoreInner:
         fake_ctx = MagicMock()
         fake_ctx.triggered = [{"prop_id": "ws-topology-buffer.data"}]
         with patch.object(dmmod.dash, "callback_context", fake_ctx), patch("backend.cascor_service_adapter.CascorServiceAdapter._is_complete_topology", return_value=True), patch("backend.cascor_service_adapter.CascorServiceAdapter._transform_topology", return_value={"transformed": True}):
-            result = cb(1, {"hidden_units": [1, 2]}, "topology")
+            result = cb(1, {"hidden_units": [1, 2]}, "topology", None)
         assert result == {"transformed": True}
 
     def test_update_topology_store_ws_stub_falls_back_to_rest(self, dm):
@@ -350,7 +350,7 @@ class TestDatastoreInner:
         with patch.object(dmmod.dash, "callback_context", fake_ctx), patch("backend.cascor_service_adapter.CascorServiceAdapter._is_complete_topology", return_value=False), patch("backend.cascor_service_adapter.CascorServiceAdapter._transform_topology", return_value={"rest": True}), patch("requests.get") as mock_get:
             mock_get.return_value = _resp(ok=True, json_value={"data": {"input_size": 2, "output_size": 1, "hidden_units": []}})
             with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-                result = cb(1, {"hidden_units": 5}, "topology")
+                result = cb(1, {"hidden_units": 5}, "topology", None)
         assert result == {"rest": True}
 
     def test_update_topology_store_polls_rest_even_with_ws_connected(self, dm):
@@ -366,7 +366,10 @@ class TestDatastoreInner:
         with patch.object(dmmod.dash, "callback_context", fake_ctx), patch("backend.cascor_service_adapter.CascorServiceAdapter._transform_topology", return_value={"rest": True}), patch("requests.get") as mock_get:
             mock_get.return_value = _resp(ok=True, json_value={"data": {"input_size": 2, "output_size": 1, "hidden_units": []}})
             with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-                result = cb(1, None, "topology")
+                # 4th arg is F-CANOPY-039's ``current_topology`` State: None
+                # means "store empty", which never suppresses — so these tests
+                # exercise the same write path they always did.
+                result = cb(1, None, "topology", None)
         assert result == {"rest": True}
         mock_get.assert_called_once()
 
@@ -377,7 +380,10 @@ class TestDatastoreInner:
         with patch.object(dmmod.dash, "callback_context", fake_ctx), patch("backend.cascor_service_adapter.CascorServiceAdapter._transform_topology", return_value={"rest": True}), patch("requests.get") as mock_get:
             mock_get.return_value = _resp(ok=True, json_value={"data": {"input_size": 2, "output_size": 1, "hidden_units": []}})
             with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-                result = cb(1, None, "topology")
+                # 4th arg is F-CANOPY-039's ``current_topology`` State: None
+                # means "store empty", which never suppresses — so these tests
+                # exercise the same write path they always did.
+                result = cb(1, None, "topology", None)
         assert result == {"rest": True}
 
     def test_update_topology_store_graph_format_passthrough(self, dm):
@@ -395,7 +401,10 @@ class TestDatastoreInner:
         with patch.object(dmmod.dash, "callback_context", fake_ctx), patch("backend.cascor_service_adapter.CascorServiceAdapter._transform_topology", return_value={"rest": True}) as mock_transform, patch("requests.get") as mock_get:
             mock_get.return_value = _resp(ok=True, json_value={"data": graph_payload})
             with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-                result = cb(1, None, "topology")
+                # 4th arg is F-CANOPY-039's ``current_topology`` State: None
+                # means "store empty", which never suppresses — so these tests
+                # exercise the same write path they always did.
+                result = cb(1, None, "topology", None)
         assert result == graph_payload
         mock_transform.assert_not_called()
 
