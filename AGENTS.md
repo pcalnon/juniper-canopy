@@ -5,9 +5,40 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.6.0
-**Last Updated**: 2026-08-24
+**Last Updated**: 2026-08-30
 
 ---
+
+## Hazards (resident — do not relocate)
+
+Directives whose **non-application destroys work**. Everything else in this file may be demoted to
+the `docs/` tree under the memory budget; these may not, because a pointer only helps an agent that
+already knows to look. Adding a new hazard here is legitimate — ratchet space out of a reference
+section in the same PR rather than waiving the budget gate.
+
+- **Dash `no_update` chaining, and the duplicate writer it creates.** A clientside producer that
+  idles with `no_update` must never be an `Input` to an interval-driven callback **that shares its
+  tick**: the dependent callback is skipped for that tick, so the lane fires only when the producer
+  does — silently, with no error and no failing test. Route such a signal by what the callback needs
+  from it. **Read-only → `State`** (`ws-liveness-store`), and there is no second writer. **Must
+  drive an update → `State` cannot serve it** (State does not trigger), so it goes to a separate
+  `allow_duplicate` callback (`ws-metrics-buffer`) — and that callback co-owns the store id, so the
+  must-drive branch **always** produces a second writer. Therefore: **before reasoning from a
+  store's write census, count its writers — grep the store id, not the callback.** An
+  `allow_duplicate` `Output` is invisible to anyone reading the handler they happened to open.
+  `metrics-panel-metrics-store` has two writers and only one carries an identity guard
+  (`dashboard_manager.py` `:3877` guarded poll, `:3909` unguarded append).
+- **Do not change existing payload keys without versioning.** Add new keys as optional and update
+  dashboard consumers before changing a contract. The failure is silent to the author and breaks
+  clients.
+- **No global mutable state without locks.** All shared state uses `threading.Lock()`;
+  `TrainingState`'s lock is load-bearing. A lockless shared write corrupts a run with no error.
+- **Long-lived collections must be size-bounded.** Use `maxlen` for deques and cap history buffers
+  (`REPLAY_WEIGHT_BUFFER_MAX` reasons about a few-hundred-MB peak). Unbounded growth kills a long
+  run with no warning.
+- **`/tmp/` is prohibited** as the home for any script that produces, modifies or analyzes
+  repository content — it is reaped and the scripts are irrecoverable. Scratch *data* there is fine;
+  source files are not. Full rule and the motivating incident: § File Placement Rules.
 
 ## Project Overview
 
