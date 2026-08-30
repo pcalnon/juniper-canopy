@@ -553,7 +553,7 @@ class SecurityConstants:
     # ``/metrics/``, and any future sub-paths the prometheus_client
     # ASGI app may add.
     EXEMPT_PATH_PREFIXES: Final[tuple[str, ...]] = ("/dashboard", "/metrics")
-    # Exact path exemptions (health checks, OpenAPI docs).
+    # Exact path exemptions (health checks and the dashboard root; NOT the docs -- see below).
     EXEMPT_PATHS: Final[frozenset[str]] = frozenset(
         {
             "/",
@@ -562,9 +562,13 @@ class SecurityConstants:
             "/v1/health",
             "/v1/health/live",
             "/v1/health/ready",
-            "/docs",
-            "/openapi.json",
-            "/redoc",
+            # APD-DATA-024 / service-core 0.6.0: the documentation surface is
+            # deliberately NOT exempt. ``_is_exempt()`` ignores whether a key is
+            # configured, so listing /docs, /openapi.json and /redoc here made
+            # "docs enabled" and "docs public" the same switch: relaxing
+            # ``_docs_enabled`` in main.py (currently ``not get_secret("CANOPY_API_KEY")``)
+            # would serve the schema to everyone while looking like it sat behind
+            # the key. Removing them decouples the two.
         }
     )
 
