@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Upper version ceilings on all five first-party `juniper-*` dependencies.** canopy was the only
+  service pinning its Juniper dependencies with a floor and **no ceiling**, against the documented
+  ecosystem policy: the release-train plan states consumers pin `>=floor,<next-minor`, "which makes
+  each `0.x` a compatibility boundary". Now `juniper-observability>=0.4.0,<0.5.0`,
+  `juniper-service-core>=0.5.0,<0.8.0`, `juniper-cascor-protocol>=0.1.0,<0.3.0`,
+  `juniper-data-client>=0.4.1,<0.5.0`, `juniper-cascor-client>=0.7.0,<0.8.0`.
+
+  This is the root-cause fix for the lockfile drift found on 2026-08-31: canopy's
+  `juniper-service-core` lock sat at `==0.5.1` across **two** published releases. An unbounded range
+  does not make a lockfile self-updating -- it removes the *ceiling raise*, which is the event that
+  prompts a lockfile refresh in every other repo. With `Lockfile Freshness` running in constraint
+  mode (it asks only whether the lock still *satisfies* pyproject), `==0.5.1` satisfied `>=0.5.0`
+  forever and no gate ever fired. A ceiling turns the next minor into a deliberate, prompted upgrade.
+
+  No lockfile change accompanies this: all five locked versions already sit inside the new ceilings,
+  and a constraint-mode recompile reproduces the current lock with **zero** pin drift.
+
 ### Added
 
 - Tests pinning Stage 2 (`#511`) live-callback contracts that the original PR's happy-path suite left open: `_update_unified_status_bar_handler` element `[9]` stays `dash.no_update` on every error path (so a hiccup cannot blank `training-status-store` and re-fire its consumers), `{is_running, phase}` is coerced then suppressed, and `_update_system_panels_handler` isolates a `/api/status` Timeout/JSON failure from the details and stream-health surfaces.
