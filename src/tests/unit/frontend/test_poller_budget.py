@@ -172,3 +172,59 @@ class TestPollerShape:
         exempt = set(SHARED_LANES)
         unused = [iid for iid, _tab in _GATED_POLL_INTERVALS if iid not in used and iid not in exempt]
         assert not unused, f"gated intervals no perpetual poller reads: {unused}"
+
+
+class TestF039TickIsNotATrigger:
+    """F-CANOPY-039: ``tabpoll-topology`` must ride the topology rebuild as STATE.
+
+    dash-renderer identifies a pending callback by ``getUniqueIdentifier``
+    (``dash_renderer.dev.js:1715``) = its inputs + outputs + state, and NOT by
+    what triggered it. So a rebuild triggered by the topology store and one
+    triggered by a bare interval tick are the SAME identity. At ``:3026`` the
+    renderer computes
+
+        eDuplicates = concat(executing, requested), grouped by identity,
+                      each group sliced [0:-1]
+
+    and hands those to ``removeExecutingCallbacks``. Because ``requested`` is
+    concatenated last, the newly-requested invocation survives and the IN-FLIGHT
+    one is dropped — its response then arrives for a callback no longer in
+    ``executing`` and is discarded rather than applied.
+
+    The topology rebuild takes 1.5-5 s and the tab poll ticks every 5 s, so as an
+    Input the tick retired the populated rebuild on essentially every cycle and
+    the graph never painted. Measured on one fixture, one variable changed:
+
+        tabpoll as Input : 0 of 11 painted (deterministic, counts 0/0/0/0)
+        tabpoll as State : 11 of 11 painted (counts 2/10/2/89, traces 181)
+
+    State keeps ``n_intervals`` readable for the P2-1 pulse timing while removing
+    the trigger — the same Input -> State demotion F-CANOPY-037 applied to
+    ``metrics-panel-metrics-store`` one layer up.
+
+    Promoting it back to an Input would silently restore the defect, and every
+    other test in this repo would still pass.
+    """
+
+    REBUILD_OUTPUT = "network-visualizer-graph.figure"
+    TICK = "tabpoll-topology.n_intervals"
+
+    def _rebuild_entry(self, dashboard):
+        for entry in dashboard.app._callback_list:
+            if entry.get("clientside_function"):
+                continue
+            if self.REBUILD_OUTPUT in str(entry.get("output") or ""):
+                return entry
+        return None
+
+    def test_topology_rebuild_exists(self, dashboard):
+        assert self._rebuild_entry(dashboard) is not None, f"no server callback outputs {self.REBUILD_OUTPUT}"
+
+    def test_tabpoll_is_state_not_input_on_the_rebuild(self, dashboard):
+        entry = self._rebuild_entry(dashboard)
+        assert entry is not None
+        inputs = _deps(entry, "inputs")
+        state = _deps(entry, "state")
+
+        assert self.TICK not in inputs, f"{self.TICK} is an INPUT of the topology rebuild. dash-renderer will retire the " "in-flight rebuild every tick and discard its response (F-CANOPY-039, 0 of 11 painted)."
+        assert self.TICK in state, f"{self.TICK} must remain as STATE so the P2-1 pulse can still read n_intervals; " "dropping it entirely would break _calculate_highlight_properties."

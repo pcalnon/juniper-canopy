@@ -74,10 +74,27 @@ class TestRebuildIsNotChainedOffTheMetricsStore:
         assert SHARED_METRICS_STORE in _ids(rebuild_entry, "state")
 
     def test_real_topology_triggers_are_still_inputs(self, rebuild_entry):
-        """What legitimately means "the topology changed" must keep triggering."""
+        """What legitimately means "the topology changed" must keep triggering.
+
+        ``tabpoll-topology`` was on this list and has been REMOVED from it by
+        F-CANOPY-039. It does not mean "the topology changed" — it is a poll
+        cadence, and the thing it drives (``update_topology_store``) already
+        publishes a real change through ``-topology-store``. Keeping the tick as
+        an Input here meant the 5 s tick re-requested this callback while the
+        1.5-5 s rebuild was still executing; dash-renderer's executing/requested
+        dedup then retired the in-flight one and discarded its response.
+
+        Measured on one fixture with one variable changed:
+            tick as Input : 0 of 11 painted (deterministic, counts 0/0/0/0)
+            tick as State : 11 of 11 painted (counts 2/10/2/89, traces 181)
+
+        The tick is now State — see ``TestF039TickIsNotATrigger`` in
+        test_poller_budget.py, which pins that directly.
+        """
         inputs = _ids(rebuild_entry, "inputs")
-        for dep in (f"{COMPONENT_ID}-topology-store", "tabpoll-topology", "ws-cascade-add-buffer"):
+        for dep in (f"{COMPONENT_ID}-topology-store", "ws-cascade-add-buffer"):
             assert dep in inputs, f"{dep} must remain an Input of the rebuild"
+        assert "tabpoll-topology" not in inputs, "tabpoll-topology must NOT be an Input of the rebuild (F-CANOPY-039): as an Input " "the tick retires the in-flight rebuild every cycle and the graph never paints"
 
     def test_no_unconditional_fast_lane_store_drives_the_rebuild(self, rebuild_entry):
         """Class-level pin, not just this one store.
@@ -143,8 +160,8 @@ class TestNewUnitDetectionSurvivesTheDemotion:
             None,  # depth_filter
             "light",  # theme
             [],  # selected_nodes
-            0,  # n_intervals
-            None,  # ws_cascade_add
+            None,  # ws_cascade_add — LAST Input (F-CANOPY-039 moved the tick out of the Inputs)
+            0,  # n_intervals — now STATE, so it lands after every Input
             metrics_data,  # metrics_data — STATE, so it lands AFTER every Input
             None,  # view_state
             None,  # prev_hash
