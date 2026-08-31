@@ -5,7 +5,7 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.6.0
-**Last Updated**: 2026-08-30
+**Last Updated**: 2026-08-31
 
 ---
 
@@ -39,6 +39,24 @@ section in the same PR rather than waiving the budget gate.
 - **`/tmp/` is prohibited** as the home for any script that produces, modifies or analyzes
   repository content — it is reaped and the scripts are irrecoverable. Scratch *data* there is fine;
   source files are not. Full rule and the motivating incident: § File Placement Rules.
+- **Plotly trace *names* are a cross-language contract with the clientside JS — renaming one
+  silently mis-appends live data to the wrong trace.** Trace 0 of each plot is the WS-bridge
+  `extendTraces` target (appended by index); every other series is looked up by its exact **display
+  name** via `findTraceIndex` (`components/metrics_panel.py:850`) against the constants at
+  `metrics_panel.py:78-79` (`OUTPUT_TRACE_NAME`, `ACCURACY_TRACE_NAME`). A mismatch does not raise —
+  the lookup simply misses and WS points land on the wrong series, so the chart keeps updating and
+  is wrong. Both sides are pinned together by
+  `src/tests/unit/frontend/test_n9_metrics_visualization.py`; change a name in one place only by
+  changing it in all three.
+- **The pinned-params store must be MERGED, never replaced wholesale.**
+  `update_pinned_params_store` (`dashboard_manager.py:4183`) takes the existing store as a `State`
+  and delegates to `_merge_pinned_params` (`:6121`) for a reason: its pattern-match `Input` sees
+  only the pin checkboxes **currently in the DOM**, and the Parameters tables are rebuilt on every
+  params-store change, so any render while the store is empty or stale (mount before
+  `storage_type="local"` hydration, or a tab whose tables are not rendered) under-reports the real
+  pin set. A wholesale replace then asserts "not pinned" for every key it could not see, and the
+  next toggle persists that under-report — **silently discarding pins made before a reload**
+  (F-CANOPY-018 / F-CANOPY-028). Write only what you can actually observe; preserve the rest.
 
 ## Project Overview
 
@@ -452,128 +470,7 @@ The three-level configuration hierarchy, every setting, and which layer wins. Mo
 
 ## Code Style Guidelines
 
-### File Headers
-
-All Python files should include the standard project header:
-
-```python
-#####################################################################################################################################################################################################
-# Project:       Juniper
-# Sub-Project:   JuniperCanopy
-# Application:   juniper_canopy
-# Purpose:       Monitoring and Diagnostic Frontend for Cascade Correlation Neural Network
-#
-# Author:        Paul Calnon
-# Version:       <version>
-# File Name:     <filename>.py
-# File Path:     <Project>/<Sub-Project>/<Application>/<Source Directory Path>/
-#
-# Created Date:  <date created>
-# Last Modified: <date last changed>
-#
-# License:       MIT License
-# Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
-#
-# Description:
-#     <High level description of the current script>
-#
-#####################################################################################################################################################################################################
-# Notes:
-#     <Additional information about the script>
-#
-#####################################################################################################################################################################################################
-# References:
-#     <External information sources or documentation relevant to the script>
-#
-#####################################################################################################################################################################################################
-# TODO :
-#     <List of pending tasks or improvements for the script>
-#
-#####################################################################################################################################################################################################
-# COMPLETED:
-#     <List of completed tasks or features for the script>
-#
-#####################################################################################################################################################################################################
-```
-
-### Naming Conventions
-
-- **Classes:** PascalCase (e.g., `DemoMode`, `WebSocketManager`)
-- **Functions/Methods:** snake_case (e.g., `get_metrics_history`, `broadcast_from_thread`)
-- **Constants:** _UPPER_SNAKE_CASE (e.g., `_MAX_EPOCHS`, `_DEFAULT_PORT`)
-- **Private attributes:** Prefix with double underscore (e.g., `self.__private_data`)
-- **Protected attributes:** Prefix with single underscore (e.g., `self._lock`)
-
-### Metric Naming Standard
-
-- Use snake_case for all metric names
-- Prefix with `train_` or `val_` where relevant (e.g., `train_loss`, `val_loss`, `train_accuracy`, `val_accuracy`)
-- Standard metrics: `epoch`, `step`, `loss`, `accuracy`, `learning_rate`
-- Follow consistent naming across backend and frontend for interoperability
-
-### Blocking Rules
-
-- **No global mutable state without locks** - All shared state must use `threading.Lock()` for protection
-- **Any long-lived collections must be size-bounded** - Use `maxlen` for deques, limit history buffers to prevent memory leaks
-
-### Thread Safety
-
-When writing concurrent code:
-
-```python
-import threading
-
-class ThreadSafeClass:
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._stop = threading.Event()
-
-    def update_state(self, value):
-        """Thread-safe state update."""
-        with self._lock:
-            self.state = value
-
-    def get_state(self):
-        """Thread-safe state retrieval."""
-        with self._lock:
-            return self.state
-```
-
-### Async/Thread Communication
-
-For calling async code from threads:
-
-```python
-import asyncio
-
-# In async context (FastAPI startup)
-event_loop = asyncio.get_running_loop()
-websocket_manager.set_event_loop(event_loop)
-
-# From background thread
-websocket_manager.broadcast_from_thread(message)
-```
-
-### Error Handling
-
-```python
-def robust_function():
-    """Handle errors appropriately."""
-    try:
-        # Main logic
-        result = some_operation()
-    except ImportError:
-        # Expected errors - silent or debug logging
-        logger.debug("Optional module not available")
-    except SpecificException as e:
-        # Known errors - warning logging
-        logger.warning(f"Known issue: {type(e).__name__}: {e}")
-        return default_value
-    except Exception as e:
-        # Unexpected errors - error logging
-        logger.error(f"Unexpected error: {type(e).__name__}: {e}", exc_info=True)
-        raise
-```
+The standard file header, naming conventions, type-hint and docstring rules. Moved to [`docs/AGENTS_REFERENCE.md` § Code Style Reference](docs/AGENTS_REFERENCE.md#code-style-reference) — read it when working on this area.
 
 ## Environment Setup
 
