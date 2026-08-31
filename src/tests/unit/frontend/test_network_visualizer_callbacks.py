@@ -1075,7 +1075,7 @@ class TestCallbackInvocation:
         for key, callback_info in app.callback_map.items():
             if callback_key in key:
                 func = callback_info["callback"]
-                result = func.__wrapped__(simple_topology, "hierarchical", ["show"], "2d", "node_graph", None, None, "light", [], 0, None, metrics_data, None, None, None)
+                result = func.__wrapped__(simple_topology, "hierarchical", ["show"], "2d", "node_graph", None, None, "light", [], None, 0, metrics_data, None, None, None)
                 fig, _config, _, _, _, _, _, new_highlight = result
                 assert isinstance(fig, go.Figure)
                 # Should have detected new unit and created highlight
@@ -1119,7 +1119,7 @@ class TestCallbackInvocation:
         for key, callback_info in app.callback_map.items():
             if callback_key in key:
                 func = callback_info["callback"]
-                result = func.__wrapped__(simple_topology, "hierarchical", [], "2d", "node_graph", None, None, "light", [], 0, None, [], view_state, None, None)
+                result = func.__wrapped__(simple_topology, "hierarchical", [], "2d", "node_graph", None, None, "light", [], None, 0, [], view_state, None, None)
                 fig, _config, _, _, _, _, _, _ = result
                 assert isinstance(fig, go.Figure)
                 break

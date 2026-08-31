@@ -1,5 +1,52 @@
 #!/usr/bin/env python
-"""F-CANOPY-039: the topology rebuild's poll-tick short-circuit must name the LIVE lane.
+"""F-CANOPY-039: the poll tick must not TRIGGER the topology rebuild at all.
+
+ROOT CAUSE FOUND AND FIXED 2026-08-31. This module's original subject — canopy#537's
+bare-tick short-circuit — has been REMOVED, and everything below the next horizontal rule
+is retained only as the record of a wrong turn. Read this part first.
+
+The rebuild's response was never applied because **dash-renderer retires the in-flight
+invocation whenever the same callback identity is re-requested**:
+
+* ``getUniqueIdentifier`` (``dash_renderer.dev.js:1715``) hashes a pending callback's
+  inputs + outputs + state — **not** what triggered it. A rebuild triggered by the
+  topology store and one triggered by a bare tick are therefore the SAME identity.
+* ``:3026`` computes ``eDuplicates = concat(executing, requested)``, grouped by that
+  identity, each group sliced ``[0:-1]``, and passes the result to
+  ``removeExecutingCallbacks``. ``requested`` is concatenated LAST, so the newly
+  requested invocation survives and the **in-flight** one is dropped.
+* Its response then arrives for a callback no longer in ``executing`` and is discarded
+  rather than applied.
+
+The rebuild takes 1.5-5 s; ``tabpoll-topology`` ticked every 5 s. As an Input, the tick
+retired the populated rebuild on essentially every cycle.
+
+**canopy#537's guard made this worse, not better.** Before it, a bare tick ran a full
+rebuild that at least computed a correct figure (the measured "7 responses carrying the
+graph"). With the guard, the tick's invocation returned ``no_update`` for all 8 outputs —
+so it still displaced the in-flight rebuild and then contributed nothing in its place,
+turning an intermittent miss into a deterministic never-paint.
+
+Census, one fixture, one variable changed:
+
+    tick as Input : **0 of 11** painted — identical signatures, counts 0/0/0/0, sig 2
+    tick as State : **11 of 11** painted — counts 2/10/2/89, traces 181, sig 30850
+
+The fix is the Input -> State demotion, the same move F-CANOPY-037 applied to
+``metrics-panel-metrics-store`` one layer up. The durable rule: **a server-side
+``no_update`` does not save a renderer slot and does not prevent the invocation** — the
+round trip already happened and the invocation had already displaced its predecessor.
+Suppress the TRIGGER, not the work.
+
+---
+
+HISTORICAL, AND WRONG IN ITS CONCLUSION — retained because the reasoning was plausible at
+every step. In particular the duplicate-instance root cause asserted below was REFUTED by
+direct measurement (exactly one instance of every store id on all three tabs, with three
+control ids), and the claim that this module "does NOT fix F-CANOPY-039" was correct about
+the guard but wrong about where the defect lived.
+
+F-CANOPY-039: the topology rebuild's poll-tick short-circuit must name the LIVE lane.
 
 Ledger: juniper-ml notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md
 
@@ -76,12 +123,15 @@ def rebuild_source():
     for key, entry in app.callback_map.items():
         if f"{COMPONENT_ID}-graph.figure" not in key:
             continue
+        # Returns the callback's PRELUDE — everything before the first helper
+        # definition. It used to be sliced from the short-circuit block's own
+        # marker text, which meant removing that block made the fixture itself
+        # error out (F-CANOPY-039: the guard is now gone by design, and a fixture
+        # that cannot represent its absence cannot test for it).
         src = inspect.getsource(entry["callback"].__wrapped__)
-        start = src.find("Short-circuit")
-        assert start != -1, "the tick short-circuit block is gone entirely"
-        end = src.find("_dynamic_graph_config", start)
-        assert end != -1, "could not bound the short-circuit block"
-        return src[start:end]
+        end = src.find("_dynamic_graph_config")
+        assert end != -1, "could not bound the callback prelude"
+        return src[:end]
     # ``raise`` rather than ``pytest.fail`` so the function has no implicit
     # fall-through return: CodeQL cannot see that pytest.fail is NoReturn and
     # flags the mix as py/mixed-returns, which blocks the merge while the
@@ -105,35 +155,47 @@ def rebuild_entry():
 
 
 @pytest.mark.unit
-class TestTheGuardNamesTheLiveLane:
-    def test_short_circuit_matches_the_actual_interval_input(self, rebuild_source, rebuild_entry):
-        """THE regression, and the reason it is written this way.
+class TestTheGuardIsGoneAndTheTickIsNotATrigger:
+    """SUPERSEDES ``TestTheGuardNamesTheLiveLane``, which pinned canopy#537's
+    bare-tick short-circuit. That guard has been removed and this class pins the
+    replacement invariant, because live measurement refuted the guard's premise.
 
-        Asserting the literal string ``tabpoll-topology`` would pass while the callback
-        listened to something else entirely. This derives the interval id from the
-        callback's OWN Input list and requires the guard to name it — so renaming the
-        lane without updating the guard fails here instead of silently going dead for
-        another arc.
-        """
+    The guard assumed a bare tick SHOULD reach this callback and merely needed to
+    be cheap. It could not fire in practice (a poll cycle delivered three
+    triggers, never one, so ``len(ctx.triggered) == 1`` was never true), and once
+    the identical-store-write was suppressed and it COULD fire, it made things
+    worse rather than better:
+
+      * dash-renderer identifies a pending callback by inputs+outputs+state, not
+        by trigger (``getUniqueIdentifier``, dash_renderer.dev.js:1715);
+      * ``:3026`` drops the IN-FLIGHT invocation when the same identity is
+        re-requested, so its response arrives orphaned and is discarded;
+      * the tick's own invocation then returned ``no_update`` for all 8 outputs,
+        contributing nothing in place of what it displaced.
+
+    Net: a deterministic never-paint. 0 of 11 sessions with the tick as an Input,
+    11 of 11 once it became State — same fixture, one variable.
+
+    The durable rule: **a server-side ``no_update`` does not save a renderer slot
+    and does not prevent the invocation.** Suppress the TRIGGER, not the work.
+    """
+
+    def test_the_tick_is_not_an_input_of_the_rebuild(self, rebuild_entry):
         input_ids = [d.get("id") for d in rebuild_entry.get("inputs", []) if isinstance(d, dict)]
         intervals = [i for i in input_ids if isinstance(i, str) and ("interval" in i or i.startswith("tabpoll"))]
-        assert intervals, f"the rebuild has no interval-style Input; guard is unanchored (inputs: {input_ids})"
-        for interval_id in intervals:
-            assert interval_id in rebuild_source, f"the tick short-circuit does not name {interval_id!r}, which IS an Input of this callback — the guard is dead code and every tick will start a full rebuild (F-CANOPY-039)"
+        assert not intervals, f"an interval-style Input is back on the topology rebuild: {intervals}. " "It will retire the in-flight rebuild every tick and the graph will stop painting " "(F-CANOPY-039, measured 0 of 11)."
 
-    def test_guard_returns_no_update_for_all_eight_outputs(self, rebuild_source):
-        """A partial short-circuit would still write some outputs and keep the
-        supersession window open."""
-        assert "(dash.no_update,) * 8" in rebuild_source, "the tick short-circuit no longer returns no_update for all 8 outputs"
+    def test_the_tick_survives_as_state_for_the_pulse(self, rebuild_entry):
+        """Removing it entirely would break ``_calculate_highlight_properties``,
+        which reads ``n_intervals`` to time the P2-1 pulse."""
+        state_ids = [d.get("id") for d in rebuild_entry.get("state", []) if isinstance(d, dict)]
+        assert "tabpoll-topology" in state_ids, "tabpoll-topology must remain as STATE so the pulse can still read n_intervals"
 
-    def test_guard_still_yields_to_an_active_highlight(self, rebuild_source):
-        """Forward guard: the P2-1 pulse animates off the tick, so the short-circuit
-        must NOT swallow ticks while a highlight is running."""
-        assert "not current_highlight" in rebuild_source, "the tick short-circuit no longer defers to an active highlight; the new-node pulse will freeze"
-
-    def test_guard_only_fires_for_a_lone_trigger(self, rebuild_source):
-        """A real change arriving in the same dispatch must still rebuild."""
-        assert "len(ctx.triggered) == 1" in rebuild_source, "the short-circuit no longer requires a lone trigger; a real topology change batched with a tick would be skipped"
+    def test_the_dead_short_circuit_is_gone(self, rebuild_source):
+        """The guard is unreachable once the tick is State; leaving it in place
+        would be dead code that reads as protection."""
+        assert "(dash.no_update,) * 8" not in rebuild_source, "canopy#537's bare-tick short-circuit is back; it is unreachable while the tick is State"
+        assert "len(ctx.triggered) == 1" not in rebuild_source, "the lone-trigger short-circuit is back; see this class's docstring for why it made the failure deterministic"
 
 
 @pytest.mark.unit

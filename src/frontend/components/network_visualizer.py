@@ -350,13 +350,31 @@ class NetworkVisualizer(BaseComponent):
                 Input(f"{self.component_id}-depth-slider", "value"),  # CAN-020: hierarchy depth filter
                 Input("theme-state", "data"),
                 Input(f"{self.component_id}-selected-nodes", "data"),
-                # F-CANOPY-027: was ``fast-update-interval``, which forced a full topology
-                # re-render at 1 Hz from EVERY tab and held a renderer slot to do it. The
-                # gated lane only ticks while the Topology tab is active.
-                Input("tabpoll-topology", "n_intervals"),
                 Input("ws-cascade-add-buffer", "data"),  # D-06: WS cascade_add events trigger topo refresh
             ],
             [
+                # F-CANOPY-039 (EXPERIMENT): ``tabpoll-topology`` demoted Input -> State.
+                #
+                # dash-renderer identifies a pending callback by getUniqueIdentifier
+                # (dash_renderer.dev.js:1715) = its inputs + outputs + state, and NOT the
+                # trigger. So a rebuild triggered by the store and one triggered by a bare
+                # tick are the SAME identity. At :3026 it computes
+                #     eDuplicates = concat(executing, requested) grouped by identity,
+                #                   each group sliced [0:-1]
+                # so when the tick re-requests while the good rebuild is still EXECUTING,
+                # the in-flight one is the duplicate and is passed to
+                # removeExecutingCallbacks. Its response then arrives for a callback no
+                # longer in ``executing`` and is discarded rather than applied.
+                #
+                # That is why the graph never paints: the 5 s tick retires the populated
+                # rebuild every time, and (post-canopy#537) the tick's own invocation
+                # short-circuits to no_update, so nothing repaints in its place. Measured
+                # 0 of 11 with identical deterministic signatures.
+                #
+                # State keeps ``n_intervals`` readable for the P2-1 pulse timing while
+                # removing the trigger -- the same Input -> State demotion F-CANOPY-037
+                # used one layer up.
+                State("tabpoll-topology", "n_intervals"),
                 # F-CANOPY-037: ``metrics-panel-metrics-store`` was an INPUT here — the
                 # Stage 2 "chained store" hazard the F-CANOPY-027 note above flagged and
                 # left open. That global store is rewritten by the 1 Hz ``fast-update-
@@ -393,8 +411,8 @@ class NetworkVisualizer(BaseComponent):
             depth_filter: Optional[int],  # CAN-020: hierarchy depth filter (None = no filter)
             theme: str,
             selected_nodes: List[str],
-            n_intervals: int,
             ws_cascade_add: Optional[Dict[str, Any]],  # D-06: WS cascade_add events
+            n_intervals: int,  # F-CANOPY-039: State, not Input (see above) — read, never a trigger
             metrics_data: List[Dict[str, Any]],  # F-CANOPY-037: State, not Input (see above)
             view_state: Dict[str, Any],
             prev_hash: str,
@@ -423,34 +441,24 @@ class NetworkVisualizer(BaseComponent):
             Returns:
                 Tuple of updated components including new highlight state
             """
-            import dash
-
-            # Short-circuit: a bare poll tick with no highlight animation running has
-            # nothing to redraw, so skip the full rebuild.
+            # F-CANOPY-039: canopy#537's bare-tick short-circuit lived here and has been
+            # REMOVED, because the demotion above makes it unreachable — ``tabpoll-topology``
+            # is State now, so it can never appear in ``ctx.triggered`` and the guard's
+            # ``tick_only`` branch can never be taken.
             #
-            # F-CANOPY-039: this named ``fast-update-interval`` — the trigger
-            # F-CANOPY-027 REPLACED with ``tabpoll-topology``. The guard has been dead
-            # code ever since: every 5 s tick started a full 1.5-5 s rebuild, and the
-            # NEXT tick retired that invocation before its response could land, so the
-            # renderer discarded a correct 39,319 B figure ~every time. Measured: the
-            # callback's whole lifecycle completing (AddRequested -> LOADING ->
-            # Executed -> LOADED) with no dispatched action ever carrying the figure,
-            # a graph that painted 0 of 5 sessions, and — decisively — an immediate
-            # paint to 181 traces / sig 31152 the moment ``tabpoll-topology`` was
-            # disabled at runtime.
+            # It is worth recording that the guard did not merely fail to help: it made the
+            # failure WORSE. Before it, a bare tick ran a full rebuild that at least computed a
+            # correct figure (the measured "7 responses carrying the graph"). With the guard,
+            # the tick's invocation returned ``no_update`` for all 8 outputs — so it still
+            # retired the in-flight populated rebuild via the renderer's executing/requested
+            # dedup, and then contributed nothing in its place. That is what turned an
+            # intermittent miss into a deterministic never-paint: 0 of 11 sessions, identical
+            # signatures, against 11 of 11 once the tick stopped being a trigger at all.
             #
-            # Both ids are matched so the guard cannot silently die again if the lane
-            # is renamed a second time; the highlight condition is unchanged, so the
-            # P2-1 pulse still animates off the tick while it is running.
-            try:
-                ctx = dash.callback_context
-                if ctx.triggered and len(ctx.triggered) == 1:
-                    trigger_id = ctx.triggered[0]["prop_id"]
-                    tick_only = "tabpoll-topology" in trigger_id or "fast-update-interval" in trigger_id
-                    if tick_only and not current_highlight:
-                        return (dash.no_update,) * 8
-            except Exception:  # nosec B110 — callback_context unavailable outside Dash request
-                pass
+            # The lesson generalises: a server-side ``no_update`` does not save a renderer
+            # slot and does not prevent the invocation. The round trip already happened, and
+            # the invocation had already displaced its predecessor. Suppress the TRIGGER, not
+            # the work.
 
             def _dynamic_graph_config():
                 """Build dcc.Graph config with a timestamped screenshot filename."""
