@@ -4,7 +4,7 @@
 
 **Version:** 0.25.0
 **Status:** Active
-**Last Updated:** July 4, 2026
+**Last Updated:** August 31, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -12,6 +12,7 @@
 ## Table of Contents
 
 - [Overview](#overview)
+- [AGENTS Reference](#agents-reference)
 - [API Reference](#api-reference)
 - [Configuration Reference](#configuration-reference)
 - [WebSocket Reference](#websocket-reference)
@@ -29,6 +30,20 @@
 This document serves as a central index for all technical reference documentation in juniper-canopy. Each section links to the detailed reference document for that subsystem.
 
 For comprehensive usage guides, see the corresponding manuals linked from [DOCUMENTATION_OVERVIEW.md](DOCUMENTATION_OVERVIEW.md).
+
+---
+
+## AGENTS Reference
+
+Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan (juniper-ml plan §P5 step e), so it is read on demand rather than loaded into every session. Nothing was rewritten; each relocated section carries a provenance line naming where it came from.
+
+| Document | Purpose | Lines |
+|----------|---------|-------|
+| [AGENTS_REFERENCE.md](AGENTS_REFERENCE.md) | Layered architecture and callback topology, the three-level configuration hierarchy, and the REST/WebSocket contract | ~580 |
+
+The same cut sent documentation-about-documentation to [DOCUMENTATION_OVERVIEW.md](DOCUMENTATION_OVERVIEW.md) instead, which is the file whose subject that already is.
+
+**Hazards were deliberately not relocated.** Directives whose non-application destroys work stay resident in [`AGENTS.md` § Hazards](../AGENTS.md#hazards-resident--do-not-relocate), because a pointer only helps an agent that already knows to look.
 
 ---
 
@@ -215,6 +230,6 @@ The most commonly used environment variables for juniper-canopy configuration. F
 
 ---
 
-**Last Updated:** July 4, 2026
+**Last Updated:** August 31, 2026
 **Version:** 0.25.1
 **Maintainer:** Paul Calnon
