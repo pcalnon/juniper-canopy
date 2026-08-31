@@ -38,6 +38,17 @@ The fix is the Input -> State demotion, the same move F-CANOPY-037 applied to
 round trip already happened and the invocation had already displaced its predecessor.
 Suppress the TRIGGER, not the work.
 
+WHERE THE OLD TESTS WENT (sequence-safety record). ``TestTheGuardNamesTheLiveLane`` and
+its four methods were deleted by canopy#549, because they pinned properties of the guard
+that PR removes — and ``State`` can never appear in ``ctx.triggered``, so the guard is
+unreachable rather than merely unused. Their coverage is not lost, it is INVERTED:
+``TestTheGuardIsGoneAndTheTickIsNotATrigger`` below pins the guard's absence and the tick's
+demotion, and ``TestF039TickIsNotATrigger`` in ``test_poller_budget.py`` fails on the
+parent with the exact diagnostic. The symbol-loss screen cannot infer that (both the names
+and the bodies changed), so the removals are waived by name with ``Allow-Symbol-Loss``
+trailers. canopy#549 merged without them and turned ``main`` red; this note and those
+trailers are the repair.
+
 ---
 
 HISTORICAL, AND WRONG IN ITS CONCLUSION — retained because the reasoning was plausible at
