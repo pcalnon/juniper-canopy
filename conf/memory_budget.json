@@ -27,9 +27,16 @@
     "Allow-Budget-Overrun, because an overrun borrows against a ceiling that still stands",
     "while a raise moves it and erases the debt for everyone.",
     "",
-    "docs/REFERENCE.md is deliberately NOT governed. It is the migration DESTINATION;",
-    "capping it would penalise exactly the relocation this plan wants, and it is read on",
-    "demand rather than always loaded -- which is the entire point."
+    "THIS REPO'S DESTINATIONS ARE NOT docs/REFERENCE.md. That line was inherited from the",
+    "juniper-ml original and was false here for the whole cut. Canopy relocated to TWO",
+    "files, by subject, in two sequential single-destination PRs: documentation-about-",
+    "documentation to docs/DOCUMENTATION_OVERVIEW.md (#540), and the remaining reference",
+    "material to a new docs/AGENTS_REFERENCE.md (#541). docs/REFERENCE.md keeps its index",
+    "role and carries one row per destination.",
+    "",
+    "None of the three is governed, and for the reason the original gave: capping a",
+    "destination would penalise exactly the relocation this plan wants, and they are read",
+    "on demand rather than always loaded -- which is the entire point."
   ],
   "files": {
     "AGENTS.md": {

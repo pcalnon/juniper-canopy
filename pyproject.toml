@@ -106,7 +106,7 @@ dependencies = [
     # ``build_date`` passthrough on ``set_build_info`` + the shared
     # ``ReadinessResponse`` model for build provenance (juniper-ml
     # notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md).
-    "juniper-observability>=0.4.0",
+    "juniper-observability>=0.4.0,<0.5.0",
     # E-8 boot-time dependency-floor self-check. canopy calls
     # ``enforce_dependency_floors(distribution="juniper-canopy")`` in its FastAPI
     # lifespan (``src/main.py``) to fail loud before binding if any installed
@@ -116,12 +116,12 @@ dependencies = [
     # dead app" class at first boot. Unconditional (the check must always run).
     # 0.5.0 floor: adds ``enforce_auth_posture`` (SEC-F01 / HO-2), the boot-time
     # auth-posture self-check the lifespan calls right after the floor check.
-    "juniper-service-core>=0.5.0",
+    "juniper-service-core>=0.5.0,<0.8.0",
     # METRICS-MON R2.2.5 / seed-05: WS frame schema validation. Pinned
     # at the first stable release; pulled in transitively by
     # juniper-cascor-client too, but pinned explicitly here so the
     # dependency edge is visible to anyone reading canopy's pyproject.
-    "juniper-cascor-protocol>=0.1.0",
+    "juniper-cascor-protocol>=0.1.0,<0.3.0",
     # 2026-05-10: promoted from the [observability] extra into required
     # deps. ``src/observability.py:152`` unconditionally imports
     # ``prometheus_client`` whenever ``CANOPY_METRICS_ENABLED=true``, and
@@ -145,7 +145,7 @@ juniper-data = [
     # canopy now constructs ``JuniperDataClient`` with the ``on_request``
     # instrumentation kwarg (added in 0.4.1). Pin floor matches the
     # release that introduced the kwarg.
-    "juniper-data-client>=0.4.1",
+    "juniper-data-client>=0.4.1,<0.5.0",
     "requests>=2.28.0",
 ]
 juniper-cascor = [
@@ -159,7 +159,7 @@ juniper-cascor = [
     # Earlier releases lack the surface, so the floor is the oldest version the
     # adapter can run against. (Prior floor 0.6.0: FakeCascorClient ``_request``
     # in-memory parity, cascor-client#91.)
-    "juniper-cascor-client>=0.7.0",
+    "juniper-cascor-client>=0.7.0,<0.8.0",
 ]
 observability = [
     # prometheus-client moved to [project] dependencies on 2026-05-10
