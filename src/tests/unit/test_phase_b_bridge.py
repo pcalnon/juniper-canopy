@@ -526,9 +526,19 @@ class TestGapWs25TopologyRestGate:
         comment explaining why so future contributors don't 'fix' it."""
         assert "raw weight matrices" in dashboard_manager_source
         assert "GAP-WS-25" in dashboard_manager_source
-        # The raw-topology callback signature must not include ws_status —
-        # the callback definition stays as-is.
-        assert "def update_raw_topology_store(n, active_tab, view_mode):" in dashboard_manager_source
+
+        # The raw-topology callback must not read ws_status. Pinned on the ABSENCE
+        # of that parameter rather than on the whole signature as one exact string:
+        # the exact-string form asserted `(n, active_tab, view_mode)` and therefore
+        # failed for a change that has nothing to do with WS gating — F-CANOPY-040
+        # renamed that parameter to `display_mode`, because reading the 2D/3D
+        # toggle instead of the Node Graph / Weight Matrix selector is exactly what
+        # kept the heatmap empty. A tripwire for edits it was never meant to govern.
+        match = re.search(r"def update_raw_topology_store\(([^)]*)\):", dashboard_manager_source)
+        assert match is not None, "update_raw_topology_store must still exist"
+        params = [p.strip() for p in match.group(1).split(",") if p.strip()]
+        assert "ws_status" not in params, f"GAP-WS-25: raw topology must stay WS-ungated, got {params}"
+        assert params[:2] == ["n", "active_tab"], f"leading Input order changed: {params}"
 
     def test_topology_callback_signature_dropped_ws_status(self, dashboard_manager_source):
         """N1: the topology callback no longer reads ws-connection-status —

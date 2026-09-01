@@ -246,29 +246,29 @@ class TestStoreHandlerBranches:
         assert result is dash.no_update
 
     def test_raw_topology_guard_wrong_tab(self, dm):
-        assert dm._update_raw_topology_store_handler(n=1, active_tab="metrics", view_mode="weight_matrix") is dash.no_update
+        assert dm._update_raw_topology_store_handler(n=1, active_tab="metrics", display_mode="weight_matrix") is dash.no_update
 
     def test_raw_topology_guard_wrong_view(self, dm):
-        assert dm._update_raw_topology_store_handler(n=1, active_tab="topology", view_mode="graph") is dash.no_update
+        assert dm._update_raw_topology_store_handler(n=1, active_tab="topology", display_mode="graph") is dash.no_update
 
     @patch("requests.get")
     def test_raw_topology_success(self, mock_get, dm):
         mock_get.return_value = _resp(ok=True, json_value={"weights": [[1, 2]]})
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dm._update_raw_topology_store_handler(n=1, active_tab="topology", view_mode="weight_matrix")
+            result = dm._update_raw_topology_store_handler(n=1, active_tab="topology", display_mode="weight_matrix")
         assert result == {"weights": [[1, 2]]}
 
     @patch("requests.get")
     def test_raw_topology_non_ok(self, mock_get, dm):
         mock_get.return_value = _resp(ok=False, status=500)
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dm._update_raw_topology_store_handler(n=1, active_tab="topology", view_mode="weight_matrix")
+            result = dm._update_raw_topology_store_handler(n=1, active_tab="topology", display_mode="weight_matrix")
         assert result is dash.no_update
 
     @patch("requests.get", side_effect=Exception("boom"))
     def test_raw_topology_exception(self, _mock_get, dm):
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = dm._update_raw_topology_store_handler(n=1, active_tab="topology", view_mode="weight_matrix")
+            result = dm._update_raw_topology_store_handler(n=1, active_tab="topology", display_mode="weight_matrix")
         assert result is dash.no_update
 
     @patch("requests.get")
