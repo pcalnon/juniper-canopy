@@ -183,3 +183,135 @@ class TestNewUnitDetectionSurvivesTheDemotion:
             {"network_topology": {"hidden_units": 1}},
         ]
         assert self._invoke(rebuild_entry, metrics)[-1] is None
+
+
+@pytest.mark.unit
+class TestM16WholeWindowGlowDetection:
+    """M-TOPOLOGY-16: the cascade-add glow must survive the addition scrolling
+    out of the last pair.
+
+    The detector used to compare ONLY ``metrics_data[-2]`` against ``[-1]``. The
+    rebuild does not run on every metrics sample, so by the time it runs those two
+    are almost always equal and the addition sits in the middle of the window.
+    Measured live, logging the detector's own arguments from inside the callback:
+
+        metrics_len=4   last_pair=40->40  window_span=(39, 40)  armed=0
+        metrics_len=23  last_pair=17->17  window_span=(0, 17)   armed=0
+
+    The second carries SEVENTEEN additions and armed zero times. After the fix, an
+    identical window shape arms:
+
+        metrics_len=4   last_pair=40->40  window_span=(39, 40)  armed=1  unit=39
+
+    Same inputs, opposite outcome -- the scan is the only variable.
+    """
+
+    def _viz(self):
+        return NetworkVisualizer({"show_weights": True, "layout": "hierarchical"}, component_id=COMPONENT_ID)
+
+    def _window(self, *hidden_counts):
+        return [{"network_topology": {"hidden_units": h}} for h in hidden_counts]
+
+    def _invoke(self, entry, metrics_data):
+        topology = {
+            "input_units": 2,
+            "hidden_units": 1,
+            "output_units": 1,
+            "connections": [{"source": "input_0", "target": "hidden_0", "weight": 0.5}],
+        }
+        return entry["callback"].__wrapped__(
+            topology,
+            "hierarchical",
+            ["show"],
+            "2d",
+            "node_graph",
+            None,
+            None,
+            "light",
+            [],
+            None,
+            0,
+            metrics_data,
+            None,
+            None,
+            None,
+        )
+
+    def test_addition_mid_window_is_detected(self, rebuild_entry):
+        """THE regression. The addition is at index 1; the last pair is 1->1.
+
+        A last-pair check returns None here, which is precisely the live 0-of-N
+        signature. Fails on the parent commit.
+        """
+        highlight = self._invoke(rebuild_entry, self._window(0, 1, 1, 1))[-1]
+        assert highlight is not None, "whole-window scan failed to find an addition that is not in the last pair"
+        assert highlight["unit_index"] == 0
+        assert highlight["node_id"] == "hidden_0"
+
+    def test_steady_window_arms_nothing(self, rebuild_entry):
+        """Forward guard against over-correcting into 'always arms'."""
+        assert self._invoke(rebuild_entry, self._window(1, 1, 1, 1))[-1] is None
+
+    def test_same_unit_does_not_rearm(self):
+        """Without this the whole-window scan re-arms the SAME unit on every
+        rebuild -- the glow would restart forever and never fade."""
+        viz = self._viz()
+        already = {"node_id": "hidden_0", "unit_index": 0, "state": "active", "start_interval": 5, "shown_unit": 0}
+        out = viz._update_highlight_state(
+            current_highlight=already,
+            newly_added_unit=0,
+            n_hidden=3,
+            selected_nodes=[],
+            n_intervals=99,
+        )
+        assert out["start_interval"] == 5, "the highlight was reset for a unit already shown"
+
+    def test_a_newer_unit_does_rearm(self):
+        """Dedupe must not become 'never glows again'."""
+        viz = self._viz()
+        already = {"node_id": "hidden_0", "unit_index": 0, "state": "active", "start_interval": 5, "shown_unit": 0}
+        out = viz._update_highlight_state(
+            current_highlight=already,
+            newly_added_unit=2,
+            n_hidden=5,
+            selected_nodes=[],
+            n_intervals=99,
+        )
+        assert out["unit_index"] == 2 and out["shown_unit"] == 2
+        assert out["start_interval"] == 99
+
+    def test_faded_marker_keeps_the_memory_and_renders_nothing(self):
+        """The fade path returns a marker, not None.
+
+        Returning a bare None would erase ``shown_unit``, and the whole-window scan
+        would immediately re-arm the same unit -- a fade/re-arm loop. The marker has
+        to render nothing, which is the ``node_id`` guard in
+        ``_calculate_highlight_properties``.
+        """
+        viz = self._viz()
+        fading = {"node_id": "hidden_0", "unit_index": 0, "state": "fading", "fade_start_interval": 0, "shown_unit": 0}
+        out = viz._update_highlight_state(
+            current_highlight=fading,
+            newly_added_unit=None,
+            n_hidden=3,
+            selected_nodes=[],
+            n_intervals=10000,
+        )
+        assert out is not None, "fade completion dropped the dedupe memory (returned None)"
+        assert out.get("node_id") is None
+        assert out.get("shown_unit") == 0
+        assert viz._calculate_highlight_properties(out, 10000) is None, "the faded marker rendered highlight props"
+
+    def test_faded_unit_is_not_rearmed_by_the_scan(self):
+        """End of the loop the naive dedupe leaves open: after the glow has faded,
+        the window STILL contains that addition, so the scan still reports it."""
+        viz = self._viz()
+        done = {"node_id": None, "state": "done", "shown_unit": 0}
+        out = viz._update_highlight_state(
+            current_highlight=done,
+            newly_added_unit=0,
+            n_hidden=3,
+            selected_nodes=[],
+            n_intervals=200,
+        )
+        assert out.get("node_id") is None, "a faded unit was re-armed by the whole-window scan"
