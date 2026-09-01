@@ -508,13 +508,34 @@ class NetworkVisualizer(BaseComponent):
             current_hash = compute_hash(topology_data)
             n_hidden = topology_data.get("hidden_units", 0)
 
-            # Detect newly added hidden unit from metrics delta
+            # Detect newly added hidden unit from metrics delta.
+            #
+            # M-TOPOLOGY-16: this was a LAST-PAIR check — it compared only
+            # ``metrics_data[-2]`` against ``[-1]``. The rebuild does not run on
+            # every metrics sample, so by the time it does run those two samples
+            # are almost always identical and the addition has scrolled into the
+            # middle of the window. Measured live, with the detector's own
+            # arguments logged from inside the callback:
+            #
+            #   metrics_len=4   last_pair=40->40  window_span=(39, 40)  armed=0
+            #   metrics_len=23  last_pair=17->17  window_span=(0, 17)   armed=0
+            #
+            # The second is the whole defect in one line: a window carrying
+            # SEVENTEEN unit additions, and the glow armed zero times. It was
+            # never flaky in the sense of "sometimes misses" — on this evidence
+            # it essentially never fires.
+            #
+            # Scanning backwards finds the MOST RECENT addition anywhere in the
+            # window, which is the one worth glowing. ``shown_unit`` below is what
+            # keeps that from re-arming forever (see _update_highlight_state).
             newly_added_unit = None
             if metrics_data and len(metrics_data) >= 2:
-                prev_hidden = metrics_data[-2].get("network_topology", {}).get("hidden_units", 0)
-                curr_hidden = metrics_data[-1].get("network_topology", {}).get("hidden_units", 0)
-                if curr_hidden > prev_hidden:
-                    newly_added_unit = curr_hidden - 1  # Index of new unit
+                for _i in range(len(metrics_data) - 1, 0, -1):
+                    prev_hidden = (metrics_data[_i - 1] or {}).get("network_topology", {}).get("hidden_units", 0) or 0
+                    curr_hidden = (metrics_data[_i] or {}).get("network_topology", {}).get("hidden_units", 0) or 0
+                    if curr_hidden > prev_hidden:
+                        newly_added_unit = curr_hidden - 1  # Index of new unit
+                        break
 
             # P2-1: Manage new node highlight state
             new_highlight = self._update_highlight_state(
@@ -1613,8 +1634,18 @@ class NetworkVisualizer(BaseComponent):
         Returns:
             Updated highlight state or None
         """
-        # If a new hidden unit was just added, create/reset highlight to that node
-        if newly_added_unit is not None and newly_added_unit < n_hidden:
+        # M-TOPOLOGY-16: ``shown_unit`` is the dedupe memory, and it is what makes a
+        # WHOLE-WINDOW scan safe. The detector now reports the most recent addition
+        # anywhere in the metrics window, so without this the same unit would re-arm
+        # on every rebuild and the glow would never advance or fade. Worse, the
+        # obvious dedupe — "is it already the current highlight?" — does NOT close
+        # the loop: once the highlight fades to None the scan still reports that
+        # unit, and it re-arms forever. So the memory has to OUTLIVE the highlight,
+        # which is why the fade path below returns a marker rather than None.
+        shown_unit = (current_highlight or {}).get("shown_unit")
+
+        # If a genuinely NEW hidden unit was added, create/reset highlight to it.
+        if newly_added_unit is not None and newly_added_unit < n_hidden and (shown_unit is None or newly_added_unit > shown_unit):
             node_id = f"hidden_{newly_added_unit}"
             return {
                 "node_id": node_id,
@@ -1622,6 +1653,7 @@ class NetworkVisualizer(BaseComponent):
                 "state": "active",
                 "start_interval": n_intervals,
                 "fade_start_interval": None,
+                "shown_unit": newly_added_unit,
             }
 
         # No current highlight - nothing to do
@@ -1648,8 +1680,12 @@ class NetworkVisualizer(BaseComponent):
             fade_duration_ms = 2000  # 2 seconds
 
             if elapsed_ms >= fade_duration_ms:
-                # Fade complete, clear highlight
-                return None
+                # Fade complete. Clear the VISIBLE highlight but KEEP ``shown_unit``
+                # (M-TOPOLOGY-16) — returning a bare None here would erase the dedupe
+                # memory, and the whole-window scan would immediately re-arm the same
+                # unit on the next rebuild, glowing it forever in a fade/re-arm loop.
+                # ``node_id`` is None, so _calculate_highlight_properties renders nothing.
+                return {"node_id": None, "state": "done", "shown_unit": current_highlight.get("shown_unit")}
 
         return current_highlight
 
@@ -1670,6 +1706,12 @@ class NetworkVisualizer(BaseComponent):
             return None
 
         node_id = highlight.get("node_id")
+        # M-TOPOLOGY-16: a faded highlight is now a ``{"node_id": None, ...}`` marker
+        # that carries the dedupe memory rather than a bare None, so it reaches here.
+        # It must render nothing. Without this guard the marker would fall through and
+        # emit highlight props for a node id of None.
+        if not node_id:
+            return None
         state = highlight.get("state", "active")
         start_interval = highlight.get("start_interval", n_intervals)
 
