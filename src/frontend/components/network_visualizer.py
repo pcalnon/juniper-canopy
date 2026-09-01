@@ -1269,11 +1269,31 @@ class NetworkVisualizer(BaseComponent):
         if output_weights:
             row_heights.append(max(output_size, 1))
 
+        # F-CANOPY-041: plotly enforces ``vertical_spacing <= 1 / (n_rows - 1)`` and
+        # raises ValueError otherwise — which Dash turns into an HTTP 500, so the
+        # Weight Matrix view did not degrade, it BROKE.
+        #
+        # The old form was a fixed two-branch heuristic (0.08 / 0.04) that ignored
+        # the constraint entirely. One row per hidden unit plus one for the output
+        # weights means 0.04 stops being legal at n_rows = 27, i.e. **26 hidden
+        # units**: at 25 units the limit is exactly 0.0400 and it just fits, at 26
+        # it is 0.0385 and every render raises. Measured live on a 40-unit cascade —
+        # limit 0.0250 against a requested 0.04, a 500 on every poll tick.
+        #
+        # It stayed invisible because the service default ``max_hidden_units`` is 10,
+        # and because F-CANOPY-040 meant this function was never reached with real
+        # data at all. Fixing that gate is what exposed this.
+        #
+        # Clamping to the library's own limit keeps the preferred spacing whenever it
+        # is legal and degrades gracefully — tighter gaps on tall cascades — instead
+        # of failing the request.
+        desired_spacing = 0.08 if n_rows <= 5 else 0.04
+        max_spacing = (1.0 / (n_rows - 1)) if n_rows > 1 else desired_spacing
         fig = make_subplots(
             rows=n_rows,
             cols=1,
             subplot_titles=subplot_titles,
-            vertical_spacing=0.08 if n_rows <= 5 else 0.04,
+            vertical_spacing=min(desired_spacing, max_spacing),
             row_heights=row_heights,
         )
 
