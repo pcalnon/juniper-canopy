@@ -3983,10 +3983,16 @@ class DashboardManager:
             Output("network-visualizer-raw-topology-store", "data"),
             Input("tabpoll-topology", "n_intervals"),  # F-CANOPY-027: was slow-update-interval
             Input("visualization-tabs", "active_tab"),
-            State("network-visualizer-view-mode", "value"),
+            # F-CANOPY-040: was ``network-visualizer-view-mode`` — the 2D/3D toggle,
+            # whose values are "2d" and "3d". The handler gates on
+            # ``!= "weight_matrix"``, so that comparison was ALWAYS true, the poll
+            # returned ``dash.no_update`` on every tick, the raw-topology store was
+            # never populated, and the Weight Matrix heatmap could never render for
+            # anyone. The Node Graph / Weight Matrix selector is ``-display-mode``.
+            State("network-visualizer-display-mode", "value"),
             prevent_initial_call=False,
         )
-        def update_raw_topology_store(n, active_tab, view_mode):
+        def update_raw_topology_store(n, active_tab, display_mode):
             """Fetch raw weight-oriented topology for heatmap view (OF-1).
 
             Only polls when topology tab is active AND weight matrix view is selected.
@@ -3998,7 +4004,7 @@ class DashboardManager:
             the socket is up. Per-tab + per-view-mode gating already restricts
             polling to the heatmap surface.
             """
-            return self._update_raw_topology_store_handler(n=n, active_tab=active_tab, view_mode=view_mode)
+            return self._update_raw_topology_store_handler(n=n, active_tab=active_tab, display_mode=display_mode)
 
         # PERF-CN-01: prevent_initial_call=False — must hit /api/dataset on
         # mount when the dataset tab is active so the plotter has data before
@@ -6892,9 +6898,17 @@ class DashboardManager:
             self.logger.warning(f"Failed to fetch topology from API: {type(e).__name__}: {e}")
             return dash.no_update
 
-    def _update_raw_topology_store_handler(self, n=None, active_tab=None, view_mode=None):
-        """Fetch raw weight-oriented topology from API for heatmap view (OF-1)."""
-        if active_tab != "topology" or view_mode != "weight_matrix":
+    def _update_raw_topology_store_handler(self, n=None, active_tab=None, display_mode=None):
+        """Fetch raw weight-oriented topology from API for heatmap view (OF-1).
+
+        F-CANOPY-040: the parameter is ``display_mode``, not ``view_mode``. It is
+        compared against ``"weight_matrix"``, which is a value of
+        ``network-visualizer-display-mode`` (Node Graph / Weight Matrix) — NOT of
+        ``network-visualizer-view-mode`` (2D / 3D). The callback used to pass the
+        latter, so this gate was always true and the heatmap never had data.
+        The name is part of the fix: it is what made the mis-wiring look right.
+        """
+        if active_tab != "topology" or display_mode != "weight_matrix":
             return dash.no_update
 
         try:

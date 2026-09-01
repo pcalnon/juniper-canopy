@@ -32,6 +32,7 @@ Design of record: ``notes/JUNIPER_2026-08-23_JUNIPER-CANOPY_CALLBACK-STARVATION-
 """
 
 import collections
+import re
 import sys
 from pathlib import Path
 
@@ -228,3 +229,73 @@ class TestF039TickIsNotATrigger:
 
         assert self.TICK not in inputs, f"{self.TICK} is an INPUT of the topology rebuild. dash-renderer will retire the " "in-flight rebuild every tick and discard its response (F-CANOPY-039, 0 of 11 painted)."
         assert self.TICK in state, f"{self.TICK} must remain as STATE so the P2-1 pulse can still read n_intervals; " "dropping it entirely would break _calculate_highlight_properties."
+
+
+@pytest.mark.unit
+class TestF040RawTopologyGateIsWiredToTheRightControl:
+    """F-CANOPY-040: the raw-topology poll must read the DISPLAY mode, not the 2D/3D toggle.
+
+    The handler gates on ``display_mode != "weight_matrix"``. ``weight_matrix`` is a
+    value of ``network-visualizer-display-mode`` (Node Graph / Weight Matrix). The
+    callback used to pass ``network-visualizer-view-mode``, whose only values are
+    ``"2d"`` and ``"3d"`` — so the comparison was ALWAYS true, the poll returned
+    ``dash.no_update`` on every tick, the raw-topology store was never populated, and
+    the Weight Matrix heatmap could never render. Measured live: ``/api/topology/raw``
+    served a full 40-unit weight payload while the heatmap drew zero traces.
+
+    WHY NO EXISTING TEST CAUGHT IT, which is the point of this class. Every handler
+    test calls ``_update_raw_topology_store_handler(..., display_mode="weight_matrix")``
+    DIRECTLY. The handler was always correct; only the wiring was wrong, and nothing
+    asserted the wiring. Unit coverage of a correct function cannot see a caller that
+    never supplies the value — so this pins the CALLBACK's dependency, not the handler.
+    """
+
+    STORE = "network-visualizer-raw-topology-store"
+    DISPLAY_MODE = "network-visualizer-display-mode"
+    VIEW_MODE = "network-visualizer-view-mode"
+
+    def _entry(self, dashboard):
+        for key, entry in dashboard.app.callback_map.items():
+            if key.startswith(f"{self.STORE}.data"):
+                return entry
+        return None
+
+    def test_the_raw_topology_poll_exists(self, dashboard):
+        assert self._entry(dashboard) is not None, f"no callback writes {self.STORE}"
+
+    def test_it_reads_display_mode_and_not_the_2d_3d_toggle(self, dashboard):
+        entry = self._entry(dashboard)
+        assert entry is not None
+        dep_ids = {d["id"] for d in (entry.get("state") or []) + (entry.get("inputs") or []) if isinstance(d, dict)}
+
+        assert self.DISPLAY_MODE in dep_ids, f"{self.STORE}'s poll does not read {self.DISPLAY_MODE}. Its gate compares against " '"weight_matrix", which only that control ever holds — so the heatmap gets no data.'
+        assert self.VIEW_MODE not in dep_ids, f"{self.STORE}'s poll reads {self.VIEW_MODE} (the 2D/3D toggle, values '2d'/'3d'). " 'Its gate compares against "weight_matrix", so the comparison is always true and the ' "raw-topology store is never populated (F-CANOPY-040)."
+
+    def test_the_gate_value_is_reachable_from_the_control_it_reads(self, dashboard):
+        """Class-level pin, not just these two ids.
+
+        Whatever control the poll gates on must actually be able to hold the value the
+        gate tests for. This is the invariant the original bug violated, and it would
+        catch the same mistake against a third control.
+        """
+        import inspect
+
+        from frontend.dashboard_manager import DashboardManager
+
+        handler_src = inspect.getsource(DashboardManager._update_raw_topology_store_handler)
+        gate_values = set(re.findall(r'!=\s*"([a-z_]+)"', handler_src))
+        gate_values.discard("topology")  # the active_tab half of the gate
+        assert gate_values, "could not read the gate's expected value out of the handler"
+
+        entry = self._entry(dashboard)
+        dep_ids = {d["id"] for d in (entry.get("state") or []) + (entry.get("inputs") or []) if isinstance(d, dict)}
+        components = _components_by_id(dashboard)
+        reachable = set()
+        for dep in dep_ids:
+            comp = components.get(dep)
+            for opt in getattr(comp, "options", None) or []:
+                if isinstance(opt, dict) and "value" in opt:
+                    reachable.add(str(opt["value"]))
+
+        missing = gate_values - reachable
+        assert not missing, f"the raw-topology gate tests for {sorted(missing)}, which none of the controls it reads " f"({sorted(dep_ids)}) can ever hold — the gate can never pass (F-CANOPY-040 class)"
