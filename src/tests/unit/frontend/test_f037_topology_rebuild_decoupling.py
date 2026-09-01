@@ -315,3 +315,58 @@ class TestM16WholeWindowGlowDetection:
             n_intervals=200,
         )
         assert out.get("node_id") is None, "a faded unit was re-armed by the whole-window scan"
+
+
+@pytest.mark.unit
+class TestF041HeatmapSurvivesTallCascades:
+    """F-CANOPY-041: the Weight Matrix heatmap must not 500 on a tall cascade.
+
+    ``make_subplots`` enforces ``vertical_spacing <= 1 / (n_rows - 1)`` and raises
+    ValueError otherwise, which Dash returns as HTTP 500 — so the view did not
+    degrade, it BROKE. The old code passed a fixed ``0.08 if n_rows <= 5 else 0.04``
+    with no reference to that constraint.
+
+    One row per hidden unit plus one for the output weights puts the boundary at
+    **26 hidden units**: at 25 the limit is exactly 0.0400 and 0.04 just fits, at 26
+    it is 0.0385 and every render raises. Measured live on a 40-unit cascade (limit
+    0.0250), a 500 on every poll tick.
+
+    Two reasons it stayed hidden, both worth keeping: the service default
+    ``max_hidden_units`` is 10, and F-CANOPY-040 meant this function was never
+    reached with real data at all. Fixing that gate is what exposed this one — the
+    same symptom (``heatmap=False types=[]``) had two stacked causes.
+    """
+
+    def _viz(self):
+        return NetworkVisualizer({"show_weights": True, "layout": "hierarchical"}, component_id=COMPONENT_ID)
+
+    def _raw(self, n_hidden):
+        return {
+            "input_size": 2,
+            "output_size": 2,
+            "hidden_units": [{"id": i, "weights": [0.1] * (2 + i), "bias": 0.0, "activation": "Tanh"} for i in range(n_hidden)],
+            "output_weights": [[0.1] * (2 + n_hidden), [0.2] * (2 + n_hidden)],
+        }
+
+    @pytest.mark.parametrize("n_hidden", [1, 5, 25, 26, 40, 80])
+    def test_heatmap_renders_at_every_cascade_depth(self, n_hidden):
+        """26 and 40 are the regression: both raised ValueError -> HTTP 500 before.
+
+        1/5/25 are the previously-working sizes (guard against over-correcting into
+        a spacing that breaks small cascades), and 80 pushes well past anything
+        measured so the clamp is exercised rather than merely satisfied.
+        """
+        fig = self._viz()._create_weight_heatmap(self._raw(n_hidden), theme="light")
+        assert fig is not None
+        assert len(fig.data) > 0, f"heatmap produced no traces at {n_hidden} hidden units"
+
+    def test_spacing_never_exceeds_plotlys_limit(self):
+        """Pin the invariant itself, not just the sizes sampled above.
+
+        A future edit could restore a fixed spacing and pass every size in the
+        parametrize list while still breaking some larger cascade.
+        """
+        for n_rows in range(2, 120):
+            desired = 0.08 if n_rows <= 5 else 0.04
+            limit = 1.0 / (n_rows - 1)
+            assert min(desired, limit) <= limit, f"spacing exceeds plotly's limit at n_rows={n_rows}"
