@@ -1287,8 +1287,30 @@ class NetworkVisualizer(BaseComponent):
         # Clamping to the library's own limit keeps the preferred spacing whenever it
         # is legal and degrades gracefully — tighter gaps on tall cascades — instead
         # of failing the request.
+        # F-CANOPY-041b: clamping to plotly's own limit is NOT ENOUGH, and the first
+        # fix (canopy#558) got this wrong in a way that was worse than the bug.
+        #
+        # ``1/(n_rows-1)`` is the value at which the gaps consume the ENTIRE figure.
+        # Plotly's row height is ``(1 - vertical_spacing*(rows-1)) * share``, so at
+        # exactly the limit every row is **zero height**. #558 used
+        # ``min(desired, 1/(n_rows-1))``, which returns exactly the limit for every
+        # n_rows >= 26 — so the HTTP 500 went away and the heatmap rendered 41 trace
+        # objects into 41 zero-height domains: a blank 4,200 px canvas, silently.
+        # Measured on the real function: min row height 0.000000 and total plot area
+        # 0.0000 at 25, 26 and 40 hidden units; even at 24 the plots had only 4% of
+        # the figure.
+        #
+        # A silent blank is worse than a 500: the 500 was at least visible, and
+        # M-TOPOLOGY-03's predicate ("a heatmap trace exists") cannot tell the two
+        # apart, so it passed on the blank.
+        #
+        # Reserve the plot area instead of exhausting it: gaps may take at most
+        # GAP_BUDGET of the figure, leaving the rest for the rows. Below ~8 rows the
+        # preferred spacing is smaller than the budget allows, so short cascades keep
+        # exactly their previous appearance.
+        GAP_BUDGET = 0.30
         desired_spacing = 0.08 if n_rows <= 5 else 0.04
-        max_spacing = (1.0 / (n_rows - 1)) if n_rows > 1 else desired_spacing
+        max_spacing = (GAP_BUDGET / (n_rows - 1)) if n_rows > 1 else desired_spacing
         fig = make_subplots(
             rows=n_rows,
             cols=1,

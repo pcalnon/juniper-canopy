@@ -360,13 +360,38 @@ class TestF041HeatmapSurvivesTallCascades:
         assert fig is not None
         assert len(fig.data) > 0, f"heatmap produced no traces at {n_hidden} hidden units"
 
-    def test_spacing_never_exceeds_plotlys_limit(self):
-        """Pin the invariant itself, not just the sizes sampled above.
+    @pytest.mark.parametrize("n_hidden", [1, 5, 8, 24, 25, 26, 40, 80])
+    def test_every_row_has_real_height(self, n_hidden):
+        """F-CANOPY-041b. THE regression, and the reason the first attempt failed.
 
-        A future edit could restore a fixed spacing and pass every size in the
-        parametrize list while still breaking some larger cascade.
+        The previous version of this test was a TAUTOLOGY:
+
+            assert min(desired, limit) <= limit
+
+        ``min(a, b) <= b`` holds for every input. It never called
+        ``_create_weight_heatmap``, never imported the clamp, and could not fail for
+        any implementation — so it certified canopy#558 while #558 was rendering
+        every subplot at ZERO height.
+
+        ``1/(n_rows-1)`` is the spacing at which the gaps consume the whole figure.
+        Clamping TO it (what #558 did) satisfies plotly and leaves no room to draw:
+        measured min row height 0.000000 and total plot area 0.0000 at 25, 26 and 40
+        hidden units. The HTTP 500 disappeared and a blank canvas replaced it.
+
+        So assert what actually matters — that the rows have height — by measuring
+        the FIGURE, not by re-deriving the formula the code uses.
         """
-        for n_rows in range(2, 120):
-            desired = 0.08 if n_rows <= 5 else 0.04
-            limit = 1.0 / (n_rows - 1)
-            assert min(desired, limit) <= limit, f"spacing exceeds plotly's limit at n_rows={n_rows}"
+        raw = {
+            "input_size": 2,
+            "output_size": 2,
+            "hidden_units": [{"id": i, "weights": [0.1] * (2 + i), "bias": 0.0, "activation": "Tanh"} for i in range(n_hidden)],
+            "output_weights": [[0.1] * (2 + n_hidden), [0.2] * (2 + n_hidden)],
+        }
+        fig = self._viz()._create_weight_heatmap(raw, theme="light")
+        layout = fig.layout.to_plotly_json()
+        heights = [v["domain"][1] - v["domain"][0] for k, v in layout.items() if k.startswith("yaxis") and isinstance(v, dict) and "domain" in v]
+        assert heights, f"no y-axis domains at {n_hidden} hidden units"
+        assert min(heights) > 0, f"zero-height subplot at {n_hidden} hidden units — the heatmap is blank (F-CANOPY-041b)"
+        # And the plots must own a real share of the figure, not a sliver: #558 left
+        # only 4% at 24 units on its way to 0%, which no assertion of the day caught.
+        assert sum(heights) >= 0.5, f"plots occupy only {sum(heights):.2%} of the figure at {n_hidden} hidden units"
