@@ -271,6 +271,27 @@ class TestF040RawTopologyGateIsWiredToTheRightControl:
         assert self.DISPLAY_MODE in dep_ids, f"{self.STORE}'s poll does not read {self.DISPLAY_MODE}. Its gate compares against " '"weight_matrix", which only that control ever holds — so the heatmap gets no data.'
         assert self.VIEW_MODE not in dep_ids, f"{self.STORE}'s poll reads {self.VIEW_MODE} (the 2D/3D toggle, values '2d'/'3d'). " 'Its gate compares against "weight_matrix", so the comparison is always true and the ' "raw-topology store is never populated (F-CANOPY-040)."
 
+    def test_display_mode_is_an_INPUT_so_the_switch_actually_fetches(self, dashboard):
+        """F-CANOPY-040 RESIDUAL. Reading the right control is not reacting to it.
+
+        #557 moved this dependency from ``-view-mode`` to ``-display-mode`` but left
+        it a ``State``. A State is read when something ELSE fires, so selecting
+        Weight Matrix did not trigger the fetch: the store filled only on the next
+        ``tabpoll-topology`` tick, up to 5 s later. M-TOPOLOGY-03 reads within that
+        window and saw a different failure on each run — 41 zero-height traces in one
+        (that part was F-CANOPY-041b), ZERO traces in the next.
+
+        Note the sibling test above deliberately unions ``state`` + ``inputs``,
+        because it asks WHICH control is read. That union is why it stayed green
+        across this defect, and it is why this separate assertion has to exist: the
+        two questions are "does it read the right control" and "does that control
+        make it run", and only the second one is about triggering.
+        """
+        entry = self._entry(dashboard)
+        assert entry is not None
+        input_ids = {d["id"] for d in (entry.get("inputs") or []) if isinstance(d, dict)}
+        assert self.DISPLAY_MODE in input_ids, f"{self.DISPLAY_MODE} must be an Input of the {self.STORE} poll, not a State. As State it is " "only read when the tab poll ticks, so switching to Weight Matrix leaves the store empty " "for up to one tick and the heatmap renders nothing (F-CANOPY-040 residual)."
+
     def test_the_gate_value_is_reachable_from_the_control_it_reads(self, dashboard):
         """Class-level pin, not just these two ids.
 

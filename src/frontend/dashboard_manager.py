@@ -3989,10 +3989,23 @@ class DashboardManager:
             # returned ``dash.no_update`` on every tick, the raw-topology store was
             # never populated, and the Weight Matrix heatmap could never render for
             # anyone. The Node Graph / Weight Matrix selector is ``-display-mode``.
-            State("network-visualizer-display-mode", "value"),
+            #
+            # F-CANOPY-040 RESIDUAL: it must be an ``Input``, not a ``State``. #557
+            # corrected WHICH control is read but left it as State, so selecting
+            # Weight Matrix did not TRIGGER the fetch — the store filled only on the
+            # next ``tabpoll-topology`` tick, up to 5 s later. A reader that arrives
+            # before that tick sees an empty store and an unpainted heatmap, which is
+            # exactly M-TOPOLOGY-03's observed run-to-run variance (41 zero-height
+            # traces in one run, ZERO traces in the next). Reading the right control
+            # is not the same as reacting to it.
+            Input("network-visualizer-display-mode", "value"),
+            # F-CANOPY-043: the store's own previous value, for identity suppression
+            # below. Mirrors the ``current`` thread that canopy#542 added to
+            # ``-topology-store`` for F-CANOPY-039.
+            State("network-visualizer-raw-topology-store", "data"),
             prevent_initial_call=False,
         )
-        def update_raw_topology_store(n, active_tab, display_mode):
+        def update_raw_topology_store(n, active_tab, display_mode, current_raw):
             """Fetch raw weight-oriented topology for heatmap view (OF-1).
 
             Only polls when topology tab is active AND weight matrix view is selected.
@@ -4004,7 +4017,7 @@ class DashboardManager:
             the socket is up. Per-tab + per-view-mode gating already restricts
             polling to the heatmap surface.
             """
-            return self._update_raw_topology_store_handler(n=n, active_tab=active_tab, display_mode=display_mode)
+            return self._update_raw_topology_store_handler(n=n, active_tab=active_tab, display_mode=display_mode, current=current_raw)
 
         # PERF-CN-01: prevent_initial_call=False — must hit /api/dataset on
         # mount when the dataset tab is active so the plotter has data before
@@ -6898,7 +6911,7 @@ class DashboardManager:
             self.logger.warning(f"Failed to fetch topology from API: {type(e).__name__}: {e}")
             return dash.no_update
 
-    def _update_raw_topology_store_handler(self, n=None, active_tab=None, display_mode=None):
+    def _update_raw_topology_store_handler(self, n=None, active_tab=None, display_mode=None, current=None):
         """Fetch raw weight-oriented topology from API for heatmap view (OF-1).
 
         F-CANOPY-040: the parameter is ``display_mode``, not ``view_mode``. It is
@@ -6907,6 +6920,22 @@ class DashboardManager:
         ``network-visualizer-view-mode`` (2D / 3D). The callback used to pass the
         latter, so this gate was always true and the heatmap never had data.
         The name is part of the fix: it is what made the mis-wiring look right.
+
+        F-CANOPY-043 — identity suppression, the same guard canopy#542 gave
+        ``-topology-store``. Fixing F-CANOPY-040 turned a poll that had returned
+        ``dash.no_update`` on EVERY tick since it was written into a live 5 s
+        writer, and ``-raw-topology-store`` is an ``Input`` of the topology
+        rebuild. Dash fires every consumer of a store on any write, identical or
+        not, so an unchanged weight payload re-triggered the 1.5-31 s rebuild
+        every 5 s — and dash-renderer's ``getUniqueIdentifier`` hashes a
+        callback's inputs/outputs/state and NOT its trigger, so the re-request
+        retires the IN-FLIGHT rebuild rather than queueing behind it. That is
+        F-CANOPY-039's starvation mechanism, re-created by the fix for -040 on a
+        different store. A saturated 40-unit network is exactly where it bites:
+        the payload is large, unchanging, and the rebuild is slowest.
+
+        ``current=None`` (the default, and what this handler's direct unit tests
+        pass) means "no previous value" and never suppresses.
         """
         if active_tab != "topology" or display_mode != "weight_matrix":
             return dash.no_update
@@ -6917,7 +6946,20 @@ class DashboardManager:
             if not response.ok:
                 self.logger.warning(f"Raw topology API returned {response.status_code}")
                 return dash.no_update
-            return response.json()
+            fetched = response.json()
+            if current is not None:
+                try:
+                    if json.dumps(current, sort_keys=True, default=str) == json.dumps(fetched, sort_keys=True, default=str):
+                        return dash.no_update
+                except (TypeError, ValueError):
+                    # Deliberately swallowed, same posture as the -topology-store
+                    # guard: an unserialisable payload means we cannot PROVE the two
+                    # are identical, and the safe answer to "are these the same?" is
+                    # "assume not". Falling through costs a redundant rebuild;
+                    # suppressing on a failed comparison would drop a real weight
+                    # update and freeze the heatmap.
+                    pass
+            return fetched
         except Exception as e:
             self.logger.warning(f"Failed to fetch raw topology from API: {type(e).__name__}: {e}")
             return dash.no_update
