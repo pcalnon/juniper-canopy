@@ -676,18 +676,38 @@ class NetworkVisualizer(BaseComponent):
                 points = click_data.get("points", [])
                 if points:
                     point = points[0]
-                    text = point.get("text", "")
+                    # F-CANOPY-044: fall back to the edge's ``customdata``.
+                    #
+                    # Edges are drawn TO node centres, so a click aimed at a node
+                    # resolves to an EDGE trace (measured 0 of 7 clicks landing on a
+                    # node trace), and edge points have no ``text`` -- so this guard
+                    # dropped every click and node selection was unreachable. The
+                    # edge traces now carry the endpoint node labels per point, so a
+                    # click on an edge vertex still identifies the node there.
+                    text = point.get("text") or point.get("customdata") or ""
                     if text:
-                        node_id = text.lower().replace(" ", "_")
+                        node_id = str(text).lower().replace(" ", "_")
 
                         # Toggle selection: if already selected, deselect
                         if current_selection and node_id in current_selection:
                             return [], [], hidden_style
 
-                        # Get node info
-                        curve_number = point.get("curveNumber", 0)
-                        layer_names = ["", "", "Input", "Hidden", "Output"]
-                        layer = layer_names[min(curve_number, 4)] if curve_number >= 2 else "Unknown"
+                        # F-CANOPY-045: derive the layer from the node LABEL, not
+                        # from ``curveNumber``.
+                        #
+                        # This was ``layer_names[min(curve_number, 4)]`` against
+                        # ``["", "", "Input", "Hidden", "Output"]``, which is correct
+                        # only if the node traces are curves 2-4 -- i.e. if exactly
+                        # two traces precede them. With one trace per connection they
+                        # sit at ~1888-1890, and ``min(n, 4)`` is 4 for all three, so
+                        # EVERY node reported "Output". Confirmed live for all three
+                        # node types once F-CANOPY-044 stopped masking it.
+                        #
+                        # The label already encodes the layer ("Hidden 0"), and it is
+                        # the same string the node_id is derived from, so this cannot
+                        # drift from the figure's trace composition again.
+                        layer_word = str(text).split()[0] if str(text).split() else ""
+                        layer = layer_word if layer_word in ("Input", "Hidden", "Output") else "Unknown"
 
                         info = html.Div(
                             [
@@ -1096,6 +1116,28 @@ class NetworkVisualizer(BaseComponent):
             # Line width based on weight magnitude
             width = min(5, max(0.5, abs(weight) * 3))
 
+            # F-CANOPY-044: carry the ENDPOINT NODE LABELS on the edge itself.
+            #
+            # An edge is drawn TO the node centres, so its vertices sit at distance
+            # zero from the marker a user aims at, and plotly's click hit-test
+            # resolves to the edge rather than to the node -- measured 0 of 7 clicks
+            # landing on a node trace. Edge points had no ``text``, so
+            # ``handle_node_selection``'s ``if text:`` guard dropped every click and
+            # node selection was unreachable.
+            #
+            # ``customdata`` is per-POINT and plotly passes it through on
+            # ``clickData``, so a click on an edge vertex still says which node is at
+            # that vertex. The labels use the SAME ``"hidden_0" -> "Hidden 0"``
+            # form as the node traces (``_create_node_trace``), so the handler's
+            # ``node_id`` derivation is identical either way.
+            #
+            # Why not the alternatives, both tested rather than argued
+            # (``util/ad-hoc/2026-09-02_f044_fix_experiment.py`` in juniper-ml):
+            #   * reordering so node traces come FIRST does NOT work -- with the
+            #     node traces moved to curves 0/1/2, a click on a node still
+            #     resolved to an edge (curve 251). Data order does not break the tie;
+            #   * ``hoverinfo="skip"`` on the edges DOES work, but it removes the
+            #     "Weight: -0.420" tooltip, which is a shipped feature of this layer.
             edge_trace = go.Scatter(
                 x=[x0, x1, None],
                 y=[y0, y1, None],
@@ -1103,6 +1145,11 @@ class NetworkVisualizer(BaseComponent):
                 line={"width": width, "color": color},
                 hoverinfo="text",
                 hovertext=f"Weight: {weight:.3f}",
+                customdata=[
+                    from_node.replace("_", " ").title(),
+                    to_node.replace("_", " ").title(),
+                    None,
+                ],
                 showlegend=False,
             )
             edge_traces.append(edge_trace)
