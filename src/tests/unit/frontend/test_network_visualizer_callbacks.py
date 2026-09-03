@@ -525,37 +525,22 @@ class TestHandleNodeSelectionCallback:
         assert nodes == []
         assert style["display"] == "none"
 
-    @pytest.mark.unit
-    def test_layer_detection_input(self, visualizer):
-        """Should detect input layer from curveNumber."""
-        layer_names = ["", "", "Input", "Hidden", "Output"]
-        curve_number = 2
-        layer = layer_names[min(curve_number, 4)] if curve_number >= 2 else "Unknown"
-        assert layer == "Input"
-
-    @pytest.mark.unit
-    def test_layer_detection_hidden(self, visualizer):
-        """Should detect hidden layer from curveNumber."""
-        layer_names = ["", "", "Input", "Hidden", "Output"]
-        curve_number = 3
-        layer = layer_names[min(curve_number, 4)] if curve_number >= 2 else "Unknown"
-        assert layer == "Hidden"
-
-    @pytest.mark.unit
-    def test_layer_detection_output(self, visualizer):
-        """Should detect output layer from curveNumber."""
-        layer_names = ["", "", "Input", "Hidden", "Output"]
-        curve_number = 4
-        layer = layer_names[min(curve_number, 4)] if curve_number >= 2 else "Unknown"
-        assert layer == "Output"
-
-    @pytest.mark.unit
-    def test_layer_detection_unknown(self, visualizer):
-        """Should return Unknown for low curveNumber."""
-        layer_names = ["", "", "Input", "Hidden", "Output"]
-        curve_number = 1
-        layer = layer_names[min(curve_number, 4)] if curve_number >= 2 else "Unknown"
-        assert layer == "Unknown"
+    # REMOVED: test_layer_detection_input / _hidden / _output / _unknown.
+    #
+    # All four re-typed the production expression inline and asserted against their
+    # own copy — they imported nothing from ``network_visualizer`` and called nothing
+    # in it, so they could not fail for ANY implementation. The same class as
+    # canopy#558's ``assert min(a, b) <= b``, which is how F-CANOPY-041b shipped.
+    #
+    # They "covered" the layer logic while the product labelled EVERY node
+    # ``Output`` (F-CANOPY-045): ``layer_names[min(curve_number, 4)]`` is correct
+    # only if the node traces are curves 2-4, and with one trace per connection they
+    # sit at ~1888-1890. The scheme those tests described no longer exists — the
+    # layer is now derived from the node LABEL — so keeping them would document a
+    # design the code does not have.
+    #
+    # Replaced by ``test_f044_node_click_selection.py``, every test in which reaches
+    # the REAL registered callback.
 
     @pytest.mark.unit
     def test_node_id_conversion(self, visualizer):
@@ -584,7 +569,18 @@ class TestHandleNodeSelectionCallback:
         current_selection: List[str],
         trigger: str,
     ):
-        """Simulate handle_node_selection callback logic."""
+        """Simulate handle_node_selection callback logic.
+
+        WARNING — this is a RE-IMPLEMENTATION, not the product. It cannot see a
+        defect in the real handler, and it did not: F-CANOPY-044 (an edge-resolved
+        click selecting nothing) and F-CANOPY-045 (every node reporting
+        ``Layer: Output``) both shipped while this class was green.
+
+        The click path in particular has since diverged — the real handler falls
+        back to the edge's ``customdata`` and derives the layer from the node label.
+        Do not add click-path coverage here. ``test_f044_node_click_selection.py``
+        drives the REAL registered callback; put it there.
+        """
         base_style = {
             "marginBottom": "10px",
             "padding": "10px",
