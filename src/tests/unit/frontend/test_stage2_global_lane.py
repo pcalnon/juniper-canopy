@@ -242,6 +242,80 @@ class TestF039TopologyIdentitySuppression:
         assert self.STORE not in input_ids, f"{self.STORE} must NOT be an Input of its own writer"
 
 
+@pytest.mark.unit
+class TestF043RawTopologyIdentitySuppression:
+    """F-CANOPY-043: ``-raw-topology-store`` must not rewrite an unchanged payload.
+
+    This is F-CANOPY-039's starvation mechanism on a second store, and it was
+    CREATED by the fix for F-CANOPY-040. Before #557 the raw-topology poll gated on
+    the 2D/3D toggle, so its ``!= "weight_matrix"`` comparison was always true and it
+    returned ``dash.no_update`` on every tick — dead code that could not starve
+    anything. #557 corrected the control, which made the poll a live 5 s writer of a
+    store that is an ``Input`` of the topology rebuild.
+
+    Dash fires every consumer of a store on any write, identical or not, and
+    dash-renderer's ``getUniqueIdentifier`` (``dash_renderer.dev.js:1715``) hashes a
+    callback's inputs/outputs/state and NOT its trigger — so the re-request retires
+    the IN-FLIGHT rebuild instead of queueing behind it. Measured paints on this
+    fixture are 7.1-31.1 s against a 5 s tick, so an unchanged weight payload is
+    enough to keep the heatmap permanently unpainted.
+
+    The suppression and the Weight-Matrix gate are only effective together, exactly
+    as ``-topology-store``'s suppression and canopy#537's bare-tick guard were.
+    """
+
+    STORE = "network-visualizer-raw-topology-store"
+
+    RAW = {
+        "hidden_units": 3,
+        "layers": [{"index": 0, "weights": [[0.1, 0.2], [0.3, 0.4]]}],
+        "input_units": 2,
+    }
+
+    @patch("requests.get")
+    def test_identical_fetch_is_no_update(self, mock_get, dm):
+        mock_get.return_value = _resp(json_value=dict(self.RAW))
+        assert dm._update_raw_topology_store_handler(n=1, active_tab="topology", display_mode="weight_matrix", current=dict(self.RAW)) is dash.no_update
+
+    @patch("requests.get")
+    def test_changed_fetch_still_writes(self, mock_get, dm):
+        """A real weight change must land — suppression must not freeze the heatmap."""
+        mock_get.return_value = _resp(json_value=dict(self.RAW))
+        stale = dict(self.RAW, hidden_units=2)
+        assert dm._update_raw_topology_store_handler(n=1, active_tab="topology", display_mode="weight_matrix", current=stale) == self.RAW
+
+    @patch("requests.get")
+    def test_key_reordered_payload_is_still_suppressed(self, mock_get, dm):
+        """Canonical (sorted-key) comparison, not ``==`` on insertion order."""
+        reordered = {k: self.RAW[k] for k in reversed(list(self.RAW))}
+        mock_get.return_value = _resp(json_value=reordered)
+        assert dm._update_raw_topology_store_handler(n=1, active_tab="topology", display_mode="weight_matrix", current=dict(self.RAW)) is dash.no_update
+
+    @patch("requests.get")
+    def test_mount_with_no_prior_value_still_writes(self, mock_get, dm):
+        """``current=None`` means "store empty" — the mount fetch must land.
+
+        This is also the shape every pre-existing direct call site uses, so the
+        default must never suppress.
+        """
+        mock_get.return_value = _resp(json_value=dict(self.RAW))
+        assert dm._update_raw_topology_store_handler(n=1, active_tab="topology", display_mode="weight_matrix") == self.RAW
+
+    def test_the_store_rides_as_state_not_as_its_own_input(self, dm):
+        """Threading the store's value in must not make it trigger itself."""
+        entry = None
+        for key, candidate in dm.app.callback_map.items():
+            if key.startswith(f"{self.STORE}.data"):
+                entry = candidate
+                break
+        assert entry is not None, f"no callback writes {self.STORE}"
+
+        state_ids = {s["id"] for s in entry.get("state", [])}
+        input_ids = {i["id"] for i in entry.get("inputs", [])}
+        assert self.STORE in state_ids, f"{self.STORE} must ride as State so the handler can compare against it"
+        assert self.STORE not in input_ids, f"{self.STORE} must NOT be an Input of its own writer"
+
+
 class TestLever3BoundariesCadence:
     def test_tabpoll_boundaries_rides_the_slow_lane(self, dm):
         intervals = {getattr(c, "id", None): c for c in _walk(dm.app.layout) if type(c).__name__ == "Interval"}

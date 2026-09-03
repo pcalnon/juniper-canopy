@@ -413,7 +413,10 @@ class TestDatastoreInner:
         mock_get.return_value = _resp(ok=True, json_value={"weights": []})
         cb = raw_cb(dm, "update_raw_topology_store")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = cb(1, "topology", "weight_matrix")
+            # F-CANOPY-043 added the store's own value as a trailing State for
+            # identity suppression; `None` means "store empty", which never
+            # suppresses — so this exercises the same write path it always did.
+            result = cb(1, "topology", "weight_matrix", None)
         assert result == {"weights": []}
 
     @patch("requests.get")
