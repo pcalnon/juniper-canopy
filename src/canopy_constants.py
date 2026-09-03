@@ -590,7 +590,18 @@ class SecurityConstants:
     # - Dash requires 'unsafe-inline' for styles and scripts.
     # - cdn.jsdelivr.net serves Bootstrap CSS via dash-bootstrap-components.
     # - data: in img-src is needed for Bootstrap inline SVG data URIs.
-    DEFAULT_CSP_POLICY: Final[str] = "default-src 'self'; " "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " "script-src 'self' 'unsafe-inline'; " "img-src 'self' data:; " "frame-ancestors 'none'"
+    # - blob: in img-src is needed for plotly's PNG export (F-CANOPY-047). The
+    #   modebar camera rasterises the figure as SVG -> Blob -> <img> -> canvas ->
+    #   toDataURL. Without blob: the browser refuses that image load, plotly's
+    #   promise rejects with a bare `[object Event]`, no download is ever offered,
+    #   and the user sees nothing but a console error. Measured live: a hand-made
+    #   10x10 SVG failed via blob: and succeeded via data:, on the same page.
+    #
+    #   SCOPE: blob: URLs are minted by this page's own scripts and are opaque
+    #   origins that cannot be forged by a third party; allowing them for IMG only
+    #   does not admit any external content. It is not added to script-src or
+    #   default-src, where it would be materially riskier.
+    DEFAULT_CSP_POLICY: Final[str] = "default-src 'self'; " "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " "script-src 'self' 'unsafe-inline'; " "img-src 'self' data: blob:; " "frame-ancestors 'none'"
 
     # ── Standard security response headers ──
     HEADER_X_CONTENT_TYPE_OPTIONS: Final[str] = "X-Content-Type-Options"
