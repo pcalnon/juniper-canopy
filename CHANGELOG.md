@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **F-CANOPY-047 operator docs.** The Topology modebar camera is a Plotly PNG export that rasterises SVG → Blob → `<img>` → canvas, so `img-src` must allow `blob:` *and* `data:`. `blob:` is img-only. Canonical runbook: `docs/AGENTS_REFERENCE.md` § Plotly PNG Export. Pins: `src/tests/regression/test_csp_plotly_image_export.py` and `test_csp_bootstrap_cdn.py`.
+
 - Tests pinning Stage 2 (`#511`) live-callback contracts that the original PR's happy-path suite left open: `_update_unified_status_bar_handler` element `[9]` stays `dash.no_update` on every error path (so a hiccup cannot blank `training-status-store` and re-fire its consumers), `{is_running, phase}` is coerced then suppressed, and `_update_system_panels_handler` isolates a `/api/status` Timeout/JSON failure from the details and stream-health surfaces.
 
 ### Changed

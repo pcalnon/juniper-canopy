@@ -1,8 +1,8 @@
 # Juniper Canopy User Manual
 
-**Version:** 0.26.0
+**Version:** 0.26.1
 **Status:** ✅ Production Ready
-**Last Updated:** May 4, 2026
+**Last Updated:** September 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -352,6 +352,12 @@ tick. The base tick is **1000 ms**; the **1x / 2x / 4x** buttons set it to 1000 
 - **Zoom** - Scroll to zoom in/out
 - **Pan** - Click and drag to pan view
 - **Hover** - Show node ID and connection details
+- **Camera (modebar)** — download the current figure as PNG
+  (`canopy_network_<YYYYmmdd>_<HHMMSS>.png`, 2× scale). SVG from the
+  same menu is a different path and does not need `blob:`. If the
+  camera button does nothing, the browser console will show a CSP
+  `img-src` violation — see
+  [troubleshooting #6](#6-modebar-camera-does-nothing-no-png-file).
 
 **Data Source:**
 
@@ -1079,6 +1085,42 @@ const ws = new WebSocket('ws://127.0.0.1:8050/ws/training');
 ws.onopen = () => console.log('Connected');
 ws.onmessage = (e) => console.log('Message:', e.data);
 ```
+
+---
+
+#### 6. Modebar camera does nothing (no PNG file)
+
+**Symptoms:**
+
+- Topology (or any Plotly) camera button is present and clickable
+- No file is offered; the figure does not change
+- Browser console reports a Content-Security-Policy `img-src` violation
+  for a `blob:http://…` URL
+
+**Cause:**
+
+Plotly's PNG export rasterises SVG → Blob → `<img>` → canvas. That
+image load is a `blob:` URL. The shipped policy is
+`img-src 'self' data: blob:` (`SecurityConstants.DEFAULT_CSP_POLICY`,
+served by `SecurityHeadersMiddleware`). Without `blob:`, the promise
+rejects with `[object Event]` and no download is offered. SVG export
+from the same menu still works.
+
+**Solutions:**
+
+✅ **Confirm the console names `img-src`**, not a missing figure.
+
+✅ **Confirm the constant and the middleware still match:**
+
+```bash
+cd src
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
+```
+
+Do not "fix" this by adding `blob:` to `script-src` or by replacing
+`data:` (Bootstrap icons need `data:`). Developer contract:
+[AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047).
 
 ---
 

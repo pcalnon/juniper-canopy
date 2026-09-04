@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-08-30
+**Last Updated**: 2026-09-04
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -18,6 +18,7 @@ pointer only helps an agent that already knows to look.
 ## Table of Contents
 
 - [Architecture Reference](#architecture-reference)
+- [Plotly PNG Export (F-CANOPY-047)](#plotly-png-export-f-canopy-047)
 - [Configuration Reference](#configuration-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
 - [Further Reading](#further-reading)
@@ -237,6 +238,124 @@ juniper_canopy/
     - Centralized application constants
     - Type-safe configuration values
     - Training parameters, UI settings, server config
+
+---
+
+## Plotly PNG Export (F-CANOPY-047)
+
+Operator surface: the Network Topology modebar camera
+(`dcc.Graph` `toImageButtonOptions` in
+[`network_visualizer.py`](../src/frontend/components/network_visualizer.py)).
+The policy that lets that button produce a file is
+`SecurityConstants.DEFAULT_CSP_POLICY`, served on every response by
+[`SecurityHeadersMiddleware`](../src/middleware.py).
+
+User-facing copy lives in
+[`USER_MANUAL.md` § Network Topology Tab](USER_MANUAL.md#network-topology-tab).
+
+### Intent
+
+The camera rasterises the figure as **SVG → Blob → `<img>` → canvas →
+`toDataURL`**. That `<img>` load is a `blob:` URL. Without `blob:` in
+`img-src`, the browser refuses it, plotly's promise rejects with a bare
+`[object Event]`, no `<a download>` is clicked, and the operator sees
+a correctly configured button that does nothing. The console is the
+only signal:
+
+```text
+Loading the image 'blob:http://127.0.0.1:8051/...' violates the
+following Content Security Policy directive: "img-src 'self' data:".
+```
+
+SVG export from the same menu still works — serialisation never hits
+`img-src`. The defect is the scheme, not the figure.
+
+### Current policy (on `main`, canopy#565)
+
+`SecurityConstants.DEFAULT_CSP_POLICY` is:
+
+```text
+default-src 'self';
+style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+script-src 'self' 'unsafe-inline';
+img-src 'self' data: blob:;
+frame-ancestors 'none'
+```
+
+`main.py` mounts `SecurityHeadersMiddleware()` with no override.
+`middleware._DEFAULT_CSP` is an alias of that constant — pin both, or a
+test that only reads the constant cannot fail for what the browser
+gets.
+
+There is **no** `JUNIPER_CANOPY_*` setting for CSP. Editing
+`DEFAULT_CSP_POLICY` is the production path.
+
+### Two `img-src` schemes, two consumers
+
+| Scheme | Consumer | What breaks without it |
+| --- | --- | --- |
+| `data:` | Bootstrap form-control SVG icons | Sidebar / form controls fail to render |
+| `blob:` | Plotly PNG rasteriser (F-CANOPY-047) | Modebar camera silently produces no file |
+
+These are **not** interchangeable. Replacing `data:` with `blob:`
+fixes plotly and breaks every Bootstrap form control. Adding `blob:`
+without keeping `data:` is the same class. The two regression files
+exist so a future edit that satisfies one while breaking the other
+fails a test named after the thing it broke:
+
+- [`test_csp_bootstrap_cdn.py`](../src/tests/regression/test_csp_bootstrap_cdn.py)
+  pins `data:` (and the Bootstrap CDN on `style-src`).
+- [`test_csp_plotly_image_export.py`](../src/tests/regression/test_csp_plotly_image_export.py)
+  pins `blob:`. `test_middleware_coverage.py` still only asserts
+  `data:` — that is why the dedicated file exists.
+
+### Scope: `blob:` is img-only
+
+`blob:` URLs are minted by this page's own scripts and are opaque
+origins a third party cannot forge. Allowing them for **IMG** does not
+admit external content. That case does **not** extend to executing
+`blob:` script.
+
+Do not add `blob:` to `script-src` or `default-src`. Do not open
+`img-src` with `*` or `http:`. The plotly file asserts all four.
+
+### UI contract
+
+`network_visualizer.py` sets `toImageButtonOptions` to
+`format: png`, `scale: 2`. The rebuild path (`_dynamic_graph_config`)
+also stamps `filename: canopy_network_<YYYYmmdd>_<HHMMSS>`. The
+layout-time graph omits the filename (plotly's default applies until
+the first rebuild). The button is present and correctly configured
+even when CSP blocks the rasteriser — that is why the failure is
+silent.
+
+Measured live (juniper-ml
+`util/ad-hoc/2026-09-03_modebar_download_probe.py`) against the
+pre-fix policy: topology PNG scale=2 failed in 4.4 s with
+`[object Event]`; scale=1 failed the same way; SVG export wrote
+1,211,031 bytes; a 10×10 SVG failed via `blob:` and succeeded via
+`data:` on the same page.
+
+A control that itself rasterises through a `blob:` URL proves
+nothing: it fails for the same reason as the subject.
+
+### Tests
+
+```bash
+cd src
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
+```
+
+### Pitfalls
+
+- Do not replace `data:` with `blob:`. Add, do not swap.
+- Do not put `blob:` on `script-src` or `default-src`.
+- Do not "fix" a silent camera by widening `img-src` to `*`.
+- Do not treat a green `test_middleware_coverage.py` as evidence
+  plotly export works — that file does not pin `blob:`.
+- Do not introduce a CSP env override without teaching both tests
+  to read the value that actually ships on the response.
 
 ---
 

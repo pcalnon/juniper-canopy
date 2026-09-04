@@ -149,6 +149,10 @@ pytest tests/unit/frontend/test_metrics_panel_handlers.py -k "validation_overlay
 
 # Documentation link checker regression tests
 pytest tests/unit/test_doc_link_checker.py -v
+
+# F-CANOPY-047: plotly PNG export vs Bootstrap CSP pair
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
 ```
 
 ### Advanced Options

@@ -501,6 +501,24 @@ pip install -r conf/requirements.txt
 
 ---
 
+### Issue 8: Modebar Camera Does Nothing
+
+**Symptom:** The Topology camera button is present. Clicking it never offers a PNG. The browser console reports a Content-Security-Policy `img-src` violation for a `blob:` URL.
+
+**Cause:** Plotly's PNG export loads the figure through a `blob:` URL. The shipped CSP is `img-src 'self' data: blob:` (`SecurityConstants.DEFAULT_CSP_POLICY`). Without `blob:`, the promise rejects with `[object Event]` and no file is offered. SVG export from the same menu still works.
+
+**Solution:** Do not replace `data:` with `blob:` (Bootstrap icons need `data:`). Do not add `blob:` to `script-src`. Confirm both pins still hold:
+
+```bash
+cd src
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
+```
+
+**See:** [AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047)
+
+---
+
 ## Next Steps
 
 ### Learn More

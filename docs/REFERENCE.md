@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.0
+**Version:** 0.25.5
 **Status:** Active
-**Last Updated:** August 31, 2026
+**Last Updated:** September 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -13,6 +13,7 @@
 
 - [Overview](#overview)
 - [AGENTS Reference](#agents-reference)
+- [Plotly PNG Export / CSP](#plotly-png-export--csp)
 - [API Reference](#api-reference)
 - [Configuration Reference](#configuration-reference)
 - [WebSocket Reference](#websocket-reference)
@@ -44,6 +45,30 @@ Reference material relocated **verbatim** out of `AGENTS.md` under the shared-se
 The same cut sent documentation-about-documentation to [DOCUMENTATION_OVERVIEW.md](DOCUMENTATION_OVERVIEW.md) instead, which is the file whose subject that already is.
 
 **Hazards were deliberately not relocated.** Directives whose non-application destroys work stay resident in [`AGENTS.md` § Hazards](../AGENTS.md#hazards-resident--do-not-relocate), because a pointer only helps an agent that already knows to look.
+
+---
+
+## Plotly PNG Export / CSP
+
+The Topology modebar camera is a Plotly PNG export. It rasterises SVG →
+Blob → `<img>` → canvas, so `img-src` must allow `blob:` **and** `data:`
+(Bootstrap icons). `blob:` belongs on `img-src` only — not `script-src`
+or `default-src`. There is no CSP environment variable; the shipped
+string is `SecurityConstants.DEFAULT_CSP_POLICY`, aliased as
+`middleware._DEFAULT_CSP`.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) | Operator runbook (F-CANOPY-047) |
+| [USER_MANUAL.md troubleshooting #6](USER_MANUAL.md#6-modebar-camera-does-nothing-no-png-file) | Silent-camera symptom |
+| [`test_csp_plotly_image_export.py`](../src/tests/regression/test_csp_plotly_image_export.py) | Pins `blob:` on `img-src` only |
+| [`test_csp_bootstrap_cdn.py`](../src/tests/regression/test_csp_bootstrap_cdn.py) | Pins `data:` + Bootstrap CDN |
+
+```bash
+cd src
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
+```
 
 ---
 
@@ -198,6 +223,7 @@ Application constants are centralized in `src/canopy_constants.py`:
 | `TrainingConstants` | Training parameters (epochs, learning rates, hidden units) |
 | `DashboardConstants` | UI behavior (update intervals, timeouts, data limits) |
 | `ServerConstants` | Server configuration (host, port, WebSocket paths) |
+| `SecurityConstants` | HTTP headers and `DEFAULT_CSP_POLICY` (`img-src 'self' data: blob:`) |
 
 See [CONSTANTS_GUIDE.md](cascor/CONSTANTS_GUIDE.md) for the complete constants management guide.
 
@@ -230,6 +256,6 @@ The most commonly used environment variables for juniper-canopy configuration. F
 
 ---
 
-**Last Updated:** August 31, 2026
-**Version:** 0.25.1
+**Last Updated:** September 4, 2026
+**Version:** 0.25.5
 **Maintainer:** Paul Calnon

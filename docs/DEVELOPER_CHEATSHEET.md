@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.2
-**Date**: 2026-07-04
+**Version**: 1.0.6
+**Date**: 2026-09-04
 **Project**: juniper-canopy
 
 ---
@@ -133,6 +133,20 @@ Common failure causes:
 - Same-file anchors fail if no matching heading exists
 - Links inside fenced code blocks and inline code are intentionally ignored
 
+### 6. Keep Plotly PNG Export Working (F-CANOPY-047)
+
+The Topology modebar camera rasterises SVG → Blob → `<img>` → canvas.
+`img-src` must allow `blob:` *and* `data:` (Bootstrap icons). Do not
+add `blob:` to `script-src` or `default-src`.
+
+```bash
+cd src
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
+```
+
+> See: [AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047)
+
 ---
 
 ## Environment Variables
@@ -236,6 +250,7 @@ Coverage includes:
 | Tests fail with backend errors                   | Demo mode not forced       | Ensure `conftest.py` sets `JUNIPER_CANOPY_DEMO_MODE=1`; do not set `CASCOR_BACKEND_AVAILABLE` unless backend is running |
 | Docs job fails in CI (`Documentation Links`)     | Broken links/anchors or unsafe doc path | Re-run `python scripts/check_doc_links.py --cross-repo skip --exclude templates --exclude history --exclude pull_requests --exclude releases --exclude analysis --exclude fixes --exclude development --exclude CHANGELOG.md` and fix reported markdown targets |
 | Prometheus metrics missing                       | Feature not enabled        | Set `JUNIPER_CANOPY_METRICS_ENABLED=true`; verify `/metrics` endpoint returns data                              |
+| Modebar camera clicks; no PNG, CSP `img-src` in console | `blob:` missing from `img-src` | Keep `img-src 'self' data: blob:`; do not move `blob:` onto `script-src`. See [AGENTS_REFERENCE § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) |
 
 ---
 
@@ -264,6 +279,6 @@ Coverage includes:
 
 ---
 
-**Last Updated:** 2026-07-04
-**Version:** 1.0.2
+**Last Updated:** 2026-09-04
+**Version:** 1.0.6
 **Maintainer:** Paul Calnon

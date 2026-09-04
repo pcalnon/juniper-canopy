@@ -1,7 +1,7 @@
 # Testing Reference
 
-**Last Updated:** April 5, 2026  
-**Version:** v0.26.1
+**Last Updated:** September 4, 2026  
+**Version:** v0.26.5
 
 Technical reference for the active pytest configuration, markers, fixtures, and CI-equivalent commands.
 
@@ -177,6 +177,11 @@ python scripts/check_doc_links.py --cross-repo check
 
 # Run focused unit tests for link-checker hardening
 pytest src/tests/unit/test_check_doc_links.py -v
+
+# F-CANOPY-047: CSP must allow plotly PNG export without over-widening
+cd src
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
 ```
 
 ### Documentation Link Checker Edge-Case Matrix
@@ -287,6 +292,21 @@ python ../scripts/check_doc_links.py \
   --exclude analysis --exclude fixes --exclude development \
   --exclude CHANGELOG.md \
   --cross-repo skip
+```
+
+### CSP / Plotly PNG Export (F-CANOPY-047)
+
+The two files pin unrelated `img-src` consumers. A green result on one is not evidence the other still works.
+
+| Test File | Contract Focus | Key Behavior |
+| --- | --- | --- |
+| `tests/regression/test_csp_plotly_image_export.py` | Plotly PNG rasteriser | `img-src` allows `blob:` *and* `data:`; `blob:` is absent from `script-src` / `default-src`; no `*` / `http:`; `middleware._DEFAULT_CSP` equals `SecurityConstants.DEFAULT_CSP_POLICY` |
+| `tests/regression/test_csp_bootstrap_cdn.py` | Bootstrap CDN + icons | `style-src` allows `cdn.jsdelivr.net`; `img-src` allows `data:`; CDN is not on `script-src` |
+
+```bash
+cd src
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
 ```
 
 ### Testing WebSocket Endpoints

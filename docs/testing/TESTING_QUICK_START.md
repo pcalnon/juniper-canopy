@@ -46,6 +46,10 @@ pytest src/tests/unit/test_demo_mode.py::test_demo_mode_initialization -v
 # Run tests matching pattern
 pytest -k "demo_mode" -v
 
+# F-CANOPY-047 CSP pair (plotly PNG + Bootstrap icons)
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
+
 # Run with verbose output
 pytest -vv
 

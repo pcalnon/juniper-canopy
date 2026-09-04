@@ -2,8 +2,8 @@
 
 ## Complete Navigation Guide to Juniper Canopy Documentation
 
-**Version:** 0.25.0  
-**Last Updated:** January 29, 2026  
+**Version:** 0.25.6  
+**Last Updated:** September 4, 2026  
 **Project:** Juniper Canopy - Real-Time CasCor Monitoring Frontend
 
 ---
@@ -60,6 +60,7 @@
 | **Find technical reference** | [REFERENCE.md](REFERENCE.md)                                              | docs/          |
 | **See version history**      | [CHANGELOG.md](../CHANGELOG.md)                                           | Root           |
 | **Quick-reference dev tasks** | [DEVELOPER_CHEATSHEET.md](DEVELOPER_CHEATSHEET.md)              | docs/         |
+| **Debug a silent PNG export** | [AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) | docs/ |
 | **Contribute code**          | [AGENTS.md](../AGENTS.md)                                                 | Root           |
 
 ---
@@ -1723,8 +1724,8 @@ Relocated verbatim from `AGENTS.md` (P3 of the shared-session-memory plan) so it
 
 ---
 
-**Last Updated:** January 29, 2026  
-**Version:** 0.25.0  
+**Last Updated:** September 4, 2026  
+**Version:** 0.25.6  
 **Maintainer:** Paul Calnon
 
 ---
