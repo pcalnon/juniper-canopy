@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.2
-**Date**: 2026-07-04
+**Version**: 1.0.4
+**Date**: 2026-09-04
 **Project**: juniper-canopy
 
 ---
@@ -133,6 +133,17 @@ Common failure causes:
 - Same-file anchors fail if no matching heading exists
 - Links inside fenced code blocks and inline code are intentionally ignored
 
+### 6. Change the Depth-Filter Label or Filter
+
+The Network Topology **Hidden depth** slider is CAN-020. `_apply_hierarchy_filter` is the oracle (`0` / `None` / `>= N` → `"all"`). The label is a *separate* clientside callback after canopy#570 — do not put `-depth-slider.value` on the bounds-sync callback (circular: that callback already Outputs the value) and do not add the label to `update_network_graph` (1.5–31 s paint). Change the Python guard and the JavaScript guard together.
+
+```bash
+cd src
+pytest tests/unit/test_network_visualizer.py -k "Hierarchy or hierarchy or depth" -v
+```
+
+> See: [AGENTS_REFERENCE.md — Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020)
+
 ---
 
 ## Environment Variables
@@ -236,6 +247,7 @@ Coverage includes:
 | Tests fail with backend errors                   | Demo mode not forced       | Ensure `conftest.py` sets `JUNIPER_CANOPY_DEMO_MODE=1`; do not set `CASCOR_BACKEND_AVAILABLE` unless backend is running |
 | Docs job fails in CI (`Documentation Links`)     | Broken links/anchors or unsafe doc path | Re-run `python scripts/check_doc_links.py --cross-repo skip --exclude templates --exclude history --exclude pull_requests --exclude releases --exclude analysis --exclude fixes --exclude development --exclude CHANGELOG.md` and fix reported markdown targets |
 | Prometheus metrics missing                       | Feature not enabled        | Set `JUNIPER_CANOPY_METRICS_ENABLED=true`; verify `/metrics` endpoint returns data                              |
+| Depth-filter label reads `"0 of N"` at rest, or ignores the slider | F-CANOPY-042: label is a State of the bounds-sync callback; `0` ≠ `"all"` in the old JS rule | Do not add `Input(-depth-slider, value)` to that callback (circular). Trust the graph until canopy#570. See [Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020) |
 
 ---
 
@@ -264,6 +276,6 @@ Coverage includes:
 
 ---
 
-**Last Updated:** 2026-07-04
-**Version:** 1.0.2
+**Last Updated:** 2026-09-04
+**Version:** 1.0.4
 **Maintainer:** Paul Calnon

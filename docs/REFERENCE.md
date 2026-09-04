@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.0
+**Version:** 0.25.3
 **Status:** Active
-**Last Updated:** August 31, 2026
+**Last Updated:** September 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -13,6 +13,7 @@
 
 - [Overview](#overview)
 - [AGENTS Reference](#agents-reference)
+- [Hierarchy Depth Filter](#hierarchy-depth-filter)
 - [API Reference](#api-reference)
 - [Configuration Reference](#configuration-reference)
 - [WebSocket Reference](#websocket-reference)
@@ -44,6 +45,18 @@ Reference material relocated **verbatim** out of `AGENTS.md` under the shared-se
 The same cut sent documentation-about-documentation to [DOCUMENTATION_OVERVIEW.md](DOCUMENTATION_OVERVIEW.md) instead, which is the file whose subject that already is.
 
 **Hazards were deliberately not relocated.** Directives whose non-application destroys work stay resident in [`AGENTS.md` § Hazards](../AGENTS.md#hazards-resident--do-not-relocate), because a pointer only helps an agent that already knows to look.
+
+---
+
+## Hierarchy Depth Filter
+
+CAN-020 view filter on the Network Topology tab. `_apply_hierarchy_filter` is the oracle (`0` / `None` / `>= N` → `"all"`). F-CANOPY-042 is the label-wiring defect (slider value was State, not Input; rest-state `0` rendered `"0 of N"`). Repair lands in canopy#570 as a dedicated clientside callback — do not merge it back into the bounds-sync callback (circular dependency).
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020) | Developer contract: filter arms, label split, tests, pitfalls |
+| [USER_MANUAL.md § Network Topology Tab](USER_MANUAL.md#network-topology-tab) | Operator: slider, `"all"` vs `"K of N"`, rest-state `0` |
+| [DEVELOPER_CHEATSHEET.md § 6](DEVELOPER_CHEATSHEET.md#6-change-the-depth-filter-label-or-filter) | Short procedure + troubleshooting row |
 
 ---
 

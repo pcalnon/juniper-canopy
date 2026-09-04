@@ -1,7 +1,7 @@
 # Testing Reference
 
-**Last Updated:** April 5, 2026  
-**Version:** v0.26.1
+**Last Updated:** September 4, 2026  
+**Version:** v0.26.3
 
 Technical reference for the active pytest configuration, markers, fixtures, and CI-equivalent commands.
 
@@ -178,6 +178,25 @@ python scripts/check_doc_links.py --cross-repo check
 # Run focused unit tests for link-checker hardening
 pytest src/tests/unit/test_check_doc_links.py -v
 ```
+
+### Hierarchy depth filter (CAN-020 / F-CANOPY-042)
+
+The Python oracle lives on `main`. The clientside label suite lands with canopy#570
+(`src/tests/unit/frontend/test_f042_depth_filter_label.py` — not on `main` yet;
+do not markdown-link it until that file merges).
+
+```bash
+cd src
+pytest tests/unit/test_network_visualizer.py -k "Hierarchy or hierarchy or depth" -v
+```
+
+`TestHierarchyDepthFilter` is the contract: `None` / `0` / at-total / above-total
+are `"all"`; a mid-range depth copies the dict, caps `hidden_units`, and drops
+edges touching `hidden_K` for `K >= depth`. `TestHierarchyDepthSliderWiring` is
+source-level only and does **not** execute the JavaScript. After #570 merges,
+prefer the registered-callback + `node` grid over any test that re-types the
+production expression. See
+[AGENTS_REFERENCE.md § Hierarchy Depth Filter](../AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020).
 
 ### Documentation Link Checker Edge-Case Matrix
 

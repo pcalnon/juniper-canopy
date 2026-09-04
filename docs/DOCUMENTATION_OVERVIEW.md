@@ -2,8 +2,8 @@
 
 ## Complete Navigation Guide to Juniper Canopy Documentation
 
-**Version:** 0.25.0  
-**Last Updated:** January 29, 2026  
+**Version:** 0.25.3  
+**Last Updated:** September 4, 2026  
 **Project:** Juniper Canopy - Real-Time CasCor Monitoring Frontend
 
 ---
@@ -61,6 +61,7 @@
 | **See version history**      | [CHANGELOG.md](../CHANGELOG.md)                                           | Root           |
 | **Quick-reference dev tasks** | [DEVELOPER_CHEATSHEET.md](DEVELOPER_CHEATSHEET.md)              | docs/         |
 | **Contribute code**          | [AGENTS.md](../AGENTS.md)                                                 | Root           |
+| **Read the topology depth filter** | [AGENTS_REFERENCE.md § Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020) | docs/ |
 
 ---
 

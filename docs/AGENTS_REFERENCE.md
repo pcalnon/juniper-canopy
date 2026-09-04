@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-08-30
+**Last Updated**: 2026-09-04
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -18,6 +18,7 @@ pointer only helps an agent that already knows to look.
 ## Table of Contents
 
 - [Architecture Reference](#architecture-reference)
+- [Hierarchy Depth Filter (CAN-020)](#hierarchy-depth-filter-can-020)
 - [Configuration Reference](#configuration-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
 - [Further Reading](#further-reading)
@@ -237,6 +238,141 @@ juniper_canopy/
     - Centralized application constants
     - Type-safe configuration values
     - Training parameters, UI settings, server config
+
+---
+
+## Hierarchy Depth Filter (CAN-020)
+
+Operator surface: the Network Topology tab's **Hidden depth** slider
+(`network-visualizer-depth-slider`). Developer contract below. User-facing
+copy lives in [`USER_MANUAL.md` § Network Topology Tab](USER_MANUAL.md#network-topology-tab).
+
+### Intent
+
+CasCor cascade order *is* the hierarchy: `hidden_0` was added first,
+`hidden_N-1` most recently. The slider keeps the first `K` hidden units
+(and any edge that touches a dropped unit) so a deep cascade can be read
+one prefix at a time. It is a **view filter** — it does not change the
+backend network.
+
+The control is hidden until `topology.hidden_units >= 1`. Slider `max`
+tracks the live hidden-unit count clientside; a user-picked `K` persists
+across `cascade_add` as long as it is still in range, otherwise it snaps
+to the new max (show all).
+
+### Filter contract
+
+`NetworkVisualizer._apply_hierarchy_filter(topology, depth, n_hidden_total)`
+is the oracle. It never mutates the input dict (that payload is a Dash
+store other callbacks also read). No-op arms return the original
+reference and label `"all"`:
+
+| `depth` / `n_hidden_total` | Graph | Label |
+| --- | --- | --- |
+| `depth is None` | unchanged | `"all"` |
+| `depth <= 0` | unchanged | `"all"` |
+| `depth >= n_hidden_total` | unchanged | `"all"` |
+| `n_hidden_total == 0` | unchanged | `"all"` |
+| `0 < depth < n_hidden_total` | `hidden_units` capped at `depth`; drop any edge whose `from`/`to` is `hidden_K` with `K >= depth` | `"{depth} of {n_hidden_total}"` |
+
+Unparseable node ids (`hidden_x`) are kept — the filter cannot decide.
+
+**`0` means "no filter", not "show zero units."** The slider ships
+`min=0, max=0, value=0`. Treating rest-state `0` as a real depth would
+blank the graph. The same rest state is why a label that only special-
+cases `v === nHidden` reads `"0 of 40"` while all 40 units are drawn.
+
+The filter runs inside `update_network_graph` **before** `compute_hash`,
+so a depth change invalidates the figure cache. That callback is the
+starvation-prone rebuild (measured **1.5–31 s**; F-CANOPY-037 / -039 /
+-043). Do not add `-depth-label.children` as a ninth Output of it —
+the number under the thumb would lag the drag by seconds, and two of
+the four return paths are empty-figure exits with no meaningful label.
+
+### Label wiring (F-CANOPY-042)
+
+Two defects, one finding id.
+
+**Defect A — State vs Input.** On `main` the label is the fourth Output
+of the clientside slider-bounds sync. That callback's only Input is
+`-topology-store.data`; `-depth-slider.value` rides as **State**. A
+State is read when something *else* fires, so moving the slider
+recomputes nothing. Since canopy#542 identity-suppressed the topology
+store, at idle the label never updates at all.
+
+The obvious repair is structurally unavailable: adding
+`Input(-depth-slider, "value")` to that callback makes one
+component-property both an Input and an Output of a single callback,
+which Dash rejects at registration as a circular dependency. The
+bounds-sync callback **must** keep writing `max` and `value` (it bumps
+`max` on grow and snaps an out-of-range pick). Therefore the label
+cannot live there.
+
+**Defect B — two meanings of `0`.** The filter's `depth <= 0` arm is
+`"all"`. The old clientside rule was `(v === nHidden) ? "all" : v + " of " + nHidden`.
+On a loaded 40-unit network the control reads `"0 of 40"` while all 40
+units are displayed, before anyone touches anything. Fixing the wiring
+alone does not fix this.
+
+**Incoming repair (canopy#570, not yet on `main`):** a second clientside
+callback owns `-depth-label.children` with Inputs
+`[-depth-slider.value, -topology-store.data]` — both operands of the
+filter, because a grow event changes the denominator with no user
+action. The JavaScript guard is a condition-for-condition
+transliteration of `_apply_hierarchy_filter`. The bounds-sync callback
+returns three elements (`max`, `value`, container `style`). Until #570
+merges, the `main` tree still has Defect A and Defect B.
+
+### Dual definition — change one, change both
+
+`_apply_hierarchy_filter` still *returns* the label. The rebuild
+discards it on purpose so the readout is not stuck behind the 1.5–31 s
+paint. That return value stays the definition the clientside rule
+transliterates. A label that says `"0 of 40"` while the filter returns
+the unfiltered topology is exactly F-CANOPY-042. Edit the Python guard
+and the JavaScript guard in the same change.
+
+### Tests
+
+On `main`:
+
+```bash
+cd src
+pytest tests/unit/test_network_visualizer.py -k "Hierarchy or hierarchy or depth" -v
+```
+
+`TestHierarchyDepthFilter` drives the Python oracle directly (None / 0 /
+at-total / above-total / keep-3 / drop-edges / no-mutate /
+malformed-id). `TestHierarchyDepthSliderWiring` is source-level only —
+it does not execute the clientside function.
+
+The #570 suite (`src/tests/unit/frontend/test_f042_depth_filter_label.py`,
+not on `main` yet) asserts wiring against `app._callback_list` after a
+real `register_callbacks`, executes the registered JavaScript under
+`node` over a 48-case grid with `_apply_hierarchy_filter` as the oracle,
+and pins that no callback has `-depth-slider.value` as both Input and
+Output. Do not replace that shape with a test that re-types the
+production expression and asserts against its own copy — that class let
+F-CANOPY-041b and F-CANOPY-045 ship green.
+
+E2E rows M-TOPOLOGY-06 / M-TOPOLOGY-07 live in juniper-ml. The old
+M-TOPOLOGY-06 predicate was `label == want OR counts["hidden"] == want`
+and passed on the counts branch while the label stayed `"0 of 40"`.
+M-TOPOLOGY-07 recorded the label but scored `display` alone.
+
+### Pitfalls
+
+- Do not merge the label back into the bounds-sync callback. Dash will
+  refuse the registration (or a future "simplification" will silently
+  restore Defect A).
+- Do not route the label through `update_network_graph`. Correct by
+  construction, unusable under the thumb.
+- Do not treat slider `value=0` as "show zero hidden units."
+- Do not mutate the topology dict inside the filter.
+- Count writers by grepping the store / component id, not by reading
+  the handler you happened to open (`allow_duplicate` and a split
+  clientside callback are both easy to miss). Same lesson as the
+  `metrics-panel-metrics-store` hazard in `AGENTS.md`.
 
 ---
 

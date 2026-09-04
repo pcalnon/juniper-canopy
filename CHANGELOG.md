@@ -30,6 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Hierarchy depth-filter operator docs (CAN-020 / F-CANOPY-042).** Canonical
+  runbook in `docs/AGENTS_REFERENCE.md` § Hierarchy Depth Filter: filter arms
+  (`0` / `None` / `>= N` → `"all"`), why the slider ships `value=0`, the
+  circular-dependency that forbids putting `-depth-slider.value` on the
+  bounds-sync callback, and why the label must not ride `update_network_graph`
+  (1.5–31 s). Operator copy and a `"0 of N"` troubleshooting row in
+  `docs/USER_MANUAL.md`. Pins in the cheatsheet, REFERENCE, TESTING_REFERENCE.
+  canopy#570 is the incoming label-callback split — documented as not yet on
+  `main`.
+
 - Tests pinning Stage 2 (`#511`) live-callback contracts that the original PR's happy-path suite left open: `_update_unified_status_bar_handler` element `[9]` stays `dash.no_update` on every error path (so a hiccup cannot blank `training-status-store` and re-fire its consumers), `{is_running, phase}` is coerced then suppressed, and `_update_system_panels_handler` isolates a `/api/status` Timeout/JSON failure from the details and stream-health surfaces.
 
 ### Changed
