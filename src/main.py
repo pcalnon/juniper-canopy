@@ -157,7 +157,7 @@ async def _websocket_keepalive_loop(interval: float, channel: str = "training") 
             system_logger.debug("WebSocket keepalive ping failed: %s", exc)
 
 
-def _seed_training_state(backend: Any) -> None:
+async def _seed_training_state(backend: Any) -> None:
     """Seed the global ``training_state`` from a freshly-initialized backend.
 
     The per-backend-type seeding shared by application startup (``lifespan``) and the A1-iv-2
@@ -205,7 +205,14 @@ def _seed_training_state(backend: Any) -> None:
         # ``set_state_update_callback`` — the dashboard reads its binary status by
         # polling ``get_status()``. Seed ``training_state`` from the backend's initial
         # status so the dashboard boots to a consistent idle baseline (A1-iii-a).
-        initial_status = backend.get_status()
+        # X7: offloaded even though the recurrence backend answers from memory. The
+        # safety here rests entirely on the ``backend_type`` guard above, which the
+        # off-loop gate cannot see and a future backend added to this chain would
+        # invalidate silently. The alternative -- exempting ``backend.get_status`` by
+        # expression -- is the module-global exemption that made the gate unsound in
+        # d33ab0a, so it is not available. The recurrence call also takes a lock its
+        # training thread holds, which is a loop stall in its own right.
+        initial_status = await asyncio.to_thread(backend.get_status)
         training_state.update_state(
             status=initial_status.get("fsm_status", "idle"),
             phase=initial_status.get("phase", "idle"),
@@ -346,7 +353,7 @@ async def lifespan(app: FastAPI):
     # Sync global training_state from the freshly-initialized backend. Shared with the A1-iv-2
     # runtime model swap (``_swap_backend``) so the per-backend-type seeding logic lives in
     # exactly one place and cannot drift between startup and a live model switch.
-    _seed_training_state(backend)
+    await _seed_training_state(backend)
 
     system_logger.info("Backend initialized: %s", backend.backend_type)
     # METRICS-MON R3.2 / seed-11: reflect the post-fallback backend type in
@@ -702,7 +709,7 @@ async def websocket_training_endpoint(websocket: WebSocket):
 
     try:
         # Send initial status
-        status = backend.get_status()
+        status = await asyncio.to_thread(backend.get_status)
 
         await websocket_manager.send_personal_message({"type": "initial_status", "data": status}, websocket)
 
@@ -1030,6 +1037,10 @@ async def websocket_control_endpoint(websocket: WebSocket):
 async def health_check_deprecated(request: Request):
     """Health check endpoint (deprecated — use /v1/health instead)."""
     system_logger.warning("Deprecated health endpoint %s called — use /v1/health, /v1/health/live, or /v1/health/ready instead", request.url.path)
+    # X7: hoisted off the dict literal so the upstream probe runs in a worker
+    # thread. Health is the endpoint the defect is defined by — a blocking call
+    # here stalls every other route on the single-worker loop, not just this one.
+    training_active = await asyncio.to_thread(backend.is_training_active)
     return {
         # API-01: align with cascor + juniper-data ("ok"). Canopy was the
         # only service returning "healthy"; the field is still present so
@@ -1047,7 +1058,7 @@ async def health_check_deprecated(request: Request):
         "timestamp": time.time(),
         "version": APP_VERSION,
         "active_connections": websocket_manager.get_connection_count(),
-        "training_active": backend.is_training_active(),
+        "training_active": training_active,
         "demo_mode": backend.backend_type == "demo",
         "juniper_data_available": juniper_data_available,
     }
@@ -1065,6 +1076,8 @@ async def health_check():
       ``active_connections``, ``training_active``, ``demo_mode``,
       ``juniper_data_available``.
     """
+    # X7: same hoist as the deprecated twin above -- see the note there.
+    training_active = await asyncio.to_thread(backend.is_training_active)
     return {
         # API-01: align with cascor + juniper-data ("ok").
         "status": "ok",
@@ -1073,7 +1086,7 @@ async def health_check():
         "timestamp": time.time(),
         "version": APP_VERSION,
         "active_connections": websocket_manager.get_connection_count(),
-        "training_active": backend.is_training_active(),
+        "training_active": training_active,
         "demo_mode": backend.backend_type == "demo",
         "juniper_data_available": juniper_data_available,
         # Build provenance (juniper-ml notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md):
@@ -1120,6 +1133,8 @@ async def readiness_probe() -> ReadinessResponse:
             overall = "degraded"
             break
 
+    # X7: the readiness probe is the third endpoint the outage was measured on.
+    training_active = await asyncio.to_thread(backend.is_training_active)
     return ReadinessResponse(
         status=overall,
         version=APP_VERSION,
@@ -1130,7 +1145,7 @@ async def readiness_probe() -> ReadinessResponse:
         details={
             "mode": backend.backend_type,
             "active_connections": websocket_manager.get_connection_count(),
-            "training_active": backend.is_training_active(),
+            "training_active": training_active,
         },
     )
 
@@ -1314,7 +1329,7 @@ async def get_status():
     Returns:
         Training status dictionary with FSM-based status and phase
     """
-    return backend.get_status()
+    return await asyncio.to_thread(backend.get_status)
 
 
 @app.get("/api/stream_health")
@@ -1330,7 +1345,13 @@ async def get_stream_health():
     ``overall`` is ``"n/a"`` and the badge ignores it.
     """
     if backend.backend_type == "service" and hasattr(backend, "_adapter"):
-        return backend._adapter.get_stream_health()
+        # X7: this one really is in-memory today (StreamHealth.snapshot() under a lock
+        # held only by in-memory writers), so it is offloaded for uniformity rather than
+        # exempted. The docstring's "no upstream call" is a promise about a method on the
+        # same adapter whose every neighbour does call upstream; a thread hop costs
+        # microseconds against a 1.0 s budget, and an exemption entry would need
+        # re-verifying every time that promise is edited.
+        return await asyncio.to_thread(backend._adapter.get_stream_health)
     return {"overall": "n/a", "mode": backend.backend_type, "relay": None, "control": None}
 
 
@@ -1341,7 +1362,7 @@ async def get_metrics():
     Returns:
         Current metrics dictionary
     """
-    return backend.get_metrics()
+    return await asyncio.to_thread(backend.get_metrics)
 
 
 @app.get("/api/metrics/history")
@@ -1398,7 +1419,7 @@ async def get_network_stats():
 
     # Service mode: get network data from adapter
     if backend.backend_type == "service" and hasattr(backend, "_adapter"):
-        network_data = backend._adapter.get_network_data()
+        network_data = await asyncio.to_thread(backend._adapter.get_network_data)
         return adapter.get_network_statistics(
             input_weights=network_data.get("input_weights"),
             hidden_weights=network_data.get("hidden_weights"),
@@ -1446,7 +1467,7 @@ async def get_dataset():
     Returns:
         Dataset dictionary
     """
-    dataset = backend.get_dataset()
+    dataset = await asyncio.to_thread(backend.get_dataset)
     if dataset is None:
         return JSONResponse({"error": "No dataset available"}, status_code=503)
     return dataset
@@ -1486,7 +1507,7 @@ async def generate_dataset(request: Request):
         if not hasattr(backend, "regenerate_dataset_from_generator"):
             return JSONResponse({"error": "Backend does not support generator selection"}, status_code=501)
         try:
-            dataset = backend.regenerate_dataset_from_generator(generator=generator, n_samples=n_samples)
+            dataset = await asyncio.to_thread(backend.regenerate_dataset_from_generator, generator=generator, n_samples=n_samples)
             return dataset or {"status": "generated"}
         except Exception as exc:
             error_id = uuid.uuid4().hex[:12]
@@ -1494,7 +1515,7 @@ async def generate_dataset(request: Request):
             return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
 
     try:
-        dataset = backend.regenerate_dataset(n_samples=n_samples, n_spirals=n_spirals, noise=noise, n_rotations=n_rotations)
+        dataset = await asyncio.to_thread(backend.regenerate_dataset, n_samples=n_samples, n_spirals=n_spirals, noise=noise, n_rotations=n_rotations)
         return dataset or {"status": "generated"}
     except Exception as exc:
         # SEC-14: never leak internal exception messages to clients; log the
@@ -1533,7 +1554,7 @@ async def import_dataset_file(file: UploadFile = File(...)):  # noqa: B008 — F
         return JSONResponse({"error": str(exc)}, status_code=400)
 
     try:
-        dataset = backend.import_dataset(inputs, targets, source_label=f"upload:{file.filename or 'unnamed.csv'}")
+        dataset = await asyncio.to_thread(backend.import_dataset, inputs, targets, source_label=f"upload:{file.filename or 'unnamed.csv'}")
         return dataset or {"status": "imported"}
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
@@ -1668,7 +1689,7 @@ async def import_dataset_url(request: _ImportUrlRequest):
         return JSONResponse({"error": str(exc)}, status_code=400)
 
     try:
-        dataset = backend.import_dataset(inputs, targets, source_label=f"url:{url}")
+        dataset = await asyncio.to_thread(backend.import_dataset, inputs, targets, source_label=f"url:{url}")
         return dataset or {"status": "imported"}
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
@@ -1729,7 +1750,7 @@ async def get_decision_boundary(resolution: int = 100):
         Decision boundary dictionary with grid and predictions
     """
     resolution = max(5, min(200, resolution))
-    boundary = backend.get_decision_boundary(resolution)
+    boundary = await asyncio.to_thread(backend.get_decision_boundary, resolution)
     if boundary is None:
         return JSONResponse({"error": "No decision boundary data available"}, status_code=503)
     return boundary
@@ -2206,9 +2227,15 @@ _demo_snapshots: deque = deque(maxlen=_DEMO_SNAPSHOTS_MAX)
 _META_PARAM_PREFIXES = ("nn_", "cn_")
 
 
-def _extract_meta_params() -> dict:
-    """Extract current nn_*/cn_* meta parameters from the backend status."""
-    status = backend.get_status()
+async def _extract_meta_params() -> dict:
+    """Extract current nn_*/cn_* meta parameters from the backend status.
+
+    X7: async because it reaches cascor. This helper is why the committed AST gate is
+    necessary but not sufficient — at both call sites the receiver is a bare module
+    function, not an I/O client, so a receiver-resolving scan sees nothing at all while
+    the call blocks the loop exactly as ``backend.get_status()`` does.
+    """
+    status = await asyncio.to_thread(backend.get_status)
     return {k: v for k, v in status.items() if any(k.startswith(p) for p in _META_PARAM_PREFIXES)}
 
 
@@ -2282,7 +2309,7 @@ async def create_snapshot(
     # Demo mode: create mock snapshot entry
     if backend.backend_type == "demo":
         size_bytes = 1024 * 1024 + int(now.timestamp()) % (512 * 1024)  # ~1-1.5 MB mock size
-        meta_params = _extract_meta_params()
+        meta_params = await _extract_meta_params()
 
         snapshot = {
             "id": snapshot_id,
@@ -2295,7 +2322,7 @@ async def create_snapshot(
         }
 
         # Include dataset versioning metadata for reproducibility
-        status = backend.get_status()
+        status = await asyncio.to_thread(backend.get_status)
         if "dataset_name" in status:
             snapshot["dataset_name"] = status["dataset_name"]
         if "dataset_version" in status:
@@ -2356,7 +2383,7 @@ async def create_snapshot(
             # the response from cascor's own metadata instead; the local stat
             # now lives only in the h5py fallback branch, which really writes
             # the file it stats.
-            result = backend._adapter.save_snapshot(str(snapshot_path), description=description or "")
+            result = await asyncio.to_thread(backend._adapter.save_snapshot, str(snapshot_path), description=description or "")
             data = result.get("data", result) if isinstance(result, dict) else {}
             if not isinstance(data, dict):
                 data = {}
@@ -2387,7 +2414,7 @@ async def create_snapshot(
                                 state_group.attrs[key] = value
 
                     # Store nn_*/cn_* meta parameters
-                    meta_params = _extract_meta_params()
+                    meta_params = await _extract_meta_params()
                     if meta_params:
                         mp_group = f.create_group("meta_params")
                         for key, value in meta_params.items():
@@ -2416,7 +2443,7 @@ async def create_snapshot(
             }
 
         # Include dataset versioning metadata for reproducibility
-        status = backend.get_status()
+        status = await asyncio.to_thread(backend.get_status)
         if "dataset_name" in status:
             snapshot["dataset_name"] = status["dataset_name"]
         if "dataset_version" in status:
@@ -2477,7 +2504,8 @@ async def restore_snapshot(snapshot_id: str):
     global training_state
 
     # Check if training is running - only allow restore when paused/stopped
-    if backend.is_training_active():
+    training_is_active = await asyncio.to_thread(backend.is_training_active)
+    if training_is_active:
         raise HTTPException(
             status_code=409,
             detail="Cannot restore while training is running. Please pause or stop training first.",
@@ -2526,7 +2554,7 @@ async def restore_snapshot(snapshot_id: str):
         # Demo mode: simulate restore by resetting training state
         if backend.backend_type == "demo":
             # Reset demo mode state
-            backend.reset_training()
+            await asyncio.to_thread(backend.reset_training)
 
             # Update training state with simulated restored values
             if training_state:
@@ -2540,7 +2568,7 @@ async def restore_snapshot(snapshot_id: str):
             # Restore meta parameters if the snapshot captured them
             meta_params = snapshot_data.get("meta_params")
             if meta_params:
-                backend.apply_params(**meta_params)
+                await asyncio.to_thread(backend.apply_params, **meta_params)
 
             restored_state = {
                 "snapshot_id": snapshot_id,
@@ -2587,7 +2615,7 @@ async def restore_snapshot(snapshot_id: str):
         # A1-iii-a: gate on ``backend_type == "service"`` — recurrence's ``_adapter`` is a
         # different type, so it falls to the h5py fallback rather than cascor's load path.
         if backend.backend_type == "service" and hasattr(backend, "_adapter") and hasattr(backend._adapter, "load_snapshot"):
-            backend._adapter.load_snapshot(str(snapshot_path))
+            await asyncio.to_thread(backend._adapter.load_snapshot, str(snapshot_path))
         else:
             # Fallback: read HDF5 file and restore state
             try:
@@ -2623,7 +2651,7 @@ async def restore_snapshot(snapshot_id: str):
                 pass
 
         if meta_params:
-            backend.apply_params(**meta_params)
+            await asyncio.to_thread(backend.apply_params, **meta_params)
 
         restored_state = {
             "snapshot_id": snapshot_id,
@@ -2737,11 +2765,12 @@ async def replay_snapshot_route(snapshot_id: str):
     from fastapi import HTTPException
 
     snapshot_id = _sanitize_snapshot_name(snapshot_id)
-    if backend.is_training_active():
+    training_is_active = await asyncio.to_thread(backend.is_training_active)
+    if training_is_active:
         raise HTTPException(status_code=409, detail="Cannot start replay while training is running. Pause or stop training first.")
     adapter = _require_service_adapter()
     try:
-        result = adapter.replay_snapshot(snapshot_id)
+        result = await asyncio.to_thread(adapter.replay_snapshot, snapshot_id)
         _log_snapshot_activity(action="replay", snapshot_id=snapshot_id, details={"mode": "service"}, message=f"Started replay of snapshot {snapshot_id}")
         _broadcast_snapshot_op("replay_started", snapshot_id, payload=result)
         return result
@@ -2771,7 +2800,7 @@ async def replay_control_route(snapshot_id: str, body: _ReplayControlBody):
     adapter = _require_service_adapter()
     params = body.model_dump(exclude_none=True, exclude={"action"})
     try:
-        result = adapter.replay_control(snapshot_id, body.action, **params)
+        result = await asyncio.to_thread(adapter.replay_control, snapshot_id, body.action, **params)
         # Don't log/broadcast every play/pause/seek tick — too noisy. The
         # ``stop`` action is the meaningful one to surface.
         if body.action.lower() == "stop":
@@ -2798,11 +2827,12 @@ async def resume_snapshot_route(snapshot_id: str):
     from fastapi import HTTPException
 
     snapshot_id = _sanitize_snapshot_name(snapshot_id)
-    if backend.is_training_active():
+    training_is_active = await asyncio.to_thread(backend.is_training_active)
+    if training_is_active:
         raise HTTPException(status_code=409, detail="Cannot resume while training is running. Pause or stop training first.")
     adapter = _require_service_adapter()
     try:
-        result = adapter.resume_snapshot(snapshot_id)
+        result = await asyncio.to_thread(adapter.resume_snapshot, snapshot_id)
         _log_snapshot_activity(action="resume", snapshot_id=snapshot_id, details={"mode": "service"}, message=f"Resumed snapshot {snapshot_id}")
         _broadcast_snapshot_op("resumed", snapshot_id, payload=result)
         return result
@@ -2819,11 +2849,12 @@ async def retrain_snapshot_route(snapshot_id: str):
     from fastapi import HTTPException
 
     snapshot_id = _sanitize_snapshot_name(snapshot_id)
-    if backend.is_training_active():
+    training_is_active = await asyncio.to_thread(backend.is_training_active)
+    if training_is_active:
         raise HTTPException(status_code=409, detail="Cannot retrain while training is running. Pause or stop training first.")
     adapter = _require_service_adapter()
     try:
-        result = adapter.retrain_snapshot(snapshot_id)
+        result = await asyncio.to_thread(adapter.retrain_snapshot, snapshot_id)
         _log_snapshot_activity(action="retrain", snapshot_id=snapshot_id, details={"mode": "service"}, message=f"Retrain prepared from snapshot {snapshot_id}")
         _broadcast_snapshot_op("retrain_ready", snapshot_id, payload=result)
         return result
@@ -2863,7 +2894,8 @@ async def patch_weights_route(body: _PatchWeightsBody):
 
     adapter = _require_service_adapter()
     try:
-        return adapter.patch_weights(
+        return await asyncio.to_thread(
+            adapter.patch_weights,
             target=body.target,
             field=body.field,
             values=body.values,
@@ -2893,7 +2925,8 @@ async def add_hidden_unit_route(body: _AddHiddenUnitBody):
 
     adapter = _require_service_adapter()
     try:
-        return adapter.add_hidden_unit(
+        return await asyncio.to_thread(
+            adapter.add_hidden_unit,
             weights=body.weights,
             bias=body.bias,
             activation=body.activation,
@@ -2910,7 +2943,7 @@ async def remove_hidden_unit_route(idx: int):
 
     adapter = _require_service_adapter()
     try:
-        return adapter.remove_hidden_unit(idx=idx)
+        return await asyncio.to_thread(adapter.remove_hidden_unit, idx=idx)
     except Exception as e:
         system_logger.error("remove_hidden_unit(idx=%d) failed: %s", idx, e)
         raise HTTPException(status_code=500, detail=f"remove_hidden_unit failed: {e}") from e
@@ -3126,7 +3159,7 @@ async def get_redis_status():
     from backend.redis_client import get_redis_client
 
     client = get_redis_client()
-    return client.get_status()
+    return await asyncio.to_thread(client.get_status)
 
 
 @app.get("/api/v1/redis/metrics")
@@ -3143,7 +3176,7 @@ async def get_redis_metrics():
     from backend.redis_client import get_redis_client
 
     client = get_redis_client()
-    return client.get_metrics()
+    return await asyncio.to_thread(client.get_metrics)
 
 
 # ============================================================================
@@ -3168,7 +3201,7 @@ async def get_cassandra_status():
     from backend.cassandra_client import get_cassandra_client
 
     client = get_cassandra_client()
-    return client.get_status()
+    return await asyncio.to_thread(client.get_status)
 
 
 @app.get("/api/v1/cassandra/metrics")
@@ -3185,7 +3218,7 @@ async def get_cassandra_metrics():
     from backend.cassandra_client import get_cassandra_client
 
     client = get_cassandra_client()
-    return client.get_metrics()
+    return await asyncio.to_thread(client.get_metrics)
 
 
 # ============================================================================
@@ -3203,7 +3236,7 @@ async def get_worker_stats():
     """
     if backend.backend_type == "service" and hasattr(backend, "_adapter"):
         try:
-            result = backend._adapter._client.get_worker_stats()
+            result = await asyncio.to_thread(backend._adapter._client.get_worker_stats)
             return result.get("data", result)
         except Exception:
             # SEC-14: return an opaque error_id instead of the exception message.
@@ -3251,7 +3284,7 @@ async def get_worker_list():
     """
     if backend.backend_type == "service" and hasattr(backend, "_adapter"):
         try:
-            result = backend._adapter._client.list_workers()
+            result = await asyncio.to_thread(backend._adapter._client.list_workers)
             data = result.get("data", result)
             if isinstance(data, dict):
                 for worker in data.get("workers", []) or []:
@@ -3425,7 +3458,7 @@ async def api_train_start(reset: bool = False, body: _TrainStartBody | None = No
     # ``backend.start_training(reset=..., start_fresh=...)`` directly — the plain
     # Start route keeps its existing signature (start_fresh defaults to False).
     start_kwargs = _recurrence_start_kwargs(body.model_dump()) if (backend.backend_type == "recurrence" and body is not None) else {}
-    result = backend.start_training(reset=reset, **start_kwargs)
+    result = await asyncio.to_thread(backend.start_training, reset=reset, **start_kwargs)
     failure = _control_result_failure(result)
     if failure is not None:
         system_logger.warning("Training start rejected: %s", failure)
@@ -3447,7 +3480,7 @@ async def api_train_pause():
 
     from communication.websocket_manager import create_control_ack_message
 
-    result = backend.pause_training()
+    result = await asyncio.to_thread(backend.pause_training)
     failure = _control_result_failure(result)
     if failure is not None:
         system_logger.warning("Training pause rejected: %s", failure)
@@ -3468,7 +3501,7 @@ async def api_train_resume():
 
     from communication.websocket_manager import create_control_ack_message
 
-    result = backend.resume_training()
+    result = await asyncio.to_thread(backend.resume_training)
     failure = _control_result_failure(result)
     if failure is not None:
         system_logger.warning("Training resume rejected: %s", failure)
@@ -3489,7 +3522,7 @@ async def api_train_stop():
 
     from communication.websocket_manager import create_control_ack_message
 
-    result = backend.stop_training()
+    result = await asyncio.to_thread(backend.stop_training)
     failure = _control_result_failure(result)
     if failure is not None:
         system_logger.warning("Training stop rejected: %s", failure)
@@ -3510,7 +3543,7 @@ async def api_train_reset():
 
     from communication.websocket_manager import create_control_ack_message
 
-    result = backend.reset_training()
+    result = await asyncio.to_thread(backend.reset_training)
     failure = _control_result_failure(result)
     if failure is not None:
         system_logger.warning("Training reset rejected: %s", failure)
@@ -3527,7 +3560,8 @@ async def api_train_status():
     Returns:
         Training status dictionary with network info and training state.
     """
-    return {"backend": backend.backend_type, "execution": backend.execution, **backend.get_status()}
+    status = await asyncio.to_thread(backend.get_status)
+    return {"backend": backend.backend_type, "execution": backend.execution, **status}
 
 
 class _TrainRestartBody(BaseModel):
@@ -3614,7 +3648,7 @@ async def api_train_restart(body: _TrainRestartBody | None = None):
 
     was_active = await asyncio.to_thread(backend.is_training_active)
     if was_active:
-        stop_result = backend.stop_training()
+        stop_result = await asyncio.to_thread(backend.stop_training)
         stop_failure = _control_result_failure(stop_result)
         if stop_failure is not None:
             steps.append({"step": "stop", "ok": False, "detail": stop_failure})
@@ -3635,7 +3669,7 @@ async def api_train_restart(body: _TrainRestartBody | None = None):
         steps.append({"step": "await_stopped", "ok": True, "detail": "Training stopped"})
 
     # Start consumes the staged dataset; start_fresh discards the model when set.
-    start_result = backend.start_training(reset=reset, start_fresh=start_fresh)
+    start_result = await asyncio.to_thread(backend.start_training, reset=reset, start_fresh=start_fresh)
     start_failure = _control_result_failure(start_result)
     if start_failure is not None:
         steps.append({"step": "start", "ok": False, "detail": start_failure})
@@ -3707,7 +3741,8 @@ async def _swap_backend(nn_model: str) -> dict:
         current_nn_model = nn_model
         return _model_state_response(nn_model, swapped=False)
 
-    if backend.is_training_active():
+    training_is_active = await asyncio.to_thread(backend.is_training_active)
+    if training_is_active:
         raise HTTPException(
             status_code=409,
             detail="Cannot switch models while training is active. Pause or stop training first.",
@@ -3721,7 +3756,7 @@ async def _swap_backend(nn_model: str) -> dict:
 
     backend = new_backend
     current_nn_model = nn_model
-    _seed_training_state(new_backend)
+    await _seed_training_state(new_backend)
     set_demo_mode_active(new_backend.backend_type == "demo")
     await old_backend.shutdown()
     system_logger.info("Backend swapped for model %r -> %s", nn_model, new_backend.backend_type)
@@ -4232,7 +4267,7 @@ async def api_remote_status():
         Dictionary with remote worker status information.
     """
     if backend.backend_type == "service" and hasattr(backend, "_adapter"):
-        return backend._adapter.get_remote_worker_status()
+        return await asyncio.to_thread(backend._adapter.get_remote_worker_status)
     return {"available": False, "connected": False, "workers_active": False, "error": "Not available in demo mode"}
 
 
@@ -4263,7 +4298,7 @@ async def api_remote_connect(request: RemoteConnectRequest):
         return JSONResponse({"error": "Not available in demo mode"}, status_code=503)
 
     try:
-        success = backend._adapter.connect_remote_workers((request.host, request.port), request.authkey.get_secret_value())
+        success = await asyncio.to_thread(backend._adapter.connect_remote_workers, (request.host, request.port), request.authkey.get_secret_value())
         if success:
             return {"status": "connected", "address": f"{request.host}:{request.port}"}
         return JSONResponse({"error": "Connection failed"}, status_code=500)
@@ -4291,7 +4326,7 @@ async def api_remote_start_workers(num_workers: int = 1):
     if backend.backend_type != "service" or not hasattr(backend, "_adapter"):
         return JSONResponse({"error": "Not available in demo mode"}, status_code=503)
 
-    success = backend._adapter.start_remote_workers(num_workers)
+    success = await asyncio.to_thread(backend._adapter.start_remote_workers, num_workers)
     if success:
         return {"status": "started", "num_workers": num_workers}
     return JSONResponse({"error": "Failed to start workers"}, status_code=500)
@@ -4313,7 +4348,7 @@ async def api_remote_stop_workers(timeout: int = 10):  # noqa: ASYNC109
     if backend.backend_type != "service" or not hasattr(backend, "_adapter"):
         return JSONResponse({"error": "Not available in demo mode"}, status_code=503)
 
-    success = backend._adapter.stop_remote_workers(timeout)
+    success = await asyncio.to_thread(backend._adapter.stop_remote_workers, timeout)
     if success:
         return {"status": "stopped"}
     return JSONResponse({"error": "Failed to stop workers"}, status_code=500)
@@ -4329,7 +4364,7 @@ async def api_remote_disconnect():
     if backend.backend_type != "service" or not hasattr(backend, "_adapter"):
         return JSONResponse({"error": "Not available in demo mode"}, status_code=503)
 
-    success = backend._adapter.disconnect_remote_workers()
+    success = await asyncio.to_thread(backend._adapter.disconnect_remote_workers)
     if success:
         return {"status": "disconnected"}
     return JSONResponse({"error": "Failed to disconnect"}, status_code=500)

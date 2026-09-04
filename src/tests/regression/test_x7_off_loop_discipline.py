@@ -44,18 +44,30 @@ reports 50 unguarded / 0 guarded on this file, emitting false positives on the e
 code while missing every correct offload.
 
 **SCOPE LIMIT -- read this before treating a green result as "slice 1a is done".** This gate
-reads ``main.py`` only. Slice 1a is larger: §5.2 of the design also puts in scope the metrics
-relay's inline ``extract_network_topology()`` (``backend/cascor_service_adapter.py:771``,
-inside ``async def _relay_loop()``), measured at **123 s blocked per 183 s with no user
-present**. That call is a ``self``-method whose I/O is internal, so a receiver-based scan
-cannot see it, and extending this gate to cover it needs a model of which adapter methods
-perform I/O. Until that exists, **the relay is tracked as a named work item, not by this
-gate**. Treating a green gate as proof that 1a is complete would be exactly the
-"core now, remaining paths later" split that let SEC-F20 recur as X7.
+reads ``main.py`` only, and it guards two shapes there: a direct call on a receiver that
+resolves to an I/O client, and a bare call to a module-level helper whose body reaches one
+(``_blocking_helpers``). The second was added after the first shipped: ``_extract_meta_params``
+held a ``backend.get_status()`` and ``create_snapshot`` called it twice, so the gate read a
+clean **0** over two live blocking calls -- the same "green over a partial fix" failure as the
+module-global exemption fixed in ``d33ab0a``, reached by a different route.
+
+**Four sites outside ``main.py`` are NOT guarded by this file.** They were found by
+``util/ad-hoc/2026-09-04_async_blocking_callgraph.py`` -- a transitive taint scan over
+canopy plus both client libraries -- and fixed in the same change:
+``cascor_service_adapter.py`` ``connect()`` (``self._client.is_alive()``) and ``_relay_loop()``
+(``self.extract_network_topology()``, measured at **123 s blocked per 183 s with no user
+present**), and ``service_backend.py`` ``initialize()`` (``attach_to_existing()`` and
+``CascorStateSync(...).sync()``, both on the runtime model-swap path via ``_swap_backend``).
+Guarding them here needs a model of which adapter methods perform I/O; that model exists in
+the ad-hoc script but is not a committed gate. **Run the script when touching the adapter.**
+Treating a green gate as proof that 1a is complete would be exactly the "core now, remaining
+paths later" split that let SEC-F20 recur as X7.
 
 Buckets, all reported so none hides:
 
 * ``CASCOR``     -- the module ``backend`` global or anything reached through it.
+* ``HELPER``     -- a bare call to a module-level sync function that reaches the network
+  through its own body. Same mechanism, invisible to receiver resolution.
 * ``OTHER``      -- another *synchronous* network client (redis, cassandra). Same
   mechanism, different upstream, so in scope: the fix is defined by mechanism, and
   excluding these would be the path-subset exclusion that let SEC-F20 recur.
@@ -87,9 +99,15 @@ OFFLOADERS = {"to_thread", "run_in_executor"}
 # would hide real I/O. Each entry below was read and confirmed:
 #   _demo.get_network()       -> ``return self.network``            (demo_mode.py:1752)
 #   _demo.get_current_state() -> lock-guarded dict copy, no I/O      (demo_mode.py:2069)
+#   get_synced_state()        -> ``return self._synced_state``      (service_backend.py:372)
+#   set_state_update_callback -> stores the callback, and forwards to the adapter's own
+#                                store (service_backend.py:72, cascor_service_adapter.py:566);
+#                                both implementations are assignments, nothing else
 VERIFIED_NO_IO_CALLS = {
     "backend._demo.get_network",
     "backend._demo.get_current_state",
+    "backend.get_synced_state",
+    "backend.set_state_update_callback",
 }
 
 # Receiver roots that plausibly perform I/O. A receiver outside this set with unknown
@@ -116,7 +134,7 @@ def _offloaded_targets(tree: ast.AST) -> set[str]:
     return out
 
 
-def _provenance(fn: ast.AsyncFunctionDef) -> dict[str, str]:
+def _provenance(fn: ast.AST) -> dict[str, str]:
     """Local name -> the factory that bound it, within one handler."""
     bound: dict[str, str] = {}
     for node in ast.walk(fn):
@@ -154,15 +172,69 @@ def _classify(receiver: ast.AST, bound: dict[str, str]) -> str:
     return "UNRESOLVED" if root in IO_RECEIVER_ROOTS else "SKIP"
 
 
-def census() -> dict[str, list[str]]:
-    """Bucket every un-offloaded call on an I/O receiver inside an async handler."""
-    tree = ast.parse(MAIN_PY.read_text())
+def _blocking_helpers(tree: ast.Module) -> set[str]:
+    """Module-level **sync** functions that transitively perform a blocking call.
+
+    Everything above answers one question -- "is this call's receiver an I/O client?" --
+    and that is the wrong question at ``_extract_meta_params()``: a bare module function
+    whose *body* holds ``backend.get_status()``. At its call sites the receiver is not a
+    client at all, it is nothing, so a receiver-resolving scan sees nothing while the
+    call blocks the loop exactly as the direct one does.
+
+    This was not hypothetical. ``create_snapshot`` called it twice, and both sites were
+    invisible to this gate while it reported a clean **0** for the file. That is the same
+    failure shape as the module-global exemption fixed in ``d33ab0a`` -- a gate reading
+    zero over live blocking calls -- reached by a different route, which is the argument
+    for closing it here rather than noting it.
+
+    Transitive on purpose: a helper that calls a helper that blocks, blocks.
+    """
+    funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    direct: set[str] = set()
+    calls: dict[str, set[str]] = {}
+
+    for name, fn in funcs.items():
+        bound = _provenance(fn)
+        callees: set[str] = set()
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Name):
+                callees.add(node.func.id)
+            elif isinstance(node.func, ast.Attribute):
+                if ast.unparse(node.func) in VERIFIED_NO_IO_CALLS:
+                    continue
+                if _classify(node.func.value, bound) in ("CASCOR", "OTHER"):
+                    direct.add(name)
+        calls[name] = callees
+
+    blocking = set(direct)
+    changed = True
+    while changed:
+        changed = False
+        for name, callees in calls.items():
+            if name not in blocking and callees & blocking:
+                blocking.add(name)
+                changed = True
+    return blocking
+
+
+def census(tree: ast.Module | None = None) -> dict[str, list[str]]:
+    """Bucket every un-offloaded call on an I/O receiver inside an async handler.
+
+    ``tree`` defaults to ``main.py``; passing one lets the tests below drive the whole
+    classifier over a synthetic module, so the rules can be proved to *fire* rather than
+    only proved to be quiet against a file that currently happens to be clean.
+    """
+    if tree is None:
+        tree = ast.parse(MAIN_PY.read_text())
     for parent in ast.walk(tree):
         for child in ast.iter_child_nodes(parent):
             child._parent = parent  # type: ignore[attr-defined]
 
     offloaded = _offloaded_targets(tree)
-    buckets: dict[str, list[str]] = {k: [] for k in ("CASCOR", "OTHER", "LOCAL", "ASYNC", "UNRESOLVED")}
+    helpers = _blocking_helpers(tree)
+    buckets: dict[str, list[str]] = {k: [] for k in ("CASCOR", "OTHER", "HELPER", "LOCAL", "ASYNC", "UNRESOLVED")}
 
     for fn in ast.walk(tree):
         if not isinstance(fn, ast.AsyncFunctionDef):
@@ -176,6 +248,11 @@ def census() -> dict[str, list[str]]:
 
         for node in ast.walk(fn):
             if id(node) in exempt or not isinstance(node, ast.Call):
+                continue
+            if isinstance(node.func, ast.Name):
+                # A bare call to a module-level sync helper that reaches the network.
+                if node.func.id in helpers and not isinstance(getattr(node, "_parent", None), ast.Await):
+                    buckets["HELPER"].append(f"main.py:{node.lineno} {fn.name}() -> {node.func.id}()")
                 continue
             if not isinstance(node.func, ast.Attribute):
                 continue
@@ -217,6 +294,77 @@ def test_census_instrument_is_not_vacuous():
     assert seen > 0, "the scan classified nothing at all -- it cannot discriminate"
 
 
+# A miniature ``main.py``: one direct blocking call, one that blocks only through a
+# module-level helper, one that blocks two helpers deep, and three that must stay quiet.
+_SYNTHETIC = """
+import asyncio
+
+
+def _reaches_network():
+    return backend.get_status()
+
+
+def _one_more_hop():
+    return _reaches_network()
+
+
+def _pure_helper():
+    return {"a": 1}
+
+
+async def direct_handler():
+    return backend.get_metrics()
+
+
+async def helper_handler():
+    return _reaches_network()
+
+
+async def transitive_handler():
+    return _one_more_hop()
+
+
+async def clean_handler():
+    return await asyncio.to_thread(backend.get_status)
+
+
+async def helper_awaited_handler():
+    return await _reaches_network()
+
+
+async def pure_handler():
+    return _pure_helper()
+"""
+
+
+def test_helper_rule_fires_on_a_call_that_blocks_through_a_helper():
+    """The HELPER rule must catch what receiver resolution structurally cannot.
+
+    This is the check that would have failed before ``_extract_meta_params`` was made
+    async: the gate read a clean 0 over ``main.py`` while two of ``create_snapshot``'s
+    calls blocked the loop through it. Asserting only "the real file is clean" cannot
+    distinguish a working rule from a rule that never fires, so the rule is exercised
+    here against a module that is deliberately dirty.
+    """
+    tree = ast.parse(_SYNTHETIC)
+
+    helpers = _blocking_helpers(tree)
+    assert "_reaches_network" in helpers, "a helper holding backend.get_status() must be blocking"
+    assert "_one_more_hop" in helpers, "blocking must propagate transitively through helpers"
+    assert "_pure_helper" not in helpers, "a helper with no network call must stay clean"
+
+    buckets = census(tree)
+    flagged = " ".join(buckets["HELPER"])
+    assert "helper_handler" in flagged, "a bare call to a blocking helper must be flagged"
+    assert "transitive_handler" in flagged, "a two-hop blocking helper must be flagged"
+    assert "pure_handler" not in flagged, "a pure helper must not be flagged"
+    assert "helper_awaited_handler" not in flagged, "an awaited helper is already off the loop"
+
+    # And the direct rule still works alongside it, in its own bucket.
+    assert any("direct_handler" in hit for hit in buckets["CASCOR"])
+    assert not any("clean_handler" in hit for hit in buckets["CASCOR"])
+
+
 def test_no_blocking_calls_on_the_event_loop():
     """X7 gate: zero synchronous network calls in async route handlers.
 
@@ -225,7 +373,7 @@ def test_no_blocking_calls_on_the_event_loop():
     adjudicated and added to the tables above, not waved through.
     """
     buckets = census()
-    blocking = buckets["CASCOR"] + buckets["OTHER"] + buckets["UNRESOLVED"]
+    blocking = buckets["CASCOR"] + buckets["OTHER"] + buckets["HELPER"] + buckets["UNRESOLVED"]
 
     detail = "\n  ".join(sorted(blocking))
     assert not blocking, f"{len(blocking)} synchronous network call(s) run on the event loop in async handlers:\n  {detail}"
