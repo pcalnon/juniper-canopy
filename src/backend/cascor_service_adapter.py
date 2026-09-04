@@ -504,7 +504,18 @@ class CascorServiceAdapter:
         # E.2 PR-2-C: store + forward to the control-stream supervisor.
         # See ``settings.cascor_ws_origin`` for the env-binding contract.
         self._ws_origin = ws_origin
-        self._client = client or JuniperCascorClient(base_url=service_url, api_key=api_key)
+        # X7 slice 1b: pass the HTTP budget explicitly. Inheriting the client's
+        # defaults (timeout=30, retries=3) cost 123.1 s per call against a hung
+        # cascor and 3.0 s against a stopped one -- almost all of the latter being
+        # urllib3 backoff sleep -- on canopy's event loop. See
+        # ``BackendConstants.CASCOR_CLIENT_RETRIES`` for why zero is correct for a
+        # service that already re-polls on its own interval.
+        self._client = client or JuniperCascorClient(
+            base_url=service_url,
+            api_key=api_key,
+            timeout=BackendConstants.CASCOR_CLIENT_TIMEOUT_SECONDS,
+            retries=BackendConstants.CASCOR_CLIENT_RETRIES,
+        )
         self.training_monitor = _ServiceTrainingMonitor(self._client)
         self._training_stream: Optional[CascorTrainingStream] = None
         self._relay_task: Optional[asyncio.Task] = None
