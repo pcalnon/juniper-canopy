@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-08-30
+**Last Updated**: 2026-09-04
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -18,6 +18,7 @@ pointer only helps an agent that already knows to look.
 ## Table of Contents
 
 - [Architecture Reference](#architecture-reference)
+- [Topology Node Selection (F-CANOPY-046)](#topology-node-selection-f-canopy-046)
 - [Configuration Reference](#configuration-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
 - [Further Reading](#further-reading)
@@ -237,6 +238,140 @@ juniper_canopy/
     - Centralized application constants
     - Type-safe configuration values
     - Training parameters, UI settings, server config
+
+---
+
+## Topology Node Selection (F-CANOPY-046)
+
+Operator surface: the Network Topology tab's selection panel
+(`network-visualizer-selection-info`) and the `-selected-nodes` store.
+Developer contract below. User-facing copy lives in
+[`USER_MANUAL.md` § Network Topology Tab](USER_MANUAL.md#network-topology-tab).
+
+### Intent
+
+Click or box/lasso a node to inspect it. The store is view state — it
+does not change the backend network. `update_network_graph` takes
+`-selected-nodes.data` as a real **Input** and draws a highlight overlay
+(`_create_selection_highlight`). Any write to that store, identical or
+not, rebuilds the figure (measured **1.5–31 s**; F-CANOPY-037 / -039 /
+-043). canopy#542 identity-suppressed the *topology* store; this store
+has no such guard.
+
+### How a click becomes a node (F-CANOPY-044 / F-CANOPY-045)
+
+`handle_node_selection` (`prevent_initial_call=True`) has two Inputs on
+`main`: `-graph.clickData` and `-graph.selectedData`.
+
+**F-CANOPY-044.** Edges are drawn *to* node centres, so a click aimed at
+a node resolves to an EDGE trace (measured 0 of 7 clicks landing on a
+node trace). Edge points have no `text`. The handler reads
+`point.get("text") or point.get("customdata")`. The edge traces carry
+the endpoint node labels in `customdata`, so a click on an edge vertex
+still identifies the node there. Reordering traces so the node series
+come first does **not** break plotly's pick — do not "fix" this by
+shuffling `data` order.
+
+**F-CANOPY-045.** Layer is the first word of that same label
+(`Input` / `Hidden` / `Output`), not `curveNumber`. The old
+`layer_names[min(curve_number, 4)]` table is correct only if the node
+traces are curves 2–4. With one trace per connection they sit at
+~1888–1890, so every node reported `"Output"`.
+
+`node_id` is `text.lower().replace(" ", "_")` (`"Hidden 0"` →
+`hidden_0`).
+
+### What actually clears a selection
+
+| Gesture | Result on `main` |
+| --- | --- |
+| Click the already-selected node again | Clears. The toggle branch returns `[]`. |
+| Click any member of a box/lasso set | Clears the **whole** set (same toggle: `node_id in current_selection` → `[]`). |
+| Click empty canvas | **Nothing.** Plotly emits `plotly_click` only on a point hit. `clickData` does not change, the callback never runs. Measured: 7 empty-canvas clicks, 0 events. |
+| Box / lasso (`select2d` / `lasso2d`) | Selects. Panel lists up to 5 ids. Box points use `text` only (no `customdata` fallback). |
+
+The panel on `main` still says *"(Click again or elsewhere to deselect)"*
+after a click and *"(Click elsewhere to deselect)"* after a box select.
+The "again" half is true. The "elsewhere" half was never implemented —
+only described.
+
+### Store write cost
+
+The fall-through at the bottom of `handle_node_selection` writes `[]`
+unconditionally. Because `-selected-nodes` is an Input of
+`update_network_graph`, a click that resolves to nothing (or a clear of
+an already-empty store) still pays the 1.5–31 s rebuild. Assert
+`is dash.no_update`, not `== []` — equality passes against the broken
+write.
+
+### Incoming repair (canopy#573, not yet on `main`)
+
+A **"Clear selection"** button (`-clear-selection`) is wired as a third
+**Input** (the click *is* the trigger) and a fourth Output that sets
+`display` to `inline-block` only while something is selected — no dead
+button on an empty panel. The click hint keeps *"(Click again to
+deselect)"* and drops *"or elsewhere"*. The box branch drops its hint
+entirely; the visible button carries the affordance.
+
+Both clear paths return `dash.no_update` on all four Outputs when
+`current_selection` is already empty.
+
+A clientside listener on the graph container would literally satisfy
+the old sentence and was rejected: it races plotly's own event path,
+and this is the callback family this arc has repeatedly starved. Until
+#573 merges, `main` still has the false "elsewhere" copy and the
+unguarded `[]` write.
+
+### Tests
+
+On `main`:
+
+```bash
+cd src
+pytest tests/unit/frontend/test_f044_node_click_selection.py -v
+```
+
+Every test in that file reaches the real registered callback or the
+real trace builder. Do not replace it with a test that re-types
+`layer_names[min(curve_number, 4)]` and asserts against its own copy —
+that class let F-CANOPY-045 ship green while every node read
+`"Output"`.
+
+`test_network_visualizer_callbacks.py` `TestHandleNodeSelectionCallback`
+still drives a *re-implementation* (`_simulate_handle_node_selection`)
+for several cases; treat those as historical, not as the contract.
+
+The #573 suite (`src/tests/unit/frontend/test_f046_clear_selection.py`,
+not on `main` yet) reaches the real callback, builds its argument list
+from the live signature, and asserts `is dash.no_update` on the empty-
+clear path. Adding an Input and an Output changes arity: three existing
+files invoke the callback for real
+(`test_f044_node_click_selection.py`,
+`test_network_visualizer_callbacks.py`,
+`tests/regression/test_dark_mode_info_panels.py`). The last two locate
+it by Output key, not by the function name — a grep for
+`handle_node_selection` misses them.
+
+E2E row M-TOPOLOGY-12 lives in juniper-ml. On a build with no clear
+control it scores **BLOCKED**, not FAIL. The empty-canvas click is
+still recorded (and still produces zero `plotly_click` events) as the
+evidence for why the contract changed.
+
+### Pitfalls
+
+- Do not add a container-level click listener to "make elsewhere work."
+  It races plotly and starves this callback family (F-CANOPY-037 / -039
+  / -043).
+- Do not write `[]` over an already-empty `-selected-nodes`. Return
+  `dash.no_update`.
+- Do not derive layer from `curveNumber`. The label is the contract.
+- Do not require `point.text` without the `customdata` fallback. Most
+  node-aimed clicks land on an edge.
+- When changing this callback's arity, grep the **Output key**
+  (`-selected-nodes.data`), not the handler name.
+- Count writers by grepping the store id. `-selected-nodes` has one
+  writer today; an `allow_duplicate` second writer would be invisible
+  from the handler you happened to open.
 
 ---
 

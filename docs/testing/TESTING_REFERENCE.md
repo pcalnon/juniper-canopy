@@ -1,7 +1,7 @@
 # Testing Reference
 
-**Last Updated:** April 5, 2026  
-**Version:** v0.26.1
+**Last Updated:** September 4, 2026  
+**Version:** v0.26.4
 
 Technical reference for the active pytest configuration, markers, fixtures, and CI-equivalent commands.
 
@@ -178,6 +178,26 @@ python scripts/check_doc_links.py --cross-repo check
 # Run focused unit tests for link-checker hardening
 pytest src/tests/unit/test_check_doc_links.py -v
 ```
+
+### Topology node selection (F-CANOPY-044 / F-CANOPY-045 / F-CANOPY-046)
+
+On `main`, drive the real registered callback (not the
+`_simulate_handle_node_selection` re-implementation):
+
+```bash
+cd src
+pytest tests/unit/frontend/test_f044_node_click_selection.py -v
+```
+
+`test_f044_node_click_selection.py` is the contract for click-to-select:
+edge `customdata` fallback (F-044) and label-derived layer (F-045). The
+#573 suite (`src/tests/unit/frontend/test_f046_clear_selection.py` — not
+on `main` yet) pins the Clear button, the true hints, and
+`is dash.no_update` on an already-empty store. Adding an Input/Output
+changes arity; three files invoke the callback by its Output key
+(`-selected-nodes.data`), including
+`tests/regression/test_dark_mode_info_panels.py`. See
+[AGENTS_REFERENCE.md § Topology Node Selection](../AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046).
 
 ### Documentation Link Checker Edge-Case Matrix
 

@@ -61,6 +61,7 @@
 | **See version history**      | [CHANGELOG.md](../CHANGELOG.md)                                           | Root           |
 | **Quick-reference dev tasks** | [DEVELOPER_CHEATSHEET.md](DEVELOPER_CHEATSHEET.md)              | docs/         |
 | **Contribute code**          | [AGENTS.md](../AGENTS.md)                                                 | Root           |
+| **Understand topology node selection** | [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046) | docs/ |
 
 ---
 

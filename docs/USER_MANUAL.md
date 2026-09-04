@@ -352,6 +352,21 @@ tick. The base tick is **1000 ms**; the **1x / 2x / 4x** buttons set it to 1000 
 - **Zoom** - Scroll to zoom in/out
 - **Pan** - Click and drag to pan view
 - **Hover** - Show node ID and connection details
+- **Click a node** - Opens the selection panel (`Selected: …`, `Layer: Input|Hidden|Output`). Clicking the same node again clears the selection.
+- **Box / lasso** - Mode-bar `select2d` / `lasso2d` select several nodes. The panel lists up to five.
+
+**Node Selection:**
+
+The selection panel is view state. It highlights nodes on the graph; it does not change the trained network.
+
+| Gesture | What happens |
+| --- | --- |
+| Click a node (or the edge vertex that sits on it) | Panel opens. Layer is taken from the node *label* (`Hidden 0` → Hidden), not from the Plotly curve index. |
+| Click the selected node again | Selection clears. This is the only click gesture that works on `main`. |
+| Click any member of a box/lasso set | The *whole* set clears (same toggle). |
+| Click empty canvas | **Nothing.** Plotly emits `plotly_click` only when a point is hit. The callback never runs. |
+
+The panel currently says *"(Click again or elsewhere to deselect)"* after a click and *"(Click elsewhere to deselect)"* after a box select. The "again" half is true. The "elsewhere" half is not — that sentence was never implemented. canopy#573 adds a **Clear selection** button that appears only while something is selected, and rewrites the hints so they match the gestures that actually exist. See [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046).
 
 **Data Source:**
 
@@ -1082,6 +1097,28 @@ ws.onmessage = (e) => console.log('Message:', e.data);
 
 ---
 
+#### 6. Topology selection does not clear when you click empty space
+
+**Symptoms:**
+
+- After a click the panel reads *"(Click again or elsewhere to deselect)"*
+- After a box/lasso it reads *"(Click elsewhere to deselect)"*
+- Clicking the blank canvas leaves the highlight in place
+
+**Cause:**
+
+- Plotly emits `plotly_click` only when a *point* is hit. A click on empty canvas produces no event, so `clickData` never changes and `handle_node_selection` (`prevent_initial_call=True`) never runs. The "elsewhere" sentence was never implemented.
+
+**Solutions:**
+
+✅ **Click the selected node again** — that toggle *does* clear (including every member of a box/lasso set).
+
+✅ **Do not wait for a container-level listener.** A clientside click-on-empty handler was considered and rejected (it races Plotly and starves the 1.5–31 s rebuild family). canopy#573 ships an explicit **Clear selection** button instead.
+
+See [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046).
+
+---
+
 ### Diagnostic Commands
 
 **Check server health:**
@@ -1317,6 +1354,7 @@ and the **About** tab (both read the same source); the release history is in `CH
 - **WebSocket** - Bidirectional real-time communication protocol
 - **FastAPI** - Modern Python web framework for APIs
 - **Dash** - Python framework for interactive web dashboards
+- **Node selection** - Topology click or box/lasso highlight. Clicking empty canvas does not clear (F-CANOPY-046). Click the selected node again, or (after canopy#573) use **Clear selection**.
 
 ### System Requirements
 

@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.0
+**Version:** 0.25.4
 **Status:** Active
-**Last Updated:** August 31, 2026
+**Last Updated:** September 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -12,6 +12,7 @@
 ## Table of Contents
 
 - [Overview](#overview)
+- [Topology Node Selection](#topology-node-selection)
 - [AGENTS Reference](#agents-reference)
 - [API Reference](#api-reference)
 - [Configuration Reference](#configuration-reference)
@@ -30,6 +31,17 @@
 This document serves as a central index for all technical reference documentation in juniper-canopy. Each section links to the detailed reference document for that subsystem.
 
 For comprehensive usage guides, see the corresponding manuals linked from [DOCUMENTATION_OVERVIEW.md](DOCUMENTATION_OVERVIEW.md).
+
+---
+
+## Topology Node Selection
+
+Click / box / lasso highlight on the Network Topology tab. The panel's "click elsewhere to deselect" sentence is false on `main` (plotly emits `plotly_click` only on a point hit). Clicking the selected node again *does* clear. `-selected-nodes` is an Input of `update_network_graph`; an unguarded `[]` write costs a 1.5–31 s rebuild. canopy#573 (not yet on `main`) adds a Clear button and returns `dash.no_update` when there is nothing to clear.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046) | Developer contract: F-044 `customdata` fallback, F-045 label-derived layer, F-046 empty-canvas no-event, store-write cost, incoming #573 |
+| [USER_MANUAL.md § Network Topology Tab](USER_MANUAL.md#network-topology-tab) | Operator gestures and the false "elsewhere" hint |
 
 ---
 
@@ -230,6 +242,6 @@ The most commonly used environment variables for juniper-canopy configuration. F
 
 ---
 
-**Last Updated:** August 31, 2026
-**Version:** 0.25.1
+**Last Updated:** September 4, 2026
+**Version:** 0.25.4
 **Maintainer:** Paul Calnon

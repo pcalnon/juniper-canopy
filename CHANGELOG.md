@@ -30,6 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Topology node-selection operator docs (F-CANOPY-044 / F-CANOPY-045 / F-CANOPY-046).** Canonical
+  runbook in `docs/AGENTS_REFERENCE.md` § Topology Node Selection: click identity
+  (`text` or edge `customdata`), layer from the label not `curveNumber`, the
+  toggle that *does* clear, and why empty-canvas "click elsewhere" never runs
+  the callback (plotly emits `plotly_click` only on a point hit). Documents the
+  unguarded `[]` write into `-selected-nodes` (an Input of `update_network_graph`,
+  1.5–31 s). Operator copy and troubleshooting row 6 in `docs/USER_MANUAL.md`.
+  Pins in the cheatsheet, REFERENCE, TESTING_REFERENCE. canopy#573 is the
+  incoming Clear-selection button — documented as not yet on `main`.
+
 - Tests pinning Stage 2 (`#511`) live-callback contracts that the original PR's happy-path suite left open: `_update_unified_status_bar_handler` element `[9]` stays `dash.no_update` on every error path (so a hiccup cannot blank `training-status-store` and re-fire its consumers), `{is_running, phase}` is coerced then suppressed, and `_update_system_panels_handler` isolates a `/api/status` Timeout/JSON failure from the details and stream-health surfaces.
 
 ### Changed

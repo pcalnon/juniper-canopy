@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.2
-**Date**: 2026-07-04
+**Version**: 1.0.5
+**Date**: 2026-09-04
 **Project**: juniper-canopy
 
 ---
@@ -133,6 +133,12 @@ Common failure causes:
 - Same-file anchors fail if no matching heading exists
 - Links inside fenced code blocks and inline code are intentionally ignored
 
+### 6. Clear a Topology Node Selection
+
+`handle_node_selection` Inputs are `-graph.clickData` and `-graph.selectedData`. Plotly emits `plotly_click` only on a point hit, so empty-canvas clicks never run the callback (`prevent_initial_call=True`). Clicking the selected node again *does* deselect (toggle; also clears a whole box/lasso set). Do not write `[]` over an already-empty `-selected-nodes` — that store is an Input of `update_network_graph` (1.5–31 s). canopy#573 adds a Clear button; until it lands the panel's "elsewhere" hint is false.
+
+> See: [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046)
+
 ---
 
 ## Environment Variables
@@ -236,6 +242,7 @@ Coverage includes:
 | Tests fail with backend errors                   | Demo mode not forced       | Ensure `conftest.py` sets `JUNIPER_CANOPY_DEMO_MODE=1`; do not set `CASCOR_BACKEND_AVAILABLE` unless backend is running |
 | Docs job fails in CI (`Documentation Links`)     | Broken links/anchors or unsafe doc path | Re-run `python scripts/check_doc_links.py --cross-repo skip --exclude templates --exclude history --exclude pull_requests --exclude releases --exclude analysis --exclude fixes --exclude development --exclude CHANGELOG.md` and fix reported markdown targets |
 | Prometheus metrics missing                       | Feature not enabled        | Set `JUNIPER_CANOPY_METRICS_ENABLED=true`; verify `/metrics` endpoint returns data                              |
+| Topology panel says "click elsewhere" but empty-canvas clicks do nothing | Plotly emits `plotly_click` only on a point hit; the callback never runs | Click the selected node again to toggle off. canopy#573 adds a Clear button. See [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046) |
 
 ---
 
@@ -264,6 +271,6 @@ Coverage includes:
 
 ---
 
-**Last Updated:** 2026-07-04
-**Version:** 1.0.2
+**Last Updated:** 2026-09-04
+**Version:** 1.0.5
 **Maintainer:** Paul Calnon
