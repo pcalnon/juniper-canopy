@@ -39,6 +39,7 @@
 #
 #####################################################################################################################################################################################################
 
+import asyncio
 import logging
 from typing import Any, Callable, Dict, List, Optional, cast
 
@@ -347,12 +348,16 @@ class ServiceBackend:
         """Connect to cascor service, attach non-destructively, sync state, and start metrics relay."""
         connected = await self._adapter.connect()
         if connected:
-            # Non-destructive attach: check for existing network without creating/resetting
-            has_network = self._adapter.attach_to_existing()
+            # Non-destructive attach: check for existing network without creating/resetting.
+            # X7: both calls below are synchronous cascor HTTP — ``attach_to_existing``
+            # issues a ``get_network()`` and ``sync()`` issues several more. This runs on
+            # the request path, not just at startup: ``_swap_backend`` (main.py) awaits
+            # ``initialize()`` when the operator changes model at runtime.
+            has_network = await asyncio.to_thread(self._adapter.attach_to_existing)
             if has_network:
                 logger.info("ServiceBackend: attached to existing cascor network")
                 # Sync current cascor state into canopy
-                self._synced_state = CascorStateSync(self._adapter.client).sync()
+                self._synced_state = await asyncio.to_thread(CascorStateSync(self._adapter.client).sync)
                 logger.info(f"ServiceBackend: state synced — status={self._synced_state.status}, epoch={self._synced_state.current_epoch}, params={len(self._synced_state.params)} keys")
             else:
                 logger.info("ServiceBackend: no existing cascor network found (will create on start)")

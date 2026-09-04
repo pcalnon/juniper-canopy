@@ -572,7 +572,7 @@ class CascorServiceAdapter:
     async def connect(self) -> bool:
         """Connect to the CasCor service and verify it is reachable."""
         try:
-            return bool(self._client.is_alive())
+            return bool(await asyncio.to_thread(self._client.is_alive))
         except Exception:
             logger.error(f"Failed to connect to CasCor service at {self._service_url}")
             return False
@@ -768,7 +768,7 @@ class CascorServiceAdapter:
                         # On cascade_add, fetch fresh topology and broadcast
                         if msg_type == "cascade_add":
                             try:
-                                topology = self.extract_network_topology()
+                                topology = await asyncio.to_thread(self.extract_network_topology)
                                 if topology:
                                     await websocket_manager.broadcast({"type": "topology", "data": topology})
                             except Exception as te:
