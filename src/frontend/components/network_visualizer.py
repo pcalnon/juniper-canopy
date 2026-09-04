@@ -504,7 +504,12 @@ class NetworkVisualizer(BaseComponent):
             # cache invalidates when the filter changes; run AFTER the empty-
             # topology fast-path so we don't bother filtering an empty topo.
             n_hidden_total = topology_data.get("hidden_units", 0)
-            topology_data, depth_label = self._apply_hierarchy_filter(topology_data, depth_filter, n_hidden_total)
+            # The filter also returns the depth label, discarded here on purpose:
+            # the readout is rendered clientside (F-CANOPY-042) so it follows the
+            # slider instead of waiting on this callback's measured 1.5-31 s
+            # paint. That return value stays the *definition* the clientside rule
+            # transliterates — change one, change both.
+            topology_data, _ = self._apply_hierarchy_filter(topology_data, depth_filter, n_hidden_total)
             current_hash = compute_hash(topology_data)
             n_hidden = topology_data.get("hidden_units", 0)
 
@@ -745,22 +750,31 @@ class NetworkVisualizer(BaseComponent):
                 "border": "1px solid #2c5282" if is_dark else "1px solid #90caf9",
             }
 
-        # CAN-020: clientside slider-bounds + label sync. The slider's ``max``
-        # must track ``topology.hidden_units`` so the user can pick any cascade
+        # CAN-020: clientside slider-bounds sync. The slider's ``max`` must
+        # track ``topology.hidden_units`` so the user can pick any cascade
         # depth, and the container should hide entirely when there are zero
-        # hidden units (no useful filter to apply). The label below the slider
-        # reads "all" when the value is at max (no filter active) and the
-        # explicit count otherwise. Done clientside so we don't need to round-
-        # trip the topology store through the server every time a unit is added.
+        # hidden units (no useful filter to apply). Done clientside so we don't
+        # need to round-trip the topology store through the server every time a
+        # unit is added.
+        #
+        # F-CANOPY-042: this callback used to own ``-depth-label.children`` too,
+        # which is why the label never followed the slider. Its only Input is the
+        # topology store — the slider's value rides here as *State*, read only
+        # when something else fires — so moving the slider recomputed nothing.
+        # And the obvious repair is structurally unavailable: adding
+        # ``Input(-depth-slider, "value")`` here would make the same
+        # component-property both an Input and an Output of one callback, which
+        # Dash rejects at registration as a circular dependency. The label
+        # therefore lives in its own callback below.
         app.clientside_callback(
             """
             function(topology, currentValue) {
                 if (!topology) {
-                    return [0, 0, {marginBottom: "10px", padding: "0 10px", display: "none"}, "all"];
+                    return [0, 0, {marginBottom: "10px", padding: "0 10px", display: "none"}];
                 }
                 var nHidden = topology.hidden_units || 0;
                 if (nHidden === 0) {
-                    return [0, 0, {marginBottom: "10px", padding: "0 10px", display: "none"}, "all"];
+                    return [0, 0, {marginBottom: "10px", padding: "0 10px", display: "none"}];
                 }
                 // Bump max to current hidden-unit count.
                 // Preserve the user-picked value across grow events as long as
@@ -769,12 +783,10 @@ class NetworkVisualizer(BaseComponent):
                 if (v === null || v === undefined || v > nHidden) {
                     v = nHidden;
                 }
-                var label = (v === nHidden) ? "all" : (v + " of " + nHidden);
                 return [
                     nHidden,
                     v,
-                    {marginBottom: "10px", padding: "0 10px", display: "block"},
-                    label
+                    {marginBottom: "10px", padding: "0 10px", display: "block"}
                 ];
             }
             """,
@@ -782,10 +794,43 @@ class NetworkVisualizer(BaseComponent):
                 Output(f"{self.component_id}-depth-slider", "max"),
                 Output(f"{self.component_id}-depth-slider", "value"),
                 Output(f"{self.component_id}-depth-slider-container", "style"),
-                Output(f"{self.component_id}-depth-label", "children"),
             ],
             Input(f"{self.component_id}-topology-store", "data"),
             State(f"{self.component_id}-depth-slider", "value"),
+        )
+
+        # F-CANOPY-042: the depth-filter label, in its own callback so it can
+        # take the slider's value as an *Input*. Two Inputs, because the label
+        # is a function of both operands of the filter: the depth the user
+        # picked and the hidden-unit count it is measured against. A grow event
+        # changes the denominator without the user touching anything.
+        #
+        # The guard below is a transliteration of ``_apply_hierarchy_filter``'s
+        # (see that method) — deliberately, condition for condition, so the two
+        # can be compared by eye. The label must never claim a filter the server
+        # is not applying, and the ``depth <= 0`` arm is the half that was wrong
+        # at rest: the slider ships ``value=0``, the filter reads 0 as "no
+        # filter", and the old rule rendered that as "0 of 40" while all 40
+        # units were on screen. Clientside for the same reason as above, and
+        # because the alternative — routing the label out of the rebuild, which
+        # already computes it — would put a text readout behind that callback's
+        # measured 1.5-31 s paint (F-CANOPY-037 / -039 / -043).
+        app.clientside_callback(
+            """
+            function(depth, topology) {
+                var nHidden = (topology && topology.hidden_units) || 0;
+                if (depth === null || depth === undefined ||
+                    depth <= 0 || depth >= nHidden || nHidden === 0) {
+                    return "all";
+                }
+                return depth + " of " + nHidden;
+            }
+            """,
+            Output(f"{self.component_id}-depth-label", "children"),
+            [
+                Input(f"{self.component_id}-depth-slider", "value"),
+                Input(f"{self.component_id}-topology-store", "data"),
+            ],
         )
 
         self.logger.debug(f"Callbacks registered for {self.component_id}")
@@ -807,6 +852,14 @@ class NetworkVisualizer(BaseComponent):
         The filter is a no-op for topologies with zero hidden units. We never
         mutate the input dict — the input is a Dash store payload that other
         callbacks may also read, and mutation would race.
+
+        **The returned label is the canonical definition** even though the UI
+        renders its own copy: the ``-depth-label`` readout is computed
+        clientside (F-CANOPY-042) so it can follow the slider without waiting on
+        the rebuild, and that JavaScript is a condition-for-condition
+        transliteration of the guard below. The two must agree — a label that
+        says "0 of 40" while this function is returning the unfiltered topology
+        is exactly the defect F-CANOPY-042 recorded. Change one, change both.
         """
         if depth is None or depth <= 0 or depth >= n_hidden_total or n_hidden_total == 0:
             return topology, "all"
