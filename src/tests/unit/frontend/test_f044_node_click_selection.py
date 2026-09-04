@@ -93,12 +93,20 @@ def selection_callback(visualizer):
     return found
 
 
-def _call(callback, *, click_data=None, selected_data=None, current_selection=None, theme=None, trigger="clickData"):
-    """Invoke the real callback with a stubbed dash callback context."""
+def _call(callback, *, click_data=None, selected_data=None, clear_clicks=0, current_selection=None, theme=None, trigger="clickData"):
+    """Invoke the real callback with a stubbed dash callback context.
+
+    F-CANOPY-046 added a third Input (the "Clear selection" button) and a fourth
+    Output (that button's style), so callers here unpack four values. The tests
+    in this file are about F-CANOPY-044/-045 selection semantics and ignore the
+    button's style, but they unpack it explicitly rather than having this helper
+    silently drop an output — a harness that hides a production Output is how a
+    later regression goes unnoticed.
+    """
     ctx = MagicMock()
     ctx.triggered = [{"prop_id": f"{COMPONENT_ID}-graph.{trigger}"}]
     with patch("dash.callback_context", ctx):
-        return callback(click_data, selected_data, current_selection, theme)
+        return callback(click_data, selected_data, clear_clicks, current_selection, theme)
 
 
 def _text_of(children):
@@ -185,7 +193,7 @@ class TestF044ClickOnAnEdgeStillSelectsTheNode:
         ``customdata`` naming the node at the clicked vertex.
         """
         click = {"points": [{"curveNumber": 248, "pointNumber": 0, "customdata": "Hidden 0"}]}
-        nodes, info, style = _call(selection_callback, click_data=click, current_selection=[])
+        nodes, info, style, _ = _call(selection_callback, click_data=click, current_selection=[])
         assert nodes == ["hidden_0"], "an edge-resolved click selected nothing — node selection is unreachable (F-CANOPY-044)"
         assert style["display"] == "block"
         assert "Hidden 0" in _text_of(info)
@@ -193,27 +201,27 @@ class TestF044ClickOnAnEdgeStillSelectsTheNode:
     def test_node_resolved_click_still_selects(self, selection_callback):
         """The pre-existing path must not regress."""
         click = {"points": [{"curveNumber": 1889, "pointNumber": 0, "text": "Hidden 3"}]}
-        nodes, _, style = _call(selection_callback, click_data=click, current_selection=[])
+        nodes, _, style, _ = _call(selection_callback, click_data=click, current_selection=[])
         assert nodes == ["hidden_3"]
         assert style["display"] == "block"
 
     def test_text_wins_over_customdata(self, selection_callback):
         """A node-trace click carries both; ``text`` is the node's own label."""
         click = {"points": [{"curveNumber": 1889, "pointNumber": 0, "text": "Hidden 3", "customdata": "Input 0"}]}
-        nodes, _, _ = _call(selection_callback, click_data=click, current_selection=[])
+        nodes, _, _, _ = _call(selection_callback, click_data=click, current_selection=[])
         assert nodes == ["hidden_3"]
 
     def test_clicking_the_same_node_again_deselects(self, selection_callback):
         """M-TOPOLOGY-10's second half, now reachable through an edge-resolved click."""
         click = {"points": [{"curveNumber": 248, "pointNumber": 0, "customdata": "Hidden 0"}]}
-        nodes, _, style = _call(selection_callback, click_data=click, current_selection=["hidden_0"])
+        nodes, _, style, _ = _call(selection_callback, click_data=click, current_selection=["hidden_0"])
         assert nodes == []
         assert style["display"] == "none"
 
     def test_a_point_with_neither_text_nor_customdata_clears(self, selection_callback):
         """Empty space stays empty space (M-TOPOLOGY-12)."""
         click = {"points": [{"curveNumber": 7, "pointNumber": 0}]}
-        nodes, _, style = _call(selection_callback, click_data=click, current_selection=["hidden_0"])
+        nodes, _, style, _ = _call(selection_callback, click_data=click, current_selection=["hidden_0"])
         assert nodes == []
         assert style["display"] == "none"
 
@@ -233,18 +241,18 @@ class TestF045LayerComesFromTheLabelNotTheCurveNumber:
         made ``layer_names[min(curve_number, 4)]`` collapse to ``Output``.
         """
         click = {"points": [{"curveNumber": 1889, "pointNumber": 0, "text": label}]}
-        _, info, _ = _call(selection_callback, click_data=click, current_selection=[])
+        _, info, _, _ = _call(selection_callback, click_data=click, current_selection=[])
         assert f"Layer: {expected}" in _text_of(info)
 
     def test_layer_is_correct_for_an_edge_resolved_click_too(self, selection_callback):
         """The two fixes have to compose: an edge curve number must not leak in."""
         click = {"points": [{"curveNumber": 248, "pointNumber": 0, "customdata": "Input 0"}]}
-        _, info, _ = _call(selection_callback, click_data=click, current_selection=[])
+        _, info, _, _ = _call(selection_callback, click_data=click, current_selection=[])
         assert "Layer: Input" in _text_of(info)
 
     def test_an_unrecognised_label_reads_unknown(self, selection_callback):
         click = {"points": [{"curveNumber": 1889, "pointNumber": 0, "text": "Candidate 2"}]}
-        _, info, _ = _call(selection_callback, click_data=click, current_selection=[])
+        _, info, _, _ = _call(selection_callback, click_data=click, current_selection=[])
         assert "Layer: Unknown" in _text_of(info)
 
 
@@ -266,6 +274,6 @@ class TestBoxSelectDoesNotOverSelect:
                 {"text": "Hidden 0"},
             ]
         }
-        nodes, _, style = _call(selection_callback, selected_data=selected, current_selection=[], trigger="selectedData")
+        nodes, _, style, _ = _call(selection_callback, selected_data=selected, current_selection=[], trigger="selectedData")
         assert nodes == ["input_0", "hidden_0"], "box select picked up an edge endpoint the user did not enclose"
         assert style["display"] == "block"
