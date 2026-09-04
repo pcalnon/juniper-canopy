@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.2
-**Date**: 2026-07-04
+**Version**: 1.0.3
+**Date**: 2026-09-04
 **Project**: juniper-canopy
 
 ---
@@ -42,6 +42,9 @@
 | Check doc links (CI parity) | `python scripts/check_doc_links.py --exclude templates --exclude history --exclude pull_requests --exclude releases --exclude analysis --exclude fixes --exclude development --exclude CHANGELOG.md --cross-repo skip` |
 | Check doc links (strict)    | `python scripts/check_doc_links.py --cross-repo check`                                               |
 | Install pre-commit hooks    | `pip install pre-commit && pre-commit install`                                                       |
+| X7 client budget (1b)       | `cd src && pytest tests/regression/test_x7_client_budget.py -v`                                      |
+| X7 off-loop gate + T-A2/T-A4 (1a) | `cd src && pytest tests/regression/test_x7_off_loop_discipline.py tests/regression/test_x7_loop_responsiveness.py -v` |
+| X7 adapter callgraph        | `python util/ad-hoc/2026-09-04_async_blocking_callgraph.py`                                          |
 
 > See: [AGENTS.md](../AGENTS.md) for full command reference
 
@@ -106,7 +109,17 @@ Existing components: `training_metrics`, `metrics_panel`, `network_visualizer`, 
 
 > See: [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)
 
-### 5. Validate Documentation Links
+### 5. Keep the Event Loop Answerable (X7)
+
+Canopy is a single-worker uvicorn. A synchronous `requests` call inside `async def` stalls
+`/v1/health/live`. Offload with `await asyncio.to_thread(backend.get_status)`. Do not trust
+`ruff --select ASYNC` — it cannot see `backend.get_status()`. The `main.py` gate is
+`test_x7_off_loop_discipline.py`; touching the adapter, run the ad-hoc callgraph. Slice 1b
+already pins `CASCOR_CLIENT_RETRIES = 0`. C4 (bounded concurrency) is slice 1d, not 1a.
+
+> See: [AGENTS_REFERENCE.md — Event-loop I/O discipline](AGENTS_REFERENCE.md#event-loop-io-discipline-x7)
+
+### 6. Validate Documentation Links
 
 Use the same command as CI when validating markdown links locally:
 
@@ -236,6 +249,8 @@ Coverage includes:
 | Tests fail with backend errors                   | Demo mode not forced       | Ensure `conftest.py` sets `JUNIPER_CANOPY_DEMO_MODE=1`; do not set `CASCOR_BACKEND_AVAILABLE` unless backend is running |
 | Docs job fails in CI (`Documentation Links`)     | Broken links/anchors or unsafe doc path | Re-run `python scripts/check_doc_links.py --cross-repo skip --exclude templates --exclude history --exclude pull_requests --exclude releases --exclude analysis --exclude fixes --exclude development --exclude CHANGELOG.md` and fix reported markdown targets |
 | Prometheus metrics missing                       | Feature not enabled        | Set `JUNIPER_CANOPY_METRICS_ENABLED=true`; verify `/metrics` endpoint returns data                              |
+| `/v1/health/live` hangs while cascor is down     | Sync I/O on the event loop (X7) | Offload with `asyncio.to_thread`; run `test_x7_off_loop_discipline.py`; do not trust `ruff --select ASYNC`     |
+| Adapter change, gate still green                 | Gate reads `main.py` only  | Run `python util/ad-hoc/2026-09-04_async_blocking_callgraph.py` (needs sibling client checkouts)                |
 
 ---
 
@@ -264,6 +279,6 @@ Coverage includes:
 
 ---
 
-**Last Updated:** 2026-07-04
-**Version:** 1.0.2
+**Last Updated:** 2026-09-04
+**Version:** 1.0.3
 **Maintainer:** Paul Calnon

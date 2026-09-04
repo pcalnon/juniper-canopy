@@ -1,7 +1,7 @@
 # Testing Quick Start Guide
 
-**Last Updated:** January 29, 2026  
-**Version:** v0.25.0
+**Last Updated:** September 4, 2026  
+**Version:** v0.25.1
 
 Get up and running with tests in **5 minutes**.
 
@@ -42,6 +42,9 @@ pytest src/tests/unit/test_demo_mode.py -v
 
 # Run specific test function
 pytest src/tests/unit/test_demo_mode.py::test_demo_mode_initialization -v
+
+# X7 client budget (slice 1b, on main)
+pytest src/tests/regression/test_x7_client_budget.py -v
 
 # Run tests matching pattern
 pytest -k "demo_mode" -v
@@ -120,6 +123,7 @@ pytest --cov=src --cov-report=html:reports/coverage
 - **Comprehensive Guide**: See [TESTING_MANUAL.md](TESTING_MANUAL.md)
 - **Coverage Details**: See [TESTING_REPORTS_COVERAGE.md](TESTING_REPORTS_COVERAGE.md)
 - **Technical Reference**: See [TESTING_REFERENCE.md](TESTING_REFERENCE.md)
+- **X7 event-loop discipline**: See [AGENTS_REFERENCE.md](../AGENTS_REFERENCE.md#event-loop-io-discipline-x7)
 
 ## Test Structure Overview
 

@@ -1,7 +1,7 @@
 # Testing Reference
 
-**Last Updated:** April 5, 2026  
-**Version:** v0.26.1
+**Last Updated:** September 4, 2026  
+**Version:** v0.26.2
 
 Technical reference for the active pytest configuration, markers, fixtures, and CI-equivalent commands.
 
@@ -14,9 +14,10 @@ Technical reference for the active pytest configuration, markers, fixtures, and 
 3. [Fixture Reference](#fixture-reference)
 4. [Environment and Gating Variables](#environment-and-gating-variables)
 5. [Command Reference](#command-reference)
-6. [Coverage Reference](#coverage-reference)
-7. [CI Mapping](#ci-mapping)
-8. [Troubleshooting Reference](#troubleshooting-reference)
+6. [X7 Event-Loop Discipline](#x7-event-loop-discipline)
+7. [Coverage Reference](#coverage-reference)
+8. [CI Mapping](#ci-mapping)
+9. [Troubleshooting Reference](#troubleshooting-reference)
 
 ---
 
@@ -194,6 +195,30 @@ pytest src/tests/unit/test_check_doc_links.py -k "code_fences or inline_code or 
 pytest src/tests/unit/test_check_doc_links.py -k "dangerous_link_inputs or rejects_escape" -v
 pytest src/tests/unit/test_check_doc_links.py -k "cross_repo or invalid_cross_repo_mode or falls_back_to_skip" -v
 ```
+
+## X7 Event-Loop Discipline
+
+X7 is canopy ceasing to answer HTTP — `/v1/health/live` included — when an upstream is
+unreachable. Slice 1b (`#566`) bounds the cascor client; slice 1a (`#567`) moves remaining
+sync I/O off the loop. Full runbook:
+[AGENTS_REFERENCE.md § Event-loop I/O discipline](../AGENTS_REFERENCE.md#event-loop-io-discipline-x7).
+
+```bash
+# Client budget (on main) — T-B1 refused-call milliseconds; T-B2 a 503 is attempted once
+cd src && pytest tests/regression/test_x7_client_budget.py -v
+
+# Structural gate + T-A2/T-A3/T-A4 (land with #567). Do not mark these slow:
+# the coverage gate runs -m "not slow" and would drop the only behavioural check.
+cd src && pytest tests/regression/test_x7_off_loop_discipline.py \
+  tests/regression/test_x7_loop_responsiveness.py -v
+
+# Adapter-wide census (instrument, exit 0). Needs sibling juniper-cascor-client.
+python util/ad-hoc/2026-09-04_async_blocking_callgraph.py
+```
+
+The `main.py` gate cannot see adapter/self-method I/O. A green gate after editing
+`cascor_service_adapter.py` or `service_backend.py` is not "1a done". `ruff --select ASYNC`
+cannot see `backend.get_status()` either.
 
 ### Debugging Commands
 

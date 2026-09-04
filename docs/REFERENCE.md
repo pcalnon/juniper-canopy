@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.0
+**Version:** 0.25.2
 **Status:** Active
-**Last Updated:** August 31, 2026
+**Last Updated:** September 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -17,6 +17,7 @@
 - [Configuration Reference](#configuration-reference)
 - [WebSocket Reference](#websocket-reference)
 - [Testing Reference](#testing-reference)
+- [Event-loop I/O discipline (X7)](#event-loop-io-discipline-x7)
 - [CI/CD Reference](#cicd-reference)
 - [CasCor Backend Reference](#cascor-backend-reference)
 - [Demo Mode Reference](#demo-mode-reference)
@@ -135,6 +136,27 @@ pytest tests/ --cov=. --cov-report=html  # Coverage report
 
 ---
 
+## Event-loop I/O discipline (X7)
+
+Canopy is a single-worker uvicorn. Synchronous `requests` I/O inside `async def` stalls
+every route, including `/v1/health/live`. Slice 1b (`#566`) bounds the cascor client
+budget; slice 1a (`#567`) moves remaining calls off the loop.
+
+| Surface | Purpose |
+| --- | --- |
+| [AGENTS_REFERENCE.md § Event-loop I/O discipline](AGENTS_REFERENCE.md#event-loop-io-discipline-x7) | Operator runbook: idiom, gate, T-A2/T-A3/T-A4, callgraph, pitfalls |
+| [`AGENTS.md` § Hazards](../AGENTS.md#hazards-resident--do-not-relocate) | Resident one-line hazard |
+| `src/tests/regression/test_x7_client_budget.py` | Slice 1b — T-B1 / T-B2 (on `main`) |
+| `src/tests/regression/test_x7_off_loop_discipline.py` | Slice 1a structural gate (`main.py` only) |
+| `src/tests/regression/test_x7_loop_responsiveness.py` | Slice 1a behavioural tests |
+| `util/ad-hoc/2026-09-04_async_blocking_callgraph.py` | Adapter-wide census (instrument, not a gate) |
+
+```bash
+cd src && pytest tests/regression/test_x7_client_budget.py -v
+```
+
+---
+
 ## CI/CD Reference
 
 Pipeline configuration, hooks, and workflow reference.
@@ -230,6 +252,6 @@ The most commonly used environment variables for juniper-canopy configuration. F
 
 ---
 
-**Last Updated:** August 31, 2026
-**Version:** 0.25.1
+**Last Updated:** September 4, 2026
+**Version:** 0.25.2
 **Maintainer:** Paul Calnon

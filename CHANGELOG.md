@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **X7 event-loop I/O operator docs.** Runbook in `docs/AGENTS_REFERENCE.md` covering the
+  single-worker outage class (sync `requests` inside `async def` stalls `/v1/health/live`),
+  the slice 1b client budget already on `main` (`CASCOR_CLIENT_RETRIES = 0`), the slice 1a
+  gate / T-A2–T-A4 / adapter callgraph landing with `#567`, and the pitfalls (`ruff
+  --select ASYNC` is blind; the `main.py` gate cannot see adapter I/O). Cheatsheet,
+  testing manuals, QUICK_START Issue 8, CasCor adapter notes, and `/v1/health/live` in
+  the API reference. Resident hazard in `AGENTS.md`.
 - Tests pinning Stage 2 (`#511`) live-callback contracts that the original PR's happy-path suite left open: `_update_unified_status_bar_handler` element `[9]` stays `dash.no_update` on every error path (so a hiccup cannot blank `training-status-store` and re-fire its consumers), `{is_running, phase}` is coerced then suppressed, and `_update_system_panels_handler` isolates a `/api/status` Timeout/JSON failure from the details and stream-health surfaces.
 
 ### Changed

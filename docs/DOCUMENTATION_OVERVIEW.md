@@ -61,6 +61,7 @@
 | **See version history**      | [CHANGELOG.md](../CHANGELOG.md)                                           | Root           |
 | **Quick-reference dev tasks** | [DEVELOPER_CHEATSHEET.md](DEVELOPER_CHEATSHEET.md)              | docs/         |
 | **Contribute code**          | [AGENTS.md](../AGENTS.md)                                                 | Root           |
+| **Keep the event loop answerable (X7)** | [AGENTS_REFERENCE.md § Event-loop I/O discipline](AGENTS_REFERENCE.md#event-loop-io-discipline-x7) | docs/ |
 
 ---
 

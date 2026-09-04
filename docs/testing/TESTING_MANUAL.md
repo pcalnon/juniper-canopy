@@ -1,7 +1,7 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** 2026-04-05  
-**Version:** v0.26.0
+**Last Updated:** 2026-09-04  
+**Version:** v0.26.1
 
 Complete guide to testing the Juniper Canopy application.
 
@@ -85,6 +85,21 @@ pytest -m "not slow"
 # Skip tests requiring external services
 pytest -m "not requires_cascor and not requires_server and not requires_redis and not requires_cassandra and not requires_display"
 ```
+
+### X7 event-loop suite
+
+```bash
+# Slice 1b client budget (on main)
+pytest src/tests/regression/test_x7_client_budget.py -v
+
+# Slice 1a gate + responsiveness (land with #567). Not marked slow on purpose.
+pytest src/tests/regression/test_x7_off_loop_discipline.py \
+  src/tests/regression/test_x7_loop_responsiveness.py -v
+```
+
+The structural gate reads `main.py` only. After adapter edits run
+`python util/ad-hoc/2026-09-04_async_blocking_callgraph.py` (needs sibling
+`juniper-cascor-client`). See [AGENTS_REFERENCE.md § Event-loop I/O discipline](../AGENTS_REFERENCE.md#event-loop-io-discipline-x7).
 
 ### Running by Pattern
 

@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-08-30
+**Last Updated**: 2026-09-04
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -18,6 +18,7 @@ pointer only helps an agent that already knows to look.
 ## Table of Contents
 
 - [Architecture Reference](#architecture-reference)
+- [Event-loop I/O discipline (X7)](#event-loop-io-discipline-x7)
 - [Configuration Reference](#configuration-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
 - [Further Reading](#further-reading)
@@ -641,6 +642,7 @@ All Python files should include the standard project header:
 
 - **No global mutable state without locks** - All shared state must use `threading.Lock()` for protection
 - **Any long-lived collections must be size-bounded** - Use `maxlen` for deques, limit history buffers to prevent memory leaks
+- **No synchronous network I/O inside `async def`** — canopy is a single-worker uvicorn; one blocking `requests` call stalls `/v1/health/live`. See [Event-loop I/O discipline (X7)](#event-loop-io-discipline-x7).
 
 ### Thread Safety
 
@@ -680,6 +682,20 @@ websocket_manager.set_event_loop(event_loop)
 websocket_manager.broadcast_from_thread(message)
 ```
 
+For calling **synchronous** network I/O from an `async def` handler, hop off the loop. Do not
+invoke the client on the coroutine:
+
+```python
+# Correct — the request thread blocks, the event loop does not
+return await asyncio.to_thread(backend.get_status)
+
+# Wrong — single-worker uvicorn: this stalls every route, including /v1/health/live
+return backend.get_status()
+```
+
+See [Event-loop I/O discipline (X7)](#event-loop-io-discipline-x7) for the gate, the callgraph
+instrument, and the constraints this idiom does **not** satisfy.
+
 ### Error Handling
 
 ```python
@@ -700,6 +716,181 @@ def robust_function():
         logger.error(f"Unexpected error: {type(e).__name__}: {e}", exc_info=True)
         raise
 ```
+
+---
+
+## Event-loop I/O discipline (X7)
+
+Operator runbook for the X7 outage class. Not a P5 relocation — added 2026-09-04 after
+slice 1b merged (`#566`) and slice 1a opened (`#567`). The resident one-line hazard lives in
+[`AGENTS.md` § Hazards](../AGENTS.md#hazards-resident--do-not-relocate).
+
+### What X7 is
+
+Canopy is a **single-worker** uvicorn. A synchronous, retrying `requests` call inside an
+`async def` handler holds the only event loop, so **every** route stalls — including
+`/v1/health/live`, which touches no backend. Measured end-to-end:
+
+| Condition | Observed latency |
+| --- | --- |
+| Healthy cascor | 5.7 ms |
+| Cascor stopped (`ECONNREFUSED`) | 3.0 s (retry backoff sleep; closed by slice 1b) |
+| Cascor hung | **123.12 s** (`timeout × (retries + 1) + backoff`) |
+| Recovery after cascor returns | 5.1 ms, no canopy restart |
+
+This is a recurrence of SEC-F20: the first fix shipped a comment and no test.
+
+### Slices
+
+| Slice | Role | Status |
+| --- | --- | --- |
+| **1b** | Bound per-call cost (`timeout=30`, `retries=0`) instead of inheriting the client defaults (`timeout=30`, `retries=3`) | Merged `#566` |
+| **1a** | Move every remaining synchronous network call off the event loop | `#567` — this is the slice that **closes X7** |
+| **1c** | Status cache + classifier | Follow-up |
+| **1d** | Admission control (constraint C4) | Follow-up |
+
+Slice 1a ships **bare** `asyncio.to_thread`. That is acceptable only because 1b already
+bounds per-call cost. **C4 (bounded concurrency) is deferred to 1d**, not satisfied here.
+
+### Correct idiom
+
+Two shapes the committed gate recognises as offloaded:
+
+```python
+# Bare-attribute offload — the backend call is an Attribute, never a Call
+return await asyncio.to_thread(backend.get_status)
+
+# Named closure handed to to_thread
+def _fetch():
+    return backend.get_status()
+return await asyncio.to_thread(_fetch)
+```
+
+Do **not** write `return backend.get_status()` inside `async def`. Do **not** "fix" one
+site by adding a module-global exemption for the expression `backend.get_status` — that
+was the unsound draft that would have certified a partial fix as complete (offloading
+one site hid every other, including the three health endpoints). Exemption is
+**site-local** only: calls inside a closure that is itself handed to an offloader.
+
+### Client budget (slice 1b, on `main`)
+
+`BackendConstants` names the budget the adapter must pass explicitly:
+
+- `CASCOR_CLIENT_TIMEOUT_SECONDS = 30.0` — kept at the client default; canopy's slowest
+  legitimate operation (`/api/train/restart`) budgets 30 s.
+- `CASCOR_CLIENT_RETRIES = 0` — the load-bearing half. urllib3 backoff is pure `sleep`
+  on the calling thread. Measured 3.005 s → 0.002 s per `ECONNREFUSED`. Canopy re-polls
+  on its own interval, so client-level retries buy nothing and duplicate non-idempotent
+  verbs (`RETRY_ALLOWED_METHODS` includes POST and DELETE).
+
+Pinned by `src/tests/regression/test_x7_client_budget.py` (T-B1 refused-call milliseconds;
+T-B2 a 503 is attempted once). Dropping the keywords silently restores the inherited
+`retries=3` defaults.
+
+### Structural gate (slice 1a)
+
+`src/tests/regression/test_x7_off_loop_discipline.py` asserts the count is **zero**. It is
+a gate, not a sample.
+
+- **Reads `main.py` only.** A green result is not proof that 1a is complete.
+- **Provenance resolution, not name matching.** The bare name `client` is bound to the
+  cascor client, redis, cassandra, *and* an `httpx.AsyncClient`. Name-matching is the
+  same flaw that makes `ruff --select ASYNC` report "All checks passed!" against these
+  sites: ruff matches a hardcoded list of callee names and cannot see
+  `backend.get_status()`.
+- **Closure-aware.** A naive lexical scan reports the correct idiom as unguarded.
+- **Transitive `HELPER` bucket.** A bare call to a module-level sync function whose body
+  reaches the network (`_extract_meta_params`, `_seed_training_state`) is the same defect.
+  `census()` accepts an optional AST so the rule is proved to *fire* against a synthetic
+  dirty module, not only proved quiet against a file that happens to be clean.
+- **`UNRESOLVED` fails.** An unaudited receiver is how a check goes quietly wrong.
+
+Verified in-process (not offloaded): `backend.get_synced_state`,
+`backend.set_state_update_callback`, `backend._demo.get_network`,
+`backend._demo.get_current_state`. Offloaded despite being in-memory today:
+`get_stream_health` (uniformity — an exemption would need re-verifying on every edit).
+
+Four sites outside `main.py` are invisible to this gate and were found by the callgraph
+below: `CascorServiceAdapter.connect` → `is_alive()`, `_relay_loop` →
+`extract_network_topology()` (measured **123 s blocked per 183 s with no user present**),
+and `ServiceBackend.initialize` → `attach_to_existing()` / `CascorStateSync.sync()`.
+`initialize()` is on the **request path**: `_swap_backend` awaits it when the operator
+changes model at runtime.
+
+### Behavioural tests (T-A2 / T-A3 / T-A4)
+
+`src/tests/regression/test_x7_loop_responsiveness.py` proves the property the structure
+is supposed to buy: **while an upstream is slow, canopy still answers**.
+
+| Id | Assertion |
+| --- | --- |
+| **T-A2** | 3 concurrent `GET /api/status` against a bounded 2.0 s stub; `GET /v1/health/live` answers in **< 500 ms** |
+| **T-A3** | Four vacuity guards: probe sample non-empty; every driver waited the stub's bound; the driver reached the backend (counted at the stub); the identical harness **fails** against a deliberately un-offloaded control app |
+| **T-A4** | 8 threads × 4 uniquely-tagged requests against a local echo server: no cross-talk, one shared `Session`, headers unchanged afterwards |
+
+Not marked `slow` despite exceeding that marker's 1 s threshold: the coverage gate runs
+`-m "not slow"`, so the marker would remove the only behavioural check X7 has. Bound
+total runtime ~5 s.
+
+**T-A4 corrects constraint C5 on evidence.** C5 called for a `threading.local()` session
+because a shared `requests.Session` must not be used from multiple threads, and 1a
+removes the accidental protection the blocked loop provided (concurrency was pinned at
+1). `JuniperCascorClient` mutates session state **only in `__init__`**; `_request` passes
+method/url/json/params/timeout as arguments. What is shared is the `HTTPAdapter`'s
+urllib3 pool, which is thread-safe and is why `pool_maxsize` exists. A thread-local
+session would discard keep-alive across the executor. If per-request session mutation is
+ever added upstream, T-A4 fails and C5's original remedy becomes the right one.
+
+### Adapter callgraph (outside the gate)
+
+```bash
+python util/ad-hoc/2026-09-04_async_blocking_callgraph.py
+python util/ad-hoc/2026-09-04_async_blocking_callgraph.py --all   # include adjudicated
+```
+
+A taint-propagating call graph over canopy plus `juniper-cascor-client` and
+`juniper-data-client`. Exit status is always 0: this is an **instrument**, not a gate.
+**Run it when touching the adapter.**
+
+Constraints:
+
+- Requires a sibling `juniper-cascor-client` checkout. The script walks up from the repo
+  (including worktrees) and **exits** if the sibling is missing. A missing corpus is the
+  worst failure: every adapter method looks pure and the census prints a confident `0`.
+- Resolution is by bare method name and over-reports (`close()` collapses). Read every
+  hit; the in-file `ADJUDICATED` table records verdicts already reached.
+- Its first draft rooted receiver chains at `self`, seeded nothing, and printed `0` over
+  a file with 52 known sites. That bug and the reason are recorded in the script.
+
+### Operator commands
+
+```bash
+# Slice 1b — client budget (on main)
+cd src && pytest tests/regression/test_x7_client_budget.py -v
+
+# Slice 1a — structural gate + behavioural tests (land with #567)
+cd src && pytest tests/regression/test_x7_off_loop_discipline.py tests/regression/test_x7_loop_responsiveness.py -v
+
+# Adapter-wide census (needs sibling client checkouts)
+python util/ad-hoc/2026-09-04_async_blocking_callgraph.py
+```
+
+### Pitfalls
+
+- `ruff --select ASYNC` (the CI-blocking "Async-route audit (BUG-JD-10 class)" hook)
+  cannot see this class. A green ruff run is not evidence the loop is safe.
+- Do not mark the X7 behavioural tests `slow`. Coverage would drop them.
+- Do not treat a green `main.py` gate as "1a done" after editing
+  `cascor_service_adapter.py` or `service_backend.py`.
+- Do not add a module-global expression exemption. Site-local only.
+- `/v1/health/live` is the canary (`{"status": "alive"}`). `/v1/health` and `/api/status`
+  reach the backend and must be offloaded; `/v1/health/ready` probes dependencies via
+  async `probe_dependency`.
+- Timing a responsiveness test from *inside* the coroutine measures only the coroutine.
+  Clock from request **issue** time, and create driver tasks before probes.
+
+Design of record (juniper-ml, revision 4):
+`notes/JUNIPER_2026-09-03_JUNIPER-CANOPY_X7-EVENT-LOOP-BLOCKING-REMEDIATION-DESIGN.md`.
 
 ---
 

@@ -66,6 +66,25 @@ set -euo pipefail
 
 ---
 
+## Operational: X7 adapter callgraph
+
+`2026-09-04_async_blocking_callgraph.py` is the instrument for sites the committed
+`main.py` gate cannot see (adapter `self.*` methods whose body reaches the network).
+**Run it when touching `cascor_service_adapter.py` or `service_backend.py`.**
+
+```bash
+python util/ad-hoc/2026-09-04_async_blocking_callgraph.py
+python util/ad-hoc/2026-09-04_async_blocking_callgraph.py --all
+```
+
+Exit status is always 0 (instrument, not a gate). Requires a sibling
+`juniper-cascor-client` checkout — a missing corpus prints a confident `0`. See
+[Event-loop I/O discipline (X7)](../../docs/AGENTS_REFERENCE.md#event-loop-io-discipline-x7).
+
+The script lands with slice 1a (`#567`).
+
+---
+
 ## What does NOT belong here
 
 - Scripts that are part of a documented build / test / release flow → `util/` proper or `scripts/`.

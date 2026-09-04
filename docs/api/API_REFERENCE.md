@@ -1,7 +1,7 @@
 # Juniper Canopy API Reference
 
-**Version:** 1.4.1
-**Last Updated:** July 4, 2026
+**Version:** 1.4.2
+**Last Updated:** September 4, 2026
 **Base URL:** `http://127.0.0.1:8050`
 
 ---
@@ -167,9 +167,46 @@ curl http://127.0.0.1:8050/api/health
 - Load balancer probes
 - Deployment diagnostics
 
+**Deprecation:** Prefer `/v1/health`, `/v1/health/live`, and `/v1/health/ready`.
+`/api/health` and `/health` remain as aliases and log a warning.
+
+### GET /v1/health/live
+
+**Description:** Liveness probe. Confirms the process is running. Touches **no**
+backend — this is the X7 canary: if this stalls, the event loop itself is blocked.
+
+**Parameters:** None
+
+**Response Schema:**
+
+```json
+{
+  "status": "alive"
+}
+```
+
+**Status Codes:**
+
+- `200 OK` - Process is running
+
+**Example Request:**
+
+```bash
+curl -s -o /dev/null -w "%{http_code} %{time_total}\n" http://127.0.0.1:8050/v1/health/live
+```
+
+When cascor is unreachable this must still return in milliseconds. See
+[Event-loop I/O discipline (X7)](../AGENTS_REFERENCE.md#event-loop-io-discipline-x7).
+
+Related: `GET /v1/health` (combined status; reaches `backend.is_training_active`) and
+`GET /v1/health/ready` (async dependency probes via `probe_dependency`).
+
 ### GET /api/status
 
-**Description:** Get normalized training status and network information
+**Description:** Get normalized training status and network information. Reaches
+`backend.get_status()` — a synchronous cascor HTTP call. Slice 1a (`#567`) offloads it
+with `asyncio.to_thread` so a slow upstream cannot stall `/v1/health/live`. This is the
+T-A2 driver route.
 
 **Parameters:** None
 
