@@ -660,6 +660,30 @@ class BackendConstants:
     CIRCUIT_BREAKER_FAILURE_THRESHOLD: Final[int] = 5
     CIRCUIT_BREAKER_RECOVERY_TIMEOUT: Final[float] = 60.0
 
+    # ── Cascor HTTP client budget (X7 slice 1b) ──
+    # ``JuniperCascorClient`` defaults to ``timeout=30, retries=3``. Left implicit,
+    # those defaults cost ``timeout x (retries + 1) + sum(backoff)`` per call —
+    # measured 123.1 s against a hung cascor and 3.0 s against a stopped one, all of
+    # it on canopy's event loop (X7). Naming them here makes the budget visible and
+    # tunable instead of inherited.
+    #
+    # ``RETRIES = 0`` is the load-bearing half: urllib3's backoff is pure ``sleep``
+    # on the calling thread, so the 3.0 s refused-case cost is ENTIRELY sleep.
+    # Measured 3.005 s -> 0.002 s per ECONNREFUSED tick. Canopy re-polls on its own
+    # interval, so a poller gains nothing from client-level retries — it retries by
+    # definition on the next tick. This also removes the duplicate-request hazard:
+    # the installed client retries every verb (``RETRY_ALLOWED_METHODS`` includes
+    # POST and DELETE), so a timed-out ``POST /v1/training/start`` was measured
+    # reaching the server 4 times.
+    #
+    # TIMEOUT stays at the client's own default. The client applies ONE timeout to
+    # every call, and canopy's slowest legitimate operation (``/api/train/restart``)
+    # budgets 30 s, so lowering it here would abort real work. Bounding per-call
+    # budgets is slice 1d; making the remaining 30 s harmless is slice 1a, which
+    # moves these calls off the event loop.
+    CASCOR_CLIENT_TIMEOUT_SECONDS: Final[float] = 30.0
+    CASCOR_CLIENT_RETRIES: Final[int] = 0
+
     # ── Redis client timeouts (seconds) ──
     REDIS_SOCKET_TIMEOUT: Final[float] = 5.0
     REDIS_CONNECT_TIMEOUT: Final[float] = 5.0
