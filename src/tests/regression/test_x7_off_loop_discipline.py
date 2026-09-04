@@ -43,6 +43,16 @@ a bare-attribute offload (``to_thread(backend.get_status)`` -- the backend call 
 reports 50 unguarded / 0 guarded on this file, emitting false positives on the exemplar
 code while missing every correct offload.
 
+**SCOPE LIMIT -- read this before treating a green result as "slice 1a is done".** This gate
+reads ``main.py`` only. Slice 1a is larger: §5.2 of the design also puts in scope the metrics
+relay's inline ``extract_network_topology()`` (``backend/cascor_service_adapter.py:771``,
+inside ``async def _relay_loop()``), measured at **123 s blocked per 183 s with no user
+present**. That call is a ``self``-method whose I/O is internal, so a receiver-based scan
+cannot see it, and extending this gate to cover it needs a model of which adapter methods
+perform I/O. Until that exists, **the relay is tracked as a named work item, not by this
+gate**. Treating a green gate as proof that 1a is complete would be exactly the
+"core now, remaining paths later" split that let SEC-F20 recur as X7.
+
 Buckets, all reported so none hides:
 
 * ``CASCOR``     -- the module ``backend`` global or anything reached through it.
@@ -170,7 +180,18 @@ def census() -> dict[str, list[str]]:
             if not isinstance(node.func, ast.Attribute):
                 continue
             expr = ast.unparse(node.func)
-            if expr in offloaded or isinstance(getattr(node, "_parent", None), ast.Await):
+            # NOTE: exemption is SITE-LOCAL only (the ``exempt`` node-id set above, which
+            # covers calls inside a closure that is itself handed to an offloader). It must
+            # NEVER be expression-based across sites. An earlier draft skipped any call whose
+            # expression appeared offloaded ANYWHERE in the module, which made the gate
+            # unsound in the worst possible way: because :3574 offloads ``backend.get_status``,
+            # every OTHER ``backend.get_status()`` became invisible -- including the three
+            # health endpoints X7 is defined by. Measured, that hid 15 sites (52 real vs 37
+            # reported), and it degraded as work progressed: offloading one site made its
+            # untouched twin vanish too, so the gate would have reached 0 with ~21 blocking
+            # calls still on the loop. A gate that certifies a partial fix as complete is the
+            # exact failure this slice exists to prevent.
+            if isinstance(getattr(node, "_parent", None), ast.Await):
                 continue
             if expr in VERIFIED_NO_IO_CALLS:
                 buckets["LOCAL"].append(f"main.py:{node.lineno} {fn.name}() -> {expr}")
