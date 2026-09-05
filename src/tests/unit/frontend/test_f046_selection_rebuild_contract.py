@@ -136,11 +136,7 @@ class TestRebuildConsumerMakesNoUpdateLoadBearing:
         change.
         """
         inputs = _dep_pairs(rebuild_entry, "inputs")
-        assert (SELECTED_STORE, "data") in inputs, (
-            f"{SELECTED_STORE} is not an Input of update_network_graph — "
-            "writing the store no longer rebuilds the figure, so the highlight "
-            "and the no_update guard both lose their consumer"
-        )
+        assert (SELECTED_STORE, "data") in inputs, f"{SELECTED_STORE} is not an Input of update_network_graph — " "writing the store no longer rebuilds the figure, so the highlight " "and the no_update guard both lose their consumer"
 
     def test_selected_nodes_is_not_demoted_to_state(self, rebuild_entry):
         """Input, not State. The same demotion that fixed the poll tick would
@@ -165,9 +161,7 @@ class TestSelectedDataFallthroughAlsoGuardsTheStore:
             current_selection=[],
             trigger=f"{GRAPH_ID}.selectedData",
         )
-        assert all(v is dash.no_update for v in out), (
-            "an empty box-select still writes the store, forcing a rebuild"
-        )
+        assert all(v is dash.no_update for v in out), "an empty box-select still writes the store, forcing a rebuild"
 
     def test_null_box_selection_writes_nothing_when_empty(self, selection_callback):
         """Plotly sends ``selectedData=None`` when the rubber-band is dismissed."""
@@ -230,14 +224,11 @@ class TestClearButtonStyleDoesNotJumpOnReveal:
             current_selection=[],
         )
         for key in _STYLE_KEYS_THAT_MUST_NOT_JUMP:
-            assert clear_style.get(key) == shipped.get(key), (
-                f"revealing the button changed {key!r}: "
-                f"layout={shipped.get(key)!r} callback={clear_style.get(key)!r}"
-            )
+            assert clear_style.get(key) == shipped.get(key), f"revealing the button changed {key!r}: " f"layout={shipped.get(key)!r} callback={clear_style.get(key)!r}"
         assert clear_style.get("display") in ("inline-block", "block", "inline")
 
     def test_hidden_after_clear_keeps_the_same_non_display_keys(self, visualizer, selection_callback):
-        shipped = (_find(visualizer.get_layout(), CLEAR_BUTTON).style or {})
+        shipped = _find(visualizer.get_layout(), CLEAR_BUTTON).style or {}
         _, _, _, clear_style = _call(
             selection_callback,
             clear_clicks=1,
