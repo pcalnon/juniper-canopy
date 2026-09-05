@@ -79,15 +79,20 @@ def restore_main_globals():
         main.backend = original_backend
 
 
-def _gauge_value(metric, **labels) -> float:
-    """Read a labelled gauge sample via the public ``collect()`` API."""
+def _gauge_value(metric, **labels):
+    """Read a labelled gauge sample via the public ``collect()`` API.
+
+    Returns ``None`` when no sample matches, **not** ``0.0``. A missing series and a
+    series explicitly set to zero are different facts, and an assertion that cannot
+    tell them apart passes vacuously against a gauge that was never written.
+    """
     samples = list(metric.collect())[0].samples
     for sample in samples:
         if sample.name.endswith("_created"):
             continue
         if all(sample.labels.get(key) == value for key, value in labels.items()):
             return sample.value
-    return 0.0
+    return None
 
 
 # --------------------------------------------------------------------------------------
@@ -249,11 +254,35 @@ class TestHealthAndStatusWiring:
         await cache.refresh_once()
         main.status_cache = cache
         extras = main._backend_status_extras()
+        # ``age_seconds`` is a live ``time.monotonic()`` read rounded to milliseconds,
+        # and ``_backend_status_extras()`` and the comparison below read the clock at
+        # DIFFERENT instants. Exact equality here fails ~0.2% of runs on idle hardware
+        # and worse on a contended runner. The dict shape stays exact so a missing or
+        # extra key still fails; only the clock field is given a tolerance.
         assert extras == {
             "backend_status": "ok",
             "backend_status_stale": False,
-            "backend_status_age_seconds": cache.for_status()["age_seconds"],
+            "backend_status_age_seconds": pytest.approx(cache.for_status()["age_seconds"], abs=0.05),
         }
+
+    async def test_c7_extras_report_stale_when_the_cache_is_stale(self, restore_main_globals):
+        """``backend_status_stale`` must track the cache, not sit at its default.
+
+        Every other assertion on this field uses a freshly-refreshed cache, where the
+        correct answer *is* ``False`` — so an implementation that hardcoded ``False``
+        passed. This is the only test in the repository that reaches the ``True`` arm,
+        and it is the C9 contract the slice exists for: staleness is reported BESIDE
+        the class, not by flipping it.
+        """
+        import main
+
+        cache = _cache([{"training_active": True}], stale_after=0.0)
+        await cache.refresh_once()
+        main.status_cache = cache
+        extras = main._backend_status_extras()
+        assert extras["backend_status_stale"] is True
+        # The class must NOT flip just because the payload aged.
+        assert extras["backend_status"] == "ok"
 
     async def test_health_omits_c7_fields_without_a_cache(self, restore_main_globals):
         import main
@@ -345,6 +374,32 @@ class TestHealthAndStatusWiring:
         service.backend_type = "service"
         await main._start_status_cache(service)
         assert main.status_cache is None
+
+    async def test_start_status_cache_builds_one_for_an_adaptered_service(self, restore_main_globals):
+        """The half that decides a cache DOES exist.
+
+        Without this, ``_start_status_cache`` reduced to an unconditional ``return``
+        passes the whole suite: every other assertion about it checks that some
+        backend gets NO cache, which a function that never assigns satisfies too.
+        """
+        import main
+
+        main.status_cache = None
+        adapter = MagicMock(spec=["get_training_status_for_refresh"])
+        adapter.get_training_status_for_refresh = MagicMock(return_value={"training_active": True})
+        service = MagicMock(spec=["backend_type", "_adapter", "normalize_status"])
+        service.backend_type = "service"
+        service._adapter = adapter
+        service.normalize_status = lambda raw: {"is_training": bool(raw.get("training_active"))}
+
+        try:
+            await main._start_status_cache(service)
+            assert main.status_cache is not None, "a service backend with an adapter got no cache"
+            # The DEDICATED breaker fetch, not ``get_training_status`` — sharing the
+            # breaker would let failing ``get_network_data()`` calls freeze this cache.
+            assert main.status_cache._fetch_raw is adapter.get_training_status_for_refresh
+        finally:
+            await main._stop_status_cache()
 
 
 # --------------------------------------------------------------------------------------
