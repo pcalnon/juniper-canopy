@@ -1,7 +1,7 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** 2026-09-04  
-**Version:** v0.26.1
+**Last Updated:** 2026-09-05  
+**Version:** v0.26.2
 
 Complete guide to testing the Juniper Canopy application.
 
@@ -92,7 +92,7 @@ pytest -m "not requires_cascor and not requires_server and not requires_redis an
 # Slice 1b client budget (on main)
 pytest src/tests/regression/test_x7_client_budget.py -v
 
-# Slice 1a gate + responsiveness (land with #567). Not marked slow on purpose.
+# Slice 1a gate + responsiveness (landed with #567). Not marked slow on purpose.
 pytest src/tests/regression/test_x7_off_loop_discipline.py \
   src/tests/regression/test_x7_loop_responsiveness.py -v
 ```
@@ -117,7 +117,7 @@ pytest -k "demo_mode or config"
 pytest -k "demo_mode and advanced"
 
 # X7 slice 1c — classifier, status-bar class routing, breaker isolation, staleness
-# Lands with #578; the file is not on main until then.
+# Landed with #578.
 pytest src/tests/regression/test_x7_status_cache.py -v
 ```
 
