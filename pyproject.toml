@@ -160,18 +160,23 @@ juniper-cascor = [
     # adapter can run against. (Prior floor 0.6.0: FakeCascorClient ``_request``
     # in-memory parity, cascor-client#91.)
     #
-    # Cap widened <0.8.0 -> <0.9.0 on 2026-09-05. cascor-client's next release
-    # carries the X7 C8 fix -- ``RETRY_ALLOWED_METHODS`` narrowed to
-    # ``["HEAD", "GET"]``, so a failed ``POST /v1/training/start`` is no longer
-    # retried into up to four training runs (cascor-client ``APD-CCLIENT-001``).
-    # That release also adds ``backoff_factor`` as a public constructor
-    # parameter (``APD-CCLIENT-013``), which makes it a MINOR: 0.8.0, not 0.7.1.
-    # The old ``<0.8.0`` cap would therefore have excluded the very artefact
-    # canopy needs, so the cap moves first and the floor follows publication --
-    # pinning a floor at an unpublished version resolves nothing. Floor stays
-    # ``>=0.7.0`` until 0.8.0 is on PyPI (cascor-client
-    # ``notes/releases/RELEASE_NOTES_v0.8.0.md``, "After publication").
-    "juniper-cascor-client>=0.7.0,<0.9.0",
+    # Floor 0.8.0 (2026-09-05, the X7 C8 fix): 0.8.0 narrows
+    # ``RETRY_ALLOWED_METHODS`` to ``["HEAD", "GET"]``, so a failed
+    # ``POST /v1/training/start`` is no longer retried into up to four training
+    # runs (cascor-client ``APD-CCLIENT-001``). Every earlier release -- 0.7.0
+    # included -- retries ``POST``/``PUT``/``PATCH``/``DELETE``, and canopy is
+    # the consumer that issues the training-start. The floor is what stops a
+    # resolver handing canopy a client that does that; the cap alone would not.
+    # 0.8.0 rather than 0.7.1 because it also adds ``backoff_factor`` as a
+    # public constructor parameter (``APD-CCLIENT-013``) -- additive public API
+    # is a feature, so MINOR. The ``<0.8.0`` cap this replaced was widened to
+    # ``<0.9.0`` first (canopy#584), because a cap excluding the artefact would
+    # have blocked the release outright; the floor could only follow, since a
+    # floor pinned at an unpublished version resolves nothing.
+    # Verified against the published wheel, not the checkout:
+    # ``pip install juniper-cascor-client==0.8.0`` then
+    # ``constants.RETRY_ALLOWED_METHODS`` -> ``['HEAD', 'GET']``.
+    "juniper-cascor-client>=0.8.0,<0.9.0",
 ]
 observability = [
     # prometheus-client moved to [project] dependencies on 2026-05-10
