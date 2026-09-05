@@ -34,14 +34,29 @@ pytestmark = pytest.mark.unit
 
 
 def _valid_npz(n: int = 12) -> dict:
-    """Return a minimal valid 2-D classification NPZ dict (X_full float32, y_full one-hot)."""
+    """Return a minimal valid 2-D classification NPZ dict, partitioned train / val / test.
+
+    It returned only ``X_full`` / ``y_full`` until decision 11 removed that family from
+    the contract. Partitioning it here is not cosmetic: a fixture that still shipped the
+    old shape would keep exercising the tolerance path and never the one every new
+    artifact takes.
+    """
     rng = np.random.RandomState(0)
     X = rng.randn(n, 2).astype(np.float32)
     y = np.zeros((n, 2), dtype=np.float32)
     idx = np.arange(n)
     y[idx % 2 == 0, 0] = 1.0
     y[idx % 2 == 1, 1] = 1.0
-    return {"X_full": X, "y_full": y}
+    train_end = max(1, int(n * 0.8))
+    val_end = max(train_end + 1, int(n * 0.9))
+    return {
+        "X_train": X[:train_end],
+        "y_train": y[:train_end],
+        "X_val": X[train_end:val_end],
+        "y_val": y[train_end:val_end],
+        "X_test": X[val_end:],
+        "y_test": y[val_end:],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +324,11 @@ class TestGuardBranches:
                 demo.regenerate_dataset_from_generator(generator="xor")
 
     def test_generator_artifact_missing_x_raises(self, mock_juniper_data_client):
-        """An artifact with neither X_full nor X_train raises after the fallback (lines 1817, 1819)."""
+        """An artifact with neither X_full nor X_train raises after the fallback.
+
+        The X_full arm of that fallback is now the LEGACY one -- decision 11 stopped
+        producers emitting it -- so this pins that both arms are still consulted.
+        """
         demo = DemoMode()
         with patch.object(mock_juniper_data_client, "create_dataset", return_value={"dataset_id": "d-nox"}), patch.object(mock_juniper_data_client, "download_artifact_npz", return_value={}):
             with pytest.raises(ValueError, match="missing required key: X_full"):
