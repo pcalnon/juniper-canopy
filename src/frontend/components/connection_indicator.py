@@ -77,7 +77,15 @@ function(wsStatus, streamHealth) {
         verticalAlign: "middle"
     };
 
-    if (wsStatus.mode === "demo") {
+    // PR 2 (demo-mode honesty): the mode comes from the SERVER, via
+    // GET /api/stream_health, because the browser cannot know it. This branch was
+    // previously keyed on `wsStatus.mode`, which websocket_client.js and
+    // ws_dash_bridge.js both hardcode to "live" — so "WS: Demo" was unreachable dead
+    // code, and canopy rendered a green "WS: Connected" over simulated data whenever a
+    // cold start could not reach cascor. `wsStatus.mode` is still honoured first so a
+    // future client that learns its own mode is not overridden by a stale store.
+    var mode = (wsStatus && wsStatus.mode !== "live" && wsStatus.mode) || (streamHealth && streamHealth.mode);
+    if (mode === "demo") {
         baseStyle.backgroundColor = "#6c757d";
         return ["WS: Demo", baseStyle];
     }
