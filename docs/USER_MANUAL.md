@@ -1,8 +1,8 @@
 # Juniper Canopy User Manual
 
-**Version:** 0.26.1
+**Version:** 0.26.2
 **Status:** ✅ Production Ready
-**Last Updated:** September 4, 2026
+**Last Updated:** September 5, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -381,11 +381,11 @@ The selection panel is view state. It highlights nodes on the graph; it does not
 | Gesture | What happens |
 | --- | --- |
 | Click a node (or the edge vertex that sits on it) | Panel opens. Layer is taken from the node *label* (`Hidden 0` → Hidden), not from the Plotly curve index. |
-| Click the selected node again | Selection clears. This is the only click gesture that works on `main`. |
+| Click the selected node again | Selection clears. This is the only *canvas* click gesture that clears; the **Clear selection** button clears too. |
 | Click any member of a box/lasso set | The *whole* set clears (same toggle). |
 | Click empty canvas | **Nothing.** Plotly emits `plotly_click` only when a point is hit. The callback never runs. |
 
-The panel currently says *"(Click again or elsewhere to deselect)"* after a click and *"(Click elsewhere to deselect)"* after a box select. The "again" half is true. The "elsewhere" half is not — that sentence was never implemented. canopy#573 adds a **Clear selection** button that appears only while something is selected, and rewrites the hints so they match the gestures that actually exist. See [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046).
+The panel *used to say* *"(Click again or elsewhere to deselect)"* after a click and *"(Click elsewhere to deselect)"* after a box select. The "elsewhere" half was described but never implemented. canopy#573 fixed it: a **Clear selection** button appears only while something is selected, the click hint reads *"(Click again to deselect)"*, and the box/lasso panel carries no hint, because the button is the affordance. See [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046).
 
 - **Camera (modebar)** — download the current figure as PNG
   (`canopy_network_<YYYYmmdd>_<HHMMSS>.png`, 2× scale). SVG from the
@@ -1123,9 +1123,12 @@ ws.onmessage = (e) => console.log('Message:', e.data);
 
 ---
 
-#### 6. Depth-filter label stuck at "0 of N" (F-CANOPY-042)
+#### 6. Depth-filter label stuck at "0 of N" (F-CANOPY-042) — **fixed in canopy#570**
 
-**Symptoms:**
+Kept for anyone running a build older than canopy#570. On current `main` the
+label follows the slider and reads `"all"` at rest.
+
+**Symptoms (pre-#570):**
 
 - Network Topology tab shows a loaded cascade (for example 40 hidden units)
 - The **Hidden depth** label reads `"0 of 40"` at rest, or does not change when you drag the slider
@@ -1133,22 +1136,28 @@ ws.onmessage = (e) => console.log('Message:', e.data);
 
 **Cause:**
 
-- On `main` the label is a fourth output of the clientside slider-bounds sync. That callback fires only when the topology store changes; the slider value is read as State. Rest-state `0` is also rendered as `"0 of N"` even though the filter treats `0` as "show all."
+- The label *was* a fourth output of the clientside slider-bounds sync. That callback fires only when the topology store changes; the slider value was read as State. Rest-state `0` was also rendered as `"0 of N"` even though the filter treats `0` as "show all."
 
 **What to do:**
 
 - Trust the graph and the stats bar for what is actually drawn. `"all"` and a slider at max are the no-filter states.
 - Do not "fix" the label by adding the slider value as an Input of the bounds-sync callback — Dash rejects that as a circular dependency (`-depth-slider.value` is already an Output there).
 - Do not route the label through the topology rebuild (`update_network_graph`); that callback's measured paint is 1.5–31 s.
-- The repair is canopy#570: a dedicated clientside label callback whose rule matches `_apply_hierarchy_filter`. Developer contract: [AGENTS_REFERENCE.md § Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020).
+- The repair, canopy#570, is on `main`: a dedicated clientside label callback whose rule matches `_apply_hierarchy_filter`. Developer contract: [AGENTS_REFERENCE.md § Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020).
 
 ---
 
-#### 6. Topology selection does not clear when you click empty space
+#### 6. Topology selection does not clear when you click empty space — **fixed in canopy#573**
 
-- After a click the panel reads *"(Click again or elsewhere to deselect)"*
-- After a box/lasso it reads *"(Click elsewhere to deselect)"*
-- Clicking the blank canvas leaves the highlight in place
+Kept for anyone running a build older than canopy#573. Clicking blank canvas
+still does nothing — plotly emits no event — but the panel no longer promises
+that it will, and a **Clear selection** button now carries the gesture.
+
+**Symptoms (pre-#573):**
+
+- After a click the panel read *"(Click again or elsewhere to deselect)"*
+- After a box/lasso it read *"(Click elsewhere to deselect)"*
+- Clicking the blank canvas left the highlight in place
 
 - Plotly emits `plotly_click` only when a *point* is hit. A click on empty canvas produces no event, so `clickData` never changes and `handle_node_selection` (`prevent_initial_call=True`) never runs. The "elsewhere" sentence was never implemented.
 
@@ -1156,7 +1165,7 @@ ws.onmessage = (e) => console.log('Message:', e.data);
 
 ✅ **Click the selected node again** — that toggle *does* clear (including every member of a box/lasso set).
 
-✅ **Do not wait for a container-level listener.** A clientside click-on-empty handler was considered and rejected (it races Plotly and starves the 1.5–31 s rebuild family). canopy#573 ships an explicit **Clear selection** button instead.
+✅ **Use the Clear selection button.** A clientside click-on-empty handler was considered and rejected (it races Plotly and starves the 1.5–31 s rebuild family); canopy#573 shipped an explicit **Clear selection** button instead, visible only while something is selected.
 
 See [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046).
 

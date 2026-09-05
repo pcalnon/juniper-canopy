@@ -2,9 +2,9 @@
 
 ## Technical reference for CasCor backend integration in Juniper Canopy
 
-**Version:** 0.27.1  
+**Version:** 0.27.2  
 **Status:** ✅ PARTIALLY IMPLEMENTED  
-**Last Updated:** September 4, 2026
+**Last Updated:** September 5, 2026
 
 ---
 
@@ -232,7 +232,7 @@ get_status() -> Dict[str, Any]
 - `current_epoch` and `hidden_units` use first-defined (`None`-aware) extraction to preserve explicit zero values.
 - Running/paused/completed flags are derived from normalized uppercase FSM status values.
 
-**X7 slice 1c (lands with `#578`).** `ServiceBackend.normalize_status` is an extract-method
+**X7 slice 1c (landed with `#578`).** `ServiceBackend.normalize_status` is an extract-method
 from `get_status` (body verbatim). The status cache classifies the **raw** adapter
 response and serves the **normalized** one; composing them would force a choice.
 `get_status()` itself is unchanged: `normalize_status(adapter.get_training_status())`.
@@ -1070,7 +1070,7 @@ with self.topology_lock:
 ---
 
 **Last Updated:** September 5, 2026  
-**Version:** 0.27.1  
+**Version:** 0.27.2  
 **Status:** ✅ PARTIALLY IMPLEMENTED
 
 **Complete technical reference for CasCor backend integration!**
