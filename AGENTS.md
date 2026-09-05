@@ -5,7 +5,7 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.6.0
-**Last Updated**: 2026-09-04
+**Last Updated**: 2026-09-05
 
 ---
 
@@ -72,7 +72,7 @@ section in the same PR rather than waiving the budget gate.
   to the refresher (it shares `_cb` with five other sites and freezes the cache INDETERMINATE
   for 60 s against a healthy upstream) — use `get_training_status_for_refresh`. Do not invent
   `is_training: False` when no OK has been seen. Do not widen `is_training_active()` to a
-  tri-state. Age out on the last **attempt**, not the last success. Lands with `#578`. Runbook:
+  tri-state. Age out on the last **attempt**, not the last success. Landed with `#578`. Runbook:
   [`docs/AGENTS_REFERENCE.md` § Cascor status cache](docs/AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
 
 ## Project Overview

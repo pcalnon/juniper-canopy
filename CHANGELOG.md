@@ -30,6 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Complementary X7 slice 1c guard tests** (`src/tests/regression/test_x7_status_cache_guards.py`),
+  18 tests over the leftover paths `#578`'s T-C1–T-C4 suite cannot reach: a raising `normalize`
+  must not keep a prior OK payload reading fresh; the OK-but-stale window stays
+  `status_class=ok` while *marked* stale rather than flipping class; `for_status()` synthesises
+  `error` on a half-dead 200 and **omits** `is_training` rather than guessing `False`; the
+  `is_training` tri-state (true / false / absent) stays distinct, which is the property a
+  boolean coercion silently destroys; C7 health extras and the health boolean prefer the cache
+  over a live outage-negative and still fall back when the cache holds no verdict;
+  `_start_status_cache` skips demo and adapterless service backends, and DOES build one for an
+  adaptered service backend on the dedicated breaker fetch; `backend_status_stale` tracks the
+  cache rather than sitting at its default; the status-class gauge is one-hot on transition. Harvested from canopy#580, whose other nine files had already landed.
 - **X7 event-loop I/O operator docs.** Runbook in `docs/AGENTS_REFERENCE.md` covering the
   single-worker outage class (sync `requests` inside `async def` stalls `/v1/health/live`),
   the slice 1b client budget already on `main` (`CASCOR_CLIENT_RETRIES = 0`), the slice 1a

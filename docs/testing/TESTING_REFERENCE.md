@@ -1,7 +1,7 @@
 # Testing Reference
 
-**Last Updated:** September 4, 2026  
-**Version:** v0.26.2
+**Last Updated:** September 5, 2026  
+**Version:** v0.26.3
 
 Technical reference for the active pytest configuration, markers, fixtures, and CI-equivalent commands.
 
@@ -188,9 +188,9 @@ pytest tests/regression/test_csp_plotly_image_export.py \
 
 ### Hierarchy depth filter (CAN-020 / F-CANOPY-042)
 
-The Python oracle lives on `main`. The clientside label suite lands with canopy#570
-(`src/tests/unit/frontend/test_f042_depth_filter_label.py` — not on `main` yet;
-do not markdown-link it until that file merges).
+The Python oracle and the clientside label suite
+(`src/tests/unit/frontend/test_f042_depth_filter_label.py`, landed with canopy#570)
+both live on `main`.
 
 ```bash
 cd src
@@ -200,7 +200,7 @@ pytest tests/unit/test_network_visualizer.py -k "Hierarchy or hierarchy or depth
 `TestHierarchyDepthFilter` is the contract: `None` / `0` / at-total / above-total
 are `"all"`; a mid-range depth copies the dict, caps `hidden_units`, and drops
 edges touching `hidden_K` for `K >= depth`. `TestHierarchyDepthSliderWiring` is
-source-level only and does **not** execute the JavaScript. After #570 merges,
+source-level only and does **not** execute the JavaScript. Since #570 merged,
 prefer the registered-callback + `node` grid over any test that re-types the
 production expression. See
 [AGENTS_REFERENCE.md § Hierarchy Depth Filter](../AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020).
@@ -217,8 +217,8 @@ pytest tests/unit/frontend/test_f044_node_click_selection.py -v
 
 `test_f044_node_click_selection.py` is the contract for click-to-select:
 edge `customdata` fallback (F-044) and label-derived layer (F-045). The
-canopy#573 suite (`src/tests/unit/frontend/test_f046_clear_selection.py` — not
-on `main` yet) pins the Clear button, the true hints, and
+canopy#573 suite (`src/tests/unit/frontend/test_f046_clear_selection.py`,
+on `main`) pins the Clear button, the true hints, and
 `is dash.no_update` on an already-empty store. Adding an Input/Output
 changes arity; three files invoke the callback by its Output key
 (`-selected-nodes.data`), including
@@ -252,7 +252,7 @@ sync I/O off the loop. Full runbook:
 # Client budget (on main) — T-B1 refused-call milliseconds; T-B2 a 503 is attempted once
 cd src && pytest tests/regression/test_x7_client_budget.py -v
 
-# Structural gate + T-A2/T-A3/T-A4 (land with #567). Do not mark these slow:
+# Structural gate + T-A2/T-A3/T-A4 (landed with #567). Do not mark these slow:
 # the coverage gate runs -m "not slow" and would drop the only behavioural check.
 cd src && pytest tests/regression/test_x7_off_loop_discipline.py \
   tests/regression/test_x7_loop_responsiveness.py -v
@@ -280,9 +280,9 @@ pytest --ff
 
 ## X7 Status Cache (slice 1c)
 
-Incoming with `#578`. Pins the classifier, the PR `#340` status-bar regression, breaker
+Landed with `#578`. Pins the classifier, the PR `#340` status-bar regression, breaker
 isolation, and the staleness contract. The file is
-`src/tests/regression/test_x7_status_cache.py` — backtick only until it exists on `main`.
+`src/tests/regression/test_x7_status_cache.py`.
 
 ```bash
 cd src && pytest tests/regression/test_x7_status_cache.py -v
