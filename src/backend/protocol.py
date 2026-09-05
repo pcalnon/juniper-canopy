@@ -120,6 +120,7 @@ class DatasetResult(TypedDict, total=False):
     targets: Any
     loaded: bool
     train_samples: int
+    val_samples: int
     test_samples: int
     dataset_name: str
 
