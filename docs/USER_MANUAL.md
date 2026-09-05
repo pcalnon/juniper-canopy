@@ -1,8 +1,8 @@
 # Juniper Canopy User Manual
 
-**Version:** 0.26.0
+**Version:** 0.26.1
 **Status:** ✅ Production Ready
-**Last Updated:** May 4, 2026
+**Last Updated:** September 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -352,6 +352,47 @@ tick. The base tick is **1000 ms**; the **1x / 2x / 4x** buttons set it to 1000 
 - **Zoom** - Scroll to zoom in/out
 - **Pan** - Click and drag to pan view
 - **Hover** - Show node ID and connection details
+- **Hidden depth slider** - Once at least one cascade unit exists, filter the graph to the first `K` hidden units (see below)
+
+**Hidden Depth Filter:**
+
+The **Hidden depth** slider is a view filter, not a training control. CasCor adds hidden units in cascade order (`hidden_0` first), so the slider shows a prefix of that history.
+
+| Slider / label | What you see |
+| --- | --- |
+| Label reads **`all`** | No filter. Every hidden unit and every connection is drawn. |
+| Label reads **`K of N`** | Only the first `K` of `N` hidden units. Edges that touch a hidden unit at or past `K` are dropped. |
+| Slider at rest (`0`) | Same as **`all`**. `0` means "no filter", not "show zero units." |
+| Slider at max (`N`) | Same as **`all`**. |
+
+The slider is hidden until the network has at least one hidden unit. Dragging commits on mouse-up (not on every tick). A chosen `K` survives later `cascade_add` events unless it is now past the new max, in which case the control snaps to "show all." The stats bar's Hidden Units readout shows `K of N` while a filter is active.
+
+The first-run walkthrough highlights this control (`network-visualizer-depth-slider-container`).
+
+If the label stays at `"0 of N"` while the graph is clearly showing every unit, that is F-CANOPY-042 (the label was wired to topology changes, not to the slider, and treated rest-state `0` as a real depth). The graph and stats bar can still be correct. canopy#570 splits the label onto its own clientside callback so it tracks the slider and matches the filter. See [AGENTS_REFERENCE.md § Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020).
+
+- **Click a node** - Opens the selection panel (`Selected: …`, `Layer: Input|Hidden|Output`). Clicking the same node again clears the selection.
+- **Box / lasso** - Mode-bar `select2d` / `lasso2d` select several nodes. The panel lists up to five.
+
+**Node Selection:**
+
+The selection panel is view state. It highlights nodes on the graph; it does not change the trained network.
+
+| Gesture | What happens |
+| --- | --- |
+| Click a node (or the edge vertex that sits on it) | Panel opens. Layer is taken from the node *label* (`Hidden 0` → Hidden), not from the Plotly curve index. |
+| Click the selected node again | Selection clears. This is the only click gesture that works on `main`. |
+| Click any member of a box/lasso set | The *whole* set clears (same toggle). |
+| Click empty canvas | **Nothing.** Plotly emits `plotly_click` only when a point is hit. The callback never runs. |
+
+The panel currently says *"(Click again or elsewhere to deselect)"* after a click and *"(Click elsewhere to deselect)"* after a box select. The "again" half is true. The "elsewhere" half is not — that sentence was never implemented. canopy#573 adds a **Clear selection** button that appears only while something is selected, and rewrites the hints so they match the gestures that actually exist. See [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046).
+
+- **Camera (modebar)** — download the current figure as PNG
+  (`canopy_network_<YYYYmmdd>_<HHMMSS>.png`, 2× scale). SVG from the
+  same menu is a different path and does not need `blob:`. If the
+  camera button does nothing, the browser console will show a CSP
+  `img-src` violation — see
+  [troubleshooting #6](#6-modebar-camera-does-nothing-no-png-file).
 
 **Data Source:**
 
@@ -1082,6 +1123,71 @@ ws.onmessage = (e) => console.log('Message:', e.data);
 
 ---
 
+#### 6. Depth-filter label stuck at "0 of N" (F-CANOPY-042)
+
+**Symptoms:**
+
+- Network Topology tab shows a loaded cascade (for example 40 hidden units)
+- The **Hidden depth** label reads `"0 of 40"` at rest, or does not change when you drag the slider
+- The graph and the Hidden Units stats count still follow the filter
+
+**Cause:**
+
+- On `main` the label is a fourth output of the clientside slider-bounds sync. That callback fires only when the topology store changes; the slider value is read as State. Rest-state `0` is also rendered as `"0 of N"` even though the filter treats `0` as "show all."
+
+**What to do:**
+
+- Trust the graph and the stats bar for what is actually drawn. `"all"` and a slider at max are the no-filter states.
+- Do not "fix" the label by adding the slider value as an Input of the bounds-sync callback — Dash rejects that as a circular dependency (`-depth-slider.value` is already an Output there).
+- Do not route the label through the topology rebuild (`update_network_graph`); that callback's measured paint is 1.5–31 s.
+- The repair is canopy#570: a dedicated clientside label callback whose rule matches `_apply_hierarchy_filter`. Developer contract: [AGENTS_REFERENCE.md § Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020).
+
+---
+
+#### 6. Topology selection does not clear when you click empty space
+
+- After a click the panel reads *"(Click again or elsewhere to deselect)"*
+- After a box/lasso it reads *"(Click elsewhere to deselect)"*
+- Clicking the blank canvas leaves the highlight in place
+
+- Plotly emits `plotly_click` only when a *point* is hit. A click on empty canvas produces no event, so `clickData` never changes and `handle_node_selection` (`prevent_initial_call=True`) never runs. The "elsewhere" sentence was never implemented.
+
+**Solutions:**
+
+✅ **Click the selected node again** — that toggle *does* clear (including every member of a box/lasso set).
+
+✅ **Do not wait for a container-level listener.** A clientside click-on-empty handler was considered and rejected (it races Plotly and starves the 1.5–31 s rebuild family). canopy#573 ships an explicit **Clear selection** button instead.
+
+See [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046).
+
+#### 6. Modebar camera does nothing (no PNG file)
+
+- Topology (or any Plotly) camera button is present and clickable
+- No file is offered; the figure does not change
+- Browser console reports a Content-Security-Policy `img-src` violation
+  for a `blob:http://…` URL
+
+Plotly's PNG export rasterises SVG → Blob → `<img>` → canvas. That
+image load is a `blob:` URL. The shipped policy is
+`img-src 'self' data: blob:` (`SecurityConstants.DEFAULT_CSP_POLICY`,
+served by `SecurityHeadersMiddleware`). Without `blob:`, the promise
+rejects with `[object Event]` and no download is offered. SVG export
+from the same menu still works.
+
+✅ **Confirm the console names `img-src`**, not a missing figure.
+
+✅ **Confirm the constant and the middleware still match:**
+
+```bash
+cd src
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
+```
+
+Do not "fix" this by adding `blob:` to `script-src` or by replacing
+`data:` (Bootstrap icons need `data:`). Developer contract:
+[AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047).
+
 ### Diagnostic Commands
 
 **Check server health:**
@@ -1313,10 +1419,12 @@ and the **About** tab (both read the same source); the release history is in `CH
 - **CasCor** - Cascade Correlation neural network architecture
 - **Epoch** - One complete pass through the training dataset
 - **Cascade Unit** - Hidden unit added dynamically during training
+- **Hidden depth** - View filter on the Network Topology tab; keeps the first `K` cascade units. Slider `0` and slider-at-max both mean "all" (no filter).
 - **Decision Boundary** - Regions where network changes classification
 - **WebSocket** - Bidirectional real-time communication protocol
 - **FastAPI** - Modern Python web framework for APIs
 - **Dash** - Python framework for interactive web dashboards
+- **Node selection** - Topology click or box/lasso highlight. Clicking empty canvas does not clear (F-CANOPY-046). Click the selected node again, or (after canopy#573) use **Clear selection**.
 
 ### System Requirements
 

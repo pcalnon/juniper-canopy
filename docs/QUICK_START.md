@@ -2,9 +2,9 @@
 
 ## Get Juniper Canopy running in 5 minutes
 
-**Version:** 0.25.1
+**Version:** 0.25.2
 **Status:** ✅ Production Ready
-**Last Updated:** July 4, 2026
+**Last Updated:** September 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -501,6 +501,61 @@ pip install -r conf/requirements.txt
 
 ---
 
+### Issue 8: Dashboard Frozen / `/v1/health/live` Hangs When CasCor Is Down
+
+**Symptom:** Canopy stops answering HTTP — health probes included — whenever cascor is
+stopped or hung. Pre-fix measurements: 3.0 s with cascor stopped, **123.12 s** with
+cascor hung.
+
+**Cause:** Synchronous `requests` I/O inside `async def` on a single-worker uvicorn (X7).
+
+**Check:**
+
+```bash
+# Liveness must stay fast even when cascor is unreachable
+curl -s -o /dev/null -w "%{http_code} %{time_total}\n" http://127.0.0.1:8050/v1/health/live
+
+# Client budget (slice 1b, on main)
+cd src && pytest tests/regression/test_x7_client_budget.py -v
+```
+
+**See:** [AGENTS_REFERENCE.md — Event-loop I/O discipline](AGENTS_REFERENCE.md#event-loop-io-discipline-x7)
+
+---
+
+### Issue 8: Modebar Camera Does Nothing
+
+**Symptom:** The Topology camera button is present. Clicking it never offers a PNG. The browser console reports a Content-Security-Policy `img-src` violation for a `blob:` URL.
+
+**Cause:** Plotly's PNG export loads the figure through a `blob:` URL. The shipped CSP is `img-src 'self' data: blob:` (`SecurityConstants.DEFAULT_CSP_POLICY`). Without `blob:`, the promise rejects with `[object Event]` and no file is offered. SVG export from the same menu still works.
+
+**Solution:** Do not replace `data:` with `blob:` (Bootstrap icons need `data:`). Do not add `blob:` to `script-src`. Confirm both pins still hold:
+
+cd src
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
+
+**See:** [AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047)
+
+### Issue 9: Status Bar Says "Stopped" While CasCor Is Down
+
+**Symptom:** Service-mode dashboard shows **Stopped** (or a healthy idle) when cascor is
+unreachable, hung, or returning a 200 that is not a cascor status. An operator cannot
+tell that from a backend that is genuinely idle.
+
+**Cause:** `/api/status` handed the UI a raw payload. A half-dead 200 has no `error`
+key, so the PR `#340` branch never fires (X7 slice 1c). The cache must publish
+`status_class`; the status bar must render the class (`Unreachable` / `Unknown`).
+
+```bash
+curl -s http://127.0.0.1:8050/api/status | python -m json.tool
+# Expect status_class + stale + age_seconds in service mode (lands with #578)
+
+cd src && pytest tests/regression/test_x7_status_cache.py -v
+```
+
+**See:** [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)
+
 ## Next Steps
 
 ### Learn More
@@ -508,6 +563,8 @@ pip install -r conf/requirements.txt
 - **[README.md](../README.md)** - Complete project overview and features
 - **[ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)** - Detailed environment configuration
 - **[AGENTS.md](../AGENTS.md)** - Development guide and conventions
+- **[Event-loop I/O discipline (X7)](AGENTS_REFERENCE.md#event-loop-io-discipline-x7)** - Keep `/v1/health/live` answerable when cascor is down
+- **[Cascor status cache (X7 slice 1c)](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)** - Why `/api/status` publishes a class, not a raw payload
 - **[CI/CD Guide](ci_cd/CICD_QUICK_START.md)** - Testing and CI/CD workflows
 
 ### Start Developing
