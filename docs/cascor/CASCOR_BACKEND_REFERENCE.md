@@ -2,9 +2,9 @@
 
 ## Technical reference for CasCor backend integration in Juniper Canopy
 
-**Version:** 0.27.0  
+**Version:** 0.27.1  
 **Status:** ✅ PARTIALLY IMPLEMENTED  
-**Last Updated:** March 30, 2026
+**Last Updated:** September 4, 2026
 
 ---
 
@@ -36,6 +36,12 @@ CascorServiceAdapter(
 
 **Description:** Create a service adapter that exposes a `CascorIntegration`-compatible surface for `main.py` and `ServiceBackend`.
 
+The adapter constructs `JuniperCascorClient` with an explicit budget from
+`BackendConstants` (slice 1b, `#566`): `CASCOR_CLIENT_TIMEOUT_SECONDS = 30.0` and
+`CASCOR_CLIENT_RETRIES = 0`. Do not drop those keywords — the library defaults
+(`timeout=30`, `retries=3`) restore the 3 s refused-case sleep and the 123 s hung-cascor
+worst case. Pinned by `src/tests/regression/test_x7_client_budget.py`.
+
 **Parameters:**
 
 - `service_url` (str): Base CasCor service URL.
@@ -48,7 +54,8 @@ CascorServiceAdapter(
 connect() -> bool
 ```
 
-- Verifies service reachability (`is_alive()`).
+- Verifies service reachability (`is_alive()`). That call is synchronous cascor HTTP.
+  Slice 1a (`#567`) offloads it with `await asyncio.to_thread(self._client.is_alive)`.
 
 ```python
 attach_to_existing() -> bool
@@ -205,9 +212,15 @@ initialize() -> bool
 ```
 
 - Connects adapter to CasCor service.
-- Performs non-destructive attach.
+- Performs non-destructive attach (`attach_to_existing()` → `get_network()`).
 - Runs `CascorStateSync.sync()` if network exists.
 - Starts metrics relay for real-time updates.
+- **Not startup-only.** `_swap_backend` (in `main.py`) awaits `initialize()` when the
+  operator changes model at runtime, so both attach and sync are on a request path.
+  They are synchronous cascor HTTP; slice 1a (`#567`) wraps them in
+  `asyncio.to_thread`. The committed `main.py` gate cannot see these sites — run
+  `util/ad-hoc/2026-09-04_async_blocking_callgraph.py` after adapter edits.
+  See [Event-loop I/O discipline (X7)](../AGENTS_REFERENCE.md#event-loop-io-discipline-x7).
 
 #### Status and Dataset Normalization Behavior
 
@@ -218,6 +231,18 @@ get_status() -> Dict[str, Any]
 - If adapter status payload is nested CasCor format (`state_machine`/`training_state`), returns normalized flat Canopy status shape.
 - `current_epoch` and `hidden_units` use first-defined (`None`-aware) extraction to preserve explicit zero values.
 - Running/paused/completed flags are derived from normalized uppercase FSM status values.
+
+**X7 slice 1c (lands with `#578`).** `ServiceBackend.normalize_status` is an extract-method
+from `get_status` (body verbatim). The status cache classifies the **raw** adapter
+response and serves the **normalized** one; composing them would force a choice.
+`get_status()` itself is unchanged: `normalize_status(adapter.get_training_status())`.
+
+The cache does **not** call `get_training_status()`. It calls
+`adapter.get_training_status_for_refresh()` on a dedicated breaker
+(`BackendConstants.STATUS_CIRCUIT_BREAKER_NAME = "cascor-status"`). Sharing `_cb` would
+let five failing `get_network_data()` calls freeze the cache INDETERMINATE for 60 s
+against a healthy status endpoint. See
+[AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
 
 ```python
 get_dataset() -> Optional[Dict[str, Any]]
@@ -1044,8 +1069,8 @@ with self.topology_lock:
 
 ---
 
-**Last Updated:** March 30, 2026  
-**Version:** 0.27.0  
+**Last Updated:** September 5, 2026  
+**Version:** 0.27.1  
 **Status:** ✅ PARTIALLY IMPLEMENTED
 
 **Complete technical reference for CasCor backend integration!**

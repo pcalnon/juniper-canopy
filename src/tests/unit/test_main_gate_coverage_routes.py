@@ -19,6 +19,7 @@ never a bare truthiness smoke check. The handlers reference the module-global
 ``main.backend``; each test saves and restores it so isolation is preserved.
 """
 
+import asyncio
 import contextlib
 import sys
 from pathlib import Path
@@ -73,7 +74,7 @@ class TestSeedTrainingStateService:
         backend.backend_type = "service"
         backend.get_synced_state.return_value = synced
 
-        main._seed_training_state(backend)
+        asyncio.run(main._seed_training_state(backend))
 
         # The global training_state must now reflect the synced values.
         state = main.training_state.get_state()

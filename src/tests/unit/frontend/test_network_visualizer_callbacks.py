@@ -901,6 +901,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -944,6 +945,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1002,6 +1004,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1058,6 +1061,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1105,6 +1109,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1146,6 +1151,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1190,6 +1196,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1202,8 +1209,10 @@ class TestCallbackInvocation:
                 with patch("dash.callback_context") as mock_ctx:
                     mock_ctx.triggered = [{"prop_id": f"{visualizer.component_id}-graph.clickData"}]
                     click_data = {"points": [{"text": "Input 0", "curveNumber": 2}]}
-                    result = func.__wrapped__(click_data, None, [], "light")
-                    nodes, info, style = result
+                    # F-CANOPY-046 added the clear-button Input (3rd positional)
+                    # and its style Output (4th returned value).
+                    result = func.__wrapped__(click_data, None, 0, [], "light")
+                    nodes, info, style, clear_style = result
                     assert nodes == ["input_0"]
                 break
 
@@ -1233,6 +1242,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1244,8 +1254,10 @@ class TestCallbackInvocation:
                 with patch("dash.callback_context") as mock_ctx:
                     mock_ctx.triggered = [{"prop_id": f"{visualizer.component_id}-graph.selectedData"}]
                     selected_data = {"points": [{"text": "Input 0"}, {"text": "Hidden 0"}]}
-                    result = func.__wrapped__(None, selected_data, [], "light")
-                    nodes, info, style = result
+                    # F-CANOPY-046 added the clear-button Input (3rd positional)
+                    # and its style Output (4th returned value).
+                    result = func.__wrapped__(None, selected_data, 0, [], "light")
+                    nodes, info, style, clear_style = result
                     assert "input_0" in nodes
                     assert "hidden_0" in nodes
                 break
@@ -1276,6 +1288,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1287,9 +1300,11 @@ class TestCallbackInvocation:
                 with patch("dash.callback_context") as mock_ctx:
                     mock_ctx.triggered = [{"prop_id": f"{visualizer.component_id}-graph.clickData"}]
                     click_data = {"points": [{"text": "Input 0", "curveNumber": 2}]}
-                    # Node is already selected
-                    result = func.__wrapped__(click_data, None, ["input_0"], "light")
-                    nodes, info, style = result
+                    # Node is already selected.
+                    # F-CANOPY-046 added the clear-button Input (3rd positional)
+                    # and its style Output (4th returned value).
+                    result = func.__wrapped__(click_data, None, 0, ["input_0"], "light")
+                    nodes, info, style, clear_style = result
                     assert nodes == []
                 break
 
@@ -1319,6 +1334,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1361,6 +1377,7 @@ class TestCallbackInvocation:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)
@@ -1469,6 +1486,7 @@ class TestWeightHeatmapRendering:
                 html.Span(id=f"{visualizer.component_id}-output-count"),
                 html.Span(id=f"{visualizer.component_id}-connection-count"),
                 html.Div(id=f"{visualizer.component_id}-selection-info"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
             ]
         )
         visualizer.register_callbacks(app)

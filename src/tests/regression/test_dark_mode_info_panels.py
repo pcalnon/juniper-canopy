@@ -69,6 +69,7 @@ class TestNodeSelectionDarkMode:
                 dcc.Store(id=f"{visualizer.component_id}-topology-store"),
                 dcc.Store(id=f"{visualizer.component_id}-topology-hash"),
                 dcc.Store(id=f"{visualizer.component_id}-selected-nodes"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
@@ -90,7 +91,9 @@ class TestNodeSelectionDarkMode:
                 with patch("dash.callback_context") as mock_ctx:
                     mock_ctx.triggered = [{"prop_id": f"{visualizer.component_id}-graph.clickData"}]
                     click_data = {"points": [{"text": "Hidden 0", "curveNumber": 3}]}
-                    _, _, style = func.__wrapped__(click_data, None, [], "dark")
+                    # F-CANOPY-046 added the clear-button Input (3rd positional)
+                    # and its style Output (4th returned value).
+                    _, _, style, _clear_style = func.__wrapped__(click_data, None, 0, [], "dark")
                     assert style["backgroundColor"] == "#1a3a5c", "Dark mode should use dark blue background"
                     assert "2c5282" in style["border"], "Dark mode should use dark blue border"
                 break
@@ -111,6 +114,7 @@ class TestNodeSelectionDarkMode:
                 dcc.Store(id=f"{visualizer.component_id}-topology-store"),
                 dcc.Store(id=f"{visualizer.component_id}-topology-hash"),
                 dcc.Store(id=f"{visualizer.component_id}-selected-nodes"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),
@@ -132,7 +136,9 @@ class TestNodeSelectionDarkMode:
                 with patch("dash.callback_context") as mock_ctx:
                     mock_ctx.triggered = [{"prop_id": f"{visualizer.component_id}-graph.clickData"}]
                     click_data = {"points": [{"text": "Hidden 0", "curveNumber": 3}]}
-                    _, _, style = func.__wrapped__(click_data, None, [], "light")
+                    # F-CANOPY-046 added the clear-button Input (3rd positional)
+                    # and its style Output (4th returned value).
+                    _, _, style, _clear_style = func.__wrapped__(click_data, None, 0, [], "light")
                     assert style["backgroundColor"] == "#e3f2fd", "Light mode should use light blue background"
                     assert "90caf9" in style["border"], "Light mode should use light blue border"
                 break
@@ -153,6 +159,7 @@ class TestNodeSelectionDarkMode:
                 dcc.Store(id=f"{visualizer.component_id}-topology-store"),
                 dcc.Store(id=f"{visualizer.component_id}-topology-hash"),
                 dcc.Store(id=f"{visualizer.component_id}-selected-nodes"),
+                html.Button(id=f"{visualizer.component_id}-clear-selection"),
                 dcc.Store(id="metrics-panel-metrics-store"),
                 dcc.Store(id="theme-state"),
                 dcc.Dropdown(id=f"{visualizer.component_id}-layout-selector"),

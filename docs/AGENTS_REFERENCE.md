@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-08-30
+**Last Updated**: 2026-09-04
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -18,8 +18,13 @@ pointer only helps an agent that already knows to look.
 ## Table of Contents
 
 - [Architecture Reference](#architecture-reference)
+- [Event-loop I/O discipline (X7)](#event-loop-io-discipline-x7)
+- [Hierarchy Depth Filter (CAN-020)](#hierarchy-depth-filter-can-020)
+- [Topology Node Selection (F-CANOPY-046)](#topology-node-selection-f-canopy-046)
+- [Plotly PNG Export (F-CANOPY-047)](#plotly-png-export-f-canopy-047)
 - [Configuration Reference](#configuration-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
+- [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
 - [Further Reading](#further-reading)
 
 ---
@@ -239,6 +244,375 @@ juniper_canopy/
     - Training parameters, UI settings, server config
 
 ---
+
+## Hierarchy Depth Filter (CAN-020)
+
+Operator surface: the Network Topology tab's **Hidden depth** slider
+(`network-visualizer-depth-slider`). Developer contract below. User-facing
+copy lives in [`USER_MANUAL.md` § Network Topology Tab](USER_MANUAL.md#network-topology-tab).
+
+### Intent
+
+CasCor cascade order *is* the hierarchy: `hidden_0` was added first,
+`hidden_N-1` most recently. The slider keeps the first `K` hidden units
+(and any edge that touches a dropped unit) so a deep cascade can be read
+one prefix at a time. It is a **view filter** — it does not change the
+backend network.
+
+The control is hidden until `topology.hidden_units >= 1`. Slider `max`
+tracks the live hidden-unit count clientside; a user-picked `K` persists
+across `cascade_add` as long as it is still in range, otherwise it snaps
+to the new max (show all).
+
+### Filter contract
+
+`NetworkVisualizer._apply_hierarchy_filter(topology, depth, n_hidden_total)`
+is the oracle. It never mutates the input dict (that payload is a Dash
+store other callbacks also read). No-op arms return the original
+reference and label `"all"`:
+
+| `depth` / `n_hidden_total` | Graph | Label |
+| --- | --- | --- |
+| `depth is None` | unchanged | `"all"` |
+| `depth <= 0` | unchanged | `"all"` |
+| `depth >= n_hidden_total` | unchanged | `"all"` |
+| `n_hidden_total == 0` | unchanged | `"all"` |
+| `0 < depth < n_hidden_total` | `hidden_units` capped at `depth`; drop any edge whose `from`/`to` is `hidden_K` with `K >= depth` | `"{depth} of {n_hidden_total}"` |
+
+Unparseable node ids (`hidden_x`) are kept — the filter cannot decide.
+
+**`0` means "no filter", not "show zero units."** The slider ships
+`min=0, max=0, value=0`. Treating rest-state `0` as a real depth would
+blank the graph. The same rest state is why a label that only special-
+cases `v === nHidden` reads `"0 of 40"` while all 40 units are drawn.
+
+The filter runs inside `update_network_graph` **before** `compute_hash`,
+so a depth change invalidates the figure cache. That callback is the
+starvation-prone rebuild (measured **1.5–31 s**; F-CANOPY-037 / -039 /
+-043). Do not add `-depth-label.children` as a ninth Output of it —
+the number under the thumb would lag the drag by seconds, and two of
+the four return paths are empty-figure exits with no meaningful label.
+
+### Label wiring (F-CANOPY-042)
+
+Two defects, one finding id.
+
+**Defect A — State vs Input.** On `main` the label is the fourth Output
+of the clientside slider-bounds sync. That callback's only Input is
+`-topology-store.data`; `-depth-slider.value` rides as **State**. A
+State is read when something *else* fires, so moving the slider
+recomputes nothing. Since canopy#542 identity-suppressed the topology
+store, at idle the label never updates at all.
+
+The obvious repair is structurally unavailable: adding
+`Input(-depth-slider, "value")` to that callback makes one
+component-property both an Input and an Output of a single callback,
+which Dash rejects at registration as a circular dependency. The
+bounds-sync callback **must** keep writing `max` and `value` (it bumps
+`max` on grow and snaps an out-of-range pick). Therefore the label
+cannot live there.
+
+**Defect B — two meanings of `0`.** The filter's `depth <= 0` arm is
+`"all"`. The old clientside rule was `(v === nHidden) ? "all" : v + " of " + nHidden`.
+On a loaded 40-unit network the control reads `"0 of 40"` while all 40
+units are displayed, before anyone touches anything. Fixing the wiring
+alone does not fix this.
+
+**Incoming repair (canopy#570, not yet on `main`):** a second clientside
+callback owns `-depth-label.children` with Inputs
+`[-depth-slider.value, -topology-store.data]` — both operands of the
+filter, because a grow event changes the denominator with no user
+action. The JavaScript guard is a condition-for-condition
+transliteration of `_apply_hierarchy_filter`. The bounds-sync callback
+returns three elements (`max`, `value`, container `style`). Until #570
+merges, the `main` tree still has Defect A and Defect B.
+
+### Dual definition — change one, change both
+
+`_apply_hierarchy_filter` still *returns* the label. The rebuild
+discards it on purpose so the readout is not stuck behind the 1.5–31 s
+paint. That return value stays the definition the clientside rule
+transliterates. A label that says `"0 of 40"` while the filter returns
+the unfiltered topology is exactly F-CANOPY-042. Edit the Python guard
+and the JavaScript guard in the same change.
+
+### Tests
+
+On `main`:
+
+```bash
+cd src
+pytest tests/unit/test_network_visualizer.py -k "Hierarchy or hierarchy or depth" -v
+```
+
+`TestHierarchyDepthFilter` drives the Python oracle directly (None / 0 /
+at-total / above-total / keep-3 / drop-edges / no-mutate /
+malformed-id). `TestHierarchyDepthSliderWiring` is source-level only —
+it does not execute the clientside function.
+
+The #570 suite (`src/tests/unit/frontend/test_f042_depth_filter_label.py`,
+not on `main` yet) asserts wiring against `app._callback_list` after a
+real `register_callbacks`, executes the registered JavaScript under
+`node` over a 48-case grid with `_apply_hierarchy_filter` as the oracle,
+and pins that no callback has `-depth-slider.value` as both Input and
+Output. Do not replace that shape with a test that re-types the
+production expression and asserts against its own copy — that class let
+F-CANOPY-041b and F-CANOPY-045 ship green.
+
+E2E rows M-TOPOLOGY-06 / M-TOPOLOGY-07 live in juniper-ml. The old
+M-TOPOLOGY-06 predicate was `label == want OR counts["hidden"] == want`
+and passed on the counts branch while the label stayed `"0 of 40"`.
+M-TOPOLOGY-07 recorded the label but scored `display` alone.
+
+### Pitfalls
+
+- Do not merge the label back into the bounds-sync callback. Dash will
+  refuse the registration (or a future "simplification" will silently
+  restore Defect A).
+- Do not route the label through `update_network_graph`. Correct by
+  construction, unusable under the thumb.
+- Do not treat slider `value=0` as "show zero hidden units."
+- Do not mutate the topology dict inside the filter.
+- Count writers by grepping the store / component id, not by reading
+  the handler you happened to open (`allow_duplicate` and a split
+  clientside callback are both easy to miss). Same lesson as the
+  `metrics-panel-metrics-store` hazard in `AGENTS.md`.
+
+---
+
+## Topology Node Selection (F-CANOPY-046)
+
+Operator surface: the Network Topology tab's selection panel
+(`network-visualizer-selection-info`) and the `-selected-nodes` store.
+Developer contract below. User-facing copy lives in
+[`USER_MANUAL.md` § Network Topology Tab](USER_MANUAL.md#network-topology-tab).
+
+Click or box/lasso a node to inspect it. The store is view state — it
+does not change the backend network. `update_network_graph` takes
+`-selected-nodes.data` as a real **Input** and draws a highlight overlay
+(`_create_selection_highlight`). Any write to that store, identical or
+not, rebuilds the figure (measured **1.5–31 s**; F-CANOPY-037 / -039 /
+-043). canopy#542 identity-suppressed the *topology* store; this store
+has no such guard.
+
+### How a click becomes a node (F-CANOPY-044 / F-CANOPY-045)
+
+`handle_node_selection` (`prevent_initial_call=True`) has two Inputs on
+`main`: `-graph.clickData` and `-graph.selectedData`.
+
+**F-CANOPY-044.** Edges are drawn *to* node centres, so a click aimed at
+a node resolves to an EDGE trace (measured 0 of 7 clicks landing on a
+node trace). Edge points have no `text`. The handler reads
+`point.get("text") or point.get("customdata")`. The edge traces carry
+the endpoint node labels in `customdata`, so a click on an edge vertex
+still identifies the node there. Reordering traces so the node series
+come first does **not** break plotly's pick — do not "fix" this by
+shuffling `data` order.
+
+**F-CANOPY-045.** Layer is the first word of that same label
+(`Input` / `Hidden` / `Output`), not `curveNumber`. The old
+`layer_names[min(curve_number, 4)]` table is correct only if the node
+traces are curves 2–4. With one trace per connection they sit at
+~1888–1890, so every node reported `"Output"`.
+
+`node_id` is `text.lower().replace(" ", "_")` (`"Hidden 0"` →
+`hidden_0`).
+
+### What actually clears a selection
+
+| Gesture | Result on `main` |
+| --- | --- |
+| Click the already-selected node again | Clears. The toggle branch returns `[]`. |
+| Click any member of a box/lasso set | Clears the **whole** set (same toggle: `node_id in current_selection` → `[]`). |
+| Click empty canvas | **Nothing.** Plotly emits `plotly_click` only on a point hit. `clickData` does not change, the callback never runs. Measured: 7 empty-canvas clicks, 0 events. |
+| Box / lasso (`select2d` / `lasso2d`) | Selects. Panel lists up to 5 ids. Box points use `text` only (no `customdata` fallback). |
+
+The panel on `main` still says *"(Click again or elsewhere to deselect)"*
+after a click and *"(Click elsewhere to deselect)"* after a box select.
+The "again" half is true. The "elsewhere" half was never implemented —
+only described.
+
+### Store write cost
+
+The fall-through at the bottom of `handle_node_selection` writes `[]`
+unconditionally. Because `-selected-nodes` is an Input of
+`update_network_graph`, a click that resolves to nothing (or a clear of
+an already-empty store) still pays the 1.5–31 s rebuild. Assert
+`is dash.no_update`, not `== []` — equality passes against the broken
+write.
+
+### Incoming repair (canopy#573, not yet on `main`)
+
+A **"Clear selection"** button (`-clear-selection`) is wired as a third
+**Input** (the click *is* the trigger) and a fourth Output that sets
+`display` to `inline-block` only while something is selected — no dead
+button on an empty panel. The click hint keeps *"(Click again to
+deselect)"* and drops *"or elsewhere"*. The box branch drops its hint
+entirely; the visible button carries the affordance.
+
+Both clear paths return `dash.no_update` on all four Outputs when
+`current_selection` is already empty.
+
+A clientside listener on the graph container would literally satisfy
+the old sentence and was rejected: it races plotly's own event path,
+and this is the callback family this arc has repeatedly starved. Until
+canopy#573 merges, `main` still has the false "elsewhere" copy and the
+unguarded `[]` write.
+
+### Tests
+
+On `main`:
+
+```bash
+cd src
+pytest tests/unit/frontend/test_f044_node_click_selection.py -v
+```
+
+Every test in that file reaches the real registered callback or the
+real trace builder. Do not replace it with a test that re-types
+`layer_names[min(curve_number, 4)]` and asserts against its own copy —
+that class let F-CANOPY-045 ship green while every node read
+`"Output"`.
+
+`test_network_visualizer_callbacks.py` `TestHandleNodeSelectionCallback`
+still drives a *re-implementation* (`_simulate_handle_node_selection`)
+for several cases; treat those as historical, not as the contract.
+
+The #573 suite (`src/tests/unit/frontend/test_f046_clear_selection.py`,
+not on `main` yet) reaches the real callback, builds its argument list
+from the live signature, and asserts `is dash.no_update` on the empty-
+clear path. Adding an Input and an Output changes arity: three existing
+files invoke the callback for real
+(`test_f044_node_click_selection.py`,
+`test_network_visualizer_callbacks.py`,
+`tests/regression/test_dark_mode_info_panels.py`). The last two locate
+it by Output key, not by the function name — a grep for
+`handle_node_selection` misses them.
+
+E2E row M-TOPOLOGY-12 lives in juniper-ml. On a build with no clear
+control it scores **BLOCKED**, not FAIL. The empty-canvas click is
+still recorded (and still produces zero `plotly_click` events) as the
+evidence for why the contract changed.
+
+- Do not add a container-level click listener to "make elsewhere work."
+  It races plotly and starves this callback family (F-CANOPY-037 / -039
+  / -043).
+- Do not write `[]` over an already-empty `-selected-nodes`. Return
+  `dash.no_update`.
+- Do not derive layer from `curveNumber`. The label is the contract.
+- Do not require `point.text` without the `customdata` fallback. Most
+  node-aimed clicks land on an edge.
+- When changing this callback's arity, grep the **Output key**
+  (`-selected-nodes.data`), not the handler name.
+- Count writers by grepping the store id. `-selected-nodes` has one
+  writer today; an `allow_duplicate` second writer would be invisible
+  from the handler you happened to open.
+
+## Plotly PNG Export (F-CANOPY-047)
+
+Operator surface: the Network Topology modebar camera
+(`dcc.Graph` `toImageButtonOptions` in
+[`network_visualizer.py`](../src/frontend/components/network_visualizer.py)).
+The policy that lets that button produce a file is
+`SecurityConstants.DEFAULT_CSP_POLICY`, served on every response by
+[`SecurityHeadersMiddleware`](../src/middleware.py).
+
+User-facing copy lives in
+
+The camera rasterises the figure as **SVG → Blob → `<img>` → canvas →
+`toDataURL`**. That `<img>` load is a `blob:` URL. Without `blob:` in
+`img-src`, the browser refuses it, plotly's promise rejects with a bare
+`[object Event]`, no `<a download>` is clicked, and the operator sees
+a correctly configured button that does nothing. The console is the
+only signal:
+
+```text
+Loading the image 'blob:http://127.0.0.1:8051/...' violates the
+following Content Security Policy directive: "img-src 'self' data:".
+```
+
+SVG export from the same menu still works — serialisation never hits
+`img-src`. The defect is the scheme, not the figure.
+
+### Current policy (on `main`, canopy#565)
+
+`SecurityConstants.DEFAULT_CSP_POLICY` is:
+
+```text
+default-src 'self';
+style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+script-src 'self' 'unsafe-inline';
+img-src 'self' data: blob:;
+frame-ancestors 'none'
+```
+
+`main.py` mounts `SecurityHeadersMiddleware()` with no override.
+`middleware._DEFAULT_CSP` is an alias of that constant — pin both, or a
+test that only reads the constant cannot fail for what the browser
+gets.
+
+There is **no** `JUNIPER_CANOPY_*` setting for CSP. Editing
+`DEFAULT_CSP_POLICY` is the production path.
+
+### Two `img-src` schemes, two consumers
+
+| Scheme | Consumer | What breaks without it |
+| --- | --- | --- |
+| `data:` | Bootstrap form-control SVG icons | Sidebar / form controls fail to render |
+| `blob:` | Plotly PNG rasteriser (F-CANOPY-047) | Modebar camera silently produces no file |
+
+These are **not** interchangeable. Replacing `data:` with `blob:`
+fixes plotly and breaks every Bootstrap form control. Adding `blob:`
+without keeping `data:` is the same class. The two regression files
+exist so a future edit that satisfies one while breaking the other
+fails a test named after the thing it broke:
+
+- [`test_csp_bootstrap_cdn.py`](../src/tests/regression/test_csp_bootstrap_cdn.py)
+  pins `data:` (and the Bootstrap CDN on `style-src`).
+- [`test_csp_plotly_image_export.py`](../src/tests/regression/test_csp_plotly_image_export.py)
+  pins `blob:`. `test_middleware_coverage.py` still only asserts
+  `data:` — that is why the dedicated file exists.
+
+### Scope: `blob:` is img-only
+
+`blob:` URLs are minted by this page's own scripts and are opaque
+origins a third party cannot forge. Allowing them for **IMG** does not
+admit external content. That case does **not** extend to executing
+`blob:` script.
+
+Do not add `blob:` to `script-src` or `default-src`. Do not open
+`img-src` with `*` or `http:`. The plotly file asserts all four.
+
+### UI contract
+
+`network_visualizer.py` sets `toImageButtonOptions` to
+`format: png`, `scale: 2`. The rebuild path (`_dynamic_graph_config`)
+also stamps `filename: canopy_network_<YYYYmmdd>_<HHMMSS>`. The
+layout-time graph omits the filename (plotly's default applies until
+the first rebuild). The button is present and correctly configured
+even when CSP blocks the rasteriser — that is why the failure is
+silent.
+
+Measured live (juniper-ml
+`util/ad-hoc/2026-09-03_modebar_download_probe.py`) against the
+pre-fix policy: topology PNG scale=2 failed in 4.4 s with
+`[object Event]`; scale=1 failed the same way; SVG export wrote
+1,211,031 bytes; a 10×10 SVG failed via `blob:` and succeeded via
+`data:` on the same page.
+
+A control that itself rasterises through a `blob:` URL proves
+nothing: it fails for the same reason as the subject.
+
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
+
+- Do not replace `data:` with `blob:`. Add, do not swap.
+- Do not put `blob:` on `script-src` or `default-src`.
+- Do not "fix" a silent camera by widening `img-src` to `*`.
+- Do not treat a green `test_middleware_coverage.py` as evidence
+  plotly export works — that file does not pin `blob:`.
+- Do not introduce a CSP env override without teaching both tests
+  to read the value that actually ships on the response.
 
 ## Configuration Reference
 
@@ -641,6 +1015,7 @@ All Python files should include the standard project header:
 
 - **No global mutable state without locks** - All shared state must use `threading.Lock()` for protection
 - **Any long-lived collections must be size-bounded** - Use `maxlen` for deques, limit history buffers to prevent memory leaks
+- **No synchronous network I/O inside `async def`** — canopy is a single-worker uvicorn; one blocking `requests` call stalls `/v1/health/live`. See [Event-loop I/O discipline (X7)](#event-loop-io-discipline-x7).
 
 ### Thread Safety
 
@@ -680,6 +1055,20 @@ websocket_manager.set_event_loop(event_loop)
 websocket_manager.broadcast_from_thread(message)
 ```
 
+For calling **synchronous** network I/O from an `async def` handler, hop off the loop. Do not
+invoke the client on the coroutine:
+
+```python
+# Correct — the request thread blocks, the event loop does not
+return await asyncio.to_thread(backend.get_status)
+
+# Wrong — single-worker uvicorn: this stalls every route, including /v1/health/live
+return backend.get_status()
+```
+
+See [Event-loop I/O discipline (X7)](#event-loop-io-discipline-x7) for the gate, the callgraph
+instrument, and the constraints this idiom does **not** satisfy.
+
 ### Error Handling
 
 ```python
@@ -702,6 +1091,338 @@ def robust_function():
 ```
 
 ---
+
+## Event-loop I/O discipline (X7)
+
+Operator runbook for the X7 outage class. Not a P5 relocation — added 2026-09-04 after
+slice 1b merged (`#566`) and slice 1a opened (`#567`). The resident one-line hazard lives in
+[`AGENTS.md` § Hazards](../AGENTS.md#hazards-resident--do-not-relocate).
+
+### What X7 is
+
+Canopy is a **single-worker** uvicorn. A synchronous, retrying `requests` call inside an
+`async def` handler holds the only event loop, so **every** route stalls — including
+`/v1/health/live`, which touches no backend. Measured end-to-end:
+
+| Condition | Observed latency |
+| --- | --- |
+| Healthy cascor | 5.7 ms |
+| Cascor stopped (`ECONNREFUSED`) | 3.0 s (retry backoff sleep; closed by slice 1b) |
+| Cascor hung | **123.12 s** (`timeout × (retries + 1) + backoff`) |
+| Recovery after cascor returns | 5.1 ms, no canopy restart |
+
+This is a recurrence of SEC-F20: the first fix shipped a comment and no test.
+
+### Slices
+
+| Slice | Role | Status |
+| --- | --- | --- |
+| **1b** | Bound per-call cost (`timeout=30`, `retries=0`) instead of inheriting the client defaults (`timeout=30`, `retries=3`) | Merged `#566` |
+| **1a** | Move every remaining synchronous network call off the event loop | `#567` — this is the slice that **closes X7** |
+| **1c** | Status cache + classifier | Follow-up |
+| **1d** | Admission control (constraint C4) | Follow-up |
+
+Slice 1a ships **bare** `asyncio.to_thread`. That is acceptable only because 1b already
+bounds per-call cost. **C4 (bounded concurrency) is deferred to 1d**, not satisfied here.
+
+### Correct idiom
+
+Two shapes the committed gate recognises as offloaded:
+
+```python
+# Bare-attribute offload — the backend call is an Attribute, never a Call
+return await asyncio.to_thread(backend.get_status)
+
+# Named closure handed to to_thread
+def _fetch():
+    return backend.get_status()
+return await asyncio.to_thread(_fetch)
+```
+
+Do **not** write `return backend.get_status()` inside `async def`. Do **not** "fix" one
+site by adding a module-global exemption for the expression `backend.get_status` — that
+was the unsound draft that would have certified a partial fix as complete (offloading
+one site hid every other, including the three health endpoints). Exemption is
+**site-local** only: calls inside a closure that is itself handed to an offloader.
+
+### Client budget (slice 1b, on `main`)
+
+`BackendConstants` names the budget the adapter must pass explicitly:
+
+- `CASCOR_CLIENT_TIMEOUT_SECONDS = 30.0` — kept at the client default; canopy's slowest
+  legitimate operation (`/api/train/restart`) budgets 30 s.
+- `CASCOR_CLIENT_RETRIES = 0` — the load-bearing half. urllib3 backoff is pure `sleep`
+  on the calling thread. Measured 3.005 s → 0.002 s per `ECONNREFUSED`. Canopy re-polls
+  on its own interval, so client-level retries buy nothing and duplicate non-idempotent
+  verbs (`RETRY_ALLOWED_METHODS` includes POST and DELETE).
+
+Pinned by `src/tests/regression/test_x7_client_budget.py` (T-B1 refused-call milliseconds;
+T-B2 a 503 is attempted once). Dropping the keywords silently restores the inherited
+`retries=3` defaults.
+
+### Structural gate (slice 1a)
+
+`src/tests/regression/test_x7_off_loop_discipline.py` asserts the count is **zero**. It is
+a gate, not a sample.
+
+- **Reads `main.py` only.** A green result is not proof that 1a is complete.
+- **Provenance resolution, not name matching.** The bare name `client` is bound to the
+  cascor client, redis, cassandra, *and* an `httpx.AsyncClient`. Name-matching is the
+  same flaw that makes `ruff --select ASYNC` report "All checks passed!" against these
+  sites: ruff matches a hardcoded list of callee names and cannot see
+  `backend.get_status()`.
+- **Closure-aware.** A naive lexical scan reports the correct idiom as unguarded.
+- **Transitive `HELPER` bucket.** A bare call to a module-level sync function whose body
+  reaches the network (`_extract_meta_params`, `_seed_training_state`) is the same defect.
+  `census()` accepts an optional AST so the rule is proved to *fire* against a synthetic
+  dirty module, not only proved quiet against a file that happens to be clean.
+- **`UNRESOLVED` fails.** An unaudited receiver is how a check goes quietly wrong.
+
+Verified in-process (not offloaded): `backend.get_synced_state`,
+`backend.set_state_update_callback`, `backend._demo.get_network`,
+`backend._demo.get_current_state`. Offloaded despite being in-memory today:
+`get_stream_health` (uniformity — an exemption would need re-verifying on every edit).
+
+Four sites outside `main.py` are invisible to this gate and were found by the callgraph
+below: `CascorServiceAdapter.connect` → `is_alive()`, `_relay_loop` →
+`extract_network_topology()` (measured **123 s blocked per 183 s with no user present**),
+and `ServiceBackend.initialize` → `attach_to_existing()` / `CascorStateSync.sync()`.
+`initialize()` is on the **request path**: `_swap_backend` awaits it when the operator
+changes model at runtime.
+
+### Behavioural tests (T-A2 / T-A3 / T-A4)
+
+`src/tests/regression/test_x7_loop_responsiveness.py` proves the property the structure
+is supposed to buy: **while an upstream is slow, canopy still answers**.
+
+| Id | Assertion |
+| --- | --- |
+| **T-A2** | 3 concurrent `GET /api/status` against a bounded 2.0 s stub; `GET /v1/health/live` answers in **< 500 ms** |
+| **T-A3** | Four vacuity guards: probe sample non-empty; every driver waited the stub's bound; the driver reached the backend (counted at the stub); the identical harness **fails** against a deliberately un-offloaded control app |
+| **T-A4** | 8 threads × 4 uniquely-tagged requests against a local echo server: no cross-talk, one shared `Session`, headers unchanged afterwards |
+
+Not marked `slow` despite exceeding that marker's 1 s threshold: the coverage gate runs
+`-m "not slow"`, so the marker would remove the only behavioural check X7 has. Bound
+total runtime ~5 s.
+
+**T-A4 corrects constraint C5 on evidence.** C5 called for a `threading.local()` session
+because a shared `requests.Session` must not be used from multiple threads, and 1a
+removes the accidental protection the blocked loop provided (concurrency was pinned at
+1). `JuniperCascorClient` mutates session state **only in `__init__`**; `_request` passes
+method/url/json/params/timeout as arguments. What is shared is the `HTTPAdapter`'s
+urllib3 pool, which is thread-safe and is why `pool_maxsize` exists. A thread-local
+session would discard keep-alive across the executor. If per-request session mutation is
+ever added upstream, T-A4 fails and C5's original remedy becomes the right one.
+
+### Adapter callgraph (outside the gate)
+
+```bash
+python util/ad-hoc/2026-09-04_async_blocking_callgraph.py
+python util/ad-hoc/2026-09-04_async_blocking_callgraph.py --all   # include adjudicated
+```
+
+A taint-propagating call graph over canopy plus `juniper-cascor-client` and
+`juniper-data-client`. Exit status is always 0: this is an **instrument**, not a gate.
+**Run it when touching the adapter.**
+
+Constraints:
+
+- Requires a sibling `juniper-cascor-client` checkout. The script walks up from the repo
+  (including worktrees) and **exits** if the sibling is missing. A missing corpus is the
+  worst failure: every adapter method looks pure and the census prints a confident `0`.
+- Resolution is by bare method name and over-reports (`close()` collapses). Read every
+  hit; the in-file `ADJUDICATED` table records verdicts already reached.
+- Its first draft rooted receiver chains at `self`, seeded nothing, and printed `0` over
+  a file with 52 known sites. That bug and the reason are recorded in the script.
+
+### Operator commands
+
+```bash
+# Slice 1b — client budget (on main)
+cd src && pytest tests/regression/test_x7_client_budget.py -v
+
+# Slice 1a — structural gate + behavioural tests (land with #567)
+cd src && pytest tests/regression/test_x7_off_loop_discipline.py tests/regression/test_x7_loop_responsiveness.py -v
+
+# Adapter-wide census (needs sibling client checkouts)
+python util/ad-hoc/2026-09-04_async_blocking_callgraph.py
+```
+
+### Pitfalls
+
+- `ruff --select ASYNC` (the CI-blocking "Async-route audit (BUG-JD-10 class)" hook)
+  cannot see this class. A green ruff run is not evidence the loop is safe.
+- Do not mark the X7 behavioural tests `slow`. Coverage would drop them.
+- Do not treat a green `main.py` gate as "1a done" after editing
+  `cascor_service_adapter.py` or `service_backend.py`.
+- Do not add a module-global expression exemption. Site-local only.
+- `/v1/health/live` is the canary (`{"status": "alive"}`). `/v1/health` and `/api/status`
+  reach the backend and must be offloaded; `/v1/health/ready` probes dependencies via
+  async `probe_dependency`.
+- Timing a responsiveness test from *inside* the coroutine measures only the coroutine.
+  Clock from request **issue** time, and create driver tasks before probes.
+
+Design of record (juniper-ml, revision 4):
+`notes/JUNIPER_2026-09-03_JUNIPER-CANOPY_X7-EVENT-LOOP-BLOCKING-REMEDIATION-DESIGN.md`.
+
+---
+
+## Cascor status cache (X7 slice 1c)
+
+Operator runbook for the incoming status cache (`#578`). Slice 1a (on `main` as `#567`)
+already moved every blocking call off the event loop, so canopy answers HTTP under a dead
+upstream. It did **not** reduce the number of upstream calls, and it did **not** make an
+unreachable backend legible. 1c does both, and is droppable without reopening X7.
+
+The module is `src/backend/status_cache.py` (lands with `#578`). Until that PR merges,
+refer to it in backticks so the link checker stays green.
+
+The resident one-line hazard lives in
+[`AGENTS.md` § Hazards](../AGENTS.md#hazards-resident--do-not-relocate). Off-loop
+discipline (slices 1a / 1b) is a **different** gap, owned by docs `#568`.
+
+### What 1c buys
+
+| Constraint | Meaning |
+| --- | --- |
+| **C2** | One background task polls cascor; every browser tab polling `/api/status` costs **zero** upstream calls. |
+| **C6** | An unknown backend is never presented as a fresh negative. With no OK ever seen, the body omits `is_training` rather than passing through the adapter's `{"is_training": False, "error": …}`. |
+| **C7** | Health surfaces (`/v1/health`, `/api/health`, `/v1/health/ready` `details`) gain additive `backend_status` / `backend_status_stale` / `backend_status_age_seconds` in **service mode only**. Status codes are unchanged: an upstream outage stays 200 / degraded. |
+| **C9** | Every non-fresh read carries `stale` and `age_seconds`. |
+
+`/v1/health/ready` is otherwise left alone. `is_training_active()` keeps its `bool`
+contract — widening it to a tri-state was measured to open all five 409 interlocks.
+Staleness is reported **beside** the boolean, not smuggled into it.
+
+Demo and recurrence backends get **no** cache: they answer `get_status()` from memory, so
+there is no upstream call to amortise.
+
+### Intervals (derived, not chosen)
+
+| Constant | Value | Why |
+| --- | --- | --- |
+| `REFRESH_INTERVAL_SECONDS` | 1.0 s | Tightest consumer is the 15 s healthcheck with a 5 s budget; the dashboard fast lane is also 1.0 s. |
+| `STALE_AFTER_SECONDS` | 5.0 s | The probe budget. A value older than a probe's deadline is not fresh *to that probe*. |
+| `UNKNOWN_AFTER_SECONDS` | 30.0 s | The longest probe interval. Past this with no attempt, the cache admits it has no recent knowledge. |
+
+**Single-flight is structural, not enforced.** The loop awaits its fetch and *then*
+sleeps, so a second tick cannot begin while one is in flight — there is no lock to get
+wrong. The same ordering is **self-limiting**: a 30 s timeout yields a 1/31 Hz poll, not
+a pile of 1 Hz calls. That is why there is **no backoff** (design OQ-X2): backoff would
+only delay recovery detection, which is what the status bar exists to show.
+
+### Classifier
+
+`classify(raw)` is pure and total — every input, including `None` / `[]` / a bare
+string, lands in exactly one class. An exception here would kill the refresher and freeze
+the last verdict (machinery-fails-green).
+
+The predicate is canopy's own `CascorServiceAdapter.is_cascor_nested` (positive detection
+of cascor's nested structure). An earlier draft keyed on `is_training`, which appears
+**only on the failure path**, and misclassified 7 of 20 measured healthy shapes as
+UNREACHABLE.
+
+| Class | When | Status-bar label |
+| --- | --- | --- |
+| `ok` | Nested cascor shape, no truthy `error` | Payload (`Running` / `Stopped` / …) |
+| `unreachable` | Reached an answer, and the answer is bad — including a **half-dead 200** (dict, no `error`, not cascor-shaped) | **Unreachable** |
+| `indeterminate` | Call was **skipped** (`"circuit open"` in `error`) | **Unknown** |
+
+`INDETERMINATE` is not a hedge. An open breaker means the tick observed nothing.
+Reporting UNREACHABLE would claim evidence that was never gathered.
+
+### Dedicated breaker
+
+The refresher calls `adapter.get_training_status_for_refresh()`, **not**
+`get_training_status()`. The shared `_cb` fronts five call sites; five failing
+`get_network_data()` calls would otherwise freeze this cache for the full 60 s recovery
+timeout **against a healthy upstream**. The dedicated breaker is named
+`BackendConstants.STATUS_CIRCUIT_BREAKER_NAME` (`"cascor-status"`). Same threshold /
+recovery as the shared breaker; a second *instance*, not a second name for the first
+one (`CircuitBreaker` keeps state per instance).
+
+### Route the class, not the payload
+
+`dashboard_manager` renders "Unreachable" from a truthy `error` (the PR `#340` branch).
+On a half-dead 200 that branch does not fire and the elif chain renders **"Stopped"** —
+indistinguishable from a healthy idle backend. So the cache publishes `status_class` and
+the UI renders the class. Mutation-checked: removing the class routing makes T-C2 fail
+with `'Stopped' == 'Unreachable'`.
+
+Every non-OK `/api/status` body still carries a truthy `error` so a UI that has not been
+taught about `status_class` keeps the `#340` branch. The half-dead 200, which has no
+error of its own, gets one synthesised.
+
+### Two guards the design implies
+
+- **A refresher that dies** would leave the last verdict frozen. `current_class()` ages
+  out on the last **attempt**, not the last success. Past `UNKNOWN_AFTER_SECONDS` with no
+  attempt, the honest answer is INDETERMINATE.
+- **C6 with no OK ever seen.** The body omits `is_training`. Passing through the
+  adapter's `{"is_training": False, "error": …}` is how a cache invents "not training"
+  during a live run whose status call merely failed.
+
+A raising fetch is UNREACHABLE, not a reason to stop polling. A raising Prometheus sink
+is logged and swallowed — observability must not kill the refresher it observes.
+
+### `/api/status` envelope (service mode)
+
+```json
+{
+  "is_training": true,
+  "is_running": true,
+  "status_class": "ok",
+  "stale": false,
+  "age_seconds": 0.2
+}
+```
+
+Never-OK body (C6): `status_class`, `stale: true`, `age_seconds: null`, a truthy
+`error`, and **no** `is_training`.
+
+### Health extras (C7)
+
+Additive, service-mode only:
+
+| Field | Source |
+| --- | --- |
+| `backend_status` | `status_class` (`ok` / `unreachable` / `indeterminate`) |
+| `backend_status_stale` | `stale` |
+| `backend_status_age_seconds` | `age_seconds` |
+
+### Prometheus (registered, not yet observable)
+
+`juniper_canopy_backend_status_class{status_class=…}` is one gauge per class (0 or 1),
+so an alert reads `{status_class="unreachable"} == 1` without knowing an ordinal.
+`JUNIPER_CANOPY_METRICS_ENABLED` defaults `false` and gates both the middleware and the
+`/metrics` mount; `/metrics` also sits behind the trusted-IP allowlist. Enabling that
+pair is a later PR. Design §5.6 binds acceptance to the **status bar** for exactly this
+reason.
+
+### Tests (land with `#578`)
+
+`src/tests/regression/test_x7_status_cache.py` — do not markdown-link until `#578` merges.
+
+| Id | Assertion |
+| --- | --- |
+| **T-C1** | Table-driven classifier census over observed shapes, plus a vacuity guard that the table exercises all three classes |
+| **T-C2** | Half-dead 200 → "Unreachable", plus a vacuity guard that the same body *without* the class still renders "Stopped" |
+| **T-C3** | Dedicated breaker: five failing `get_network_data()` calls open the shared breaker and leave the status breaker closed |
+| **T-C4** | Staleness contract, never-OK omits `is_training`, dead refresher ages out, single-flight peak is 1, prompt/idempotent stop, raising sink cannot kill the loop |
+
+cd src && pytest tests/regression/test_x7_status_cache.py -v
+
+- Do not hand the status bar a raw payload. That re-creates PR `#340` on a half-dead 200.
+- Do not share `_cb` with the refresher. Isolation is T-C3.
+- Do not invent `is_training: False` on a never-OK cache. That is C6.
+- Do not age out on last success. A dead refresher would stay green forever.
+- Do not widen `is_training_active()` to a tri-state. Report staleness beside it.
+- Do not claim the Prometheus gauge is watched. It is registered; it is not yet a channel.
+- Slice **1d** (admission control) is where C4 — bounded concurrency — actually gets
+  satisfied. 1a and 1c both still ship bare offload.
+
+Design of record (juniper-ml):
+`notes/JUNIPER_2026-09-03_JUNIPER-CANOPY_X7-EVENT-LOOP-BLOCKING-REMEDIATION-DESIGN.md` §5.3 / §5.6.
 
 ## Further Reading
 

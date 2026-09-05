@@ -242,6 +242,32 @@ class NetworkVisualizer(BaseComponent):
                         "display": "none",
                     },
                 ),
+                # F-CANOPY-046: an explicit control for clearing the selection.
+                #
+                # The panel used to promise "(Click elsewhere to deselect)" and
+                # clicking elsewhere did nothing: plotly emits ``plotly_click``
+                # ONLY on a point hit, so a click on empty canvas produces no
+                # event at all, ``clickData`` never changes, and the selection
+                # callback (``prevent_initial_call=True``) never runs. Measured
+                # live: 7 clicks on empty canvas, 0 events. The gesture was never
+                # implemented — only described.
+                #
+                # Ships hidden and is revealed by ``handle_node_selection`` only
+                # while something is selected, so the affordance appears exactly
+                # when it applies and there is no dead button on an empty panel.
+                html.Button(
+                    "Clear selection",
+                    id=f"{self.component_id}-clear-selection",
+                    n_clicks=0,
+                    title="Clear the current node selection",
+                    style={
+                        "marginBottom": "10px",
+                        "padding": "4px 10px",
+                        "fontSize": "12px",
+                        "cursor": "pointer",
+                        "display": "none",
+                    },
+                ),
                 # Network graph
                 dcc.Graph(
                     id=f"{self.component_id}-graph",
@@ -621,10 +647,15 @@ class NetworkVisualizer(BaseComponent):
                 Output(f"{self.component_id}-selected-nodes", "data"),
                 Output(f"{self.component_id}-selection-info", "children"),
                 Output(f"{self.component_id}-selection-info", "style"),
+                Output(f"{self.component_id}-clear-selection", "style"),
             ],
             [
                 Input(f"{self.component_id}-graph", "clickData"),
                 Input(f"{self.component_id}-graph", "selectedData"),
+                # F-CANOPY-046: the gesture the panel promised does not exist, so
+                # give the user a control that does. This is an Input, not a
+                # State — the click on it IS the trigger.
+                Input(f"{self.component_id}-clear-selection", "n_clicks"),
             ],
             [
                 State(f"{self.component_id}-selected-nodes", "data"),
@@ -632,8 +663,8 @@ class NetworkVisualizer(BaseComponent):
             ],
             prevent_initial_call=True,
         )
-        def handle_node_selection(click_data, selected_data, current_selection, theme):
-            """Handle node selection via click or box/lasso select."""
+        def handle_node_selection(click_data, selected_data, clear_clicks, current_selection, theme):
+            """Handle node selection via click, box/lasso select, or the clear button."""
             import dash
 
             ctx = dash.callback_context
@@ -652,6 +683,25 @@ class NetworkVisualizer(BaseComponent):
             secondary_color = "#adb5bd" if is_dark else "#666"
             hint_color = "#9ca3af" if is_dark else "#888"
 
+            clear_base = {"marginBottom": "10px", "padding": "4px 10px", "fontSize": "12px", "cursor": "pointer"}
+            clear_hidden = {**clear_base, "display": "none"}
+            clear_visible = {**clear_base, "display": "inline-block"}
+
+            # F-CANOPY-046: the clear button, and the no-op guard.
+            #
+            # ``-selected-nodes`` is a real Input of ``update_network_graph``, and
+            # Dash fires every consumer of a store on ANY write, identical or not
+            # (this is what canopy#542 had to suppress for the topology store). So
+            # writing ``[]`` over an already-empty selection costs a full 1.5-31 s
+            # rebuild for no change — the waste class of F-CANOPY-037 / -039 / -043.
+            # Return ``no_update`` instead. The same guard covers the fall-through
+            # at the bottom of this function, which had been writing ``[]``
+            # unconditionally on every click that did not resolve to a node.
+            if "clear-selection" in trigger:
+                if not current_selection:
+                    return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+                return [], [], hidden_style, clear_hidden
+
             # Handle box/lasso selection
             if "selectedData" in trigger and selected_data:
                 points = selected_data.get("points", [])
@@ -664,17 +714,18 @@ class NetworkVisualizer(BaseComponent):
                             selected_nodes.append(node_id)
 
                     if selected_nodes:
+                        # F-CANOPY-046: no hint here. There is no click gesture
+                        # that clears a BOX selection — clicking a selected node
+                        # toggles only that node, and clicking empty canvas emits
+                        # nothing — so any text describing one would be false. The
+                        # visible "Clear selection" button carries the affordance.
                         info = html.Div(
                             [
                                 html.Strong(f"Selected: {len(selected_nodes)} node(s)"),
                                 html.Ul([html.Li(n.replace("_", " ").title()) for n in selected_nodes[:5]]),
-                                html.Span(
-                                    "(Click elsewhere to deselect)",
-                                    style={"fontSize": "11px", "color": hint_color},
-                                ),
                             ]
                         )
-                        return selected_nodes, info, visible_style
+                        return selected_nodes, info, visible_style, clear_visible
 
             # Handle single click selection
             if "clickData" in trigger and click_data:
@@ -695,7 +746,7 @@ class NetworkVisualizer(BaseComponent):
 
                         # Toggle selection: if already selected, deselect
                         if current_selection and node_id in current_selection:
-                            return [], [], hidden_style
+                            return [], [], hidden_style, clear_hidden
 
                         # F-CANOPY-045: derive the layer from the node LABEL, not
                         # from ``curveNumber``.
@@ -720,16 +771,25 @@ class NetworkVisualizer(BaseComponent):
                                 html.Br(),
                                 html.Span(f"Layer: {layer}", style={"color": secondary_color}),
                                 html.Br(),
+                                # F-CANOPY-046: "or elsewhere" removed. Clicking
+                                # the node again DOES deselect it (the toggle
+                                # above), so this half of the hint was true and
+                                # stays; clicking elsewhere never worked.
                                 html.Span(
-                                    "(Click again or elsewhere to deselect)",
+                                    "(Click again to deselect)",
                                     style={"fontSize": "11px", "color": hint_color},
                                 ),
                             ]
                         )
-                        return [node_id], info, visible_style
+                        return [node_id], info, visible_style, clear_visible
 
-            # No valid selection, clear
-            return [], [], hidden_style
+            # No valid selection, clear — but only if there is something to clear.
+            # This return used to fire unconditionally, so a click that resolved
+            # to nothing paid for a rebuild even when the selection was already
+            # empty. See the note on the guard above.
+            if not current_selection:
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return [], [], hidden_style, clear_hidden
 
         @app.callback(
             Output(f"{self.component_id}-selection-info", "style", allow_duplicate=True),
