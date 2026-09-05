@@ -2,8 +2,8 @@
 
 ## Complete Navigation Guide to Juniper Canopy Documentation
 
-**Version:** 0.25.0  
-**Last Updated:** January 29, 2026  
+**Version:** 0.25.3  
+**Last Updated:** September 4, 2026  
 **Project:** Juniper Canopy - Real-Time CasCor Monitoring Frontend
 
 ---
@@ -60,7 +60,12 @@
 | **Find technical reference** | [REFERENCE.md](REFERENCE.md)                                              | docs/          |
 | **See version history**      | [CHANGELOG.md](../CHANGELOG.md)                                           | Root           |
 | **Quick-reference dev tasks** | [DEVELOPER_CHEATSHEET.md](DEVELOPER_CHEATSHEET.md)              | docs/         |
+| **Debug a silent PNG export** | [AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) | docs/ |
+| **Read the cascor status cache (X7 1c)** | [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c) | docs/ |
 | **Contribute code**          | [AGENTS.md](../AGENTS.md)                                                 | Root           |
+| **Keep the event loop answerable (X7)** | [AGENTS_REFERENCE.md § Event-loop I/O discipline](AGENTS_REFERENCE.md#event-loop-io-discipline-x7) | docs/ |
+| **Read the topology depth filter** | [AGENTS_REFERENCE.md § Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020) | docs/ |
+| **Understand topology node selection** | [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046) | docs/ |
 
 ---
 
@@ -1723,8 +1728,8 @@ Relocated verbatim from `AGENTS.md` (P3 of the shared-session-memory plan) so it
 
 ---
 
-**Last Updated:** January 29, 2026  
-**Version:** 0.25.0  
+**Last Updated:** September 4, 2026  
+**Version:** 0.25.6  
 **Maintainer:** Paul Calnon
 
 ---
