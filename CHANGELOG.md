@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Complementary X7 slice 1c tests (`test_x7_status_cache_guards.py`) for leftover paths `#578`'s T-C1–T-C4 suite cannot see: a raising `normalize` must not keep a prior OK payload fresh; the OK-but-stale window stays `status_class=ok` while marked stale; `for_status()` synthesises `error` on a half-dead 200; C7 health extras and the health boolean prefer the cache over a live outage-negative; `/api/status` does not call upstream when the cache is live; the status-class gauge is one-hot on transition.
+
 - Tests pinning Stage 2 (`#511`) live-callback contracts that the original PR's happy-path suite left open: `_update_unified_status_bar_handler` element `[9]` stays `dash.no_update` on every error path (so a hiccup cannot blank `training-status-store` and re-fire its consumers), `{is_running, phase}` is coerced then suppressed, and `_update_system_panels_handler` isolates a `/api/status` Timeout/JSON failure from the details and stream-health surfaces.
 
 ### Changed
