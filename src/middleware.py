@@ -5,12 +5,14 @@ WebSocket upgrade requests are not intercepted by BaseHTTPMiddleware,
 so /ws/* paths are inherently exempt.
 """
 
+from typing import Optional
+
 from fastapi import HTTPException, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
-from canopy_constants import SecurityConstants
+from canopy_constants import BackendConstants, SecurityConstants
 from security import APIKeyAuth, RateLimiter
 
 # Module-level aliases preserved for tests that import these names directly
@@ -179,3 +181,74 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if path in KEY_EXEMPT_PATHS:
             return True
         return any(path.startswith(prefix) for prefix in KEY_EXEMPT_PATH_PREFIXES)
+
+
+class CallerBudgetMiddleware:
+    """Record each request's caller budget as a deadline (X7 slice 1d, C10).
+
+    **Pure ASGI, not ``BaseHTTPMiddleware``, and that is the point.**
+    ``BaseHTTPMiddleware`` runs the rest of the application in a *separate anyio task*. A
+    ``ContextVar`` set before ``call_next`` is copied into that task at creation, so it
+    would probably work — but "probably", across Starlette versions, for the mechanism
+    that decides whether an upstream call is issued, is not a foundation. A plain ASGI
+    callable runs the endpoint in the *same* task, so the deadline reaches
+    ``asyncio.to_thread``'s context copy by construction rather than by version.
+
+    Budget resolution, in order:
+
+    1. the ``X-Canopy-Budget-Seconds`` header, when the caller declares one (clamped);
+    2. the measured per-route table, matched exactly then by longest path prefix;
+    3. ``None`` — bounded by the gate, but never declined.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            # WebSocket and lifespan carry no caller budget: a WS connection is not a
+            # request/response pair with a client-side timeout to honour.
+            await self.app(scope, receive, send)
+            return
+
+        from backend.admission import set_deadline
+
+        set_deadline(self._resolve_budget(scope))
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    def _resolve_budget(scope) -> Optional[float]:
+        declared = CallerBudgetMiddleware._declared_budget(scope)
+        if declared is not None:
+            return declared
+
+        path = scope.get("path", "")
+        table = BackendConstants.CALLER_BUDGET_SECONDS
+        if path in table:
+            return float(table[path])
+        # Prefix match for templated routes. Longest first, so a specific entry wins over
+        # a shorter one that merely prefixes it.
+        for route in sorted(table, key=len, reverse=True):
+            if path.startswith(route + "/"):
+                return float(table[route])
+        return None
+
+    @staticmethod
+    def _declared_budget(scope) -> Optional[float]:
+        wanted = BackendConstants.CALLER_BUDGET_HEADER.lower().encode()
+        for key, value in scope.get("headers") or []:
+            if key.lower() != wanted:
+                continue
+            try:
+                seconds = float(value.decode())
+            except ValueError:  # UnicodeDecodeError is a ValueError subclass
+                # A malformed budget is not a reason to refuse the request; fall through
+                # to the table. Trusting it would let a typo pin or starve a gate slot.
+                return None
+            if seconds <= 0:
+                return None
+            return max(
+                BackendConstants.CALLER_BUDGET_MIN_SECONDS,
+                min(seconds, BackendConstants.CALLER_BUDGET_MAX_SECONDS),
+            )
+        return None

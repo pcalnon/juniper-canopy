@@ -90,7 +90,12 @@ SYNC_NETWORK_FACTORIES = {"get_redis_client", "get_cassandra_client"}
 CASCOR_FACTORIES = {"_require_service_adapter"}
 NO_IO_FACTORIES = {"DataAdapter"}
 CASCOR_ROOTS = {"backend"}
-OFFLOADERS = {"to_thread", "run_in_executor"}
+# ``offload`` is slice 1d's admission-controlled wrapper around ``to_thread`` (bounded
+# concurrency + the caller's deadline). It is an offloader for this gate's purposes: the
+# work leaves the loop exactly as before, it merely does so through a gate. Omitting it
+# would make the gate report every 1d-converted site as blocking — the gate would fail
+# BECAUSE the code got safer, which is the fastest way to teach someone to delete a gate.
+OFFLOADERS = {"to_thread", "run_in_executor", "offload"}
 
 # Specific calls verified to be in-process accessors despite being reached through
 # ``backend``. Listed by exact expression, never by receiver prefix: demo mode DOES reach
@@ -125,7 +130,12 @@ def _offloaded_targets(tree: ast.AST) -> set[str]:
     """Names and bare attributes handed to an offloader anywhere in the module."""
     out: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and getattr(node.func, "attr", None) in OFFLOADERS:
+        if not isinstance(node, ast.Call):
+            continue
+        # ``asyncio.to_thread(...)`` is an Attribute call; the bare ``offload(...)`` is a
+        # Name call. Match either, or the 1d idiom is invisible here.
+        callee = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+        if callee in OFFLOADERS:
             for arg in node.args:
                 if isinstance(arg, ast.Name):
                     out.add(arg.id)

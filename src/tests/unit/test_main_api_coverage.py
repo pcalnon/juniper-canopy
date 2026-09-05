@@ -714,11 +714,11 @@ class TestPollRoutesUseToThread:
         original_backend = main.backend
         try:
             main.backend = mock_backend
-            with patch("main.asyncio.to_thread", new=AsyncMock(return_value=[{"epoch": 1}])) as mock_to_thread:
+            with patch("main.offload", new=AsyncMock(return_value=[{"epoch": 1}])) as mock_offload:
                 result = await main.get_metrics_history(limit=50)
 
-            mock_to_thread.assert_awaited_once()
-            call = mock_to_thread.await_args
+            mock_offload.assert_awaited_once()
+            call = mock_offload.await_args
             assert call.args[0] == mock_backend.get_metrics_history
             assert call.args[1] == 50
             assert result == {"history": [{"epoch": 1}]}
@@ -736,10 +736,10 @@ class TestPollRoutesUseToThread:
         original_backend = main.backend
         try:
             main.backend = mock_backend
-            with patch("main.asyncio.to_thread", new=AsyncMock(return_value=[])) as mock_to_thread:
+            with patch("main.offload", new=AsyncMock(return_value=[])) as mock_offload:
                 result = await main.get_metrics_history(limit=0)
 
-            call = mock_to_thread.await_args
+            call = mock_offload.await_args
             assert call.args[0] == mock_backend.get_metrics_history
             assert call.args[1] == 10000
             assert result == {"history": []}
@@ -756,11 +756,11 @@ class TestPollRoutesUseToThread:
         original_backend = main.backend
         try:
             main.backend = mock_backend
-            with patch("main.asyncio.to_thread", new=AsyncMock(return_value={"nodes": [], "connections": []})) as mock_to_thread:
+            with patch("main.offload", new=AsyncMock(return_value={"nodes": [], "connections": []})) as mock_offload:
                 result = await main.get_topology()
 
-            mock_to_thread.assert_awaited_once()
-            assert mock_to_thread.await_args.args[0] == mock_backend.get_network_topology
+            mock_offload.assert_awaited_once()
+            assert mock_offload.await_args.args[0] == mock_backend.get_network_topology
             assert result == {"nodes": [], "connections": []}
             mock_backend.get_network_topology.assert_not_called()
         finally:
@@ -776,11 +776,11 @@ class TestPollRoutesUseToThread:
         original_backend = main.backend
         try:
             main.backend = mock_backend
-            with patch("main.asyncio.to_thread", new=AsyncMock(return_value={"weights": []})) as mock_to_thread:
+            with patch("main.offload", new=AsyncMock(return_value={"weights": []})) as mock_offload:
                 result = await main.get_raw_topology()
 
-            mock_to_thread.assert_awaited_once()
-            assert mock_to_thread.await_args.args[0] == mock_backend.get_raw_topology
+            mock_offload.assert_awaited_once()
+            assert mock_offload.await_args.args[0] == mock_backend.get_raw_topology
             assert result == {"weights": []}
         finally:
             main.backend = original_backend
@@ -1239,16 +1239,16 @@ class TestSetParamsEndpoint:
             main.websocket_manager = mock_ws_manager
 
             with patch(
-                "main.asyncio.to_thread",
+                "main.offload",
                 new=AsyncMock(return_value={"ok": False, "error": "invalid threshold"}),
-            ) as mock_to_thread:
+            ) as mock_offload:
                 result = await main.api_set_params(main.SetParamsRequest(learning_rate=0.03, nn_patience=5))
 
             assert isinstance(result, JSONResponse)
             assert result.status_code == 502
             assert b"Backend rejected parameters: invalid threshold" in result.body
-            mock_to_thread.assert_awaited_once()
-            call = mock_to_thread.await_args
+            mock_offload.assert_awaited_once()
+            call = mock_offload.await_args
             assert call.args[0] == mock_backend.apply_params
             assert call.kwargs["nn_learning_rate"] == 0.03
             assert call.kwargs["nn_patience"] == 5
@@ -1281,7 +1281,7 @@ class TestSetParamsEndpoint:
             main.training_state = mock_training_state
             main.websocket_manager = mock_ws_manager
 
-            with patch("main.asyncio.to_thread", new=AsyncMock(return_value={"ok": True})) as mock_to_thread:
+            with patch("main.offload", new=AsyncMock(return_value={"ok": True})) as mock_offload:
                 result = await main.api_set_params(
                     main.SetParamsRequest(
                         learning_rate=0.04,
@@ -1291,8 +1291,8 @@ class TestSetParamsEndpoint:
                 )
 
             assert result["status"] == "success"
-            mock_to_thread.assert_awaited_once()
-            call = mock_to_thread.await_args
+            mock_offload.assert_awaited_once()
+            call = mock_offload.await_args
             assert call.kwargs["nn_learning_rate"] == 0.04
             assert call.kwargs["nn_patience"] == 7
             assert call.kwargs["cn_candidate_learning_rate"] == 0.15
@@ -1335,10 +1335,10 @@ class TestSetParamsEndpoint:
             main.training_state = mock_training_state
             main.websocket_manager = mock_ws_manager
 
-            with patch("main.asyncio.to_thread", new=AsyncMock(return_value={"ok": True})) as mock_to_thread:
+            with patch("main.offload", new=AsyncMock(return_value={"ok": True})) as mock_offload:
                 await main.api_set_params(main.SetParamsRequest(patience=5, nn_patience=9))
 
-            call = mock_to_thread.await_args
+            call = mock_offload.await_args
             assert "patience" not in call.kwargs
             assert call.kwargs["nn_patience"] == 9
             mock_training_state.update_state.assert_called_once_with(patience=9)
