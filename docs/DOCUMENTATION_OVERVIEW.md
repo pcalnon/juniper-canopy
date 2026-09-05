@@ -2,8 +2,8 @@
 
 ## Complete Navigation Guide to Juniper Canopy Documentation
 
-**Version:** 0.25.3  
-**Last Updated:** September 4, 2026  
+**Version:** 0.25.6  
+**Last Updated:** September 5, 2026  
 **Project:** Juniper Canopy - Real-Time CasCor Monitoring Frontend
 
 ---
@@ -1728,7 +1728,7 @@ Relocated verbatim from `AGENTS.md` (P3 of the shared-session-memory plan) so it
 
 ---
 
-**Last Updated:** September 4, 2026  
+**Last Updated:** September 5, 2026  
 **Version:** 0.25.6  
 **Maintainer:** Paul Calnon
 

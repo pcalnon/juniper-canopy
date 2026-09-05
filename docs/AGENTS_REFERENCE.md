@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-09-04
+**Last Updated**: 2026-09-05
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -297,12 +297,12 @@ the four return paths are empty-figure exits with no meaningful label.
 
 Two defects, one finding id.
 
-**Defect A — State vs Input.** On `main` the label is the fourth Output
-of the clientside slider-bounds sync. That callback's only Input is
-`-topology-store.data`; `-depth-slider.value` rides as **State**. A
+**Defect A — State vs Input.** The label *was* the fourth Output of the
+clientside slider-bounds sync. That callback's only Input is
+`-topology-store.data`; `-depth-slider.value` rode as **State**. A
 State is read when something *else* fires, so moving the slider
-recomputes nothing. Since canopy#542 identity-suppressed the topology
-store, at idle the label never updates at all.
+recomputed nothing. Since canopy#542 identity-suppressed the topology
+store, at idle the label never updated at all.
 
 The obvious repair is structurally unavailable: adding
 `Input(-depth-slider, "value")` to that callback makes one
@@ -314,18 +314,18 @@ cannot live there.
 
 **Defect B — two meanings of `0`.** The filter's `depth <= 0` arm is
 `"all"`. The old clientside rule was `(v === nHidden) ? "all" : v + " of " + nHidden`.
-On a loaded 40-unit network the control reads `"0 of 40"` while all 40
-units are displayed, before anyone touches anything. Fixing the wiring
-alone does not fix this.
+On a loaded 40-unit network the control *read* `"0 of 40"` while all 40
+units were displayed, before anyone touched anything. Fixing the wiring
+alone would not have fixed this.
 
-**Incoming repair (canopy#570, not yet on `main`):** a second clientside
+**The repair (canopy#570, on `main`):** a second clientside
 callback owns `-depth-label.children` with Inputs
 `[-depth-slider.value, -topology-store.data]` — both operands of the
 filter, because a grow event changes the denominator with no user
 action. The JavaScript guard is a condition-for-condition
 transliteration of `_apply_hierarchy_filter`. The bounds-sync callback
-returns three elements (`max`, `value`, container `style`). Until #570
-merges, the `main` tree still has Defect A and Defect B.
+returns three elements (`max`, `value`, container `style`). #570 merged,
+so Defect A and Defect B are fixed on `main`.
 
 ### Dual definition — change one, change both
 
@@ -350,8 +350,8 @@ at-total / above-total / keep-3 / drop-edges / no-mutate /
 malformed-id). `TestHierarchyDepthSliderWiring` is source-level only —
 it does not execute the clientside function.
 
-The #570 suite (`src/tests/unit/frontend/test_f042_depth_filter_label.py`,
-not on `main` yet) asserts wiring against `app._callback_list` after a
+The #570 suite (`src/tests/unit/frontend/test_f042_depth_filter_label.py`)
+asserts wiring against `app._callback_list` after a
 real `register_callbacks`, executes the registered JavaScript under
 `node` over a 48-case grid with `_apply_hierarchy_filter` as the oracle,
 and pins that no callback has `-depth-slider.value` as both Input and
@@ -427,21 +427,24 @@ traces are curves 2–4. With one trace per connection they sit at
 | Click empty canvas | **Nothing.** Plotly emits `plotly_click` only on a point hit. `clickData` does not change, the callback never runs. Measured: 7 empty-canvas clicks, 0 events. |
 | Box / lasso (`select2d` / `lasso2d`) | Selects. Panel lists up to 5 ids. Box points use `text` only (no `customdata` fallback). |
 
-The panel on `main` still says *"(Click again or elsewhere to deselect)"*
-after a click and *"(Click elsewhere to deselect)"* after a box select.
-The "again" half is true. The "elsewhere" half was never implemented —
-only described.
+The panel *used to say* *"(Click again or elsewhere to deselect)"* after a
+click and *"(Click elsewhere to deselect)"* after a box select. The
+"again" half is true. The "elsewhere" half was never implemented — only
+described, which is why canopy#573 removed it. On `main` the click hint
+reads *"(Click again to deselect)"* and the box branch carries **no**
+hint at all.
 
 ### Store write cost
 
-The fall-through at the bottom of `handle_node_selection` writes `[]`
-unconditionally. Because `-selected-nodes` is an Input of
-`update_network_graph`, a click that resolves to nothing (or a clear of
-an already-empty store) still pays the 1.5–31 s rebuild. Assert
-`is dash.no_update`, not `== []` — equality passes against the broken
-write.
+The fall-through at the bottom of `handle_node_selection` *used to write*
+`[]` unconditionally. Because `-selected-nodes` is an Input of
+`update_network_graph`, a click that resolved to nothing (or a clear of
+an already-empty store) paid the full 1.5–31 s rebuild. canopy#573 added
+the `if not current_selection: return dash.no_update` guard. Assert
+`is dash.no_update`, **not** `== []` — equality passes against the broken
+write, so an `== []` test cannot tell the repair from the defect.
 
-### Incoming repair (canopy#573, not yet on `main`)
+### The repair (canopy#573, on `main`)
 
 A **"Clear selection"** button (`-clear-selection`) is wired as a third
 **Input** (the click *is* the trigger) and a fourth Output that sets
@@ -455,9 +458,7 @@ Both clear paths return `dash.no_update` on all four Outputs when
 
 A clientside listener on the graph container would literally satisfy
 the old sentence and was rejected: it races plotly's own event path,
-and this is the callback family this arc has repeatedly starved. Until
-canopy#573 merges, `main` still has the false "elsewhere" copy and the
-unguarded `[]` write.
+and this is the callback family this arc has repeatedly starved.
 
 ### Tests
 
@@ -478,8 +479,8 @@ that class let F-CANOPY-045 ship green while every node read
 still drives a *re-implementation* (`_simulate_handle_node_selection`)
 for several cases; treat those as historical, not as the contract.
 
-The #573 suite (`src/tests/unit/frontend/test_f046_clear_selection.py`,
-not on `main` yet) reaches the real callback, builds its argument list
+The #573 suite (`src/tests/unit/frontend/test_f046_clear_selection.py`)
+reaches the real callback, builds its argument list
 from the live signature, and asserts `is dash.no_update` on the empty-
 clear path. Adding an Input and an Output changes arity: three existing
 files invoke the callback for real
@@ -1119,8 +1120,8 @@ This is a recurrence of SEC-F20: the first fix shipped a comment and no test.
 | --- | --- | --- |
 | **1b** | Bound per-call cost (`timeout=30`, `retries=0`) instead of inheriting the client defaults (`timeout=30`, `retries=3`) | Merged `#566` |
 | **1a** | Move every remaining synchronous network call off the event loop | `#567` — this is the slice that **closes X7** |
-| **1c** | Status cache + classifier | Follow-up |
-| **1d** | Admission control (constraint C4) | Follow-up |
+| **1c** | Status cache + classifier | Landed (`#578`) |
+| **1d** | Admission control (constraint C4) | Landed (`#581`) |
 
 Slice 1a ships **bare** `asyncio.to_thread`. That is acceptable only because 1b already
 bounds per-call cost. **C4 (bounded concurrency) is deferred to 1d**, not satisfied here.
@@ -1241,7 +1242,7 @@ Constraints:
 # Slice 1b — client budget (on main)
 cd src && pytest tests/regression/test_x7_client_budget.py -v
 
-# Slice 1a — structural gate + behavioural tests (land with #567)
+# Slice 1a — structural gate + behavioural tests (landed with #567)
 cd src && pytest tests/regression/test_x7_off_loop_discipline.py tests/regression/test_x7_loop_responsiveness.py -v
 
 # Adapter-wide census (needs sibling client checkouts)
@@ -1274,12 +1275,12 @@ already moved every blocking call off the event loop, so canopy answers HTTP und
 upstream. It did **not** reduce the number of upstream calls, and it did **not** make an
 unreachable backend legible. 1c does both, and is droppable without reopening X7.
 
-The module is `src/backend/status_cache.py` (lands with `#578`). Until that PR merges,
-refer to it in backticks so the link checker stays green.
+The module is `src/backend/status_cache.py`, landed with `#578`.
 
 The resident one-line hazard lives in
 [`AGENTS.md` § Hazards](../AGENTS.md#hazards-resident--do-not-relocate). Off-loop
-discipline (slices 1a / 1b) is a **different** gap, owned by docs `#568`.
+discipline (slices 1a / 1b) is a **different** gap; its runbook landed via
+the docs consolidation `#583` (`#568` was closed superseded).
 
 ### What 1c buys
 
@@ -1399,9 +1400,9 @@ so an alert reads `{status_class="unreachable"} == 1` without knowing an ordinal
 pair is a later PR. Design §5.6 binds acceptance to the **status bar** for exactly this
 reason.
 
-### Tests (land with `#578`)
+### Tests (landed with `#578`)
 
-`src/tests/regression/test_x7_status_cache.py` — do not markdown-link until `#578` merges.
+`src/tests/regression/test_x7_status_cache.py`.
 
 | Id | Assertion |
 | --- | --- |

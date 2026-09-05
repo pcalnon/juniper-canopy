@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.2
+**Version:** 0.25.3
 **Status:** Active
-**Last Updated:** September 4, 2026
+**Last Updated:** September 5, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -40,7 +40,7 @@ For comprehensive usage guides, see the corresponding manuals linked from [DOCUM
 
 ## Topology Node Selection
 
-Click / box / lasso highlight on the Network Topology tab. The panel's "click elsewhere to deselect" sentence is false on `main` (plotly emits `plotly_click` only on a point hit). Clicking the selected node again *does* clear. `-selected-nodes` is an Input of `update_network_graph`; an unguarded `[]` write costs a 1.5–31 s rebuild. canopy#573 (not yet on `main`) adds a Clear button and returns `dash.no_update` when there is nothing to clear.
+Click / box / lasso highlight on the Network Topology tab. The panel once promised "click elsewhere to deselect", which plotly cannot deliver (`plotly_click` fires only on a point hit). canopy#573 retired it: the hint now reads "(Click again to deselect)", a **Clear selection** button carries the gesture, and the callback returns `dash.no_update` when nothing is selected. That guard matters: `-selected-nodes` is an Input of `update_network_graph`, so an unguarded `[]` write costs a 1.5–31 s rebuild.
 
 | Document | Purpose |
 |----------|---------|
@@ -208,7 +208,7 @@ cd src && pytest tests/regression/test_x7_client_budget.py -v
 
 ## Cascor status cache (X7 slice 1c)
 
-Incoming with `#578`. One background task polls cascor; `/api/status` and the status bar
+Landed with `#578`. One background task polls cascor; `/api/status` and the status bar
 serve its **class** (`ok` / `unreachable` / `indeterminate`), not a raw payload. That is
 what keeps a half-dead 200 from rendering as a healthy **"Stopped"**.
 
@@ -216,10 +216,11 @@ what keeps a half-dead 200 from rendering as a healthy **"Stopped"**.
 |----------|---------|
 | [AGENTS_REFERENCE.md § Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c) | Operator runbook: intervals, classifier, dedicated breaker, C6 / C7 / C9, T-C1–T-C4 |
 
-# Lands with #578 — do not markdown-link the file until it exists on main
+# X7 slice 1c status cache (landed with #578)
 cd src && pytest tests/regression/test_x7_status_cache.py -v
 
-Distinct from the 1a / 1b off-loop runbook (docs `#568`).
+Distinct from the 1a / 1b off-loop runbook, which landed via the docs
+consolidation `#583` (`#568` was closed superseded).
 
 ## CI/CD Reference
 
@@ -317,6 +318,6 @@ The most commonly used environment variables for juniper-canopy configuration. F
 
 ---
 
-**Last Updated:** September 4, 2026
-**Version:** 0.25.2
+**Last Updated:** September 5, 2026
+**Version:** 0.25.3
 **Maintainer:** Paul Calnon
