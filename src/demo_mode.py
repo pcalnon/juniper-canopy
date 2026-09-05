@@ -808,9 +808,26 @@ class DemoMode:
             juniper_data_api_key=juniper_data_api_key,
         )
 
+    #: NPZ partitions this ladder validates, in contract order. ``train`` is required;
+    #: the other two are validated when present. ``full`` is deliberately NOT here --
+    #: decision 11 removed it from the contract, and a legacy artifact that still carries
+    #: it is tolerated, not validated.
+    _VALIDATED_PARTITIONS = ("train", "val", "test")
+
     @staticmethod
     def _validate_npz_arrays(npz_data: Dict[str, Any]) -> None:
         """Validate NPZ dataset arrays for dtype, shape, and consistency.
+
+        This validated ``X_full`` / ``y_full`` ONLY. That was canopy's single artifact
+        guard, and decision 11 removes the keys it was reading -- so re-pointing it is
+        not cosmetic: leaving it would have made the guard raise on every new artifact,
+        and deleting it would have lost the check entirely. Design §9.5.4 item 2 calls
+        this out by name for exactly that reason.
+
+        It now walks the partitions. ``train`` must be present -- an artifact with no
+        training rows is not a dataset -- and ``val`` / ``test`` are checked whenever they
+        appear, so an artifact carrying a malformed validation split is rejected rather
+        than half-validated.
 
         Args:
             npz_data: Dictionary of numpy arrays from NPZ artifact.
@@ -818,23 +835,50 @@ class DemoMode:
         Raises:
             ValueError: If validation fails (wrong dtype, shape, or mismatched counts).
         """
-        inputs = npz_data.get("X_full")
-        targets = npz_data.get("y_full")
+        if npz_data.get("X_train") is None or npz_data.get("y_train") is None:
+            raise ValueError("JuniperData artifact missing required keys: X_train, y_train")
 
-        if inputs is None or targets is None:
-            raise ValueError("JuniperData artifact missing required keys: X_full, y_full")
+        for split in DemoMode._VALIDATED_PARTITIONS:
+            x_key, y_key = f"X_{split}", f"y_{split}"
+            inputs = npz_data.get(x_key)
+            targets = npz_data.get(y_key)
+            if inputs is None and targets is None:
+                continue
+            if inputs is None or targets is None:
+                present, missing = (x_key, y_key) if inputs is not None else (y_key, x_key)
+                raise ValueError(f"JuniperData artifact has a partial {split} split: {present} without {missing}")
 
-        if not isinstance(inputs, np.ndarray) or not isinstance(targets, np.ndarray):
-            raise ValueError(f"Expected numpy arrays, got X_full={type(inputs).__name__}, y_full={type(targets).__name__}")
+            if not isinstance(inputs, np.ndarray) or not isinstance(targets, np.ndarray):
+                raise ValueError(f"Expected numpy arrays, got {x_key}={type(inputs).__name__}, {y_key}={type(targets).__name__}")
 
-        if inputs.dtype != np.float32:
-            raise ValueError(f"X_full dtype must be float32, got {inputs.dtype}")
+            if inputs.dtype != np.float32:
+                raise ValueError(f"{x_key} dtype must be float32, got {inputs.dtype}")
 
-        if inputs.ndim != 2:
-            raise ValueError(f"X_full must be 2D (samples, features), got shape {inputs.shape}")
+            if inputs.ndim != 2:
+                raise ValueError(f"{x_key} must be 2D (samples, features), got shape {inputs.shape}")
 
-        if inputs.shape[0] != targets.shape[0]:
-            raise ValueError(f"Sample count mismatch: X_full has {inputs.shape[0]} samples, y_full has {targets.shape[0]}")
+            if inputs.shape[0] != targets.shape[0]:
+                raise ValueError(f"Sample count mismatch: {x_key} has {inputs.shape[0]} samples, {y_key} has {targets.shape[0]}")
+
+    @staticmethod
+    def _whole_dataset(npz_data: Dict[str, Any], stem: str) -> np.ndarray:
+        """Assemble one key's whole dataset from its partitions.
+
+        Every canopy use of ``X_full`` was "give me the whole dataset", never "give me
+        the array the partitions were cut from" (design §9.5.1's census). So the
+        replacement is a concatenation, in contract order.
+
+        A legacy artifact's ``<stem>_full`` is used directly when present -- decision 11
+        drops the REQUIREMENT, not the tolerance, and re-deriving it would be slower and
+        could differ in row order from what that artifact actually shipped.
+        """
+        legacy = npz_data.get(f"{stem}_full")
+        if legacy is not None:
+            return np.asarray(legacy)
+        blocks = [np.asarray(npz_data[f"{stem}_{s}"]) for s in DemoMode._VALIDATED_PARTITIONS if npz_data.get(f"{stem}_{s}") is not None]
+        if not blocks:
+            raise ValueError(f"JuniperData artifact carries no {stem}_* partitions to assemble")
+        return np.vstack(blocks) if len(blocks) > 1 else blocks[0]
 
     @staticmethod
     def _user_friendly_data_error(exc: Exception) -> str:
@@ -962,8 +1006,8 @@ class DemoMode:
 
         self._validate_npz_arrays(npz_data)
 
-        inputs = npz_data["X_full"]
-        targets_one_hot = npz_data["y_full"]
+        inputs = self._whole_dataset(npz_data, "X")
+        targets_one_hot = self._whole_dataset(npz_data, "y")
 
         targets = np.argmax(targets_one_hot, axis=1).astype(np.float32)
 
@@ -1855,8 +1899,8 @@ class DemoMode:
             return self._install_sequence_dataset(npz_data, source_label=f"generator:{generator}")
 
         self._validate_npz_arrays(npz_data)
-        inputs = npz_data["X_full"]
-        targets = np.argmax(npz_data["y_full"], axis=1).astype(np.int64)
+        inputs = self._whole_dataset(npz_data, "X")
+        targets = np.argmax(self._whole_dataset(npz_data, "y"), axis=1).astype(np.int64)
         return self.import_dataset(inputs, targets, source_label=f"generator:{generator}")
 
     def import_dataset(self, inputs: Any, targets: Any, source_label: str = "imported") -> Dict[str, Any]:

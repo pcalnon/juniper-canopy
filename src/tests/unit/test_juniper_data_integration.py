@@ -451,7 +451,7 @@ class TestDemoModeDatasetSchema:
 
     @pytest.mark.unit
     def test_missing_npz_keys_raises_value_error(self):
-        """Missing X_full or y_full in NPZ raises ValueError."""
+        """An artifact with no training partition raises ValueError."""
         from demo_mode import DemoMode
 
         demo = DemoMode.__new__(DemoMode)
@@ -460,11 +460,11 @@ class TestDemoModeDatasetSchema:
         mock_client_class = MagicMock()
         mock_client_instance = MagicMock()
         mock_client_instance.create_dataset.return_value = {"dataset_id": "test-003"}
-        mock_client_instance.download_artifact_npz.return_value = {"X_train": np.zeros((10, 2))}
+        mock_client_instance.download_artifact_npz.return_value = {"y_train": np.zeros((10, 2))}
         mock_client_class.return_value = mock_client_instance
 
         with patch("juniper_data_client.JuniperDataClient", mock_client_class):
-            with pytest.raises(ValueError, match="X_full"):
+            with pytest.raises(ValueError, match="X_train"):
                 demo._generate_spiral_dataset_from_juniper_data(200, "http://localhost:8100")
 
 
@@ -481,8 +481,12 @@ class TestNpzValidation:
         from demo_mode import DemoMode
 
         npz = {
-            "X_full": np.zeros((100, 2), dtype=np.float32),
-            "y_full": np.zeros((100, 2), dtype=np.float32),
+            "X_train": np.zeros((80, 2), dtype=np.float32),
+            "y_train": np.zeros((80, 2), dtype=np.float32),
+            "X_val": np.zeros((10, 2), dtype=np.float32),
+            "y_val": np.zeros((10, 2), dtype=np.float32),
+            "X_test": np.zeros((10, 2), dtype=np.float32),
+            "y_test": np.zeros((10, 2), dtype=np.float32),
         }
         DemoMode._validate_npz_arrays(npz)
 
@@ -490,7 +494,7 @@ class TestNpzValidation:
     def test_missing_x_full_raises(self):
         from demo_mode import DemoMode
 
-        npz = {"y_full": np.zeros((10, 2), dtype=np.float32)}
+        npz = {"y_train": np.zeros((10, 2), dtype=np.float32)}
         with pytest.raises(ValueError, match="missing required keys"):
             DemoMode._validate_npz_arrays(npz)
 
@@ -498,7 +502,7 @@ class TestNpzValidation:
     def test_missing_y_full_raises(self):
         from demo_mode import DemoMode
 
-        npz = {"X_full": np.zeros((10, 2), dtype=np.float32)}
+        npz = {"X_train": np.zeros((10, 2), dtype=np.float32)}
         with pytest.raises(ValueError, match="missing required keys"):
             DemoMode._validate_npz_arrays(npz)
 
@@ -507,8 +511,8 @@ class TestNpzValidation:
         from demo_mode import DemoMode
 
         npz = {
-            "X_full": np.zeros((10, 2), dtype=np.float64),
-            "y_full": np.zeros((10, 2), dtype=np.float32),
+            "X_train": np.zeros((10, 2), dtype=np.float64),
+            "y_train": np.zeros((10, 2), dtype=np.float32),
         }
         with pytest.raises(ValueError, match="float32"):
             DemoMode._validate_npz_arrays(npz)
@@ -518,8 +522,8 @@ class TestNpzValidation:
         from demo_mode import DemoMode
 
         npz = {
-            "X_full": np.zeros(10, dtype=np.float32),
-            "y_full": np.zeros((10, 2), dtype=np.float32),
+            "X_train": np.zeros(10, dtype=np.float32),
+            "y_train": np.zeros((10, 2), dtype=np.float32),
         }
         with pytest.raises(ValueError, match="2D"):
             DemoMode._validate_npz_arrays(npz)
@@ -529,8 +533,8 @@ class TestNpzValidation:
         from demo_mode import DemoMode
 
         npz = {
-            "X_full": np.zeros((10, 2), dtype=np.float32),
-            "y_full": np.zeros((20, 2), dtype=np.float32),
+            "X_train": np.zeros((10, 2), dtype=np.float32),
+            "y_train": np.zeros((20, 2), dtype=np.float32),
         }
         with pytest.raises(ValueError, match="Sample count mismatch"):
             DemoMode._validate_npz_arrays(npz)
@@ -539,7 +543,7 @@ class TestNpzValidation:
     def test_non_numpy_raises(self):
         from demo_mode import DemoMode
 
-        npz = {"X_full": [[1, 2]], "y_full": [[0, 1]]}
+        npz = {"X_train": [[1, 2]], "y_train": [[0, 1]]}
         with pytest.raises(ValueError, match="numpy arrays"):
             DemoMode._validate_npz_arrays(npz)
 
