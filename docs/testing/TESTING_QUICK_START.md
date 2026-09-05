@@ -1,7 +1,7 @@
 # Testing Quick Start Guide
 
-**Last Updated:** September 4, 2026  
-**Version:** v0.25.1
+**Last Updated:** September 5, 2026  
+**Version:** v0.25.2
 
 Get up and running with tests in **5 minutes**.
 
@@ -40,7 +40,7 @@ pytest -m integration -v
 # Run specific test file
 pytest src/tests/unit/test_demo_mode.py -v
 
-# X7 slice 1c status cache (lands with #578)
+# X7 slice 1c status cache (landed with #578)
 pytest src/tests/regression/test_x7_status_cache.py -v
 
 # Run specific test function
@@ -161,7 +161,7 @@ src/tests/
 | `pytest -x`             | Stop at first failure   |
 | `pytest -v`             | Verbose output          |
 | `pytest --cov=src`      | Run with coverage       |
-| `pytest src/tests/regression/test_x7_status_cache.py -v` | X7 1c status cache (lands with `#578`) |
+| `pytest src/tests/regression/test_x7_status_cache.py -v` | X7 1c status cache (landed with `#578`) |
 | `pytest --lf`           | Run last failed tests   |
 | `pytest --ff`           | Run failures first      |
 

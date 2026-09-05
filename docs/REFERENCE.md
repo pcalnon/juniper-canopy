@@ -208,7 +208,7 @@ cd src && pytest tests/regression/test_x7_client_budget.py -v
 
 ## Cascor status cache (X7 slice 1c)
 
-Incoming with `#578`. One background task polls cascor; `/api/status` and the status bar
+Landed with `#578`. One background task polls cascor; `/api/status` and the status bar
 serve its **class** (`ok` / `unreachable` / `indeterminate`), not a raw payload. That is
 what keeps a half-dead 200 from rendering as a healthy **"Stopped"**.
 
@@ -216,7 +216,7 @@ what keeps a half-dead 200 from rendering as a healthy **"Stopped"**.
 |----------|---------|
 | [AGENTS_REFERENCE.md § Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c) | Operator runbook: intervals, classifier, dedicated breaker, C6 / C7 / C9, T-C1–T-C4 |
 
-# Lands with #578 — do not markdown-link the file until it exists on main
+# X7 slice 1c status cache (landed with #578)
 cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 Distinct from the 1a / 1b off-loop runbook (docs `#568`).

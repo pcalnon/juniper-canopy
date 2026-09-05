@@ -324,8 +324,8 @@ callback owns `-depth-label.children` with Inputs
 filter, because a grow event changes the denominator with no user
 action. The JavaScript guard is a condition-for-condition
 transliteration of `_apply_hierarchy_filter`. The bounds-sync callback
-returns three elements (`max`, `value`, container `style`). Until #570
-merges, the `main` tree still has Defect A and Defect B.
+returns three elements (`max`, `value`, container `style`). #570 merged,
+so Defect A and Defect B are fixed on `main`.
 
 ### Dual definition — change one, change both
 
@@ -1274,8 +1274,7 @@ already moved every blocking call off the event loop, so canopy answers HTTP und
 upstream. It did **not** reduce the number of upstream calls, and it did **not** make an
 unreachable backend legible. 1c does both, and is droppable without reopening X7.
 
-The module is `src/backend/status_cache.py` (lands with `#578`). Until that PR merges,
-refer to it in backticks so the link checker stays green.
+The module is `src/backend/status_cache.py`, landed with `#578`.
 
 The resident one-line hazard lives in
 [`AGENTS.md` § Hazards](../AGENTS.md#hazards-resident--do-not-relocate). Off-loop

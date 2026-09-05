@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.3
-**Date**: 2026-09-04
+**Version**: 1.0.4
+**Date**: 2026-09-05
 **Project**: juniper-canopy
 
 ---
@@ -160,7 +160,7 @@ pytest tests/unit/test_network_visualizer.py -k "Hierarchy or hierarchy or depth
 
 ### 6. Clear a Topology Node Selection
 
-`handle_node_selection` Inputs are `-graph.clickData` and `-graph.selectedData`. Plotly emits `plotly_click` only on a point hit, so empty-canvas clicks never run the callback (`prevent_initial_call=True`). Clicking the selected node again *does* deselect (toggle; also clears a whole box/lasso set). Do not write `[]` over an already-empty `-selected-nodes` — that store is an Input of `update_network_graph` (1.5–31 s). canopy#573 adds a Clear button; until it lands the panel's "elsewhere" hint is false.
+`handle_node_selection` Inputs are `-graph.clickData` and `-graph.selectedData`. Plotly emits `plotly_click` only on a point hit, so empty-canvas clicks never run the callback (`prevent_initial_call=True`). Clicking the selected node again *does* deselect (toggle; also clears a whole box/lasso set). Do not write `[]` over an already-empty `-selected-nodes` — that store is an Input of `update_network_graph` (1.5–31 s). canopy#573 added a **Clear selection** button; the hint is "(Click again to deselect)".
 
 > See: [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046)
 
@@ -179,7 +179,7 @@ pytest tests/regression/test_csp_plotly_image_export.py \
 
 Service-mode `/api/status` is served from a 1 Hz cache. The body carries `status_class`
 (`ok` / `unreachable` / `indeterminate`). The status bar renders the **class**, not a raw
-half-dead 200 (that path has no `error` and shows "Stopped"). Lands with `#578`.
+half-dead 200 (that path has no `error` and shows "Stopped"). Landed with `#578`.
 
 cd src && pytest tests/regression/test_x7_status_cache.py -v
 
@@ -293,7 +293,7 @@ Coverage includes:
 | Depth-filter label reads `"0 of N"` at rest, or ignores the slider | F-CANOPY-042: label is a State of the bounds-sync callback; `0` ≠ `"all"` in the old JS rule | Do not add `Input(-depth-slider, value)` to that callback (circular). Trust the graph until canopy#570. See [Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020) |
 | Topology panel says "click elsewhere" but empty-canvas clicks do nothing | Plotly emits `plotly_click` only on a point hit; the callback never runs | Click the selected node again to toggle off. canopy#573 adds a Clear button. See [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046) |
 | Modebar camera clicks; no PNG, CSP `img-src` in console | `blob:` missing from `img-src` | Keep `img-src 'self' data: blob:`; do not move `blob:` onto `script-src`. See [AGENTS_REFERENCE § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) |
-| Status bar says "Stopped" while cascor is down   | Half-dead 200 has no `error`; UI read the payload (X7 1c) | Confirm `status_class` on `/api/status`; run `test_x7_status_cache.py` (lands with `#578`) |
+| Status bar says "Stopped" while cascor is down   | Half-dead 200 has no `error`; UI read the payload (X7 1c) | Confirm `status_class` on `/api/status`; run `test_x7_status_cache.py` (landed with `#578`) |
 | Status bar says "Unreachable" during a skipped poll | Class rendered as UNREACHABLE instead of INDETERMINATE | `"circuit open"` must classify `indeterminate` → "Unknown"; do not share `_cb` with the refresher |
 
 ---
@@ -323,6 +323,6 @@ Coverage includes:
 
 ---
 
-**Last Updated:** 2026-09-04
-**Version:** 1.0.3
+**Last Updated:** 2026-09-05
+**Version:** 1.0.4
 **Maintainer:** Paul Calnon

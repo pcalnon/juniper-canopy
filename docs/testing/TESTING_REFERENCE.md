@@ -280,9 +280,9 @@ pytest --ff
 
 ## X7 Status Cache (slice 1c)
 
-Incoming with `#578`. Pins the classifier, the PR `#340` status-bar regression, breaker
+Landed with `#578`. Pins the classifier, the PR `#340` status-bar regression, breaker
 isolation, and the staleness contract. The file is
-`src/tests/regression/test_x7_status_cache.py` — backtick only until it exists on `main`.
+`src/tests/regression/test_x7_status_cache.py`.
 
 ```bash
 cd src && pytest tests/regression/test_x7_status_cache.py -v
