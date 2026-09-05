@@ -65,6 +65,7 @@ from pydantic import BaseModel, Field, SecretStr
 
 # from backend.data_adapter import DataAdapter  trunk-ignore(ruff/E402)
 # from backend.training_monitor import TrainingMonitor  trunk-ignore(ruff/E402)
+from backend.status_cache import StatusCache  # trunk-ignore(ruff/E402)
 from backend.training_monitor import TrainingState  # trunk-ignore(ruff/E402)
 from canopy_constants import APP_VERSION, BackendConstants, TrainingConstants  # trunk-ignore(ruff/E402)
 from communication.websocket_manager import create_command_response_message, websocket_manager
@@ -82,6 +83,7 @@ from observability import (
     configure_logging,
     configure_sentry,
     get_prometheus_app,
+    set_backend_status_class,
     set_build_info,
     set_demo_mode_active,
 )
@@ -155,6 +157,76 @@ async def _websocket_keepalive_loop(interval: float, channel: str = "training") 
             await websocket_manager.broadcast_ping(channel=channel)
         except Exception as exc:  # a transient send error must not kill the heartbeat
             system_logger.debug("WebSocket keepalive ping failed: %s", exc)
+
+
+async def _start_status_cache(be: Any) -> None:
+    """(Re)build and start the X7 slice-1c status cache for ``be``.
+
+    Shared by startup and the runtime model swap, for the same reason
+    ``_seed_training_state`` is: two copies of "which backend gets a cache" would drift,
+    and the swap path is the one that gets forgotten.
+
+    Only service backends get a cache. Demo and recurrence answer ``get_status()`` from
+    memory, so there is no upstream call to amortise and nothing to classify — a cache
+    there would add a poll loop and a staleness story to a synchronous dict read.
+    """
+    global status_cache
+    await _stop_status_cache()
+    if be is None or be.backend_type != "service" or not hasattr(be, "_adapter"):
+        return
+    status_cache = StatusCache(
+        # The DEDICATED-breaker fetch, not ``get_training_status``: sharing the breaker
+        # would let five failing ``get_network_data()`` calls freeze this cache for 60 s
+        # against a healthy cascor.
+        fetch_raw=be._adapter.get_training_status_for_refresh,
+        normalize=be.normalize_status,
+        on_verdict=lambda verdict: set_backend_status_class(verdict.value),
+    )
+    await status_cache.start()
+
+
+async def _stop_status_cache() -> None:
+    """Stop and drop the status cache, if one is running. Safe to call when there is none."""
+    global status_cache
+    cache, status_cache = status_cache, None
+    if cache is not None:
+        await cache.stop()
+
+
+async def _training_active_for_health() -> bool:
+    """``training_active`` for the health bodies, from the cache when it knows.
+
+    Falls back to the live call — which 1a already moved off the loop — when there is no
+    cache (demo/recurrence) or it has no verdict yet. The fallback returns ``False`` under
+    an outage, because ``is_training_active()`` keeps its ``bool`` contract deliberately
+    (design §5.5: widening it to a tri-state was measured to open all five 409 gates and
+    race a second run). That is precisely why the health bodies also carry
+    ``_backend_status_extras()`` — the boolean stays a boolean, and the *staleness* is
+    reported beside it instead of being smuggled into it.
+    """
+    if status_cache is not None:
+        cached = status_cache.training_active()
+        if cached is not None:
+            return cached
+    return await asyncio.to_thread(backend.is_training_active)
+
+
+def _backend_status_extras() -> dict:
+    """C7: surface the cache's verdict and its age on health responses.
+
+    Additive, and empty outside service mode — demo and recurrence have no upstream to be
+    stale about, so their health bodies are unchanged. Status codes are untouched: an
+    upstream outage stays 200/degraded (``values.yaml:222-226``, guarded by
+    ``test_canopy_never_returns_503_on_upstream_down``).
+    """
+    if status_cache is None:
+        return {}
+    body = status_cache.for_status()
+    return {
+        "backend_status": body["status_class"],
+        "backend_status_stale": body["stale"],
+        "backend_status_age_seconds": body["age_seconds"],
+    }
 
 
 async def _seed_training_state(backend: Any) -> None:
@@ -355,6 +427,10 @@ async def lifespan(app: FastAPI):
     # exactly one place and cannot drift between startup and a live model switch.
     await _seed_training_state(backend)
 
+    # X7 slice 1c: start polling cascor on a timer so read handlers stop each paying
+    # their own upstream call (C2 — call rate independent of tabs and pollers).
+    await _start_status_cache(backend)
+
     system_logger.info("Backend initialized: %s", backend.backend_type)
     # METRICS-MON R3.2 / seed-11: reflect the post-fallback backend type in
     # the ``juniper_canopy_demo_mode_active`` gauge. This is the single
@@ -390,6 +466,10 @@ async def lifespan(app: FastAPI):
         keepalive_task.cancel()
         with suppress(asyncio.CancelledError):
             await keepalive_task
+
+    # Before ``backend.shutdown()``: the refresher holds that backend's adapter, and a
+    # tick landing on a torn-down client logs a spurious unreachable verdict.
+    await _stop_status_cache()
 
     await backend.shutdown()
 
@@ -491,6 +571,12 @@ backend = None
 # backend (D5: re-create, not multiplex).
 current_nn_model: Optional[str] = None
 _resolved_service_url: Optional[str] = None
+
+# X7 slice 1c: the cascor status cache. ``None`` outside service mode — demo and
+# recurrence backends answer ``get_status()`` from memory, so there is no upstream call
+# to amortise and no unreachability to classify. Readers must therefore handle ``None``
+# by falling back to the live (already off-loop, since 1a) call rather than assuming it.
+status_cache: Optional[StatusCache] = None
 
 # Initialize Dash dashboard (standalone with its own Flask server)
 dashboard_manager = DashboardManager({})
@@ -1037,10 +1123,9 @@ async def websocket_control_endpoint(websocket: WebSocket):
 async def health_check_deprecated(request: Request):
     """Health check endpoint (deprecated — use /v1/health instead)."""
     system_logger.warning("Deprecated health endpoint %s called — use /v1/health, /v1/health/live, or /v1/health/ready instead", request.url.path)
-    # X7: hoisted off the dict literal so the upstream probe runs in a worker
-    # thread. Health is the endpoint the defect is defined by — a blocking call
-    # here stalls every other route on the single-worker loop, not just this one.
-    training_active = await asyncio.to_thread(backend.is_training_active)
+    # X7 1a hoisted this off the dict literal so the upstream probe ran in a worker
+    # thread; 1c removes the probe from the request path entirely in service mode.
+    training_active = await _training_active_for_health()
     return {
         # API-01: align with cascor + juniper-data ("ok"). Canopy was the
         # only service returning "healthy"; the field is still present so
@@ -1061,6 +1146,7 @@ async def health_check_deprecated(request: Request):
         "training_active": training_active,
         "demo_mode": backend.backend_type == "demo",
         "juniper_data_available": juniper_data_available,
+        **_backend_status_extras(),
     }
 
 
@@ -1076,8 +1162,8 @@ async def health_check():
       ``active_connections``, ``training_active``, ``demo_mode``,
       ``juniper_data_available``.
     """
-    # X7: same hoist as the deprecated twin above -- see the note there.
-    training_active = await asyncio.to_thread(backend.is_training_active)
+    # X7: same as the deprecated twin above -- see the note there.
+    training_active = await _training_active_for_health()
     return {
         # API-01: align with cascor + juniper-data ("ok").
         "status": "ok",
@@ -1089,6 +1175,9 @@ async def health_check():
         "training_active": training_active,
         "demo_mode": backend.backend_type == "demo",
         "juniper_data_available": juniper_data_available,
+        # C7: the cache's verdict and its age, so an outage is legible on the endpoint
+        # the defect is named for. Additive and service-mode only; status codes unchanged.
+        **_backend_status_extras(),
         # Build provenance (juniper-ml notes/BUILD_PROVENANCE_DESIGN_2026-06-14.md):
         # source git SHA + ISO-8601 build date baked into the image. ``None``
         # outside a provenance-stamped image; lets ``make doctor`` detect drift.
@@ -1134,7 +1223,7 @@ async def readiness_probe() -> ReadinessResponse:
             break
 
     # X7: the readiness probe is the third endpoint the outage was measured on.
-    training_active = await asyncio.to_thread(backend.is_training_active)
+    training_active = await _training_active_for_health()
     return ReadinessResponse(
         status=overall,
         version=APP_VERSION,
@@ -1146,6 +1235,7 @@ async def readiness_probe() -> ReadinessResponse:
             "mode": backend.backend_type,
             "active_connections": websocket_manager.get_connection_count(),
             "training_active": training_active,
+            **_backend_status_extras(),
         },
     )
 
@@ -1327,8 +1417,15 @@ async def get_status():
     """
     Get current training status.
     Returns:
-        Training status dictionary with FSM-based status and phase
+        Training status dictionary with FSM-based status and phase, plus the X7 slice-1c
+        cache envelope (``status_class``, ``stale``, ``age_seconds``) in service mode.
     """
+    # X7 slice 1c: serve the cache. Every browser tab polling this route used to cost one
+    # upstream call; now they cost none (C2). The body carries the cache's CLASS so the
+    # status bar can distinguish "cascor says idle" from "cascor is unreachable" — handing
+    # back the raw payload instead is what re-creates the PR #340 defect on a half-dead 200.
+    if status_cache is not None:
+        return status_cache.for_status()
     return await asyncio.to_thread(backend.get_status)
 
 
@@ -3757,6 +3854,9 @@ async def _swap_backend(nn_model: str) -> dict:
     backend = new_backend
     current_nn_model = nn_model
     await _seed_training_state(new_backend)
+    # Rebind the cache to the new backend's adapter (and drop it entirely when swapping to
+    # recurrence, which has no upstream). Before ``old_backend.shutdown()`` below.
+    await _start_status_cache(new_backend)
     set_demo_mode_active(new_backend.backend_type == "demo")
     await old_backend.shutdown()
     system_logger.info("Backend swapped for model %r -> %s", nn_model, new_backend.backend_type)
