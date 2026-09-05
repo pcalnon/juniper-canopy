@@ -141,7 +141,13 @@ class TestApiStreamHealth:
         monkeypatch.setattr(main, "backend", _FakeServiceBackend(stream_health=payload))
         response = client.get("/api/stream_health")
         assert response.status_code == 200
-        assert response.json() == payload
+        body = response.json()
+        # The adapter's snapshot passes through unchanged...
+        assert {k: body[k] for k in payload} == payload
+        # ...plus the backend mode (PR 2, demo-mode honesty). Both branches of this route
+        # now report it, so a consumer can use it as a mode signal without already knowing
+        # which branch it is reading. The badge's "WS: Demo" state depends on it.
+        assert body["mode"] == "service"
 
     def test_non_service_mode_is_not_applicable(self, client):
         """Demo/recurrence backends have no upstream stream — overall n/a."""
