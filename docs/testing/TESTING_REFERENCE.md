@@ -1,7 +1,7 @@
 # Testing Reference
 
-**Last Updated:** April 5, 2026  
-**Version:** v0.26.1
+**Last Updated:** September 4, 2026  
+**Version:** v0.26.2
 
 Technical reference for the active pytest configuration, markers, fixtures, and CI-equivalent commands.
 
@@ -14,9 +14,11 @@ Technical reference for the active pytest configuration, markers, fixtures, and 
 3. [Fixture Reference](#fixture-reference)
 4. [Environment and Gating Variables](#environment-and-gating-variables)
 5. [Command Reference](#command-reference)
-6. [Coverage Reference](#coverage-reference)
-7. [CI Mapping](#ci-mapping)
-8. [Troubleshooting Reference](#troubleshooting-reference)
+6. [X7 Status Cache (slice 1c)](#x7-status-cache-slice-1c)
+6. [X7 Event-Loop Discipline](#x7-event-loop-discipline)
+7. [Coverage Reference](#coverage-reference)
+8. [CI Mapping](#ci-mapping)
+9. [Troubleshooting Reference](#troubleshooting-reference)
 
 ---
 
@@ -177,7 +179,51 @@ python scripts/check_doc_links.py --cross-repo check
 
 # Run focused unit tests for link-checker hardening
 pytest src/tests/unit/test_check_doc_links.py -v
+
+# F-CANOPY-047: CSP must allow plotly PNG export without over-widening
+cd src
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
 ```
+
+### Hierarchy depth filter (CAN-020 / F-CANOPY-042)
+
+The Python oracle lives on `main`. The clientside label suite lands with canopy#570
+(`src/tests/unit/frontend/test_f042_depth_filter_label.py` — not on `main` yet;
+do not markdown-link it until that file merges).
+
+```bash
+cd src
+pytest tests/unit/test_network_visualizer.py -k "Hierarchy or hierarchy or depth" -v
+```
+
+`TestHierarchyDepthFilter` is the contract: `None` / `0` / at-total / above-total
+are `"all"`; a mid-range depth copies the dict, caps `hidden_units`, and drops
+edges touching `hidden_K` for `K >= depth`. `TestHierarchyDepthSliderWiring` is
+source-level only and does **not** execute the JavaScript. After #570 merges,
+prefer the registered-callback + `node` grid over any test that re-types the
+production expression. See
+[AGENTS_REFERENCE.md § Hierarchy Depth Filter](../AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020).
+
+### Topology node selection (F-CANOPY-044 / F-CANOPY-045 / F-CANOPY-046)
+
+On `main`, drive the real registered callback (not the
+`_simulate_handle_node_selection` re-implementation):
+
+```bash
+cd src
+pytest tests/unit/frontend/test_f044_node_click_selection.py -v
+```
+
+`test_f044_node_click_selection.py` is the contract for click-to-select:
+edge `customdata` fallback (F-044) and label-derived layer (F-045). The
+canopy#573 suite (`src/tests/unit/frontend/test_f046_clear_selection.py` — not
+on `main` yet) pins the Clear button, the true hints, and
+`is dash.no_update` on an already-empty store. Adding an Input/Output
+changes arity; three files invoke the callback by its Output key
+(`-selected-nodes.data`), including
+`tests/regression/test_dark_mode_info_panels.py`. See
+[AGENTS_REFERENCE.md § Topology Node Selection](../AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046).
 
 ### Documentation Link Checker Edge-Case Matrix
 
@@ -195,6 +241,30 @@ pytest src/tests/unit/test_check_doc_links.py -k "dangerous_link_inputs or rejec
 pytest src/tests/unit/test_check_doc_links.py -k "cross_repo or invalid_cross_repo_mode or falls_back_to_skip" -v
 ```
 
+## X7 Event-Loop Discipline
+
+X7 is canopy ceasing to answer HTTP — `/v1/health/live` included — when an upstream is
+unreachable. Slice 1b (`#566`) bounds the cascor client; slice 1a (`#567`) moves remaining
+sync I/O off the loop. Full runbook:
+[AGENTS_REFERENCE.md § Event-loop I/O discipline](../AGENTS_REFERENCE.md#event-loop-io-discipline-x7).
+
+```bash
+# Client budget (on main) — T-B1 refused-call milliseconds; T-B2 a 503 is attempted once
+cd src && pytest tests/regression/test_x7_client_budget.py -v
+
+# Structural gate + T-A2/T-A3/T-A4 (land with #567). Do not mark these slow:
+# the coverage gate runs -m "not slow" and would drop the only behavioural check.
+cd src && pytest tests/regression/test_x7_off_loop_discipline.py \
+  tests/regression/test_x7_loop_responsiveness.py -v
+
+# Adapter-wide census (instrument, exit 0). Needs sibling juniper-cascor-client.
+python util/ad-hoc/2026-09-04_async_blocking_callgraph.py
+```
+
+The `main.py` gate cannot see adapter/self-method I/O. A green gate after editing
+`cascor_service_adapter.py` or `service_backend.py` is not "1a done". `ruff --select ASYNC`
+cannot see `backend.get_status()` either.
+
 ### Debugging Commands
 
 ```bash
@@ -205,6 +275,28 @@ pytest -ra
 pytest --lf
 pytest --ff
 ```
+
+---
+
+## X7 Status Cache (slice 1c)
+
+Incoming with `#578`. Pins the classifier, the PR `#340` status-bar regression, breaker
+isolation, and the staleness contract. The file is
+`src/tests/regression/test_x7_status_cache.py` — backtick only until it exists on `main`.
+
+```bash
+cd src && pytest tests/regression/test_x7_status_cache.py -v
+```
+
+| Id | What it pins |
+| --- | --- |
+| T-C1 | Every observed shape lands in exactly one class; the table exercises all three |
+| T-C2 | Half-dead 200 → "Unreachable"; the same body without `status_class` still renders "Stopped" |
+| T-C3 | Five failing `get_network_data()` calls open the shared breaker and leave the status breaker closed |
+| T-C4 | Stale + age on non-OK; never-OK omits `is_training`; a dead refresher ages out; peak in-flight is 1 |
+
+Do not mark these `slow`. The coverage gate runs `-m "not slow"`. Operator runbook:
+[AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
 
 ---
 
@@ -287,6 +379,21 @@ python ../scripts/check_doc_links.py \
   --exclude analysis --exclude fixes --exclude development \
   --exclude CHANGELOG.md \
   --cross-repo skip
+```
+
+### CSP / Plotly PNG Export (F-CANOPY-047)
+
+The two files pin unrelated `img-src` consumers. A green result on one is not evidence the other still works.
+
+| Test File | Contract Focus | Key Behavior |
+| --- | --- | --- |
+| `tests/regression/test_csp_plotly_image_export.py` | Plotly PNG rasteriser | `img-src` allows `blob:` *and* `data:`; `blob:` is absent from `script-src` / `default-src`; no `*` / `http:`; `middleware._DEFAULT_CSP` equals `SecurityConstants.DEFAULT_CSP_POLICY` |
+| `tests/regression/test_csp_bootstrap_cdn.py` | Bootstrap CDN + icons | `style-src` allows `cdn.jsdelivr.net`; `img-src` allows `data:`; CDN is not on `script-src` |
+
+```bash
+cd src
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
 ```
 
 ### Testing WebSocket Endpoints

@@ -1,7 +1,7 @@
 # Testing Quick Start Guide
 
-**Last Updated:** January 29, 2026  
-**Version:** v0.25.0
+**Last Updated:** September 4, 2026  
+**Version:** v0.25.1
 
 Get up and running with tests in **5 minutes**.
 
@@ -40,11 +40,21 @@ pytest -m integration -v
 # Run specific test file
 pytest src/tests/unit/test_demo_mode.py -v
 
+# X7 slice 1c status cache (lands with #578)
+pytest src/tests/regression/test_x7_status_cache.py -v
+
 # Run specific test function
 pytest src/tests/unit/test_demo_mode.py::test_demo_mode_initialization -v
 
+# X7 client budget (slice 1b, on main)
+pytest src/tests/regression/test_x7_client_budget.py -v
+
 # Run tests matching pattern
 pytest -k "demo_mode" -v
+
+# F-CANOPY-047 CSP pair (plotly PNG + Bootstrap icons)
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
 
 # Run with verbose output
 pytest -vv
@@ -120,6 +130,7 @@ pytest --cov=src --cov-report=html:reports/coverage
 - **Comprehensive Guide**: See [TESTING_MANUAL.md](TESTING_MANUAL.md)
 - **Coverage Details**: See [TESTING_REPORTS_COVERAGE.md](TESTING_REPORTS_COVERAGE.md)
 - **Technical Reference**: See [TESTING_REFERENCE.md](TESTING_REFERENCE.md)
+- **X7 event-loop discipline**: See [AGENTS_REFERENCE.md](../AGENTS_REFERENCE.md#event-loop-io-discipline-x7)
 
 ## Test Structure Overview
 
@@ -150,6 +161,7 @@ src/tests/
 | `pytest -x`             | Stop at first failure   |
 | `pytest -v`             | Verbose output          |
 | `pytest --cov=src`      | Run with coverage       |
+| `pytest src/tests/regression/test_x7_status_cache.py -v` | X7 1c status cache (lands with `#578`) |
 | `pytest --lf`           | Run last failed tests   |
 | `pytest --ff`           | Run failures first      |
 
