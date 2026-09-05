@@ -1448,7 +1448,14 @@ async def get_stream_health():
         # same adapter whose every neighbour does call upstream; a thread hop costs
         # microseconds against a 1.0 s budget, and an exemption entry would need
         # re-verifying every time that promise is edited.
-        return await asyncio.to_thread(backend._adapter.get_stream_health)
+        health = await asyncio.to_thread(backend._adapter.get_stream_health)
+        # PR 2 (demo-mode honesty): carry the backend mode on BOTH branches. The non-service
+        # branch below has always reported it; the service branch did not, so a consumer
+        # could not use this field as a mode signal at all — it had to already know which
+        # branch it was reading, which is the thing it was trying to find out.
+        if isinstance(health, dict):
+            health = {**health, "mode": backend.backend_type}
+        return health
     return {"overall": "n/a", "mode": backend.backend_type, "relay": None, "control": None}
 
 
@@ -1987,7 +1994,12 @@ def _generate_mock_snapshots():
                 "id": f"demo_snapshot_{i + 1}",
                 "name": f"Demo Snapshot {i + 1}",
                 "timestamp": f"{ts.isoformat()}Z",
-                "size_bytes": (i + 1) * 1024 * 1024 + i * 512 * 1024,
+                # PR 2: no invented sizes. These rows name no file on disk, so a
+                # byte count is a claim about something that does not exist -- and
+                # ``(i+1) MB + i*512 KB`` is exactly the kind of plausible number that
+                # passes every sanity check a consumer might apply.
+                "size_bytes": 0,
+                "simulated": True,
                 "description": f"Demo training snapshot #{i + 1} (simulated)",
             }
         )
@@ -2405,7 +2417,14 @@ async def create_snapshot(
 
     # Demo mode: create mock snapshot entry
     if backend.backend_type == "demo":
-        size_bytes = 1024 * 1024 + int(now.timestamp()) % (512 * 1024)  # ~1-1.5 MB mock size
+        # PR 2 (demo-mode honesty). This branch used to invent a *plausible* size --
+        # ``1 MB + timestamp % 512 KB``, i.e. ~1-1.5 MB -- for a file it never writes, and
+        # report it beside a ``path`` inside the real (often bind-mounted) snapshot
+        # archive. A plausible number is worse than no number: it survives every sanity
+        # check a consumer might apply, so a demo entry is indistinguishable from a real
+        # snapshot in the listing, in the activity log, and in anything that later totals
+        # archive size. Zero is the truth -- no bytes were written.
+        size_bytes = 0
         meta_params = await _extract_meta_params()
 
         snapshot = {
@@ -2413,6 +2432,10 @@ async def create_snapshot(
             "name": snapshot_name,
             "timestamp": f"{now.replace(microsecond=0).isoformat()}Z",
             "size_bytes": size_bytes,
+            # Machine-readable, and not merely a prose default: the previous marker lived
+            # only in ``description``, which the caller overwrites whenever it supplies
+            # one of its own -- so a described demo snapshot carried no marker at all.
+            "simulated": True,
             "description": description or "Demo snapshot (no real HDF5 file)",
             "path": f"{_snapshots_dir}/{snapshot_name}",
             "meta_params": meta_params,
