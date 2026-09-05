@@ -67,9 +67,32 @@ import time
 from enum import Enum
 from typing import Any, Callable, Dict, Optional
 
-from backend.cascor_service_adapter import CascorServiceAdapter
-
 logger = logging.getLogger("juniper_canopy.backend.status_cache")
+
+
+def _is_cascor_nested(raw: dict) -> bool:
+    """Canopy's own nested-structure predicate, imported **lazily and deliberately**.
+
+    ``cascor_service_adapter`` imports ``juniper_cascor_client`` unconditionally at module
+    level, while ``backend/__init__`` imports the *adapter* only inside the service branch
+    of ``create_backend``. That structure is load-bearing: demo mode runs without the
+    cascor client installed at all, and CI relies on it -- ``conf/requirements_ci.txt``
+    does not ship the client, so the UI sub-suite boots canopy in demo mode against an
+    environment where importing it raises.
+
+    A module-level import here would therefore make the client a hard **startup**
+    dependency of demo mode. Measured: canopy exits 1 before serving a request, and the
+    only symptom is the UI harness reporting "canopy exited early with code 1" -- every
+    unit test still passes, because they run in an environment that has the client.
+
+    Deferring it to call time costs a cached ``sys.modules`` lookup at 1 Hz and keeps the
+    predicate shared rather than copied, which is what the design asks for: an earlier
+    draft invented its own rule and misclassified 7 of 20 healthy shapes.
+    """
+    from backend.cascor_service_adapter import CascorServiceAdapter
+
+    return bool(CascorServiceAdapter.is_cascor_nested(raw))
+
 
 # Poll cadence. Derived, not chosen (design OQ-X1): the tightest consumer is the container
 # healthcheck at a 15 s interval with a 5 s budget, and the dashboard's own fast lane is
@@ -143,7 +166,7 @@ def classify(raw: Any) -> StatusClass:
 
     # A truthy-error check alone is not enough. A half-dead 200 carries no error and is
     # still not a cascor status; without this it would classify OK and render "Stopped".
-    if not CascorServiceAdapter.is_cascor_nested(raw):
+    if not _is_cascor_nested(raw):
         return StatusClass.UNREACHABLE
 
     return StatusClass.OK

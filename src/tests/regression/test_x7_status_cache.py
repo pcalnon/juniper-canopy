@@ -353,3 +353,64 @@ class TestC4StalenessContract:
         cache = _cache([{"training_active": True}], on_verdict=boom)
         assert await cache.refresh_once() is StatusClass.OK
         assert cache.for_status()["status_class"] == "ok"
+
+
+# --------------------------------------------------------------------------------------
+# Import-graph guard -- the failure every test above was blind to
+# --------------------------------------------------------------------------------------
+
+
+def _import_probe(statement: str):
+    """Run ``statement`` in a subprocess rooted at ``src/``, with output captured."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    return subprocess.run(
+        [sys.executable, "-c", statement],
+        cwd=str(Path(__file__).resolve().parents[2]),
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+
+
+# ``sys.modules[name] = None`` makes any ``import name`` raise ImportError, which is the
+# closest in-process analogue of "the package is not installed".
+_BLOCK = "import sys; sys.modules['juniper_cascor_client'] = None; "
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+def test_demo_mode_starts_without_the_cascor_client_installed():
+    """``main`` must import with ``juniper_cascor_client`` absent.
+
+    Not a style rule. ``backend/__init__`` imports ``CascorServiceAdapter`` only inside
+    the *service* branch of ``create_backend``, and the adapter imports
+    ``juniper_cascor_client`` unconditionally at module level — so demo mode runs without
+    the client, and ``conf/requirements_ci.txt`` does not ship it.
+
+    The first draft of this slice imported the adapter at module level to reuse
+    ``is_cascor_nested``. ``main`` imports the cache, so the client silently became a hard
+    **startup** dependency of demo mode: canopy exited 1 before serving a request, and the
+    only symptom was the UI harness reporting "canopy exited early with code 1". Every
+    other test in this file still passed — which is the whole point, and the reason this
+    guard has to be a subprocess with the client removed rather than an assertion made
+    from inside a process that has already imported it.
+    """
+    result = _import_probe(_BLOCK + "import main; print('IMPORTED')")
+    assert "IMPORTED" in result.stdout, f"main.py cannot start without juniper-cascor-client:\n{result.stderr[-2000:]}"
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+def test_the_import_guard_can_actually_fail():
+    """Vacuity guard: blocking the client must really break a module that needs it.
+
+    If ``sys.modules[...] = None`` did not induce an ImportError — a different Python, a
+    vendored copy, a stale ``.pyc`` — the guard above would pass over a genuinely broken
+    import graph and prove nothing at all.
+    """
+    result = _import_probe(_BLOCK + "import backend.cascor_service_adapter; print('UNEXPECTEDLY IMPORTED')")
+    assert "UNEXPECTEDLY IMPORTED" not in result.stdout, "blocking the client did not prevent importing the adapter -- the guard above is vacuous"
+    assert "ImportError" in result.stderr or "ModuleNotFoundError" in result.stderr
