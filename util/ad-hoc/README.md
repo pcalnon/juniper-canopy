@@ -81,7 +81,7 @@ Exit status is always 0 (instrument, not a gate). Requires a sibling
 `juniper-cascor-client` checkout — a missing corpus prints a confident `0`. See
 [Event-loop I/O discipline (X7)](../../docs/AGENTS_REFERENCE.md#event-loop-io-discipline-x7).
 
-The script lands with slice 1a (`#567`).
+The script landed with slice 1a (`#567`).
 
 ---
 
