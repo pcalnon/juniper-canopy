@@ -323,13 +323,33 @@ class TestC4StalenessContract:
             inflight["peak"] = max(inflight["peak"], inflight["now"])
             import time as _time
 
-            _time.sleep(0.05)
+            _time.sleep(0.02)
             inflight["now"] -= 1
             return {"training_active": False}
 
-        cache = StatusCache(fetch_raw=slow_fetch, normalize=lambda raw: {"is_training": False}, interval=0.001)
+        # Wait for the CONDITION, not for a fixed span. An earlier draft slept 0.3 s and
+        # assumed two ticks would fit; under full-suite load the executor delivered one,
+        # so the test failed on scheduling rather than on overlap -- flaky in exactly the
+        # direction that teaches people to re-run a red build instead of reading it.
+        #
+        # Signalled rather than polled: ``on_verdict`` runs on the loop thread at the end
+        # of each tick, so it can set an ``asyncio.Event`` directly. (A poll loop here is
+        # also what ruff's ASYNC110 exists to catch -- the same hook that is blind to the
+        # blocking calls X7 is made of.)
+        ticked_twice = asyncio.Event()
+
+        def on_verdict(_verdict):
+            if cache.ticks >= 2:
+                ticked_twice.set()
+
+        cache = StatusCache(
+            fetch_raw=slow_fetch,
+            normalize=lambda raw: {"is_training": False},
+            interval=0.001,
+            on_verdict=on_verdict,
+        )
         await cache.start()
-        await asyncio.sleep(0.3)
+        await asyncio.wait_for(ticked_twice.wait(), timeout=15.0)
         await cache.stop()
 
         assert cache.ticks >= 2, f"the refresher must have ticked more than once (got {cache.ticks})"
