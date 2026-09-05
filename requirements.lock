@@ -64,7 +64,7 @@ janus==2.0.0
     # via dash
 jinja2==3.1.6
     # via flask
-juniper-cascor-client==0.7.0
+juniper-cascor-client==0.8.0
     # via juniper-canopy (pyproject.toml)
 juniper-cascor-protocol==0.2.0
     # via
