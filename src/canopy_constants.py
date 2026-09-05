@@ -670,6 +670,60 @@ class BackendConstants:
     # path is evidence about the status endpoint and nothing else.
     STATUS_CIRCUIT_BREAKER_NAME: Final[str] = "cascor-status"
 
+    # ── Admission control (X7 slice 1d) ──
+    # Concurrent outbound cascor calls (C4). Bounded BELOW two independent ceilings, and
+    # both matter:
+    #   * the default thread executor, min(32, cpu+4) = 20 here. Bare offload was measured
+    #     peaking at 20/20 with mean occupancy 16.2, turning 3 upstream requests into 42.
+    #   * the cascor client's connection pool, ``DEFAULT_POOL_MAXSIZE = 10``. Exceeding it
+    #     does not fail loudly -- urllib3 discards the surplus connection per request, so
+    #     the symptom is silent connection churn rather than an error.
+    # 4 clears both with room, and is the design's proposed bound (OQ-X3).
+    CASCOR_MAX_CONCURRENT_CALLS: Final[int] = 4
+
+    # Per-route caller budgets, in seconds, for the deadline that decides whether a queued
+    # cascor call is still worth ISSUING (C10).
+    #
+    # Measured, not chosen: extracted by AST from every ``requests.*`` call in
+    # ``dashboard_manager.py`` and its ``timeout=`` argument. Each entry is the MAXIMUM
+    # observed for that route, which makes the table conservative by construction -- it
+    # never declines work earlier than the most patient known caller.
+    #
+    # The maximum is load-bearing rather than tidy: ``/api/state`` is called at THREE
+    # different budgets (1.0 s, 2 s and 5 s) from three sites, so there is no single
+    # "right" per-route value, and a single global constant is worse still -- §5.5 of the
+    # design refutes it because the seven real budgets span 1.0 s to 30 s and one constant
+    # breaks the long ones (a 2 s default would abandon every restart at 2 s of 30).
+    #
+    # A route ABSENT from this table gets no deadline at all: bounded, never declined.
+    # That direction is deliberate. Declining work a caller still wants breaks a feature;
+    # issuing work a caller abandoned wastes an upstream call. The default must be the
+    # second. A caller that knows its own budget can say so with the
+    # ``X-Canopy-Budget-Seconds`` header, which overrides this table.
+    CALLER_BUDGET_SECONDS: Final[dict] = {
+        "/api/train/restart": 30.0,
+        "/api/set_params": 10.0,
+        "/api/stage_dataset": 10.0,
+        "/api/live_dataset_swap": 10.0,
+        "/api/cancel_pending_dataset": 10.0,
+        "/api/dataset/generate": 7.0,
+        "/api/model/select": 7.0,
+        "/api/state": 5.0,
+        "/api/train/status": 5.0,
+        "/api/dataset/generators": 5.0,
+        "/api/v1/workers/list": 2.0,
+        "/api/v1/workers/stats": 2.0,
+    }
+
+    # Header by which a caller declares its own budget, overriding the table above. The
+    # table is a model of canopy's known callers; this is how an unknown one corrects it.
+    CALLER_BUDGET_HEADER: Final[str] = "X-Canopy-Budget-Seconds"
+
+    # An absurd declared budget is a client bug or an attempt to pin a gate slot open;
+    # clamp rather than trust. Below the floor the request could never succeed anyway.
+    CALLER_BUDGET_MIN_SECONDS: Final[float] = 0.1
+    CALLER_BUDGET_MAX_SECONDS: Final[float] = 120.0
+
     # ── Cascor HTTP client budget (X7 slice 1b) ──
     # ``JuniperCascorClient`` defaults to ``timeout=30, retries=3``. Left implicit,
     # those defaults cost ``timeout x (retries + 1) + sum(backoff)`` per call —

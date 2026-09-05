@@ -65,6 +65,7 @@ from pydantic import BaseModel, Field, SecretStr
 
 # from backend.data_adapter import DataAdapter  trunk-ignore(ruff/E402)
 # from backend.training_monitor import TrainingMonitor  trunk-ignore(ruff/E402)
+from backend.admission import CallerGoneAway, offload  # trunk-ignore(ruff/E402)
 from backend.status_cache import StatusCache  # trunk-ignore(ruff/E402)
 from backend.training_monitor import TrainingState  # trunk-ignore(ruff/E402)
 from canopy_constants import APP_VERSION, BackendConstants, TrainingConstants  # trunk-ignore(ruff/E402)
@@ -208,7 +209,17 @@ async def _training_active_for_health() -> bool:
         cached = status_cache.training_active()
         if cached is not None:
             return cached
-    return await asyncio.to_thread(backend.is_training_active)
+    try:
+        return await offload(backend.is_training_active)
+    except CallerGoneAway:
+        # C7: health must stay 200/degraded on an upstream outage — ``values.yaml:222-226``
+        # is binding, and ``test_canopy_never_returns_503_on_upstream_down`` guards it. The
+        # 1d gate is allowed to DECLINE this call, but it is not allowed to turn health
+        # into a 503, so the decline collapses to the same ``bool`` the fallback already
+        # returns under an outage. This is not a fresh negative smuggled past C6: the
+        # accompanying ``_backend_status_extras()`` reports the class and the age, so the
+        # boolean is never the only thing a reader gets.
+        return False
 
 
 def _backend_status_extras() -> dict:
@@ -284,7 +295,7 @@ async def _seed_training_state(backend: Any) -> None:
         # expression -- is the module-global exemption that made the gate unsound in
         # d33ab0a, so it is not available. The recurrence call also takes a lock its
         # training thread holds, which is a loop stall in its own right.
-        initial_status = await asyncio.to_thread(backend.get_status)
+        initial_status = await offload(backend.get_status)
         training_state.update_state(
             status=initial_status.get("fsm_status", "idle"),
             phase=initial_status.get("phase", "idle"),
@@ -504,11 +515,15 @@ if settings.cors_origins:
     )
 
 # Security headers (outermost — runs on every response)
-from middleware import RequestBodyLimitMiddleware, SecurityHeadersMiddleware, SecurityMiddleware
+from middleware import CallerBudgetMiddleware, RequestBodyLimitMiddleware, SecurityHeadersMiddleware, SecurityMiddleware
 from security import browser_origin_allowed, get_api_key_auth, get_rate_limiter, require_browser_control_auth
 
 app.add_middleware(RequestBodyLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
+# X7 slice 1d: stamp each request with its caller's budget before any handler runs, so an
+# offloaded cascor call can be DECLINED at admission when the caller has already gone.
+# Added last, so it wraps outermost and every downstream handler sees the deadline.
+app.add_middleware(CallerBudgetMiddleware)
 
 api_key_auth = get_api_key_auth()
 rate_limiter = get_rate_limiter()
@@ -552,6 +567,23 @@ if settings.metrics_enabled:
     # is the source of truth.
     app.mount("/metrics", MetricsAuthMiddleware(get_prometheus_app(), settings.metrics_trusted_ips))
 app.add_middleware(RequestIdMiddleware)
+
+
+# X7 slice 1d: a declined cascor call is not a canopy fault and not an upstream fault —
+# the work was refused because the caller's own budget had already elapsed while it sat in
+# the admission queue. Registered ABOVE the catch-all so it is not flattened into a 500
+# that reads like a bug; 503 with a distinct marker says "we deliberately did not do this".
+# There is very likely no reader left, which is the whole point.
+@app.exception_handler(CallerGoneAway)
+async def caller_gone_away_handler(request: Request, exc: CallerGoneAway):
+    """Answer 503 for work declined at admission (C10)."""
+    system_logger.info("Declined %s %s: %s", request.method, request.url.path, exc)
+    body = ErrorResponse(
+        error="Request abandoned",
+        detail="The caller's budget elapsed before this upstream call was issued; it was not performed.",
+        status_code=503,
+    )
+    return JSONResponse(body.model_dump(), status_code=503)
 
 
 # Global exception handler for unhandled errors — returns standardized ErrorResponse.
@@ -795,7 +827,7 @@ async def websocket_training_endpoint(websocket: WebSocket):
 
     try:
         # Send initial status
-        status = await asyncio.to_thread(backend.get_status)
+        status = await offload(backend.get_status)
 
         await websocket_manager.send_personal_message({"type": "initial_status", "data": status}, websocket)
 
@@ -1057,7 +1089,7 @@ async def websocket_control_endpoint(websocket: WebSocket):
             timeout = _command_timeout(command)
             try:
                 result = await asyncio.wait_for(
-                    asyncio.to_thread(
+                    offload(
                         _execute_command,
                         command,
                         message.get("params"),
@@ -1341,7 +1373,7 @@ async def get_state():
         def _fetch_live_status_and_params():
             return backend.get_status(), backend._adapter.get_canopy_params()
 
-        live_status, canopy_params = await asyncio.to_thread(_fetch_live_status_and_params)
+        live_status, canopy_params = await offload(_fetch_live_status_and_params)
 
         state = training_state.get_state()
 
@@ -1426,7 +1458,7 @@ async def get_status():
     # back the raw payload instead is what re-creates the PR #340 defect on a half-dead 200.
     if status_cache is not None:
         return status_cache.for_status()
-    return await asyncio.to_thread(backend.get_status)
+    return await offload(backend.get_status)
 
 
 @app.get("/api/stream_health")
@@ -1466,7 +1498,7 @@ async def get_metrics():
     Returns:
         Current metrics dictionary
     """
-    return await asyncio.to_thread(backend.get_metrics)
+    return await offload(backend.get_metrics)
 
 
 @app.get("/api/metrics/history")
@@ -1482,7 +1514,7 @@ async def get_metrics_history(limit: int = 100):
     # N1 event-loop guard: the backend call is a synchronous cascor-client call;
     # run it in a thread so a slow cascor cannot stall canopy's event loop under
     # the un-gated 1 Hz dashboard poll.
-    return {"history": await asyncio.to_thread(backend.get_metrics_history, count)}
+    return {"history": await offload(backend.get_metrics_history, count)}
 
 
 @app.get("/api/network/stats")
@@ -1523,7 +1555,7 @@ async def get_network_stats():
 
     # Service mode: get network data from adapter
     if backend.backend_type == "service" and hasattr(backend, "_adapter"):
-        network_data = await asyncio.to_thread(backend._adapter.get_network_data)
+        network_data = await offload(backend._adapter.get_network_data)
         return adapter.get_network_statistics(
             input_weights=network_data.get("input_weights"),
             hidden_weights=network_data.get("hidden_weights"),
@@ -1545,7 +1577,7 @@ async def get_topology():
     """
     # N1 event-loop guard: same sync-in-async pattern as /api/metrics/history —
     # the un-gated topology poll exercises this route on every slow tick.
-    topology = await asyncio.to_thread(backend.get_network_topology)
+    topology = await offload(backend.get_network_topology)
     if topology is None:
         return JSONResponse({"error": "No topology available"}, status_code=503)
     return topology
@@ -1558,7 +1590,7 @@ async def get_raw_topology():
     Returns CasCor's native format with weight arrays for heatmap visualization.
     """
     # N1 event-loop guard (trivially co-located with /api/topology).
-    raw = await asyncio.to_thread(backend.get_raw_topology)
+    raw = await offload(backend.get_raw_topology)
     if raw is None:
         return JSONResponse({"error": "No raw topology available"}, status_code=503)
     return raw
@@ -1571,7 +1603,7 @@ async def get_dataset():
     Returns:
         Dataset dictionary
     """
-    dataset = await asyncio.to_thread(backend.get_dataset)
+    dataset = await offload(backend.get_dataset)
     if dataset is None:
         return JSONResponse({"error": "No dataset available"}, status_code=503)
     return dataset
@@ -1611,7 +1643,7 @@ async def generate_dataset(request: Request):
         if not hasattr(backend, "regenerate_dataset_from_generator"):
             return JSONResponse({"error": "Backend does not support generator selection"}, status_code=501)
         try:
-            dataset = await asyncio.to_thread(backend.regenerate_dataset_from_generator, generator=generator, n_samples=n_samples)
+            dataset = await offload(backend.regenerate_dataset_from_generator, generator=generator, n_samples=n_samples)
             return dataset or {"status": "generated"}
         except Exception as exc:
             error_id = uuid.uuid4().hex[:12]
@@ -1619,7 +1651,7 @@ async def generate_dataset(request: Request):
             return JSONResponse({"error": "Internal server error", "error_id": error_id}, status_code=500)
 
     try:
-        dataset = await asyncio.to_thread(backend.regenerate_dataset, n_samples=n_samples, n_spirals=n_spirals, noise=noise, n_rotations=n_rotations)
+        dataset = await offload(backend.regenerate_dataset, n_samples=n_samples, n_spirals=n_spirals, noise=noise, n_rotations=n_rotations)
         return dataset or {"status": "generated"}
     except Exception as exc:
         # SEC-14: never leak internal exception messages to clients; log the
@@ -1658,7 +1690,7 @@ async def import_dataset_file(file: UploadFile = File(...)):  # noqa: B008 — F
         return JSONResponse({"error": str(exc)}, status_code=400)
 
     try:
-        dataset = await asyncio.to_thread(backend.import_dataset, inputs, targets, source_label=f"upload:{file.filename or 'unnamed.csv'}")
+        dataset = await offload(backend.import_dataset, inputs, targets, source_label=f"upload:{file.filename or 'unnamed.csv'}")
         return dataset or {"status": "imported"}
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
@@ -1793,7 +1825,7 @@ async def import_dataset_url(request: _ImportUrlRequest):
         return JSONResponse({"error": str(exc)}, status_code=400)
 
     try:
-        dataset = await asyncio.to_thread(backend.import_dataset, inputs, targets, source_label=f"url:{url}")
+        dataset = await offload(backend.import_dataset, inputs, targets, source_label=f"url:{url}")
         return dataset or {"status": "imported"}
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
@@ -1854,7 +1886,7 @@ async def get_decision_boundary(resolution: int = 100):
         Decision boundary dictionary with grid and predictions
     """
     resolution = max(5, min(200, resolution))
-    boundary = await asyncio.to_thread(backend.get_decision_boundary, resolution)
+    boundary = await offload(backend.get_decision_boundary, resolution)
     if boundary is None:
         return JSONResponse({"error": "No decision boundary data available"}, status_code=503)
     return boundary
@@ -2154,7 +2186,7 @@ async def get_snapshots(limit: Optional[int] = None, offset: int = 0):
 
     # F-CANOPY-007: in service mode the inventory comes from the backend that
     # created the files; the local directory is only the fallback.
-    inventory = await asyncio.to_thread(_backend_snapshot_inventory)
+    inventory = await offload(_backend_snapshot_inventory)
     if inventory is not None:
         snapshots = inventory
     else:
@@ -2274,7 +2306,7 @@ async def get_snapshot_detail(snapshot_id: str):
     # F-CANOPY-007: in service mode cascor is the authority on which snapshots
     # exist (it created them); a local copy, when also visible here (shared
     # volume), only enriches the record with its HDF5 attributes.
-    remote = await asyncio.to_thread(_backend_snapshot_detail, snapshot_id)
+    remote = await offload(_backend_snapshot_detail, snapshot_id)
     if remote is not None:
         if not remote.get("found"):
             raise HTTPException(status_code=404, detail="Snapshot not found")
@@ -2344,7 +2376,7 @@ async def _extract_meta_params() -> dict:
     function, not an I/O client, so a receiver-resolving scan sees nothing at all while
     the call blocks the loop exactly as ``backend.get_status()`` does.
     """
-    status = await asyncio.to_thread(backend.get_status)
+    status = await offload(backend.get_status)
     return {k: v for k, v in status.items() if any(k.startswith(p) for p in _META_PARAM_PREFIXES)}
 
 
@@ -2442,7 +2474,7 @@ async def create_snapshot(
         }
 
         # Include dataset versioning metadata for reproducibility
-        status = await asyncio.to_thread(backend.get_status)
+        status = await offload(backend.get_status)
         if "dataset_name" in status:
             snapshot["dataset_name"] = status["dataset_name"]
         if "dataset_version" in status:
@@ -2503,7 +2535,7 @@ async def create_snapshot(
             # the response from cascor's own metadata instead; the local stat
             # now lives only in the h5py fallback branch, which really writes
             # the file it stats.
-            result = await asyncio.to_thread(backend._adapter.save_snapshot, str(snapshot_path), description=description or "")
+            result = await offload(backend._adapter.save_snapshot, str(snapshot_path), description=description or "")
             data = result.get("data", result) if isinstance(result, dict) else {}
             if not isinstance(data, dict):
                 data = {}
@@ -2563,7 +2595,7 @@ async def create_snapshot(
             }
 
         # Include dataset versioning metadata for reproducibility
-        status = await asyncio.to_thread(backend.get_status)
+        status = await offload(backend.get_status)
         if "dataset_name" in status:
             snapshot["dataset_name"] = status["dataset_name"]
         if "dataset_version" in status:
@@ -2624,7 +2656,7 @@ async def restore_snapshot(snapshot_id: str):
     global training_state
 
     # Check if training is running - only allow restore when paused/stopped
-    training_is_active = await asyncio.to_thread(backend.is_training_active)
+    training_is_active = await offload(backend.is_training_active)
     if training_is_active:
         raise HTTPException(
             status_code=409,
@@ -2674,7 +2706,7 @@ async def restore_snapshot(snapshot_id: str):
         # Demo mode: simulate restore by resetting training state
         if backend.backend_type == "demo":
             # Reset demo mode state
-            await asyncio.to_thread(backend.reset_training)
+            await offload(backend.reset_training)
 
             # Update training state with simulated restored values
             if training_state:
@@ -2688,7 +2720,7 @@ async def restore_snapshot(snapshot_id: str):
             # Restore meta parameters if the snapshot captured them
             meta_params = snapshot_data.get("meta_params")
             if meta_params:
-                await asyncio.to_thread(backend.apply_params, **meta_params)
+                await offload(backend.apply_params, **meta_params)
 
             restored_state = {
                 "snapshot_id": snapshot_id,
@@ -2735,7 +2767,7 @@ async def restore_snapshot(snapshot_id: str):
         # A1-iii-a: gate on ``backend_type == "service"`` — recurrence's ``_adapter`` is a
         # different type, so it falls to the h5py fallback rather than cascor's load path.
         if backend.backend_type == "service" and hasattr(backend, "_adapter") and hasattr(backend._adapter, "load_snapshot"):
-            await asyncio.to_thread(backend._adapter.load_snapshot, str(snapshot_path))
+            await offload(backend._adapter.load_snapshot, str(snapshot_path))
         else:
             # Fallback: read HDF5 file and restore state
             try:
@@ -2771,7 +2803,7 @@ async def restore_snapshot(snapshot_id: str):
                 pass
 
         if meta_params:
-            await asyncio.to_thread(backend.apply_params, **meta_params)
+            await offload(backend.apply_params, **meta_params)
 
         restored_state = {
             "snapshot_id": snapshot_id,
@@ -2885,12 +2917,12 @@ async def replay_snapshot_route(snapshot_id: str):
     from fastapi import HTTPException
 
     snapshot_id = _sanitize_snapshot_name(snapshot_id)
-    training_is_active = await asyncio.to_thread(backend.is_training_active)
+    training_is_active = await offload(backend.is_training_active)
     if training_is_active:
         raise HTTPException(status_code=409, detail="Cannot start replay while training is running. Pause or stop training first.")
     adapter = _require_service_adapter()
     try:
-        result = await asyncio.to_thread(adapter.replay_snapshot, snapshot_id)
+        result = await offload(adapter.replay_snapshot, snapshot_id)
         _log_snapshot_activity(action="replay", snapshot_id=snapshot_id, details={"mode": "service"}, message=f"Started replay of snapshot {snapshot_id}")
         _broadcast_snapshot_op("replay_started", snapshot_id, payload=result)
         return result
@@ -2920,7 +2952,7 @@ async def replay_control_route(snapshot_id: str, body: _ReplayControlBody):
     adapter = _require_service_adapter()
     params = body.model_dump(exclude_none=True, exclude={"action"})
     try:
-        result = await asyncio.to_thread(adapter.replay_control, snapshot_id, body.action, **params)
+        result = await offload(adapter.replay_control, snapshot_id, body.action, **params)
         # Don't log/broadcast every play/pause/seek tick — too noisy. The
         # ``stop`` action is the meaningful one to surface.
         if body.action.lower() == "stop":
@@ -2947,12 +2979,12 @@ async def resume_snapshot_route(snapshot_id: str):
     from fastapi import HTTPException
 
     snapshot_id = _sanitize_snapshot_name(snapshot_id)
-    training_is_active = await asyncio.to_thread(backend.is_training_active)
+    training_is_active = await offload(backend.is_training_active)
     if training_is_active:
         raise HTTPException(status_code=409, detail="Cannot resume while training is running. Pause or stop training first.")
     adapter = _require_service_adapter()
     try:
-        result = await asyncio.to_thread(adapter.resume_snapshot, snapshot_id)
+        result = await offload(adapter.resume_snapshot, snapshot_id)
         _log_snapshot_activity(action="resume", snapshot_id=snapshot_id, details={"mode": "service"}, message=f"Resumed snapshot {snapshot_id}")
         _broadcast_snapshot_op("resumed", snapshot_id, payload=result)
         return result
@@ -2969,12 +3001,12 @@ async def retrain_snapshot_route(snapshot_id: str):
     from fastapi import HTTPException
 
     snapshot_id = _sanitize_snapshot_name(snapshot_id)
-    training_is_active = await asyncio.to_thread(backend.is_training_active)
+    training_is_active = await offload(backend.is_training_active)
     if training_is_active:
         raise HTTPException(status_code=409, detail="Cannot retrain while training is running. Pause or stop training first.")
     adapter = _require_service_adapter()
     try:
-        result = await asyncio.to_thread(adapter.retrain_snapshot, snapshot_id)
+        result = await offload(adapter.retrain_snapshot, snapshot_id)
         _log_snapshot_activity(action="retrain", snapshot_id=snapshot_id, details={"mode": "service"}, message=f"Retrain prepared from snapshot {snapshot_id}")
         _broadcast_snapshot_op("retrain_ready", snapshot_id, payload=result)
         return result
@@ -3014,7 +3046,7 @@ async def patch_weights_route(body: _PatchWeightsBody):
 
     adapter = _require_service_adapter()
     try:
-        return await asyncio.to_thread(
+        return await offload(
             adapter.patch_weights,
             target=body.target,
             field=body.field,
@@ -3045,7 +3077,7 @@ async def add_hidden_unit_route(body: _AddHiddenUnitBody):
 
     adapter = _require_service_adapter()
     try:
-        return await asyncio.to_thread(
+        return await offload(
             adapter.add_hidden_unit,
             weights=body.weights,
             bias=body.bias,
@@ -3063,7 +3095,7 @@ async def remove_hidden_unit_route(idx: int):
 
     adapter = _require_service_adapter()
     try:
-        return await asyncio.to_thread(adapter.remove_hidden_unit, idx=idx)
+        return await offload(adapter.remove_hidden_unit, idx=idx)
     except Exception as e:
         system_logger.error("remove_hidden_unit(idx=%d) failed: %s", idx, e)
         raise HTTPException(status_code=500, detail=f"remove_hidden_unit failed: {e}") from e
@@ -3356,7 +3388,7 @@ async def get_worker_stats():
     """
     if backend.backend_type == "service" and hasattr(backend, "_adapter"):
         try:
-            result = await asyncio.to_thread(backend._adapter._client.get_worker_stats)
+            result = await offload(backend._adapter._client.get_worker_stats)
             return result.get("data", result)
         except Exception:
             # SEC-14: return an opaque error_id instead of the exception message.
@@ -3404,7 +3436,7 @@ async def get_worker_list():
     """
     if backend.backend_type == "service" and hasattr(backend, "_adapter"):
         try:
-            result = await asyncio.to_thread(backend._adapter._client.list_workers)
+            result = await offload(backend._adapter._client.list_workers)
             data = result.get("data", result)
             if isinstance(data, dict):
                 for worker in data.get("workers", []) or []:
@@ -3578,7 +3610,7 @@ async def api_train_start(reset: bool = False, body: _TrainStartBody | None = No
     # ``backend.start_training(reset=..., start_fresh=...)`` directly — the plain
     # Start route keeps its existing signature (start_fresh defaults to False).
     start_kwargs = _recurrence_start_kwargs(body.model_dump()) if (backend.backend_type == "recurrence" and body is not None) else {}
-    result = await asyncio.to_thread(backend.start_training, reset=reset, **start_kwargs)
+    result = await offload(backend.start_training, reset=reset, **start_kwargs)
     failure = _control_result_failure(result)
     if failure is not None:
         system_logger.warning("Training start rejected: %s", failure)
@@ -3600,7 +3632,7 @@ async def api_train_pause():
 
     from communication.websocket_manager import create_control_ack_message
 
-    result = await asyncio.to_thread(backend.pause_training)
+    result = await offload(backend.pause_training)
     failure = _control_result_failure(result)
     if failure is not None:
         system_logger.warning("Training pause rejected: %s", failure)
@@ -3621,7 +3653,7 @@ async def api_train_resume():
 
     from communication.websocket_manager import create_control_ack_message
 
-    result = await asyncio.to_thread(backend.resume_training)
+    result = await offload(backend.resume_training)
     failure = _control_result_failure(result)
     if failure is not None:
         system_logger.warning("Training resume rejected: %s", failure)
@@ -3642,7 +3674,7 @@ async def api_train_stop():
 
     from communication.websocket_manager import create_control_ack_message
 
-    result = await asyncio.to_thread(backend.stop_training)
+    result = await offload(backend.stop_training)
     failure = _control_result_failure(result)
     if failure is not None:
         system_logger.warning("Training stop rejected: %s", failure)
@@ -3663,7 +3695,7 @@ async def api_train_reset():
 
     from communication.websocket_manager import create_control_ack_message
 
-    result = await asyncio.to_thread(backend.reset_training)
+    result = await offload(backend.reset_training)
     failure = _control_result_failure(result)
     if failure is not None:
         system_logger.warning("Training reset rejected: %s", failure)
@@ -3680,7 +3712,7 @@ async def api_train_status():
     Returns:
         Training status dictionary with network info and training state.
     """
-    status = await asyncio.to_thread(backend.get_status)
+    status = await offload(backend.get_status)
     return {"backend": backend.backend_type, "execution": backend.execution, **status}
 
 
@@ -3704,7 +3736,7 @@ async def _await_training_stopped(timeout_s: float, poll: float) -> bool:
     """
     deadline = asyncio.get_running_loop().time() + timeout_s
     while True:
-        if not await asyncio.to_thread(backend.is_training_active):
+        if not await offload(backend.is_training_active):
             return True
         if asyncio.get_running_loop().time() >= deadline:
             return False
@@ -3725,7 +3757,7 @@ async def _peek_training_completed(budget: float, poll: float) -> bool:
     try:
         deadline = asyncio.get_running_loop().time() + budget
         while True:
-            status = await asyncio.to_thread(backend.get_status)
+            status = await offload(backend.get_status)
             if isinstance(status, dict):
                 if status.get("completed") or status.get("failed"):
                     return True
@@ -3766,9 +3798,9 @@ async def api_train_restart(body: _TrainRestartBody | None = None):
     reset = bool(body.reset) if body is not None else True
     steps: list[dict] = []
 
-    was_active = await asyncio.to_thread(backend.is_training_active)
+    was_active = await offload(backend.is_training_active)
     if was_active:
-        stop_result = await asyncio.to_thread(backend.stop_training)
+        stop_result = await offload(backend.stop_training)
         stop_failure = _control_result_failure(stop_result)
         if stop_failure is not None:
             steps.append({"step": "stop", "ok": False, "detail": stop_failure})
@@ -3789,7 +3821,7 @@ async def api_train_restart(body: _TrainRestartBody | None = None):
         steps.append({"step": "await_stopped", "ok": True, "detail": "Training stopped"})
 
     # Start consumes the staged dataset; start_fresh discards the model when set.
-    start_result = await asyncio.to_thread(backend.start_training, reset=reset, start_fresh=start_fresh)
+    start_result = await offload(backend.start_training, reset=reset, start_fresh=start_fresh)
     start_failure = _control_result_failure(start_result)
     if start_failure is not None:
         steps.append({"step": "start", "ok": False, "detail": start_failure})
@@ -3861,7 +3893,7 @@ async def _swap_backend(nn_model: str) -> dict:
         current_nn_model = nn_model
         return _model_state_response(nn_model, swapped=False)
 
-    training_is_active = await asyncio.to_thread(backend.is_training_active)
+    training_is_active = await offload(backend.is_training_active)
     if training_is_active:
         raise HTTPException(
             status_code=409,
@@ -4054,7 +4086,7 @@ async def api_set_params(body: SetParamsRequest):
         if "cn_candidate_learning_rate" in backend_updates:
             ts_updates["candidate_learning_rate"] = float(backend_updates["cn_candidate_learning_rate"])
         # Forward all params to backend FIRST (offloaded to thread for sync backends)
-        result = await asyncio.to_thread(backend.apply_params, **backend_updates)
+        result = await offload(backend.apply_params, **backend_updates)
         skipped: list = []
         # N5 (I-4 / T3): cascor's C2a applied/skipped(reason) partition — which
         # submitted keys the live network actually took vs. declined (with the
@@ -4073,7 +4105,14 @@ async def api_set_params(body: SetParamsRequest):
                 # backend in the first place".
                 err_payload = {"error": f"Backend rejected parameters: {error_msg}"}
                 if result.get("skipped"):
-                    err_payload["skipped"] = result["skipped"]
+                    # ``skipped`` is a real runtime key that ``ApplyParamsResult`` does not
+                    # declare. Latent until now: 1a's bare ``asyncio.to_thread`` returns
+                    # ``Any``, so mypy could not see the type at all. 1d's ``offload`` is
+                    # generic in the callable's return, so the TypedDict finally reaches
+                    # here -- the same class of gap the three ignores just below already
+                    # record. Widening the TypedDict is a protocol change and belongs with
+                    # the C2a work, not in an admission-control slice.
+                    err_payload["skipped"] = result["skipped"]  # type: ignore[typeddict-item]
                 return JSONResponse(err_payload, status_code=502)
             skipped = list(result.get("skipped") or [])  # type: ignore[call-overload]  # pre-existing: dict.get() is object-typed, runtime value is a list (surfaced by the A1-iv-2 main.py mypy re-check)
             applied_detail = list(result.get("applied") or [])  # type: ignore[call-overload]  # runtime value is list[str] (C2a applied, canopy-keyed)
@@ -4150,7 +4189,7 @@ async def api_stage_dataset(body: StageDatasetRequest):
     """
     try:
         params = body.model_dump(exclude_none=True)
-        result = await asyncio.to_thread(backend.stage_dataset, **params)
+        result = await offload(backend.stage_dataset, **params)
         if isinstance(result, dict) and not result.get("ok", True):
             error_msg = result.get("error", "unknown")
             system_logger.warning("Backend rejected dataset staging: %s", error_msg)
@@ -4167,7 +4206,7 @@ async def api_stage_dataset(body: StageDatasetRequest):
 async def api_cancel_pending_dataset():
     """Cancel any staged dataset change — Phase 1 Cancel button target."""
     try:
-        result = await asyncio.to_thread(backend.cancel_pending_dataset)
+        result = await offload(backend.cancel_pending_dataset)
         if isinstance(result, dict) and not result.get("ok", True):
             error_msg = result.get("error", "unknown")
             system_logger.warning("Backend rejected dataset cancel: %s", error_msg)
@@ -4206,7 +4245,7 @@ async def api_get_experimental_functions():
     safe default — no Live Switch affordance until we can confirm).
     """
     try:
-        result = await asyncio.to_thread(backend.get_experimental_functions)
+        result = await offload(backend.get_experimental_functions)
         if isinstance(result, dict) and not result.get("ok", True):
             error_msg = result.get("error", "unknown")
             system_logger.warning("Backend rejected experimental_functions read: %s", error_msg)
@@ -4228,7 +4267,7 @@ async def api_set_experimental_functions(body: ExperimentalFunctionsRequest):
     must trust the returned value and reconcile UI state to it.
     """
     try:
-        result = await asyncio.to_thread(backend.set_experimental_functions, body.enabled)
+        result = await offload(backend.set_experimental_functions, body.enabled)
         if isinstance(result, dict) and not result.get("ok", True):
             error_msg = result.get("error", "unknown")
             system_logger.warning("Backend rejected experimental_functions write: %s", error_msg)
@@ -4272,7 +4311,7 @@ async def api_live_dataset_swap(body: StageDatasetRequest):
     """
     try:
         params = body.model_dump(exclude_none=True)
-        result = await asyncio.to_thread(backend.swap_dataset_live, **params)
+        result = await offload(backend.swap_dataset_live, **params)
         if isinstance(result, dict) and not result.get("ok", True):
             error_msg = result.get("error", "unknown")
             system_logger.warning("Backend rejected live dataset swap: %s", error_msg)
@@ -4298,7 +4337,7 @@ async def api_cancel_live_dataset_swap():
     finished" and leaves the UI alone.
     """
     try:
-        result = await asyncio.to_thread(backend.cancel_swap_dataset_live)
+        result = await offload(backend.cancel_swap_dataset_live)
         if isinstance(result, dict) and not result.get("ok", True):
             error_msg = result.get("error", "unknown")
             system_logger.warning("Backend rejected live swap cancel: %s", error_msg)
@@ -4335,7 +4374,7 @@ async def api_get_dataset_swap_events(since: Optional[str] = None):
     panels treat a 502 as "no events known yet" and render empty state.
     """
     try:
-        result = await asyncio.to_thread(backend.get_dataset_swap_events, since=since)
+        result = await offload(backend.get_dataset_swap_events, since=since)
         if isinstance(result, dict) and not result.get("ok", True):
             error_msg = result.get("error", "unknown")
             system_logger.warning("Backend rejected dataset_swap events fetch: %s", error_msg)
@@ -4364,7 +4403,7 @@ async def api_get_snapshot_dataset_swaps(snapshot_id: str):
     missing or unreadable snapshot never produces a hard UI error.
     """
     try:
-        result = await asyncio.to_thread(backend.get_snapshot_dataset_swaps, snapshot_id=snapshot_id)
+        result = await offload(backend.get_snapshot_dataset_swaps, snapshot_id=snapshot_id)
         if isinstance(result, dict) and not result.get("ok", True):
             error_msg = result.get("error", "unknown")
             system_logger.warning("Backend rejected snapshot dataset_swap events fetch (%s): %s", snapshot_id, error_msg)
