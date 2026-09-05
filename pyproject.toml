@@ -159,7 +159,19 @@ juniper-cascor = [
     # Earlier releases lack the surface, so the floor is the oldest version the
     # adapter can run against. (Prior floor 0.6.0: FakeCascorClient ``_request``
     # in-memory parity, cascor-client#91.)
-    "juniper-cascor-client>=0.7.0,<0.8.0",
+    #
+    # Cap widened <0.8.0 -> <0.9.0 on 2026-09-05. cascor-client's next release
+    # carries the X7 C8 fix -- ``RETRY_ALLOWED_METHODS`` narrowed to
+    # ``["HEAD", "GET"]``, so a failed ``POST /v1/training/start`` is no longer
+    # retried into up to four training runs (cascor-client ``APD-CCLIENT-001``).
+    # That release also adds ``backoff_factor`` as a public constructor
+    # parameter (``APD-CCLIENT-013``), which makes it a MINOR: 0.8.0, not 0.7.1.
+    # The old ``<0.8.0`` cap would therefore have excluded the very artefact
+    # canopy needs, so the cap moves first and the floor follows publication --
+    # pinning a floor at an unpublished version resolves nothing. Floor stays
+    # ``>=0.7.0`` until 0.8.0 is on PyPI (cascor-client
+    # ``notes/releases/RELEASE_NOTES_v0.8.0.md``, "After publication").
+    "juniper-cascor-client>=0.7.0,<0.9.0",
 ]
 observability = [
     # prometheus-client moved to [project] dependencies on 2026-05-10
