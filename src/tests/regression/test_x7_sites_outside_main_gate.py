@@ -36,6 +36,7 @@ runtime is ~2.5 s (five 0.4 s stalls).
 from __future__ import annotations
 
 import asyncio
+import importlib
 import sys
 import time
 import types
@@ -50,7 +51,12 @@ import pytest
 # the name present. A real install is left untouched.
 if "juniper_cascor_client.constants" not in sys.modules:
     try:
-        import juniper_cascor_client.constants  # noqa: F401
+        # `importlib.import_module` rather than a bare `import` statement: the import
+        # is for its SIDE EFFECT (populate sys.modules, or raise so the stub below
+        # runs), and a bare import whose name is never referenced reads as dead to
+        # CodeQL -- an unresolved alert of that shape blocks the merge while every
+        # check stays green.
+        importlib.import_module("juniper_cascor_client.constants")
     except ImportError:
         _constants = types.ModuleType("juniper_cascor_client.constants")
         _constants.ENDPOINT_TRAINING_START = "/v1/training/start"
