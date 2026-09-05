@@ -43,6 +43,7 @@ import asyncio
 import logging
 from typing import Any, Callable, Dict, List, Optional, cast
 
+import validation_gate
 from backend.cascor_service_adapter import CascorServiceAdapter, _first_defined
 from backend.protocol import (
     ApplyParamsResult,
@@ -103,9 +104,31 @@ class ServiceBackend:
         "nn_spiral_number": TrainingConstants.DEFAULT_SPIRAL_NUMBER,
     }
 
-    def start_training(self, reset: bool = True, start_fresh: bool = False, **kwargs: Any) -> ControlResult:
+    def start_training(self, reset: bool = True, start_fresh: bool = False, accept_missing_validation_split: bool = False, **kwargs: Any) -> ControlResult:
+        """Start training, refusing first if the dataset has no validation split.
+
+        Design §6.4: an interactive run must not proceed silently when ``X_val`` is
+        absent. cascor refuses at ingress (§6.1 rule 1) and that refusal is what
+        ultimately protects the metric, but by then the user has clicked Start and gets
+        a service error rather than a choice. Refusing HERE, before the request, is what
+        lets canopy explain the problem and offer §6.4's options.
+
+        ``accept_missing_validation_split`` is the user's choice arriving back -- §6.4
+        option 1. It is a parameter rather than a setting on purpose: the decision
+        belongs to one run, and a persisted flag would silently apply to the next one.
+
+        Args:
+            reset: legacy query flag, not forwarded (see below).
+            start_fresh: discard the current model rather than continuing it.
+            accept_missing_validation_split: proceed despite a missing validation split,
+                having been told what that costs. The caller is responsible for
+                recording the warning for the run's lifetime.
+        """
         if self._adapter.is_training_in_progress():
             return ControlResult(ok=False, error="Training already in progress")
+        gate = self._validation_split_refusal(accept_missing_validation_split)
+        if gate is not None:
+            return gate
         if self._adapter.network is None:
             # PR-B2: cascor creates the network from the dataset dims on start
             # (PR-B1), honoring this class's long-standing "will create on
@@ -124,6 +147,39 @@ class ServiceBackend:
         if not started:
             return ControlResult(ok=False, error=error or "Failed to start training")
         return ControlResult(ok=True, is_training=True)
+
+    def _validation_split_refusal(self, accepted: bool) -> Optional[ControlResult]:
+        """Return a refusal when the staged dataset is KNOWN to have no validation split.
+
+        ``None`` means "nothing to refuse", which covers three different situations and
+        deliberately does not distinguish them here: the split exists, the user has
+        already accepted its absence, or this cascor is too old to say. The third is
+        surfaced as a warning by :func:`validation_gate.decide`, not as a refusal --
+        gating on "cannot tell" would block every run against an older cascor and teach
+        the user to click past the gate, which is worse than the thing being guarded.
+        """
+        if accepted:
+            return None
+        decision = validation_gate.decide(self._adapter.get_dataset_info())
+        if not decision.show_gate:
+            return None
+        return ControlResult(
+            ok=False,
+            error=validation_gate.CONTINUE_WITH_WARNING_NOTE,
+            data={
+                "validation_gate": True,
+                "options": [
+                    {
+                        "id": option.option_id,
+                        "label": option.label,
+                        "description": option.description,
+                        "enabled": option.enabled,
+                        "disabled_reason": option.disabled_reason,
+                    }
+                    for option in decision.options
+                ],
+            },
+        )
 
     def _ensure_first_start_dataset(self) -> Optional[str]:
         """Trivial-case first start: make sure cascor has data to size the network from.
@@ -287,12 +343,23 @@ class ServiceBackend:
         if not raw:
             return None
         if "train_samples" in raw or "input_features" in raw:
+            # THREE partitions. ``num_samples`` summed train + test, which was the whole
+            # dataset only while there were two; with a val split it under-counts by the
+            # validation rows and the dashboard reports a dataset smaller than the one
+            # cascor is training on.
+            #
+            # ``val_samples`` is absent from a pre-#623 cascor, and ``.get(..., 0)`` is the
+            # right reading of that: a producer that does not report a validation split has
+            # none to report. It is NOT a claim that the split is empty -- see
+            # ``has_validation_split`` below, which distinguishes "no val" from "cascor too
+            # old to say".
             result = {
-                "num_samples": raw.get("train_samples", 0) + raw.get("test_samples", 0),
+                "num_samples": raw.get("train_samples", 0) + raw.get("val_samples", 0) + raw.get("test_samples", 0),
                 "num_features": raw.get("input_features", 0),
                 "num_classes": raw.get("output_features", 0),
                 "loaded": raw.get("loaded", True),
                 "train_samples": raw.get("train_samples", 0),
+                "val_samples": raw.get("val_samples", 0),
                 "test_samples": raw.get("test_samples", 0),
             }
             if "inputs" in raw:
