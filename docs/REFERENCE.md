@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.0
+**Version:** 0.25.2
 **Status:** Active
-**Last Updated:** August 31, 2026
+**Last Updated:** September 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -12,11 +12,16 @@
 ## Table of Contents
 
 - [Overview](#overview)
+- [Topology Node Selection](#topology-node-selection)
 - [AGENTS Reference](#agents-reference)
+- [Hierarchy Depth Filter](#hierarchy-depth-filter)
+- [Plotly PNG Export / CSP](#plotly-png-export--csp)
 - [API Reference](#api-reference)
 - [Configuration Reference](#configuration-reference)
 - [WebSocket Reference](#websocket-reference)
 - [Testing Reference](#testing-reference)
+- [Event-loop I/O discipline (X7)](#event-loop-io-discipline-x7)
+- [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
 - [CI/CD Reference](#cicd-reference)
 - [CasCor Backend Reference](#cascor-backend-reference)
 - [Demo Mode Reference](#demo-mode-reference)
@@ -33,6 +38,17 @@ For comprehensive usage guides, see the corresponding manuals linked from [DOCUM
 
 ---
 
+## Topology Node Selection
+
+Click / box / lasso highlight on the Network Topology tab. The panel's "click elsewhere to deselect" sentence is false on `main` (plotly emits `plotly_click` only on a point hit). Clicking the selected node again *does* clear. `-selected-nodes` is an Input of `update_network_graph`; an unguarded `[]` write costs a 1.5–31 s rebuild. canopy#573 (not yet on `main`) adds a Clear button and returns `dash.no_update` when there is nothing to clear.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046) | Developer contract: F-044 `customdata` fallback, F-045 label-derived layer, F-046 empty-canvas no-event, store-write cost, incoming #573 |
+| [USER_MANUAL.md § Network Topology Tab](USER_MANUAL.md#network-topology-tab) | Operator gestures and the false "elsewhere" hint |
+
+---
+
 ## AGENTS Reference
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan (juniper-ml plan §P5 step e), so it is read on demand rather than loaded into every session. Nothing was rewritten; each relocated section carries a provenance line naming where it came from.
@@ -46,6 +62,40 @@ The same cut sent documentation-about-documentation to [DOCUMENTATION_OVERVIEW.m
 **Hazards were deliberately not relocated.** Directives whose non-application destroys work stay resident in [`AGENTS.md` § Hazards](../AGENTS.md#hazards-resident--do-not-relocate), because a pointer only helps an agent that already knows to look.
 
 ---
+
+## Hierarchy Depth Filter
+
+CAN-020 view filter on the Network Topology tab. `_apply_hierarchy_filter` is the oracle (`0` / `None` / `>= N` → `"all"`). F-CANOPY-042 is the label-wiring defect (slider value was State, not Input; rest-state `0` rendered `"0 of N"`). Repair lands in canopy#570 as a dedicated clientside callback — do not merge it back into the bounds-sync callback (circular dependency).
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020) | Developer contract: filter arms, label split, tests, pitfalls |
+| [USER_MANUAL.md § Network Topology Tab](USER_MANUAL.md#network-topology-tab) | Operator: slider, `"all"` vs `"K of N"`, rest-state `0` |
+| [DEVELOPER_CHEATSHEET.md § 6](DEVELOPER_CHEATSHEET.md#6-change-the-depth-filter-label-or-filter) | Short procedure + troubleshooting row |
+
+---
+
+## Plotly PNG Export / CSP
+
+The Topology modebar camera is a Plotly PNG export. It rasterises SVG →
+Blob → `<img>` → canvas, so `img-src` must allow `blob:` **and** `data:`
+(Bootstrap icons). `blob:` belongs on `img-src` only — not `script-src`
+or `default-src`. There is no CSP environment variable; the shipped
+string is `SecurityConstants.DEFAULT_CSP_POLICY`, aliased as
+`middleware._DEFAULT_CSP`.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) | Operator runbook (F-CANOPY-047) |
+| [USER_MANUAL.md troubleshooting #6](USER_MANUAL.md#6-modebar-camera-does-nothing-no-png-file) | Silent-camera symptom |
+| [`test_csp_plotly_image_export.py`](../src/tests/regression/test_csp_plotly_image_export.py) | Pins `blob:` on `img-src` only |
+| [`test_csp_bootstrap_cdn.py`](../src/tests/regression/test_csp_bootstrap_cdn.py) | Pins `data:` + Bootstrap CDN |
+
+```bash
+cd src
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
+```
 
 ## API Reference
 
@@ -135,6 +185,42 @@ pytest tests/ --cov=. --cov-report=html  # Coverage report
 
 ---
 
+## Event-loop I/O discipline (X7)
+
+Canopy is a single-worker uvicorn. Synchronous `requests` I/O inside `async def` stalls
+every route, including `/v1/health/live`. Slice 1b (`#566`) bounds the cascor client
+budget; slice 1a (`#567`) moves remaining calls off the loop.
+
+| Surface | Purpose |
+| --- | --- |
+| [AGENTS_REFERENCE.md § Event-loop I/O discipline](AGENTS_REFERENCE.md#event-loop-io-discipline-x7) | Operator runbook: idiom, gate, T-A2/T-A3/T-A4, callgraph, pitfalls |
+| [`AGENTS.md` § Hazards](../AGENTS.md#hazards-resident--do-not-relocate) | Resident one-line hazard |
+| `src/tests/regression/test_x7_client_budget.py` | Slice 1b — T-B1 / T-B2 (on `main`) |
+| `src/tests/regression/test_x7_off_loop_discipline.py` | Slice 1a structural gate (`main.py` only) |
+| `src/tests/regression/test_x7_loop_responsiveness.py` | Slice 1a behavioural tests |
+| `util/ad-hoc/2026-09-04_async_blocking_callgraph.py` | Adapter-wide census (instrument, not a gate) |
+
+```bash
+cd src && pytest tests/regression/test_x7_client_budget.py -v
+```
+
+---
+
+## Cascor status cache (X7 slice 1c)
+
+Incoming with `#578`. One background task polls cascor; `/api/status` and the status bar
+serve its **class** (`ok` / `unreachable` / `indeterminate`), not a raw payload. That is
+what keeps a half-dead 200 from rendering as a healthy **"Stopped"**.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c) | Operator runbook: intervals, classifier, dedicated breaker, C6 / C7 / C9, T-C1–T-C4 |
+
+# Lands with #578 — do not markdown-link the file until it exists on main
+cd src && pytest tests/regression/test_x7_status_cache.py -v
+
+Distinct from the 1a / 1b off-loop runbook (docs `#568`).
+
 ## CI/CD Reference
 
 Pipeline configuration, hooks, and workflow reference.
@@ -198,6 +284,7 @@ Application constants are centralized in `src/canopy_constants.py`:
 | `TrainingConstants` | Training parameters (epochs, learning rates, hidden units) |
 | `DashboardConstants` | UI behavior (update intervals, timeouts, data limits) |
 | `ServerConstants` | Server configuration (host, port, WebSocket paths) |
+| `SecurityConstants` | HTTP headers and `DEFAULT_CSP_POLICY` (`img-src 'self' data: blob:`) |
 
 See [CONSTANTS_GUIDE.md](cascor/CONSTANTS_GUIDE.md) for the complete constants management guide.
 
@@ -230,6 +317,6 @@ The most commonly used environment variables for juniper-canopy configuration. F
 
 ---
 
-**Last Updated:** August 31, 2026
-**Version:** 0.25.1
+**Last Updated:** September 4, 2026
+**Version:** 0.25.2
 **Maintainer:** Paul Calnon

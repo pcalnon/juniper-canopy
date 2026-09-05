@@ -6434,6 +6434,27 @@ class DashboardManager:
         # PR #340 ("handle the circuit-open 200 explicitly instead
         # of as Stopped").
         error_marker = status_data.get("error") if isinstance(status_data, dict) else None
+
+        # X7 slice 1c: render the class the status cache CONCLUDED, not the payload it
+        # happens to hold. The ``error``-marker branch below is necessary but not
+        # sufficient: on a *half-dead 200* — a dict that carries no error and is not
+        # cascor-shaped — it does not fire, every field falls back to its False/0 default,
+        # and the elif chain renders "Stopped", which is indistinguishable from a healthy
+        # idle backend. That is the defect PR #340 was opened to fix, and reading the
+        # payload rather than the verdict re-creates it. The cache classifies that shape
+        # UNREACHABLE, so ``status_class`` fires here where ``error`` could not.
+        #
+        # ``indeterminate`` gets its own label rather than borrowing "Unreachable":
+        # the breaker was open, so the tick SKIPPED the call and observed nothing.
+        # Rendering "Unreachable" would assert evidence that was never gathered.
+        status_class = status_data.get("status_class") if isinstance(status_data, dict) else None
+        if status_class == "unreachable":
+            return self._status_bar_error_tuple("Unreachable", f"Backend unreachable ({error_marker or 'no cascor-shaped status'})")
+        if status_class == "indeterminate":
+            return self._status_bar_error_tuple("Unknown", f"Backend status unknown ({error_marker or 'not polled'})")
+
+        # Legacy path: demo/recurrence serve the raw backend result (no cache), and a UI
+        # running against an older canopy sees no ``status_class`` at all.
         if error_marker:
             return self._status_bar_error_tuple("Unreachable", f"Backend unreachable ({error_marker})")
 

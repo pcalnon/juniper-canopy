@@ -30,6 +30,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **X7 event-loop I/O operator docs.** Runbook in `docs/AGENTS_REFERENCE.md` covering the
+  single-worker outage class (sync `requests` inside `async def` stalls `/v1/health/live`),
+  the slice 1b client budget already on `main` (`CASCOR_CLIENT_RETRIES = 0`), the slice 1a
+  gate / T-A2–T-A4 / adapter callgraph landing with `#567`, and the pitfalls (`ruff
+  --select ASYNC` is blind; the `main.py` gate cannot see adapter I/O). Cheatsheet,
+  testing manuals, QUICK_START Issue 8, CasCor adapter notes, and `/v1/health/live` in
+  the API reference. Resident hazard in `AGENTS.md`.
+- **Hierarchy depth-filter operator docs (CAN-020 / F-CANOPY-042).** Canonical
+  runbook in `docs/AGENTS_REFERENCE.md` § Hierarchy Depth Filter: filter arms
+  (`0` / `None` / `>= N` → `"all"`), why the slider ships `value=0`, the
+  circular-dependency that forbids putting `-depth-slider.value` on the
+  bounds-sync callback, and why the label must not ride `update_network_graph`
+  (1.5–31 s). Operator copy and a `"0 of N"` troubleshooting row in
+  `docs/USER_MANUAL.md`. Pins in the cheatsheet, REFERENCE, TESTING_REFERENCE.
+  canopy#570 is the incoming label-callback split — documented as not yet on
+  `main`.
+
+- **Topology node-selection operator docs (F-CANOPY-044 / F-CANOPY-045 / F-CANOPY-046).** Canonical
+  runbook in `docs/AGENTS_REFERENCE.md` § Topology Node Selection: click identity
+  (`text` or edge `customdata`), layer from the label not `curveNumber`, the
+  toggle that *does* clear, and why empty-canvas "click elsewhere" never runs
+  the callback (plotly emits `plotly_click` only on a point hit). Documents the
+  unguarded `[]` write into `-selected-nodes` (an Input of `update_network_graph`,
+  1.5–31 s). Operator copy and troubleshooting row 6 in `docs/USER_MANUAL.md`.
+  Pins in the cheatsheet, REFERENCE, TESTING_REFERENCE. canopy#573 is the
+  incoming Clear-selection button — documented as not yet on `main`.
+
+- **F-CANOPY-047 operator docs.** The Topology modebar camera is a Plotly PNG export that rasterises SVG → Blob → `<img>` → canvas, so `img-src` must allow `blob:` *and* `data:`. `blob:` is img-only. Canonical runbook: `docs/AGENTS_REFERENCE.md` § Plotly PNG Export. Pins: `src/tests/regression/test_csp_plotly_image_export.py` and `test_csp_bootstrap_cdn.py`.
+
+- **X7 slice 1c status-cache operator docs.** Runbook in `docs/AGENTS_REFERENCE.md` for the
+  incoming `#578` cache: one 1 Hz poll, `/api/status` publishes `status_class` /
+  `stale` / `age_seconds`, the status bar renders the class (half-dead 200 → Unreachable,
+  not Stopped), dedicated `cascor-status` breaker, C6 never-OK omits `is_training`, C7
+  health extras, T-C1–T-C4. Cheatsheet, QUICK_START Issue 9, API `/api/status` envelope,
+  CasCor adapter notes, testing manuals. Resident hazard in `AGENTS.md`. Distinct from
+  the 1a / 1b off-loop runbook (docs `#568`).
 - Complementary F-CANOPY-046 tests: `#573` already pins the clear control, the hint text, and the click-path `no_update` guard. The rebuild consumer (`-selected-nodes` as an Input of `update_network_graph`), the selectedData fall-through that also used to write `[]`, and the layout↔callback style contract for the clear button were untested. New `src/tests/unit/frontend/test_f046_selection_rebuild_contract.py`.
 
 - Tests pinning Stage 2 (`#511`) live-callback contracts that the original PR's happy-path suite left open: `_update_unified_status_bar_handler` element `[9]` stays `dash.no_update` on every error path (so a hiccup cannot blank `training-status-store` and re-fire its consumers), `{is_running, phase}` is coerced then suppressed, and `_update_system_panels_handler` isolates a `/api/status` Timeout/JSON failure from the details and stream-health surfaces.

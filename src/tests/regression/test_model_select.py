@@ -23,6 +23,7 @@ refused (409); a failed ``initialize()`` leaves the current backend intact (502)
 shared ``_seed_training_state`` helper handles every backend type.
 """
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -105,7 +106,7 @@ def test_selection_targets_recurrence_requires_provider_and_url(monkeypatch):
 def test_seed_training_state_handles_every_backend_type():
     # Must not raise for any backend_type (the shared startup/swap seeder).
     for backend_type in ("demo", "service", "recurrence", "unknown"):
-        main._seed_training_state(_FakeBackend(backend_type=backend_type))
+        asyncio.run(main._seed_training_state(_FakeBackend(backend_type=backend_type)))
 
 
 @pytest.mark.regression

@@ -39,6 +39,7 @@
 #
 #####################################################################################################################################################################################################
 
+import asyncio
 import logging
 from typing import Any, Callable, Dict, List, Optional, cast
 
@@ -163,7 +164,21 @@ class ServiceBackend:
     # --- Status and metrics ---
 
     def get_status(self) -> StatusResult:
-        raw = self._adapter.get_training_status()
+        """Live status fetch, normalized. Unchanged behaviour — see ``normalize_status``."""
+        return self.normalize_status(self._adapter.get_training_status())
+
+    @staticmethod
+    def normalize_status(raw: Any) -> StatusResult:
+        """Map cascor's raw training status onto canopy's ``StatusResult`` shape.
+
+        Split out of ``get_status`` for the X7 slice-1c status cache, which needs the two
+        halves separately: it classifies the **raw** response — the nested check below is
+        the classifier's discriminator too — and then serves the **normalized** one to
+        readers. Composing them as ``get_status`` does would force the cache to choose one.
+
+        Pure and static; the body moved verbatim, so ``get_status`` is exactly this
+        function applied to a live fetch.
+        """
         if not isinstance(raw, dict) or not CascorServiceAdapter.is_cascor_nested(raw):
             return cast(StatusResult, raw)
         sm = raw.get("state_machine", {}) if isinstance(raw.get("state_machine"), dict) else {}
@@ -347,12 +362,16 @@ class ServiceBackend:
         """Connect to cascor service, attach non-destructively, sync state, and start metrics relay."""
         connected = await self._adapter.connect()
         if connected:
-            # Non-destructive attach: check for existing network without creating/resetting
-            has_network = self._adapter.attach_to_existing()
+            # Non-destructive attach: check for existing network without creating/resetting.
+            # X7: both calls below are synchronous cascor HTTP — ``attach_to_existing``
+            # issues a ``get_network()`` and ``sync()`` issues several more. This runs on
+            # the request path, not just at startup: ``_swap_backend`` (main.py) awaits
+            # ``initialize()`` when the operator changes model at runtime.
+            has_network = await asyncio.to_thread(self._adapter.attach_to_existing)
             if has_network:
                 logger.info("ServiceBackend: attached to existing cascor network")
                 # Sync current cascor state into canopy
-                self._synced_state = CascorStateSync(self._adapter.client).sync()
+                self._synced_state = await asyncio.to_thread(CascorStateSync(self._adapter.client).sync)
                 logger.info(f"ServiceBackend: state synced — status={self._synced_state.status}, epoch={self._synced_state.current_epoch}, params={len(self._synced_state.params)} keys")
             else:
                 logger.info("ServiceBackend: no existing cascor network found (will create on start)")
