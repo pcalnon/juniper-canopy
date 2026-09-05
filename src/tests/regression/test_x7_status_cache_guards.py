@@ -34,6 +34,7 @@ refresher + never-OK C6). This file covers leftover those tests cannot see:
 
 from __future__ import annotations
 
+import contextlib
 from unittest.mock import MagicMock
 
 import pytest
@@ -415,17 +416,17 @@ class TestBackendStatusClassGauge:
         import observability as obs
 
         obs._canopy_metrics = None
-        try:
+        # Both suppressions are deliberate and narrow, and `contextlib.suppress` says
+        # so where a bare `except: pass` reads as an oversight (CodeQL flags it as one).
+        # Unregistering a collector that was never registered is the normal path on a
+        # first run, and prometheus_client is an optional dependency here.
+        with contextlib.suppress(ImportError):
             from prometheus_client import REGISTRY
 
             collector = REGISTRY._names_to_collectors.get("juniper_canopy_backend_status_class")
             if collector is not None:
-                try:
+                with contextlib.suppress(KeyError, ValueError):
                     REGISTRY.unregister(collector)
-                except (KeyError, ValueError):
-                    pass
-        except ImportError:
-            pass
         yield
         obs._canopy_metrics = None
 
