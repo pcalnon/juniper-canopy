@@ -164,7 +164,21 @@ class ServiceBackend:
     # --- Status and metrics ---
 
     def get_status(self) -> StatusResult:
-        raw = self._adapter.get_training_status()
+        """Live status fetch, normalized. Unchanged behaviour — see ``normalize_status``."""
+        return self.normalize_status(self._adapter.get_training_status())
+
+    @staticmethod
+    def normalize_status(raw: Any) -> StatusResult:
+        """Map cascor's raw training status onto canopy's ``StatusResult`` shape.
+
+        Split out of ``get_status`` for the X7 slice-1c status cache, which needs the two
+        halves separately: it classifies the **raw** response — the nested check below is
+        the classifier's discriminator too — and then serves the **normalized** one to
+        readers. Composing them as ``get_status`` does would force the cache to choose one.
+
+        Pure and static; the body moved verbatim, so ``get_status`` is exactly this
+        function applied to a live fetch.
+        """
         if not isinstance(raw, dict) or not CascorServiceAdapter.is_cascor_nested(raw):
             return cast(StatusResult, raw)
         sm = raw.get("state_machine", {}) if isinstance(raw.get("state_machine"), dict) else {}

@@ -1986,6 +1986,50 @@ class CascorServiceAdapter:
             logger.error(f"Failed to get training status: {e}")
             return {"is_training": False, "error": str(e)}
 
+    # Declaration only, deliberately without a value: it gives mypy the type while leaving
+    # the attribute genuinely absent until first use, which is what makes the lazy
+    # ``AttributeError`` path below work for ``__new__``-created instances. Assigning
+    # ``None`` here would create it and turn the lazy branch into dead code.
+    _status_circuit: CircuitBreaker
+
+    @property
+    def _status_cb(self) -> CircuitBreaker:
+        """Dedicated breaker for the X7 slice-1c status refresher.
+
+        Lazy for the same reason as ``_cb``: instances built via ``__new__`` (tests, and
+        the model-swap path) never run ``__init__``.
+        """
+        try:
+            return self._status_circuit
+        except AttributeError:
+            self._status_circuit = CircuitBreaker(
+                name=BackendConstants.STATUS_CIRCUIT_BREAKER_NAME,
+                failure_threshold=BackendConstants.CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+                recovery_timeout=BackendConstants.CIRCUIT_BREAKER_RECOVERY_TIMEOUT,
+            )
+            return self._status_circuit
+
+    def get_training_status_for_refresh(self) -> Dict[str, Any]:
+        """``get_training_status`` on a **dedicated** breaker, for the 1c refresher.
+
+        Identical call and identical return shape — the only difference is which breaker
+        counts the failures, and that difference is the point. Sharing ``_cb`` would let
+        unrelated traffic (five failing ``get_network_data()`` calls) short-circuit the
+        status poll for 60 s while cascor is perfectly healthy, and the cache would
+        publish INDETERMINATE for a minute on no evidence at all.
+
+        Deliberately a separate method rather than a flag on ``get_training_status``: the
+        existing method has five other callers whose breaker semantics must not change.
+        """
+        try:
+            return self._status_cb.call(
+                lambda: self._unwrap_response(self._client.get_training_status()),
+                fallback=lambda: {"is_training": False, "error": "circuit open"},
+            )
+        except JuniperCascorClientError as e:
+            logger.error(f"Failed to get training status (refresher): {e}")
+            return {"is_training": False, "error": str(e)}
+
     def get_network_data(self) -> Dict[str, Any]:
         try:
             return self._cb.call(

@@ -660,6 +660,16 @@ class BackendConstants:
     CIRCUIT_BREAKER_FAILURE_THRESHOLD: Final[int] = 5
     CIRCUIT_BREAKER_RECOVERY_TIMEOUT: Final[float] = 60.0
 
+    # ── Status-refresher circuit breaker (X7 slice 1c) ──
+    # A SECOND breaker instance, not a second name for the first one: ``CircuitBreaker``
+    # keeps its state per instance and uses ``name`` only for logging. The status
+    # refresher needs its own because the shared ``_cb`` fronts five call sites, so five
+    # failing ``get_network_data()`` calls would open it for ``get_training_status()``
+    # too — freezing the status cache for the full 60 s recovery timeout **against a
+    # healthy upstream**. With a dedicated breaker, an open circuit on the refresher's
+    # path is evidence about the status endpoint and nothing else.
+    STATUS_CIRCUIT_BREAKER_NAME: Final[str] = "cascor-status"
+
     # ── Cascor HTTP client budget (X7 slice 1b) ──
     # ``JuniperCascorClient`` defaults to ``timeout=30, retries=3``. Left implicit,
     # those defaults cost ``timeout x (retries + 1) + sum(backoff)`` per call —
