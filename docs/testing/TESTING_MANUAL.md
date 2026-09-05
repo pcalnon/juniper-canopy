@@ -1,7 +1,7 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** 2026-04-05  
-**Version:** v0.26.0
+**Last Updated:** 2026-09-04  
+**Version:** v0.26.1
 
 Complete guide to testing the Juniper Canopy application.
 
@@ -86,6 +86,21 @@ pytest -m "not slow"
 pytest -m "not requires_cascor and not requires_server and not requires_redis and not requires_cassandra and not requires_display"
 ```
 
+### X7 event-loop suite
+
+```bash
+# Slice 1b client budget (on main)
+pytest src/tests/regression/test_x7_client_budget.py -v
+
+# Slice 1a gate + responsiveness (land with #567). Not marked slow on purpose.
+pytest src/tests/regression/test_x7_off_loop_discipline.py \
+  src/tests/regression/test_x7_loop_responsiveness.py -v
+```
+
+The structural gate reads `main.py` only. After adapter edits run
+`python util/ad-hoc/2026-09-04_async_blocking_callgraph.py` (needs sibling
+`juniper-cascor-client`). See [AGENTS_REFERENCE.md § Event-loop I/O discipline](../AGENTS_REFERENCE.md#event-loop-io-discipline-x7).
+
 ### Running by Pattern
 
 ```bash
@@ -100,7 +115,14 @@ pytest -k "demo_mode or config"
 
 # Multiple patterns (AND)
 pytest -k "demo_mode and advanced"
+
+# X7 slice 1c — classifier, status-bar class routing, breaker isolation, staleness
+# Lands with #578; the file is not on main until then.
+pytest src/tests/regression/test_x7_status_cache.py -v
 ```
+
+See [TESTING_REFERENCE.md — X7 Status Cache](TESTING_REFERENCE.md#x7-status-cache-slice-1c)
+and [AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
 
 ### Running with Coverage
 
@@ -149,6 +171,10 @@ pytest tests/unit/frontend/test_metrics_panel_handlers.py -k "validation_overlay
 
 # Documentation link checker regression tests
 pytest tests/unit/test_doc_link_checker.py -v
+
+# F-CANOPY-047: plotly PNG export vs Bootstrap CSP pair
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
 ```
 
 ### Advanced Options

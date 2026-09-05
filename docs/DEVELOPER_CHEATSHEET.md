@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.2
-**Date**: 2026-07-04
+**Version**: 1.0.3
+**Date**: 2026-09-04
 **Project**: juniper-canopy
 
 ---
@@ -28,6 +28,7 @@
 | Liveness / readiness        | `curl -s http://localhost:8050/v1/health/live` / `.../v1/health/ready`                               |
 | Run all tests               | `cd src && pytest tests/ -v`                                                                         |
 | Run unit tests only         | `cd src && pytest -m "unit and not slow" -v`                                                         |
+| X7 status cache (1c)        | `cd src && pytest tests/regression/test_x7_status_cache.py -v`                                       |
 | Run integration tests       | `cd src && pytest tests/integration/ -v`                                                             |
 | Run with coverage           | `cd src && pytest tests/ --cov=. --cov-report=html --cov-report=term-missing`                        |
 | Coverage threshold check    | `cd src && pytest tests/ --cov=. --cov-fail-under=80`                                                |
@@ -42,6 +43,9 @@
 | Check doc links (CI parity) | `python scripts/check_doc_links.py --exclude templates --exclude history --exclude pull_requests --exclude releases --exclude analysis --exclude fixes --exclude development --exclude CHANGELOG.md --cross-repo skip` |
 | Check doc links (strict)    | `python scripts/check_doc_links.py --cross-repo check`                                               |
 | Install pre-commit hooks    | `pip install pre-commit && pre-commit install`                                                       |
+| X7 client budget (1b)       | `cd src && pytest tests/regression/test_x7_client_budget.py -v`                                      |
+| X7 off-loop gate + T-A2/T-A4 (1a) | `cd src && pytest tests/regression/test_x7_off_loop_discipline.py tests/regression/test_x7_loop_responsiveness.py -v` |
+| X7 adapter callgraph        | `python util/ad-hoc/2026-09-04_async_blocking_callgraph.py`                                          |
 
 > See: [AGENTS.md](../AGENTS.md) for full command reference
 
@@ -106,7 +110,17 @@ Existing components: `training_metrics`, `metrics_panel`, `network_visualizer`, 
 
 > See: [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)
 
-### 5. Validate Documentation Links
+### 5. Keep the Event Loop Answerable (X7)
+
+Canopy is a single-worker uvicorn. A synchronous `requests` call inside `async def` stalls
+`/v1/health/live`. Offload with `await asyncio.to_thread(backend.get_status)`. Do not trust
+`ruff --select ASYNC` — it cannot see `backend.get_status()`. The `main.py` gate is
+`test_x7_off_loop_discipline.py`; touching the adapter, run the ad-hoc callgraph. Slice 1b
+already pins `CASCOR_CLIENT_RETRIES = 0`. C4 (bounded concurrency) is slice 1d, not 1a.
+
+> See: [AGENTS_REFERENCE.md — Event-loop I/O discipline](AGENTS_REFERENCE.md#event-loop-io-discipline-x7)
+
+### 6. Validate Documentation Links
 
 Use the same command as CI when validating markdown links locally:
 
@@ -132,6 +146,44 @@ Common failure causes:
 - Null-byte targets are rejected
 - Same-file anchors fail if no matching heading exists
 - Links inside fenced code blocks and inline code are intentionally ignored
+
+### 6. Change the Depth-Filter Label or Filter
+
+The Network Topology **Hidden depth** slider is CAN-020. `_apply_hierarchy_filter` is the oracle (`0` / `None` / `>= N` → `"all"`). The label is a *separate* clientside callback after canopy#570 — do not put `-depth-slider.value` on the bounds-sync callback (circular: that callback already Outputs the value) and do not add the label to `update_network_graph` (1.5–31 s paint). Change the Python guard and the JavaScript guard together.
+
+```bash
+cd src
+pytest tests/unit/test_network_visualizer.py -k "Hierarchy or hierarchy or depth" -v
+```
+
+> See: [AGENTS_REFERENCE.md — Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020)
+
+### 6. Clear a Topology Node Selection
+
+`handle_node_selection` Inputs are `-graph.clickData` and `-graph.selectedData`. Plotly emits `plotly_click` only on a point hit, so empty-canvas clicks never run the callback (`prevent_initial_call=True`). Clicking the selected node again *does* deselect (toggle; also clears a whole box/lasso set). Do not write `[]` over an already-empty `-selected-nodes` — that store is an Input of `update_network_graph` (1.5–31 s). canopy#573 adds a Clear button; until it lands the panel's "elsewhere" hint is false.
+
+> See: [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046)
+
+### 6. Keep Plotly PNG Export Working (F-CANOPY-047)
+
+The Topology modebar camera rasterises SVG → Blob → `<img>` → canvas.
+`img-src` must allow `blob:` *and* `data:` (Bootstrap icons). Do not
+add `blob:` to `script-src` or `default-src`.
+
+pytest tests/regression/test_csp_plotly_image_export.py \
+       tests/regression/test_csp_bootstrap_cdn.py -v
+
+> See: [AGENTS_REFERENCE.md § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047)
+
+### 6. Read the Cascor Status Cache (X7 slice 1c)
+
+Service-mode `/api/status` is served from a 1 Hz cache. The body carries `status_class`
+(`ok` / `unreachable` / `indeterminate`). The status bar renders the **class**, not a raw
+half-dead 200 (that path has no `error` and shows "Stopped"). Lands with `#578`.
+
+cd src && pytest tests/regression/test_x7_status_cache.py -v
+
+> See: [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)
 
 ---
 
@@ -236,6 +288,13 @@ Coverage includes:
 | Tests fail with backend errors                   | Demo mode not forced       | Ensure `conftest.py` sets `JUNIPER_CANOPY_DEMO_MODE=1`; do not set `CASCOR_BACKEND_AVAILABLE` unless backend is running |
 | Docs job fails in CI (`Documentation Links`)     | Broken links/anchors or unsafe doc path | Re-run `python scripts/check_doc_links.py --cross-repo skip --exclude templates --exclude history --exclude pull_requests --exclude releases --exclude analysis --exclude fixes --exclude development --exclude CHANGELOG.md` and fix reported markdown targets |
 | Prometheus metrics missing                       | Feature not enabled        | Set `JUNIPER_CANOPY_METRICS_ENABLED=true`; verify `/metrics` endpoint returns data                              |
+| `/v1/health/live` hangs while cascor is down     | Sync I/O on the event loop (X7) | Offload with `asyncio.to_thread`; run `test_x7_off_loop_discipline.py`; do not trust `ruff --select ASYNC`     |
+| Adapter change, gate still green                 | Gate reads `main.py` only  | Run `python util/ad-hoc/2026-09-04_async_blocking_callgraph.py` (needs sibling client checkouts)                |
+| Depth-filter label reads `"0 of N"` at rest, or ignores the slider | F-CANOPY-042: label is a State of the bounds-sync callback; `0` ≠ `"all"` in the old JS rule | Do not add `Input(-depth-slider, value)` to that callback (circular). Trust the graph until canopy#570. See [Hierarchy Depth Filter](AGENTS_REFERENCE.md#hierarchy-depth-filter-can-020) |
+| Topology panel says "click elsewhere" but empty-canvas clicks do nothing | Plotly emits `plotly_click` only on a point hit; the callback never runs | Click the selected node again to toggle off. canopy#573 adds a Clear button. See [AGENTS_REFERENCE.md § Topology Node Selection](AGENTS_REFERENCE.md#topology-node-selection-f-canopy-046) |
+| Modebar camera clicks; no PNG, CSP `img-src` in console | `blob:` missing from `img-src` | Keep `img-src 'self' data: blob:`; do not move `blob:` onto `script-src`. See [AGENTS_REFERENCE § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) |
+| Status bar says "Stopped" while cascor is down   | Half-dead 200 has no `error`; UI read the payload (X7 1c) | Confirm `status_class` on `/api/status`; run `test_x7_status_cache.py` (lands with `#578`) |
+| Status bar says "Unreachable" during a skipped poll | Class rendered as UNREACHABLE instead of INDETERMINATE | `"circuit open"` must classify `indeterminate` → "Unknown"; do not share `_cb` with the refresher |
 
 ---
 
@@ -264,6 +323,6 @@ Coverage includes:
 
 ---
 
-**Last Updated:** 2026-07-04
-**Version:** 1.0.2
+**Last Updated:** 2026-09-04
+**Version:** 1.0.3
 **Maintainer:** Paul Calnon
