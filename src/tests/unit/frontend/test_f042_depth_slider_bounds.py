@@ -126,12 +126,7 @@ def _run_bounds(app, tmp_path, cases):
     payload = [_args_in_registration_order(entry, topology, value) for topology, value in cases]
     driver = tmp_path / "bounds_sync.js"
     driver.write_text(
-        "globalThis.window = globalThis.window || {};\n"
-        + script
-        + "\n"
-        + f'const fn = window.dash_clientside["_dashprivate_clientside_funcs"]["{name}"];\n'
-        + "const cases = JSON.parse(process.argv[2]);\n"
-        + "console.log(JSON.stringify(cases.map(function(args) { return fn.apply(null, args); })));\n",
+        "globalThis.window = globalThis.window || {};\n" + script + "\n" + f'const fn = window.dash_clientside["_dashprivate_clientside_funcs"]["{name}"];\n' + "const cases = JSON.parse(process.argv[2]);\n" + "console.log(JSON.stringify(cases.map(function(args) { return fn.apply(null, args); })));\n",
         encoding="utf-8",
     )
     proc = subprocess.run(  # nosec B603 - fixed interpreter, test-authored script
