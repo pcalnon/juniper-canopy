@@ -133,7 +133,7 @@ class TestD1DeclineAtAdmission:
             return "held"
 
         async def hold():
-            await offload(occupy)
+            return await offload(occupy)
 
         set_deadline(30.0)
         holders = [asyncio.create_task(hold()) for _ in range(BackendConstants.CASCOR_MAX_CONCURRENT_CALLS)]
@@ -152,7 +152,13 @@ class TestD1DeclineAtAdmission:
 
         with pytest.raises(CallerGoneAway):
             await late_task
-        await asyncio.gather(*holders)
+
+        # Assert on the holders' results rather than discarding them: it proves they
+        # really occupied the gate (so the late job genuinely queued) and that every
+        # permit came back. A bare ``await gather(...)`` throws that evidence away — and
+        # CodeQL flags the discarded value, correctly, as a statement with no effect.
+        held = await asyncio.gather(*holders)
+        assert held == ["held"] * BackendConstants.CASCOR_MAX_CONCURRENT_CALLS
 
         assert issued == [], "a job that outlived its budget in the queue was still issued"
 
