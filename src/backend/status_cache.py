@@ -232,6 +232,10 @@ class StatusCache:
         try:
             await task
         except asyncio.CancelledError:
+            # Expected and not an error: we cancelled it one line above, and awaiting a
+            # cancelled task is how you wait for it to actually unwind. Re-raising would
+            # propagate OUR cancellation into the caller's shutdown path — ``lifespan``
+            # would abort before closing the backend and the WebSocket manager.
             pass
         except Exception:  # pragma: no cover — defensive; a dying task must not block shutdown
             logger.exception("Status cache refresher raised during shutdown")
