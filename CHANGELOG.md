@@ -76,6 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   health extras, T-C1–T-C4. Cheatsheet, QUICK_START Issue 9, API `/api/status` envelope,
   CasCor adapter notes, testing manuals. Resident hazard in `AGENTS.md`. Distinct from
   the 1a / 1b off-loop runbook (docs `#568`).
+- Complementary F-CANOPY-046 tests: `#573` already pins the clear control, the hint text, and the click-path `no_update` guard. The rebuild consumer (`-selected-nodes` as an Input of `update_network_graph`), the selectedData fall-through that also used to write `[]`, and the layout↔callback style contract for the clear button were untested. New `src/tests/unit/frontend/test_f046_selection_rebuild_contract.py`.
+
 - Tests pinning Stage 2 (`#511`) live-callback contracts that the original PR's happy-path suite left open: `_update_unified_status_bar_handler` element `[9]` stays `dash.no_update` on every error path (so a hiccup cannot blank `training-status-store` and re-fire its consumers), `{is_running, phase}` is coerced then suppressed, and `_update_system_panels_handler` isolates a `/api/status` Timeout/JSON failure from the details and stream-health surfaces.
 
 ### Changed

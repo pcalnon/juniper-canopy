@@ -1,7 +1,7 @@
 # Juniper Canopy API Reference
 
-**Version:** 1.4.2
-**Last Updated:** September 4, 2026
+**Version:** 1.4.3
+**Last Updated:** September 5, 2026
 **Base URL:** `http://127.0.0.1:8050`
 
 ---
@@ -157,7 +157,7 @@ Location: /dashboard/
 These three extras are **additive** and appear on `/v1/health` and inside
 `/v1/health/ready` `details` as well. Status codes are unchanged: an upstream outage
 stays `200`. `training_active` remains a `bool`; staleness is reported beside it, not
-smuggled into it. Lands with `#578`.
+smuggled into it. Landed with `#578`.
 
 **Status Codes:**
 
@@ -270,7 +270,7 @@ T-A2 driver route.
 }
 ```
 
-**Cache envelope (service mode, X7 slice 1c, lands with `#578`):**
+**Cache envelope (service mode, X7 slice 1c, landed with `#578`):**
 
 | Field | Meaning |
 | --- | --- |

@@ -2,9 +2,9 @@
 
 ## Get Juniper Canopy running in 5 minutes
 
-**Version:** 0.25.2
+**Version:** 0.25.3
 **Status:** ✅ Production Ready
-**Last Updated:** September 4, 2026
+**Last Updated:** September 5, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -549,7 +549,7 @@ key, so the PR `#340` branch never fires (X7 slice 1c). The cache must publish
 
 ```bash
 curl -s http://127.0.0.1:8050/api/status | python -m json.tool
-# Expect status_class + stale + age_seconds in service mode (lands with #578)
+# Expect status_class + stale + age_seconds in service mode (landed with #578)
 
 cd src && pytest tests/regression/test_x7_status_cache.py -v
 ```
@@ -825,8 +825,8 @@ conda list | grep -E "(fastapi|dash|uvicorn)"
 
 ---
 
-**Last Updated:** January 29, 2026  
-**Version:** 0.25.0  
+**Last Updated:** September 5, 2026  
+**Version:** 0.25.3  
 **Status:** ✅ Production Ready
 
 **Last Updated:** 2026-03-15
