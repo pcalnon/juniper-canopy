@@ -219,7 +219,8 @@ what keeps a half-dead 200 from rendering as a healthy **"Stopped"**.
 # X7 slice 1c status cache (landed with #578)
 cd src && pytest tests/regression/test_x7_status_cache.py -v
 
-Distinct from the 1a / 1b off-loop runbook (docs `#568`).
+Distinct from the 1a / 1b off-loop runbook, which landed via the docs
+consolidation `#583` (`#568` was closed superseded).
 
 ## CI/CD Reference
 

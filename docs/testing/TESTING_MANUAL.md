@@ -92,7 +92,7 @@ pytest -m "not requires_cascor and not requires_server and not requires_redis an
 # Slice 1b client budget (on main)
 pytest src/tests/regression/test_x7_client_budget.py -v
 
-# Slice 1a gate + responsiveness (land with #567). Not marked slow on purpose.
+# Slice 1a gate + responsiveness (landed with #567). Not marked slow on purpose.
 pytest src/tests/regression/test_x7_off_loop_discipline.py \
   src/tests/regression/test_x7_loop_responsiveness.py -v
 ```
