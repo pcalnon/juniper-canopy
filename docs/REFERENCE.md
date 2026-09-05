@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.2
+**Version:** 0.25.3
 **Status:** Active
-**Last Updated:** September 4, 2026
+**Last Updated:** September 5, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -40,7 +40,7 @@ For comprehensive usage guides, see the corresponding manuals linked from [DOCUM
 
 ## Topology Node Selection
 
-Click / box / lasso highlight on the Network Topology tab. The panel's "click elsewhere to deselect" sentence is false on `main` (plotly emits `plotly_click` only on a point hit). Clicking the selected node again *does* clear. `-selected-nodes` is an Input of `update_network_graph`; an unguarded `[]` write costs a 1.5–31 s rebuild. canopy#573 (not yet on `main`) adds a Clear button and returns `dash.no_update` when there is nothing to clear.
+Click / box / lasso highlight on the Network Topology tab. The panel once promised "click elsewhere to deselect", which plotly cannot deliver (`plotly_click` fires only on a point hit). canopy#573 retired it: the hint now reads "(Click again to deselect)", a **Clear selection** button carries the gesture, and the callback returns `dash.no_update` when nothing is selected. That guard matters: `-selected-nodes` is an Input of `update_network_graph`, so an unguarded `[]` write costs a 1.5–31 s rebuild.
 
 | Document | Purpose |
 |----------|---------|
@@ -317,6 +317,6 @@ The most commonly used environment variables for juniper-canopy configuration. F
 
 ---
 
-**Last Updated:** September 4, 2026
-**Version:** 0.25.2
+**Last Updated:** September 5, 2026
+**Version:** 0.25.3
 **Maintainer:** Paul Calnon

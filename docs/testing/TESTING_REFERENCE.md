@@ -1,7 +1,7 @@
 # Testing Reference
 
-**Last Updated:** September 4, 2026  
-**Version:** v0.26.2
+**Last Updated:** September 5, 2026  
+**Version:** v0.26.3
 
 Technical reference for the active pytest configuration, markers, fixtures, and CI-equivalent commands.
 
@@ -188,9 +188,9 @@ pytest tests/regression/test_csp_plotly_image_export.py \
 
 ### Hierarchy depth filter (CAN-020 / F-CANOPY-042)
 
-The Python oracle lives on `main`. The clientside label suite lands with canopy#570
-(`src/tests/unit/frontend/test_f042_depth_filter_label.py` — not on `main` yet;
-do not markdown-link it until that file merges).
+The Python oracle and the clientside label suite
+(`src/tests/unit/frontend/test_f042_depth_filter_label.py`, landed with canopy#570)
+both live on `main`.
 
 ```bash
 cd src

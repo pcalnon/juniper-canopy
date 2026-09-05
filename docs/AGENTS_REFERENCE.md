@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-09-04
+**Last Updated**: 2026-09-05
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -318,7 +318,7 @@ On a loaded 40-unit network the control reads `"0 of 40"` while all 40
 units are displayed, before anyone touches anything. Fixing the wiring
 alone does not fix this.
 
-**Incoming repair (canopy#570, not yet on `main`):** a second clientside
+**The repair (canopy#570, on `main`):** a second clientside
 callback owns `-depth-label.children` with Inputs
 `[-depth-slider.value, -topology-store.data]` — both operands of the
 filter, because a grow event changes the denominator with no user
@@ -350,8 +350,8 @@ at-total / above-total / keep-3 / drop-edges / no-mutate /
 malformed-id). `TestHierarchyDepthSliderWiring` is source-level only —
 it does not execute the clientside function.
 
-The #570 suite (`src/tests/unit/frontend/test_f042_depth_filter_label.py`,
-not on `main` yet) asserts wiring against `app._callback_list` after a
+The #570 suite (`src/tests/unit/frontend/test_f042_depth_filter_label.py`)
+asserts wiring against `app._callback_list` after a
 real `register_callbacks`, executes the registered JavaScript under
 `node` over a 48-case grid with `_apply_hierarchy_filter` as the oracle,
 and pins that no callback has `-depth-slider.value` as both Input and
@@ -441,7 +441,7 @@ an already-empty store) still pays the 1.5–31 s rebuild. Assert
 `is dash.no_update`, not `== []` — equality passes against the broken
 write.
 
-### Incoming repair (canopy#573, not yet on `main`)
+### The repair (canopy#573, on `main`)
 
 A **"Clear selection"** button (`-clear-selection`) is wired as a third
 **Input** (the click *is* the trigger) and a fourth Output that sets
@@ -478,8 +478,8 @@ that class let F-CANOPY-045 ship green while every node read
 still drives a *re-implementation* (`_simulate_handle_node_selection`)
 for several cases; treat those as historical, not as the contract.
 
-The #573 suite (`src/tests/unit/frontend/test_f046_clear_selection.py`,
-not on `main` yet) reaches the real callback, builds its argument list
+The #573 suite (`src/tests/unit/frontend/test_f046_clear_selection.py`)
+reaches the real callback, builds its argument list
 from the live signature, and asserts `is dash.no_update` on the empty-
 clear path. Adding an Input and an Output changes arity: three existing
 files invoke the callback for real
