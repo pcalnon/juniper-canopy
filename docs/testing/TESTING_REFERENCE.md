@@ -1,7 +1,7 @@
 # Testing Reference
 
-**Last Updated:** April 5, 2026  
-**Version:** v0.26.1
+**Last Updated:** September 5, 2026  
+**Version:** v0.26.6
 
 Technical reference for the active pytest configuration, markers, fixtures, and CI-equivalent commands.
 
@@ -14,9 +14,10 @@ Technical reference for the active pytest configuration, markers, fixtures, and 
 3. [Fixture Reference](#fixture-reference)
 4. [Environment and Gating Variables](#environment-and-gating-variables)
 5. [Command Reference](#command-reference)
-6. [Coverage Reference](#coverage-reference)
-7. [CI Mapping](#ci-mapping)
-8. [Troubleshooting Reference](#troubleshooting-reference)
+6. [X7 Status Cache (slice 1c)](#x7-status-cache-slice-1c)
+7. [Coverage Reference](#coverage-reference)
+8. [CI Mapping](#ci-mapping)
+9. [Troubleshooting Reference](#troubleshooting-reference)
 
 ---
 
@@ -205,6 +206,28 @@ pytest -ra
 pytest --lf
 pytest --ff
 ```
+
+---
+
+## X7 Status Cache (slice 1c)
+
+Incoming with `#578`. Pins the classifier, the PR `#340` status-bar regression, breaker
+isolation, and the staleness contract. The file is
+`src/tests/regression/test_x7_status_cache.py` — backtick only until it exists on `main`.
+
+```bash
+cd src && pytest tests/regression/test_x7_status_cache.py -v
+```
+
+| Id | What it pins |
+| --- | --- |
+| T-C1 | Every observed shape lands in exactly one class; the table exercises all three |
+| T-C2 | Half-dead 200 → "Unreachable"; the same body without `status_class` still renders "Stopped" |
+| T-C3 | Five failing `get_network_data()` calls open the shared breaker and leave the status breaker closed |
+| T-C4 | Stale + age on non-OK; never-OK omits `is_training`; a dead refresher ages out; peak in-flight is 1 |
+
+Do not mark these `slow`. The coverage gate runs `-m "not slow"`. Operator runbook:
+[AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
 
 ---
 

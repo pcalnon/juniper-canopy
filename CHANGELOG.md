@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **X7 slice 1c status-cache operator docs.** Runbook in `docs/AGENTS_REFERENCE.md` for the
+  incoming `#578` cache: one 1 Hz poll, `/api/status` publishes `status_class` /
+  `stale` / `age_seconds`, the status bar renders the class (half-dead 200 → Unreachable,
+  not Stopped), dedicated `cascor-status` breaker, C6 never-OK omits `is_training`, C7
+  health extras, T-C1–T-C4. Cheatsheet, QUICK_START Issue 9, API `/api/status` envelope,
+  CasCor adapter notes, testing manuals. Resident hazard in `AGENTS.md`. Distinct from
+  the 1a / 1b off-loop runbook (docs `#568`).
 - Tests pinning Stage 2 (`#511`) live-callback contracts that the original PR's happy-path suite left open: `_update_unified_status_bar_handler` element `[9]` stays `dash.no_update` on every error path (so a hiccup cannot blank `training-status-store` and re-fire its consumers), `{is_running, phase}` is coerced then suppressed, and `_update_system_panels_handler` isolates a `/api/status` Timeout/JSON failure from the details and stream-health surfaces.
 
 ### Changed

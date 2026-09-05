@@ -5,7 +5,7 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.6.0
-**Last Updated**: 2026-08-31
+**Last Updated**: 2026-09-05
 
 ---
 
@@ -57,6 +57,15 @@ section in the same PR rather than waiving the budget gate.
   pin set. A wholesale replace then asserts "not pinned" for every key it could not see, and the
   next toggle persists that under-report — **silently discarding pins made before a reload**
   (F-CANOPY-018 / F-CANOPY-028). Write only what you can actually observe; preserve the rest.
+- **Route the cascor status *class*, not the raw payload (X7 slice 1c).** In service mode
+  `/api/status` serves a cache envelope (`status_class`, `stale`, `age_seconds`). A half-dead
+  200 has no `error`, so the legacy status-bar branch renders **"Stopped"** — the PR #340 lie.
+  The cache publishes what it concluded; the UI renders that. Do not feed `get_training_status`
+  to the refresher (it shares `_cb` with five other sites and freezes the cache INDETERMINATE
+  for 60 s against a healthy upstream) — use `get_training_status_for_refresh`. Do not invent
+  `is_training: False` when no OK has been seen. Do not widen `is_training_active()` to a
+  tri-state. Age out on the last **attempt**, not the last success. Lands with `#578`. Runbook:
+  [`docs/AGENTS_REFERENCE.md` § Cascor status cache](docs/AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
 
 ## Project Overview
 

@@ -1,7 +1,7 @@
 # Juniper Canopy API Reference
 
-**Version:** 1.4.1
-**Last Updated:** July 4, 2026
+**Version:** 1.4.2
+**Last Updated:** September 5, 2026
 **Base URL:** `http://127.0.0.1:8050`
 
 ---
@@ -150,6 +150,14 @@ Location: /dashboard/
 - `training_active` (boolean) - Whether training is in progress
 - `demo_mode` (boolean) - Whether running in demo mode
 - `juniper_data_available` (boolean) - JuniperData dependency status
+- `backend_status` (string, service mode, X7 slice 1c) - Cache class: `ok` / `unreachable` / `indeterminate`. Omitted in demo / recurrence.
+- `backend_status_stale` (boolean, service mode) - `true` when the last OK payload is older than 5 s or the class is not `ok`
+- `backend_status_age_seconds` (number or `null`, service mode) - Seconds since the last OK payload; `null` if none
+
+These three extras are **additive** and appear on `/v1/health` and inside
+`/v1/health/ready` `details` as well. Status codes are unchanged: an upstream outage
+stays `200`. `training_active` remains a `bool`; staleness is reported beside it, not
+smuggled into it. Lands with `#578`.
 
 **Status Codes:**
 
@@ -169,7 +177,10 @@ curl http://127.0.0.1:8050/api/health
 
 ### GET /api/status
 
-**Description:** Get normalized training status and network information
+**Description:** Get normalized training status and network information. In **service
+mode**, after `#578`, this is served from the X7 slice-1c status cache — one background
+poll; every tab costs zero upstream calls. Demo and recurrence still return a live
+`backend.get_status()`.
 
 **Parameters:** None
 
@@ -214,9 +225,27 @@ curl http://127.0.0.1:8050/api/health
   "output_size": 3,
   "learning_rate": 0.01,
   "max_hidden_units": 10,
-  "max_epochs": 500
+  "max_epochs": 500,
+  "status_class": "ok",
+  "stale": false,
+  "age_seconds": 0.2
 }
 ```
+
+**Cache envelope (service mode, X7 slice 1c, lands with `#578`):**
+
+| Field | Meaning |
+| --- | --- |
+| `status_class` | `ok` / `unreachable` / `indeterminate` — what the cache *concluded*, not the raw payload |
+| `stale` | `true` when the class is not `ok` or the last OK payload is older than 5 s |
+| `age_seconds` | Seconds since the last OK payload, or `null` if none has been seen |
+
+A never-OK body omits `is_training` (C6) and still carries a truthy `error` so a UI that
+has not been taught about `status_class` keeps the PR `#340` "Unreachable" branch. A
+half-dead 200 (dict, no `error`, not cascor-shaped) is classified `unreachable`; handing
+the raw payload to the status bar re-creates that defect as **"Stopped"**.
+
+See [AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
 
 **Field Descriptions:**
 
@@ -236,6 +265,9 @@ curl http://127.0.0.1:8050/api/health
 - `learning_rate` (number, service mode) - Active learning rate
 - `max_hidden_units` (integer, service mode) - Max hidden units setting
 - `max_epochs` (integer, service mode) - Max epochs setting
+- `status_class` (string, service mode) - Cache verdict (`ok` / `unreachable` / `indeterminate`)
+- `stale` (boolean, service mode) - Whether the last OK payload is fresh
+- `age_seconds` (number or `null`, service mode) - Age of the last OK payload
 
 **Status Codes:**
 
@@ -245,6 +277,8 @@ curl http://127.0.0.1:8050/api/health
 
 - Use `phase` (not `current_phase`) as the canonical phase key.
 - In service mode, this endpoint returns normalized fields from nested CasCor status payloads.
+- After `#578`, service-mode responses are the cache envelope above. Render
+  `status_class`, not the raw payload. Demo / recurrence are unchanged.
 
 ### GET /api/state
 

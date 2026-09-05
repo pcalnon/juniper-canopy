@@ -2,8 +2,8 @@
 
 ## Complete Navigation Guide to Juniper Canopy Documentation
 
-**Version:** 0.25.0  
-**Last Updated:** January 29, 2026  
+**Version:** 0.25.7  
+**Last Updated:** September 5, 2026  
 **Project:** Juniper Canopy - Real-Time CasCor Monitoring Frontend
 
 ---
@@ -60,6 +60,7 @@
 | **Find technical reference** | [REFERENCE.md](REFERENCE.md)                                              | docs/          |
 | **See version history**      | [CHANGELOG.md](../CHANGELOG.md)                                           | Root           |
 | **Quick-reference dev tasks** | [DEVELOPER_CHEATSHEET.md](DEVELOPER_CHEATSHEET.md)              | docs/         |
+| **Read the cascor status cache (X7 1c)** | [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c) | docs/ |
 | **Contribute code**          | [AGENTS.md](../AGENTS.md)                                                 | Root           |
 
 ---

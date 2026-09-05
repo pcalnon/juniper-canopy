@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-08-30
+**Last Updated**: 2026-09-05
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -20,6 +20,7 @@ pointer only helps an agent that already knows to look.
 - [Architecture Reference](#architecture-reference)
 - [Configuration Reference](#configuration-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
+- [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
 - [Further Reading](#further-reading)
 
 ---
@@ -700,6 +701,169 @@ def robust_function():
         logger.error(f"Unexpected error: {type(e).__name__}: {e}", exc_info=True)
         raise
 ```
+
+---
+
+## Cascor status cache (X7 slice 1c)
+
+Operator runbook for the incoming status cache (`#578`). Slice 1a (on `main` as `#567`)
+already moved every blocking call off the event loop, so canopy answers HTTP under a dead
+upstream. It did **not** reduce the number of upstream calls, and it did **not** make an
+unreachable backend legible. 1c does both, and is droppable without reopening X7.
+
+The module is `src/backend/status_cache.py` (lands with `#578`). Until that PR merges,
+refer to it in backticks so the link checker stays green.
+
+The resident one-line hazard lives in
+[`AGENTS.md` § Hazards](../AGENTS.md#hazards-resident--do-not-relocate). Off-loop
+discipline (slices 1a / 1b) is a **different** gap, owned by docs `#568`.
+
+### What 1c buys
+
+| Constraint | Meaning |
+| --- | --- |
+| **C2** | One background task polls cascor; every browser tab polling `/api/status` costs **zero** upstream calls. |
+| **C6** | An unknown backend is never presented as a fresh negative. With no OK ever seen, the body omits `is_training` rather than passing through the adapter's `{"is_training": False, "error": …}`. |
+| **C7** | Health surfaces (`/v1/health`, `/api/health`, `/v1/health/ready` `details`) gain additive `backend_status` / `backend_status_stale` / `backend_status_age_seconds` in **service mode only**. Status codes are unchanged: an upstream outage stays 200 / degraded. |
+| **C9** | Every non-fresh read carries `stale` and `age_seconds`. |
+
+`/v1/health/ready` is otherwise left alone. `is_training_active()` keeps its `bool`
+contract — widening it to a tri-state was measured to open all five 409 interlocks.
+Staleness is reported **beside** the boolean, not smuggled into it.
+
+Demo and recurrence backends get **no** cache: they answer `get_status()` from memory, so
+there is no upstream call to amortise.
+
+### Intervals (derived, not chosen)
+
+| Constant | Value | Why |
+| --- | --- | --- |
+| `REFRESH_INTERVAL_SECONDS` | 1.0 s | Tightest consumer is the 15 s healthcheck with a 5 s budget; the dashboard fast lane is also 1.0 s. |
+| `STALE_AFTER_SECONDS` | 5.0 s | The probe budget. A value older than a probe's deadline is not fresh *to that probe*. |
+| `UNKNOWN_AFTER_SECONDS` | 30.0 s | The longest probe interval. Past this with no attempt, the cache admits it has no recent knowledge. |
+
+**Single-flight is structural, not enforced.** The loop awaits its fetch and *then*
+sleeps, so a second tick cannot begin while one is in flight — there is no lock to get
+wrong. The same ordering is **self-limiting**: a 30 s timeout yields a 1/31 Hz poll, not
+a pile of 1 Hz calls. That is why there is **no backoff** (design OQ-X2): backoff would
+only delay recovery detection, which is what the status bar exists to show.
+
+### Classifier
+
+`classify(raw)` is pure and total — every input, including `None` / `[]` / a bare
+string, lands in exactly one class. An exception here would kill the refresher and freeze
+the last verdict (machinery-fails-green).
+
+The predicate is canopy's own `CascorServiceAdapter.is_cascor_nested` (positive detection
+of cascor's nested structure). An earlier draft keyed on `is_training`, which appears
+**only on the failure path**, and misclassified 7 of 20 measured healthy shapes as
+UNREACHABLE.
+
+| Class | When | Status-bar label |
+| --- | --- | --- |
+| `ok` | Nested cascor shape, no truthy `error` | Payload (`Running` / `Stopped` / …) |
+| `unreachable` | Reached an answer, and the answer is bad — including a **half-dead 200** (dict, no `error`, not cascor-shaped) | **Unreachable** |
+| `indeterminate` | Call was **skipped** (`"circuit open"` in `error`) | **Unknown** |
+
+`INDETERMINATE` is not a hedge. An open breaker means the tick observed nothing.
+Reporting UNREACHABLE would claim evidence that was never gathered.
+
+### Dedicated breaker
+
+The refresher calls `adapter.get_training_status_for_refresh()`, **not**
+`get_training_status()`. The shared `_cb` fronts five call sites; five failing
+`get_network_data()` calls would otherwise freeze this cache for the full 60 s recovery
+timeout **against a healthy upstream**. The dedicated breaker is named
+`BackendConstants.STATUS_CIRCUIT_BREAKER_NAME` (`"cascor-status"`). Same threshold /
+recovery as the shared breaker; a second *instance*, not a second name for the first
+one (`CircuitBreaker` keeps state per instance).
+
+### Route the class, not the payload
+
+`dashboard_manager` renders "Unreachable" from a truthy `error` (the PR `#340` branch).
+On a half-dead 200 that branch does not fire and the elif chain renders **"Stopped"** —
+indistinguishable from a healthy idle backend. So the cache publishes `status_class` and
+the UI renders the class. Mutation-checked: removing the class routing makes T-C2 fail
+with `'Stopped' == 'Unreachable'`.
+
+Every non-OK `/api/status` body still carries a truthy `error` so a UI that has not been
+taught about `status_class` keeps the `#340` branch. The half-dead 200, which has no
+error of its own, gets one synthesised.
+
+### Two guards the design implies
+
+- **A refresher that dies** would leave the last verdict frozen. `current_class()` ages
+  out on the last **attempt**, not the last success. Past `UNKNOWN_AFTER_SECONDS` with no
+  attempt, the honest answer is INDETERMINATE.
+- **C6 with no OK ever seen.** The body omits `is_training`. Passing through the
+  adapter's `{"is_training": False, "error": …}` is how a cache invents "not training"
+  during a live run whose status call merely failed.
+
+A raising fetch is UNREACHABLE, not a reason to stop polling. A raising Prometheus sink
+is logged and swallowed — observability must not kill the refresher it observes.
+
+### `/api/status` envelope (service mode)
+
+```json
+{
+  "is_training": true,
+  "is_running": true,
+  "status_class": "ok",
+  "stale": false,
+  "age_seconds": 0.2
+}
+```
+
+Never-OK body (C6): `status_class`, `stale: true`, `age_seconds: null`, a truthy
+`error`, and **no** `is_training`.
+
+### Health extras (C7)
+
+Additive, service-mode only:
+
+| Field | Source |
+| --- | --- |
+| `backend_status` | `status_class` (`ok` / `unreachable` / `indeterminate`) |
+| `backend_status_stale` | `stale` |
+| `backend_status_age_seconds` | `age_seconds` |
+
+### Prometheus (registered, not yet observable)
+
+`juniper_canopy_backend_status_class{status_class=…}` is one gauge per class (0 or 1),
+so an alert reads `{status_class="unreachable"} == 1` without knowing an ordinal.
+`JUNIPER_CANOPY_METRICS_ENABLED` defaults `false` and gates both the middleware and the
+`/metrics` mount; `/metrics` also sits behind the trusted-IP allowlist. Enabling that
+pair is a later PR. Design §5.6 binds acceptance to the **status bar** for exactly this
+reason.
+
+### Tests (land with `#578`)
+
+`src/tests/regression/test_x7_status_cache.py` — do not markdown-link until `#578` merges.
+
+| Id | Assertion |
+| --- | --- |
+| **T-C1** | Table-driven classifier census over observed shapes, plus a vacuity guard that the table exercises all three classes |
+| **T-C2** | Half-dead 200 → "Unreachable", plus a vacuity guard that the same body *without* the class still renders "Stopped" |
+| **T-C3** | Dedicated breaker: five failing `get_network_data()` calls open the shared breaker and leave the status breaker closed |
+| **T-C4** | Staleness contract, never-OK omits `is_training`, dead refresher ages out, single-flight peak is 1, prompt/idempotent stop, raising sink cannot kill the loop |
+
+```bash
+cd src && pytest tests/regression/test_x7_status_cache.py -v
+```
+
+### Pitfalls
+
+- Do not hand the status bar a raw payload. That re-creates PR `#340` on a half-dead 200.
+- Do not share `_cb` with the refresher. Isolation is T-C3.
+- Do not invent `is_training: False` on a never-OK cache. That is C6.
+- Do not age out on last success. A dead refresher would stay green forever.
+- Do not widen `is_training_active()` to a tri-state. Report staleness beside it.
+- Do not claim the Prometheus gauge is watched. It is registered; it is not yet a channel.
+- Slice **1d** (admission control) is where C4 — bounded concurrency — actually gets
+  satisfied. 1a and 1c both still ship bare offload.
+
+Design of record (juniper-ml):
+`notes/JUNIPER_2026-09-03_JUNIPER-CANOPY_X7-EVENT-LOOP-BLOCKING-REMEDIATION-DESIGN.md` §5.3 / §5.6.
 
 ---
 

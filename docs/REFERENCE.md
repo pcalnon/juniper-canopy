@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.0
+**Version:** 0.25.6
 **Status:** Active
-**Last Updated:** August 31, 2026
+**Last Updated:** September 5, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -17,6 +17,7 @@
 - [Configuration Reference](#configuration-reference)
 - [WebSocket Reference](#websocket-reference)
 - [Testing Reference](#testing-reference)
+- [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
 - [CI/CD Reference](#cicd-reference)
 - [CasCor Backend Reference](#cascor-backend-reference)
 - [Demo Mode Reference](#demo-mode-reference)
@@ -135,6 +136,25 @@ pytest tests/ --cov=. --cov-report=html  # Coverage report
 
 ---
 
+## Cascor status cache (X7 slice 1c)
+
+Incoming with `#578`. One background task polls cascor; `/api/status` and the status bar
+serve its **class** (`ok` / `unreachable` / `indeterminate`), not a raw payload. That is
+what keeps a half-dead 200 from rendering as a healthy **"Stopped"**.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c) | Operator runbook: intervals, classifier, dedicated breaker, C6 / C7 / C9, T-C1–T-C4 |
+
+```bash
+# Lands with #578 — do not markdown-link the file until it exists on main
+cd src && pytest tests/regression/test_x7_status_cache.py -v
+```
+
+Distinct from the 1a / 1b off-loop runbook (docs `#568`).
+
+---
+
 ## CI/CD Reference
 
 Pipeline configuration, hooks, and workflow reference.
@@ -230,6 +250,6 @@ The most commonly used environment variables for juniper-canopy configuration. F
 
 ---
 
-**Last Updated:** August 31, 2026
-**Version:** 0.25.1
+**Last Updated:** September 5, 2026
+**Version:** 0.25.6
 **Maintainer:** Paul Calnon

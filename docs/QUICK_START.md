@@ -2,9 +2,9 @@
 
 ## Get Juniper Canopy running in 5 minutes
 
-**Version:** 0.25.1
+**Version:** 0.25.2
 **Status:** ✅ Production Ready
-**Last Updated:** July 4, 2026
+**Last Updated:** September 5, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -501,6 +501,29 @@ pip install -r conf/requirements.txt
 
 ---
 
+### Issue 9: Status Bar Says "Stopped" While CasCor Is Down
+
+**Symptom:** Service-mode dashboard shows **Stopped** (or a healthy idle) when cascor is
+unreachable, hung, or returning a 200 that is not a cascor status. An operator cannot
+tell that from a backend that is genuinely idle.
+
+**Cause:** `/api/status` handed the UI a raw payload. A half-dead 200 has no `error`
+key, so the PR `#340` branch never fires (X7 slice 1c). The cache must publish
+`status_class`; the status bar must render the class (`Unreachable` / `Unknown`).
+
+**Check:**
+
+```bash
+curl -s http://127.0.0.1:8050/api/status | python -m json.tool
+# Expect status_class + stale + age_seconds in service mode (lands with #578)
+
+cd src && pytest tests/regression/test_x7_status_cache.py -v
+```
+
+**See:** [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)
+
+---
+
 ## Next Steps
 
 ### Learn More
@@ -508,6 +531,7 @@ pip install -r conf/requirements.txt
 - **[README.md](../README.md)** - Complete project overview and features
 - **[ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)** - Detailed environment configuration
 - **[AGENTS.md](../AGENTS.md)** - Development guide and conventions
+- **[Cascor status cache (X7 slice 1c)](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)** - Why `/api/status` publishes a class, not a raw payload
 - **[CI/CD Guide](ci_cd/CICD_QUICK_START.md)** - Testing and CI/CD workflows
 
 ### Start Developing

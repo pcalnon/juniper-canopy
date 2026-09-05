@@ -2,9 +2,9 @@
 
 ## Technical reference for CasCor backend integration in Juniper Canopy
 
-**Version:** 0.27.0  
+**Version:** 0.27.1  
 **Status:** ✅ PARTIALLY IMPLEMENTED  
-**Last Updated:** March 30, 2026
+**Last Updated:** September 5, 2026
 
 ---
 
@@ -218,6 +218,18 @@ get_status() -> Dict[str, Any]
 - If adapter status payload is nested CasCor format (`state_machine`/`training_state`), returns normalized flat Canopy status shape.
 - `current_epoch` and `hidden_units` use first-defined (`None`-aware) extraction to preserve explicit zero values.
 - Running/paused/completed flags are derived from normalized uppercase FSM status values.
+
+**X7 slice 1c (lands with `#578`).** `ServiceBackend.normalize_status` is an extract-method
+from `get_status` (body verbatim). The status cache classifies the **raw** adapter
+response and serves the **normalized** one; composing them would force a choice.
+`get_status()` itself is unchanged: `normalize_status(adapter.get_training_status())`.
+
+The cache does **not** call `get_training_status()`. It calls
+`adapter.get_training_status_for_refresh()` on a dedicated breaker
+(`BackendConstants.STATUS_CIRCUIT_BREAKER_NAME = "cascor-status"`). Sharing `_cb` would
+let five failing `get_network_data()` calls freeze the cache INDETERMINATE for 60 s
+against a healthy status endpoint. See
+[AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
 
 ```python
 get_dataset() -> Optional[Dict[str, Any]]
@@ -1044,8 +1056,8 @@ with self.topology_lock:
 
 ---
 
-**Last Updated:** March 30, 2026  
-**Version:** 0.27.0  
+**Last Updated:** September 5, 2026  
+**Version:** 0.27.1  
 **Status:** ✅ PARTIALLY IMPLEMENTED
 
 **Complete technical reference for CasCor backend integration!**

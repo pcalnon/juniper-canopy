@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.2
-**Date**: 2026-07-04
+**Version**: 1.0.7
+**Date**: 2026-09-05
 **Project**: juniper-canopy
 
 ---
@@ -28,6 +28,7 @@
 | Liveness / readiness        | `curl -s http://localhost:8050/v1/health/live` / `.../v1/health/ready`                               |
 | Run all tests               | `cd src && pytest tests/ -v`                                                                         |
 | Run unit tests only         | `cd src && pytest -m "unit and not slow" -v`                                                         |
+| X7 status cache (1c)        | `cd src && pytest tests/regression/test_x7_status_cache.py -v`                                       |
 | Run integration tests       | `cd src && pytest tests/integration/ -v`                                                             |
 | Run with coverage           | `cd src && pytest tests/ --cov=. --cov-report=html --cov-report=term-missing`                        |
 | Coverage threshold check    | `cd src && pytest tests/ --cov=. --cov-fail-under=80`                                                |
@@ -133,6 +134,18 @@ Common failure causes:
 - Same-file anchors fail if no matching heading exists
 - Links inside fenced code blocks and inline code are intentionally ignored
 
+### 6. Read the Cascor Status Cache (X7 slice 1c)
+
+Service-mode `/api/status` is served from a 1 Hz cache. The body carries `status_class`
+(`ok` / `unreachable` / `indeterminate`). The status bar renders the **class**, not a raw
+half-dead 200 (that path has no `error` and shows "Stopped"). Lands with `#578`.
+
+```bash
+cd src && pytest tests/regression/test_x7_status_cache.py -v
+```
+
+> See: [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)
+
 ---
 
 ## Environment Variables
@@ -236,6 +249,8 @@ Coverage includes:
 | Tests fail with backend errors                   | Demo mode not forced       | Ensure `conftest.py` sets `JUNIPER_CANOPY_DEMO_MODE=1`; do not set `CASCOR_BACKEND_AVAILABLE` unless backend is running |
 | Docs job fails in CI (`Documentation Links`)     | Broken links/anchors or unsafe doc path | Re-run `python scripts/check_doc_links.py --cross-repo skip --exclude templates --exclude history --exclude pull_requests --exclude releases --exclude analysis --exclude fixes --exclude development --exclude CHANGELOG.md` and fix reported markdown targets |
 | Prometheus metrics missing                       | Feature not enabled        | Set `JUNIPER_CANOPY_METRICS_ENABLED=true`; verify `/metrics` endpoint returns data                              |
+| Status bar says "Stopped" while cascor is down   | Half-dead 200 has no `error`; UI read the payload (X7 1c) | Confirm `status_class` on `/api/status`; run `test_x7_status_cache.py` (lands with `#578`) |
+| Status bar says "Unreachable" during a skipped poll | Class rendered as UNREACHABLE instead of INDETERMINATE | `"circuit open"` must classify `indeterminate` → "Unknown"; do not share `_cb` with the refresher |
 
 ---
 
@@ -264,6 +279,6 @@ Coverage includes:
 
 ---
 
-**Last Updated:** 2026-07-04
-**Version:** 1.0.2
+**Last Updated:** 2026-09-05
+**Version:** 1.0.7
 **Maintainer:** Paul Calnon

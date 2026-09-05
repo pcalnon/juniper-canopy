@@ -1,7 +1,7 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** 2026-04-05  
-**Version:** v0.26.0
+**Last Updated:** 2026-09-05  
+**Version:** v0.26.1
 
 Complete guide to testing the Juniper Canopy application.
 
@@ -100,7 +100,14 @@ pytest -k "demo_mode or config"
 
 # Multiple patterns (AND)
 pytest -k "demo_mode and advanced"
+
+# X7 slice 1c — classifier, status-bar class routing, breaker isolation, staleness
+# Lands with #578; the file is not on main until then.
+pytest src/tests/regression/test_x7_status_cache.py -v
 ```
+
+See [TESTING_REFERENCE.md — X7 Status Cache](TESTING_REFERENCE.md#x7-status-cache-slice-1c)
+and [AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
 
 ### Running with Coverage
 
