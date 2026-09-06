@@ -1461,6 +1461,20 @@ async def get_status():
     return await offload(backend.get_status)
 
 
+def _demo_dataset_source() -> str | None:
+    """Where demo mode's dataset actually came from (§4.12 / G9).
+
+    ``"juniper-data"`` when demo mode reached the service (the dogfooding path), ``"local"`` when
+    it fell back to its own generator, ``None`` for any backend that is not demo. The distinction
+    is the point: demo mode exists to exercise the real platform, and a silent fallback turns it
+    into a demo of code that runs nowhere else.
+    """
+    demo = getattr(backend, "_demo", None)
+    if demo is None:
+        return None
+    return "local" if getattr(demo, "local_dataset_fallback", False) else "juniper-data"
+
+
 @app.get("/api/stream_health")
 async def get_stream_health():
     """
@@ -1488,7 +1502,7 @@ async def get_stream_health():
         if isinstance(health, dict):
             health = {**health, "mode": backend.backend_type}
         return health
-    return {"overall": "n/a", "mode": backend.backend_type, "relay": None, "control": None}
+    return {"overall": "n/a", "mode": backend.backend_type, "dataset_source": _demo_dataset_source(), "relay": None, "control": None}
 
 
 @app.get("/api/metrics")
