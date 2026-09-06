@@ -149,10 +149,15 @@ def test_gate_snaps_away_from_a_disabled_current_selection(dm):
     assert value in enabled and value != "mnist"  # snapped to a usable dataset
 
 
-def test_gate_noop_without_model_is_preserved(dm):
-    # N7 preserves the pre-N7 contract: no model yet -> no dropdown write (the seeded
-    # model-selection-store means the mount-time pass still runs against DEFAULT_MODEL_KEY).
-    assert dm._gate_dataset_options_handler("", "spirals") == (dash.no_update, dash.no_update)
+def test_gate_ungates_without_model(dm):
+    # INVERTED by N11. The pre-N7 contract ("no model yet -> no dropdown write") was safe only
+    # while the model axis could not be cleared; once it can, that early return freezes the list
+    # at the OLD model's gate. The availability composition still applies -- this ungates the
+    # MODEL-compatibility gate, not the deployment-availability one.
+    options, value = dm._gate_dataset_options_handler("", "spirals", generators=[])
+    assert options is not dash.no_update
+    assert len(options) == len(dm._gate_dataset_options_handler("cascor", "spirals", generators=[])[0])
+    assert value is dash.no_update
 
 
 def test_gate_flag_absent_leaves_all_available_enabled(dm):

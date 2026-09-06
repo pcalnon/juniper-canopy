@@ -48,7 +48,7 @@ from dash.dependencies import Input, Output, State
 from canopy_constants import CascorPatchBounds, DashboardConstants, TrainingConstants
 from dataset_schema import apply_availability_gate, generator_name_for_type, is_generator_available, parse_schema_fields, unavailable_reason
 from frontend.internal_api import internal_api_headers
-from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, RECURRENCE_PROVIDER, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason
+from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, RECURRENCE_PROVIDER, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason, model_requirement
 from settings import get_settings
 
 from . import ui_standards
@@ -2241,7 +2241,15 @@ class DashboardManager:
                             ]
                         ),
                         dbc.ModalFooter(
-                            dbc.Button("Close", id="model-selection-modal-close", color="secondary", outline=True),
+                            [
+                                # OQ-N6 / N11 — §5.5's SECOND affordance, deferred at canopy#394 on the
+                                # grounds that "the model is selected first" and never revisited. Its
+                                # absence is half of why the mutual gate had no exit. The label names
+                                # the CONSEQUENCE, not just the action (N4): clearing the model is how
+                                # you see every dataset again.
+                                dbc.Button("Clear model — show all datasets", id="model-selection-clear", color="link", className="me-auto"),
+                                dbc.Button("Close", id="model-selection-modal-close", color="secondary", outline=True),
+                            ]
                         ),
                     ],
                     id="model-selection-modal",
@@ -2617,10 +2625,14 @@ class DashboardManager:
             Output("nn-model-summary", "children"),
             Output("model-selection-modal", "is_open", allow_duplicate=True),
             Input({"type": "model-select-btn", "index": dash.ALL}, "n_clicks"),
+            # N11: the clear rides in the SAME callback rather than a second one, because both write
+            # ``model-selection-store``. A second writer on a store is the duplicate-writer hazard,
+            # and it would be invisible to anyone reading either handler alone.
+            Input("model-selection-clear", "n_clicks"),
             prevent_initial_call=True,
         )
-        def select_model(n_clicks_list):
-            return self._select_model_from_table_handler(n_clicks_list, dash.callback_context.triggered_id)
+        def select_model(n_clicks_list, clear_clicks):
+            return self._select_model_from_table_handler(n_clicks_list, dash.callback_context.triggered_id, clear_clicks)
 
         # N7 (I-5): also fires once on mount (params-init-interval) so the availability gate is
         # applied at first paint, not only after a model change — an unavailable generator (its
@@ -2708,7 +2720,7 @@ class DashboardManager:
             dataset_ref["params"] = params
         return {"dataset": dataset_ref}
 
-    def _gate_dataset_options_handler(self, model_key, current_value):
+    def _gate_dataset_options_handler(self, model_key, current_value, *, generators=None):
         """Gate the dataset dropdown against the selected model (A1-iv-3b) AND availability (N7 / I-5).
 
         Composes the model-compatibility gate (``gated_dataset_options`` — the D5 correctness gate:
@@ -2716,14 +2728,29 @@ class DashboardManager:
         gate (``apply_availability_gate`` — a generator whose optional data extra is absent is
         disabled with a reworded reason). A missing/older availability surface degrades to
         all-available (flag-absent fallback). If the current selection became disabled, snap to the
-        first enabled option (dataset-primary conflict policy, D5). Returns ``(no_update, no_update)``
-        when there is no model yet (unchanged contract); the mount-time pass runs against the seeded
-        ``model-selection-store`` (``DEFAULT_MODEL_KEY``), so the availability gate still applies at
-        first paint.
+        first enabled option (dataset-primary conflict policy, D5). The mount-time pass runs against
+        the seeded ``model-selection-store`` (``DEFAULT_MODEL_KEY``), so the availability gate
+        applies at first paint.
+
+        **N11 — a cleared model renders UNGATED options.** This used to early-return
+        ``(no_update, no_update)`` on a falsy model key, which was harmless only while the model
+        could not be cleared. The moment it can, that return freezes the dropdown at the OLD model's
+        gate: clearing the model to escape a constraint would leave the constraint in force. That is
+        the mutual-gate trap again, on the model axis, shipped by the very affordance meant to
+        relieve it. ``gated_dataset_options(None)`` already returns every dataset enabled — the
+        registry was right and only this handler was wrong.
+
+        Because the current dataset is then in ``enabled``, the snap below leaves it alone: clearing
+        the model KEEPS the dataset. That is §5.6's dataset-primary policy, which was not even
+        expressible while the dropdown was unclearable.
         """
-        if not model_key:
-            return dash.no_update, dash.no_update
-        options = apply_availability_gate(gated_dataset_options(model_key), self._fetch_generators())
+        # ``generators`` is injectable so a test can state the deployment's availability instead of
+        # inheriting whatever a live ``/api/dataset/generators`` call returns. Without it the
+        # all-unavailable case (G1d) is unreachable, and — since N11 removed the early return that
+        # used to short-circuit before this line — a no-model gate call would otherwise perform
+        # live HTTP on a path that never did.
+        available = self._fetch_generators() if generators is None else generators
+        options = apply_availability_gate(gated_dataset_options(model_key), available)
         enabled = [option["value"] for option in options if not option.get("disabled")]
         if current_value in enabled or not enabled:
             return options, dash.no_update
@@ -2949,7 +2976,7 @@ class DashboardManager:
         is_open = True if triggered_id == "nn-model-change-button" else dash.no_update
         return is_open, self._build_model_selection_table(dataset_value, selected_model, search=search or "")
 
-    def _select_model_from_table_handler(self, n_clicks_list, triggered_id):
+    def _select_model_from_table_handler(self, n_clicks_list, triggered_id, clear_clicks=None):
         """Apply the model whose table Select button was clicked, then close the modal (A1b-1).
 
         The pattern-matching ``model-select-btn`` callback also fires once when the table is first
@@ -2959,7 +2986,21 @@ class DashboardManager:
         the modal closes only when the selection actually applied (the handler no-ops on failure, so
         a transient error leaves the modal open on the prior model). Returns
         ``(model_selection_store, model_class_store, summary, modal_is_open)``.
+
+        **N11 — the clear branch.** ``model-selection-clear`` writes ``None`` to the store, which
+        re-fires ``gate_dataset_options`` and ungates the dataset list. It deliberately does NOT
+        POST: clearing is a statement about the UI's filter, not a request to change the live
+        backend, and there is no "no model" for ``/api/model/select`` to select. The backend
+        therefore keeps running whatever it was running — which is exactly why Start is disabled at
+        a cleared model (``_update_button_appearance_handler``), and why the summary says so rather
+        than going blank. ``model-class-store`` is left untouched for the same reason: the execution
+        paradigm of the still-live backend has not changed, and nothing can be started to observe a
+        stale one.
         """
+        if triggered_id == "model-selection-clear":
+            if not clear_clicks:
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return None, dash.no_update, self.CLEARED_MODEL_SUMMARY, False
         if not isinstance(triggered_id, dict) or not any(n_clicks_list or []):
             return dash.no_update, dash.no_update, dash.no_update, dash.no_update
         store, model_class, summary = self._select_model_handler(triggered_id.get("index"))
@@ -2969,6 +3010,11 @@ class DashboardManager:
     #: ``backend.backend_type`` as reported by ``/api/model/select`` when the recurrence service
     #: backend is the live one. The other values ("cascor", "demo") both serve cascor-family models.
     RECURRENCE_BACKEND_TYPE: str = "recurrence"
+
+    #: Sidebar summary at a cleared model (``⊥`` on the model axis). It says what the state IS and
+    #: what it costs, rather than going blank: a blank summary over a live backend is the X1 class,
+    #: and this state is not runnable (Start is disabled until a model is chosen).
+    CLEARED_MODEL_SUMMARY: str = "No model selected — all datasets shown; choose one to train"
 
     @staticmethod
     def _selection_is_live(data):
@@ -3111,13 +3157,21 @@ class DashboardManager:
         compatible_count = 0
         for model in visible:
             reason = model_reason(model, dataset) if dataset is not None else None
+            # ``⊥`` is compatible with every model — that is what makes it the cut vertex — so every
+            # Select stays ENABLED here and the traversal out of ``⊥`` keeps working.
             is_compatible = reason is None
             compatible_count += int(is_compatible)
             is_active = model.key == selected_model
             model_cell = [html.Strong(model.label)]
             if model.description:
                 model_cell.extend([html.Br(), html.Span(model.description, className="text-muted small")])
-            if is_compatible:
+            if dataset is None:
+                # Y9: rendering "✓ compatible" here was a positive falsehood — it asserted agreement
+                # with a dataset that does not exist, for every model in the table. State the
+                # requirement instead, so the row says what it WOULD need. Selectability is
+                # unaffected (``is_compatible`` stays True); only the claim changes.
+                compat_cell = html.Span(model_requirement(model), className="text-muted small")
+            elif is_compatible:
                 compat_cell = html.Span("✓ compatible", className="text-success small")
             else:
                 compat_cell = html.Span(reason, className="text-muted small fst-italic")
