@@ -46,6 +46,7 @@ from fastapi.testclient import TestClient
 
 import main
 from backend.demo_backend import DemoBackend
+from dataset_schema import generator_name_for_type
 from demo_mode import DemoMode
 from frontend.dashboard_manager import DashboardManager
 from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, compatible_datasets, model_requirement
@@ -203,7 +204,15 @@ def _selectable_models(manager, dataset_value):
     return enabled
 
 
-def _pickable_datasets(manager, model_key, dataset_value):
+#: Availability injections. ``ALL_AVAILABLE`` is the flag-absent fallback (an empty list means
+#: every generator reads available); ``NONE_AVAILABLE`` names every seeded generator as absent,
+#: which is the deployed container's real state for the LMU today — ``yfinance`` is not in
+#: juniper-data's lockfile — and is the only way to produce the empty compatible ∩ available set.
+ALL_AVAILABLE: list = []
+NONE_AVAILABLE = [{"name": generator_name_for_type(spec.value), "available": False} for spec in DATASET_TYPES]
+
+
+def _pickable_datasets(manager, model_key, dataset_value, generators=ALL_AVAILABLE):
     """Dataset values the dropdown will actually let the user choose, given the current model.
 
     Availability is injected as all-available throughout this module. These are REACHABILITY
@@ -212,7 +221,7 @@ def _pickable_datasets(manager, model_key, dataset_value):
     and on a runner with no resolver the DNS failure hangs rather than erroring fast. G1d asserts
     the opposite extreme (nothing available) by injecting that instead.
     """
-    options, _value = manager._gate_dataset_options_handler(model_key, dataset_value, generators=[])
+    options, _value, _notice = manager._gate_dataset_options_handler(model_key, dataset_value, generators=generators)
     if options is dash.no_update:
         return set()
     return {opt["value"] for opt in options if not opt.get("disabled")}
@@ -227,7 +236,7 @@ def _model_clear_is_offered(manager):
     return any(getattr(c, "id", None) == "model-selection-clear" for c in _components(manager.app.layout))
 
 
-def _explore(manager, *, clearable=None, model_clearable=None):
+def _explore(manager, *, clearable=None, model_clearable=None, generators=ALL_AVAILABLE):
     """BFS the COMPOSED transition relation over the real handlers, from the mount state.
 
     Transitions, each corresponding to a gesture the UI actually exposes:
@@ -249,20 +258,26 @@ def _explore(manager, *, clearable=None, model_clearable=None):
         clearable = _dataset_dropdown_is_clearable(manager)
     if model_clearable is None:
         model_clearable = _model_clear_is_offered(manager)
-    start = (DEFAULT_MODEL_KEY, DEFAULT_DATASET_TYPE)
+    # The layout's seeded value is not the app's first settled state. ``params-init-interval``
+    # fires the gate once, ~1 s after load, so the mount pass ALWAYS runs — and where the seeded
+    # dataset is unavailable it is cleared before the user can touch anything. Starting the search
+    # at the raw layout default would credit the UI with a state it occupies only transiently, and
+    # would make G1d assert about a pre-gate snapshot rather than about the recovery state.
+    _options, mounted, _notice = manager._gate_dataset_options_handler(DEFAULT_MODEL_KEY, DEFAULT_DATASET_TYPE, generators=generators)
+    start = (DEFAULT_MODEL_KEY, DEFAULT_DATASET_TYPE if mounted is dash.no_update else mounted)
     seen = {start}
     queue = [start]
     while queue:
         model_key, dataset_value = queue.pop()
-        successors = {(model_key, ds) for ds in _pickable_datasets(manager, model_key, dataset_value)}
+        successors = {(model_key, ds) for ds in _pickable_datasets(manager, model_key, dataset_value, generators)}
         if clearable:
             successors.add((model_key, None))
         if model_clearable:
             # The clear writes None to the store, which re-fires the gate exactly as a Select does.
-            _options, snapped = manager._gate_dataset_options_handler(None, dataset_value, generators=[])
+            _options, snapped, _notice = manager._gate_dataset_options_handler(None, dataset_value, generators=generators)
             successors.add((None, dataset_value if snapped is dash.no_update else snapped))
         for target in _selectable_models(manager, dataset_value):
-            _options, snapped = manager._gate_dataset_options_handler(target, dataset_value, generators=[])
+            _options, snapped, _notice = manager._gate_dataset_options_handler(target, dataset_value, generators=generators)
             successors.add((target, dataset_value if snapped is dash.no_update else snapped))
         for state in successors:
             if state not in seen:
@@ -407,7 +422,7 @@ class TestG8ClearedModelUngatesTheDataset:
 
     @pytest.mark.parametrize("empty", [None, ""])
     def test_a_cleared_model_ungates_every_compatible_dataset(self, manager, empty):
-        options, _value = manager._gate_dataset_options_handler(empty, "spirals", generators=[])
+        options, _value, _notice = manager._gate_dataset_options_handler(empty, "spirals", generators=[])
         assert options is not dash.no_update
         enabled = {o["value"] for o in options if not o.get("disabled")}
         # Ungated means the union of both models' datasets is offered — in particular the one the
@@ -418,7 +433,7 @@ class TestG8ClearedModelUngatesTheDataset:
     def test_clearing_the_model_keeps_the_dataset(self, manager):
         # §5.6's dataset-primary conflict policy, expressible for the first time now that BOTH
         # axes can be cleared.
-        _options, value = manager._gate_dataset_options_handler(None, "equities_seq", generators=[])
+        _options, value, _notice = manager._gate_dataset_options_handler(None, "equities_seq", generators=[])
         assert value is dash.no_update
 
     def test_the_clear_writes_none_and_does_not_post(self, manager):
@@ -467,3 +482,102 @@ class TestY9ModelTableDoesNotOverclaimAtBottom:
     def test_a_real_dataset_still_reports_compatibility_normally(self, manager):
         rendered = " ".join(str(c) for c in _components(manager._build_model_selection_table("spirals", "cascor")))
         assert "✓ compatible" in rendered
+
+
+# ---------------------------------------------------------------------------
+# G3 / G1d — the empty compatible ∩ available set, and the notices
+# ---------------------------------------------------------------------------
+
+
+def _alert_text(component):
+    """Flatten an alert component tree to its rendered text."""
+    return " ".join(str(c) for c in _components(component))
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG3EmptySetRecovery:
+    """G3 — an empty compatible ∩ available set renders a recovery state, never ``no_update``."""
+
+    def test_the_empty_set_clears_the_dataset_instead_of_parking_on_it(self, manager):
+        # The old code returned ``no_update`` here, so the dropdown kept showing a dataset its OWN
+        # list disables — a committed state the gate had already judged unusable.
+        _options, value, notice = manager._gate_dataset_options_handler("recurrence", "equities_seq", generators=NONE_AVAILABLE)
+        assert value is None
+        assert notice is not None
+
+    def test_the_empty_set_notice_is_persistent_not_transient(self, manager):
+        # N12: "persistent until resolved" applies to THIS event and only this one. A duration
+        # would auto-dismiss a blocking state the operator has not resolved.
+        _options, _value, notice = manager._gate_dataset_options_handler("recurrence", "equities_seq", generators=NONE_AVAILABLE)
+        assert getattr(notice, "duration", None) is None
+        assert "No dataset is available" in _alert_text(notice)
+
+    def test_the_empty_set_notice_names_the_model_and_the_remedy(self, manager):
+        _options, _value, notice = manager._gate_dataset_options_handler("recurrence", "equities_seq", generators=NONE_AVAILABLE)
+        text = _alert_text(notice)
+        assert "Recurrence (LMU)" in text
+        assert "juniper-data" in text
+
+    def test_clearing_the_dataset_here_disables_start_and_apply(self, manager):
+        # The recovery state must not merely be legible; it must be safe. Clearing to ⊥ reaches the
+        # gates that already exist rather than adding a third one.
+        _options, value, _notice = manager._gate_dataset_options_handler("recurrence", "equities_seq", generators=NONE_AVAILABLE)
+        states = {"start": {"disabled": False, "loading": False, "timestamp": 0}}
+        appearance = manager._update_button_appearance_handler(button_states=states, model_key="recurrence", dataset_value=value)
+        assert appearance[0] is True
+        assert appearance[-1] is True
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestDatasetRepairNotice:
+    """§4.3 / D5 — the notice the snap was always specified to render and never did."""
+
+    def test_a_repaired_gate_names_the_old_and_the_new_value(self, manager):
+        _options, value, notice = manager._gate_dataset_options_handler("recurrence", "spirals", generators=ALL_AVAILABLE)
+        assert value == "equities_seq"
+        text = _alert_text(notice)
+        # "The dataset changed" without saying from what to what is an alarm, not a notice.
+        assert "Spirals" in text
+        assert "Equities (sequence)" in text
+        assert "Recurrence (LMU)" in text
+
+    def test_the_repair_notice_is_transient(self, manager):
+        # N12's other half: a successful repair is informational — there is nothing to resolve.
+        _options, _value, notice = manager._gate_dataset_options_handler("recurrence", "spirals", generators=ALL_AVAILABLE)
+        assert getattr(notice, "duration", None) is not None
+        assert notice.dismissable is True
+
+    def test_no_notice_when_the_gate_changes_nothing(self, manager):
+        # And it must CLEAR a stale one rather than leaving the last repair on screen forever.
+        _options, value, notice = manager._gate_dataset_options_handler("cascor", "spirals", generators=ALL_AVAILABLE)
+        assert value is dash.no_update
+        assert notice is None
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG1dNothingAvailable:
+    """G1d — with nothing available, assert the RECOVERY state, not reachability.
+
+    The design filed G1d under "must pass after" with a reachability assertion, which is
+    unsatisfiable: with no dataset available there is nothing to reach. It asserts §4.7 instead.
+    """
+
+    def test_no_pair_is_reachable_and_that_is_correct(self, manager):
+        reach = _explore(manager, generators=NONE_AVAILABLE)
+        # Every reachable state is incomplete on the dataset axis — there is no available dataset
+        # to complete it with. This is a vacuous pass FOR REACHABILITY and a real assertion about ⊥.
+        assert all(dataset is None for _model, dataset in reach), sorted(map(repr, reach))
+
+    def test_i_safe_still_holds_with_nothing_available(self, manager):
+        # G1b's assertion must survive the degenerate case: incomplete, never invalid.
+        allowed = {(m.key, None) for m in MODELS} | {(None, None)}
+        assert _explore(manager, generators=NONE_AVAILABLE) - allowed == set()
+
+    def test_every_model_still_reports_the_recovery_state(self, manager):
+        for model in MODELS:
+            _options, value, notice = manager._gate_dataset_options_handler(model.key, DEFAULT_DATASET_TYPE, generators=NONE_AVAILABLE)
+            assert value is None, model.key
+            assert notice is not None, model.key

@@ -133,7 +133,7 @@ def test_render_flag_absent_treats_generator_available(dm):
 
 def test_gate_composes_availability_over_model_options(dm):
     dm._fetch_generators = lambda: GENERATORS  # mnist unavailable
-    options, value = dm._gate_dataset_options_handler("cascor", "spirals")
+    options, value, _notice = dm._gate_dataset_options_handler("cascor", "spirals")
     by_value = {o["value"]: o for o in options}
     # cascor is 2-D: spirals/xor/mnist/circles/moons compatible; equities_seq 3-D -> model-disabled.
     assert by_value["mnist"]["disabled"] is True  # availability gate
@@ -144,7 +144,7 @@ def test_gate_composes_availability_over_model_options(dm):
 
 def test_gate_snaps_away_from_a_disabled_current_selection(dm):
     dm._fetch_generators = lambda: GENERATORS
-    options, value = dm._gate_dataset_options_handler("cascor", "mnist")  # mnist now unavailable
+    options, value, _notice = dm._gate_dataset_options_handler("cascor", "mnist")  # mnist now unavailable
     enabled = [o["value"] for o in options if not o.get("disabled")]
     assert value in enabled and value != "mnist"  # snapped to a usable dataset
 
@@ -154,7 +154,7 @@ def test_gate_ungates_without_model(dm):
     # while the model axis could not be cleared; once it can, that early return freezes the list
     # at the OLD model's gate. The availability composition still applies -- this ungates the
     # MODEL-compatibility gate, not the deployment-availability one.
-    options, value = dm._gate_dataset_options_handler("", "spirals", generators=[])
+    options, value, _notice = dm._gate_dataset_options_handler("", "spirals", generators=[])
     assert options is not dash.no_update
     assert len(options) == len(dm._gate_dataset_options_handler("cascor", "spirals", generators=[])[0])
     assert value is dash.no_update
@@ -162,7 +162,7 @@ def test_gate_ungates_without_model(dm):
 
 def test_gate_flag_absent_leaves_all_available_enabled(dm):
     dm._fetch_generators = lambda: [{"name": "mnist"}, {"name": "spiral"}]  # no availability flags
-    options, _value = dm._gate_dataset_options_handler("cascor", "spirals")
+    options, _value, _notice = dm._gate_dataset_options_handler("cascor", "spirals")
     by_value = {o["value"]: o for o in options}
     assert by_value["mnist"].get("disabled") in (None, False)  # flag-absent -> not availability-gated
 

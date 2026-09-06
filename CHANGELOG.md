@@ -115,6 +115,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An empty compatible ∩ available dataset set silently parked the UI on an unusable dataset**
+  (design §4.7 / N8). `_gate_dataset_options_handler` treated "the current dataset is still fine"
+  and "no dataset is both compatible with this model and available in this deployment" as one
+  branch, returning `no_update` for both -- so in the second case the dropdown kept displaying a
+  dataset **its own option list disables**, and nothing said why.
+
+  These are different events. The empty set now clears the dataset to `⊥` and renders a
+  **persistent** inline alert naming the model and the remedy. Clearing to `⊥` also disables Start
+  and Apply through the gates that already exist, rather than adding a third one. This is not a
+  hypothetical: `yfinance` is absent from juniper-data's lockfile, so in the deployed container the
+  LMU has zero available datasets regardless of any UI change -- §4.7 makes that state legible
+  instead of a silent park.
+
+- **The gate moved the dataset without telling anyone** (design §4.3 / D5). D5 always specified a
+  notice when the model gate snaps the dataset to a compatible one; the snap shipped and the notice
+  never did, so the dataset changed under the operator silently. It now names the old value, the
+  new one, and the model that forced the change -- "the dataset changed", without saying from what
+  to what, is an alarm rather than a notice.
+
+  The two notices are deliberately different channels (N12). A successful repair is informational
+  and **auto-dismisses**; the empty set is blocking and **persists until resolved**. Both render at
+  the control (N4) rather than in a detached toast, in a container carrying `role="status"` and
+  `aria-live="polite"` -- Y7 measured **zero** `aria-*` attributes in this file and dash 4.2.0's
+  dropdown emits no `aria-disabled`, so a toast alone would have been an accessibility regression
+  against simply rendering the notice inline.
+
+### Changed
+
+- **`_gate_dataset_options_handler` returns `(options, value, notice)`.** The callback that *moves*
+  the dataset owns the notice about having moved it, because only it knows both the old value and
+  the new one. Twelve unpack sites across three test files were widened.
+
+- **The reachability BFS now starts where the app actually starts** -- after the mount-time gate
+  pass, not at the layout's seeded value. `params-init-interval` fires the gate ~1 s after load, so
+  the seeded default is a state the UI occupies only transiently; where that dataset is
+  unavailable it is cleared before the user can touch anything. Guardrail **G1d** would otherwise
+  have been asserting about a pre-gate snapshot rather than about the recovery state.
+
+
 - **The model/dataset selection catch-22: `(recurrence, equities_seq)` was compatible but
   unreachable.** The dataset dropdown was gated by the selected model and the model table's Select
   buttons were gated by the selected dataset, and the compatibility relation is a disjoint

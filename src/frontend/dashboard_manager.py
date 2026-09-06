@@ -1359,6 +1359,13 @@ class DashboardManager:
                                                                                             className="mb-2 ms-3",
                                                                                             style={"width": "calc(100% - 1rem)"},
                                                                                         ),
+                                                                                        # §4.3 / N4 — the gate's notice renders HERE, at the locus, not in a
+                                                                                        # detached toast. ``role="status"`` + ``aria-live="polite"`` make it the
+                                                                                        # accessible channel: Y7 measured zero aria-* attributes in this file, and
+                                                                                        # dash 4.2.0's dropdown emits no ``aria-disabled``, so a greyed option's
+                                                                                        # gate is invisible to assistive technology. A toast alone would have been
+                                                                                        # an accessibility regression against simply rendering it inline.
+                                                                                        html.Div(id="dataset-gate-notice", className="ms-3", role="status", **{"aria-live": "polite"}),
                                                                                         # N7 (I-7 / U-6): schema-driven parameter inputs for the selected
                                                                                         # non-spiral generator, rebuilt by ``render_dataset_params`` from the
                                                                                         # generator's JSON schema (labels/bounds/defaults). Each input carries a
@@ -2640,6 +2647,9 @@ class DashboardManager:
         @self.app.callback(
             Output("nn-dataset-type-dropdown", "options"),
             Output("nn-dataset-type-dropdown", "value"),
+            # §4.3: the same callback that MOVES the dataset owns the notice about having moved it.
+            # Only this handler knows the old value and the new one, so only it can name the change.
+            Output("dataset-gate-notice", "children"),
             Input("model-selection-store", "data"),
             Input("params-init-interval", "n_intervals"),
             State("nn-dataset-type-dropdown", "value"),
@@ -2752,9 +2762,70 @@ class DashboardManager:
         available = self._fetch_generators() if generators is None else generators
         options = apply_availability_gate(gated_dataset_options(model_key), available)
         enabled = [option["value"] for option in options if not option.get("disabled")]
-        if current_value in enabled or not enabled:
-            return options, dash.no_update
-        return options, enabled[0]
+        # §4.7 — ``current_value in enabled`` and ``not enabled`` were one branch, and they are not
+        # the same event. The first is "nothing to do"; the second is "no dataset in this deployment
+        # is both compatible with this model and available", which is a RECOVERY state and was
+        # silently parking the UI on a dataset its own list disables.
+        if not enabled:
+            return options, None, self._empty_dataset_set_notice(model_key)
+        if current_value in enabled:
+            return options, dash.no_update, None
+        return options, enabled[0], self._dataset_repaired_notice(current_value, enabled[0], model_key)
+
+    @staticmethod
+    def _model_label(model_key):
+        """Human label for ``model_key``, falling back to the key itself."""
+        spec = get_model_spec(model_key) if model_key else None
+        return spec.label if spec is not None else (model_key or "the selected model")
+
+    @staticmethod
+    def _dataset_label(dataset_value):
+        """Human label for ``dataset_value``, falling back to the raw value."""
+        spec = get_dataset_spec(dataset_value) if dataset_value else None
+        return spec.label if spec is not None else (dataset_value or "none")
+
+    def _empty_dataset_set_notice(self, model_key):
+        """N8 / N12 — the PERSISTENT half. Blocking, resolvable, and never auto-dismissed.
+
+        Fires when compatible ∩ available is empty: the model is fine and the datasets are fine,
+        but no dataset in THIS deployment is both. That is the container's normal state today —
+        ``yfinance`` is absent from juniper-data's lockfile, so the LMU has zero available datasets
+        there regardless of any UI change. The old code returned ``no_update`` here, leaving the
+        dropdown showing a dataset its own list disables; the value is now cleared to ``⊥``, which
+        also disables Start and Apply through the gates that already exist.
+
+        No ``duration``: "persistent until resolved" applies to this event and only this one.
+        """
+        return dbc.Alert(
+            [
+                html.Strong(f"No dataset is available for {self._model_label(model_key)}. "),
+                html.Span("Every dataset compatible with this model is unavailable in this deployment — usually a missing optional data extra in juniper-data. "),
+                html.Span("Install it, or choose a different model."),
+            ],
+            color="warning",
+            className="mb-2",
+            id="dataset-gate-empty-alert",
+        )
+
+    def _dataset_repaired_notice(self, previous, replacement, model_key):
+        """D5's notice, and N12's TRANSIENT half — informational, so it auto-dismisses.
+
+        The gate has just moved the dataset because the previous one is not compatible with the
+        newly-selected model. D5 always specified this notice and the snap never shipped it, so the
+        dataset changed under the operator silently. Names the old value and the new one, because
+        "the dataset changed" without saying from what to what is not a notice, it is an alarm.
+        """
+        return dbc.Alert(
+            [
+                html.Strong("Dataset changed. "),
+                html.Span(f"{self._dataset_label(previous)} is not compatible with {self._model_label(model_key)}; switched to {self._dataset_label(replacement)}."),
+            ],
+            color="info",
+            className="mb-2",
+            dismissable=True,
+            duration=8000,
+            id="dataset-gate-repaired-alert",
+        )
 
     # N7 (I-7 / U-6 / I-5): schema-driven dataset-panel plumbing. The generator list (name /
     # available / schema dicts) is fetched from canopy's own /api/dataset/generators proxy and

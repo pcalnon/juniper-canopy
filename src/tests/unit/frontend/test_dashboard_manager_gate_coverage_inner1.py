@@ -175,8 +175,12 @@ class TestModelSelectionInner:
         cb = raw_cb(dm, "gate_dataset_options")
         # N7: gate_dataset_options gained a params-init-interval Input (fires the availability gate
         # on mount too) — the middle positional is the interval count.
-        options, value = cb(dmmod.DEFAULT_MODEL_KEY, None, dmmod.DEFAULT_DATASET_TYPE)
+        # §4.3: the callback gained a third Output — the gate's notice about having moved (or
+        # refused to move) the dataset.
+        options, value, notice = cb(dmmod.DEFAULT_MODEL_KEY, None, dmmod.DEFAULT_DATASET_TYPE)
         assert isinstance(options, list)
+        # The default pair is compatible and available, so the gate changes nothing and says nothing.
+        assert notice is None
 
     def test_resolve_oneshot_start_body_live(self, dm):
         cb = raw_cb(dm, "resolve_oneshot_start_body")

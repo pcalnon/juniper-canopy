@@ -89,7 +89,7 @@ def test_model_summary_text_live_vs_coming_soon():
 
 
 def test_gate_dataset_options_handler_greys_and_snaps_for_recurrence(manager):
-    options, value = manager._gate_dataset_options_handler("recurrence", "spirals")
+    options, value, _notice = manager._gate_dataset_options_handler("recurrence", "spirals")
     by_value = {option["value"]: option for option in options}
     assert by_value["spirals"]["disabled"] is True  # 2-D greyed for the 3-D model
     assert "disabled" not in by_value["equities_seq"]  # the compatible 3-D dataset stays plain
@@ -97,7 +97,7 @@ def test_gate_dataset_options_handler_greys_and_snaps_for_recurrence(manager):
 
 
 def test_gate_dataset_options_handler_keeps_compatible_value(manager):
-    _options, value = manager._gate_dataset_options_handler("cascor", "spirals")
+    _options, value, _notice = manager._gate_dataset_options_handler("cascor", "spirals")
     assert value is dash.no_update  # spirals stays valid for cascor -> no snap
 
 
@@ -105,7 +105,7 @@ def test_gate_dataset_options_handler_ungates_without_model(manager):
     # INVERTED by N11 (was: no model -> (no_update, no_update)). A cleared model must render the
     # UNGATED list; freezing the dropdown at the previous model's gate is the mutual-gate trap on
     # the model axis, shipped by the affordance meant to relieve it.
-    options, value = manager._gate_dataset_options_handler("", "spirals", generators=[])
+    options, value, _notice = manager._gate_dataset_options_handler("", "spirals", generators=[])
     assert options is not dash.no_update
     assert [o["value"] for o in options if not o.get("disabled")], "a cleared model must enable something"
     # Dataset-primary conflict policy (§5.6): clearing the model KEEPS the dataset.
