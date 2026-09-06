@@ -105,7 +105,7 @@ def test_gate_dataset_options_handler_ungates_without_model(manager):
     # INVERTED by N11 (was: no model -> (no_update, no_update)). A cleared model must render the
     # UNGATED list; freezing the dropdown at the previous model's gate is the mutual-gate trap on
     # the model axis, shipped by the affordance meant to relieve it.
-    options, value = manager._gate_dataset_options_handler("", "spirals")
+    options, value = manager._gate_dataset_options_handler("", "spirals", generators=[])
     assert options is not dash.no_update
     assert [o["value"] for o in options if not o.get("disabled")], "a cleared model must enable something"
     # Dataset-primary conflict policy (§5.6): clearing the model KEEPS the dataset.

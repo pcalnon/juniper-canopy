@@ -2720,7 +2720,7 @@ class DashboardManager:
             dataset_ref["params"] = params
         return {"dataset": dataset_ref}
 
-    def _gate_dataset_options_handler(self, model_key, current_value):
+    def _gate_dataset_options_handler(self, model_key, current_value, *, generators=None):
         """Gate the dataset dropdown against the selected model (A1-iv-3b) AND availability (N7 / I-5).
 
         Composes the model-compatibility gate (``gated_dataset_options`` — the D5 correctness gate:
@@ -2744,7 +2744,13 @@ class DashboardManager:
         the model KEEPS the dataset. That is §5.6's dataset-primary policy, which was not even
         expressible while the dropdown was unclearable.
         """
-        options = apply_availability_gate(gated_dataset_options(model_key), self._fetch_generators())
+        # ``generators`` is injectable so a test can state the deployment's availability instead of
+        # inheriting whatever a live ``/api/dataset/generators`` call returns. Without it the
+        # all-unavailable case (G1d) is unreachable, and — since N11 removed the early return that
+        # used to short-circuit before this line — a no-model gate call would otherwise perform
+        # live HTTP on a path that never did.
+        available = self._fetch_generators() if generators is None else generators
+        options = apply_availability_gate(gated_dataset_options(model_key), available)
         enabled = [option["value"] for option in options if not option.get("disabled")]
         if current_value in enabled or not enabled:
             return options, dash.no_update

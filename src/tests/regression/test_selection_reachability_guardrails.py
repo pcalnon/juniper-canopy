@@ -204,8 +204,15 @@ def _selectable_models(manager, dataset_value):
 
 
 def _pickable_datasets(manager, model_key, dataset_value):
-    """Dataset values the dropdown will actually let the user choose, given the current model."""
-    options, _value = manager._gate_dataset_options_handler(model_key, dataset_value)
+    """Dataset values the dropdown will actually let the user choose, given the current model.
+
+    Availability is injected as all-available throughout this module. These are REACHABILITY
+    assertions about the compatibility gate; letting them inherit a live
+    ``/api/dataset/generators`` call would make them depend on whether a service happened to be up,
+    and on a runner with no resolver the DNS failure hangs rather than erroring fast. G1d asserts
+    the opposite extreme (nothing available) by injecting that instead.
+    """
+    options, _value = manager._gate_dataset_options_handler(model_key, dataset_value, generators=[])
     if options is dash.no_update:
         return set()
     return {opt["value"] for opt in options if not opt.get("disabled")}
@@ -252,10 +259,10 @@ def _explore(manager, *, clearable=None, model_clearable=None):
             successors.add((model_key, None))
         if model_clearable:
             # The clear writes None to the store, which re-fires the gate exactly as a Select does.
-            _options, snapped = manager._gate_dataset_options_handler(None, dataset_value)
+            _options, snapped = manager._gate_dataset_options_handler(None, dataset_value, generators=[])
             successors.add((None, dataset_value if snapped is dash.no_update else snapped))
         for target in _selectable_models(manager, dataset_value):
-            _options, snapped = manager._gate_dataset_options_handler(target, dataset_value)
+            _options, snapped = manager._gate_dataset_options_handler(target, dataset_value, generators=[])
             successors.add((target, dataset_value if snapped is dash.no_update else snapped))
         for state in successors:
             if state not in seen:
@@ -400,7 +407,7 @@ class TestG8ClearedModelUngatesTheDataset:
 
     @pytest.mark.parametrize("empty", [None, ""])
     def test_a_cleared_model_ungates_every_compatible_dataset(self, manager, empty):
-        options, _value = manager._gate_dataset_options_handler(empty, "spirals")
+        options, _value = manager._gate_dataset_options_handler(empty, "spirals", generators=[])
         assert options is not dash.no_update
         enabled = {o["value"] for o in options if not o.get("disabled")}
         # Ungated means the union of both models' datasets is offered — in particular the one the
@@ -411,7 +418,7 @@ class TestG8ClearedModelUngatesTheDataset:
     def test_clearing_the_model_keeps_the_dataset(self, manager):
         # §5.6's dataset-primary conflict policy, expressible for the first time now that BOTH
         # axes can be cleared.
-        _options, value = manager._gate_dataset_options_handler(None, "equities_seq")
+        _options, value = manager._gate_dataset_options_handler(None, "equities_seq", generators=[])
         assert value is dash.no_update
 
     def test_the_clear_writes_none_and_does_not_post(self, manager):

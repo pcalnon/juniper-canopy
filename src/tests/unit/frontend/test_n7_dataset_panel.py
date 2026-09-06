@@ -154,9 +154,9 @@ def test_gate_ungates_without_model(dm):
     # while the model axis could not be cleared; once it can, that early return freezes the list
     # at the OLD model's gate. The availability composition still applies -- this ungates the
     # MODEL-compatibility gate, not the deployment-availability one.
-    options, value = dm._gate_dataset_options_handler("", "spirals")
+    options, value = dm._gate_dataset_options_handler("", "spirals", generators=[])
     assert options is not dash.no_update
-    assert len(options) == len(dm._gate_dataset_options_handler("cascor", "spirals")[0])
+    assert len(options) == len(dm._gate_dataset_options_handler("cascor", "spirals", generators=[])[0])
     assert value is dash.no_update
 
 
