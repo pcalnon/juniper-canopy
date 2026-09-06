@@ -115,6 +115,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Demo mode fell back to a locally generated dataset without saying so in the UI** (design
+  §4.12 / N13). Demo mode exists to **dogfood the platform**: it calls juniper-data first and
+  falls back to its own generator only when the service is unreachable. That fallback is
+  deliberately kept -- deleting it would make demo mode hard-depend on juniper-data being up, and
+  its own comment names Docker-standalone and CI smoke tests as the reason it exists. What it must
+  not do is happen *quietly*, because then demo mode stops demonstrating the platform and starts
+  demonstrating code that runs nowhere else.
+
+  `/api/stream_health` now carries `dataset_source`, and the connection badge turns red with
+  *"WS: Demo — LOCAL data, not juniper-data"*. It reuses the surface X7 PR 2 built rather than
+  adding new UI: that component exists precisely to stop canopy rendering a green *"WS: Connected"*
+  over simulated data, and this is the same claim one level finer -- red rather than grey because
+  it differs from "these numbers are simulated", in that the **data itself never came from the
+  platform**.
+
+  Two corrections to §4.12 are pinned by the new suite. The design names **one** fallback site;
+  there are **three** (`__init__`, `restart_dataset`, and the spiral-rotations regeneration), so
+  the flag is set *inside* `_generate_spiral_dataset_local` — covering every call site by
+  construction, including any added later — and a guard fails if it is moved out to the callers.
+  And the design says the fallback "degrades silently": it does not, it logs a `warning` and raises
+  a `DeprecationWarning`. It degrades silently **in the UI**, which is the channel a researcher
+  actually reads.
+
+
 - **An empty compatible ∩ available dataset set silently parked the UI on an unusable dataset**
   (design §4.7 / N8). `_gate_dataset_options_handler` treated "the current dataset is still fine"
   and "no dataset is both compatible with this model and available in this deployment" as one

@@ -87,6 +87,16 @@ function(wsStatus, streamHealth) {
     var mode = (wsStatus && wsStatus.mode !== "live" && wsStatus.mode) || (streamHealth && streamHealth.mode);
     if (mode === "demo") {
         baseStyle.backgroundColor = "#6c757d";
+        // §4.12 / G9: demo mode is SUPPOSED to run on juniper-data — that is the dogfooding the
+        // platform depends on. When it falls back to its own local generator it is no longer
+        // demonstrating the platform at all, and until now said so only in the log. Red rather
+        // than grey, because this is a different claim from "these numbers are simulated": the
+        // data itself never came from the platform.
+        if (streamHealth && streamHealth.dataset_source === "local") {
+            baseStyle.backgroundColor = "#dc3545";
+            baseStyle.color = "#fff";
+            return ["WS: Demo — LOCAL data, not juniper-data", baseStyle];
+        }
         return ["WS: Demo", baseStyle];
     }
     if (wsStatus.connected) {

@@ -545,6 +545,13 @@ class DemoMode:
         # Create mock network
         self.network = MockCascorNetwork(input_size=2, output_size=1)
 
+        # §4.12 / G9 — whether this instance is running on a LOCALLY generated dataset rather than
+        # one from juniper-data. Defaulted here, before the try/except below, because that block
+        # can set it during __init__ itself. Demo mode's job is to dogfood the platform; when it
+        # cannot, it must say so rather than quietly presenting non-platform data as a demo of the
+        # platform.
+        self.local_dataset_fallback = False
+
         # Generate demo dataset — fall back to local generation if JuniperData
         # is unreachable (e.g., Docker standalone, CI smoke test).
         try:
@@ -1058,6 +1065,16 @@ class DemoMode:
         """
         import warnings
 
+        # §4.12 / G9 — mark the instance degraded HERE rather than at the call sites. There are
+        # three of them (__init__, restart_dataset, and the spiral-rotations regeneration); the
+        # design named one, so a per-caller flag would have left demo mode able to BECOME degraded
+        # mid-session unannounced. Setting it inside the degraded path covers all three and any
+        # fourth added later.
+        self.local_dataset_fallback = True
+
+        # The existing warning + DeprecationWarning are log-channel only: A1's audit of the "it
+        # degrades silently" claim found it degrades silently *in the UI*, which is the channel a
+        # researcher actually reads. This flag is what reaches the badge.
         warnings.warn(
             "DemoMode._generate_spiral_dataset_local() is deprecated and will be removed in a future release. " "Dataset generation is now handled by the JuniperData service.",
             DeprecationWarning,
