@@ -426,8 +426,8 @@ class TestButtonAppearanceHandler:
             "resume": {"disabled": True, "loading": True, "timestamp": 100},
             "reset": {"disabled": True, "loading": True, "timestamp": 100},
         }
-        result = dashboard_manager._update_button_appearance_handler(button_states=button_states)
-        assert len(result) == 10
+        result = dashboard_manager._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
+        assert len(result) == 11  # 5 buttons x 2 (disabled, text) + apply-dataset disabled
         assert "⏳" in result[1]
         assert "⏳" in result[3]
         assert "⏳" in result[5]
@@ -443,7 +443,7 @@ class TestButtonAppearanceHandler:
             "resume": {"disabled": True, "loading": True, "timestamp": 100},
             "reset": {"disabled": False, "loading": False, "timestamp": 0},
         }
-        result = dashboard_manager._update_button_appearance_handler(button_states=button_states)
+        result = dashboard_manager._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
         assert result[0] is True
         assert "⏳" in result[1]
         assert result[2] is False

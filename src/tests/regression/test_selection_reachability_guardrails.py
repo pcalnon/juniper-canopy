@@ -38,6 +38,9 @@ gated on it would report a running CasCor as inactive. ``test_noop_reselect_of_t
 is the false-positive guard that pins that distinction; it fails against the naive predicate.
 """
 
+from unittest import mock
+
+import dash
 import pytest
 from fastapi.testclient import TestClient
 
@@ -45,6 +48,14 @@ import main
 from backend.demo_backend import DemoBackend
 from demo_mode import DemoMode
 from frontend.dashboard_manager import DashboardManager
+from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, compatible_datasets
+
+
+@pytest.fixture
+def manager():
+    """A DashboardManager instance (also validates the layout + callbacks register cleanly)."""
+    return DashboardManager({})
+
 
 # The X1 payload, shaped exactly as ``main._model_state_response`` builds it (``main.py:3860-3871``)
 # for a recurrence selection over an unconfigured service. ``test_the_real_route_payload_reads_not_active``
@@ -70,11 +81,24 @@ class TestG5ModelStateTruth:
         data = {**X1_PAYLOAD, "backend": "recurrence", "swapped": True}
         assert DashboardManager._selection_is_live(data) is True
 
-    @pytest.mark.parametrize("backend_type", ["cascor", "demo"])
+    @pytest.mark.parametrize("backend_type", ["service", "demo"])
     def test_cascor_selected_over_a_cascor_family_backend_is_live(self, backend_type):
-        # Both non-recurrence backend types serve the cascor model; neither is a disagreement.
+        # The REAL domain of ``backend.backend_type`` is exactly {"service", "demo", "recurrence"}
+        # (``service_backend.py:84``, ``demo_backend.py:71``, ``recurrence_backend.py:121``). An
+        # earlier revision of this test parametrised on "cascor", which the property never returns
+        # — so the live-cascor case, the one the predicate most needed pinned, went uncovered while
+        # the suite read green. Both non-recurrence types serve the cascor model.
         data = {"nn_model": "cascor", "backend": backend_type, "status": "live", "swapped": False}
         assert DashboardManager._selection_is_live(data) is True
+
+    def test_the_backend_type_domain_is_exactly_three_values(self):
+        # Pins the premise of every case above against the property implementations themselves, so
+        # a fourth backend type cannot appear without this suite noticing.
+        from backend.demo_backend import DemoBackend as _Demo
+        from backend.recurrence_backend import RecurrenceBackend as _Rec
+        from backend.service_backend import ServiceBackend as _Svc
+
+        assert {_Svc.backend_type.fget(None), _Demo.backend_type.fget(None), _Rec.backend_type.fget(None)} == {"service", "demo", "recurrence"}
 
     def test_an_absent_backend_is_unknown_not_a_disagreement(self):
         # The first-paint seed has never round-tripped, so it carries no ``backend``. Reporting
@@ -127,3 +151,190 @@ class TestG5ModelStateTruth:
         summary = DashboardManager._model_summary_text(body)
         assert "NOT ACTIVE" in summary, summary
         assert body["backend"] in summary
+
+
+# ---------------------------------------------------------------------------
+# G1 / G2 / G6 — reachability, safety, and the Start gate
+# ---------------------------------------------------------------------------
+
+
+def _components(tree):
+    """Flatten a Dash component tree to a list of components (children may be list/tuple/scalar)."""
+    out: list = []
+    seen: set = set()
+
+    def visit(node):
+        if node is None or isinstance(node, (str, int, float, bool)):
+            return
+        if isinstance(node, (list, tuple)):
+            for child in node:
+                visit(child)
+            return
+        if id(node) in seen:
+            return
+        seen.add(id(node))
+        out.append(node)
+        visit(getattr(node, "children", None))
+
+    visit(tree)
+    return out
+
+
+def _dataset_dropdown_is_clearable(manager):
+    """Read ``clearable`` off the SHIPPED layout, so G1a goes red when the ✕ is removed.
+
+    Deriving this rather than hard-coding ``True`` is what makes G1a a reachability test instead of
+    a restatement of the fix: revert the one-keyword change and the clear transition disappears
+    from the BFS below, which is exactly the deadlock.
+    """
+    for component in _components(manager.app.layout):
+        if getattr(component, "id", None) == "nn-dataset-type-dropdown":
+            return bool(getattr(component, "clearable", False))
+    raise AssertionError("nn-dataset-type-dropdown not found in the layout")
+
+
+def _selectable_models(manager, dataset_value):
+    """Model keys whose table Select button is ENABLED for ``dataset_value`` (the real gate)."""
+    enabled = set()
+    for component in _components(manager._build_model_selection_table(dataset_value, None)):
+        cid = getattr(component, "id", None)
+        if isinstance(cid, dict) and cid.get("type") == "model-select-btn" and not getattr(component, "disabled", False):
+            enabled.add(cid["index"])
+    return enabled
+
+
+def _pickable_datasets(manager, model_key, dataset_value):
+    """Dataset values the dropdown will actually let the user choose, given the current model."""
+    options, _value = manager._gate_dataset_options_handler(model_key, dataset_value)
+    if options is dash.no_update:
+        return set()
+    return {opt["value"] for opt in options if not opt.get("disabled")}
+
+
+def _explore(manager, *, clearable=None):
+    """BFS the COMPOSED transition relation over the real handlers, from the mount state.
+
+    Transitions, each corresponding to a gesture the UI actually exposes:
+
+    1. choose any ENABLED dataset option — the dropdown does not re-gate, because the dataset
+       rides as ``State`` on the gate callback, so picking one cannot move the model;
+    2. clear the dataset to ``⊥``, only when the shipped dropdown is ``clearable``;
+    3. click any ENABLED model Select, which writes ``model-selection-store`` and therefore FIRES
+       the gate, which may snap the dataset. The snap is applied here exactly as the callback
+       applies it — which is why this must run at handler level. Written over ``model_registry``
+       alone, the same assertion goes green against the deadlocked code.
+    """
+    if clearable is None:
+        clearable = _dataset_dropdown_is_clearable(manager)
+    start = (DEFAULT_MODEL_KEY, DEFAULT_DATASET_TYPE)
+    seen = {start}
+    queue = [start]
+    while queue:
+        model_key, dataset_value = queue.pop()
+        successors = {(model_key, ds) for ds in _pickable_datasets(manager, model_key, dataset_value)}
+        if clearable:
+            successors.add((model_key, None))
+        for target in _selectable_models(manager, dataset_value):
+            _options, snapped = manager._gate_dataset_options_handler(target, dataset_value)
+            successors.add((target, dataset_value if snapped is dash.no_update else snapped))
+        for state in successors:
+            if state not in seen:
+                seen.add(state)
+                queue.append(state)
+    return seen
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG1Reachability:
+    """G1a/G1b — every compatible pair reachable, and nothing invalid reachable."""
+
+    def test_g1a_every_compatible_and_available_pair_is_reachable(self, manager):
+        missing = {(m.key, d.value) for m in MODELS for d in compatible_datasets(m)} - _explore(manager)
+        assert not missing, f"compatible but unreachable: {sorted(missing)}"
+
+    def test_g1a_names_the_pair_this_arc_exists_for(self, manager):
+        # Kept separate from the set-difference case so a regression reports the SUBJECT.
+        assert ("recurrence", "equities_seq") in _explore(manager)
+
+    def test_g1b_no_reachable_state_is_invalid(self, manager):
+        # ``⊥`` must be admitted EXPLICITLY: it is not in compatible(), so a bare
+        # ``Reach ⊆ compatible`` would fail on this design's own change. The ``∪ {(m, ⊥)}`` term is
+        # the whole difference between "incomplete" and "invalid", and belongs in the assertion
+        # rather than only in the prose.
+        allowed = {(m.key, d.value) for m in MODELS for d in compatible_datasets(m)} | {(m.key, None) for m in MODELS}
+        invalid = _explore(manager) - allowed
+        assert not invalid, f"reachable but not compatible: {sorted(invalid)}"
+
+    def test_g2_the_clear_affordance_is_what_opens_the_graph(self, manager):
+        # Ties G1a's pass to the mechanism rather than to coincidence: withhold the clear
+        # transition and the target pair is unreachable again. This is the deadlock, in-suite.
+        assert ("recurrence", "equities_seq") not in _explore(manager, clearable=False)
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG6StartRequiresACompleteSelection:
+    """G6 / X5 — Start is disabled at ``⊥`` on EITHER axis."""
+
+    @staticmethod
+    def _appearance(manager, model_key, dataset_value):
+        states = {"start": {"disabled": False, "loading": False, "timestamp": 0}}
+        return manager._update_button_appearance_handler(button_states=states, model_key=model_key, dataset_value=dataset_value)
+
+    def test_a_complete_selection_leaves_start_enabled(self, manager):
+        assert self._appearance(manager, "cascor", "spirals")[0] is False
+
+    @pytest.mark.parametrize("empty", [None, ""])
+    def test_start_is_disabled_with_no_dataset(self, manager, empty):
+        # Before the ✕ this state could not exist. Now it can, and an unguarded cascor start would
+        # train on whatever was LAST STAGED while the sidebar showed no dataset.
+        assert self._appearance(manager, "cascor", empty)[0] is True
+
+    @pytest.mark.parametrize("empty", [None, ""])
+    def test_start_is_disabled_with_no_model(self, manager, empty):
+        # ``model_is_trainable(None)`` answers True by design, so the model axis needs its own
+        # check — otherwise the "clear model / show all" affordance ships an ungated Start.
+        assert self._appearance(manager, empty, "spirals")[0] is True
+
+    def test_apply_dataset_is_disabled_exactly_when_the_dataset_is_unset(self, manager):
+        assert self._appearance(manager, "cascor", "spirals")[-1] is False
+        assert self._appearance(manager, "cascor", None)[-1] is True
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestCommitPathsAreGuarded:
+    """Every path that could COMMIT a ``⊥`` refuses it — and none of them was merely vacuous."""
+
+    def test_apply_dataset_refuses_and_does_not_post(self, manager):
+        with mock.patch("frontend.dashboard_manager.requests.post") as post:
+            banner, alert = manager._apply_dataset_handler(1, None, 100, 0.1, 2.0, 2)
+        # An empty body is not a no-op: cascor documents it as clearing any prior staging, so this
+        # click used to DISCARD a dataset change the operator had already staged.
+        post.assert_not_called()
+        assert banner is False
+        assert alert is not None
+
+    def test_restage_refuses_and_does_not_post(self, manager):
+        with mock.patch("frontend.dashboard_manager.requests.post") as post:
+            ok, detail = manager._restage_dataset({"dataset_type": None, "n_samples": 100})
+        post.assert_not_called()
+        assert ok is False
+        assert "No dataset" in detail
+
+    def test_live_swap_refuses_and_does_not_post(self, manager):
+        # The most expensive path: the backend's live swap stops the training future and discards
+        # in-flight candidates, so an unguarded empty body destroys a running experiment — and
+        # rendered "Live dataset swap complete." while doing it.
+        with mock.patch("frontend.dashboard_manager.requests.post") as post:
+            modal, _progress, alert, in_flight = manager._accept_live_switch_handler(1, None, 100, 0.1, 2, 2.0)
+        post.assert_not_called()
+        assert modal is False and in_flight is False
+        assert alert is not None
+
+    def test_the_live_swap_confirmation_names_the_missing_dataset(self, manager):
+        # N4: name the consequence at the locus. The row used to be skipped like any other absent
+        # field, so the user confirmed a swap whose target was unset without being told.
+        _is_open, rows = manager._open_live_switch_modal_handler(1, None, 100, 0.1, 2, 2.0)
+        assert "none selected" in " ".join(str(row) for row in rows)

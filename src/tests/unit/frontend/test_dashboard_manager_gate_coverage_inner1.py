@@ -549,8 +549,11 @@ class TestButtonActionInner:
 
     def test_update_button_appearance_delegates(self, dm):
         cb = raw_cb(dm, "update_button_appearance")
-        result = cb({"start": {"disabled": False, "loading": False, "timestamp": 0}}, dmmod.DEFAULT_MODEL_KEY)
-        assert len(result) == 10
+        # X5 / §4.8: the callback gained a dataset Input and an ``apply-dataset-button.disabled``
+        # Output, so it is now 3-in / 11-out. Both axes are supplied because an omitted one is
+        # ``⊥`` and would disable Start.
+        result = cb({"start": {"disabled": False, "loading": False, "timestamp": 0}}, dmmod.DEFAULT_MODEL_KEY, dmmod.DEFAULT_DATASET_TYPE)
+        assert len(result) == 11
 
     def test_handle_button_timeout_and_acks_delegates(self, dm):
         cb = raw_cb(dm, "handle_button_timeout_and_acks")

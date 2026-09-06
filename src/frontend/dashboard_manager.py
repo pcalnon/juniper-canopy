@@ -503,6 +503,23 @@ RESTART_MODAL_PARAM_FIELDS = (
 )
 
 
+def selection_axis_unset(value) -> bool:
+    """True when a selection axis carries no value -- the design's ``⊥``.
+
+    ``⊥`` is the universal cut vertex that makes every compatible ``(model, dataset)`` pair
+    reachable: it is compatible with everything, so it joins the two otherwise-disjoint components
+    of the compatibility graph. It is an **incomplete** state, never a valid one, and that
+    distinction is enforced by the callers of this predicate rather than assumed -- every path that
+    could *commit* a ``⊥`` is guarded, and every control that could act on one is disabled.
+
+    dash 4.2.0's Dropdown ✕ emits ``null``, verified against the shipped component source. ``""``
+    is accepted as well so that a future widget change cannot silently reopen the commit paths
+    this guards; ``not value`` is deliberately not used, because truthiness is not an "is it set"
+    test and would mis-handle a legitimately falsy key.
+    """
+    return value is None or value == ""
+
+
 class DashboardManager:
     """
     Central dashboard manager for Juniper Canopy.
@@ -1331,7 +1348,14 @@ class DashboardManager:
                                                                                             id="nn-dataset-type-dropdown",
                                                                                             options=gated_dataset_options(DEFAULT_MODEL_KEY),
                                                                                             value=DEFAULT_DATASET_TYPE,
-                                                                                            clearable=False,
+                                                                                            # §4.1 -- THE reachability fix. The dataset gate and the model gate each
+                                                                                            # read the other axis, so with no way to leave a dataset selected the two
+                                                                                            # gates trap the UI in whichever component it started in: (recurrence,
+                                                                                            # equities_seq) was compatible but unreachable. The ✕ restores ``⊥``, the
+                                                                                            # cut vertex joining both components. Every commit path out of ``⊥`` is
+                                                                                            # guarded (``selection_axis_unset``) and Start/Apply are disabled there,
+                                                                                            # so ``I-cover`` is gained without weakening ``I-safe``.
+                                                                                            clearable=True,
                                                                                             className="mb-2 ms-3",
                                                                                             style={"width": "calc(100% - 1rem)"},
                                                                                         ),
@@ -2842,6 +2866,20 @@ class DashboardManager:
         """
         if not n_clicks:
             return dash.no_update, dash.no_update
+        # X4 / §4.2 -- and it is DESTRUCTIVE, not merely vacuous. At ``⊥`` this POSTed
+        # ``{"nn_dataset_type": None}``; ``main.py``'s ``model_dump(exclude_none=True)`` strips it
+        # to ``{}``, and cascor documents an empty body as "clears any prior staging" -- so the
+        # click silently discarded a dataset change the operator had already staged, while the
+        # banner opened to report success. The button is disabled at ``⊥``
+        # (``_update_button_appearance_handler``); this is the second line of defence, because a
+        # disabled button is a UI affordance and this is the wire.
+        if selection_axis_unset(dataset_type):
+            return False, dbc.Alert(
+                [html.Strong("No dataset selected. "), html.Span("Choose a dataset before applying — sending an empty change would clear whatever is currently staged.")],
+                color="warning",
+                dismissable=True,
+                duration=8000,
+            )
         payload: dict = {"nn_dataset_type": dataset_type}
         if generator_name_for_type(dataset_type) == "spiral":
             for _key, _value in (
@@ -4522,6 +4560,8 @@ class DashboardManager:
                 Output("resume-button", "children"),
                 Output("reset-button", "disabled"),
                 Output("reset-button", "children"),
+                # N9 / §4.2: this callback is the sole writer of ``apply-dataset-button.disabled``.
+                Output("apply-dataset-button", "disabled"),
             ],
             [
                 Input("button-states", "data"),
@@ -4531,12 +4571,18 @@ class DashboardManager:
                 # ``start-button.disabled`` combines the training-state and model-status factors in
                 # one place — no racy second writer.
                 Input("model-selection-store", "data"),
+                # X5 / §4.8: the dataset rides as an **Input**, not a State. State does not
+                # trigger, so clearing the dataset would leave Start enabled until some unrelated
+                # callback happened to fire — the gate would be real in the handler and absent in
+                # the UI. This callback is not interval-driven, so the ``no_update``-chaining
+                # hazard on interval-shared inputs does not apply here.
+                Input("nn-dataset-type-dropdown", "value"),
             ],
             prevent_initial_call=False,
         )
-        def update_button_appearance(button_states, model_key):
+        def update_button_appearance(button_states, model_key, dataset_value):
             """Update button states (disabled/loading) with visual feedback + the D8 Train-gate."""
-            return self._update_button_appearance_handler(button_states=button_states, model_key=model_key)
+            return self._update_button_appearance_handler(button_states=button_states, model_key=model_key, dataset_value=dataset_value)
 
         @self.app.callback(
             Output("button-states", "data", allow_duplicate=True),
@@ -5320,6 +5366,14 @@ class DashboardManager:
                 Output("restart-granular-collapse", "is_open", allow_duplicate=True),
                 Output("restart-granular-context", "children"),
                 # N3b: editable staged-dataset field values (defaults on open).
+                # X2: ``options`` had NO writer anywhere in the repo — the list was seeded once at
+                # layout time from the cascor gate and never re-gated. Harmless only while the
+                # deadlock made a non-cascor model unreachable; the moment the ✕ ships, this modal
+                # would offer the five 2-D datasets ENABLED and equities_seq DISABLED to a
+                # recurrence user, seeded with a value its own list disables — and
+                # ``execute_restart`` forwards it. Regated on every open, from the same composition
+                # the sidebar uses.
+                Output("restart-ds-type", "options"),
                 Output("restart-ds-type", "value"),
                 Output("restart-ds-samples", "value"),
                 Output("restart-ds-noise", "value"),
@@ -5342,11 +5396,13 @@ class DashboardManager:
                 dash.dependencies.State("nn-dataset-noise-input", "value"),
                 dash.dependencies.State("nn-spiral-rotations-input", "value"),
                 dash.dependencies.State("nn-spiral-number-input", "value"),
+                # X2: the model the gate must be composed against.
+                dash.dependencies.State("model-selection-store", "data"),
             ],
             prevent_initial_call=True,
         )
-        def open_restart_confirm_modal(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals):
-            return self._open_restart_confirm_modal_handler(n_clicks=n_clicks, dataset_type=dataset_type, n_samples=n_samples, noise=noise, rotations=rotations, n_spirals=n_spirals)
+        def open_restart_confirm_modal(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, model_key):
+            return self._open_restart_confirm_modal_handler(n_clicks=n_clicks, dataset_type=dataset_type, n_samples=n_samples, noise=noise, rotations=rotations, n_spirals=n_spirals, model_key=model_key)
 
         @self.app.callback(
             Output("restart-granular-collapse", "is_open", allow_duplicate=True),
@@ -5512,13 +5568,18 @@ class DashboardManager:
             ]
         )
 
-    def _open_restart_confirm_modal_handler(self, n_clicks=None, dataset_type=None, n_samples=None, noise=None, rotations=None, n_spirals=None):
+    def _open_restart_confirm_modal_handler(self, n_clicks=None, dataset_type=None, n_samples=None, noise=None, rotations=None, n_spirals=None, model_key=None):
         """Open the confirm modal + seed the editable dataset / param fields.
 
-        Returns the 17-tuple wired in ``_setup_restart_orchestration_callbacks``:
+        Returns the 18-tuple wired in ``_setup_restart_orchestration_callbacks``:
         ``(modal_open, summary_rows, start_fresh_value, granular_open, context,
-        ds_type, ds_samples, ds_noise, ds_rotations, ds_spirals, p_lr, p_hu,
+        ds_options, ds_type, ds_samples, ds_noise, ds_rotations, ds_spirals, p_lr, p_hu,
         p_patience, p_pool, p_selected, p_corr, baseline)``.
+
+        **X2** — ``ds_options`` is new. The dropdown's list had no writer at all, so it stayed on
+        whatever the cascor gate produced at layout time. It is now composed on every open exactly
+        as the sidebar composes it (model-compatibility gate ∘ availability gate), against the
+        model actually selected.
 
         The start-fresh toggle resets to its ratified default OFF (Q4) and the
         granular section collapses on every open. The dataset fields default to
@@ -5530,7 +5591,16 @@ class DashboardManager:
         exactly what the operator changed.
         """
         if not n_clicks:
-            return (dash.no_update,) * 17
+            return (dash.no_update,) * 18
+        ds_options = apply_availability_gate(gated_dataset_options(model_key or DEFAULT_MODEL_KEY), self._fetch_generators())
+        enabled = [option["value"] for option in ds_options if not option.get("disabled")]
+        # Never seed the field with a value its own list disables: if the sidebar's dataset is not
+        # offered for this model, fall back to the first enabled one. An UNSET sidebar dataset is
+        # left unset rather than snapped to an arbitrary option — inventing a selection the
+        # operator never made is the failure mode this whole arc exists to remove, and the
+        # Confirm-time re-stage guard refuses ``⊥`` rather than sending a destructive empty body.
+        if not selection_axis_unset(dataset_type) and dataset_type not in enabled:
+            dataset_type = enabled[0] if enabled else None
         dataset_vals = {"dataset_type": dataset_type, "n_samples": n_samples, "noise": noise, "rotations": rotations, "n_spirals": n_spirals}
         param_vals, context = self._read_restart_param_seed()
         baseline = {"dataset": dict(dataset_vals), "params": dict(param_vals)}
@@ -5541,6 +5611,7 @@ class DashboardManager:
             False,
             False,
             context,
+            ds_options,
             dataset_vals["dataset_type"],
             dataset_vals["n_samples"],
             dataset_vals["noise"],
@@ -5682,8 +5753,12 @@ class DashboardManager:
         dataset_vals = dataset_vals or {}
         payload = {}
         dtype = dataset_vals.get("dataset_type")
-        if dtype is not None:
-            payload["nn_dataset_type"] = dtype
+        # X4: §4.2 of the design names THIS as "the correct idiom" for the null guard, but
+        # skipping the key is exactly what produces the destructive empty body -- cascor reads
+        # ``{}`` as "clear any prior staging". Refuse the re-stage instead of sending it.
+        if selection_axis_unset(dtype):
+            return False, "No dataset selected — nothing to re-stage."
+        payload["nn_dataset_type"] = dtype
         for key, pkey in (("n_samples", "nn_dataset_elements"), ("noise", "nn_dataset_noise"), ("rotations", "nn_spiral_rotations"), ("n_spirals", "nn_spiral_number")):
             value = dataset_vals.get(key)
             if value is not None:
@@ -6061,8 +6136,15 @@ class DashboardManager:
         if not n_clicks:
             return dash.no_update, dash.no_update
         rows = []
+        # N4: name the consequence at the locus. A missing dataset type used to be skipped like any
+        # other absent field, so the confirmation listed Samples/Noise and simply had no dataset
+        # row -- the user confirmed a swap without ever seeing that its target was unset. The other
+        # fields keep the skip; the dataset type is the identity of the swap and says so.
+        if selection_axis_unset(dataset_type):
+            rows.append(dbc.ListGroupItem([html.Strong("Dataset type: "), html.Span("none selected — this swap cannot proceed")], color="warning"))
+        else:
+            rows.append(dbc.ListGroupItem([html.Strong("Dataset type: "), html.Span(str(dataset_type))]))
         for label, value in (
-            ("Dataset type", dataset_type),
             ("Samples", n_samples),
             ("Noise", noise),
             ("Spirals", n_spirals),
@@ -6101,6 +6183,23 @@ class DashboardManager:
         """
         if not n_clicks:
             return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        # X4, third commit path and the most expensive one: this handler drops ``None`` values
+        # from its payload, so at ``⊥`` it POSTed ``{}`` to ``/api/live_dataset_swap`` and
+        # rendered "Live dataset swap complete." -- while ``lifecycle.swap_dataset_live()`` STOPS
+        # the training future and discards in-flight candidates. A cleared dropdown could
+        # therefore destroy a running experiment and report success.
+        if selection_axis_unset(dataset_type):
+            return (
+                False,
+                False,
+                dbc.Alert(
+                    [html.Strong("No dataset selected. "), html.Span("A live swap needs a target dataset; sending none would stop the current run without replacing its data.")],
+                    color="warning",
+                    dismissable=True,
+                    duration=8000,
+                ),
+                False,
+            )
         payload = {
             "nn_dataset_type": dataset_type,
             "nn_dataset_elements": n_samples,
@@ -7289,7 +7388,7 @@ class DashboardManager:
             duration=8000,
         )
 
-    def _update_button_appearance_handler(self, button_states=None, model_key=None):
+    def _update_button_appearance_handler(self, button_states=None, model_key=None, dataset_value=None):
         """Update button states (disabled/loading) with visual feedback.
 
         A1-iv-5 / D8 Train-gate: when the selected model is non-live (``coming_soon`` /
@@ -7297,6 +7396,18 @@ class DashboardManager:
         regardless of training state — a non-live model is shown and selectable for inspection but
         not trainable (design §5.7). The pause / stop / resume / reset controls follow
         ``button-states`` unchanged. Live models (the common path) are entirely unaffected.
+
+        **X5 / §4.8 — Start also requires a dataset, and a model.** Before the ✕ shipped, the
+        dataset could not be empty, so Start was gated on the model alone. That is no longer safe:
+        at ``⊥`` a ``recurrence`` start fails closed with a 409, but a ``cascor`` start sent the
+        bare POST and trained on whatever was *last staged* while the sidebar showed no dataset —
+        the same silent misattribution X1 closed on the model axis. ``model_is_trainable`` cannot
+        carry this: it answers ``True`` for ``None`` (``model_registry.py:245``), by design, so a
+        cleared model would leave Start live too. Both axes are therefore checked here, in the one
+        callback that already owns ``start-button.disabled`` — no racy second writer.
+
+        Returning ``disabled`` for **Apply Dataset** from the same place is deliberate for the same
+        reason: it is the other control that would otherwise commit a ``⊥``.
         """
 
         def get_button_props(cmd, label, icon):
@@ -7309,6 +7420,10 @@ class DashboardManager:
         start_disabled, start_text = get_button_props("start", "Start Training", "▶")
         # D8 Train-gate: a non-live model can be selected (to inspect) but not trained.
         if not model_is_trainable(model_key):
+            start_disabled = True
+        # X5 / §4.8: an incomplete selection is not trainable on either axis.
+        dataset_missing = selection_axis_unset(dataset_value)
+        if dataset_missing or selection_axis_unset(model_key):
             start_disabled = True
         pause_disabled, pause_text = get_button_props("pause", "Pause Training", "⏸")
         stop_disabled, stop_text = get_button_props("stop", "Stop Training", "⏹")
@@ -7326,6 +7441,10 @@ class DashboardManager:
             resume_text,
             reset_disabled,
             reset_text,
+            # N9: Apply Dataset cannot be honoured at ``⊥`` — disable it at the control rather
+            # than discovering it at the backend, where an empty body is destructive (see the
+            # guards in ``_apply_dataset_handler``).
+            dataset_missing,
         )
 
     def _handle_button_timeout_and_acks_handler(self, action=None, n_intervals=None, button_states=None, **kwargs):

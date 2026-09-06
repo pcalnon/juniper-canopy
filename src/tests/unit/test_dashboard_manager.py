@@ -713,7 +713,10 @@ class TestDatasetApplyNumericCommit:
         # contract this test guards moved there. Search the handler, not the closure.
         idx = dashboard_manager_source.find("def _apply_dataset_handler(")
         assert idx != -1
-        window = dashboard_manager_source[idx : idx + 1600]
+        # Widened from 1600: the X4 null-dataset guard (and its rationale) now sits between the
+        # def and the payload seed, so the old window stopped short of the line under test and the
+        # assertion failed while the contract it guards was intact.
+        window = dashboard_manager_source[idx : idx + 3200]
         assert 'payload: dict = {"nn_dataset_type": dataset_type}' in window
         assert "if _value is not None:" in window
         assert "{k: v for k, v in payload.items() if v is not None}" not in window

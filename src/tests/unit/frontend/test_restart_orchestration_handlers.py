@@ -61,18 +61,21 @@ OPEN = {
     "start_fresh": 2,
     "granular_open": 3,
     "context": 4,
-    "ds_type": 5,
-    "ds_samples": 6,
-    "ds_noise": 7,
-    "ds_rotations": 8,
-    "ds_spirals": 9,
-    "p_lr": 10,
-    "p_hu": 11,
-    "p_patience": 12,
-    "p_pool": 13,
-    "p_selected": 14,
-    "p_corr": 15,
-    "baseline": 16,
+    # X2: ``restart-ds-type.options`` is written on open now (it previously had no writer at all
+    # and stayed frozen on the cascor gate), so everything from ds_type down shifts by one.
+    "ds_options": 5,
+    "ds_type": 6,
+    "ds_samples": 7,
+    "ds_noise": 8,
+    "ds_rotations": 9,
+    "ds_spirals": 10,
+    "p_lr": 11,
+    "p_hu": 12,
+    "p_patience": 13,
+    "p_pool": 14,
+    "p_selected": 15,
+    "p_corr": 16,
+    "baseline": 17,
 }
 
 _STATE_JSON = {
@@ -90,14 +93,14 @@ _STATE_JSON = {
 class TestOpenRestartConfirmModalHandler:
     def test_no_clicks_is_all_no_update(self, dm):
         result = dm._open_restart_confirm_modal_handler(n_clicks=None)
-        assert result == (dash.no_update,) * 17
+        assert result == (dash.no_update,) * 18
 
     def test_opens_seeds_dataset_params_and_baseline(self, dm):
         with patch("frontend.dashboard_manager.requests.get") as mock_get:
             mock_get.return_value.status_code = 200
             mock_get.return_value.json.return_value = dict(_STATE_JSON)
             result = dm._open_restart_confirm_modal_handler(n_clicks=1, dataset_type="xor", n_samples=300, noise=0.1, rotations=None, n_spirals=None)
-        assert len(result) == 17
+        assert len(result) == 18
         assert result[OPEN["modal"]] is True
         # Q4: start-fresh resets OFF and the granular section collapses on open.
         assert result[OPEN["start_fresh"]] is False
@@ -144,6 +147,12 @@ class TestOpenRestartConfirmModalHandler:
             result = dm._open_restart_confirm_modal_handler(n_clicks=1)
         assert result[OPEN["modal"]] is True
         assert "staged change will be applied" in _text(result[OPEN["summary"]])
+        # X2: the modal must not INVENT a dataset the operator never chose; ⊥ survives the open,
+        # and Confirm's re-stage guard is what refuses it.
+        assert result[OPEN["ds_type"]] is None
+        # ...but the list is now regated rather than frozen, so it is populated either way.
+        assert result[OPEN["ds_options"]] is not dash.no_update
+        assert len(result[OPEN["ds_options"]]) > 0
 
 
 # ---------------------------------------------------------------------------

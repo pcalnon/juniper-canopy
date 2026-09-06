@@ -694,7 +694,7 @@ class TestTrainingButtonHandlers:
             "resume": {"disabled": False, "loading": False, "timestamp": 0},
             "reset": {"disabled": False, "loading": False, "timestamp": 0},
         }
-        result = dashboard_manager._update_button_appearance_handler(button_states=button_states)
+        result = dashboard_manager._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
         assert result[0] is False
         assert "▶" in result[1]
         assert "⏳" not in result[1]
@@ -708,7 +708,7 @@ class TestTrainingButtonHandlers:
             "resume": {"disabled": False, "loading": False, "timestamp": 0},
             "reset": {"disabled": False, "loading": False, "timestamp": 0},
         }
-        result = dashboard_manager._update_button_appearance_handler(button_states=button_states)
+        result = dashboard_manager._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
         assert result[0] is True
         assert "⏳" in result[1]
 
