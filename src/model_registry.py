@@ -372,6 +372,27 @@ def model_reason(model: ModelSpec, dataset: DatasetTypeSpec) -> str | None:
     return None
 
 
+def model_requirement(model: ModelSpec) -> str:
+    """What kind of data ``model`` needs, stated without reference to any dataset (Y9; D2/§5.2).
+
+    ``model_reason`` answers a *comparative* question -- "why is this model incompatible with THIS
+    dataset" -- and returns ``None`` when there is no dataset to compare against. The model table
+    rendered that ``None`` as "✓ compatible", which at ``⊥`` is a **positive falsehood about every
+    model**: it asserts agreement with a dataset that does not exist. This states the requirement
+    itself, so a ``⊥`` row can say what it WOULD need.
+
+    Deliberately covers every axis rather than the first failing one, because there is no failure to
+    report -- the caller wants the whole shape of what this model accepts. Axis order and vocabulary
+    mirror ``model_reason`` so the two never read as different constraints.
+    """
+    dims = " or ".join(f"{n}-D" for n in sorted(model.input_ndim))
+    tasks = " or ".join(sorted(model.supported_task_types))
+    phrase = f"needs {dims} {tasks} data"
+    if model.requires_dt:
+        phrase += ", irregular Δt supported"
+    return phrase
+
+
 # N7 (I-7): tensor-rank nouns for the reverse-gate hint. The pre-N7 phrasing ("2-D models only")
 # read as a feature-count constraint and misled — e.g. MNIST is ``ndim=2`` (a rank-2 tabular tensor
 # of 784 features), so "2-D" wrongly suggested MNIST was excluded. Naming the rank AND its shape

@@ -166,7 +166,9 @@ class TestModelSelectionInner:
         fake_ctx = MagicMock()
         fake_ctx.triggered_id = None
         with patch.object(dmmod.dash, "callback_context", fake_ctx):
-            result = cb([None])
+            # N11: the callback gained the model-clear Input (2 args now); a no-click on EITHER
+            # input must still be a four-way no_update.
+            result = cb([None], None)
         assert result == (dash.no_update, dash.no_update, dash.no_update, dash.no_update)
 
     def test_gate_dataset_options(self, dm):

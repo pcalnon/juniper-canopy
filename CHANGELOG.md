@@ -90,6 +90,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   code-scanning gate (errors + high-or-higher alerts). Replaces the stale
   `init@v2` snippet.
 
+### Added
+
+- **"Clear model — show all datasets"**, the second selection affordance (design §5.5 / OQ-N6).
+  It was specified at canopy#394, deferred there on the grounds that *"the model is selected
+  first"*, falsified by canopy#397 thirteen hours later when the model input became a
+  dataset-gated table, and never revisited. Its absence was half of why the mutual gate had no
+  exit.
+
+  Clearing writes `None` to `model-selection-store` and deliberately does **not** POST: it is a
+  statement about the UI's filter, not a request to change the live backend, and there is no
+  "no model" for `/api/model/select` to select. The backend keeps running whatever it was
+  running -- which is why Start stays disabled at a cleared model and why the sidebar reads
+  *"No model selected — all datasets shown; choose one to train"* rather than going blank. A
+  blank summary over a live backend is the X1 class this arc opened by closing.
+
+  **Measured consequence, contrary to how the design frames it:** the two clear affordances are
+  not a fix plus a companion, they are **two independent cut vertices**. Clearing the model
+  ungates the dataset list, from which `equities_seq` can be picked directly and Recurrence then
+  selected -- reaching the previously-unreachable pair without ever touching the dataset ✕. So
+  removing either affordance alone does *not* resurface the deadlock, and neither can be
+  regression-tested by its own absence. **G2** now pins exactly that: the deadlock returns only
+  when *both* are withheld, and each alone still reaches the target.
+
 ### Fixed
 
 - **The model/dataset selection catch-22: `(recurrence, equities_seq)` was compatible but
@@ -113,6 +136,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `recurrence` start fails closed with a 409, but a `cascor` start sent the bare POST and trained
   on whatever was **last staged**. Start now requires a complete selection on both axes.
   `model_is_trainable` could not carry this -- it answers `True` for `None` by design, so the model
+- **A cleared model would have frozen the dataset list at the previous model's gate** (design
+  N11). `_gate_dataset_options_handler` early-returned `(no_update, no_update)` on a falsy model
+  key -- harmless only while the model could not be cleared. The moment it can, clearing the
+  model *to escape a constraint* would have left that constraint in force: the mutual-gate trap
+  again, on the model axis, shipped by the very affordance meant to relieve it. The registry was
+  already correct (`gated_dataset_options(None)` enables every dataset); only the handler was
+  wrong. Guardrail **G8**, verified red against the restored early return.
+
+  Because the current dataset is then in the enabled set, the snap leaves it alone: clearing the
+  model **keeps** the dataset. That is §5.6's dataset-primary conflict policy, which was not even
+  expressible while the dropdown was unclearable.
+
+- **The model table claimed every model was compatible when no dataset was selected** (Y9). At
+  `⊥`, `model_reason` has nothing to compare against and returned `None`, which rendered as
+  *"✓ compatible"* -- a positive falsehood asserting agreement with a dataset that does not
+  exist, for every row. Rows now state what they *would* require (`model_requirement`, new:
+  "needs 2-D classification or regression data", "needs 3-D regression data, irregular Δt
+  supported").
+
+  The same flag drives `disabled=not is_compatible`, so the fix corrects the **claim** without
+  touching selectability -- `⊥` is compatible with everything, which is what makes it the cut
+  vertex. A dedicated guard asserts every Select stays enabled at `⊥`, because re-disabling them
+  would silently restore the deadlock while the compatibility cell read honestly.
+
   axis needed its own check, which also pre-closes the ungated Start that the forthcoming "clear
   model" affordance would otherwise ship. **Apply Dataset** is disabled at `⊥` from the same
   callback.
