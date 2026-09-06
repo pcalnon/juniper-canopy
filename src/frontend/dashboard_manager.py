@@ -48,7 +48,7 @@ from dash.dependencies import Input, Output, State
 from canopy_constants import CascorPatchBounds, DashboardConstants, TrainingConstants
 from dataset_schema import apply_availability_gate, generator_name_for_type, is_generator_available, parse_schema_fields, unavailable_reason
 from frontend.internal_api import internal_api_headers
-from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason
+from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, RECURRENCE_PROVIDER, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason
 from settings import get_settings
 
 from . import ui_standards
@@ -2928,13 +2928,55 @@ class DashboardManager:
         is_open = False if store is not dash.no_update else dash.no_update
         return store, model_class, summary, is_open
 
+    #: ``backend.backend_type`` as reported by ``/api/model/select`` when the recurrence service
+    #: backend is the live one. The other values ("cascor", "demo") both serve cascor-family models.
+    RECURRENCE_BACKEND_TYPE: str = "recurrence"
+
+    @staticmethod
+    def _selection_is_live(data):
+        """Whether the live backend actually serves the selected model (X1 / design N5).
+
+        ``POST /api/model/select`` answers 200 even when it changed nothing: ``_swap_backend``
+        (``main.py:3891``) no-ops whenever the selection routes to the backend type already
+        running, and with ``recurrence_service_url`` unset a ``recurrence`` selection routes to
+        the default cascor/demo backend. The response records that faithfully -- ``backend`` and
+        ``swapped`` are both in the payload (``main.py:3860-3871``) -- but this summary read
+        neither, so the sidebar claimed *"Active: Recurrence (LMU)"* while cascor trained,
+        silently misattributing every benchmark produced in that state.
+
+        ``swapped`` is the WRONG predicate here, though it is the obvious one: it is *also*
+        ``False`` on the ordinary correct path where the user re-selects the model already live,
+        so gating on it alone would report a running CasCor as inactive. The honest test is
+        provider agreement -- a recurrence-provider model is live iff the recurrence backend is.
+
+        Returns ``None`` when the payload carries no ``backend`` (the first-paint seed, which has
+        never round-tripped): unknown is not disagreement, and reporting it as one would trade a
+        silent lie for a loud one. Seeding that value honestly is model/dataset hydration, which
+        the design sequences separately (§4.10).
+        """
+        backend_type = data.get("backend")
+        if not backend_type:
+            return None
+        spec = get_model_spec(data.get("nn_model", ""))
+        selection_needs_recurrence = spec is not None and spec.provider == RECURRENCE_PROVIDER
+        return selection_needs_recurrence == (backend_type == DashboardManager.RECURRENCE_BACKEND_TYPE)
+
     @staticmethod
     def _model_summary_text(data):
-        """Compact 'Active: <label>' summary line for the sidebar model picker (A1-iv-3a)."""
+        """Compact summary line for the sidebar model picker (A1-iv-3a; X1 truth-up).
+
+        Reads ``"Active: <label>"`` only when the live backend actually serves the selection
+        (``_selection_is_live``). When it does not, the line leads with ``"Selected:"`` and names
+        the backend that is really running, because a model whose displayed identity differs from
+        the live backend is a defect rather than a display lag (design N5) -- and on a
+        benchmarking platform a wrong attribution is worse than a blocked control.
+        """
         spec = get_model_spec(data.get("nn_model", ""))
         label = spec.label if spec is not None else data.get("nn_model", "?")
         status = data.get("status", "live")
         note = "" if status == "live" else f" · {status.replace('_', ' ')}"
+        if DashboardManager._selection_is_live(data) is False:
+            return f"Selected: {label}{note} · NOT ACTIVE — the {data.get('backend')} backend is running"
         return f"Active: {label}{note}"
 
     def _initial_model_summary(self):

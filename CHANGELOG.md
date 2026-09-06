@@ -90,6 +90,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   code-scanning gate (errors + high-or-higher alerts). Replaces the stale
   `init@v2` snippet.
 
+### Fixed
+
+- **The sidebar claimed a model was active while a different backend trained it** (X1, selection
+  design N5). `POST /api/model/select` answers HTTP 200 for a `recurrence` selection even when
+  `recurrence_service_url` is unset -- the code default -- because `_swap_backend` sees that the
+  selection routes to the backend type already running and no-ops. The response reports that
+  faithfully (it carries both `backend` and `swapped`), but `_model_summary_text` read only
+  `nn_model` and the registry's lifecycle `status`, which are `"recurrence"` and `"live"`. The
+  sidebar therefore rendered *"Active: Recurrence (LMU)"* while cascor trained, filing real runs
+  under the wrong model.
+
+  The summary now leads with `"Selected:"` and names the backend actually running whenever the two
+  disagree. The predicate is deliberately **not** `swapped is False`: that is also the correct
+  answer when a user re-selects the model already live, so gating on it would report a healthy
+  CasCor as inactive. Agreement is tested on the model's *provider* instead -- a recurrence-provider
+  model is live iff the recurrence backend is -- and an absent `backend` (the first-paint seed,
+  which has never round-tripped) reads as unknown rather than as disagreement.
+
+  Guardrail **G5** lands with it (`src/tests/regression/test_selection_reachability_guardrails.py`),
+  including a false-positive guard for the no-op re-select and an end-to-end case that feeds the
+  real route payload to the real summary, so the two cannot drift apart. Verified red before green:
+  7 of its 9 cases fail against the prior code with the exact symptom.
+
+  This is phase 1 of the selection-reachability remediation
+  (`JUNIPER_2026-09-02_JUNIPER-CANOPY_SELECTION-REACHABILITY-DESIGN.md` §4.4, §7). It ships first
+  because unblocking the model/dataset deadlock without it would convert a blocked control into a
+  silently mis-attributed result.
+
 ## [0.6.0] - 2026-07-28
 
 ### Added
