@@ -197,23 +197,25 @@ MODELS: tuple[ModelSpec, ...] = (
 DEFAULT_MODEL_KEY: str = MODELS[0].key
 
 
-def dataset_type_options() -> list[dict[str, str]]:
+def dataset_type_options(*, dataset_types: tuple[DatasetTypeSpec, ...] = DATASET_TYPES) -> list[dict[str, str]]:
     """Return the dataset-type dropdown options as ``[{"label", "value"}, ...]``.
 
     Single source for the ``nn-dataset-type-dropdown`` options (previously inlined in
-    ``dashboard_manager``). Order is preserved for behavior parity.
+    ``dashboard_manager``). Order is preserved for behavior parity. ``dataset_types`` is
+    injectable for tests (design §5 enabling change).
     """
-    return [{"label": spec.label, "value": spec.value} for spec in DATASET_TYPES]
+    return [{"label": spec.label, "value": spec.value} for spec in dataset_types]
 
 
-def dataset_default_params(value: str) -> dict[str, object]:
+def dataset_default_params(value: str, *, dataset_types: tuple[DatasetTypeSpec, ...] = DATASET_TYPES) -> dict[str, object]:
     """Return a copy of the one-shot start params seeded for dataset ``value`` (A1-iv-3c).
 
     The recurrence (one-shot) Start button forwards these as the juniper-data ``generator``
     params so the fit is bounded + stationary (see ``DatasetTypeSpec.default_params``). A copy
     is returned so a caller can never mutate the registry seed. Unknown ``value`` → ``{}``.
+    ``dataset_types`` is injectable for tests (design §5 enabling change).
     """
-    for spec in DATASET_TYPES:
+    for spec in dataset_types:
         if spec.value == value:
             return dict(spec.default_params)
     return {}
@@ -261,25 +263,27 @@ def model_matches_search(model: ModelSpec, query: str) -> bool:
     return needle in haystack
 
 
-def get_model_spec(key: str) -> ModelSpec | None:
+def get_model_spec(key: str, *, models: tuple[ModelSpec, ...] = MODELS) -> ModelSpec | None:
     """Return the :class:`ModelSpec` for ``key`` (matching ``key`` or an alias), or None.
 
     Used by the backend factory (``backend.create_backend``) to resolve a selected model
     key to its provider for routing, and available to the A1 selection UI for lookups.
+    ``models`` is injectable for tests (design §5 enabling change).
     """
-    for spec in MODELS:
+    for spec in models:
         if key == spec.key or key in spec.aliases:
             return spec
     return None
 
 
-def get_dataset_spec(value: str) -> DatasetTypeSpec | None:
+def get_dataset_spec(value: str, *, dataset_types: tuple[DatasetTypeSpec, ...] = DATASET_TYPES) -> DatasetTypeSpec | None:
     """Return the :class:`DatasetTypeSpec` for ``value``, or None (symmetric with get_model_spec).
 
     Used by the A1b model-selection surface to resolve the currently-selected dataset value to
     its spec so the per-model compatibility cell (``model_reason``) can be computed against it.
+    ``dataset_types`` is injectable for tests (design §5 enabling change).
     """
-    for spec in DATASET_TYPES:
+    for spec in dataset_types:
         if spec.value == value:
             return spec
     return None
@@ -426,17 +430,21 @@ def dataset_model_hint(dataset_value: str, *, models: tuple[ModelSpec, ...] = MO
     return f"{' '.join(parts)} models only"
 
 
-def gated_dataset_options(model_key: str) -> list[dict[str, object]]:
+def gated_dataset_options(model_key: str, *, models: tuple[ModelSpec, ...] = MODELS, dataset_types: tuple[DatasetTypeSpec, ...] = DATASET_TYPES) -> list[dict[str, object]]:
     """Dataset-dropdown options gated against the selected model (A1-iv-3b).
 
     Compatible dataset types are plain, selectable options; incompatible ones are ``disabled``
     with a reason-suffix label (D2). Single source for the initial render (``DEFAULT_MODEL_KEY``)
     and the runtime gate callback. An unknown ``model_key`` (no spec) falls back to ungated
     options so a desync never hides every dataset.
+
+    Both registries are injectable for tests (design §5 enabling change) — and they must travel
+    TOGETHER: resolving the model against a synthetic registry while iterating the production
+    dataset seeds would silently score a graph that exists nowhere.
     """
-    spec = get_model_spec(model_key)
+    spec = get_model_spec(model_key, models=models)
     options: list[dict[str, object]] = []
-    for dataset in DATASET_TYPES:
+    for dataset in dataset_types:
         reason = dataset_reason(dataset, spec) if spec is not None else None
         if reason is None:
             options.append({"label": dataset.label, "value": dataset.value})

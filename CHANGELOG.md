@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The five registry resolvers that closed over module globals are now injectable** --
+  `gated_dataset_options`, `get_model_spec`, `get_dataset_spec`, `dataset_type_options` and
+  `dataset_default_params` -- following the convention `compatible_models` and
+  `compatible_datasets` already established. `_build_model_selection_table` gains `dataset_types`
+  for the same reason.
+
+  This was the design's stated "enabling change", and without it guardrail **G1c** could not be
+  written at all: a synthetic registry was unreachable from handler level, so the consensus audit
+  had to record G1c as **NO ARTIFACT** and declined to report a number from monkeypatched globals.
+
+  The two registries travel **together** on `gated_dataset_options`. Resolving the model against a
+  synthetic registry while iterating the production dataset seeds would silently score a graph that
+  exists nowhere -- and resolving a synthetic dataset value against the production seeds returns
+  `None`, which reads as `⊥` and enables every Select.
+
 - **Upper version ceilings on all five first-party `juniper-*` dependencies.** canopy was the only
   service pinning its Juniper dependencies with a floor and **no ceiling**, against the documented
   ecosystem policy: the release-train plan states consumers pin `>=floor,<next-minor`, "which makes
@@ -29,6 +44,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a constraint-mode recompile reproduces the current lock with **zero** pin drift.
 
 ### Added
+
+- **Guardrail G1c** -- `I-cover` and `I-safe` over a synthetic registry with **three** disjoint
+  components (three models over four datasets, partitioned by rank and task). The shipped registry
+  has exactly two, so the Confinement Lemma is only ever exercised at n=2 there, and a fix that
+  happened to work for two components could pass every other guardrail while leaving a
+  three-component registry trapped. §12.2 argues the seeded generator expansion keeps the count at
+  two; this is the case that argument does not cover.
+
+  Measured, and matching the design's prediction: without both clear affordances the synthetic
+  registry strands **two** components rather than one. That is exactly why the shipped registry
+  cannot substitute for it -- it can only ever strand one, so it cannot distinguish a fix that
+  generalises from one that does not. A companion test asserts the fixture really does have three
+  components, so a later edit cannot collapse it and leave G1c passing while testing nothing.
 
 - **Complementary X7 slice 1c guard tests** (`src/tests/regression/test_x7_status_cache_guards.py`),
   18 tests over the leftover paths `#578`'s T-C1–T-C4 suite cannot reach: a raising `normalize`
