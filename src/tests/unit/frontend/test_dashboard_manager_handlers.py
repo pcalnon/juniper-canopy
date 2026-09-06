@@ -763,9 +763,9 @@ class TestButtonAppearanceHandlers:
             "reset": {"disabled": False, "loading": False, "timestamp": 0},
         }
 
-        result = dashboard_manager._update_button_appearance_handler(button_states=button_states)
+        result = dashboard_manager._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
 
-        assert len(result) == 10  # 5 buttons x 2 (disabled, text)
+        assert len(result) == 11  # 5 buttons x 2 (disabled, text) + apply-dataset disabled
         assert result[0] is False  # start disabled
         assert "▶ Start Training" in result[1]
 
@@ -779,16 +779,16 @@ class TestButtonAppearanceHandlers:
             "reset": {"disabled": False, "loading": False, "timestamp": 0},
         }
 
-        result = dashboard_manager._update_button_appearance_handler(button_states=button_states)
+        result = dashboard_manager._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
 
         assert result[0] is True  # start disabled
         assert "⏳" in result[1]  # loading indicator
 
     def test_update_button_appearance_handler_empty_states(self, dashboard_manager):
         """Test button appearance with empty states."""
-        result = dashboard_manager._update_button_appearance_handler(button_states={})
+        result = dashboard_manager._update_button_appearance_handler(button_states={}, model_key="cascor", dataset_value="spirals")
 
-        assert len(result) == 10
+        assert len(result) == 11  # 5 buttons x 2 (disabled, text) + apply-dataset disabled
         # All should have default values
         assert result[0] is False
 

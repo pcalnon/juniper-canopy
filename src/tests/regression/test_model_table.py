@@ -303,12 +303,12 @@ def test_update_button_appearance_force_disables_start_for_non_live(manager, mon
         "reset": {"disabled": False, "loading": False, "timestamp": 0},
     }
     # Live model (cascor) -> Start follows button-states (enabled here); no gate.
-    live_out = manager._update_button_appearance_handler(button_states=button_states, model_key="cascor")
+    live_out = manager._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
     assert live_out[0] is False  # start_disabled
     assert live_out[2] is True  # pause_disabled follows button-states
     # Non-live model -> Start force-disabled regardless of button-states; the others are unaffected.
     monkeypatch.setattr(dm, "model_is_trainable", lambda model_key: False)
-    gated_out = manager._update_button_appearance_handler(button_states=button_states, model_key="anything")
+    gated_out = manager._update_button_appearance_handler(button_states=button_states, model_key="anything", dataset_value="spirals")
     assert gated_out[0] is True  # start force-disabled by the D8 gate
     assert gated_out[2] is True  # pause unchanged (still per button-states)
     assert gated_out[8] is False  # reset unchanged (still per button-states)

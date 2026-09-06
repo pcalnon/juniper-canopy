@@ -92,6 +92,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The model/dataset selection catch-22: `(recurrence, equities_seq)` was compatible but
+  unreachable.** The dataset dropdown was gated by the selected model and the model table's Select
+  buttons were gated by the selected dataset, and the compatibility relation is a disjoint
+  partition -- cascor takes the five 2-D datasets, the LMU takes only `equities_seq`. With no way
+  to leave a dataset selected, the two gates trapped the UI in whichever component it mounted in.
+  Each gate was individually correct; the trap was mutual.
+
+  `nn-dataset-type-dropdown` is now `clearable`, restoring the null dataset `⊥` -- the cut vertex
+  that joins both components. Measured over the real handlers, reachability goes from 5 pairs to 8
+  with **zero** invalid states: `I-cover` gained without weakening `I-safe`.
+
+  Guardrail **G1a** BFSs the composed transition relation and reads `clearable` off the shipped
+  layout, so reverting the one keyword turns it red with `compatible but unreachable:
+  {('recurrence', 'equities_seq')}`. **G1b** admits `⊥` explicitly (`Reach ⊆ compatible ∪ {(m,⊥)}`)
+  -- without that term the assertion would fail on this change itself. **G2** withholds the clear
+  transition and asserts the pair is unreachable again: the deadlock, reproduced in-suite.
+
+- **Start could train on a dataset the sidebar was not showing** (X5). `⊥` made this reachable:
+  a `recurrence` start fails closed with a 409, but a `cascor` start sent the bare POST and trained
+  on whatever was **last staged**. Start now requires a complete selection on both axes.
+  `model_is_trainable` could not carry this -- it answers `True` for `None` by design, so the model
+  axis needed its own check, which also pre-closes the ungated Start that the forthcoming "clear
+  model" affordance would otherwise ship. **Apply Dataset** is disabled at `⊥` from the same
+  callback.
+
+- **Three paths could commit a `⊥` dataset, and none of them was merely vacuous** (X4). Apply
+  Dataset POSTed `{"nn_dataset_type": None}`, which `model_dump(exclude_none=True)` strips to `{}`
+  -- and cascor documents an empty body as *clearing any prior staging*, so the click silently
+  discarded a change the operator had already staged while the banner reported success. The live
+  dataset swap POSTed `{}` and rendered "Live dataset swap complete." while the backend's
+  `swap_dataset_live()` stopped the training future and discarded in-flight candidates -- a cleared
+  dropdown could destroy a running experiment. `_restage_dataset`, which the design cites as *the
+  correct idiom*, omitted the key and produced the same empty body. All three now refuse and say
+  why, and the live-swap confirmation names a missing dataset instead of silently omitting the row.
+
+- **The restart modal's dataset list was frozen to cascor forever** (X2). `restart-ds-type.options`
+  had no writer anywhere in the repository -- the list was seeded once at layout time and never
+  regated. Harmless only while the deadlock made a non-cascor model unreachable; the moment the ✕
+  ships it would offer a recurrence user the five 2-D datasets **enabled** and `equities_seq`
+  **disabled**, seeded with a value its own list disables, and `execute_restart` would forward it.
+  It is now regated on every open from the same composition the sidebar uses. An unset sidebar
+  dataset is left unset rather than snapped to an arbitrary option.
+
+- **A guardrail from the previous change pinned a `backend_type` that does not exist.** The domain
+  is exactly `{"service", "demo", "recurrence"}`; the parametrisation asserted on `"cascor"`, so
+  the live-cascor case -- the one the predicate most needed pinned -- went uncovered while the
+  suite read green. Corrected, and the domain itself is now pinned against the three property
+  implementations.
+
+
 - **The sidebar claimed a model was active while a different backend trained it** (X1, selection
   design N5). `POST /api/model/select` answers HTTP 200 for a `recurrence` selection even when
   `recurrence_service_url` is unset -- the code default -- because `_swap_backend` sees that the

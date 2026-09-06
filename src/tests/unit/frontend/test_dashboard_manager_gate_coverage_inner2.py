@@ -128,27 +128,27 @@ class TestCancelPendingDatasetInner:
 class TestOpenRestartConfirmModalInner:
     def test_no_click(self, dm):
         cb = raw_cb(dm, "open_restart_confirm_modal")
-        assert cb(None, "spirals", 100, 0.1, 1.5, 2) == (dash.no_update,) * 17
+        assert cb(None, "spirals", 100, 0.1, 1.5, 2, "cascor") == (dash.no_update,) * 18
 
     @patch("requests.get")
     def test_click_opens_modal_with_defaults_off(self, mock_get, dm):
         mock_get.return_value = _resp(status=200, json_value={"current_epoch": 5})
         cb = raw_cb(dm, "open_restart_confirm_modal")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            result = cb(1, "spirals", 100, 0.1, 1.5, 2)
-        assert len(result) == 17
+            result = cb(1, "spirals", 100, 0.1, 1.5, 2, "cascor")
+        assert len(result) == 18
         assert result[0] is True  # modal open
         # Q4 default OFF (index 2) + Q3 verify/modify section collapsed (index 3).
         assert result[2] is False
         assert result[3] is False
         assert result[1] is not None  # summary
-        assert result[16] and "dataset" in result[16] and "params" in result[16]  # baseline
+        assert result[17] and "dataset" in result[17] and "params" in result[17]  # baseline
 
     @patch("requests.get", side_effect=requests.ConnectionError("down"))
     def test_click_opens_even_when_status_unreachable(self, _mock_get, dm):
         cb = raw_cb(dm, "open_restart_confirm_modal")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            is_open = cb(1, "moons", None, None, None, None)[0]
+            is_open = cb(1, "moons", None, None, None, None, "cascor")[0]
         assert is_open is True
 
 

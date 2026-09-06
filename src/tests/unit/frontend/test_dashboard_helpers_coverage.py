@@ -810,10 +810,10 @@ class TestButtonAppearanceHandler:
             "reset": {"disabled": False, "loading": False, "timestamp": 0},
         }
 
-        result = manager._update_button_appearance_handler(button_states=button_states)
+        result = manager._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
 
         # Returns 10 values: (start_disabled, start_text, pause_disabled, pause_text, ...)
-        assert len(result) == 10
+        assert len(result) == 11  # 5 buttons x 2 (disabled, text) + apply-dataset disabled
         start_disabled, start_text = result[0], result[1]
         assert start_disabled is False
         assert "▶" in start_text
@@ -832,7 +832,7 @@ class TestButtonAppearanceHandler:
             "reset": {"disabled": False, "loading": False, "timestamp": 0},
         }
 
-        result = manager._update_button_appearance_handler(button_states=button_states)
+        result = manager._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
 
         start_disabled, start_text = result[0], result[1]
         assert start_disabled is True

@@ -260,7 +260,7 @@ class TestButtonStateIntegration:
                 trigger="start-button",
             )
 
-        result = dashboard._update_button_appearance_handler(button_states=button_states)
+        result = dashboard._update_button_appearance_handler(button_states=button_states, model_key="cascor", dataset_value="spirals")
 
         start_disabled, start_text = result[0], result[1]
 
