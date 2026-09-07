@@ -49,7 +49,7 @@ from backend.demo_backend import DemoBackend
 from dataset_schema import generator_name_for_type
 from demo_mode import DemoMode
 from frontend.dashboard_manager import DashboardManager
-from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, compatible_datasets, model_requirement
+from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, DatasetTypeSpec, ModelSpec, compatible, compatible_datasets, model_requirement
 
 
 @pytest.fixture
@@ -194,10 +194,10 @@ def _dataset_dropdown_is_clearable(manager):
     raise AssertionError("nn-dataset-type-dropdown not found in the layout")
 
 
-def _selectable_models(manager, dataset_value):
+def _selectable_models(manager, dataset_value, models=MODELS, dataset_types=DATASET_TYPES):
     """Model keys whose table Select button is ENABLED for ``dataset_value`` (the real gate)."""
     enabled = set()
-    for component in _components(manager._build_model_selection_table(dataset_value, None)):
+    for component in _components(manager._build_model_selection_table(dataset_value, None, models=models, dataset_types=dataset_types)):
         cid = getattr(component, "id", None)
         if isinstance(cid, dict) and cid.get("type") == "model-select-btn" and not getattr(component, "disabled", False):
             enabled.add(cid["index"])
@@ -212,7 +212,7 @@ ALL_AVAILABLE: list = []
 NONE_AVAILABLE = [{"name": generator_name_for_type(spec.value), "available": False} for spec in DATASET_TYPES]
 
 
-def _pickable_datasets(manager, model_key, dataset_value, generators=ALL_AVAILABLE):
+def _pickable_datasets(manager, model_key, dataset_value, generators=ALL_AVAILABLE, models=MODELS, dataset_types=DATASET_TYPES):
     """Dataset values the dropdown will actually let the user choose, given the current model.
 
     Availability is injected as all-available throughout this module. These are REACHABILITY
@@ -221,7 +221,7 @@ def _pickable_datasets(manager, model_key, dataset_value, generators=ALL_AVAILAB
     and on a runner with no resolver the DNS failure hangs rather than erroring fast. G1d asserts
     the opposite extreme (nothing available) by injecting that instead.
     """
-    options, _value, _notice = manager._gate_dataset_options_handler(model_key, dataset_value, generators=generators)
+    options, _value, _notice = manager._gate_dataset_options_handler(model_key, dataset_value, generators=generators, models=models, dataset_types=dataset_types)
     if options is dash.no_update:
         return set()
     return {opt["value"] for opt in options if not opt.get("disabled")}
@@ -236,7 +236,7 @@ def _model_clear_is_offered(manager):
     return any(getattr(c, "id", None) == "model-selection-clear" for c in _components(manager.app.layout))
 
 
-def _explore(manager, *, clearable=None, model_clearable=None, generators=ALL_AVAILABLE):
+def _explore(manager, *, clearable=None, model_clearable=None, generators=ALL_AVAILABLE, models=MODELS, dataset_types=DATASET_TYPES, start=None):
     """BFS the COMPOSED transition relation over the real handlers, from the mount state.
 
     Transitions, each corresponding to a gesture the UI actually exposes:
@@ -263,21 +263,22 @@ def _explore(manager, *, clearable=None, model_clearable=None, generators=ALL_AV
     # dataset is unavailable it is cleared before the user can touch anything. Starting the search
     # at the raw layout default would credit the UI with a state it occupies only transiently, and
     # would make G1d assert about a pre-gate snapshot rather than about the recovery state.
-    _options, mounted, _notice = manager._gate_dataset_options_handler(DEFAULT_MODEL_KEY, DEFAULT_DATASET_TYPE, generators=generators)
-    start = (DEFAULT_MODEL_KEY, DEFAULT_DATASET_TYPE if mounted is dash.no_update else mounted)
+    seed_model, seed_dataset = start if start is not None else (DEFAULT_MODEL_KEY, DEFAULT_DATASET_TYPE)
+    _options, mounted, _notice = manager._gate_dataset_options_handler(seed_model, seed_dataset, generators=generators, models=models, dataset_types=dataset_types)
+    start = (seed_model, seed_dataset if mounted is dash.no_update else mounted)
     seen = {start}
     queue = [start]
     while queue:
         model_key, dataset_value = queue.pop()
-        successors = {(model_key, ds) for ds in _pickable_datasets(manager, model_key, dataset_value, generators)}
+        successors = {(model_key, ds) for ds in _pickable_datasets(manager, model_key, dataset_value, generators, models, dataset_types)}
         if clearable:
             successors.add((model_key, None))
         if model_clearable:
             # The clear writes None to the store, which re-fires the gate exactly as a Select does.
-            _options, snapped, _notice = manager._gate_dataset_options_handler(None, dataset_value, generators=generators)
+            _options, snapped, _notice = manager._gate_dataset_options_handler(None, dataset_value, generators=generators, models=models, dataset_types=dataset_types)
             successors.add((None, dataset_value if snapped is dash.no_update else snapped))
-        for target in _selectable_models(manager, dataset_value):
-            _options, snapped, _notice = manager._gate_dataset_options_handler(target, dataset_value, generators=generators)
+        for target in _selectable_models(manager, dataset_value, models, dataset_types):
+            _options, snapped, _notice = manager._gate_dataset_options_handler(target, dataset_value, generators=generators, models=models, dataset_types=dataset_types)
             successors.add((target, dataset_value if snapped is dash.no_update else snapped))
         for state in successors:
             if state not in seen:
@@ -581,3 +582,67 @@ class TestG1dNothingAvailable:
             _options, value, notice = manager._gate_dataset_options_handler(model.key, DEFAULT_DATASET_TYPE, generators=NONE_AVAILABLE)
             assert value is None, model.key
             assert notice is not None, model.key
+
+
+# ---------------------------------------------------------------------------
+# G1c — the invariants over a synthetic >=3-component registry
+# ---------------------------------------------------------------------------
+
+# Three models over four datasets, partitioned into THREE components by rank and task. The shipped
+# registry has exactly two, so the Confinement Lemma's reach is only ever exercised at n=2 there —
+# and a fix that happened to work for two components could pass every other guardrail while leaving
+# a three-component registry trapped. §12.2 argues the seeded expansion keeps the component count
+# at two; this is the case that argument does NOT cover.
+SYNTH_MODELS = (
+    ModelSpec(key="m_flat", label="Flat", category="c", input_ndim=frozenset({2}), supported_task_types=frozenset({"classification"}), family="f", status="live", provider="in-process", description=""),
+    ModelSpec(key="m_seq", label="Seq", category="c", input_ndim=frozenset({3}), supported_task_types=frozenset({"regression"}), family="f", status="live", provider="in-process", description=""),
+    ModelSpec(key="m_vol", label="Vol", category="c", input_ndim=frozenset({4}), supported_task_types=frozenset({"regression"}), family="f", status="live", provider="in-process", description=""),
+)
+SYNTH_DATASETS = (
+    DatasetTypeSpec(value="d_flat_a", label="Flat A", task_type="classification", ndim=2),
+    DatasetTypeSpec(value="d_flat_b", label="Flat B", task_type="classification", ndim=2),
+    DatasetTypeSpec(value="d_seq", label="Seq", task_type="regression", ndim=3),
+    DatasetTypeSpec(value="d_vol", label="Vol", task_type="regression", ndim=4),
+)
+SYNTH_START = ("m_flat", "d_flat_a")
+
+
+def _synth_explore(manager, **kwargs):
+    return _explore(manager, models=SYNTH_MODELS, dataset_types=SYNTH_DATASETS, start=SYNTH_START, **kwargs)
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG1cThreeComponents:
+    """G1c — I-cover and I-safe over a registry with three disjoint components."""
+
+    def test_the_fixture_really_has_three_components(self, manager):
+        # Guard the guard. If a future edit collapses these into two, G1c silently stops testing
+        # the thing it exists for while still passing.
+        pairs = {(m.key, d.value) for m in SYNTH_MODELS for d in SYNTH_DATASETS if compatible(d, m)}
+        by_model = {m.key: {d for mk, d in pairs if mk == m.key} for m in SYNTH_MODELS}
+        assert by_model["m_flat"] == {"d_flat_a", "d_flat_b"}
+        assert by_model["m_seq"] == {"d_seq"}
+        assert by_model["m_vol"] == {"d_vol"}
+        # Disjoint: no dataset accepts two models.
+        assert len({d for ds in by_model.values() for d in ds}) == 4
+
+    def test_g1c_every_compatible_pair_is_reachable(self, manager):
+        reach = _synth_explore(manager)
+        compatible_pairs = {(m.key, d.value) for m in SYNTH_MODELS for d in SYNTH_DATASETS if compatible(d, m)}
+        assert not compatible_pairs - reach, f"unreachable: {sorted(compatible_pairs - reach)}"
+
+    def test_g1c_no_reachable_state_is_invalid(self, manager):
+        allowed = {(m.key, d.value) for m in SYNTH_MODELS for d in SYNTH_DATASETS if compatible(d, m)}
+        allowed |= {(m.key, None) for m in SYNTH_MODELS} | {(None, d.value) for d in SYNTH_DATASETS} | {(None, None)}
+        assert not _synth_explore(manager) - allowed
+
+    def test_g1c_is_the_case_the_shipped_registry_cannot_produce(self, manager):
+        # Without BOTH clears, a three-component registry strands TWO components, not one — which
+        # is the whole reason a synthetic case is needed: the shipped two-component registry can
+        # only ever strand one, so it cannot distinguish a fix that generalises from one that does
+        # not.
+        trapped = _synth_explore(manager, clearable=False, model_clearable=False)
+        assert trapped == {("m_flat", "d_flat_a"), ("m_flat", "d_flat_b")}
+        stranded = {("m_seq", "d_seq"), ("m_vol", "d_vol")}
+        assert not (trapped & stranded)

@@ -48,7 +48,7 @@ from dash.dependencies import Input, Output, State
 from canopy_constants import CascorPatchBounds, DashboardConstants, TrainingConstants
 from dataset_schema import apply_availability_gate, generator_name_for_type, is_generator_available, parse_schema_fields, unavailable_reason
 from frontend.internal_api import internal_api_headers
-from model_registry import DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, RECURRENCE_PROVIDER, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason, model_requirement
+from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, RECURRENCE_PROVIDER, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason, model_requirement
 from settings import get_settings
 
 from . import ui_standards
@@ -2730,7 +2730,7 @@ class DashboardManager:
             dataset_ref["params"] = params
         return {"dataset": dataset_ref}
 
-    def _gate_dataset_options_handler(self, model_key, current_value, *, generators=None):
+    def _gate_dataset_options_handler(self, model_key, current_value, *, generators=None, models=MODELS, dataset_types=DATASET_TYPES):
         """Gate the dataset dropdown against the selected model (A1-iv-3b) AND availability (N7 / I-5).
 
         Composes the model-compatibility gate (``gated_dataset_options`` — the D5 correctness gate:
@@ -2760,7 +2760,10 @@ class DashboardManager:
         # used to short-circuit before this line — a no-model gate call would otherwise perform
         # live HTTP on a path that never did.
         available = self._fetch_generators() if generators is None else generators
-        options = apply_availability_gate(gated_dataset_options(model_key), available)
+        # ``models``/``dataset_types`` travel together and default to the production seeds. G1c
+        # needs a synthetic ≥3-component registry, which is unreachable while this closes over the
+        # module globals; A1's audit could not measure G1c at all for exactly that reason.
+        options = apply_availability_gate(gated_dataset_options(model_key, models=models, dataset_types=dataset_types), available)
         enabled = [option["value"] for option in options if not option.get("disabled")]
         # §4.7 — ``current_value in enabled`` and ``not enabled`` were one branch, and they are not
         # the same event. The first is "nothing to do"; the second is "no dataset in this deployment
@@ -3194,7 +3197,7 @@ class DashboardManager:
         return dbc.Badge(status.replace("_", " "), color=color, className="text-uppercase")
 
     @staticmethod
-    def _build_model_selection_table(dataset_value, selected_model, *, models=MODELS, search=""):
+    def _build_model_selection_table(dataset_value, selected_model, *, models=MODELS, dataset_types=DATASET_TYPES, search=""):
         """Build the custom ``dbc.Table`` of models for the selection modal (A1b; design §5.2).
 
         Rows = every model matching the optional ``search`` filter (label + family + category +
@@ -3212,7 +3215,10 @@ class DashboardManager:
         message is rendered above the (all-greyed) table (the empty-compatible-set state, §5.8).
         ``models`` is injectable so both states are testable with the real seeds.
         """
-        dataset = get_dataset_spec(dataset_value) if dataset_value else None
+        # ``dataset_types`` must be injectable alongside ``models``: resolving a synthetic dataset
+        # value against the production seeds returns None, which reads as ``⊥`` and would enable
+        # every Select — scoring a graph that is not the one under test.
+        dataset = get_dataset_spec(dataset_value, dataset_types=dataset_types) if dataset_value else None
         visible = [model for model in models if model_matches_search(model, search or "")]
         # A1b search (§5.2): a non-empty query that matches nothing -> a clear "no matches" message,
         # distinct from the §5.8 empty-compatible-set state below (which is about the dataset).
