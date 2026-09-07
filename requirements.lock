@@ -91,7 +91,7 @@ nest-asyncio==1.6.0
     #   dash
 networkx==3.6.1
     # via juniper-canopy (pyproject.toml)
-numpy==2.5.2
+numpy==2.5.3
     # via
     #   juniper-canopy (pyproject.toml)
     #   juniper-cascor-protocol
