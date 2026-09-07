@@ -76,8 +76,11 @@ class TestResolveOneshotStartBody:
 
     def test_one_shot_generator_without_default_params_omits_params_key(self):
         # A generator with no seeded params yields a generator-only ref (no empty "params" key).
+        # X3 INVERTED the name: this asserted the RAW dropdown value, which is exactly the defect —
+        # "spirals" is not juniper-data's generator, "spiral" is. The subject of this test (an
+        # empty params key is omitted) is unchanged.
         body = DashboardManager._resolve_oneshot_start_body_handler("one_shot", "spirals")
-        assert body == {"dataset": {"generator": "spirals"}}
+        assert body == {"dataset": {"generator": "spiral"}}
         assert "params" not in body["dataset"]
 
     def test_resolved_params_are_decoupled_from_registry(self):
