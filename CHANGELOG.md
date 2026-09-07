@@ -45,6 +45,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Guardrail G4, re-specified**, plus the X8 `task_type` tripwire
+  (`src/tests/regression/test_dataset_generator_contract.py`). The design predicted G4 would "fail
+  before" because `spirals`/`moons` are not registry keys; as worded (*through*
+  `generator_name_for_type`) it already passed, since the alias map had shipped. What it *meant* to
+  catch is drift, so that is what is asserted: resolution is total, the alias map carries no dead
+  entries and no identity entries, and the one-shot body sends the resolved name.
+
+  It is deliberately **not** tested against an installed `juniper_data`. That package is importable
+  in the canopy test env but incidental -- canopy talks to the service over HTTP and has no version
+  contract with the library. The copy installed here is 0.6.0, whose registry has 8 generators and
+  contains neither `moon` nor `equities_seq`, so a subset assertion would fail on a stale dependency
+  rather than on real drift.
+
+  **X8**: canopy labels `equities_seq` `regression` while juniper-data labels it `classification`.
+  The generator is genuinely dual-target and both labels are locally correct; the divergence is inert
+  today only because `GeneratorInfo` omits `task_type` from the wire. A test now pins canopy's label
+  with the reason, and a companion **computes** the consequence rather than asserting it in prose:
+  relabelled to `classification`, `compatible_models(equities_seq)` is **empty** -- the LMU would have
+  no dataset at all. It has exactly one today, which is how little slack there is.
+
 - **Guardrail G1c** -- `I-cover` and `I-safe` over a synthetic registry with **three** disjoint
   components (three models over four datasets, partitioned by rank and task). The shipped registry
   has exactly two, so the Confinement Lemma is only ever exercised at n=2 there, and a fix that
@@ -142,6 +162,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when *both* are withheld, and each alone still reaches the target.
 
 ### Fixed
+
+- **The one-shot Start body named a generator juniper-data does not have** (X3 / design §4.6).
+  `_resolve_oneshot_start_body_handler` sent the **raw dropdown value** as the generator, skipping
+  the alias map -- so `spirals` went where `spiral` belongs. Masked in production only because
+  `equities_seq`, the one dataset a one-shot model could reach, is identity-mapped.
+
+  Verified through the consumer rather than the design's assertion: the recurrence service passes
+  `generator` **straight to `client.create_dataset()`** (`juniper_recurrence/data.py:45-46`), so
+  juniper-data's vocabulary is the right one for that channel.
+
+  The fix is deliberately **asymmetric**, and a counter-guard pins that. The staging payload reaches
+  **cascor**, whose `dataset_type` is a `Literal["spirals", …, "moons", …]` -- canopy's *plural*
+  dialect (`juniper-cascor/src/api/models/training.py:235`). Translating it too, for consistency,
+  would send `"spiral"` to a field that does not accept it. The params lookup is likewise untranslated,
+  because canopy's registry is keyed on canopy's values and translating it would silently drop
+  `equities_seq`'s `max_symbols` cap -- the thing keeping the one-shot fit inside the train timeout.
+
+- **A backend that cannot stage a dataset returned an opaque 500** (X6 / design §4.9).
+  `RecurrenceBackend` has no `stage_dataset`, and `POST /api/stage_dataset` called it unguarded, so
+  the `AttributeError` fell into the route's bare `except` and the operator was told "Internal server
+  error" plus an error id -- for a condition that is neither internal nor an error. It now answers
+  **501** naming the active backend, matching the guard the sibling routes (`regenerate_dataset`,
+  `import_dataset`) already use. Masked until now by the deadlock, which kept that backend
+  unreachable.
 
 - **Demo mode fell back to a locally generated dataset without saying so in the UI** (design
   §4.12 / N13). Demo mode exists to **dogfood the platform**: it calls juniper-data first and

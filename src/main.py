@@ -4201,6 +4201,18 @@ async def api_stage_dataset(body: StageDatasetRequest):
     rejection (e.g. unknown dataset_type) returns 502 with the cascor
     error string.
     """
+    # X6 / §4.9: ``RecurrenceBackend`` has no ``stage_dataset``, and this call site was unguarded
+    # -- so the AttributeError fell into the bare ``except`` below and the operator got
+    # "Internal server error" plus an opaque error_id for a condition that is neither internal nor
+    # an error. It is a capability the active backend does not have, and the sibling routes
+    # (``regenerate_dataset``, ``import_dataset``) already say so with a 501. Masked until now by
+    # the deadlock, which kept the recurrence backend unreachable.
+    if not hasattr(backend, "stage_dataset"):
+        system_logger.info("Dataset staging unsupported by backend %r", backend.backend_type)
+        return JSONResponse(
+            {"error": f"The active backend ({backend.backend_type}) does not support staging a dataset change. One-shot models take their dataset at Start instead."},
+            status_code=501,
+        )
     try:
         params = body.model_dump(exclude_none=True)
         result = await offload(backend.stage_dataset, **params)

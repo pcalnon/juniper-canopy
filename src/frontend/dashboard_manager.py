@@ -2724,7 +2724,15 @@ class DashboardManager:
         """
         if model_class != "one_shot" or not dataset_generator:
             return None
-        dataset_ref: dict[str, object] = {"generator": dataset_generator}
+        # X3 / §4.6: this sent the RAW dropdown value as juniper-data's generator name, skipping the
+        # alias both sibling handlers apply (``_apply_dataset_handler``, ``_restage_dataset``). It
+        # was masked only because ``equities_seq`` -- the one dataset a one-shot model could reach
+        # -- is identity-mapped; ``spirals`` is not juniper-data's ``spiral``, so the moment any
+        # aliased dataset becomes one-shot-reachable the request names a generator that does not
+        # exist. Note the ASYMMETRY: the name is translated, the params lookup is NOT. Canopy's
+        # registry is keyed on canopy's values, so ``dataset_default_params`` must keep receiving
+        # the untranslated one -- translating both would silently drop the seeded params.
+        dataset_ref: dict[str, object] = {"generator": generator_name_for_type(dataset_generator)}
         params = dataset_default_params(dataset_generator)
         if params:
             dataset_ref["params"] = params
