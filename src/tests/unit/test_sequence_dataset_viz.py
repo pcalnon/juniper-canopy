@@ -7,6 +7,10 @@ separately). Covers the ndim-aware load dispatch, the display-only sequence inst
 histograms), the plotter's two comparison modes (compare-signals / compare-windows,
 small-multiples ⇄ overlay), the selector-options helpers, the target / characterization
 companions, the advanced full-cross grid, and a 2-D regression guard.
+
+The final section covers the post-decision-11 whole-dataset assembly (S-6): a sequence
+artifact minted after juniper-data#369 carries no ``*_full`` family, and the install used
+to fall back to the ``_train`` partition alone while reporting whole-dataset counts.
 """
 
 from __future__ import annotations
@@ -391,3 +395,194 @@ def test_grid_caps_cells_at_100():
     fig = plotter._create_grid_plot(ds["sequence"], "light")
     assert len(fig.data) == 100  # 20 windows × 5 signals
     assert "first 20 of 30 windows" in fig.layout.title.text
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════
+# S-6: the install must assemble the WHOLE dataset from the partitions
+#
+# Decision 11 (juniper-ml notes/JUNIPER_2026-08-29_JUNIPER-ECOSYSTEM_TRAIN-EVAL-TEST-
+# PARTITION-DESIGN.md §9.5) retired the ``*_full`` family and juniper-data#369 stopped
+# emitting it, so NO artifact minted since 2026-09-06 carries ``X_full``. #589 migrated
+# the 2-D path to ``DemoMode._whole_dataset``; the 3-D path kept reading ``X_full`` with
+# an ``X_train`` fallback, so every sequence install was silently TRAIN-ONLY while
+# ``n_windows`` / ``lookback`` / ``n_features``, the stored windows and the Δt / target
+# histograms all claimed the whole dataset. Nothing errored.
+#
+# Each test below names, in its docstring, the assertion that fails against that old code.
+# ═══════════════════════════════════════════════════════════════════════════════════════
+def _tagged_windows(tags: list[float], length: int, n_features: int) -> np.ndarray:
+    """(W, L, F) whose every cell equals its window's tag — so row ORDER is readable."""
+    return np.stack([np.full((length, n_features), t, dtype=np.float32) for t in tags])
+
+
+def _tagged_dt(tags: list[float], length: int) -> np.ndarray:
+    """(W, L) Δt tagged the same way, with the contract's leading per-window 0."""
+    a = np.stack([np.full(length, t, dtype=np.float32) for t in tags])
+    a[:, 0] = 0.0
+    return a
+
+
+def _partitioned_sequence_npz(w_train: int = 3, w_val: int = 2, w_test: int = 1, length: int = 4, n_features: int = 2) -> dict:
+    """A post-#369 3-D artifact: partitions only, NO ``*_full`` family anywhere.
+
+    Windows are tagged 0.. within train, 100.. within val, 200.. within test, so the
+    assembled row order is directly readable off the stored windows.
+    """
+    npz: dict = {}
+    for split, base, count in (("train", 0.0, w_train), ("val", 100.0, w_val), ("test", 200.0, w_test)):
+        if count <= 0:
+            continue
+        tags = [base + i for i in range(count)]
+        npz[f"X_{split}"] = _tagged_windows(tags, length, n_features)
+        npz[f"dt_{split}"] = _tagged_dt(tags, length)
+        npz[f"y_{split}"] = np.array([[t] for t in tags], dtype=np.float32)
+    return npz
+
+
+def test_sequence_install_assembles_all_partitions_without_full():
+    """(1) train+val+test, no ``*_full`` → the WHOLE dataset is installed.
+
+    Fails on the old code at ``n_windows == 6`` (it returned 3, the train partition
+    alone) and at the Δt-histogram total (9 of the 18 inter-step gaps).
+    """
+    demo = _bare_demo()
+    npz = _partitioned_sequence_npz(w_train=3, w_val=2, w_test=1, length=4, n_features=2)
+
+    out = demo._install_sequence_dataset(npz, source_label="generator:window_irregular_series")
+
+    assert out["n_windows"] == 6  # 3 + 2 + 1, not 3
+    assert (out["lookback"], out["n_features"]) == (4, 2)
+    seq = out["sequence"]
+    assert len(seq["windows_X"]) == 6
+    # Contract order: every train window, then every val, then every test.
+    assert [w[0][0] for w in seq["windows_X"]] == [0.0, 1.0, 2.0, 100.0, 101.0, 200.0]
+    # "computed over ALL windows": 6 windows × (L-1 = 3) inter-step gaps.
+    assert sum(seq["dt_hist"]["counts"]) == 18
+    assert sum(seq["target_hist"]["counts"]) == 6
+    # Δt and y were reordered with X, not independently.
+    assert [w[1] for w in seq["windows_dt"]] == [0.0, 1.0, 2.0, 100.0, 101.0, 200.0]
+    assert [w[0] for w in seq["windows_y"]] == [0.0, 1.0, 2.0, 100.0, 101.0, 200.0]
+
+
+def test_sequence_install_prefers_legacy_full_family():
+    """(2) a legacy artifact's ``*_full`` still wins — tolerance, never a requirement.
+
+    This one passes against the old code too, deliberately: it is the guard on the
+    tolerance, and the mutation it catches is the tempting over-correction (deleting the
+    legacy branch so everything is re-derived). Every artifact minted before 2026-09-06
+    still ships the family, and re-deriving it could change the row order the producer
+    actually wrote.
+    """
+    demo = _bare_demo()
+    npz = _partitioned_sequence_npz(w_train=3, w_val=2, w_test=1, length=4, n_features=2)
+    legacy_tags = [900.0 + i for i in range(4)]
+    npz["X_full"] = _tagged_windows(legacy_tags, 4, 2)
+    npz["dt_full"] = _tagged_dt(legacy_tags, 4)
+    npz["y_full"] = np.array([[t] for t in legacy_tags], dtype=np.float32)
+
+    out = demo._install_sequence_dataset(npz, source_label="legacy")
+
+    assert out["n_windows"] == 4  # the producer's own array, not the 6-row concatenation
+    assert [w[0][0] for w in out["sequence"]["windows_X"]] == legacy_tags
+    assert [w[0] for w in out["sequence"]["windows_y"]] == legacy_tags
+
+
+def test_whole_dataset_concatenates_1d_targets_flat():
+    """(3) a 1-D ``(W,)`` target per partition concatenates to ``(W_total,)``.
+
+    Fails on the old code at the shape assertion: ``np.vstack`` promoted the three
+    ``(W,)`` partitions to a ``(3, W)`` matrix — three rows of "the whole dataset"
+    instead of one — and the install's target histogram then counted one partition.
+    """
+    from demo_mode import DemoMode
+
+    npz = {
+        "X_train": _tagged_windows([0.0, 1.0], 4, 2),
+        "X_val": _tagged_windows([100.0, 101.0], 4, 2),
+        "X_test": _tagged_windows([200.0, 201.0], 4, 2),
+        "y_train": np.array([0.0, 1.0], dtype=np.float32),
+        "y_val": np.array([100.0, 101.0], dtype=np.float32),
+        "y_test": np.array([200.0, 201.0], dtype=np.float32),
+    }
+
+    whole_y = DemoMode._whole_dataset(npz, "y")
+    assert whole_y.shape == (6,)  # not (3, 2)
+    assert whole_y.tolist() == [0.0, 1.0, 100.0, 101.0, 200.0, 201.0]
+
+    out = _bare_demo()._install_sequence_dataset(npz, source_label="flat-target")
+    assert out["n_windows"] == 6
+    assert list(out["sequence"]["windows_y"]) == [[0.0], [1.0], [100.0], [101.0], [200.0], [201.0]]
+    assert sum(out["sequence"]["target_hist"]["counts"]) == 6  # all six targets, not two
+
+
+def test_whole_dataset_restores_entity_major_order_for_two_tickers():
+    """(4) split-major partitions + ``ticker_code_*`` reproduce the ENTITY-major order.
+
+    juniper-data built ``*_full`` entity-major (each ticker's train, val, test in turn)
+    while the partitions are split-major, so a plain concatenation renders a different
+    order for the same logical dataset. ``equities`` and ``equities_seq`` both emit
+    ``ticker_code_<split>`` for every partition, which makes the legacy order exactly
+    reconstructible — concatenate, then ONE stable argsort on the codes.
+
+    Fails on the old code twice: ``_whole_dataset`` returned the split-major
+    concatenation (no reordering at all), and the install never got past ``X_train``.
+    """
+    from demo_mode import DemoMode
+
+    # Ticker 0 tags 10..13, ticker 1 tags 20..23; each partition is SPLIT-major.
+    split_major_tags = {"train": [10.0, 11.0, 20.0, 21.0], "val": [12.0, 22.0], "test": [13.0, 23.0]}
+    codes = {"train": [0, 0, 1, 1], "val": [0, 1], "test": [0, 1]}
+    npz: dict = {}
+    for split, tags in split_major_tags.items():
+        npz[f"X_{split}"] = _tagged_windows(tags, 4, 2)
+        npz[f"dt_{split}"] = _tagged_dt(tags, 4)
+        npz[f"y_{split}"] = np.array([[t] for t in tags], dtype=np.float32)
+        npz[f"ticker_code_{split}"] = np.array(codes[split], dtype=np.int32)
+
+    # Built by hand: ticker 0's train, val, test, then ticker 1's train, val, test.
+    expected = [10.0, 11.0, 12.0, 13.0, 20.0, 21.0, 22.0, 23.0]
+    # ... and that is NOT what a plain concatenation gives.
+    assert expected != [10.0, 11.0, 20.0, 21.0, 12.0, 22.0, 13.0, 23.0]
+
+    assert DemoMode._whole_dataset(npz, "X")[:, 0, 0].tolist() == expected
+
+    out = _bare_demo()._install_sequence_dataset(npz, source_label="generator:equities_seq")
+    assert out["n_windows"] == 8
+    seq = out["sequence"]
+    assert [w[0][0] for w in seq["windows_X"]] == expected
+    # One permutation for the artifact: Δt and y land on the same windows as X.
+    assert [w[1] for w in seq["windows_dt"]] == expected
+    assert [w[0] for w in seq["windows_y"]] == expected
+
+
+def test_entity_major_order_is_none_without_ticker_code_or_for_one_ticker():
+    """(4b) no ``ticker_code`` (every non-equities generator) or one ticker → no reorder.
+
+    ``None`` is the "nothing to permute" answer, and it spares a full copy of every array.
+    """
+    from demo_mode import DemoMode
+
+    plain = _partitioned_sequence_npz(w_train=2, w_val=1, w_test=1, length=3, n_features=1)
+    assert DemoMode._entity_major_order(plain) is None
+
+    single = dict(plain)
+    for split, count in (("train", 2), ("val", 1), ("test", 1)):
+        single[f"ticker_code_{split}"] = np.zeros(count, dtype=np.int32)
+    assert DemoMode._entity_major_order(single) is None  # identity permutation
+
+
+def test_sequence_install_handles_val_less_artifact():
+    """(5) a two-partition (train + test) artifact still installs, whole.
+
+    The HF / Kaggle store artifacts carry no ``val``. Fails on the old code at
+    ``n_windows == 5``, which returned 3.
+    """
+    demo = _bare_demo()
+    npz = _partitioned_sequence_npz(w_train=3, w_val=0, w_test=2, length=4, n_features=2)
+    assert "X_val" not in npz and "X_full" not in npz
+
+    out = demo._install_sequence_dataset(npz, source_label="store:kaggle")
+
+    assert out["n_windows"] == 5  # 3 + 2, not 3
+    assert [w[0][0] for w in out["sequence"]["windows_X"]] == [0.0, 1.0, 2.0, 200.0, 201.0]
+    assert sum(out["sequence"]["dt_hist"]["counts"]) == 15  # 5 windows × 3 gaps

@@ -327,11 +327,13 @@ class TestGuardBranches:
         """An artifact with neither X_full nor X_train raises after the fallback.
 
         The X_full arm of that fallback is now the LEGACY one -- decision 11 stopped
-        producers emitting it -- so this pins that both arms are still consulted.
+        producers emitting it -- so this pins that both arms are still consulted. The
+        MESSAGE names only ``X_train``, the key the current contract requires: sending a
+        reader after ``X_full`` points them at a key no producer emits any more.
         """
         demo = DemoMode()
         with patch.object(mock_juniper_data_client, "create_dataset", return_value={"dataset_id": "d-nox"}), patch.object(mock_juniper_data_client, "download_artifact_npz", return_value={}):
-            with pytest.raises(ValueError, match="missing required key: X_full"):
+            with pytest.raises(ValueError, match="missing required key: X_train"):
                 demo.regenerate_dataset_from_generator(generator="xor")
 
 

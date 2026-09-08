@@ -372,7 +372,7 @@ def _generate_spiral_dataset(
 **Behavior:**
 
 - Reads URL from `Settings.juniper_data_url` (supports `JUNIPER_DATA_URL` shared env var).
-- Calls JuniperData create/download APIs and validates NPZ payload (`X_full`, `y_full`, dtype/shape checks).
+- Calls JuniperData create/download APIs and validates the NPZ payload's **partitions** (`X_train` / `y_train` required; `X_val` / `y_val` and `X_test` / `y_test` checked whenever present; dtype/shape/row-count checks). The whole dataset is then assembled from those partitions in `train | val | test` order. A legacy `*_full` family is tolerated and used as-is when present, but never required -- decision 11 retired it from the contract and juniper-data stopped emitting it in juniper-data#369.
 - Raises JuniperData client exceptions on upstream failures.
 
 **Fallback call sites:**
