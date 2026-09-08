@@ -145,7 +145,7 @@ juniper-data = [
     # canopy now constructs ``JuniperDataClient`` with the ``on_request``
     # instrumentation kwarg (added in 0.4.1). Pin floor matches the
     # release that introduced the kwarg.
-    "juniper-data-client>=0.4.1,<0.5.0",
+    "juniper-data-client>=0.4.1,<0.6.0",
     "requests>=2.28.0",
 ]
 juniper-cascor = [
