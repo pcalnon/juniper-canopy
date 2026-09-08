@@ -276,6 +276,37 @@ def get_model_spec(key: str, *, models: tuple[ModelSpec, ...] = MODELS) -> Model
     return None
 
 
+# ``backend.backend_type`` of the live backend when the recurrence service backend is the one
+# running. The other two values the property can take ("service", "demo") both serve the
+# cascor-family models -- there is no "cascor" backend type, and a guardrail that parametrises
+# on one covers nothing.
+RECURRENCE_BACKEND_TYPE: str = "recurrence"
+
+
+def selection_is_live(model_key: str | None, backend_type: str | None, *, models: tuple[ModelSpec, ...] = MODELS) -> bool | None:
+    """Whether the live backend actually serves the selected model (design N5 / X1).
+
+    Provider agreement: a recurrence-provider model is live iff the recurrence backend is, and a
+    cascor-family model is live iff it is not. ``swapped`` from ``POST /api/model/select`` is the
+    WRONG predicate for this -- it is also ``False`` on the healthy path where the user re-selects
+    the model already running -- so it is deliberately not consulted.
+
+    Returns ``None`` when either side is unknown: no ``backend_type`` (the first-paint seed, which
+    has never round-tripped) or no ``model_key`` (a cleared model). Unknown is not disagreement;
+    a caller that treated it as one would trade a silent lie for a loud one.
+
+    Shared by the sidebar summary (``DashboardManager._selection_is_live``), the Start gate
+    (``_update_button_appearance_handler``) and the server's start paths (``main.py``), so the
+    label, the control and the run cannot answer this question differently -- which is exactly
+    how canopy#592 came to fix the label while the run stayed misattributed.
+    """
+    if model_key is None or model_key == "" or not backend_type:
+        return None
+    spec = get_model_spec(model_key, models=models)
+    selection_needs_recurrence = spec is not None and spec.provider == RECURRENCE_PROVIDER
+    return selection_needs_recurrence == (backend_type == RECURRENCE_BACKEND_TYPE)
+
+
 def get_dataset_spec(value: str, *, dataset_types: tuple[DatasetTypeSpec, ...] = DATASET_TYPES) -> DatasetTypeSpec | None:
     """Return the :class:`DatasetTypeSpec` for ``value``, or None (symmetric with get_model_spec).
 

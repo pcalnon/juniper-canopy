@@ -53,21 +53,22 @@ def _resp(*, ok, json_body=None, status_code=200, text=""):
 def test_select_model_handler_success_mirrors_swap(manager, monkeypatch):
     body = {"nn_model": "recurrence", "backend": "recurrence", "execution": "one_shot", "status": "coming_soon", "swapped": True}
     monkeypatch.setattr(requests, "post", lambda *a, **k: _resp(ok=True, json_body=body))
-    store, model_class, summary = manager._select_model_handler("recurrence")
+    store, model_class, summary, state = manager._select_model_handler("recurrence")
     assert store == "recurrence"  # model-selection-store now holds the model key (A1-iv-3b)
     assert model_class == "one_shot"  # mirrored to model-class-store -> drives cascade suppression
     assert summary.startswith("Active: Recurrence (LMU)")
     assert "coming soon" in summary
+    assert state == body  # N5: the payload itself is mirrored, for the Start gate
 
 
 def test_select_model_handler_empty_is_noop(manager):
-    assert manager._select_model_handler("") == (dash.no_update, dash.no_update, dash.no_update)
-    assert manager._select_model_handler(None) == (dash.no_update, dash.no_update, dash.no_update)
+    assert manager._select_model_handler("") == (dash.no_update,) * 4
+    assert manager._select_model_handler(None) == (dash.no_update,) * 4
 
 
 def test_select_model_handler_http_error_is_noop(manager, monkeypatch):
     monkeypatch.setattr(requests, "post", lambda *a, **k: _resp(ok=False, status_code=502, text="init failed"))
-    assert manager._select_model_handler("recurrence") == (dash.no_update, dash.no_update, dash.no_update)
+    assert manager._select_model_handler("recurrence") == (dash.no_update,) * 4
 
 
 def test_select_model_handler_transport_error_is_noop(manager, monkeypatch):
@@ -75,7 +76,7 @@ def test_select_model_handler_transport_error_is_noop(manager, monkeypatch):
         raise requests.ConnectionError("down")
 
     monkeypatch.setattr(requests, "post", _boom)
-    assert manager._select_model_handler("recurrence") == (dash.no_update, dash.no_update, dash.no_update)
+    assert manager._select_model_handler("recurrence") == (dash.no_update,) * 4
 
 
 def test_model_summary_text_live_vs_coming_soon():

@@ -213,27 +213,29 @@ def test_toggle_close_leaves_table_untouched(manager):
 def test_select_from_table_applies_and_closes_modal(manager, monkeypatch):
     body = {"nn_model": "recurrence", "backend": "recurrence", "execution": "one_shot", "status": "live", "swapped": True}
     monkeypatch.setattr(requests, "post", lambda *a, **k: _resp(ok=True, json_body=body))
-    store, model_class, summary, is_open = manager._select_model_from_table_handler([None, 1], {"type": "model-select-btn", "index": "recurrence"})
+    store, model_class, summary, is_open, state = manager._select_model_from_table_handler([None, 1], {"type": "model-select-btn", "index": "recurrence"})
     assert store == "recurrence"
     assert model_class == "one_shot"
     assert summary.startswith("Active: Recurrence (LMU)")
     assert is_open is False  # a successful apply closes the modal
+    assert state == body  # N5: the payload rides to model-state-store from the same writer
 
 
 def test_select_from_table_noop_on_dynamic_insertion_fire(manager):
     # The pattern-matching callback fires once when the buttons are first inserted (all n_clicks None).
     result = manager._select_model_from_table_handler([None, None], {"type": "model-select-btn", "index": "cascor"})
-    assert result == (dash.no_update, dash.no_update, dash.no_update, dash.no_update)
+    assert result == (dash.no_update,) * 5
     # A missing/None triggered id is likewise a no-op.
-    assert manager._select_model_from_table_handler([None, None], None) == (dash.no_update, dash.no_update, dash.no_update, dash.no_update)
+    assert manager._select_model_from_table_handler([None, None], None) == (dash.no_update,) * 5
 
 
 def test_select_from_table_keeps_modal_open_on_failed_apply(manager, monkeypatch):
-    # A transient apply failure -> handler no-ops all three -> the modal must NOT close.
+    # A transient apply failure -> handler no-ops all five -> the modal must NOT close.
     monkeypatch.setattr(requests, "post", lambda *a, **k: _resp(ok=False, status_code=502, text="init failed"))
-    store, model_class, summary, is_open = manager._select_model_from_table_handler([1, None], {"type": "model-select-btn", "index": "cascor"})
+    store, model_class, summary, is_open, state = manager._select_model_from_table_handler([1, None], {"type": "model-select-btn", "index": "cascor"})
     assert store is dash.no_update
     assert is_open is dash.no_update  # modal stays open on the prior model
+    assert state is dash.no_update  # and the payload store keeps the prior selection's truth
 
 
 # --------------------------------------------------------------------------- sidebar summary seed
