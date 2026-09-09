@@ -48,7 +48,7 @@ from dash.dependencies import Input, Output, State
 from canopy_constants import CascorPatchBounds, DashboardConstants, TrainingConstants
 from dataset_schema import apply_availability_gate, generator_name_for_type, is_generator_available, parse_schema_fields, unavailable_reason
 from frontend.internal_api import internal_api_headers
-from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, RECURRENCE_PROVIDER, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason, model_requirement
+from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, RECURRENCE_BACKEND_TYPE, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason, model_requirement, selection_is_live
 from settings import get_settings
 
 from . import ui_standards
@@ -1906,6 +1906,14 @@ class DashboardManager:
                 # A1-iv-3a: the currently-selected model key, written by the sidebar picker's
                 # POST /api/model/select callback (the runtime backend swap, A1-iv-2).
                 dcc.Store(id="model-selection-store", storage_type="memory", data=DEFAULT_MODEL_KEY),
+                # N5: the LAST ``/api/model/select`` payload -- ``nn_model`` / ``backend`` /
+                # ``execution`` / ``status`` / ``swapped`` -- written by the same callback that
+                # writes ``model-selection-store`` (one writer; the key and the payload move
+                # together). The Start gate and the train-gate notice read provider agreement off
+                # it, so a "recurrence" selection recorded over the cascor/demo backend disables
+                # Start instead of filing a cascor run under Recurrence. ``None`` until the first
+                # round-trip (unknown is not disagreement) and again after a model clear.
+                dcc.Store(id="model-state-store", storage_type="memory", data=None),
                 # A1-iv-3c: the one-shot (recurrence) Start dataset-ref body — ``{"dataset": {...}}``
                 # or None. A single Python callback resolves it from model-class-store +
                 # nn-dataset-type-dropdown so BOTH training-button transports (the server-side REST
@@ -2698,6 +2706,9 @@ class DashboardManager:
             Output("model-class-store", "data", allow_duplicate=True),
             Output("nn-model-summary", "children"),
             Output("model-selection-modal", "is_open", allow_duplicate=True),
+            # N5: the payload behind the key -- ``backend`` / ``swapped`` / ``execution`` /
+            # ``status``. Written HERE, by the store's only writer, so key and payload move together.
+            Output("model-state-store", "data"),
             Input({"type": "model-select-btn", "index": dash.ALL}, "n_clicks"),
             # N11: the clear rides in the SAME callback rather than a second one, because both write
             # ``model-selection-store``. A second writer on a store is the duplicate-writer hazard,
@@ -2772,10 +2783,12 @@ class DashboardManager:
         @self.app.callback(
             Output("train-gate-notice", "children"),
             Input("model-selection-store", "data"),
+            # N5: the same payload the Start gate reads, so the notice and the gate move together.
+            Input("model-state-store", "data"),
             prevent_initial_call=True,
         )
-        def annotate_train_gate(model_key):
-            return self._train_gate_notice_handler(model_key)
+        def annotate_train_gate(model_key, model_state):
+            return self._train_gate_notice_handler(model_key, model_state=model_state)
 
     @staticmethod
     def _resolve_oneshot_start_body_handler(model_class: "str | None", dataset_generator: "str | None") -> "dict[str, object] | None":
@@ -3090,11 +3103,14 @@ class DashboardManager:
     def _select_model_handler(self, model_key):
         """Apply a model selection via ``POST /api/model/select`` and mirror the result.
 
-        Returns ``(model_selection_store, model_class_store, summary_text)``; on any failure all
-        three are ``dash.no_update`` so a transient error leaves the UI on its prior model.
+        Returns ``(model_selection_store, model_class_store, summary_text, model_state_store)``;
+        on any failure all four are ``dash.no_update`` so a transient error leaves the UI on its
+        prior model. The fourth is the response payload itself (N5): the summary reads provider
+        agreement off it here, and the Start gate reads the same agreement off the store, so the
+        label and the control cannot answer "is this model active" differently.
         """
         if not model_key:
-            return dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
         try:
             resp = requests.post(
                 self._api_url("/api/model/select"),
@@ -3104,11 +3120,11 @@ class DashboardManager:
             )
             if resp.ok:
                 data = resp.json()
-                return data.get("nn_model", model_key), data.get("execution", "live"), self._model_summary_text(data)
+                return data.get("nn_model", model_key), data.get("execution", "live"), self._model_summary_text(data), data
             self.logger.warning("Model select failed (%s): %s", resp.status_code, resp.text[:200])
         except Exception as exc:
             self.logger.debug("Model select request failed: %s", exc)
-        return dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
     def _toggle_model_modal_handler(self, triggered_id, dataset_value, selected_model, search=""):
         """Open/close the model-selection modal + live-filter the table (A1b-1 / A1b search).
@@ -3134,7 +3150,8 @@ class DashboardManager:
         and applied via the shared ``_select_model_handler`` (POST /api/model/select + store mirror);
         the modal closes only when the selection actually applied (the handler no-ops on failure, so
         a transient error leaves the modal open on the prior model). Returns
-        ``(model_selection_store, model_class_store, summary, modal_is_open)``.
+        ``(model_selection_store, model_class_store, summary, modal_is_open, model_state_store)``
+        -- the fifth is the ``/api/model/select`` payload the Start gate reads (N5).
 
         **N11 — the clear branch.** ``model-selection-clear`` writes ``None`` to the store, which
         re-fires ``gate_dataset_options`` and ungates the dataset list. It deliberately does NOT
@@ -3148,22 +3165,30 @@ class DashboardManager:
         """
         if triggered_id == "model-selection-clear":
             if not clear_clicks:
-                return dash.no_update, dash.no_update, dash.no_update, dash.no_update
-            return None, dash.no_update, self.CLEARED_MODEL_SUMMARY, False
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            # The payload store goes ``None`` with the key: no selection has round-tripped, and
+            # unknown is not disagreement (Start is disabled here by the axis check regardless).
+            return None, dash.no_update, self.CLEARED_MODEL_SUMMARY, False, None
         if not isinstance(triggered_id, dict) or not any(n_clicks_list or []):
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
-        store, model_class, summary = self._select_model_handler(triggered_id.get("index"))
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        store, model_class, summary, state = self._select_model_handler(triggered_id.get("index"))
         is_open = False if store is not dash.no_update else dash.no_update
-        return store, model_class, summary, is_open
+        return store, model_class, summary, is_open, state
 
     #: ``backend.backend_type`` as reported by ``/api/model/select`` when the recurrence service
-    #: backend is the live one. The other values ("cascor", "demo") both serve cascor-family models.
-    RECURRENCE_BACKEND_TYPE: str = "recurrence"
+    #: backend is the live one. The other values ("service", "demo") both serve cascor-family
+    #: models. Owned by the registry since N5 (``model_registry.RECURRENCE_BACKEND_TYPE``) so the
+    #: summary, the Start gate and the server's start refusals share one value; aliased here.
+    RECURRENCE_BACKEND_TYPE: str = RECURRENCE_BACKEND_TYPE
 
     #: Sidebar summary at a cleared model (``⊥`` on the model axis). It says what the state IS and
     #: what it costs, rather than going blank: a blank summary over a live backend is the X1 class,
     #: and this state is not runnable (Start is disabled until a model is chosen).
     CLEARED_MODEL_SUMMARY: str = "No model selected — all datasets shown; choose one to train"
+
+    #: What to do about a selection the live backend does not serve (N5). The same sentence the
+    #: server puts in its 409, so the notice and the refusal read alike.
+    INACTIVE_SELECTION_REMEDY: str = "Select the model again once its service is configured (Recurrence: JUNIPER_CANOPY_RECURRENCE_SERVICE_URL), or select the model the running backend serves."
 
     @staticmethod
     def _selection_is_live(data):
@@ -3186,13 +3211,13 @@ class DashboardManager:
         never round-tripped): unknown is not disagreement, and reporting it as one would trade a
         silent lie for a loud one. Seeding that value honestly is model/dataset hydration, which
         the design sequences separately (§4.10).
+
+        The predicate itself is ``model_registry.selection_is_live`` (N5), shared with the Start
+        gate and with the server's start refusals, so a future edit cannot fix the label and leave
+        the run -- which is how canopy#592 shipped.
         """
-        backend_type = data.get("backend")
-        if not backend_type:
-            return None
-        spec = get_model_spec(data.get("nn_model", ""))
-        selection_needs_recurrence = spec is not None and spec.provider == RECURRENCE_PROVIDER
-        return selection_needs_recurrence == (backend_type == DashboardManager.RECURRENCE_BACKEND_TYPE)
+        data = data or {}
+        return selection_is_live(data.get("nn_model"), data.get("backend"))
 
     @staticmethod
     def _model_summary_text(data):
@@ -3237,27 +3262,47 @@ class DashboardManager:
         return dataset_model_hint(dataset_value) or ""
 
     @staticmethod
-    def _train_gate_notice_handler(model_key):
+    def _train_gate_notice_handler(model_key, model_state=None):
         """D8 Train-gate status notice for a non-live selected model (A1-iv-5; §5.7).
 
         Returns a warning ``dbc.Alert`` explaining why Start is disabled when the selected model is
         non-live (``coming_soon`` / ``experimental`` / ``deprecated`` / ``broken``), or ``None``
         (hidden) for a live / trainable model — the visible companion to the Start force-disable in
         ``_update_button_appearance_handler`` (both key off ``model_is_trainable``).
+
+        **N5 — the second reason Start can be disabled.** ``model_state`` is the last
+        ``/api/model/select`` payload (``model-state-store``). When the live backend does not serve
+        the selected model (``_selection_is_live`` is ``False``) the notice names the model, the
+        backend that is really running and the consequence -- the run would execute on that backend
+        and be filed under this model -- because a disabled control with no stated reason is the
+        design's N4 class. Hidden while the two agree, and at first paint, when agreement is unknown.
         """
-        if model_is_trainable(model_key):
-            return None
-        spec = get_model_spec(model_key)
-        label = spec.label if spec is not None else (model_key or "This model")
-        status = spec.status.replace("_", " ") if spec is not None else "unavailable"
-        return dbc.Alert(
-            [
-                html.Strong(f"{label} is {status}. "),
-                html.Span("This model can be selected for inspection but is not trainable yet — Start is disabled."),
-            ],
-            color="warning",
-            className="mb-0",
-        )
+        if not model_is_trainable(model_key):
+            spec = get_model_spec(model_key)
+            label = spec.label if spec is not None else (model_key or "This model")
+            status = spec.status.replace("_", " ") if spec is not None else "unavailable"
+            return dbc.Alert(
+                [
+                    html.Strong(f"{label} is {status}. "),
+                    html.Span("This model can be selected for inspection but is not trainable yet — Start is disabled."),
+                ],
+                color="warning",
+                className="mb-0",
+            )
+        state = model_state or {}
+        if DashboardManager._selection_is_live(state) is False:
+            backend_type = state.get("backend")
+            spec = get_model_spec(state.get("nn_model", ""))
+            label = spec.label if spec is not None else (state.get("nn_model") or model_key or "This model")
+            return dbc.Alert(
+                [
+                    html.Strong(f"{label} is selected but the {backend_type} backend is running. "),
+                    html.Span(f"Start is disabled — the run would execute on {backend_type} and be filed under {label}. {DashboardManager.INACTIVE_SELECTION_REMEDY}"),
+                ],
+                color="warning",
+                className="mb-0",
+            )
+        return None
 
     @staticmethod
     def _status_badge(status):
@@ -4817,6 +4862,10 @@ class DashboardManager:
                 # ``start-button.disabled`` combines the training-state and model-status factors in
                 # one place — no racy second writer.
                 Input("model-selection-store", "data"),
+                # N5: the last ``/api/model/select`` payload, written by the same callback as the
+                # key above. An Input for the same reason as the dataset below: Start must go
+                # disabled the moment a selection is recorded over a backend that does not serve it.
+                Input("model-state-store", "data"),
                 # X5 / §4.8: the dataset rides as an **Input**, not a State. State does not
                 # trigger, so clearing the dataset would leave Start enabled until some unrelated
                 # callback happened to fire — the gate would be real in the handler and absent in
@@ -4826,9 +4875,9 @@ class DashboardManager:
             ],
             prevent_initial_call=False,
         )
-        def update_button_appearance(button_states, model_key, dataset_value):
+        def update_button_appearance(button_states, model_key, model_state, dataset_value):
             """Update button states (disabled/loading) with visual feedback + the D8 Train-gate."""
-            return self._update_button_appearance_handler(button_states=button_states, model_key=model_key, dataset_value=dataset_value)
+            return self._update_button_appearance_handler(button_states=button_states, model_key=model_key, dataset_value=dataset_value, model_state=model_state)
 
         @self.app.callback(
             Output("button-states", "data", allow_duplicate=True),
@@ -7878,6 +7927,17 @@ class DashboardManager:
 
         Returning ``disabled`` for **Apply Dataset** from the same place is deliberate for the same
         reason: it is the other control that would otherwise commit a ``⊥``.
+
+        **N5 / §4.4 — Start also requires the selected model to be the one that would run.** A
+        complete, compatible, lifecycle-live selection passes every gate above and can still be
+        *inactive*: with ``recurrence_service_url`` unset, selecting Recurrence records the
+        selection over the cascor/demo backend and answers 200. canopy#592 made the sidebar say
+        "NOT ACTIVE"; this callback never saw the payload, so Start stayed enabled and filed a
+        cascor run under Recurrence (LMU). ``model_state`` is that payload (``model-state-store``),
+        and provider disagreement disables Start here -- the same predicate the label uses, so the
+        two cannot diverge again. ``None`` (never round-tripped) is unknown, not disagreement. The
+        server refuses the run as well (``main._selection_inactive_reason``) for anything that
+        bypasses this control.
         """
 
         def get_button_props(cmd, label, icon):
@@ -7894,6 +7954,9 @@ class DashboardManager:
         # X5 / §4.8: an incomplete selection is not trainable on either axis.
         dataset_missing = selection_axis_unset(dataset_value)
         if dataset_missing or selection_axis_unset(model_key):
+            start_disabled = True
+        # N5 / §4.4: a selected model that the live backend does not serve is not startable.
+        if self._selection_is_live(model_state) is False:
             start_disabled = True
         pause_disabled, pause_text = get_button_props("pause", "Pause Training", "⏸")
         stop_disabled, stop_text = get_button_props("stop", "Stop Training", "⏹")

@@ -49,7 +49,7 @@ from backend.demo_backend import DemoBackend
 from dataset_schema import generator_name_for_type
 from demo_mode import DemoMode
 from frontend.dashboard_manager import DashboardManager
-from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, DatasetTypeSpec, ModelSpec, compatible, compatible_datasets, model_requirement
+from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, DatasetTypeSpec, ModelSpec, compatible, compatible_datasets, model_requirement, selection_is_live
 
 
 @pytest.fixture
@@ -441,16 +441,18 @@ class TestG8ClearedModelUngatesTheDataset:
         # Clearing is a statement about the UI's filter, not a request to change the live backend,
         # and there is no "no model" for /api/model/select to select.
         with mock.patch("frontend.dashboard_manager.requests.post") as post:
-            store, model_class, summary, is_open = manager._select_model_from_table_handler([], "model-selection-clear", 1)
+            store, model_class, summary, is_open, state = manager._select_model_from_table_handler([], "model-selection-clear", 1)
         post.assert_not_called()
         assert store is None
         assert model_class is dash.no_update
         assert is_open is False
         assert "No model selected" in summary
+        # N5: no selection has round-tripped, so the payload store is unknown, not stale.
+        assert state is None
 
     def test_the_clear_is_inert_before_it_is_clicked(self, manager):
         # The button is in the DOM from first paint; its callback must not fire on the no-click.
-        assert manager._select_model_from_table_handler([], "model-selection-clear", None) == (dash.no_update,) * 4
+        assert manager._select_model_from_table_handler([], "model-selection-clear", None) == (dash.no_update,) * 5
 
     def test_start_stays_disabled_at_a_cleared_model(self, manager):
         # The ungated-Start hole that §4.11 would otherwise have shipped. Pinned here, at the
@@ -646,3 +648,237 @@ class TestG1cThreeComponents:
         assert trapped == {("m_flat", "d_flat_a"), ("m_flat", "d_flat_b")}
         stranded = {("m_seq", "d_seq"), ("m_vol", "d_vol")}
         assert not (trapped & stranded)
+
+
+# ---------------------------------------------------------------------------
+# N5 — Start requires the selected model to be the one that would RUN
+# ---------------------------------------------------------------------------
+#
+# G5 (above) made the sidebar tell the truth about ``X1_PAYLOAD``; nothing stopped the run. The
+# Start gate read ``model_is_trainable`` (registry lifecycle, "live" for both shipped models) plus
+# both axes being set, and ``(recurrence, equities_seq)`` passes every one of those -- so with
+# ``recurrence_service_url`` unset a user selected Recurrence, read "NOT ACTIVE", pressed Start,
+# and got a cascor/demo run filed under Recurrence (LMU). Handoff item 1; design N5 / §4.4.
+
+# The healthy no-op re-select: ``swapped`` is False here too. Any predicate that disables Start on
+# this payload has re-introduced the false positive G5's ``test_noop_reselect...`` guards.
+LIVE_RESELECT_PAYLOAD = {"nn_model": "cascor", "backend": "demo", "execution": "continuous", "status": "live", "swapped": False}
+RECURRENCE_LIVE_PAYLOAD = {"nn_model": "recurrence", "backend": "recurrence", "execution": "one_shot", "status": "live", "swapped": True}
+
+
+def _text_of(component):
+    """Concatenate every string reachable through ``.children`` of a Dash component tree."""
+    if component is None:
+        return ""
+    if isinstance(component, str):
+        return component
+    if isinstance(component, (list, tuple)):
+        return "".join(_text_of(child) for child in component)
+    return _text_of(getattr(component, "children", None))
+
+
+def _callback_writing(manager, output_ref):
+    """The single ``callback_map`` entry whose output key mentions ``output_ref`` (``"<id>.<prop>"``)."""
+    keys = [key for key in manager.app.callback_map if output_ref in key]
+    assert len(keys) == 1, f"expected exactly one writer of {output_ref!r}, found {keys}"
+    return keys[0], manager.app.callback_map[keys[0]]
+
+
+def _string_input_ids(callback_info):
+    return {entry.get("id") for entry in callback_info.get("inputs", []) if isinstance(entry.get("id"), str)}
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestN5StartRequiresBackendAgreement:
+    """N5 — a model that is selected but not ACTIVE must not be startable: the gate, not the label."""
+
+    @staticmethod
+    def _appearance(manager, model_key, dataset_value, model_state):
+        states = {"start": {"disabled": False, "loading": False, "timestamp": 0}}
+        return manager._update_button_appearance_handler(button_states=states, model_key=model_key, dataset_value=dataset_value, model_state=model_state)
+
+    def test_the_predicate_is_provider_agreement_over_the_real_backend_domain(self):
+        # The full truth table over {"service", "demo", "recurrence"} -- no "cascor".
+        assert selection_is_live("recurrence", "demo") is False
+        assert selection_is_live("recurrence", "service") is False
+        assert selection_is_live("recurrence", "recurrence") is True
+        assert selection_is_live("cascor", "demo") is True
+        assert selection_is_live("cascor", "service") is True
+        assert selection_is_live("cascor", "recurrence") is False
+
+    def test_unknown_on_either_side_is_not_disagreement(self):
+        assert selection_is_live("cascor", None) is None
+        assert selection_is_live("cascor", "") is None
+        assert selection_is_live(None, "demo") is None
+        assert selection_is_live("", "demo") is None
+
+    def test_the_sidebar_and_the_gate_share_the_predicate(self):
+        # canopy#592 fixed the label with a private predicate the gate never saw. The summary now
+        # delegates to the registry function, so the two cannot answer differently again.
+        assert DashboardManager._selection_is_live(X1_PAYLOAD) is False
+        assert DashboardManager._selection_is_live(LIVE_RESELECT_PAYLOAD) is True
+        assert DashboardManager._selection_is_live(None) is None
+        assert DashboardManager.RECURRENCE_BACKEND_TYPE == "recurrence"
+
+    def test_start_is_disabled_for_a_selected_but_inactive_model(self, manager):
+        # THE defect. (recurrence, equities_seq) is complete, compatible and lifecycle-live --
+        # every gate that existed passes -- and the backend that would run is demo.
+        assert self._appearance(manager, "recurrence", "equities_seq", X1_PAYLOAD)[0] is True
+
+    def test_start_stays_enabled_on_the_noop_reselect(self, manager):
+        # The false-positive guard: ``swapped`` is False here as well.
+        assert self._appearance(manager, "cascor", "spirals", LIVE_RESELECT_PAYLOAD)[0] is False
+
+    def test_start_is_enabled_when_the_recurrence_backend_really_runs(self, manager):
+        assert self._appearance(manager, "recurrence", "equities_seq", RECURRENCE_LIVE_PAYLOAD)[0] is False
+
+    def test_first_paint_is_unknown_and_stays_enabled(self, manager):
+        # Nothing has round-tripped; the boot backend serves the default model by construction.
+        assert self._appearance(manager, "cascor", "spirals", None)[0] is False
+
+    def test_the_other_controls_are_untouched(self, manager):
+        out = self._appearance(manager, "recurrence", "equities_seq", X1_PAYLOAD)
+        assert out[0] is True
+        # pause / stop / resume / reset follow button-states; Apply Dataset follows the dataset axis.
+        assert (out[2], out[4], out[6], out[8]) == (False, False, False, False)
+        assert out[-1] is False
+
+    def test_the_notice_names_the_model_the_backend_and_the_consequence(self):
+        notice = DashboardManager._train_gate_notice_handler("recurrence", model_state=X1_PAYLOAD)
+        assert notice is not None
+        text = _text_of(notice)
+        assert "Recurrence (LMU)" in text
+        assert "demo" in text
+        assert "Start is disabled" in text
+        assert "filed under Recurrence (LMU)" in text
+
+    def test_the_notice_is_hidden_while_the_two_agree(self):
+        assert DashboardManager._train_gate_notice_handler("cascor", model_state=LIVE_RESELECT_PAYLOAD) is None
+        assert DashboardManager._train_gate_notice_handler("recurrence", model_state=RECURRENCE_LIVE_PAYLOAD) is None
+        assert DashboardManager._train_gate_notice_handler("cascor", model_state=None) is None
+        assert DashboardManager._train_gate_notice_handler("cascor") is None
+
+    def test_the_select_handler_mirrors_the_whole_payload(self, manager):
+        with mock.patch("frontend.dashboard_manager.requests.post") as post:
+            post.return_value = mock.Mock(ok=True, json=lambda: dict(X1_PAYLOAD))
+            store, model_class, summary, state = manager._select_model_handler("recurrence")
+        assert store == "recurrence"
+        assert state == X1_PAYLOAD
+        assert "NOT ACTIVE" in summary
+
+    def test_the_state_store_has_one_writer_and_it_is_the_selection_writer(self, manager):
+        # The duplicate-writer hazard N11 names: the key and the payload must come from the same
+        # callback, or a stale payload could gate a fresh key (or the reverse).
+        key, _info = _callback_writing(manager, "model-state-store.data")
+        assert "model-selection-store.data" in key
+
+    def test_both_gate_callbacks_read_the_state_store_as_an_input(self, manager):
+        # An Input, not a State: State does not trigger, so the gate would be real in the handler
+        # and absent in the UI (the X5 lesson on the dataset axis).
+        _key, start_gate = _callback_writing(manager, "start-button.disabled")
+        assert {"model-selection-store", "model-state-store", "nn-dataset-type-dropdown"} <= _string_input_ids(start_gate)
+        _key, notice = _callback_writing(manager, "train-gate-notice.children")
+        assert {"model-selection-store", "model-state-store"} <= _string_input_ids(notice)
+
+    def test_the_store_is_seeded_unknown(self, manager):
+        stores = [c for c in _components(manager.app.layout) if getattr(c, "id", None) == "model-state-store"]
+        assert len(stores) == 1
+        assert stores[0].data is None
+        assert stores[0].storage_type == "memory"
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestN5TheServerRefusesAnInactiveSelection:
+    """The gate is at the control; this is what stops the run when anything else sends it.
+
+    Both transports the Start button uses (REST fallback and ``/ws/control``), plus the restart
+    orchestration the dataset modal uses, and ``curl``. The condition is recorded on the server
+    exactly as the D-8 tests record it: Recurrence selected over the demo backend with no service
+    URL, which ``/api/model/select`` accepts with 200.
+    """
+
+    @pytest.fixture
+    def demo_over_recurrence(self, monkeypatch):
+        with TestClient(main.app) as client:
+            monkeypatch.setattr(main.settings, "recurrence_service_url", None, raising=False)
+            fake = mock.MagicMock()
+            fake.backend_type = "demo"
+            fake.execution = "continuous"
+            fake.is_training_active.return_value = False
+            fake.start_training.return_value = {"ok": True}
+            fake.stop_training.return_value = {"ok": True}
+            monkeypatch.setattr(main, "backend", fake, raising=False)
+            monkeypatch.setattr(main, "current_nn_model", None, raising=False)
+            resp = client.post("/api/model/select", json={"nn_model": "recurrence"})
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["swapped"] is False and resp.json()["backend"] == "demo"
+            yield client, fake
+            # Hand the real backend back before the lifespan shuts it down.
+            monkeypatch.undo()
+
+    def test_rest_start_is_refused_and_nothing_starts(self, demo_over_recurrence):
+        client, fake = demo_over_recurrence
+        resp = client.post("/api/train/start")
+        assert resp.status_code == 409, resp.text
+        detail = resp.json()["detail"]
+        assert "Recurrence (LMU)" in detail
+        assert "demo" in detail
+        fake.start_training.assert_not_called()
+
+    def test_restart_is_refused_before_anything_is_stopped(self, demo_over_recurrence):
+        client, fake = demo_over_recurrence
+        fake.is_training_active.return_value = True
+        resp = client.post("/api/train/restart", json={"start_fresh": True, "reset": True})
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["success"] is False
+        assert body["was_active"] is True  # reported truthfully...
+        fake.stop_training.assert_not_called()  # ...and NOT acted on
+        fake.start_training.assert_not_called()
+        assert [step["step"] for step in body["steps"]] == ["start"]
+        assert "demo" in body["message"]
+
+    def test_ws_start_is_refused_with_an_error_envelope(self, demo_over_recurrence):
+        client, fake = demo_over_recurrence
+        with client.websocket_connect("/ws/control") as websocket:
+            assert websocket.receive_json().get("type") == "connection_established"
+            websocket.send_json({"command": "start", "command_id": "n5-1", "reset": True})
+            for _ in range(100):
+                response = websocket.receive_json()
+                if response.get("type") == "command_response":
+                    break
+            else:
+                raise AssertionError("no command_response")
+        assert response["data"]["status"] == "error"
+        assert response["data"]["command_id"] == "n5-1"
+        assert "demo" in response["data"]["error"]
+        assert response["ok"] is False
+        fake.start_training.assert_not_called()
+
+    def test_a_live_selection_still_starts(self, demo_over_recurrence):
+        # The false-positive guard at the server: re-selecting cascor over demo is a no-op swap
+        # (``swapped`` False) and must start normally.
+        client, fake = demo_over_recurrence
+        assert client.post("/api/model/select", json={"nn_model": "cascor"}).status_code == 200
+        resp = client.post("/api/train/start")
+        assert resp.status_code == 200, resp.text
+        fake.start_training.assert_called_once()
+
+    def test_nothing_selected_yet_is_not_a_refusal(self, monkeypatch):
+        fake = mock.MagicMock()
+        fake.backend_type = "demo"
+        monkeypatch.setattr(main, "backend", fake, raising=False)
+        monkeypatch.setattr(main, "current_nn_model", None, raising=False)
+        assert main._selection_inactive_reason() is None
+        monkeypatch.setattr(main, "current_nn_model", "cascor", raising=False)
+        assert main._selection_inactive_reason() is None
+        monkeypatch.setattr(main, "current_nn_model", "recurrence", raising=False)
+        reason = main._selection_inactive_reason()
+        assert reason is not None and "demo" in reason and "Recurrence (LMU)" in reason
+
+    def test_the_selection_does_not_leak_into_the_next_test(self):
+        # conftest resets ``main.current_nn_model`` between tests; without that, the two D-8 tests
+        # that select Recurrence over demo would 409 every later ``/api/train/start``.
+        assert main.current_nn_model is None

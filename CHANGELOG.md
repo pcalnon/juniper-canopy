@@ -47,6 +47,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at canopy's defaults (`start_date` 2000, `fundamentals_fill="nan"`) is refused by cascor#630's
   NaN guard *after* the shortfall is accepted, so exercising the prompt end-to-end on equities
   needs a later `start_date` or a fill policy — a separate finding, recorded in that handoff.
+  
+- **`publish-image.yml` -- the dashboard container image is published to GHCR on every `v*`
+  release** as a multi-arch manifest (`linux/amd64` + `linux/arm64`, native runners, no QEMU),
+  tagged `X.Y.Z` / `X.Y` / `latest`, pushed by digest with tags written exactly once by the merge
+  job. Wave 2 of the container-registry rollout (juniper-ml
+  `notes/JUNIPER_2026-09-05_JUNIPER-ECOSYSTEM_CONTAINER-REGISTRY-PUBLISHING-PLAN.md`); template
+  `juniper-cascor-worker/.github/workflows/publish-image.yml`. The PR arm builds both arches and
+  pushes nothing; its `paths:` filter covers everything the Dockerfile copies (`src/`,
+  `juniper_canopy/`, the `conf/` files), so a change to any image input is built before it merges.
+  Not a required status check.
+
+### Fixed
+
+- **`util/check_image_cpu_only.py` let the `cuda-*` family through, and the merge job's
+  digest-identity step accepted any number of linux images per pushed digest.** The 2026-09-07 CUDA
+  worker image carried `cuda-toolkit`, `cuda-bindings` and `cuda-pathfinder` next to the `nvidia-*`
+  wheels and `triton`; the census forbade only the latter two families, so an image with torch `X+cpu`
+  plus those three would have read `cuda_stack=0` -- and the CPU index this image installs torch from
+  hosts exactly those wheels. It now forbids `nvidia-*`, `cuda-*` and `triton`. `publish-image.yml`'s
+  merge job also asserts that each pushed per-arch digest resolves to exactly **one** linux image whose
+  architecture is the digest file's name, so a multi-platform index could never count an image the
+  census did not run on as verified. Both pinned by `src/tests/unit/test_dockerfile_cpu_torch_pin.py`.
+  Follow-up 6a of juniper-ml
+  `prompts/thread-handoff_automated-prompts/HANDOFF_2026-09-08_container-registry-rollout-wave-2-opened-and-the-cuda-class-in-three-shapes.md`.
+- **`Dockerfile` installed torch unpinned from the PyTorch CPU index**, so the image silently
+  changed with every PyTorch release and had no guard against the CUDA re-resolution that put a
+  3 GB `torch 2.12.1+cu130` stack into the worker's first published image. torch is now pinned to
+  `ARG TORCH_VERSION`+cpu (2.14.0, what the unpinned install resolved to) in **both** installs, the
+  lock install carries the CPU index as an extra index, `pip check` gates the builder, and
+  `util/check_image_cpu_only.py` asserts the contract *inside* the image (pinned `+cpu` version,
+  `torch.version.cuda is None`, **no** `nvidia-*` / `triton` distribution) on the PR arm and on the
+  publish path. `src/tests/unit/test_dockerfile_cpu_torch_pin.py` pins Dockerfile ↔ workflow.
+
+## [0.7.0] - 2026-09-08
 
 ### Changed
 
@@ -253,6 +287,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   would send `"spiral"` to a field that does not accept it. The params lookup is likewise untranslated,
   because canopy's registry is keyed on canopy's values and translating it would silently drop
   `equities_seq`'s `max_symbols` cap -- the thing keeping the one-shot fit inside the train timeout.
+
+- **Start was not gated on whether the selected model is the one that would run** (design N5 /
+  §4.4; handoff item 1). With `recurrence_service_url` unset -- the code default -- selecting
+  Recurrence records the selection, swaps nothing and answers 200. canopy#592 made the sidebar
+  read *"NOT ACTIVE"* in that state, but the Start gate read only the registry's lifecycle status
+  plus both axes being set, so pressing Start filed a **cascor/demo run under Recurrence (LMU)**.
+  The label was fixed; the run was not.
+
+  The predicate is now one shared function, `model_registry.selection_is_live` (provider
+  agreement -- deliberately **not** `swapped`, which is also `False` on the healthy re-select),
+  applied at both ends. The Start button reads it off a new `model-state-store`: the last
+  `/api/model/select` payload, written by the same callback that writes `model-selection-store`,
+  so the key and the payload cannot disagree, and `None` after a model clear. Every server start
+  path -- `POST /api/train/start`, the `/ws/control` `start` dispatch and `POST /api/train/restart`
+  -- refuses with 409 and the reason, so no transport, `curl` included, can misattribute a run;
+  the restart route refuses **before** stopping the current run. The `train-gate-notice` names the
+  model, the backend that is really running, and the consequence.
+
+  `None` (nothing round-tripped yet, or a cleared model) is unknown, not disagreement: first paint
+  stays enabled, as does the boot backend serving the default model. Seeding that value honestly
+  is §4.10 hydration, unchanged here. `main.current_nn_model` is now reset between tests, because
+  two existing tests select Recurrence over the demo backend and the new refusal would otherwise
+  have leaked into every later `/api/train/start` in the session.
 
 - **A backend that cannot stage a dataset returned an opaque 500** (X6 / design §4.9).
   `RecurrenceBackend` has no `stage_dataset`, and `POST /api/stage_dataset` called it unguarded, so

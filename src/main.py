@@ -1014,6 +1014,12 @@ async def websocket_control_endpoint(websocket: WebSocket):
         dict" when building the command_response envelope.
         """
         if cmd == "start":
+            # N5: the same refusal the REST route makes -- a selection recorded over a backend
+            # that does not serve it must not start a run that would be filed under the wrong
+            # model. ``ok=False`` rides the existing failure envelope (``_control_result_failure``).
+            inactive = _selection_inactive_reason()
+            if inactive is not None:
+                return {"ok": False, "error": inactive}
             # A1-iii-a: forward a one-shot dataset-ref + hyperparameters for recurrence
             # (carried in the WS ``params``); cascor/demo keep the bare reset-only call.
             start_kwargs = _recurrence_start_kwargs(params) if backend.backend_type == "recurrence" else {}
@@ -3623,6 +3629,13 @@ async def api_train_start(reset: bool = False, body: _TrainStartBody | None = No
     # dedicated POST /api/train/restart orchestration route, which calls
     # ``backend.start_training(reset=..., start_fresh=...)`` directly — the plain
     # Start route keeps its existing signature (start_fresh defaults to False).
+    # N5: refuse when the recorded selection is not the backend that would run. The sidebar
+    # already reads "NOT ACTIVE" in that state (canopy#592); this is what stops the run itself.
+    inactive = _selection_inactive_reason()
+    if inactive is not None:
+        system_logger.warning("Training start refused: %s", inactive)
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, inactive)))
+        raise HTTPException(status_code=409, detail=f"Training could not be started: {inactive}")
     start_kwargs = _recurrence_start_kwargs(body.model_dump()) if (backend.backend_type == "recurrence" and body is not None) else {}
     result = await offload(backend.start_training, reset=reset, **start_kwargs)
     failure = _control_result_failure(result)
@@ -3813,6 +3826,15 @@ async def api_train_restart(body: _TrainRestartBody | None = None):
     steps: list[dict] = []
 
     was_active = await offload(backend.is_training_active)
+    # N5: refuse BEFORE touching the current run -- stopping a healthy run and then declining to
+    # start its replacement would be worse than either alone. ``was_active`` is still reported
+    # truthfully; nothing was stopped.
+    inactive = _selection_inactive_reason()
+    if inactive is not None:
+        steps.append({"step": "start", "ok": False, "detail": inactive})
+        system_logger.warning("Restart: start refused: %s", inactive)
+        schedule_broadcast(websocket_manager.broadcast(create_control_ack_message("start", False, inactive)))
+        return JSONResponse({"success": False, "steps": steps, "was_active": was_active, "start_fresh": start_fresh, "message": f"Could not start the new run: {inactive}"}, status_code=409)
     if was_active:
         stop_result = await offload(backend.stop_training)
         stop_failure = _control_result_failure(stop_result)
@@ -3883,6 +3905,34 @@ def _model_state_response(nn_model: str, *, swapped: bool) -> dict:
         "status": spec.status if spec is not None else "unknown",
         "swapped": swapped,
     }
+
+
+def _selection_inactive_reason() -> Optional[str]:
+    """Why a start must be refused when the recorded selection is not what is running (N5).
+
+    ``_swap_backend`` records ``current_nn_model`` even when it swaps nothing: with
+    ``recurrence_service_url`` unset (the code default) a ``recurrence`` selection routes to the
+    cascor/demo backend already running, answers 200 with ``swapped=False``, and is recorded.
+    canopy#592 made the sidebar say so; nothing stopped the run, so pressing Start filed a
+    cascor/demo run under Recurrence (LMU). Every start path -- ``POST /api/train/start``, the
+    ``/ws/control`` dispatch and ``POST /api/train/restart`` -- asks this first, so a run cannot
+    execute on one backend and be filed under another model by any transport.
+
+    ``None`` when the selection and the backend agree, or when nothing has been selected yet
+    (``current_nn_model`` stays ``None`` until the first ``/api/model/select``): the boot
+    backend serves the default model by construction, and unknown is not disagreement. The
+    predicate is ``model_registry.selection_is_live`` -- the same one the sidebar summary and
+    the Start gate read -- so the label, the control and the run cannot disagree.
+    """
+    from model_registry import get_model_spec, selection_is_live
+
+    backend_type = backend.backend_type
+    if selection_is_live(current_nn_model, backend_type) is not False:
+        return None
+    spec = get_model_spec(current_nn_model)
+    label = spec.label if spec is not None else str(current_nn_model)
+    remedy = "Select the model again once its service is configured (Recurrence: JUNIPER_CANOPY_RECURRENCE_SERVICE_URL), or select the model the running backend serves."
+    return f"{label} is selected but the {backend_type} backend is running; the run would execute on {backend_type} and be filed under {label}. {remedy}"
 
 
 async def _swap_backend(nn_model: str) -> dict:
