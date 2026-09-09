@@ -217,6 +217,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   because canopy's registry is keyed on canopy's values and translating it would silently drop
   `equities_seq`'s `max_symbols` cap -- the thing keeping the one-shot fit inside the train timeout.
 
+- **Start was not gated on whether the selected model is the one that would run** (design N5 /
+  §4.4; handoff item 1). With `recurrence_service_url` unset -- the code default -- selecting
+  Recurrence records the selection, swaps nothing and answers 200. canopy#592 made the sidebar
+  read *"NOT ACTIVE"* in that state, but the Start gate read only the registry's lifecycle status
+  plus both axes being set, so pressing Start filed a **cascor/demo run under Recurrence (LMU)**.
+  The label was fixed; the run was not.
+
+  The predicate is now one shared function, `model_registry.selection_is_live` (provider
+  agreement -- deliberately **not** `swapped`, which is also `False` on the healthy re-select),
+  applied at both ends. The Start button reads it off a new `model-state-store`: the last
+  `/api/model/select` payload, written by the same callback that writes `model-selection-store`,
+  so the key and the payload cannot disagree, and `None` after a model clear. Every server start
+  path -- `POST /api/train/start`, the `/ws/control` `start` dispatch and `POST /api/train/restart`
+  -- refuses with 409 and the reason, so no transport, `curl` included, can misattribute a run;
+  the restart route refuses **before** stopping the current run. The `train-gate-notice` names the
+  model, the backend that is really running, and the consequence.
+
+  `None` (nothing round-tripped yet, or a cleared model) is unknown, not disagreement: first paint
+  stays enabled, as does the boot backend serving the default model. Seeding that value honestly
+  is §4.10 hydration, unchanged here. `main.current_nn_model` is now reset between tests, because
+  two existing tests select Recurrence over the demo backend and the new refusal would otherwise
+  have leaked into every later `/api/train/start` in the session.
+
 - **A backend that cannot stage a dataset returned an opaque 500** (X6 / design §4.9).
   `RecurrenceBackend` has no `stage_dataset`, and `POST /api/stage_dataset` called it unguarded, so
   the `AttributeError` fell into the route's bare `except` and the operator was told "Internal server
