@@ -60,6 +60,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The dataset-generator proxy never authenticated, so on a keyed deployment every dataset's
+  params panel read "No adjustable parameters" (Y5).** `GET /api/dataset/generators` fetched
+  juniper-data's `/v1/generators` with bare `httpx` and no `X-API-Key`. That route is **not** in
+  juniper-data's `EXEMPT_PATHS` — that set holds the three health probes and `/metrics`, nothing
+  else — so a deployment with `JUNIPER_DATA_API_KEY` set answered 401. Every *other* canopy →
+  juniper-data call already sent the key, because they all go through `juniper-data-client`
+  (`api_key=settings.juniper_data_api_key`); this proxy was the one raw-`httpx` caller that did
+  not, and `settings.juniper_data_api_key`'s own docstring already promised the key travels "on
+  every juniper-data request".
+
+  The 401 was invisible twice over. The route ignored any non-200 and fell through to its
+  built-in four-entry demo list, which carries **no `schema`** — so `_generator_schema` returned
+  `{}` for every dataset and the schema-driven sidebar rendered "No adjustable parameters"
+  everywhere, looking like a UI with nothing to configure rather than a request that was refused.
+  The proxy now sends the key when one is configured (and nothing when none is, which an unkeyed
+  juniper-data accepts either way), and a reachable-but-refusing juniper-data is logged at
+  **warning** with the status code and whether a key was configured. The unreachable case keeps
+  its `debug` and its fallback: that is an outage, and the demo list is the intended affordance
+  there. This is design §12.3's hard blocker for the generator-gap seeding — ten new seeds on top
+  of a schema-less list would have shipped ten datasets with no visible knobs.
+
 - **`util/check_image_cpu_only.py` let the `cuda-*` family through, and the merge job's
   digest-identity step accepted any number of linux images per pushed digest.** The 2026-09-07 CUDA
   worker image carried `cuda-toolkit`, `cuda-bindings` and `cuda-pathfinder` next to the `nvidia-*`
