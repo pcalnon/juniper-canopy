@@ -119,6 +119,15 @@ class TestClientsideJsContract:
         # Surfaces the HTTP status on a non-OK response.
         assert "'HTTP ' + resp.status" in js
 
+    def test_js_report_failure_carries_the_full_detail_for_the_partial_data_prompt(self):
+        """``detail`` is the alert's 300-char slice; ``detail_full`` keeps the producer's own
+        sentence (which symbols, how many rows) for the three-way prompt, which the slice cuts off."""
+        from frontend.dashboard_manager import PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+
+        js = PHASE_D_TRAINING_BUTTONS_CLIENTSIDE_JS
+        assert "detail_full: String(detail || '').slice(0, 4000)" in js
+        assert "detail: String(detail || '').slice(0, 300)" in js
+
     def test_js_forwards_oneshot_dataset_ref_body(self):
         """A1-iv-3c: a one-shot (recurrence) Start must carry the dataset-ref body on BOTH the
         WS send (as the control-message ``params``) and the REST fallback (as the JSON body);

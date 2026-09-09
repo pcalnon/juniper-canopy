@@ -15,6 +15,7 @@ import pytest
 
 from dataset_schema import (
     INFRASTRUCTURE_FIELDS,
+    PARTIAL_DATA_POLICY_FIELDS,
     GeneratorField,
     apply_availability_gate,
     availability_map,
@@ -63,6 +64,28 @@ def test_parse_excludes_infrastructure_fields_and_preserves_order():
     # seed / train_ratio / test_ratio / shuffle are infra -> dropped; declaration order preserved.
     assert names == ["dataset", "n_samples", "flatten"]
     assert INFRASTRUCTURE_FIELDS.isdisjoint(names)
+
+
+def test_parse_excludes_partial_data_policy_fields():
+    """The three-way prompt owns allow_truncation / incomplete_rows; the form must send neither.
+
+    Rendered as inputs, an unticked checkbox sent an explicit ``allow_truncation: false`` on every
+    equities apply -- which cascor#624 honours over its deployment default -- and a ticked one
+    pre-answered the question the contract puts to the operator at the shortfall itself.
+    """
+    schema = {
+        "properties": {
+            "start_date": {"type": "string", "default": "2000-01-01"},
+            "allow_truncation": {"type": "boolean", "default": False},
+            "incomplete_rows": {"type": "string", "enum": ["accept", "drop"], "default": "accept"},
+            "max_symbols": {"type": "integer", "default": 14},
+        }
+    }
+    names = [f.name for f in parse_schema_fields(schema)]
+    assert names == ["start_date", "max_symbols"]
+    assert PARTIAL_DATA_POLICY_FIELDS.isdisjoint(names)
+    # A caller that passes its own ``exclude`` is unaffected -- the default is what the sidebar uses.
+    assert "allow_truncation" in [f.name for f in parse_schema_fields(schema, exclude=())]
 
 
 def test_parse_maps_types_bounds_defaults_and_enums():
