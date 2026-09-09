@@ -89,6 +89,22 @@ INFRASTRUCTURE_FIELDS: frozenset[str] = frozenset(
     }
 )
 
+# The partial-data contract's two DECISION fields. juniper-data's ``equities`` /
+# ``equities_seq`` / ``csv_import`` schemas carry ``allow_truncation`` (the gate: accept a
+# dataset the producer cannot deliver in full) and ``incomplete_rows`` (accept or drop the
+# rows it could not resolve, once the gate is open). Rendered as ordinary sidebar inputs
+# they broke the contract twice over: an unticked checkbox sent an EXPLICIT
+# ``allow_truncation: false`` on every apply -- which cascor#624 honours over its own
+# deployment default, so the operator's silence became a refusal and the failure message
+# lost its remedy -- and a ticked one pre-answered a question the contract says must be
+# put to the operator when the shortfall actually happens. The dashboard's three-way
+# prompt owns both fields: the form sends NEITHER, so a default apply expresses option 3
+# (fail) and the prompt supplies options 1 and 2 (accept / drop) on the re-stage.
+PARTIAL_DATA_POLICY_FIELDS: frozenset[str] = frozenset({"allow_truncation", "incomplete_rows"})
+
+# Everything the schema-driven form must neither render nor forward.
+FORM_EXCLUDED_FIELDS: frozenset[str] = INFRASTRUCTURE_FIELDS | PARTIAL_DATA_POLICY_FIELDS
+
 # canopy dataset-type value -> juniper-data generator name. canopy's registry (model_registry.
 # DATASET_TYPES) keeps the historical plural values "spirals"/"moons"; juniper-data's generator
 # registry keys are singular "spiral"/"moon". Everything else (xor, mnist, circles, equities_seq)
@@ -203,11 +219,12 @@ def _field_from_property(name: str, prop: Mapping[str, Any]) -> GeneratorField |
     return None
 
 
-def parse_schema_fields(schema: Mapping[str, Any] | None, *, exclude: Iterable[str] = INFRASTRUCTURE_FIELDS) -> list[GeneratorField]:
+def parse_schema_fields(schema: Mapping[str, Any] | None, *, exclude: Iterable[str] = FORM_EXCLUDED_FIELDS) -> list[GeneratorField]:
     """Return the ordered renderable content fields of a generator ``schema``.
 
-    ``schema`` is a Pydantic ``model_json_schema()`` dict (its ``properties`` map). Infrastructure
-    fields (``exclude`` — split/seed/cache by default) and non-renderable (array/object/null-only)
+    ``schema`` is a Pydantic ``model_json_schema()`` dict (its ``properties`` map). Excluded
+    fields (``exclude`` — the split/seed/cache plumbing plus the partial-data policy fields the
+    three-way prompt owns, by default) and non-renderable (array/object/null-only)
     properties are dropped. Property order is preserved (Pydantic emits declaration order), which is
     the user-facing field order. A missing/empty ``properties`` yields ``[]``.
     """

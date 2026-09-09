@@ -154,7 +154,9 @@ function(start_clicks, pause_clicks, stop_clicks, resume_clicks, reset_clicks, l
         try {
             if (dc && typeof dc.set_props === 'function') {
                 dc.set_props('training-control-action', {
-                    data: { last: triggerId, ts: Date.now() / 1000.0, success: false, command: command, detail: String(detail || '').slice(0, 300) }
+                    // detail is the alert's 300-char slice; detail_full keeps the producer's own
+                    // sentence (which symbols, how many rows) for the partial-data prompt.
+                    data: { last: triggerId, ts: Date.now() / 1000.0, success: false, command: command, detail: String(detail || '').slice(0, 300), detail_full: String(detail || '').slice(0, 4000) }
                 });
             }
         } catch (e) {
@@ -501,6 +503,39 @@ RESTART_MODAL_PARAM_FIELDS = (
     ("restart-p-cn-selected", "cn_selected_candidates", "Selected candidates"),
     ("restart-p-cn-corr-thresh", "cn_correlation_threshold", "Correlation threshold"),
 )
+
+
+# Partial-data contract -- how canopy recognises a cascor Start refusal caused by
+# juniper-data being unable to produce the staged dataset in full. cascor#633 opens that
+# message with a machine-readable token (``_PROJECT_API_SHORTFALL_REFUSAL_TOKEN`` there);
+# the fixed sentence is matched as well so the prompt keeps working against a cascor that
+# predates the token. Neither string occurs in any other refusal cascor emits -- an outage
+# reads "juniper-data fetch failed: ..." -- and an outage must never open a prompt whose
+# every option re-sends the request.
+DATASET_SHORTFALL_REFUSAL_MARKER = "[dataset_shortfall_refused]"
+DATASET_SHORTFALL_REFUSAL_SENTENCE = "could not produce the requested dataset in full"
+
+# The three options, as the owner specified them (2026-09-05 ruling): option 3 -- fail -- is
+# the one that cancels the load and deselects the dataset. Options 1 and 2 are juniper-data
+# request parameters and travel on the generic ``nn_dataset_params`` channel.
+DATASET_SHORTFALL_OPTIONS = {
+    "dataset-shortfall-accept-button": {"allow_truncation": True, "incomplete_rows": "accept"},
+    "dataset-shortfall-drop-button": {"allow_truncation": True, "incomplete_rows": "drop"},
+}
+DATASET_SHORTFALL_FAIL_BUTTON = "dataset-shortfall-fail-button"
+
+# cascor's staged-config dialect -> canopy's ``/api/stage_dataset`` body keys, for re-staging
+# the config cascor still holds after a refused Start (it leaves the pending config in place
+# precisely so the operator can retry). The inverse of the adapter's ``_DATASET_PARAM_MAP``;
+# kept here rather than imported because the adapter is a service-mode module and this
+# handler must also run against demo mode.
+_CASCOR_TO_CANOPY_DATASET_KEYS = {
+    "dataset_type": "nn_dataset_type",
+    "n_samples": "nn_dataset_elements",
+    "noise": "nn_dataset_noise",
+    "rotations": "nn_spiral_rotations",
+    "n_spirals": "nn_spiral_number",
+}
 
 
 def selection_axis_unset(value) -> bool:
@@ -2265,6 +2300,38 @@ class DashboardManager:
                     scrollable=True,
                     centered=True,
                 ),
+                # Partial-data contract -- the three-way prompt. Opens when a Start is refused
+                # because juniper-data could not produce the staged dataset in full (cascor
+                # leaves the staged config in place for exactly this retry). The operator must
+                # choose: accept the broken rows and continue, drop them and continue, or fail
+                # the load -- which cancels the staged change and deselects the dataset. Fed by
+                # ``training-control-action`` on BOTH transports, so it fires whether the Start
+                # went over WS or REST. Static backdrop and no close button: the contract asks
+                # for an affirmative choice, and dismissing the modal would leave the staged
+                # change in place with the question unanswered.
+                dcc.Store(id="dataset-shortfall-context", data=None),
+                dbc.Modal(
+                    [
+                        dbc.ModalHeader(dbc.ModalTitle("The dataset could not be produced in full"), close_button=False),
+                        dbc.ModalBody(id="dataset-shortfall-modal-body"),
+                        dbc.ModalFooter(
+                            [
+                                dbc.Button("Accept broken rows and continue", id="dataset-shortfall-accept-button", color="warning", className="me-2"),
+                                dbc.Button("Drop broken rows and continue", id="dataset-shortfall-drop-button", color="warning", outline=True, className="me-auto"),
+                                dbc.Button("Fail the load and pick another dataset", id="dataset-shortfall-fail-button", color="danger", outline=True),
+                            ]
+                        ),
+                    ],
+                    id="dataset-shortfall-modal",
+                    is_open=False,
+                    backdrop="static",
+                    keyboard=False,
+                    size="lg",
+                    centered=True,
+                ),
+                # Outcome of the operator's choice (re-staged + started / cancelled + deselected /
+                # could not re-stage). Below dataset-stage-outcome-alert (top:17rem).
+                html.Div(id="dataset-shortfall-outcome-alert", style={"position": "fixed", "top": "21rem", "right": "1rem", "zIndex": 1060, "minWidth": "20rem"}),
                 # Hidden div to store WebSocket data
                 html.Div(id="websocket-data", style={"display": "none"}),
                 dcc.Store(id="training-control-action", data=None),
@@ -4684,6 +4751,46 @@ class DashboardManager:
             """Render the danger alert on failure; clear it on success."""
             return self._surface_training_control_outcome_handler(action=action)
 
+        # Partial-data contract -- open the three-way prompt on a shortfall-refused Start.
+        # Registered unconditionally, beside the outcome alert, because both transports write
+        # the outcome into ``training-control-action``. A separate callback rather than an
+        # extra Output on the alert's, so the alert's pinned shape is untouched.
+        @self.app.callback(
+            Output("dataset-shortfall-modal", "is_open"),
+            Output("dataset-shortfall-modal-body", "children"),
+            Output("dataset-shortfall-context", "data"),
+            Input("training-control-action", "data"),
+            prevent_initial_call=True,
+        )
+        def open_dataset_shortfall_prompt(action):
+            """Open the accept / drop / fail prompt when a Start was refused for a partial dataset."""
+            return self._open_dataset_shortfall_prompt_handler(action=action)
+
+        # The operator's answer. Accept / drop re-stage the held config with the opt-in and Start
+        # again, writing the outcome into ``training-control-action`` so the existing alert (and,
+        # on a further shortfall, this prompt) render it; fail cancels the staged change and
+        # clears the dataset selection. The dropdown value and the pending banner are owned
+        # elsewhere, hence ``allow_duplicate``.
+        @self.app.callback(
+            Output("dataset-shortfall-modal", "is_open", allow_duplicate=True),
+            Output("dataset-shortfall-outcome-alert", "children"),
+            Output("training-control-action", "data", allow_duplicate=True),
+            Output("nn-dataset-type-dropdown", "value", allow_duplicate=True),
+            Output("pending-dataset-banner", "is_open", allow_duplicate=True),
+            Input("dataset-shortfall-accept-button", "n_clicks"),
+            Input("dataset-shortfall-drop-button", "n_clicks"),
+            Input("dataset-shortfall-fail-button", "n_clicks"),
+            dash.dependencies.State("dataset-shortfall-context", "data"),
+            prevent_initial_call=True,
+        )
+        def resolve_dataset_shortfall(accept_clicks, drop_clicks, fail_clicks, context):
+            """Apply the operator's choice: re-stage with the opt-in and start, or cancel and deselect."""
+            return self._resolve_dataset_shortfall_handler(
+                triggered_id=dash.callback_context.triggered_id,
+                clicks=(accept_clicks, drop_clicks, fail_clicks),
+                context=context,
+            )
+
         # PERF-CN-01: prevent_initial_call=False — must apply the initial
         # button-states (disabled/loading flags and labels) on mount so the
         # training control buttons render in their correct initial state.
@@ -6801,6 +6908,12 @@ class DashboardManager:
             if completion_label:
                 status = f"{status} — {completion_label}"
 
+        # Partial-data contract: a run on a partial dataset carries the mark on the surface
+        # every operator watches, in every state -- progress while it runs, result when it
+        # completes. ``dataset_shortfall`` is None when the producer delivered in full.
+        if status_data.get("dataset_shortfall"):
+            status = f"{status} · partial data"
+
         # Determine phase color
         phase_colors = {
             "Output Training": "#007bff",  # Blue
@@ -6891,6 +7004,24 @@ class DashboardManager:
             self.logger.warning(f"Failed to fetch network info: {e}")
             return self._network_info_error_div("Network Info", "Error", f"{type(e).__name__}: {e}")
 
+    @staticmethod
+    def _dataset_shortfall_note_children(status):
+        """A warning block for the Network Info panel when the run is on a partial dataset, else ``[]``.
+
+        Reads cascor's ``dataset_shortfall`` annotation (``None`` when the producer delivered in
+        full). The ``summary`` is cascor's own sentence -- one formatter, so the panel cannot
+        disagree with the training log -- and it already says who accepted the shortfall.
+        """
+        shortfall = status.get("dataset_shortfall") if isinstance(status, dict) else None
+        if not isinstance(shortfall, dict) or not shortfall:
+            return []
+        summary = shortfall.get("summary") or "the producer could not deliver the dataset in full"
+        dataset_id = shortfall.get("dataset_id")
+        children = [html.Strong("Partial dataset. "), html.Span(f"{summary}.")]
+        if dataset_id:
+            children.extend([html.Br(), html.Small(f"dataset_id {dataset_id}", className="text-muted")])
+        return [dbc.Alert(children, color="warning", className="mb-2 py-2"), html.Hr()]
+
     def _render_network_info(self, status):
         """Render the Network Information panel body from an ``/api/status`` payload."""
         # N6/C2b: derive each counter's display against its correct
@@ -6903,7 +7034,8 @@ class DashboardManager:
         counters = self._counter_displays(status)
 
         return html.Div(
-            [
+            self._dataset_shortfall_note_children(status)
+            + [
                 html.P(
                     [
                         html.Strong("Input Nodes: "),
@@ -7526,6 +7658,205 @@ class DashboardManager:
             dismissable=True,
             duration=8000,
         )
+
+    # ------------------------------------------------------------------
+    # Partial-data contract: the three-way prompt (accept / drop / fail).
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_dataset_shortfall_refusal(detail) -> bool:
+        """True when a Start refusal is the producer's "cannot deliver in full" class.
+
+        cascor#633 opens the message with ``DATASET_SHORTFALL_REFUSAL_MARKER``; the fixed
+        sentence is matched too so the prompt works against a cascor that predates the
+        token. An ordinary outage ("juniper-data fetch failed: connection refused") carries
+        neither, and must not open a prompt whose every option re-sends the request.
+        """
+        text = str(detail or "")
+        return DATASET_SHORTFALL_REFUSAL_MARKER in text or DATASET_SHORTFALL_REFUSAL_SENTENCE in text
+
+    @staticmethod
+    def _producer_detail_from_refusal(detail: str) -> str:
+        """Pull juniper-data's own sentence (affected symbols, row counts) out of cascor's refusal."""
+        marker = "Producer detail: "
+        if marker not in detail:
+            return ""
+        tail = detail.split(marker, 1)[1]
+        for stop in (" To accept it,", " The resulting dataset"):
+            if stop in tail:
+                tail = tail.split(stop, 1)[0]
+        return tail.strip()
+
+    def _open_dataset_shortfall_prompt_handler(self, action=None):
+        """Open the three-way prompt when a Start failed because the dataset is partial.
+
+        Returns ``(modal_is_open, body_children, context)``. Any other action -- a success, a
+        different command, an outage -- leaves the modal alone (``no_update``), so a later
+        unrelated outcome does not close a prompt the operator has not answered.
+        """
+        if not action or action.get("success", True) or action.get("command") != "start":
+            return dash.no_update, dash.no_update, dash.no_update
+        detail_full = (action.get("detail_full") or action.get("detail") or "").strip()
+        if not self._is_dataset_shortfall_refusal(detail_full):
+            return dash.no_update, dash.no_update, dash.no_update
+        self.logger.warning("Start refused for a partial dataset; opening the three-way prompt: %s", detail_full[:200])
+        producer_detail = self._producer_detail_from_refusal(detail_full)
+        body = [
+            html.P(
+                [
+                    html.Strong("juniper-data could not produce the staged dataset in full, and this run has not accepted a partial one. "),
+                    html.Span("Training did not start. The staged dataset change is still in place, so decide what to do with it."),
+                ]
+            ),
+        ]
+        if producer_detail:
+            body.append(html.P(producer_detail, className="text-muted", style={"fontSize": "0.85rem", "whiteSpace": "pre-wrap"}))
+        body.append(
+            html.Ul(
+                [
+                    html.Li([html.Strong("Accept broken rows and continue"), " — train on the partial dataset as delivered. Rows the producer could not resolve carry placeholder values; the run, its metrics and its results are permanently annotated as partial."]),
+                    html.Li([html.Strong("Drop broken rows and continue"), " — remove the affected symbols and train on the rest; the run is annotated as partial and the record says what was dropped."]),
+                    html.Li([html.Strong("Fail the load"), " — cancel the staged change, deselect this dataset, and choose another."]),
+                ]
+            )
+        )
+        return True, body, {"detail": detail_full, "ts": time.time()}
+
+    def _fetch_pending_dataset_config(self):
+        """The staged dataset config cascor still holds, in cascor's dialect, or ``None``."""
+        try:
+            resp = requests.get(self._api_url("/api/status"), timeout=DashboardConstants.API_TIMEOUT_SECONDS, headers=internal_api_headers())
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+        except (requests.RequestException, ValueError) as exc:
+            self.logger.warning("Could not read the pending dataset config: %s", exc)
+            return None
+        pending = data.get("pending_dataset") if isinstance(data, dict) else None
+        return dict(pending) if isinstance(pending, dict) and pending else None
+
+    @staticmethod
+    def _restage_payload_with_policy(pending, choice):
+        """Translate cascor's staged config back into an ``/api/stage_dataset`` body carrying the opt-in.
+
+        ``nn_dataset_params`` (the generic channel) is where the policy fields live -- they are
+        juniper-data request parameters, and the adapter forwards that dict verbatim as cascor's
+        ``params``. The typed spiral fields map back by name; anything unknown is dropped
+        rather than guessed.
+        """
+        payload = {}
+        for cascor_key, canopy_key in _CASCOR_TO_CANOPY_DATASET_KEYS.items():
+            value = pending.get(cascor_key)
+            if value is not None:
+                payload[canopy_key] = value
+        params = dict(pending.get("params") or {})
+        params.update(choice)
+        payload["nn_dataset_params"] = params
+        return payload
+
+    def _post_stage_dataset(self, payload):
+        """POST /api/stage_dataset; returns ``(ok, detail)``."""
+        try:
+            resp = requests.post(self._api_url("/api/stage_dataset"), json=payload, timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT, headers=internal_api_headers())
+        except requests.RequestException as exc:
+            return False, f"backend unreachable: {exc}"
+        if resp.status_code == 200:
+            self.logger.info("Re-staged dataset with the partial-data choice: %s", payload)
+            return True, ""
+        return False, (resp.text[:300] if resp.text else f"HTTP {resp.status_code}")
+
+    def _post_train_start(self):
+        """POST /api/train/start the way the server-side control handler does; returns ``(started, detail)``."""
+        try:
+            resp = requests.post(self._api_url("/api/train/start"), timeout=DashboardConstants.DASHBOARD_POST_TIMEOUT, headers=internal_api_headers())
+            resp.raise_for_status()
+            return True, ""
+        except Exception as exc:
+            detail = self._extract_training_error_detail(exc)
+            self.logger.warning("Start after the partial-data choice failed: %s", detail)
+            return False, detail
+
+    def _cancel_pending_dataset_via_api(self):
+        """DELETE /api/cancel_pending_dataset; returns ``(ok, detail)``."""
+        try:
+            resp = requests.delete(self._api_url("/api/cancel_pending_dataset"), timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT, headers=internal_api_headers())
+        except requests.RequestException as exc:
+            return False, f"backend unreachable: {exc}"
+        if resp.status_code == 200:
+            return True, ""
+        return False, (resp.text[:300] if resp.text else f"HTTP {resp.status_code}")
+
+    def _resolve_dataset_shortfall_handler(self, triggered_id=None, clicks=(None, None, None), context=None):
+        """Carry out the operator's answer to the three-way prompt.
+
+        Returns ``(modal_is_open, outcome_alert, control_action, dataset_dropdown_value,
+        pending_banner_is_open)``.
+
+        * accept / drop: re-stage the config cascor still holds (``pending_dataset`` on
+          ``/api/status``) with ``allow_truncation=true`` and the chosen ``incomplete_rows``,
+          then Start again. The outcome is written into ``training-control-action`` so the
+          existing alert renders a second failure -- and, if that failure is ANOTHER shortfall
+          refusal (drop can empty the universe), the prompt re-opens on it.
+        * fail: cancel the staged change and clear the dataset selection (``⊥``), so Start
+          and Apply are gated until the operator picks another dataset.
+
+        ``context`` is the prompt's own record of the refusal; it is informational here (the
+        config to re-stage is read back from cascor, which is the authority on what is staged).
+        """
+        idle = (dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update)
+        if not triggered_id or not any(clicks):
+            return idle
+        if triggered_id == DATASET_SHORTFALL_FAIL_BUTTON:
+            ok, detail = self._cancel_pending_dataset_via_api()
+            if ok:
+                self.logger.info("Partial-data prompt: load failed by operator choice; staged change discarded and dataset deselected")
+                alert = dbc.Alert(
+                    [html.Strong("Dataset load cancelled. "), html.Span("The staged change was discarded and the dataset deselected — choose another dataset.")],
+                    color="info",
+                    dismissable=True,
+                    duration=10000,
+                )
+                return False, alert, dash.no_update, None, False
+            alert = dbc.Alert([html.Strong("Could not cancel the staged dataset: "), html.Span(detail)], color="danger", dismissable=True, duration=10000)
+            return False, alert, dash.no_update, dash.no_update, dash.no_update
+        choice = DATASET_SHORTFALL_OPTIONS.get(triggered_id)
+        if choice is None:
+            return idle
+        pending = self._fetch_pending_dataset_config()
+        if not pending:
+            alert = dbc.Alert(
+                [html.Strong("Nothing to re-stage. "), html.Span("cascor no longer holds a staged dataset change; apply the dataset again, then Start.")],
+                color="warning",
+                dismissable=True,
+                duration=10000,
+            )
+            return False, alert, dash.no_update, dash.no_update, dash.no_update
+        payload = self._restage_payload_with_policy(pending, choice)
+        ok, detail = self._post_stage_dataset(payload)
+        if not ok:
+            alert = dbc.Alert([html.Strong("Could not re-stage the dataset with your choice: "), html.Span(detail)], color="danger", dismissable=True, duration=10000)
+            return False, alert, dash.no_update, dash.no_update, dash.no_update
+        started, start_detail = self._post_train_start()
+        action = {
+            "last": triggered_id,
+            "ts": time.time(),
+            "success": started,
+            "command": "start",
+            "transport": "rest",
+            "detail": (start_detail or "")[:300],
+            "detail_full": (start_detail or "")[:4000],
+        }
+        if not started:
+            # The training-control outcome alert renders the failure from ``action``.
+            return False, dash.no_update, action, dash.no_update, dash.no_update
+        label = "accepting" if choice["incomplete_rows"] == "accept" else "dropping"
+        alert = dbc.Alert(
+            [html.Strong("Training started on the partial dataset, "), html.Span(f"{label} the broken rows. The run is annotated as partial (status bar and Network Info).")],
+            color="warning",
+            dismissable=True,
+            duration=12000,
+        )
+        return False, alert, action, dash.no_update, dash.no_update
 
     def _update_button_appearance_handler(self, button_states=None, model_key=None, dataset_value=None):
         """Update button states (disabled/loading) with visual feedback.
