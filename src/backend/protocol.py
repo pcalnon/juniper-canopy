@@ -71,6 +71,13 @@ class StatusResult(TypedDict, total=False):
     # through from /v1/training/status (converged / stalled / etc.). Absent or
     # None when the connected cascor predates the field.
     completion_reason: str
+    # Partial-data contract: cascor's ``dataset_shortfall`` annotation carried through
+    # from /v1/training/status -- ``None`` when the producer delivered in full (the
+    # overwhelming majority) or when the connected cascor predates the field. Non-null
+    # means THIS run is training on partial data; the dict carries ``dataset_id``,
+    # ``accepted_by_this_run``, ``acceptance_source``, the producer's ``truncation`` and
+    # ``data_quality`` descriptors, and a one-sentence ``summary`` for rendering.
+    dataset_shortfall: Optional[Dict[str, Any]]
 
 
 class MetricsResult(TypedDict, total=False):

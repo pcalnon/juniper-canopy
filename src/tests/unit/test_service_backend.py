@@ -526,6 +526,34 @@ class TestPhase4TypedContract:
         }
         assert service_backend.get_status()["completion_reason"] is None
 
+    def test_get_status_carries_dataset_shortfall(self, service_backend, mock_adapter):
+        """cascor#624's partial-data annotation is carried through unchanged (partial-data contract).
+
+        ``normalize_status`` is a whitelist, so this line is the ONLY place the field could be lost
+        between cascor's status route and the dashboard's status bar / Network Info panel.
+        """
+        shortfall = {"dataset_id": "equities-3.0.0-abc", "accepted_by_this_run": True, "acceptance_source": "request_params", "summary": "14 of 503 symbols imported (cap 14)"}
+        mock_adapter.get_training_status.return_value = {
+            "state_machine": {"status": "Running", "phase": "output"},
+            "monitor": {"current_epoch": 5},
+            "training_state": {"input_size": 16, "output_size": 3},
+            "training_active": True,
+            "network_loaded": True,
+            "dataset_shortfall": shortfall,
+        }
+        assert service_backend.get_status()["dataset_shortfall"] == shortfall
+
+    def test_get_status_dataset_shortfall_absent_is_none(self, service_backend, mock_adapter):
+        """A clean dataset (or a cascor that predates the field) reads None -- consumers branch on presence."""
+        mock_adapter.get_training_status.return_value = {
+            "state_machine": {"status": "Stopped", "phase": "idle"},
+            "monitor": {},
+            "training_state": {},
+            "training_active": False,
+            "network_loaded": True,
+        }
+        assert service_backend.get_status()["dataset_shortfall"] is None
+
     def test_get_metrics_returns_dict(self, service_backend):
         """get_metrics() returns a MetricsResult-shaped dict."""
         result = service_backend.get_metrics()
