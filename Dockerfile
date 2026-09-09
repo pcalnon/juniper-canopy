@@ -18,18 +18,34 @@ WORKDIR /build
 
 RUN pip install --no-cache-dir --upgrade pip wheel setuptools
 
-# Install CPU-only PyTorch first (avoids pulling CUDA which is ~4 GB)
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+# CPU-only torch, BY PIN (container-registry rollout Wave 2; plan D-5: GPU/CUDA out of scope).
+# torch is a [demo] extra, not a base dependency, so requirements.lock carries neither torch
+# nor the CUDA stack; the image installs torch here for demo mode, from the PyTorch CPU index.
+# Two rules make that actually CPU-only -- the worker's first published image shipped torch
+# 2.12.1+cu130 for want of them:
+#   1. PIN torch to a +cpu version. Unpinned, this line tracks the newest CPU wheel and the
+#      image silently changes with every PyTorch release.
+#   2. Give the lock install the CPU index too (``--extra-index-url``, not ``--index-url``:
+#      the CPU index 403s most of PyPI), and the same pin, so a re-resolution can only ever
+#      choose the +cpu wheel and a genuine conflict fails the build instead of silently
+#      swapping in the CUDA build from PyPI.
+# src/tests/unit/test_dockerfile_cpu_torch_pin.py pins this file to publish-image.yml, and
+# util/check_image_cpu_only.py asserts the built image inside that workflow.
+ARG TORCH_VERSION=2.14.0
+ARG TORCH_CPU_INDEX=https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir "torch==${TORCH_VERSION}+cpu" --index-url "${TORCH_CPU_INDEX}"
 
 # Install pinned dependencies from lockfile (best layer caching)
 COPY requirements.lock ./
-RUN pip install --no-cache-dir -r requirements.lock
+RUN pip install --no-cache-dir --extra-index-url "${TORCH_CPU_INDEX}" "torch==${TORCH_VERSION}+cpu" -r requirements.lock
 
-# Copy project files and install without deps (already installed above)
+# Copy project files and install without deps (already installed above), then prove the
+# installed set is mutually consistent -- a re-resolved, missing or conflicting dependency
+# fails HERE, at build time, rather than in the container at import time.
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
 COPY juniper_canopy/ ./juniper_canopy/
-RUN pip install --no-cache-dir --no-deps .
+RUN pip install --no-cache-dir --no-deps . && pip check
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime — Minimal production image

@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`publish-image.yml` -- the dashboard container image is published to GHCR on every `v*`
+  release** as a multi-arch manifest (`linux/amd64` + `linux/arm64`, native runners, no QEMU),
+  tagged `X.Y.Z` / `X.Y` / `latest`, pushed by digest with tags written exactly once by the merge
+  job. Wave 2 of the container-registry rollout (juniper-ml
+  `notes/JUNIPER_2026-09-05_JUNIPER-ECOSYSTEM_CONTAINER-REGISTRY-PUBLISHING-PLAN.md`); template
+  `juniper-cascor-worker/.github/workflows/publish-image.yml`. The PR arm builds both arches and
+  pushes nothing; its `paths:` filter covers everything the Dockerfile copies (`src/`,
+  `juniper_canopy/`, the `conf/` files), so a change to any image input is built before it merges.
+  Not a required status check.
+
+### Fixed
+
+- **`Dockerfile` installed torch unpinned from the PyTorch CPU index**, so the image silently
+  changed with every PyTorch release and had no guard against the CUDA re-resolution that put a
+  3 GB `torch 2.12.1+cu130` stack into the worker's first published image. torch is now pinned to
+  `ARG TORCH_VERSION`+cpu (2.14.0, what the unpinned install resolved to) in **both** installs, the
+  lock install carries the CPU index as an extra index, `pip check` gates the builder, and
+  `util/check_image_cpu_only.py` asserts the contract *inside* the image (pinned `+cpu` version,
+  `torch.version.cuda is None`, **no** `nvidia-*` / `triton` distribution) on the PR arm and on the
+  publish path. `src/tests/unit/test_dockerfile_cpu_torch_pin.py` pins Dockerfile ↔ workflow.
+
 ## [0.7.0] - 2026-09-08
 
 ### Changed

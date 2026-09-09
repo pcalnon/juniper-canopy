@@ -1,0 +1,386 @@
+---
+#####################################################################################################################################################################################################
+# Project:       Juniper
+# Sub-Project:   JuniperCanopy
+# Application:   juniper_canopy
+# File Name:     publish-image.yml
+# Author:        Paul Calnon
+# License:       MIT License
+# Copyright:     Copyright (c) 2024-2026 Paul Calnon
+#
+# Description:   Publish the juniper-canopy dashboard container image to the GitHub Container
+#                Registry (GHCR) as a multi-arch manifest covering linux/amd64 + linux/arm64.
+#
+#    Wave 2 of the container-registry rollout (juniper-ml
+#    notes/JUNIPER_2026-09-05_JUNIPER-ECOSYSTEM_CONTAINER-REGISTRY-PUBLISHING-PLAN.md, D-1..D-5).
+#    Template: juniper-cascor-worker/.github/workflows/publish-image.yml, whose header carries the
+#    full rationale -- native runners per arch and no QEMU, push BY DIGEST with tags written exactly
+#    once by the merge job, a pull_request arm that builds both arches and pushes nothing, and no
+#    credential beyond the job's GITHUB_TOKEN. What is DIFFERENT here:
+#
+#      * TORCH IS IN THE IMAGE BUT NOT IN THE LOCK. torch is only a `[demo]` extra of the package,
+#        so requirements.lock carries no torch and no CUDA stack; the Dockerfile installs torch
+#        separately for demo mode, from the PyTorch CPU index, pinned to `ARG TORCH_VERSION`+cpu in
+#        BOTH installs, with the CPU index as an extra index on the lock install. The worker's first
+#        published image shipped torch 2.12.1+cu130 because it got this wrong, so
+#        util/check_image_cpu_only.py asserts the contract inside the image on the PR arm AND on
+#        the publish path (per arch by digest, then against the tag).
+#      * CMD, NOT ENTRYPOINT. The Dockerfile ends in `CMD ["python", "src/main.py"]`, so
+#        `docker run IMG python -c ...` runs python directly -- no `--entrypoint` -- and the
+#        worker's `docker run IMG --help` assertion is replaced by importing `juniper_canopy`, as
+#        ci.yml's docker smoke already does.
+#      * IMAGE INPUTS INCLUDE conf/. The Dockerfile copies `conf/app_config.yaml`,
+#        `conf/logging_config.yaml` and `conf/layouts/` into the image, so they are in the PR
+#        `paths:` filter alongside `src/**` and `juniper_canopy/**` -- a filter that misses an
+#        input is a build that never runs for the change that mattered.
+#      * arm64 is a download, not a build: all 59 pins in requirements.lock ship a cp314/abi3
+#        manylinux aarch64 wheel or are pure Python (checked 2026-09-08 against PyPI), and torch's
+#        CPU index serves `torch-2.14.0+cpu-cp314-cp314-manylinux_2_28_aarch64.whl`.
+#      * The tag guard (`v*`) is defensive: this repo publishes one package.
+#####################################################################################################################################################################################################
+
+name: Publish Container Image
+
+on:
+  release:
+    types: [published]
+  # Build-only validation. Anything that can change what the image contains, plus this file
+  # itself -- a workflow that only runs on release must be exercised on the PR that edits it, or
+  # its first real run is also its first run.
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - "requirements.lock"
+      - "pyproject.toml"
+      - "src/**"
+      - "juniper_canopy/**"
+      - "conf/app_config.yaml"
+      - "conf/logging_config.yaml"
+      - "conf/layouts/**"
+      - "util/check_image_cpu_only.py"
+      - ".github/workflows/publish-image.yml"
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "Push to GHCR (false = build-only dry run)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  # ``github.repository`` is ``pcalnon/juniper-canopy``, so the image lands at
+  # ghcr.io/pcalnon/juniper-canopy. GHCR packages are ACCOUNT-scoped; the link back to this repo
+  # comes from the Dockerfile's ``org.opencontainers.image.source`` label, already present.
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # Build one arch per NATIVE runner. No QEMU.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    # Release-tag guard: `latest` below is gated on the EVENT, not the tag, so a release from any
+    # other tag family would republish `:latest`. Defensive in this single-package repo; PRs and
+    # dispatches are unaffected.
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')
+    strategy:
+      fail-fast: false # one arch failing must not hide the other arch's result
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Resolve build provenance
+        id: prov
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Image Build Provenance              ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          # The Dockerfile stamps these as OCI labels AND exports them as env vars so the
+          # running dashboard reports them on /v1/health -- that is how `make doctor` detects a
+          # stale image. Empty values read back as None, so they must be set.
+          version="$(python3 -c 'import tomllib,sys; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          echo "app_version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_OUTPUT}"
+          echo "  APP_VERSION = ${version}"
+          echo "  GIT_SHA     = ${GITHUB_SHA}"
+          # The Dockerfile pins torch to the +cpu build of exactly this version; the smoke test
+          # and both publish-path checks assert the image really carries it and nothing from the
+          # CUDA stack. No pin means the CPU-only contract has nothing to check.
+          torch_version="$(sed -n 's/^ARG TORCH_VERSION=//p' Dockerfile | head -n1)"
+          if [ -z "${torch_version}" ]; then
+            echo "::error::Dockerfile declares no 'ARG TORCH_VERSION=<x.y.z>' -- the CPU-only contract has no pin to check"
+            exit 1
+          fi
+          echo "expect_torch=${torch_version}+cpu" >> "${GITHUB_OUTPUT}"
+          echo "  TORCH       = ${torch_version}+cpu"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      # Only a real publish needs credentials. A PR build must not authenticate.
+      - name: Log in to GHCR
+        if: github.event_name == 'release' || inputs.push
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Two build steps, deliberately: the publish and validation paths need OPPOSITE `tags`
+      # handling, and `${{ cond && '' || 'x' }}` is NOT a ternary when the true branch is ''.
+      # Publish: push BY DIGEST with NO tag (buildx rejects a tagged ref on a digest push).
+      - name: Build and push ${{ matrix.platform }}
+        id: build
+        if: github.event_name == 'release' || inputs.push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            BUILD_DATE=${{ steps.prov.outputs.build_date }}
+            APP_VERSION=${{ steps.prov.outputs.app_version }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+      # Validation: `type=docker` LOADS the image into this runner's daemon (needs a tag) so the
+      # smoke test runs the artifact just built. Nothing is pushed; no credential is present.
+      - name: Build ${{ matrix.platform }} (validation only)
+        if: github.event_name != 'release' && !inputs.push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          tags: canopy-smoke:${{ matrix.arch }}
+          outputs: type=docker
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            BUILD_DATE=${{ steps.prov.outputs.build_date }}
+            APP_VERSION=${{ steps.prov.outputs.app_version }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+      # Smoke-test the arch just built, on a runner of that same arch (a real execution, not
+      # emulation). The torch import is the whole arm64 risk; numpy and pydantic-core are the
+      # other native wheels that must resolve per arch.
+      - name: Smoke test (build-only runs)
+        if: github.event_name != 'release' && !inputs.push
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - ${{ matrix.platform }} smoke test"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          img='canopy-smoke:${{ matrix.arch }}'
+
+          # CMD-only image: `docker run IMG python ...` runs python directly.
+          echo "--- interpreter + native wheels"
+          docker run --rm "${img}" python -c \
+            'import platform, torch, numpy, pydantic_core; print("machine:", platform.machine(), "| torch:", torch.__version__, "| numpy:", numpy.__version__, "| pydantic_core:", pydantic_core.__version__)'
+
+          # CPU-only contract: exactly the pinned +cpu torch, no CUDA runtime, and no
+          # nvidia-*/triton distribution anywhere in site-packages. The census matters: a version
+          # check alone passes the vacuous fix that installs the CPU wheel last and leaves the
+          # orphaned CUDA wheels behind (see util/check_image_cpu_only.py).
+          echo "--- CPU-only contract"
+          docker run --rm -i -e EXPECT_TORCH='${{ steps.prov.outputs.expect_torch }}' \
+            "${img}" python - < util/check_image_cpu_only.py
+
+          # The dashboard package itself, as ci.yml's docker smoke does.
+          echo "--- dashboard package"
+          docker run --rm "${img}" python -c 'import juniper_canopy; print("juniper_canopy", juniper_canopy.__version__)'
+
+      # The smoke test never runs on a publish, so the CPU-only contract is ALSO asserted on the
+      # path that ships: pull the image just pushed -- by digest, on this same native arch. A
+      # failure fails this arch's job, the merge job is skipped, and no tag is ever written.
+      - name: Verify pushed image is CPU-only (publish runs)
+        if: github.event_name == 'release' || inputs.push
+        run: |
+          digest='${{ steps.build.outputs.digest }}'
+          if [ -z "${digest}" ]; then
+            echo "::error::build produced no digest -- nothing to verify"
+            exit 1
+          fi
+          ref="${REGISTRY}/${IMAGE_NAME}@${digest}"
+          echo "verifying ${ref} on ${{ matrix.platform }}"
+          docker run --rm -i -e EXPECT_TORCH='${{ steps.prov.outputs.expect_torch }}' \
+            "${ref}" python - < util/check_image_cpu_only.py
+
+      - name: Export digest
+        if: github.event_name == 'release' || inputs.push
+        run: |
+          mkdir -p /tmp/digests
+          digest='${{ steps.build.outputs.digest }}'
+          if [ -z "${digest}" ]; then
+            echo "::error::build produced no digest -- the push-by-digest output is missing"
+            exit 1
+          fi
+          echo "${digest}" > "/tmp/digests/${{ matrix.arch }}"
+          echo "  ${{ matrix.arch }} -> ${digest}"
+
+      - name: Upload digest
+        if: github.event_name == 'release' || inputs.push
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/${{ matrix.arch }}
+          retention-days: 1
+          if-no-files-found: error
+
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  # Merge the per-arch digests into ONE manifest list and apply the tags -- the only job that
+  # writes a tag, so a tag can never point at a half-published set.
+  # ═══════════════════════════════════════════════════════════════════════════════════════════════
+  merge:
+    name: Publish manifest
+    runs-on: ubuntu-24.04
+    needs: [build]
+    if: (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'v')) || inputs.push
+
+    steps:
+      # Needed for the Dockerfile (the torch pin the published image is checked against) and
+      # util/check_image_cpu_only.py.
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download digests
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tag scheme (D-3): X.Y.Z + X.Y + latest, release-only. `latest` fires only on a real
+      # release; `dispatch-<sha>` keeps the merge job testable from a workflow_dispatch, where the
+      # semver rules produce nothing and an empty tag set would fail `imagetools create`.
+      - name: Compute tags
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+            type=raw,value=dispatch-{{sha}},enable=${{ github.event_name == 'workflow_dispatch' }}
+
+      - name: Create manifest list
+        run: |
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║       Juniper Canopy - Publish Multi-Arch Manifest         ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+          cd /tmp/digests
+          echo "digests found:"
+          for f in *; do echo "  ${f}: $(cat "${f}")"; done
+
+          # `imagetools create` with no -t is an error, and an empty tag set means the metadata
+          # rules did not match this event -- fail with that reason rather than docker's.
+          tag_count="$(jq -r '.tags | length' <<< "${DOCKER_METADATA_OUTPUT_JSON}")"
+          if [ "${tag_count}" -eq 0 ]; then
+            echo "::error::metadata-action produced no tags for event '${{ github.event_name }}' -- nothing to publish"
+            exit 1
+          fi
+          echo "tags to apply: ${tag_count}"
+          # shellcheck disable=SC2046  # intentional word-splitting: one -t per tag, one ref per digest
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "${DOCKER_METADATA_OUTPUT_JSON}") \
+            $(for f in *; do printf '%s@%s ' "${REGISTRY}/${IMAGE_NAME}" "$(cat "${f}")"; done)
+
+      # A manifest that exists is not a manifest that lists both arches -- inspect it and fail
+      # loudly if an arch is missing, rather than discovering it on a Pi.
+      - name: Verify both architectures are present
+        run: |
+          # Inspect a tag we KNOW was applied (the metadata action's first tag), not
+          # `steps.meta.outputs.version`, which is empty for some event/rule combinations.
+          ref="$(jq -r '.tags[0]' <<< "${DOCKER_METADATA_OUTPUT_JSON}")"
+          if [ -z "${ref}" ] || [ "${ref}" = "null" ]; then
+            echo "::error::no tag to verify -- metadata-action produced an empty tag list"
+            exit 1
+          fi
+          echo "inspecting ${ref}"
+          docker buildx imagetools inspect "${ref}" --format '{{ json .Manifest }}' > /tmp/manifest.json
+          arches="$(jq -r '[.manifests[]?.platform | select(.os=="linux") | .architecture] | sort | join(",")' /tmp/manifest.json)"
+          echo "  architectures: ${arches}"
+          if [ "${arches}" != "amd64,arm64" ]; then
+            echo "::error::expected 'amd64,arm64' in the manifest list, got '${arches}'"
+            exit 1
+          fi
+          echo "::notice::published ${ref} for linux/amd64 + linux/arm64"
+
+      # On a release the semver rules MUST have produced the X.Y.Z tag. metadata-action only WARNS
+      # when a tag does not parse (meta.ts: core.warning + return, never setFailed), and `latest`
+      # still fires on the release event -- so without this check a release whose tag the rules
+      # did not match would publish `:latest` with no version tag, pass the zero-tag guard above
+      # with exactly one tag, and read SUCCESS.
+      - name: Verify the release produced a version tag
+        if: github.event_name == 'release'
+        run: |
+          versioned="$(jq -r '[.tags[] | select(test(":[0-9]+\\.[0-9]+\\.[0-9]+$"))] | length' <<< "${DOCKER_METADATA_OUTPUT_JSON}")"
+          if [ "${versioned}" -eq 0 ]; then
+            echo "::error::release '${{ github.event.release.tag_name }}' produced no X.Y.Z image tag -- the semver rules did not match it; tags: $(jq -c '.tags' <<< "${DOCKER_METADATA_OUTPUT_JSON}")"
+            exit 1
+          fi
+          echo "  version tag present ($(jq -c '.tags' <<< "${DOCKER_METADATA_OUTPUT_JSON}"))"
+
+      # Each arch's build job already ran the CPU-only check against the DIGEST it pushed. This
+      # closes the loop on the TAG a consumer pulls: the manifest list must reference exactly the
+      # verified digests (so nothing unverified can hide under the tag), and the amd64 image behind
+      # the tag is pulled and checked natively here. arm64 is covered by the digest identity.
+      - name: Verify published image is CPU-only
+        run: |
+          ref="$(jq -r '.tags[0]' <<< "${DOCKER_METADATA_OUTPUT_JSON}")"
+          torch_version="$(sed -n 's/^ARG TORCH_VERSION=//p' Dockerfile | head -n1)"
+          if [ -z "${torch_version}" ]; then
+            echo "::error::Dockerfile declares no 'ARG TORCH_VERSION=<x.y.z>' -- the CPU-only contract has no pin to check"
+            exit 1
+          fi
+
+          echo "--- digest identity"
+          # Each build job pushed its arch BY DIGEST, and with provenance attestations on (the
+          # build-push-action default) that digest names a per-arch OCI INDEX -- image manifest plus
+          # attestation -- which `imagetools create` FLATTENS into the published list. So the list's
+          # entries are the IMAGE manifests, not the pushed index digests, and comparing the two
+          # directly fails on every publish (worker dispatch run 34292278641, 2026-09-08). Resolve
+          # each verified digest to the image manifest(s) it carries first; a digest that already IS
+          # an image manifest (provenance off) has no `.manifests` and stands for itself.
+          listed="$(jq -r '[.manifests[]? | select(.platform.os=="linux") | .digest] | sort | join(" ")' /tmp/manifest.json)"
+          verified=""
+          for f in /tmp/digests/*; do
+            pushed="$(cat "${f}")"
+            images="$(docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}@${pushed}" --format '{{ json .Manifest }}' \
+              | jq -r '[.manifests[]? | select(.platform.os=="linux") | .digest] | join(" ")')"
+            verified="${verified} ${images:-${pushed}}"
+          done
+          verified="$(tr ' ' '\n' <<< "${verified}" | sed '/^$/d' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
+          if [ "${listed}" != "${verified}" ]; then
+            echo "::error::manifest list references [${listed}] but the verified build digests resolve to [${verified}]"
+            exit 1
+          fi
+          echo "  ${ref} references exactly the verified images"
+
+          echo "--- CPU-only contract (linux/amd64, native pull of ${ref})"
+          docker run --rm -i -e EXPECT_TORCH="${torch_version}+cpu" "${ref}" python - < util/check_image_cpu_only.py
+          echo "::notice::${ref} is CPU-only: torch ${torch_version}+cpu, no CUDA stack"

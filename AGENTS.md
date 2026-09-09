@@ -5,7 +5,7 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.7.0
-**Last Updated**: 2026-09-08
+**Last Updated**: 2026-09-09
 
 ---
 
@@ -338,6 +338,7 @@ Tests touching these collectors should use `juniper_observability.testing.reset_
 | CodeQL Analysis | `codeql.yml` | Python SAST; required check `Analyze (python)`. SHA-pinned v4; Dependabot `codeql-action` group also bumps `ci.yml` Bandit `upload-sarif`. |
 | Lockfile Update | `lockfile-update.yml` | Automated dependency lock updates |
 | Publish | `publish.yml` | Release publishing automation |
+| Publish container image | `publish-image.yml` | GHCR multi-arch (amd64 + arm64) image on `v*` releases; PR arm builds both arches for image inputs; torch CPU-only by pin; never a required check |
 | Security Scan | `security-scan.yml` | Security vulnerability scanning |
 | Sequence Safety (Advisory) | `sequence-safety.yml` | Per-PR advisory compositional-loss screen (AST symbol-loss + docs deletion-magnitude, `src/**/*.py` symbol scope) via the packaged `juniper-ci-tools` console scripts; standalone, never a required check |
 | Post-Merge Main Verification | `main-verify.yml` | Bypass-proof post-merge sequence-safety net (screens-only; per-SHA no-cancel; catch-up base; stable-title tracking-issue notify) |
