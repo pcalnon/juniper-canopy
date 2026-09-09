@@ -11,6 +11,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The partial-data contract's three-way prompt — the last unbuilt piece of the contract.** When a
+  Start is refused because juniper-data could not produce the staged dataset in full (cascor leaves
+  the staged config in place for exactly this retry), a modal now puts the owner's three options to
+  the operator and requires an affirmative choice: **accept** the broken rows and continue, **drop**
+  them and continue, or **fail** the load — which cancels the staged change and deselects the
+  dataset (`⊥`) so Start and Apply stay gated until another is chosen. Accept and drop re-stage
+  the config cascor still holds with `allow_truncation=true` and the chosen `incomplete_rows`
+  through the existing `/api/stage_dataset` route, then Start again; the outcome rides the
+  existing `training-control-action` store, so a second refusal renders through the same alert
+  and — if it is another shortfall (drop can empty a universe) — re-opens the prompt.
+
+  The prompt fires on **both** transports (the Phase D clientside WS/REST path and the server-side
+  handler) because both write the outcome into that store; the clientside JS now also carries
+  `detail_full` (4000 chars) beside the alert's 300-char `detail`, so the producer's own sentence —
+  which symbols, how many rows — survives to the modal. It recognises the refusal by cascor#633's
+  machine-readable token `[dataset_shortfall_refused]`, and by the fixed sentence for a cascor that
+  predates it; an outage ("juniper-data fetch failed: …") carries neither and never opens it.
+
+  **A run on partial data is now marked where the operator looks**: `dataset_shortfall` is carried
+  through `normalize_status` (the whitelist was the one place it was lost — canopy already polls
+  cascor's status route at 1 Hz, so no new poller), the status bar appends `· partial data` in
+  every state (progress while it runs, result when it completes), and the Network Info panel opens
+  with cascor's own one-sentence summary, which names who accepted the shortfall.
+
+  **Two form defects fixed on the way.** The schema-driven sidebar rendered juniper-data's
+  `allow_truncation` checkbox and `incomplete_rows` select as ordinary inputs, so an unticked box
+  sent an **explicit `allow_truncation: false` on every equities apply** — which cascor#624
+  honours over its own deployment default, turning the operator's silence into a refusal and
+  stripping the remedy from the failure message — while a ticked one pre-answered a question the
+  contract says must be asked when the shortfall happens. Both are now `PARTIAL_DATA_POLICY_FIELDS`,
+  excluded from the form; the prompt owns them, and a default apply sends neither (option 3).
+
+  Found by the round-37 handoff validation in juniper-ml. Not in this change: an equities request
+  at canopy's defaults (`start_date` 2000, `fundamentals_fill="nan"`) is refused by cascor#630's
+  NaN guard *after* the shortfall is accepted, so exercising the prompt end-to-end on equities
+  needs a later `start_date` or a fill policy — a separate finding, recorded in that handoff.
+
 - **`publish-image.yml` -- the dashboard container image is published to GHCR on every `v*`
   release** as a multi-arch manifest (`linux/amd64` + `linux/arm64`, native runners, no QEMU),
   tagged `X.Y.Z` / `X.Y` / `latest`, pushed by digest with tags written exactly once by the merge
@@ -44,6 +81,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   publish path. `src/tests/unit/test_dockerfile_cpu_torch_pin.py` pins Dockerfile ↔ workflow.
 
 ## [0.7.0] - 2026-09-08
+
+- **The partial-data contract's three-way prompt — the last unbuilt piece of the contract.** When a
+  Start is refused because juniper-data could not produce the staged dataset in full (cascor leaves
+  the staged config in place for exactly this retry), a modal now puts the owner's three options to
+  the operator and requires an affirmative choice: **accept** the broken rows and continue, **drop**
+  them and continue, or **fail** the load — which cancels the staged change and deselects the
+  dataset (`⊥`) so Start and Apply stay gated until another is chosen. Accept and drop re-stage
+  the config cascor still holds with `allow_truncation=true` and the chosen `incomplete_rows`
+  through the existing `/api/stage_dataset` route, then Start again; the outcome rides the
+  existing `training-control-action` store, so a second refusal renders through the same alert
+  and — if it is another shortfall (drop can empty a universe) — re-opens the prompt.
+
+  The prompt fires on **both** transports (the Phase D clientside WS/REST path and the server-side
+  handler) because both write the outcome into that store; the clientside JS now also carries
+  `detail_full` (4000 chars) beside the alert's 300-char `detail`, so the producer's own sentence —
+  which symbols, how many rows — survives to the modal. It recognises the refusal by cascor#633's
+  machine-readable token `[dataset_shortfall_refused]`, and by the fixed sentence for a cascor that
+  predates it; an outage ("juniper-data fetch failed: …") carries neither and never opens it.
+
+  **A run on partial data is now marked where the operator looks**: `dataset_shortfall` is carried
+  through `normalize_status` (the whitelist was the one place it was lost — canopy already polls
+  cascor's status route at 1 Hz, so no new poller), the status bar appends `· partial data` in
+  every state (progress while it runs, result when it completes), and the Network Info panel opens
+  with cascor's own one-sentence summary, which names who accepted the shortfall.
+
+  **Two form defects fixed on the way.** The schema-driven sidebar rendered juniper-data's
+  `allow_truncation` checkbox and `incomplete_rows` select as ordinary inputs, so an unticked box
+  sent an **explicit `allow_truncation: false` on every equities apply** — which cascor#624
+  honours over its own deployment default, turning the operator's silence into a refusal and
+  stripping the remedy from the failure message — while a ticked one pre-answered a question the
+  contract says must be asked when the shortfall happens. Both are now `PARTIAL_DATA_POLICY_FIELDS`,
+  excluded from the form; the prompt owns them, and a default apply sends neither (option 3).
+
+  Found by the round-37 handoff validation in juniper-ml. Not in this change: an equities request
+  at canopy's defaults (`start_date` 2000, `fundamentals_fill="nan"`) is refused by cascor#630's
+  NaN guard *after* the shortfall is accepted, so exercising the prompt end-to-end on equities
+  needs a later `start_date` or a fill policy — a separate finding, recorded in that handoff.
 
 ### Changed
 
@@ -780,7 +854,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   polling, and the topology store fetches REST on tab switch
   (`src/tests/ui/test_ws_silent_poll_liveness.py`). The store wire (not the tiles) is the UI
   observable because `update_metrics_display` renders lazily in the headless harness on main
-  too — a pre-existing issue noted for E-3/N2, not introduced here.  
+  too — a pre-existing issue noted for E-3/N2, not introduced here.
 
 ### Changed
 
@@ -2045,18 +2119,18 @@ Comprehensive test coverage improvements for Phase 3 Wave 3 implementations. Add
 
 ### Test Coverage Summary
 
-| File                      | Before | After | Target | Status           |
-| ------------------------- | ------ | ----- | ------ | ---------------- |
-| redis_panel.py            | 49%    | 100%  | 95%    | ✅ Exceeded      |
-| redis_client.py           | 76%    | 97%   | 95%    | ✅ Exceeded      |
-| cassandra_client.py       | 75%    | 97%   | 95%    | ✅ Exceeded      |
-| websocket_manager.py      | 94%    | 100%  | 95%    | ✅ Exceeded      |
-| statistics.py             | 91%    | 100%  | 95%    | ✅ Exceeded      |
-| dashboard_manager.py      | 93%    | 95%   | 95%    | ✅ Met           |
-| training_monitor.py       | 95%    | 95%   | 95%    | ✅ Met           |
-| training_state_machine.py | 96%    | 96%   | 95%    | ✅ Exceeded      |
-| cassandra_panel.py        | 99%    | 99%   | 95%    | ✅ Exceeded      |
-| main.py                   | 79%    | 84%   | 95%    | ⚠️ Near target   |
+| File                      | Before | After | Target | Status        |
+|---------------------------|--------|-------|--------|---------------|
+| redis_panel.py            | 49%    | 100%  | 95%    | ✅ Exceeded    |
+| redis_client.py           | 76%    | 97%   | 95%    | ✅ Exceeded    |
+| cassandra_client.py       | 75%    | 97%   | 95%    | ✅ Exceeded    |
+| websocket_manager.py      | 94%    | 100%  | 95%    | ✅ Exceeded    |
+| statistics.py             | 91%    | 100%  | 95%    | ✅ Exceeded    |
+| dashboard_manager.py      | 93%    | 95%   | 95%    | ✅ Met         |
+| training_monitor.py       | 95%    | 95%   | 95%    | ✅ Met         |
+| training_state_machine.py | 96%    | 96%   | 95%    | ✅ Exceeded    |
+| cassandra_panel.py        | 99%    | 99%   | 95%    | ✅ Exceeded    |
+| main.py                   | 79%    | 84%   | 95%    | ⚠️ Near target |
 
 ### Technical Notes
 
@@ -2593,14 +2667,14 @@ This release addresses a critical security vulnerability in the `urllib3` depend
 
 Added 400+ new tests across 6 new test files:
 
-| File | Before | After |
-| ------ | -------- | ------- |
-| `metrics_panel.py` | 67% | 98% |
-| `dashboard_manager.py` | 68% | 93% |
-| `network_visualizer.py` | 71% | 99% |
-| `main.py` | 79% | 89% |
-| `decision_boundary.py` | 84% | 100% |
-| `dataset_plotter.py` | 87% | 99% |
+| File                    | Before | After |
+|-------------------------|--------|-------|
+| `metrics_panel.py`      | 67%    | 98%   |
+| `dashboard_manager.py`  | 68%    | 93%   |
+| `network_visualizer.py` | 71%    | 99%   |
+| `main.py`               | 79%    | 89%   |
+| `decision_boundary.py`  | 84%    | 100%  |
+| `dataset_plotter.py`    | 87%    | 99%   |
 
 **New test files:**
 
@@ -2860,7 +2934,7 @@ Added 400+ new tests across 6 new test files:
   - `test_callback_context_coverage.py` - 29 tests for callback adapter
   - `test_dashboard_helpers_coverage.py` - 48 tests for dashboard helpers
   - `test_network_visualizer_layout_coverage.py` - 43 tests for layout methods
-  - `test_metrics_panel_helpers_coverage.py` - 74 tests for metrics helpers  
+  - `test_metrics_panel_helpers_coverage.py` - 74 tests for metrics helpers
   - `test_main_api_coverage.py` - 36 tests for API endpoints
   - `test_demo_mode_comprehensive.py` - 72 tests for demo mode
   - `test_websocket_comprehensive.py` - 51 tests for WebSocket
@@ -3999,7 +4073,7 @@ juniper_canopy/
 
 #### New User Onboarding Flow
 
-**Old:** README.md → Search for relevant docs → Trial and error  
+**Old:** README.md → Search for relevant docs → Trial and error
 **New:** README.md → QUICK_START.md → ENVIRONMENT_SETUP.md → AGENTS.md
 
 **Impact:** <15 minutes to productive (vs. hours)

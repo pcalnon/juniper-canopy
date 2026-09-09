@@ -80,6 +80,36 @@ MANIFEST: tuple[ControlContract, ...] = (
         resp_equals="success",
         notes="Cancel any staged dataset change.",
     ),
+    # ---- Partial-data prompt (accept / drop re-stage the held config with the opt-in; fail cancels) ----
+    ControlContract(
+        control_id="dataset-shortfall-accept-button",
+        kind="button",
+        method="POST",
+        endpoint="/api/stage_dataset",
+        body={"nn_dataset_type": "xor", "nn_dataset_params": {"allow_truncation": True, "incomplete_rows": "accept"}},
+        resp_key="status",
+        resp_equals="success",
+        notes="Option 1: re-stage the held config with allow_truncation=true / incomplete_rows=accept, then Start.",
+    ),
+    ControlContract(
+        control_id="dataset-shortfall-drop-button",
+        kind="button",
+        method="POST",
+        endpoint="/api/stage_dataset",
+        body={"nn_dataset_type": "xor", "nn_dataset_params": {"allow_truncation": True, "incomplete_rows": "drop"}},
+        resp_key="status",
+        resp_equals="success",
+        notes="Option 2: re-stage the held config with allow_truncation=true / incomplete_rows=drop, then Start.",
+    ),
+    ControlContract(
+        control_id="dataset-shortfall-fail-button",
+        kind="button",
+        method="DELETE",
+        endpoint="/api/cancel_pending_dataset",
+        resp_key="status",
+        resp_equals="success",
+        notes="Option 3: fail the load -- cancel the staged change and deselect the dataset.",
+    ),
     # ---- Training control buttons ----
     ControlContract(
         control_id="start-button",

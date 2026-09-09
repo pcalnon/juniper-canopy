@@ -306,6 +306,12 @@ class ServiceBackend:
                 # this field to the /v1/training/status payload; carry it
                 # through unchanged.
                 "pending_dataset": raw.get("pending_dataset"),
+                # Partial-data contract (cascor#624 + #633): the ``dataset_shortfall``
+                # annotation -- ``None`` when the dataset was delivered in full. Carried
+                # through unchanged; this whitelist is the ONLY place it could be lost
+                # between cascor's status route and the dashboard (canopy already polls
+                # that route at 1 Hz through the status cache -- no new poller needed).
+                "dataset_shortfall": raw.get("dataset_shortfall"),
                 # cascor #320 (Issue #3 follow-up): which grow_network exit fired
                 # (converged vs a 0-unit stall, etc.). Carried through unchanged
                 # so the status bar can render "Completed — <reason>". None when
