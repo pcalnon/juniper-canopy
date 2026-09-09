@@ -867,8 +867,46 @@ class DemoMode:
             if inputs.shape[0] != targets.shape[0]:
                 raise ValueError(f"Sample count mismatch: {x_key} has {inputs.shape[0]} samples, {y_key} has {targets.shape[0]}")
 
+    #: Per-row / per-window key naming the entity a row belongs to, when the generator
+    #: emits one (``equities`` and ``equities_seq`` both do, for every partition). Its
+    #: presence is what makes the legacy ENTITY-major ``*_full`` row order exactly
+    #: reconstructible -- see :meth:`_entity_major_order`.
+    _ENTITY_STEM = "ticker_code"
+
     @staticmethod
-    def _whole_dataset(npz_data: Dict[str, Any], stem: str) -> np.ndarray:
+    def _entity_major_order(npz_data: Dict[str, Any]) -> Optional[np.ndarray]:
+        """Permutation restoring juniper-data's ENTITY-major ``*_full`` row order, or ``None``.
+
+        juniper-data built ``*_full`` ENTITY-major for ``equities`` / ``equities_seq`` --
+        each ticker's train rows, then its val, then its test, concatenated across tickers
+        -- while the partitions it emits are SPLIT-major (every ticker's train, then every
+        ticker's val, ...). Same rows, different permutation, identical only for a
+        single-ticker request. So a plain concatenation renders a DIFFERENT order from a
+        legacy artifact's ``X_full`` for the same logical dataset, and canopy would show
+        two orders depending on artifact vintage.
+
+        The reconstruction mirrors ``juniper_recurrence_model.data.derive_full_split``:
+        concatenate, then ONE stable argsort over the concatenated ``ticker_code_<split>``
+        arrays. Within one ticker the stable sort preserves the concatenation order (train,
+        then val, then test) and within each (ticker, split) block it preserves
+        chronological order -- exactly the entity-major layout juniper-data wrote. The sort
+        MUST be stable; numpy's default quicksort would permute equal keys arbitrarily and
+        silently reorder rows.
+
+        Returns ``None`` when the artifact carries no ``ticker_code`` for every partition
+        present (every non-equities generator), and equally when the resulting permutation
+        is the identity (a single-entity artifact) -- there is nothing to reorder, and the
+        caller then skips a full copy of every array.
+        """
+        splits = tuple(s for s in DemoMode._VALIDATED_PARTITIONS if npz_data.get(f"X_{s}") is not None)
+        if not splits or any(npz_data.get(f"{DemoMode._ENTITY_STEM}_{s}") is None for s in splits):
+            return None
+        codes = np.concatenate([np.asarray(npz_data[f"{DemoMode._ENTITY_STEM}_{s}"]).reshape(-1) for s in splits])
+        order = np.argsort(codes, kind="stable")
+        return None if np.array_equal(order, np.arange(order.size)) else order
+
+    @staticmethod
+    def _whole_dataset(npz_data: Dict[str, Any], stem: str, optional: bool = False, order: Optional[np.ndarray] = None) -> Optional[np.ndarray]:
         """Assemble one key's whole dataset from its partitions.
 
         Every canopy use of ``X_full`` was "give me the whole dataset", never "give me
@@ -877,15 +915,45 @@ class DemoMode:
 
         A legacy artifact's ``<stem>_full`` is used directly when present -- decision 11
         drops the REQUIREMENT, not the tolerance, and re-deriving it would be slower and
-        could differ in row order from what that artifact actually shipped.
+        could differ in row order from what that artifact actually shipped. It is never
+        reordered: it already IS the producer's order.
+
+        ``np.concatenate``, not ``np.vstack``: they agree for 2-D and above, but ``vstack``
+        promotes 1-D partitions, so a ``(W,)`` regression target would come back as a
+        ``(k, W)`` matrix -- k rows of "the whole dataset" instead of one.
+
+        Args:
+            npz_data: Dictionary of numpy arrays from NPZ artifact.
+            stem: Key stem to assemble, e.g. ``"X"`` / ``"y"`` / ``"dt"``.
+            optional: When True, a stem with no partition at all yields ``None`` rather
+                than raising -- ``dt`` and ``y`` are genuinely absent from some artifacts.
+            order: Entity-major permutation from :meth:`_entity_major_order`. Pass the
+                SAME one to every stem of an artifact so ``X`` / ``dt`` / ``y`` stay
+                row-aligned; leave it ``None`` and it is derived here (same value, since
+                it depends only on the artifact). A stem whose partition coverage differs
+                from ``X``'s cannot be aligned to it and is left in concatenation order
+                rather than mis-permuted.
+
+        Returns:
+            The assembled array, or ``None`` when ``optional`` and no partition exists.
+
+        Raises:
+            ValueError: No ``<stem>_*`` partition exists and ``optional`` is False.
         """
         legacy = npz_data.get(f"{stem}_full")
         if legacy is not None:
             return np.asarray(legacy)
         blocks = [np.asarray(npz_data[f"{stem}_{s}"]) for s in DemoMode._VALIDATED_PARTITIONS if npz_data.get(f"{stem}_{s}") is not None]
         if not blocks:
+            if optional:
+                return None
             raise ValueError(f"JuniperData artifact carries no {stem}_* partitions to assemble")
-        return np.vstack(blocks) if len(blocks) > 1 else blocks[0]
+        whole = np.concatenate(blocks, axis=0) if len(blocks) > 1 else blocks[0]
+        if order is None:
+            order = DemoMode._entity_major_order(npz_data)
+        if order is not None and order.shape[0] == whole.shape[0]:
+            whole = whole[order]
+        return whole
 
     @staticmethod
     def _user_friendly_data_error(exc: Exception) -> str:
@@ -1907,11 +1975,16 @@ class DemoMode:
         # / published juniper-data-client (0.4.x). 3-D sequence (irregular-Δt time series)
         # -> a display-only install (cascor cannot ingest 3-D yet, OQ-4); 2-D tabular ->
         # the existing classification path.
+        # A rank probe only, so the legacy ``X_full`` arm stays: any partition answers
+        # "how many dimensions", and a legacy artifact has no other key to ask. The
+        # message names ``X_train`` alone, because that is the one the CONTRACT requires
+        # (decision 11); naming ``X_full`` there told the reader to go looking for a key
+        # no producer has emitted since juniper-data#369.
         x_probe = npz_data.get("X_full")
         if x_probe is None:
             x_probe = npz_data.get("X_train")
         if x_probe is None:
-            raise ValueError("JuniperData artifact missing required key: X_full (or X_train)")
+            raise ValueError("JuniperData artifact missing required key: X_train")
         if getattr(x_probe, "ndim", 0) == 3:
             return self._install_sequence_dataset(npz_data, source_label=f"generator:{generator}")
 
@@ -2006,9 +2079,23 @@ class DemoMode:
         frontend, because ``DemoBackend.regenerate_dataset_from_generator`` returns
         ``get_dataset()``.
 
+        The installed view is the WHOLE dataset, assembled from the partitions by
+        :meth:`_whole_dataset`. It used to read ``X_full`` / ``dt_full`` / ``y_full`` and
+        fall back to the ``_train`` partition alone -- so from decision 11 (juniper-ml
+        ``notes/JUNIPER_2026-08-29_JUNIPER-ECOSYSTEM_TRAIN-EVAL-TEST-PARTITION-DESIGN.md``
+        §9.5) onward, when juniper-data#369 stopped emitting ``*_full``, every sequence
+        install silently showed TRAIN ONLY while ``n_windows`` / ``lookback`` /
+        ``n_features``, the stored windows and the histograms below all claimed the whole
+        dataset. Nothing errored. The 2-D path was migrated by #589; this is its 3-D twin.
+
+        One permutation is computed for the artifact and passed to all three stems, so
+        ``X`` / ``dt`` / ``y`` stay row-aligned -- reordering them independently would
+        pair each window with another window's Δt.
+
         Args:
             npz_data: dict of NPZ arrays validated as the 3-D sequence contract
-                (``X_full``/``X_train`` shape ``(W, L, F)``, ``dt_*`` shape ``(W, L)``).
+                (``X_train`` + any ``X_val`` / ``X_test``, each ``(W, L, F)``; ``dt_*``
+                ``(W, L)``; legacy ``*_full`` tolerated and used as-is when present).
             source_label: short tag for logging / dataset provenance.
 
         Returns:
@@ -2016,15 +2103,14 @@ class DemoMode:
         """
         import numpy as np
 
-        X = npz_data.get("X_full")
-        if X is None:
-            X = npz_data.get("X_train")
+        order = self._entity_major_order(npz_data)
+        # ``optional=True`` for X too, so the rank check below stays the single gate on a
+        # missing / non-3-D X and keeps its own message. X is still REQUIRED: this raises.
+        X = self._whole_dataset(npz_data, "X", optional=True, order=order)
         if X is None or getattr(X, "ndim", 0) != 3:
             shape = None if X is None else getattr(X, "shape", None)
             raise ValueError(f"sequence install expects a 3-D X (W, L, F); got shape {shape}")
-        dt = npz_data.get("dt_full")
-        if dt is None:
-            dt = npz_data.get("dt_train")
+        dt = self._whole_dataset(npz_data, "dt", optional=True, order=order)
 
         n_windows, lookback, n_features = (int(d) for d in X.shape)
         # Phase 2b: store a capped set of windows (display-only) so the plotter's
@@ -2042,9 +2128,7 @@ class DemoMode:
         # Phase 2c companions (display-only): the regression target per stored window for the
         # optional target view, plus whole-dataset Δt / target histograms (computed over ALL
         # windows, then bounded to ~30 bins) for the characterization companion.
-        y = npz_data.get("y_full")
-        if y is None:
-            y = npz_data.get("y_train")
+        y = self._whole_dataset(npz_data, "y", optional=True, order=order)
         windows_y: list = []
         if y is not None:
             y_arr = np.asarray(y)

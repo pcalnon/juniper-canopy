@@ -202,6 +202,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every sequence (3-D) dataset has rendered TRAIN-ONLY since decision 11** (S-6).
+  `DemoMode._install_sequence_dataset` read `X_full` / `dt_full` / `y_full` and fell back to
+  `X_train` / `dt_train` / `y_train`. Decision 11 (juniper-ml
+  `notes/JUNIPER_2026-08-29_JUNIPER-ECOSYSTEM_TRAIN-EVAL-TEST-PARTITION-DESIGN.md` §9.5) retired the
+  `*_full` family and juniper-data#369 (merged 2026-09-06) stopped emitting it, so from that merge on
+  the fallback was the **only** arm ever reached and the whole `val` + `test` remainder simply
+  disappeared from the dashboard. Nothing errored: `n_windows`, `lookback`, `n_features`, the stored
+  windows and the Δt / target histograms whose comment says *"computed over ALL windows"* all went on
+  reporting the whole dataset while showing one partition of it. canopy#589 migrated the 2-D path to
+  `DemoMode._whole_dataset` and did not touch its 3-D twin.
+
+  The install now assembles `X`, `dt` and `y` through that same helper, which gains three things:
+  `np.concatenate` in place of `np.vstack` (identical for 2-D and above, but `vstack` promoted a 1-D
+  `(W,)` regression target to a `(k, W)` matrix -- k rows of "the whole dataset" instead of one), an
+  `optional` arm so an artifact carrying no `dt` or no `y` at all yields `None` rather than raising,
+  and the entity-major reordering below.
+
+  **Row order is restored for multi-ticker datasets.** juniper-data built `*_full` ENTITY-major (each
+  ticker's train, then its val, then its test) while the partitions it emits are SPLIT-major, so a
+  plain concatenation rendered a *different* order from a legacy artifact's `X_full` for the same
+  logical dataset -- canopy showed two orders depending on artifact vintage. `equities` and
+  `equities_seq` both emit `ticker_code_<split>` for every partition, which makes the legacy order
+  exactly reconstructible: concatenate, then **one** stable argsort on the concatenated codes,
+  computed once per artifact and applied to every stem so `X` / `dt` / `y` stay row-aligned.
+  Reordering them independently would pair each window with another window's Δt. Mirrors
+  `juniper_recurrence_model.data.derive_full_split`.
+
+  A legacy `<stem>_full` still wins when present, and is never reordered -- decision 11 dropped the
+  requirement, not the tolerance, and every artifact minted before 2026-09-06 still ships the family.
+  Nothing asserts `X_full` is *absent*. The 3-D rank probe still consults `X_full` first (any
+  partition answers "how many dimensions", and a legacy artifact has no other key to ask); only its
+  error message changed, to name `X_train`, the key the current contract actually requires.
+
+  Pins: six new tests in `src/tests/unit/test_sequence_dataset_viz.py`. `docs/demo/DEMO_MODE_REFERENCE.md`
+  described the fetch as validating `X_full` / `y_full`; it now describes the partition ladder.
+
 - **The one-shot Start body named a generator juniper-data does not have** (X3 / design §4.6).
   `_resolve_oneshot_start_body_handler` sent the **raw dropdown value** as the generator, skipping
   the alias map -- so `spirals` went where `spiral` belongs. Masked in production only because
