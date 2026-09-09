@@ -163,6 +163,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every sequence (3-D) dataset has rendered TRAIN-ONLY since decision 11** (S-6).
+  `DemoMode._install_sequence_dataset` read `X_full` / `dt_full` / `y_full` and fell back to
+  `X_train` / `dt_train` / `y_train`. Decision 11 (juniper-ml
+  `notes/JUNIPER_2026-08-29_JUNIPER-ECOSYSTEM_TRAIN-EVAL-TEST-PARTITION-DESIGN.md` §9.5) retired the
+  `*_full` family and juniper-data#369 (merged 2026-09-06) stopped emitting it, so from that merge on
+  the fallback was the **only** arm ever reached and the whole `val` + `test` remainder simply
+  disappeared from the dashboard. Nothing errored: `n_windows`, `lookback`, `n_features`, the stored
+  windows and the Δt / target histograms whose comment says *"computed over ALL windows"* all went on
+  reporting the whole dataset while showing one partition of it. canopy#589 migrated the 2-D path to
+  `DemoMode._whole_dataset` and did not touch its 3-D twin.
+
+  The install now assembles `X`, `dt` and `y` through that same helper, which gains three things:
+  `np.concatenate` in place of `np.vstack` (identical for 2-D and above, but `vstack` promoted a 1-D
+  `(W,)` regression target to a `(k, W)` matrix -- k rows of "the whole dataset" instead of one), an
+  `optional` arm so an artifact carrying no `dt` or no `y` at all yields `None` rather than raising,
+  and the entity-major reordering below.
+
+  **Row order is restored for multi-ticker datasets.** juniper-data built `*_full` ENTITY-major (each
+  ticker's train, then its val, then its test) while the partitions it emits are SPLIT-major, so a
+  plain concatenation rendered a *different* order from a legacy artifact's `X_full` for the same
+  logical dataset -- canopy showed two orders depending on artifact vintage. `equities` and
+  `equities_seq` both emit `ticker_code_<split>` for every partition, which makes the legacy order
+  exactly reconstructible: concatenate, then **one** stable argsort on the concatenated codes,
+  computed once per artifact and applied to every stem so `X` / `dt` / `y` stay row-aligned.
+  Reordering them independently would pair each window with another window's Δt. Mirrors
+  `juniper_recurrence_model.data.derive_full_split`.
+
+  A legacy `<stem>_full` still wins when present, and is never reordered -- decision 11 dropped the
+  requirement, not the tolerance, and every artifact minted before 2026-09-06 still ships the family.
+  Nothing asserts `X_full` is *absent*. The 3-D rank probe still consults `X_full` first (any
+  partition answers "how many dimensions", and a legacy artifact has no other key to ask); only its
+  error message changed, to name `X_train`, the key the current contract actually requires.
+
+  Pins: six new tests in `src/tests/unit/test_sequence_dataset_viz.py`. `docs/demo/DEMO_MODE_REFERENCE.md`
+  described the fetch as validating `X_full` / `y_full`; it now describes the partition ladder.
+
+- **The one-shot Start body named a generator juniper-data does not have** (X3 / design §4.6).
+  `_resolve_oneshot_start_body_handler` sent the **raw dropdown value** as the generator, skipping
+  the alias map -- so `spirals` went where `spiral` belongs. Masked in production only because
+  `equities_seq`, the one dataset a one-shot model could reach, is identity-mapped.
+
+  Verified through the consumer rather than the design's assertion: the recurrence service passes
+  `generator` **straight to `client.create_dataset()`** (`juniper_recurrence/data.py:45-46`), so
+  juniper-data's vocabulary is the right one for that channel.
+
+  The fix is deliberately **asymmetric**, and a counter-guard pins that. The staging payload reaches
+  **cascor**, whose `dataset_type` is a `Literal["spirals", …, "moons", …]` -- canopy's *plural*
+  dialect (`juniper-cascor/src/api/models/training.py:235`). Translating it too, for consistency,
+  would send `"spiral"` to a field that does not accept it. The params lookup is likewise untranslated,
+  because canopy's registry is keyed on canopy's values and translating it would silently drop
+  `equities_seq`'s `max_symbols` cap -- the thing keeping the one-shot fit inside the train timeout.
+
 - **Start was not gated on whether the selected model is the one that would run** (design N5 /
   §4.4; handoff item 1). With `recurrence_service_url` unset -- the code default -- selecting
   Recurrence records the selection, swaps nothing and answers 200. canopy#592 made the sidebar
@@ -185,22 +237,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is §4.10 hydration, unchanged here. `main.current_nn_model` is now reset between tests, because
   two existing tests select Recurrence over the demo backend and the new refusal would otherwise
   have leaked into every later `/api/train/start` in the session.
-
-- **The one-shot Start body named a generator juniper-data does not have** (X3 / design §4.6).
-  `_resolve_oneshot_start_body_handler` sent the **raw dropdown value** as the generator, skipping
-  the alias map -- so `spirals` went where `spiral` belongs. Masked in production only because
-  `equities_seq`, the one dataset a one-shot model could reach, is identity-mapped.
-
-  Verified through the consumer rather than the design's assertion: the recurrence service passes
-  `generator` **straight to `client.create_dataset()`** (`juniper_recurrence/data.py:45-46`), so
-  juniper-data's vocabulary is the right one for that channel.
-
-  The fix is deliberately **asymmetric**, and a counter-guard pins that. The staging payload reaches
-  **cascor**, whose `dataset_type` is a `Literal["spirals", …, "moons", …]` -- canopy's *plural*
-  dialect (`juniper-cascor/src/api/models/training.py:235`). Translating it too, for consistency,
-  would send `"spiral"` to a field that does not accept it. The params lookup is likewise untranslated,
-  because canopy's registry is keyed on canopy's values and translating it would silently drop
-  `equities_seq`'s `max_symbols` cap -- the thing keeping the one-shot fit inside the train timeout.
 
 - **A backend that cannot stage a dataset returned an opaque 500** (X6 / design §4.9).
   `RecurrenceBackend` has no `stage_dataset`, and `POST /api/stage_dataset` called it unguarded, so
