@@ -32,7 +32,7 @@ import importlib.metadata
 from typing import Final
 
 
-def resolve_app_version(fallback: str = "0.6.0") -> str:
+def resolve_app_version(fallback: str = "0.7.0") -> str:
     """Resolve the application version from the installed package metadata.
 
     The single source for every surface that shows a version -- ``/v1/health``,
