@@ -73,7 +73,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Mapping, Optional, cast
 
 from backend.protocol import (
     ApplyParamsResult,
@@ -96,6 +96,39 @@ _HYPERPARAM_KEYS = ("d", "theta", "ridge")
 # Internal fit state -> the dashboard "phase" label.
 _PHASE_BY_STATE = {"idle": "idle", "training": "fitting", "trained": "complete", "failed": "error"}
 
+# Canopy-dialect staging keys that translate to juniper-data generator params. The spiral-only
+# typed fields (``nn_spiral_rotations`` / ``nn_spiral_number``) are deliberately absent: a spiral is
+# rank-2 and can never be staged into this backend, and forwarding them to a sequence generator
+# would 422 at juniper-data.
+_STAGED_PARAM_KEYS = {"nn_dataset_elements": "n_samples", "nn_dataset_noise": "noise"}
+
+
+def dataset_ref_from_staged(cfg: Mapping[str, Any]) -> Dict[str, Any]:
+    """Translate a canopy-dialect staged dataset config into a recurrence ``DatasetRef``.
+
+    The staging channel speaks canopy's dialect (``nn_dataset_type`` + typed fields +
+    ``nn_dataset_params``) because ``/api/stage_dataset`` was built for cascor, whose
+    ``StageDatasetRequest`` is the authoritative validator there. The recurrence service takes the
+    one-shot ``DatasetRef`` -- ``generator`` in juniper-data's vocabulary plus ``params`` forwarded
+    verbatim -- so the alias map is applied HERE (``spirals`` -> ``spiral``), exactly where the
+    one-shot Start body applies it (X3 / design §4.6), and never on the cascor-bound payload.
+
+    The registry's ``default_params`` for the dataset seed ``params`` (bounded + stationary, the
+    same seed the one-shot Start body carries); the typed fields override them; the schema-driven
+    ``nn_dataset_params`` override both. A staged fit and an un-staged fit of the same dataset
+    therefore differ only by what the operator actually edited.
+    """
+    from dataset_schema import generator_name_for_type
+    from model_registry import dataset_default_params
+
+    dataset_type = cfg.get("nn_dataset_type")
+    params: Dict[str, Any] = dict(dataset_default_params(dataset_type or ""))
+    for canopy_key, param_key in _STAGED_PARAM_KEYS.items():
+        if cfg.get(canopy_key) is not None:
+            params[param_key] = cfg[canopy_key]
+    params.update(cfg.get("nn_dataset_params") or {})
+    return {"generator": generator_name_for_type(dataset_type), "params": params, "split": "train"}
+
 
 class RecurrenceBackend:
     """``BackendProtocol`` implementation wrapping :class:`RecurrenceServiceAdapter`.
@@ -113,6 +146,10 @@ class RecurrenceBackend:
         self._result: Optional[RecurrenceTrainResult] = None
         self._error: Optional[str] = None
         self._pending_hyperparams: Dict[str, Any] = {}
+        # X6 / §4.9: the canopy-dialect dataset config staged for the NEXT fit (see the
+        # "Dataset staging" section). Consumed by ``start_training``; surfaced on ``get_status``
+        # as ``pending_dataset`` for the banner.
+        self._pending_dataset_config: Optional[Dict[str, Any]] = None
 
     @property
     def backend_type(self) -> str:
@@ -134,10 +171,16 @@ class RecurrenceBackend:
         ``split``) and LMU hyperparameters (``d`` / ``theta`` / ``ridge``) are read from
         ``kwargs``; hyperparameters fall back to any previously :meth:`apply_params`-staged
         values. ``reset`` is accepted for protocol parity (each fit is independent).
+
+        **A staged dataset config is the dataset of the next fit** (X6 / §4.9), and it takes
+        precedence over a dataset reference in ``kwargs``. That is cascor's contract for
+        ``POST /v1/training/dataset`` too, and it is the only honest order here: the one-shot
+        Start body carries the registry's *defaults* for the dropdown value and knows nothing of
+        what the operator edited and applied, so preferring it would discard the applied change
+        while reporting success. Start consumes the staged config, as cascor's does, so the
+        pending-dataset banner closes.
         """
-        dataset_ref = {k: kwargs[k] for k in _DATASET_REF_KEYS if kwargs.get(k) is not None}
-        if not any(dataset_ref.get(k) for k in ("dataset_id", "name", "generator")):
-            return ControlResult(ok=False, error="no dataset reference (need one of dataset_id / name / generator)")
+        explicit_ref = {k: kwargs[k] for k in _DATASET_REF_KEYS if kwargs.get(k) is not None}
 
         hyperparams = dict(self._pending_hyperparams)
         for key in _HYPERPARAM_KEYS:
@@ -147,6 +190,13 @@ class RecurrenceBackend:
         with self._lock:
             if self._state == "training":
                 return ControlResult(ok=False, error="a recurrence fit is already in progress", is_training=True)
+            staged = self._pending_dataset_config
+            dataset_ref = dataset_ref_from_staged(staged) if staged else explicit_ref
+            if not any(dataset_ref.get(k) for k in ("dataset_id", "name", "generator")):
+                return ControlResult(ok=False, error="no dataset reference (need one of dataset_id / name / generator, or a staged dataset)")
+            if staged and explicit_ref.get("generator") not in (None, dataset_ref["generator"]):
+                logger.info("recurrence fit uses the staged dataset %r over the start body's %r", dataset_ref["generator"], explicit_ref.get("generator"))
+            self._pending_dataset_config = None  # consumed by this start (cascor parity)
             self._result = None
             self._error = None
             self._state = "training"
@@ -206,6 +256,7 @@ class RecurrenceBackend:
             state = self._state
             result = self._result
             error = self._error
+            pending = self._pending_dataset_config
         status: Dict[str, Any] = {
             "is_training": state == "training",
             "is_running": state == "training",
@@ -216,6 +267,9 @@ class RecurrenceBackend:
             "phase": _PHASE_BY_STATE[state],
             "network_connected": state == "trained",
             "monitoring_active": state == "training",
+            # X6 / §4.9: the pending-dataset banner reconciles off this field for every backend
+            # (cascor carries it through from /v1/training/status; demo reads its simulator).
+            "pending_dataset": dict(pending) if pending else None,
         }
         if state == "failed" and error is not None:
             status["completion_reason"] = error
@@ -295,6 +349,40 @@ class RecurrenceBackend:
                     self._pending_hyperparams[key] = params[key]
                     applied[key] = params[key]
         return cast(ApplyParamsResult, {"ok": True, "data": applied})
+
+    # --- Dataset staging (X6 / design §4.9) ---
+    #
+    # ``/api/stage_dataset`` / ``/api/cancel_pending_dataset`` and the pending-dataset banner were
+    # built for cascor's server-side staging surface (cascor #242), and DemoMode mirrors them
+    # in-process. This backend does the same. The recurrence service is one-shot -- the dataset
+    # reference travels in ``POST /v1/train`` -- so "staged for the next start" is a canopy-side
+    # fact: held here, consumed by ``start_training``, no service endpoint involved. Before this,
+    # the pair the selection arc made reachable could be selected but not staged (the route
+    # answered 501), and the restart modal's bare start had nothing to fit.
+
+    def stage_dataset(self, **canopy_params: Any) -> Dict[str, Any]:
+        """Record a canopy-dialect dataset config for the next fit; an empty body clears it."""
+        cfg = {k: v for k, v in canopy_params.items() if v is not None}
+        with self._lock:
+            if not cfg:
+                # cascor documents an empty body as "clears any prior staging"; keep the contract.
+                self._pending_dataset_config = None
+                return {"ok": True, "data": {"status": "cleared", "config": None}}
+            if not cfg.get("nn_dataset_type"):
+                return {"ok": False, "error": "a staged dataset needs nn_dataset_type"}
+            self._pending_dataset_config = dict(cfg)
+            return {"ok": True, "data": {"status": "staged", "config": dict(cfg), "dataset_ref": dataset_ref_from_staged(cfg)}}
+
+    def cancel_pending_dataset(self) -> Dict[str, Any]:
+        with self._lock:
+            prior = self._pending_dataset_config
+            self._pending_dataset_config = None
+        return {"ok": True, "data": {"status": "cleared", "discarded": dict(prior) if prior else None}}
+
+    def get_pending_dataset(self) -> Dict[str, Any]:
+        with self._lock:
+            cfg = self._pending_dataset_config
+        return {"ok": True, "pending": dict(cfg) if cfg else None}
 
     # --- Lifecycle ---
 

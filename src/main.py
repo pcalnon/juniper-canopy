@@ -4251,12 +4251,22 @@ async def api_stage_dataset(body: StageDatasetRequest):
     rejection (e.g. unknown dataset_type) returns 502 with the cascor
     error string.
     """
-    # X6 / §4.9: ``RecurrenceBackend`` has no ``stage_dataset``, and this call site was unguarded
-    # -- so the AttributeError fell into the bare ``except`` below and the operator got
-    # "Internal server error" plus an opaque error_id for a condition that is neither internal nor
-    # an error. It is a capability the active backend does not have, and the sibling routes
-    # (``regenerate_dataset``, ``import_dataset``) already say so with a 501. Masked until now by
-    # the deadlock, which kept the recurrence backend unreachable.
+    # N5 -- and X6's cascor branch at its cause. With ``recurrence_service_url`` unset a Recurrence
+    # selection is recorded over the cascor/demo backend, and staging its only compatible dataset
+    # (``equities_seq``, rank 3) sent a sequence artifact toward cascade-correlation, which refuses
+    # it BY DESIGN at the tier boundary (cascor ``manager.py:3815``, W-2): widening cascor's
+    # ``Literal`` would only move that refusal from the request boundary to artifact load. Refuse
+    # here instead, with the same reason Start gives, so nothing reaches a backend the selection
+    # does not target.
+    inactive = _selection_inactive_reason()
+    if inactive is not None:
+        system_logger.warning("Dataset staging refused: %s", inactive)
+        return JSONResponse({"error": f"Refusing to stage a dataset for a model that is not active: {inactive}"}, status_code=409)
+    # X6 / §4.9: a backend without ``stage_dataset`` says so with a 501, as the sibling routes
+    # (``regenerate_dataset``, ``import_dataset``) do -- the AttributeError used to fall into the
+    # bare ``except`` below as "Internal server error" plus an opaque error_id. All three shipped
+    # backends stage now (``RecurrenceBackend`` in-process, since its service is one-shot); this
+    # guards the next one.
     if not hasattr(backend, "stage_dataset"):
         system_logger.info("Dataset staging unsupported by backend %r", backend.backend_type)
         return JSONResponse(
