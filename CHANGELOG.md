@@ -47,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at canopy's defaults (`start_date` 2000, `fundamentals_fill="nan"`) is refused by cascor#630's
   NaN guard *after* the shortfall is accepted, so exercising the prompt end-to-end on equities
   needs a later `start_date` or a fill policy — a separate finding, recorded in that handoff.
-  
+
 - **`publish-image.yml` -- the dashboard container image is published to GHCR on every `v*`
   release** as a multi-arch manifest (`linux/amd64` + `linux/arm64`, native runners, no QEMU),
   tagged `X.Y.Z` / `X.Y` / `latest`, pushed by digest with tags written exactly once by the merge
