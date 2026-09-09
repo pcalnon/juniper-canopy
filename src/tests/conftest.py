@@ -849,6 +849,16 @@ def _reset_all_singletons():
 
         reset_security_state()
 
+    # Reset the recorded model selection (N5). ``POST /api/model/select`` writes
+    # ``main.current_nn_model`` and several tests select Recurrence over the demo backend
+    # without restoring it; since the start paths refuse a selection the live backend does not
+    # serve, a leaked "recurrence" would 409 every later ``/api/train/start`` in the session.
+    # Only when ``main`` is already imported -- this must not import the app into unit tests
+    # that never touch it.
+    main_module = sys.modules.get("main")
+    if main_module is not None:
+        main_module.current_nn_model = None
+
     # Reset callback context adapter
     with contextlib.suppress(ImportError):
         from frontend.callback_context import CallbackContextAdapter

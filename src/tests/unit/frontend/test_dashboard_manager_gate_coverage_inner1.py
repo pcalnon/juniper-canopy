@@ -167,9 +167,10 @@ class TestModelSelectionInner:
         fake_ctx.triggered_id = None
         with patch.object(dmmod.dash, "callback_context", fake_ctx):
             # N11: the callback gained the model-clear Input (2 args now); a no-click on EITHER
-            # input must still be a four-way no_update.
+            # input must still be an all-ways no_update. N5: it also gained the
+            # ``model-state-store`` Output (the ``/api/model/select`` payload), so five ways now.
             result = cb([None], None)
-        assert result == (dash.no_update, dash.no_update, dash.no_update, dash.no_update)
+        assert result == (dash.no_update,) * 5
 
     def test_gate_dataset_options(self, dm):
         cb = raw_cb(dm, "gate_dataset_options")
@@ -199,8 +200,9 @@ class TestModelSelectionInner:
 
     def test_annotate_train_gate_trainable(self, dm):
         cb = raw_cb(dm, "annotate_train_gate")
-        # DEFAULT_MODEL_KEY ("cascor") is live/trainable -> None (hidden)
-        assert cb(dmmod.DEFAULT_MODEL_KEY) is None
+        # DEFAULT_MODEL_KEY ("cascor") is live/trainable -> None (hidden). N5: the callback gained
+        # the ``model-state-store`` Input; ``None`` is the first-paint seed (unknown, not gated).
+        assert cb(dmmod.DEFAULT_MODEL_KEY, None) is None
 
 
 # ---------------------------------------------------------------------------
@@ -556,9 +558,10 @@ class TestButtonActionInner:
     def test_update_button_appearance_delegates(self, dm):
         cb = raw_cb(dm, "update_button_appearance")
         # X5 / §4.8: the callback gained a dataset Input and an ``apply-dataset-button.disabled``
-        # Output, so it is now 3-in / 11-out. Both axes are supplied because an omitted one is
-        # ``⊥`` and would disable Start.
-        result = cb({"start": {"disabled": False, "loading": False, "timestamp": 0}}, dmmod.DEFAULT_MODEL_KEY, dmmod.DEFAULT_DATASET_TYPE)
+        # Output; N5 added the ``model-state-store`` Input between the model key and the dataset,
+        # so it is now 4-in / 11-out. Both axes are supplied because an omitted one is ``⊥`` and
+        # would disable Start; ``None`` for the state is the first-paint seed (unknown, not gated).
+        result = cb({"start": {"disabled": False, "loading": False, "timestamp": 0}}, dmmod.DEFAULT_MODEL_KEY, None, dmmod.DEFAULT_DATASET_TYPE)
         assert len(result) == 11
 
     def test_handle_button_timeout_and_acks_delegates(self, dm):
