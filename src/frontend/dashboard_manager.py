@@ -3230,7 +3230,7 @@ class DashboardManager:
             return dbc.Alert(
                 [
                     html.Strong(f"{label} is selected but the {backend_type} backend is running. "),
-                    html.Span(f"Start is disabled — the run would execute on {backend_type} and be filed under {label}. {DashboardManager.INACTIVE_SELECTION_REMEDY}"),
+                    html.Span(f"Start and Apply Dataset are disabled — the run would execute on {backend_type} and be filed under {label}. {DashboardManager.INACTIVE_SELECTION_REMEDY}"),
                 ],
                 color="warning",
                 className="mb-0",
@@ -7624,8 +7624,11 @@ class DashboardManager:
         dataset_missing = selection_axis_unset(dataset_value)
         if dataset_missing or selection_axis_unset(model_key):
             start_disabled = True
-        # N5 / §4.4: a selected model that the live backend does not serve is not startable.
-        if self._selection_is_live(model_state) is False:
+        # N5 / §4.4: a selected model that the live backend does not serve is not startable -- nor
+        # stageable (below): X6's cascor branch was a rank-3 dataset staged toward
+        # cascade-correlation from exactly this state.
+        selection_inactive = self._selection_is_live(model_state) is False
+        if selection_inactive:
             start_disabled = True
         pause_disabled, pause_text = get_button_props("pause", "Pause Training", "⏸")
         stop_disabled, stop_text = get_button_props("stop", "Stop Training", "⏹")
@@ -7645,8 +7648,10 @@ class DashboardManager:
             reset_text,
             # N9: Apply Dataset cannot be honoured at ``⊥`` — disable it at the control rather
             # than discovering it at the backend, where an empty body is destructive (see the
-            # guards in ``_apply_dataset_handler``).
-            dataset_missing,
+            # guards in ``_apply_dataset_handler``). N5: nor over a backend the selection does
+            # not target — ``/api/stage_dataset`` refuses that too, for anything that bypasses
+            # this control.
+            dataset_missing or selection_inactive,
         )
 
     def _handle_button_timeout_and_acks_handler(self, action=None, n_intervals=None, button_states=None, **kwargs):

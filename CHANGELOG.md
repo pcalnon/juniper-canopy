@@ -67,6 +67,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   relabelled to `classification`, `compatible_models(equities_seq)` is **empty** -- the LMU would have
   no dataset at all. It has exactly one today, which is how little slack there is.
 
+- **The recurrence backend stages a dataset in-process, and the next fit consumes it** (X6 /
+  design §4.9; handoff item 2). `(recurrence, equities_seq)` could be selected but not staged:
+  `POST /api/stage_dataset` answered 501 because `RecurrenceBackend` had no `stage_dataset`, and
+  the dataset modal's bare restart had nothing to fit. The handoff filed the fix as a
+  **juniper-recurrence endpoint**; none is needed. Staging is a canopy-side "pending config"
+  fact -- cascor holds it server-side, `DemoMode` holds it in-process -- and the recurrence
+  service is one-shot, with the dataset reference travelling in `POST /v1/train`. So
+  `RecurrenceBackend` now holds `stage_dataset` / `cancel_pending_dataset` /
+  `get_pending_dataset` in-process, surfaces `pending_dataset` on `get_status` for the banner,
+  and `start_training` fits the staged dataset, translated by `dataset_ref_from_staged`
+  (registry `default_params` seed the params, typed fields override, schema-driven
+  `nn_dataset_params` override both; the alias map is applied here, where the ref is built for
+  juniper-data's vocabulary, never on the cascor-bound payload).
+
+  **A staged config takes precedence over the one-shot Start body**, which carries only the
+  registry's defaults for the dropdown value and knows nothing of what the operator edited and
+  applied -- preferring it would discard the applied change while reporting success. Start
+  consumes the staged config, as cascor's does, so the banner closes.
+
 - **Guardrail G1c** -- `I-cover` and `I-safe` over a synthetic registry with **three** disjoint
   components (three models over four datasets, partitioned by rank and task). The shipped registry
   has exactly two, so the Confinement Lemma is only ever exercised at n=2 there, and a fix that
@@ -239,6 +258,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is §4.10 hydration, unchanged here. `main.current_nn_model` is now reset between tests, because
   two existing tests select Recurrence over the demo backend and the new refusal would otherwise
   have leaked into every later `/api/train/start` in the session.
+
+- **Staging toward a backend the selection does not target is refused** (X6's cascor branch, at
+  its cause). With `recurrence_service_url` unset, a Recurrence selection is recorded over the
+  cascor/demo backend and Apply Dataset sent `equities_seq` -- rank 3 -- toward
+  cascade-correlation, which answered 502. The handoff filed that as *"cascor's `Literal` lacks
+  `equities_seq`"*, to be fixed in cascor. It is not a cascor defect: cascor refuses 3-D artifacts
+  **by design** at the tier boundary (`api/lifecycle/manager.py:3815`, *"3-D sequence artifacts
+  belong to the juniper-recurrence tier"*, W-2), and widening the `Literal` would only move the
+  refusal from the request boundary to artifact load, after a juniper-data round trip. The defect
+  is canopy staging into a backend the selection does not target -- the inactive state N5 names.
+  `POST /api/stage_dataset` now refuses it with 409 and the N5 reason, Apply Dataset is disabled
+  there alongside Start (same callback, same predicate), and the train-gate notice names both
+  controls. Nothing reaches cascor; its refusal stays where it is.
 
 - **A backend that cannot stage a dataset returned an opaque 500** (X6 / design §4.9).
   `RecurrenceBackend` has no `stage_dataset`, and `POST /api/stage_dataset` called it unguarded, so
