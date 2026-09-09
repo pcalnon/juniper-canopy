@@ -740,9 +740,12 @@ class TestN5StartRequiresBackendAgreement:
     def test_the_other_controls_are_untouched(self, manager):
         out = self._appearance(manager, "recurrence", "equities_seq", X1_PAYLOAD)
         assert out[0] is True
-        # pause / stop / resume / reset follow button-states; Apply Dataset follows the dataset axis.
+        # pause / stop / resume / reset follow button-states untouched.
         assert (out[2], out[4], out[6], out[8]) == (False, False, False, False)
-        assert out[-1] is False
+        # Apply Dataset follows the same gate as Start since the staging fix (X6 / §4.9): staging
+        # toward a backend the selection does not target is exactly how a rank-3 dataset reached
+        # cascor. Pinned in full in test_recurrence_staging.py.
+        assert out[-1] is True
 
     def test_the_notice_names_the_model_the_backend_and_the_consequence(self):
         notice = DashboardManager._train_gate_notice_handler("recurrence", model_state=X1_PAYLOAD)
@@ -750,7 +753,7 @@ class TestN5StartRequiresBackendAgreement:
         text = _text_of(notice)
         assert "Recurrence (LMU)" in text
         assert "demo" in text
-        assert "Start is disabled" in text
+        assert "Start and Apply Dataset are disabled" in text
         assert "filed under Recurrence (LMU)" in text
 
     def test_the_notice_is_hidden_while_the_two_agree(self):
