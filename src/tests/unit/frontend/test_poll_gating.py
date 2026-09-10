@@ -59,6 +59,12 @@ SHARED_LANES = ("fast-update-interval", "slow-update-interval")
 EXPECTED_GATED_INTERVALS = (
     ("fast-update-interval", None),
     ("slow-update-interval", None),
+    # F-CANOPY-035: the metrics-store poll's own lane. It is registered here — rather
+    # than left out — so the CAN-000 apply clamp still silences it exactly as it did
+    # while the poll rode the fast lane. Its ``disabled`` prop is additionally driven
+    # by the callback's ``running=`` guard, which is a renderer ``sideUpdate`` and not
+    # a callback Output, so this remains the prop's only REGISTERED writer.
+    ("metrics-store-interval", None),
     ("tabpoll-topology", "topology"),
     ("tabpoll-dataset", "dataset"),
     ("tabpoll-workers", "workers"),

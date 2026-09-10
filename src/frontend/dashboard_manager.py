@@ -452,10 +452,25 @@ _CASCADE_ONLY_TAB_IDS = frozenset({"candidates", "topology", "evolution", "bound
 #
 # Design of record: notes/JUNIPER_2026-08-23_JUNIPER-CANOPY_CALLBACK-STARVATION-REMEDIATION-DESIGN.md
 # Evidence:         juniper-ml notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md
+# F-CANOPY-035: the metrics-store poll's dedicated lane id, referenced by the layout,
+# its callback's ``Input`` and ``running=`` guard, and the full-history modulus gate in
+# ``_update_metrics_store_handler``. Named once so those four cannot drift apart — the
+# handler's gate is a ``trigger.startswith(...)`` string test, which fails SILENTLY
+# (every tick refetches the complete history) if the interval is renamed without it.
+_METRICS_STORE_INTERVAL: Final[str] = "metrics-store-interval"
+
+
 _GATED_POLL_INTERVALS: Final[Tuple[Tuple[str, Optional[str]], ...]] = (
     # shared lanes — global consumers, apply-clamped only (CAN-000)
     ("fast-update-interval", None),
     ("slow-update-interval", None),
+    # F-CANOPY-035: the metrics-store poll's own lane. Registered here so the CAN-000
+    # apply clamp still silences it exactly as it did while the poll rode the fast
+    # lane. Its ``disabled`` prop is ALSO driven by the callback's ``running=`` guard,
+    # which is a renderer ``sideUpdate`` rather than a callback Output — so there is
+    # still exactly one registered writer of this prop, and the two never conflict
+    # except in the harmless window of a tab/apply change landing mid-fetch.
+    (_METRICS_STORE_INTERVAL, None),
     # dashboard-owned per-tab lanes (live OUTSIDE visualization-tabs, so the
     # A1-iii-b1 children rebuild cannot reset their gate)
     ("tabpoll-topology", "topology"),
@@ -1923,6 +1938,11 @@ class DashboardManager:
                 # Update intervals
                 dcc.Interval(id="fast-update-interval", interval=DashboardConstants.FAST_UPDATE_INTERVAL_MS, n_intervals=0),
                 dcc.Interval(id="slow-update-interval", interval=DashboardConstants.SLOW_UPDATE_INTERVAL_MS, n_intervals=0),
+                # F-CANOPY-035: the metrics-store poll's own lane, so it can stop its
+                # own clock while in flight (``running=`` on update_metrics_store)
+                # without silencing the nine other fast-lane callbacks. Same nominal
+                # cadence as the fast lane; see ``METRICS_STORE_POLL_INTERVAL_MS``.
+                dcc.Interval(id=_METRICS_STORE_INTERVAL, interval=DashboardConstants.METRICS_STORE_POLL_INTERVAL_MS, n_intervals=0),
                 # F-CANOPY-027: per-tab poll lanes. These carry the panel-scoped pollers that
                 # used to ride the shared fast/slow intervals, so an inactive tab costs ZERO
                 # renderer slots instead of one round-trip per tick per poller. They start
@@ -4205,12 +4225,41 @@ class DashboardManager:
         # consumed by a separate ``allow_duplicate`` append callback triggered ONLY by
         # ws-metrics-buffer. ws-liveness-store rides as State (never as an Input) for
         # the same reason.
+        # F-CANOPY-035: this poll rides its OWN Interval and stops that Interval for the
+        # duration of each fetch. Both halves are load-bearing and neither works alone.
+        #
+        # dash-renderer discards a response whose callback has left ``watched``
+        # (dash_renderer.dev.js:2698 — ``if (currentCb)`` … else return), and evicts a
+        # ``watched`` entry the instant the same callback identity appears in
+        # ``requested`` (:3027 — ``concat(watched, requested)`` grouped by
+        # ``getUniqueIdentifier``, each group sliced ``[0:-1]``, so the newcomer wins).
+        # ``getUniqueIdentifier`` hashes THIS callback's own inputs/outputs/state, so
+        # only its own re-request can evict it — never a sibling on the same lane.
+        #
+        # Consequence: while this rode ``fast-update-interval`` its ~1.5 s round trip was
+        # re-requested every 1.0 s, so every response was evicted before it could be
+        # applied and the store NEVER advanced. Measured on the live leg: 55 responses,
+        # all HTTP 200, all carrying the full payload, store length 0 throughout — and
+        # the store filled within ~3 s of the tick stopping, twice.
+        #
+        # ``running=`` disables this Interval at request dispatch and re-enables it when
+        # the response arrives — including on the error path (:1113), so a failed fetch
+        # cannot strand the poller. A re-request DURING flight therefore cannot happen at
+        # all, which is a structural guarantee rather than a tuned period. Measured
+        # effective cadence is ~7.3 s, most of it fixed overhead rather than the 1 s
+        # period — see ``METRICS_STORE_POLL_INTERVAL_MS`` for the numbers and why that
+        # is the right trade for a stale-stream backstop.
+        #
+        # Do NOT fold this back onto a shared lane: ``disabled`` is a property of the
+        # Interval, so guarding this callback there would silence the other nine
+        # fast-lane callbacks for ~60% of every second.
         @self.app.callback(
             Output("metrics-panel-metrics-store", "data"),
-            Input("fast-update-interval", "n_intervals"),
+            Input(_METRICS_STORE_INTERVAL, "n_intervals"),
             Input("metrics-panel-display-mode-store", "data"),
             dash.dependencies.State("ws-liveness-store", "data"),
             dash.dependencies.State("metrics-panel-metrics-store", "data"),
+            running=[(Output(_METRICS_STORE_INTERVAL, "disabled"), True, False)],
             prevent_initial_call=False,
         )
         def update_metrics_store(n, display_mode_state, ws_liveness, current_metrics):
@@ -7240,7 +7289,10 @@ class DashboardManager:
         if ws_live and not full_fetch:
             return dash.no_update
 
-        if full_fetch and trigger and trigger.startswith("fast-update-interval") and n and n % DashboardConstants.FULL_HISTORY_POLL_TICK_MODULUS != 0:
+        # F-CANOPY-035: the tick id moved from ``fast-update-interval`` to this poll's own
+        # lane. Both are accepted so a direct handler call written against either spelling
+        # still exercises the gate; the live wiring only ever sends the latter.
+        if full_fetch and trigger and trigger.startswith((_METRICS_STORE_INTERVAL, "fast-update-interval")) and n and n % DashboardConstants.FULL_HISTORY_POLL_TICK_MODULUS != 0:
             return dash.no_update
 
         try:

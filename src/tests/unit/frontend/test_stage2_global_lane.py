@@ -24,7 +24,7 @@ import pytest
 import requests
 
 from canopy_constants import DashboardConstants
-from frontend.dashboard_manager import DashboardManager
+from frontend.dashboard_manager import _METRICS_STORE_INTERVAL, DashboardManager
 
 
 @pytest.fixture(scope="module")
@@ -78,7 +78,14 @@ class TestLever1Consolidation:
         assert "gate_live_switch_button" not in names, "gate_live_switch_button must stay merged into update_unified_status_bar (F-CANOPY-025)"
 
     def test_global_lane_shape_is_pinned(self, dm):
-        """Exactly 3 fast-lane and 2 slow-lane server-side global riders remain."""
+        """Exactly 2 fast-lane and 2 slow-lane server-side global riders remain.
+
+        ``update_metrics_store`` LEFT the fast lane in the F-CANOPY-035 fix and now
+        rides ``metrics-store-interval``, which it stops for the duration of each
+        fetch. It was 3 fast-lane riders before that; the count is 2 by design, not
+        by drift. ``TestF035MetricsPollHasItsOwnGuardedLane`` below pins where it
+        went — without that companion, deleting the poll entirely would pass here.
+        """
         fast, slow = [], []
         for entry in dm.app.callback_map.values():
             cb = entry.get("callback")
@@ -91,8 +98,97 @@ class TestLever1Consolidation:
                 fast.append(name)
             if "slow-update-interval" in input_ids:
                 slow.append(name)
-        assert sorted(fast) == sorted(["update_unified_status_bar", "update_metrics_store", "handle_button_timeout_and_acks"]), f"fast lane drifted: {sorted(fast)}"
+        assert sorted(fast) == sorted(["update_unified_status_bar", "handle_button_timeout_and_acks"]), f"fast lane drifted: {sorted(fast)}"
         assert sorted(slow) == sorted(["update_system_panels", "poll_dataset_swap_events"]), f"slow lane drifted: {sorted(slow)}"
+
+
+class TestF035MetricsPollHasItsOwnGuardedLane:
+    """F-CANOPY-035 — the metrics-store poll must not be able to re-request over itself.
+
+    dash-renderer discards a response whose callback has left ``watched``
+    (dash_renderer.dev.js:2698) and evicts a ``watched`` entry the moment the same
+    callback identity appears in ``requested`` (:3027, ``concat(watched, requested)``
+    grouped by ``getUniqueIdentifier``, each group sliced ``[0:-1]``). While this poll
+    rode ``fast-update-interval`` its ~1.5 s round trip was re-requested every 1.0 s,
+    so every response was evicted before it could be applied: measured on the live leg
+    as 55 responses, all HTTP 200, all carrying a full payload, store length 0
+    throughout, filling within ~3 s of the tick being stopped.
+
+    Two properties keep that fixed, and neither is sufficient alone — a dedicated lane
+    with no guard still re-requests over itself whenever the round trip exceeds the
+    period, and a guard on a SHARED lane would silence the other nine fast-lane
+    callbacks for the duration of every fetch. Both are asserted here.
+    """
+
+    def _entry(self, dm):
+        for key, entry in dm.app.callback_map.items():
+            cb = entry.get("callback")
+            raw = getattr(cb, "__wrapped__", cb)
+            if getattr(raw, "__name__", None) == "update_metrics_store":
+                return key, entry
+        raise AssertionError("update_metrics_store is not registered")
+
+    def _spec(self, dm, key):
+        for spec in getattr(dm.app, "_callback_list", []):
+            if str(spec.get("output")) == str(key):
+                return spec
+        raise AssertionError(f"no callback spec for {key}")
+
+    def test_poll_rides_its_own_interval_not_a_shared_lane(self, dm):
+        _key, entry = self._entry(dm)
+        input_ids = {i.get("id") for i in entry.get("inputs", []) if isinstance(i, dict)}
+        assert _METRICS_STORE_INTERVAL in input_ids, f"metrics poll lost its own lane: {input_ids}"
+        assert "fast-update-interval" not in input_ids, "metrics poll is back on the shared fast lane (F-CANOPY-035)"
+        assert "slow-update-interval" not in input_ids, "metrics poll moved onto the shared slow lane (F-CANOPY-035)"
+
+    def test_poll_stops_its_own_clock_while_in_flight(self, dm):
+        """``running=`` is what makes a re-request during flight structurally impossible.
+
+        Asserted off the callback SPEC (``app._callback_list``), which is what is served
+        as ``_dash-dependencies`` and read by the renderer — ``running`` is not kept on
+        the ``callback_map`` entry.
+        """
+        key, _entry = self._entry(dm)
+        running = self._spec(dm, key).get("running")
+        assert running, "update_metrics_store lost its running= guard (F-CANOPY-035)"
+        prop = f"{_METRICS_STORE_INTERVAL}.disabled"
+        assert running.get("running", {}).get(prop) is True, f"guard does not disable its own interval: {running}"
+        assert running.get("runningOff", {}).get(prop) is False, f"guard does not re-enable its own interval: {running}"
+
+    def test_the_guarded_interval_exists_in_the_layout(self, dm):
+        """A ``running=`` Output naming a component that does not exist is a silent no-op."""
+
+        def walk(c):
+            yield c
+            children = getattr(c, "children", None)
+            if children is None:
+                return
+            if not isinstance(children, (list, tuple)):
+                children = [children]
+            for child in children:
+                if hasattr(child, "children") or hasattr(child, "id"):
+                    yield from walk(child)
+
+        ids = {getattr(c, "id", None) for c in walk(dm.app.layout)}
+        assert _METRICS_STORE_INTERVAL in ids, f"{_METRICS_STORE_INTERVAL} is not in the layout"
+
+    def test_full_history_modulus_gate_still_matches_the_live_trigger(self, dm):
+        """The gate is a ``trigger.startswith(...)`` string test — renaming the interval
+        without it makes ``full`` mode refetch the COMPLETE history every tick, silently.
+        """
+        with patch("requests.get") as mock_get:
+            mock_get.return_value = _resp(json_value={"history": [{"epoch": 1, "metrics": {"loss": 0.5}}]})
+            # a tick that is NOT a multiple of the modulus must be skipped
+            n = DashboardConstants.FULL_HISTORY_POLL_TICK_MODULUS + 1
+            result = dm._update_metrics_store_handler(
+                n=n,
+                display_mode_state={"mode": "full"},
+                current_metrics=[],
+                trigger=f"{_METRICS_STORE_INTERVAL}.n_intervals",
+                ws_live=False,
+            )
+            assert result is dash.no_update, "the full-history modulus gate no longer matches the live trigger id"
+            assert not mock_get.called, "the gate let a full-history fetch through on a non-modulus tick"
 
 
 class TestLever2Suppression:

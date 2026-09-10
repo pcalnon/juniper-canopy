@@ -370,6 +370,34 @@ class DashboardConstants:
     FAST_UPDATE_INTERVAL_MS: Final[int] = 1000  # 1 second
     SLOW_UPDATE_INTERVAL_MS: Final[int] = 5000  # 5 seconds
 
+    # F-CANOPY-035: the metrics-store REST poll's OWN lane. It is deliberately the
+    # same nominal cadence as the fast lane -- this is not a slowdown -- but it must
+    # be a SEPARATE ``dcc.Interval`` so ``update_metrics_store`` can stop its own
+    # clock while a fetch is in flight (``running=``) without silencing the other
+    # nine fast-lane callbacks. The poll self-clocks instead of re-requesting over
+    # itself.
+    #
+    # MEASURED effective cadence, so nobody has to rediscover it: ~7.3 s between
+    # requests at this 1000 ms period (round trip ~2.1 s, plus a ~5.1 s gap before the
+    # next request). That gap is NOT period-bound — dropping the period to 250 ms moved
+    # it only to ~4.3 s — so it is fixed overhead in re-enabling the guarded Interval,
+    # most likely the ``runningOff`` prop update waiting on a renderer cycle contended
+    # by the 1 Hz fast lane. Lowering this constant therefore buys very little.
+    #
+    # That is a real slowdown from the nominal 1 Hz and it is still the right trade:
+    # before this fix the store updated NEVER, and during live training the WS append
+    # path owns the store at full speed while this poll short-circuits on ``ws_live``
+    # without fetching at all. This is the stale-stream backstop, not the live path.
+    #
+    # WHY THIS EXISTS AT ALL. dash-renderer discards a response whose callback has
+    # left ``watched`` (dash_renderer.dev.js:2698), and evicts a ``watched`` entry
+    # the moment the same callback identity appears in ``requested``
+    # (:3027 -- ``requested`` is concatenated last, so the newcomer wins). A poll
+    # whose round trip exceeds its trigger period is therefore re-requested over
+    # itself forever and NEVER applies a single response. Measured on canopy at
+    # 1000 ms: 55 responses, every one carrying a full payload, store length 0.
+    METRICS_STORE_POLL_INTERVAL_MS: Final[int] = 1000  # 1 second (self-clocked; see above)
+
     # API timeouts (seconds)
     API_TIMEOUT_SECONDS: Final[int] = 2
     FAST_API_TIMEOUT_SECONDS: Final[float] = 1.0  # For fast-interval polling callbacks
