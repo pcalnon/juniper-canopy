@@ -60,6 +60,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The `equities_seq` seed could not generate, and once it could, it could not fit — so the one
+  pair this arc exists to make work had still never trained.** canopy#601 made
+  `(recurrence, equities_seq)` selectable and honestly gated; canopy#607 made it stageable. Neither
+  could reveal that pressing **Start** never produced a dataset. Two independent defects, in the
+  registry seed, each fatal at a different stage, both measured against juniper-data on 2026-09-09:
+
+  1. **`max_symbols` is a cap that REFUSES, not a truncator.** The seed carried
+     `{"max_symbols": 5}`, and juniper-data compares that against the *requested* universe — the
+     bundled 503 names — then raises `InputTooLargeError` → **HTTP 422** unless `allow_truncation`
+     is set. Every Start failed in 0.0s. The seed's own comment described this key as capping "the
+     ~500-symbol juniper-data default", which is what it looks like and not what it does.
+     juniper-ml's `tests/test_equities_symbol_cap_operator.py` already names the trap in as many
+     words — *"`max_symbols` alone does not save a default-universe cell"* — and warns off the
+     `allow_truncation` escape, because enabling it deployment-wide opts everything into silent
+     prefix cuts. The seed now pins an explicit five-name `symbols` list, the remedy that test
+     prescribes and that `juniper-recurrence/bench` already used.
+  2. **`fundamentals_fill` defaults to `"nan"`, and the LMU refuses non-finite input.** With the cap
+     cleared, generation succeeded and `LMURegressor.fit` then died on `ValueError: u must be
+     finite`. `X_train` came back **9.1% non-finite** — and `X_val` and `X_test` entirely clean, so
+     any check that sampled the held-out splits saw a healthy dataset. The affected columns are
+     exactly `EQUITIES_FEATURE_COLUMNS[7]`, `[8]` and `[15]`: `total_shares`, `market_cap` and
+     `days_since_report`. The seed now pins `fundamentals_fill="drop"`. Note the schema calls these
+     values "pre-2009 missing", but that is not the whole story and a later start date is **not** a
+     substitute: `start_date="2010-01-01"` still yields 299,808 non-finite cells.
+
+  Measured on the repaired seed: generate 0.9s, fit 39.6s, 15,476 training windows of `(64, 16)` —
+  **40.5s against the 300s train timeout**. `drop` was chosen over `zero` on evidence (fit 39.6s vs
+  77.3s, r² −0.004 vs −0.034) and because `zero` invents market caps for the model to fit against.
+  An r² near zero is the honest outcome for next-day equity returns rather than a defect — it is
+  also why this seed demonstrates little, and why the §12 synthetic rank-3 generators are the
+  better showcase for the LMU.
+
+  **Guards added, because canopy had none.** `TestEquitiesSeedIsGenerableAndFinite`
+  (`src/tests/regression/test_dataset_generator_contract.py`) fails any equities-family seed that
+  leans on the default universe or leaves `fundamentals_fill` at `"nan"`, and refuses to pass
+  vacuously if the seed is ever renamed out of the family. `dataset_default_params` now returns a
+  **deep** copy: it returned `dict(...)`, which was sufficient while every seeded value was a
+  scalar, but the new `symbols` list would otherwise have been shared with the frozen registry
+  constant, so one in-place `append` anywhere would have rewritten the seed for the process's life.
+  `test_oneshot_start_body.py` now derives its expected params from the registry instead of
+  restating them — a hand-copied literal pins tuning values in a suite that has no opinion about
+  tuning, and it reddened here, which is the tell.
+
 - **The dataset-generator proxy never authenticated, so on a keyed deployment every dataset's
   params panel read "No adjustable parameters" (Y5).** `GET /api/dataset/generators` fetched
   juniper-data's `/v1/generators` with bare `httpx` and no `X-API-Key`. That route is **not** in

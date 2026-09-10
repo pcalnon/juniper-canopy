@@ -81,7 +81,12 @@ def _text_of(component):
 # Recurrence recorded over the demo backend: the D-8 / X1 state, ``swapped`` False.
 INACTIVE_STATE = {"nn_model": "recurrence", "backend": "demo", "execution": "continuous", "status": "live", "swapped": False}
 LIVE_STATE = {"nn_model": "recurrence", "backend": "recurrence", "execution": "one_shot", "status": "live", "swapped": True}
-STAGED = {"nn_dataset_type": "equities_seq", "nn_dataset_params": {"max_symbols": 2}}
+# The operator's applied edit. It overrides the seed's ``symbols`` with a SHORTER list, which is
+# what narrowing an equities universe actually looks like. It deliberately does not override
+# ``max_symbols``: that key is a cap juniper-data refuses against, so pairing a cap of 2 with the
+# seed's five names would make this fixture encode a config that 422s in production -- invisible
+# here, because the adapter is a recorder, and wrong everywhere else.
+STAGED = {"nn_dataset_type": "equities_seq", "nn_dataset_params": {"symbols": ["AAPL", "MSFT"]}}
 
 
 @pytest.fixture
@@ -102,8 +107,14 @@ class TestTheStagedConfigTranslation:
     def test_registry_defaults_seed_the_params(self):
         ref = dataset_ref_from_staged({"nn_dataset_type": "equities_seq"})
         assert ref == {"generator": "equities_seq", "params": dataset_default_params("equities_seq"), "split": "train"}
-        # The bound that keeps the one-shot fit inside the service timeout rides along.
-        assert ref["params"]["max_symbols"] == 5
+        # The two keys without which this seed cannot train at all ride along. ``symbols`` pins the
+        # universe (``max_symbols`` is a cap juniper-data REFUSES against, not a truncator, so the
+        # former seed generated nothing); ``fundamentals_fill`` keeps X_train finite (at the "nan"
+        # default the LMU rejects it outright). Both are measured in the registry's own comment and
+        # pinned by TestEquitiesSeedIsGenerableAndFinite in test_dataset_generator_contract.py.
+        assert ref["params"]["symbols"] == ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"]
+        assert ref["params"]["fundamentals_fill"] == "drop"
+        assert "max_symbols" not in ref["params"]
 
     def test_the_alias_map_is_applied_here_and_only_here(self):
         # The staging PAYLOAD stays in canopy's dialect (``test_the_STAGING_payload_must_NOT_be_translated``);
@@ -112,8 +123,10 @@ class TestTheStagedConfigTranslation:
         assert dataset_ref_from_staged({"nn_dataset_type": "spirals"})["generator"] == "spiral"
 
     def test_operator_edits_override_the_seed(self):
-        ref = dataset_ref_from_staged({"nn_dataset_type": "equities_seq", "nn_dataset_elements": 40, "nn_dataset_params": {"max_symbols": 2, "symbols": ["AAPL"]}})
-        assert ref["params"] == {"max_symbols": 2, "regression_target": "return", "n_samples": 40, "symbols": ["AAPL"]}
+        ref = dataset_ref_from_staged({"nn_dataset_type": "equities_seq", "nn_dataset_elements": 40, "nn_dataset_params": {"symbols": ["AAPL"], "fundamentals_fill": "zero"}})
+        # Registry defaults seeded, the typed field added, and BOTH overridden keys replaced --
+        # including ``fundamentals_fill``, so an operator who wants the zero-filled variant gets it.
+        assert ref["params"] == {"symbols": ["AAPL"], "regression_target": "return", "fundamentals_fill": "zero", "n_samples": 40}
 
     def test_spiral_only_typed_fields_never_reach_a_sequence_generator(self):
         ref = dataset_ref_from_staged({"nn_dataset_type": "equities_seq", "nn_spiral_rotations": 2.0, "nn_spiral_number": 3})
@@ -129,7 +142,7 @@ class TestRecurrenceBackendStagesInProcess:
     def test_stage_then_status_then_cancel(self, backend):
         assert backend.get_pending_dataset() == {"ok": True, "pending": None}
         assert backend.get_status().get("pending_dataset") is None
-        result = backend.stage_dataset(nn_dataset_type="equities_seq", nn_dataset_params={"max_symbols": 2}, nn_dataset_noise=None)
+        result = backend.stage_dataset(nn_dataset_type="equities_seq", nn_dataset_params={"symbols": ["AAPL", "MSFT"]}, nn_dataset_noise=None)
         assert result["ok"] is True
         assert result["data"]["status"] == "staged"
         assert result["data"]["config"] == STAGED
@@ -161,7 +174,7 @@ class TestRecurrenceBackendStagesInProcess:
         assert _wait_until(lambda: not backend.is_training_active())
         call = backend._adapter.calls[0]
         assert call["generator"] == "equities_seq"
-        assert call["params"] == {"max_symbols": 2, "regression_target": "return"}
+        assert call["params"] == {"symbols": ["AAPL", "MSFT"], "regression_target": "return", "fundamentals_fill": "drop"}
         assert call["split"] == "train"
         # Consumed: the banner closes, as it does when cascor clears ``pending_dataset``.
         assert backend.get_pending_dataset()["pending"] is None
@@ -175,7 +188,7 @@ class TestRecurrenceBackendStagesInProcess:
         result = backend.start_training(reset=True, generator="equities_seq", params=dataset_default_params("equities_seq"))
         assert result["ok"] is True, result
         assert _wait_until(lambda: not backend.is_training_active())
-        assert backend._adapter.calls[0]["params"]["max_symbols"] == 2
+        assert backend._adapter.calls[0]["params"]["symbols"] == ["AAPL", "MSFT"]
 
     def test_without_a_staged_dataset_the_body_is_used_unchanged(self, backend):
         result = backend.start_training(reset=True, generator="equities_seq", params={"max_symbols": 1}, d=4)
@@ -235,7 +248,7 @@ class TestTheRoutesStageThePair:
         assert resp.json()["success"] is True
         assert _wait_until(lambda: not recurrence.is_training_active())
         assert recurrence._adapter.calls[0]["generator"] == "equities_seq"
-        assert recurrence._adapter.calls[0]["params"]["max_symbols"] == 2
+        assert recurrence._adapter.calls[0]["params"]["symbols"] == ["AAPL", "MSFT"]
         assert recurrence.get_pending_dataset()["pending"] is None
 
     def test_cancel_pending_reaches_the_recurrence_backend(self, client, recurrence):

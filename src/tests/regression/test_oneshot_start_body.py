@@ -49,7 +49,13 @@ from backend.recurrence_service_adapter import RecurrenceTrainResult
 from frontend.dashboard_manager import DashboardManager
 from model_registry import dataset_default_params
 
-_EQUITIES_PARAMS = {"max_symbols": 5, "regression_target": "return"}
+# Derived, not restated. What these tests pin is the RELATIONSHIP -- the one-shot Start body
+# carries the registry's seed for the selected dataset, verbatim -- and a hand-copied literal
+# pins the seed's current VALUES instead, so every tuning change reds a suite that has no
+# opinion about tuning. (It did: the 2026-09-09 equities repair had to touch this line, which
+# is the tell.) ``dataset_default_params`` returns a fresh copy per call, so the decoupling
+# test below still has something real to mutate.
+_EQUITIES_PARAMS = dataset_default_params("equities_seq")
 
 
 # --------------------------------------------------------------------------- resolution handler
@@ -86,8 +92,12 @@ class TestResolveOneshotStartBody:
     def test_resolved_params_are_decoupled_from_registry(self):
         # Mutating the produced body must never bleed into the registry seed (copy semantics).
         body = DashboardManager._resolve_oneshot_start_body_handler("one_shot", "equities_seq")
-        body["dataset"]["params"]["max_symbols"] = 999
-        assert dataset_default_params("equities_seq")["max_symbols"] == 5
+        before = dataset_default_params("equities_seq")
+        body["dataset"]["params"]["regression_target"] = "next_close"
+        body["dataset"]["params"]["injected_by_this_test"] = 999
+        # Both a replaced key and an added one, against a fresh read of the seed: mutation of the
+        # produced body must not bleed back, whichever keys the seed happens to carry today.
+        assert dataset_default_params("equities_seq") == before
 
 
 # --------------------------------------------------------------------------- server-side transport
