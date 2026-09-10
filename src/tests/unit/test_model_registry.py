@@ -78,18 +78,51 @@ def test_default_params_seeded_only_for_equities_seq():
     by_value = {spec.value: spec for spec in DATASET_TYPES}
     for value in ("spirals", "xor", "mnist", "circles", "moons"):
         assert by_value[value].default_params == {}
-    assert by_value["equities_seq"].default_params == {"max_symbols": 5, "regression_target": "return"}
+    # The seed's three keys. ``symbols`` (not ``max_symbols`` -- that is a cap juniper-data
+    # REFUSES against, so the former seed generated nothing) and ``fundamentals_fill`` (at
+    # juniper-data's "nan" default X_train comes back non-finite and the LMU rejects it) are
+    # each load-bearing; TestEquitiesSeedIsGenerableAndFinite in
+    # tests/regression/test_dataset_generator_contract.py pins WHY, this pins WHAT.
+    assert by_value["equities_seq"].default_params == {
+        "symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"],
+        "regression_target": "return",
+        "fundamentals_fill": "drop",
+    }
 
 
 def test_dataset_default_params_returns_seed_copy():
     """A1-iv-3c: the resolver returns the seed for a known value, ``{}`` for an unknown one, and a
     COPY so a caller mutating the result can never corrupt the frozen registry constant."""
-    assert dataset_default_params("equities_seq") == {"max_symbols": 5, "regression_target": "return"}
+    by_value = {spec.value: spec for spec in DATASET_TYPES}
+    assert dataset_default_params("equities_seq") == by_value["equities_seq"].default_params
     assert dataset_default_params("spirals") == {}
     assert dataset_default_params("nonexistent") == {}
+    # Copy semantics, asserted without naming a key the seed may stop carrying: replace one
+    # existing entry and add a new one, then re-read.
+    before = dataset_default_params("equities_seq")
     first = dataset_default_params("equities_seq")
-    first["max_symbols"] = 999
-    assert dataset_default_params("equities_seq")["max_symbols"] == 5
+    first["regression_target"] = "next_close"
+    first["injected_by_this_test"] = 999
+    assert dataset_default_params("equities_seq") == before
+
+
+def test_dataset_default_params_copy_is_deep():
+    """The copy must survive mutation of a NESTED value, not just of a top-level key.
+
+    ``equities_seq`` seeds a ``symbols`` list. Under the previous ``dict(...)`` shallow copy
+    every caller received the very same list object as the frozen registry constant, so a
+    single in-place ``append``/``clear`` anywhere would have rewritten the seed for the life
+    of the process — and the next Start would have sent a universe nobody selected, with
+    nothing in the UI showing it had changed. No caller mutates in place today; this pins
+    that none may start.
+    """
+    seeded = dataset_default_params("equities_seq")
+    assert isinstance(seeded.get("symbols"), list), "seed no longer carries a list; retarget this test rather than deleting it"
+    seeded["symbols"].append("INJECTED")
+    seeded["symbols"][0] = "MUTATED"
+    fresh = dataset_default_params("equities_seq")
+    assert "INJECTED" not in fresh["symbols"]
+    assert fresh["symbols"][0] != "MUTATED"
 
 
 def test_model_keys_are_unique():

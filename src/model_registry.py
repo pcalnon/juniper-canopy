@@ -78,6 +78,7 @@ See the module header and the design-of-record note for the full design.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 
 
@@ -141,11 +142,45 @@ DATASET_TYPES: tuple[DatasetTypeSpec, ...] = (
         task_type="regression",
         ndim=3,
         temporal="irregular",
-        # Bounded + stationary so the one-shot fit is fast and well-conditioned: cap the universe
-        # (vs the ~500-symbol juniper-data default that would blow the 300s train timeout) and use
-        # the stationary return target (the raw next_close default extrapolates badly on trending
-        # prices — see the recurrence equities readout finding).
-        default_params={"max_symbols": 5, "regression_target": "return"},
+        # Bounded + stationary + FINITE, so the one-shot fit actually runs. Each key is load-bearing
+        # and was measured, not reasoned about (design §12.4: a count is not a measured capability).
+        #
+        # ``symbols`` — NOT ``max_symbols``. ``max_symbols`` is a CAP that REFUSES, not a truncator:
+        #   juniper-data compares it against the requested universe (the bundled 503 names) and
+        #   raises InputTooLargeError -> HTTP 422 unless ``allow_truncation`` is set. The previous
+        #   ``{"max_symbols": 5}`` therefore generated NOTHING, in 0.0s, on every Start — which is
+        #   why the pair had never once trained end to end. juniper-ml's
+        #   tests/test_equities_symbol_cap_operator.py names this exact trap ("max_symbols alone
+        #   does not save a default-universe cell") and warns off the allow_truncation escape,
+        #   because enabling it deployment-wide opts everything into silent prefix cuts. An explicit
+        #   short list is the remedy it prescribes; juniper-recurrence's own bench does the same.
+        #   Five names also sit under the deployment ceiling (14), so the cap keeps its guard value.
+        #
+        # ``fundamentals_fill="drop"`` — the juniper-data default is ``"nan"``, and at that default
+        #   X_train comes back 9.1% NON-FINITE while X_val and X_test are entirely clean. The LMU
+        #   refuses it outright (``ValueError: u must be finite``), so fixing only the cap above
+        #   moves the failure from generation to the fit rather than removing it. The non-finite
+        #   columns are exactly EQUITIES_FEATURE_COLUMNS[7], [8] and [15] — total_shares, market_cap
+        #   and days_since_report. NB the schema calls these "pre-2009 missing", but that is not the
+        #   whole story: ``start_date="2010-01-01"`` still yields 299,808 non-finite cells, so a
+        #   later start does NOT substitute for this key. ``drop`` beats ``zero`` on every measured
+        #   axis (fit 39.6s vs 77.3s, r² -0.004 vs -0.034) and, unlike ``zero``, invents no
+        #   market caps for the model to fit against. Dropping rows is safe for a SEQUENCE dataset
+        #   here because the generator emits per-step dt and this seed is ``temporal="irregular"``:
+        #   a gap is representable, which is the whole point of the requires_dt path.
+        #
+        # ``regression_target="return"`` — unchanged; the stationary target (the raw next_close
+        #   default extrapolates badly on trending prices — the recurrence equities readout finding).
+        #
+        # Measured 2026-09-09 on this seed: generate 0.9s, fit 39.6s, 15,476 train windows of
+        # (64, 16) — 40.5s against the 300s train timeout. r² near zero is the honest outcome for
+        # next-day equity returns, not a defect; it is also why this seed demonstrates little, and
+        # why the §12 synthetic rank-3 generators are the better showcase for the LMU.
+        default_params={
+            "symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"],
+            "regression_target": "return",
+            "fundamentals_fill": "drop",
+        },
     ),
 )
 
@@ -214,10 +249,18 @@ def dataset_default_params(value: str, *, dataset_types: tuple[DatasetTypeSpec, 
     params so the fit is bounded + stationary (see ``DatasetTypeSpec.default_params``). A copy
     is returned so a caller can never mutate the registry seed. Unknown ``value`` → ``{}``.
     ``dataset_types`` is injectable for tests (design §5 enabling change).
+
+    **Deep**, not ``dict(...)``. A shallow copy was sufficient while every seed value was a
+    scalar; ``equities_seq`` now seeds a ``symbols`` LIST, and a shallow copy hands every
+    caller the same list object as the frozen registry constant — so one
+    ``params["symbols"].append(...)`` anywhere would rewrite the seed for the life of the
+    process, and the next Start would send a universe nobody chose. Replacing a key is the
+    only mutation callers perform today (``dataset_ref_from_staged`` uses ``update``), so
+    this costs nothing and closes the aliasing hole before it is opened.
     """
     for spec in dataset_types:
         if spec.value == value:
-            return dict(spec.default_params)
+            return copy.deepcopy(dict(spec.default_params))
     return {}
 
 

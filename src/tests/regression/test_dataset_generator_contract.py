@@ -83,8 +83,9 @@ class TestX3OneShotBodyUsesTheResolvedName:
     def test_params_are_looked_up_under_canopy_s_value_not_the_upstream_name(self):
         # The asymmetry that makes this easy to "fix" wrongly: canopy's registry is keyed on
         # canopy's values, so translating the params lookup too would silently drop the seeded
-        # default_params -- and equities_seq's max_symbols cap is what keeps the one-shot fit
-        # inside the train timeout.
+        # default_params -- and equities_seq cannot generate OR fit without them (``symbols``
+        # clears juniper-data's universe cap, ``fundamentals_fill`` keeps X_train finite; see
+        # TestEquitiesSeedIsGenerableAndFinite below).
         body = DashboardManager._resolve_oneshot_start_body_handler("one_shot", "equities_seq")
         seeded = get_dataset_spec("equities_seq").default_params
         if seeded:
@@ -179,3 +180,57 @@ class TestX8TaskTypeDivergenceIsDeliberate:
         # model and an unselectable one.
         recurrence = next(m for m in MODELS if m.key == "recurrence")
         assert [d.value for d in DATASET_TYPES if compatible_models(d, models=(recurrence,))] == ["equities_seq"]
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestEquitiesSeedIsGenerableAndFinite:
+    """An equities seed must carry the two keys without which it cannot train at all.
+
+    Both were measured against juniper-data on 2026-09-09, and each defeated the pair
+    (recurrence, equities_seq) at a DIFFERENT stage -- which is how the arc could ship N5
+    (canopy#601) and in-process staging (canopy#607) and still never once train end to end.
+
+    1. ``symbols``. ``max_symbols`` is a CAP that REFUSES, not a truncator: juniper-data
+       compares it against the requested universe (503 bundled names) and raises
+       InputTooLargeError -> 422 unless ``allow_truncation`` is set. The shipped seed
+       ``{"max_symbols": 5}`` generated nothing, in 0.0s, on every Start.
+    2. ``fundamentals_fill``. Its juniper-data default is ``"nan"``, and at that default
+       X_train comes back 9.1% non-finite (total_shares / market_cap / days_since_report)
+       while X_val and X_test are entirely clean -- so a spot check that samples val or
+       test sees a perfectly healthy dataset. LMURegressor.fit refuses it outright:
+       ``ValueError: u must be finite``.
+
+    Hermetic on purpose: this reads canopy's own registry and imports no ``juniper_data``.
+    The copy installed in the canopy test env is 0.6.0, whose registry predates
+    ``equities_seq`` entirely (see this module's docstring), so asserting against it would
+    produce a false red on a stale dependency rather than on real drift.
+
+    Not pinned here: the specific tickers, or ``drop`` vs ``zero``. Those are tuning. The
+    invariant is that a seed which cannot generate, or which generates values its only
+    compatible model refuses, must not sit in the dropdown looking selectable.
+    """
+
+    # Both equities generators take the same universe and fundamentals knobs, so a future
+    # ``equities`` seed inherits both traps unchanged.
+    EQUITIES_GENERATORS = frozenset({"equities", "equities_seq"})
+
+    def _equities_seeds(self):
+        return [spec for spec in DATASET_TYPES if generator_name_for_type(spec.value) in self.EQUITIES_GENERATORS]
+
+    def test_there_is_at_least_one_equities_seed_to_check(self):
+        # Guards the vacuous pass: if the seed is renamed out of the family, the two tests
+        # below keep passing while asserting over an empty list.
+        assert self._equities_seeds(), "no equities-family seed found -- the assertions below would be vacuous"
+
+    def test_every_equities_seed_pins_its_universe(self):
+        for spec in self._equities_seeds():
+            params = spec.default_params
+            symbols = params.get("symbols")
+            pinned = isinstance(symbols, (list, tuple)) and len(symbols) > 0
+            assert pinned or params.get("allow_truncation") is True, f"{spec.value!r} relies on juniper-data's default 503-name universe: it pins neither a " f"'symbols' list nor allow_truncation, so every Start 422s with InputTooLargeError. " f"'max_symbols' does NOT rescue this -- it IS the cap being exceeded. got={params!r}"
+
+    def test_every_equities_seed_pins_a_finite_fundamentals_fill(self):
+        for spec in self._equities_seeds():
+            fill = spec.default_params.get("fundamentals_fill")
+            assert fill in ("zero", "drop"), f"{spec.value!r} leaves fundamentals_fill at juniper-data's 'nan' default, which puts " f"non-finite values in X_train (and ONLY X_train) -- LMURegressor.fit rejects them with " f"'u must be finite'. A later start_date is not a substitute: start_date=2010-01-01 " f"still yields 299,808 non-finite cells. got={fill!r}"
