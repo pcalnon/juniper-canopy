@@ -1870,15 +1870,44 @@ async def list_dataset_generators():
             import httpx
 
             data_url = settings.juniper_data_url.rstrip("/")
+            # Y5 (design §12.3 item 1). ``/v1/generators`` is NOT in juniper-data's
+            # EXEMPT_PATHS -- that set holds the three health probes and /metrics and
+            # nothing else -- so the route authenticates like any other. Every other
+            # canopy -> juniper-data call already sends this key, because they all go
+            # through juniper-data-client (``api_key=settings.juniper_data_api_key``);
+            # this proxy was the one raw-httpx caller that did not. On a keyed
+            # deployment it therefore 401'd and fell through to the built-in list
+            # below, which carries no ``schema`` -- so EVERY dataset's params panel
+            # rendered "No adjustable parameters". ``settings.juniper_data_api_key``
+            # is None when no key is configured, and an unkeyed juniper-data accepts
+            # the request either way, so sending nothing then is correct.
+            headers = {}
+            if settings.juniper_data_api_key:
+                headers["X-API-Key"] = settings.juniper_data_api_key
             async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(f"{data_url}/v1/generators")
+                resp = await client.get(f"{data_url}/v1/generators", headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()
                     if isinstance(data, list):
                         generators = data
                     elif isinstance(data, dict) and "generators" in data:
                         generators = data["generators"]
+                else:
+                    # A reachable juniper-data that REFUSES us is a misconfiguration,
+                    # not an outage, and the fallback hides it behind a params panel
+                    # that merely looks featureless. The settings docstring for
+                    # ``juniper_data_api_key`` promises this failure is "loud rather
+                    # than silent"; at debug it was neither. The status code is the
+                    # whole diagnosis (401 = key missing/wrong, 403 = key rejected),
+                    # and nothing caller-supplied is echoed.
+                    system_logger.warning(
+                        "juniper-data refused GET /v1/generators with HTTP %s (api key %s); " "falling back to the built-in generator list, which carries no parameter schema",
+                        resp.status_code,
+                        "configured" if settings.juniper_data_api_key else "NOT configured",
+                    )
         except Exception as e:
+            # Unreachable service -- the fallback list is the intended demo affordance
+            # here, so this stays at debug. Only the refusal branch above is loud.
             system_logger.debug("Failed to fetch generators from JuniperData: %s", e)
 
     # Fallback to built-in demo generators

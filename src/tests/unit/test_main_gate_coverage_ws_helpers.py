@@ -569,19 +569,26 @@ class _FakeGetResp:
 
 
 class _FakeGetClient:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200, seen=None):
         self._payload = payload
+        self._status_code = status_code
+        # Y5: the recorder. ``headers`` is captured rather than ignored so a test can
+        # assert what canopy actually put on the wire, which is the whole defect.
+        self._seen = seen if seen is not None else []
 
-    async def get(self, url):
-        return _FakeGetResp(self._payload)
+    async def get(self, url, headers=None):
+        self._seen.append({"url": url, "headers": dict(headers or {})})
+        return _FakeGetResp(self._payload, status_code=self._status_code)
 
 
 class _FakeGetClientCM:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200, seen=None):
         self._payload = payload
+        self._status_code = status_code
+        self._seen = seen if seen is not None else []
 
     async def __aenter__(self):
-        return _FakeGetClient(self._payload)
+        return _FakeGetClient(self._payload, status_code=self._status_code, seen=self._seen)
 
     async def __aexit__(self, *args):
         return False
@@ -609,6 +616,58 @@ class TestListDatasetGenerators:
         result = await main.list_dataset_generators()
         names = {g["name"] for g in result["generators"]}
         assert {"spiral", "xor", "circles", "moon"} <= names
+
+    # --- Y5 (design §12.3 item 1): the proxy must authenticate ------------------
+    #
+    # ``/v1/generators`` is not in juniper-data's EXEMPT_PATHS, so a keyed deployment
+    # answered this proxy with 401 and canopy fell back to the built-in list -- which
+    # carries no ``schema``, so every dataset's params panel read "No adjustable
+    # parameters". Seeding the ten unseeded generators on top of that would have
+    # shipped ten datasets with no visible knobs, which is why §12.3 calls Y5 a hard
+    # blocker rather than a tidy-up.
+
+    @pytest.mark.asyncio
+    async def test_sends_api_key_header_when_configured(self, monkeypatch):
+        """A configured key travels as ``X-API-Key`` -- the Y5 defect, pinned."""
+        monkeypatch.setattr(main, "juniper_data_available", True)
+        monkeypatch.setattr(main.settings, "juniper_data_api_key", "test-key-123")
+        seen: list = []
+        with patch("httpx.AsyncClient", return_value=_FakeGetClientCM([{"name": "spiral"}], seen=seen)):
+            await main.list_dataset_generators()
+        assert len(seen) == 1
+        assert seen[0]["headers"].get("X-API-Key") == "test-key-123"
+        assert seen[0]["url"].endswith("/v1/generators")
+
+    @pytest.mark.asyncio
+    async def test_omits_api_key_header_when_unset(self, monkeypatch):
+        """No key configured -> no header. An unkeyed juniper-data accepts either way."""
+        monkeypatch.setattr(main, "juniper_data_available", True)
+        monkeypatch.setattr(main.settings, "juniper_data_api_key", None)
+        seen: list = []
+        with patch("httpx.AsyncClient", return_value=_FakeGetClientCM([{"name": "spiral"}], seen=seen)):
+            await main.list_dataset_generators()
+        assert len(seen) == 1
+        assert "X-API-Key" not in seen[0]["headers"]
+
+    @pytest.mark.asyncio
+    async def test_refusal_is_logged_loudly_and_falls_back(self, monkeypatch):
+        """A reachable-but-refusing juniper-data warns; at debug it was invisible.
+
+        The settings docstring for ``juniper_data_api_key`` promises the failure is
+        "loud rather than silent". The fallback still happens -- the panel must render
+        -- but the operator now gets the status code, which is the whole diagnosis.
+        """
+        monkeypatch.setattr(main, "juniper_data_available", True)
+        monkeypatch.setattr(main.settings, "juniper_data_api_key", None)
+        warnings: list = []
+        monkeypatch.setattr(main.system_logger, "warning", lambda msg, *a, **k: warnings.append(msg % a if a else msg))
+        with patch("httpx.AsyncClient", return_value=_FakeGetClientCM([], status_code=401)):
+            result = await main.list_dataset_generators()
+        names = {g["name"] for g in result["generators"]}
+        assert {"spiral", "xor", "circles", "moon"} <= names
+        assert len(warnings) == 1
+        assert "401" in warnings[0]
+        assert "NOT configured" in warnings[0]
 
 
 # =============================================================================
