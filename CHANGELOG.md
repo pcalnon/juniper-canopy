@@ -11,6 +11,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Five rank-3 sequence datasets, so the LMU has something to train on in the container it
+  actually ships in (design §12).** `multi_sine`, `mackey_glass`, `irregular_sine`, `ar_p` and
+  `delay_product` join the dataset dropdown. Each was validated the way §12.4 requires — generate,
+  then actually fit, observed once — rather than counted:
+
+  | dataset | X_train | Δt | generate | fit | r² |
+  |---|---|---|---|---|---|
+  | Multi-Sine | (1574, 32, 1) | regular | 0.00s | 0.10s | **1.000** |
+  | Mackey-Glass | (1574, 32, 1) | regular | 0.00s | 0.11s | **0.9999** |
+  | Irregular Sine | (1574, 32, 1) | irregular | 0.00s | 0.11s | **0.9918** |
+  | AR(p) | (1574, 32, 1) | regular | 0.01s | 0.10s | 0.043 |
+  | Delay Product | (1574, 32, 1) | irregular | 0.00s | 0.10s | 0.004 |
+
+  Zero non-finite values in any split, and **~0.1s end to end against a 300s train timeout** — four
+  hundred times faster than `equities_seq`, which takes 40.5s and scores r² −0.004.
+
+  **The point is not the count.** `equities_seq` was the LMU's only compatible dataset, and
+  `yfinance` is absent from juniper-data's `requirements.lock`, so in the deployed container it is
+  `available=false` — meaning selecting "Recurrence (LMU)" produced §4.7's *"No dataset is
+  available for this model"* and nothing else. These five are numpy-only and declare no
+  `is_available` hook upstream, so they are available in every deployment, and three of them are
+  signals the LMU demonstrably learns.
+
+  **Order is load-bearing.** They precede `equities_seq` in the registry because
+  `_gate_dataset_options_handler` snaps to the first compatible *and available* entry, so this is
+  what decides where an operator lands when they pick Recurrence. That is now `multi_sine`, and it
+  is asserted rather than left to chance.
+
+  `task_type="regression"` matches juniper-data's own declaration for all five, so unlike
+  `equities_seq` (the X8 divergence) these introduce no vocabulary disagreement. All five are
+  rank-3, so cascor still rejects them and the compatibility graph keeps exactly two connected
+  components — §12.2's "adds no deadlock surface", now asserted in
+  `test_compatible_datasets_resolver_over_seeds` rather than argued.
+
+  They carry **no** `default_params`, which is correct rather than an omission. G11 as the design
+  words it ("every seeded generator has bounded `default_params`") fails on the five incumbent 2-D
+  seeds and would fail on these too; measurement shows the unbounded axis is never generator
+  *parameters* but the size of an imported universe. `model_registry.py` records the restatement,
+  and the rule is enforced where it bites — the equities guard added in #610.
+
+- **`UNSEEDED_GENERATORS` — G10: an unseeded generator is now distinguishable from a forgotten
+  one.** Ten of juniper-data's sixteen generators were simply absent from the dropdown with nothing
+  recording whether that was a decision. Each remaining exclusion now carries its reason, checked
+  by `TestG10EveryUpstreamGeneratorIsSeededOrNamed` (which also refuses a reason too thin to act
+  on). Two are worth reading:
+
+  - **`arc_agi`'s rank is parameter-dependent**, which `DatasetTypeSpec.ndim` cannot express.
+    `flatten_pairs=True` (the default) gives rank-2 `(n, pad_to²)`; `False` gives rank-3
+    `(n, pad_to, pad_to)`. It is a plain boolean, so the schema-driven params panel *renders* it —
+    an operator could flip a dataset canopy statically declares `ndim=2` into rank-3 output, which
+    is compatible with nothing. §12.3 asked only that its rank be "confirmed before seeding"; the
+    answer is that it does not have one.
+  - **`csv_import` cannot be called with defaults at all** (`file_path` is required), confirming
+    §12.3 item 4's judgement that it is an import path rather than a peer generator.
+
+  `KNOWN_UPSTREAM_GENERATORS` is a dated snapshot taken by executing juniper-data's registry, not
+  an import — canopy has no version contract with that library and the copy in its test env is
+  0.6.0, old enough to predate `equities_seq`.
+
 - **The partial-data contract's three-way prompt — the last unbuilt piece of the contract.** When a
   Start is refused because juniper-data could not produce the staged dataset in full (cascor leaves
   the staged config in place for exactly this retry), a modal now puts the owner's three options to
