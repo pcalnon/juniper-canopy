@@ -539,11 +539,14 @@ class TestDatasetRepairNotice:
 
     def test_a_repaired_gate_names_the_old_and_the_new_value(self, manager):
         _options, value, notice = manager._gate_dataset_options_handler("recurrence", "spirals", generators=ALL_AVAILABLE)
-        assert value == "equities_seq"
+        # §12 moved the snap target: the five synthetic rank-3 seeds precede equities_seq, so the
+        # first compatible entry is now multi_sine. The NOTICE's contract is unchanged — it must
+        # still name both ends of the move and the model that caused it.
+        assert value == "multi_sine"
         text = _alert_text(notice)
         # "The dataset changed" without saying from what to what is an alarm, not a notice.
         assert "Spirals" in text
-        assert "Equities (sequence)" in text
+        assert "Multi-Sine (sequence)" in text
         assert "Recurrence (LMU)" in text
 
     def test_the_repair_notice_is_transient(self, manager):

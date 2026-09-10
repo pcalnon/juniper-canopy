@@ -43,7 +43,7 @@ from fastapi.testclient import TestClient
 import main
 from dataset_schema import GENERATOR_NAME_ALIASES, generator_name_for_type
 from frontend.dashboard_manager import DashboardManager
-from model_registry import DATASET_TYPES, MODELS, compatible_models, get_dataset_spec
+from model_registry import DATASET_TYPES, KNOWN_UPSTREAM_GENERATORS, MODELS, UNSEEDED_GENERATORS, compatible_models, get_dataset_spec
 
 
 @pytest.mark.regression
@@ -175,11 +175,89 @@ class TestX8TaskTypeDivergenceIsDeliberate:
         relabelled = dataclasses.replace(get_dataset_spec("equities_seq"), task_type="classification")
         assert compatible_models(relabelled, models=MODELS) == []
 
-    def test_the_lmu_has_exactly_one_compatible_dataset_today(self):
-        # Pins how little slack there is: one relabelled seed is the difference between a usable
-        # model and an unselectable one.
+    def test_the_lmu_s_compatible_set_is_the_six_rank_3_seeds(self):
+        """Was ``exactly_one``, and the one was ``equities_seq`` — which is exactly why §12 exists.
+
+        The old assertion pinned "how little slack there is: one relabelled seed is the
+        difference between a usable model and an unselectable one". §12's five synthetics
+        remove that knife-edge, and the ORDER matters as much as the membership: the sidebar
+        gate snaps to the first compatible AND available entry, so ``multi_sine`` leading is
+        what makes selecting Recurrence land on a dataset that is instant, offline and
+        actually learnable (r² 1.000) instead of on ``equities_seq``, which is 40.5s, r²
+        -0.004, and unavailable in the container at all.
+        """
         recurrence = next(m for m in MODELS if m.key == "recurrence")
-        assert [d.value for d in DATASET_TYPES if compatible_models(d, models=(recurrence,))] == ["equities_seq"]
+        assert [d.value for d in DATASET_TYPES if compatible_models(d, models=(recurrence,))] == [
+            "multi_sine",
+            "mackey_glass",
+            "irregular_sine",
+            "ar_p",
+            "delay_product",
+            "equities_seq",
+        ]
+
+    def test_every_lmu_dataset_but_equities_is_available_without_an_extra(self):
+        """The §4.7 empty-set state was the CONTAINER'S NORMAL STATE, and this is why it is not.
+
+        ``yfinance`` is absent from juniper-data's requirements.lock, so ``equities_seq`` is
+        ``available=false`` there — and while it was the LMU's only compatible dataset, picking
+        Recurrence in the container produced "No dataset is available for this model" and
+        nothing else. The five synthetics are numpy-only and declare no ``is_available`` hook
+        upstream, so they are available in every deployment.
+
+        Asserted against canopy's own registry (no ``juniper_data`` import — see this module's
+        docstring): every rank-3 seed except the equities one must be a generator canopy does
+        NOT list as needing an optional extra.
+        """
+        recurrence = next(m for m in MODELS if m.key == "recurrence")
+        rank3 = [d.value for d in DATASET_TYPES if compatible_models(d, models=(recurrence,))]
+        needs_extra = {"equities_seq", "equities", "mnist", "arc_agi"}
+        assert [v for v in rank3 if v not in needs_extra] == ["multi_sine", "mackey_glass", "irregular_sine", "ar_p", "delay_product"]
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG10EveryUpstreamGeneratorIsSeededOrNamed:
+    """G10 (design §12) — an unseeded generator must be distinguishable from a forgotten one.
+
+    Before this, "why is X not in the dataset dropdown?" had no answer anywhere in the repo:
+    ten of juniper-data's sixteen generators were simply absent, with nothing recording
+    whether that was a decision or an oversight. ``UNSEEDED_GENERATORS`` now carries the
+    reason for each, and this suite keeps the two lists honest against each other.
+
+    ``KNOWN_UPSTREAM_GENERATORS`` is a dated snapshot (2026-09-09, taken by executing
+    juniper-data's registry), not an import — see this module's docstring for why canopy must
+    not assert against the installed ``juniper_data``. Upstream ADDING a generator is
+    therefore not caught here; it is caught at runtime by ``/api/dataset/generators``.
+    """
+
+    def test_every_known_generator_is_either_seeded_or_named_unseeded(self):
+        seeded = {generator_name_for_type(spec.value) for spec in DATASET_TYPES}
+        accounted = seeded | set(UNSEEDED_GENERATORS)
+        missing = KNOWN_UPSTREAM_GENERATORS - accounted
+        assert not missing, f"generators that are neither seeded nor explained: {sorted(missing)} — add a seed, or an UNSEEDED_GENERATORS entry saying why not"
+
+    def test_no_generator_is_both_seeded_and_named_unseeded(self):
+        seeded = {generator_name_for_type(spec.value) for spec in DATASET_TYPES}
+        both = seeded & set(UNSEEDED_GENERATORS)
+        assert not both, f"listed as deliberately unseeded but present in the dropdown: {sorted(both)}"
+
+    def test_the_unseeded_list_names_no_unknown_generator(self):
+        # An entry for a generator upstream does not have is either a typo or a rename that was
+        # half-done; either way the "reason" it records is about nothing.
+        unknown = set(UNSEEDED_GENERATORS) - KNOWN_UPSTREAM_GENERATORS
+        assert not unknown, f"UNSEEDED_GENERATORS names generators absent from the snapshot: {sorted(unknown)}"
+
+    def test_every_seeded_value_resolves_to_a_known_generator(self):
+        seeded = {generator_name_for_type(spec.value) for spec in DATASET_TYPES}
+        unknown = seeded - KNOWN_UPSTREAM_GENERATORS
+        assert not unknown, f"seeded values that juniper-data does not register: {sorted(unknown)}"
+
+    @pytest.mark.parametrize("name", sorted(UNSEEDED_GENERATORS))
+    def test_each_exclusion_carries_a_substantive_reason(self, name):
+        # A one-word reason ("deferred") is the failure mode this list exists to prevent.
+        reason = UNSEEDED_GENERATORS[name]
+        assert len(reason.split()) >= 8, f"{name}'s exclusion reason is too thin to act on: {reason!r}"
 
 
 @pytest.mark.regression

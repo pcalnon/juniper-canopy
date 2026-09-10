@@ -130,12 +130,40 @@ class ModelSpec:
 # first (spirals = default), preserving the original inlined dropdown order. A1-iv-3b appends
 # the 3-D irregular-delta-t regression seed (``equities_seq``) so the recurrence (LMU) model
 # has a compatible dataset; the sidebar gate (``gated_dataset_options``) greys it for 2-D models.
+#
+# §12 (design "Iteration 2 — closing the generator gap") adds the five rank-3 SYNTHETIC
+# sequence generators. Two things about their placement are deliberate:
+#
+#   * They sit BEFORE ``equities_seq``. ``_gate_dataset_options_handler`` snaps the dropdown to
+#     ``enabled[0]`` — the first compatible AND available entry — so this order decides which
+#     dataset the operator lands on when they pick Recurrence. Measured 2026-09-09, that now
+#     means ``multi_sine``: generate 0.0s, fit 0.10s, r² 1.000. ``equities_seq`` is 40.5s and
+#     r² -0.004, and is ``available=false`` in the container at all (``yfinance`` is absent from
+#     juniper-data's requirements.lock), which is why selecting Recurrence there used to raise
+#     §4.7's "no dataset is available for this model" alert. These five declare no
+#     ``is_available`` hook, so they are available everywhere.
+#   * They carry NO ``default_params``, and that is correct rather than an omission — see
+#     ``UNBOUNDED_IMPORT_GENERATORS`` below. Their own generator defaults are already bounded:
+#     1,574 windows of (32, 1), generated and fitted in ~0.1s total against a 300s timeout.
+#
+# ``task_type="regression"`` matches what juniper-data declares for all five, so unlike
+# ``equities_seq`` (the X8 divergence) these seeds introduce no vocabulary disagreement.
+# All five are rank-3, so cascor (``input_ndim={2}``) rejects them and the compatibility graph
+# keeps exactly two components — §12.2's "this expansion adds no deadlock surface", now measured.
 DATASET_TYPES: tuple[DatasetTypeSpec, ...] = (
     DatasetTypeSpec(value="spirals", label="Spirals", task_type="classification", ndim=2),
     DatasetTypeSpec(value="xor", label="XOR", task_type="classification", ndim=2),
     DatasetTypeSpec(value="mnist", label="MNIST", task_type="classification", ndim=2),
     DatasetTypeSpec(value="circles", label="Circles", task_type="classification", ndim=2),
     DatasetTypeSpec(value="moons", label="Moons", task_type="classification", ndim=2),
+    # --- §12 rank-3 synthetics. r² is the LMU's fit at the service's effective defaults
+    # (d=16, data-driven theta, ridge=0.0), measured 2026-09-09; it is recorded because a
+    # generator that fits but learns nothing must not be mistaken for a good default.
+    DatasetTypeSpec(value="multi_sine", label="Multi-Sine (sequence)", task_type="regression", ndim=3, temporal="regular"),  # r² 1.000
+    DatasetTypeSpec(value="mackey_glass", label="Mackey-Glass (sequence)", task_type="regression", ndim=3, temporal="regular"),  # r² 0.9999
+    DatasetTypeSpec(value="irregular_sine", label="Irregular Sine (sequence)", task_type="regression", ndim=3, temporal="irregular"),  # r² 0.9918
+    DatasetTypeSpec(value="ar_p", label="AR(p) (sequence)", task_type="regression", ndim=3, temporal="regular"),  # r² 0.043 — a noisy AR process has a low ceiling
+    DatasetTypeSpec(value="delay_product", label="Delay Product (sequence)", task_type="regression", ndim=3, temporal="irregular"),  # r² 0.004 — multiplicative target, linear readout
     DatasetTypeSpec(
         value="equities_seq",
         label="Equities (sequence)",
@@ -186,6 +214,74 @@ DATASET_TYPES: tuple[DatasetTypeSpec, ...] = (
 
 # Default dataset type — preserves the prior hardcoded value="spirals".
 DEFAULT_DATASET_TYPE: str = DATASET_TYPES[0].value
+
+# --- G10 / G11 (design §12) -------------------------------------------------------------
+#
+# G10: every generator juniper-data registers is either seeded in ``DATASET_TYPES`` above or
+# named HERE with the reason it is not. The point is not bookkeeping — it is that "why is X
+# not in the dropdown?" currently has no answer anywhere, so an unseeded generator is
+# indistinguishable from a forgotten one.
+#
+# This is a DATED SNAPSHOT of juniper-data's registry, taken 2026-09-09 by executing it
+# (16 generators). It is deliberately not derived from an installed ``juniper_data``: canopy
+# talks to that service over HTTP and has no version contract with the library, and the copy
+# installed in the test env is 0.6.0 — old enough to predate ``equities_seq`` — so asserting
+# against it would produce false reds on a stale dependency rather than on real drift. The
+# LIVE check is ``/api/dataset/generators`` at runtime; this is the CI-visible half.
+KNOWN_UPSTREAM_GENERATORS: frozenset[str] = frozenset(
+    {
+        "spiral",
+        "xor",
+        "gaussian",
+        "circles",
+        "moon",
+        "checkerboard",
+        "csv_import",
+        "equities",
+        "equities_seq",
+        "multi_sine",
+        "mackey_glass",
+        "ar_p",
+        "irregular_sine",
+        "delay_product",
+        "mnist",
+        "arc_agi",
+    }
+)
+
+# Generators deliberately NOT offered in the dataset dropdown, each with the reason.
+UNSEEDED_GENERATORS: dict[str, str] = {
+    "csv_import": ("An import path, not a peer generator: it has no synthesisable default (``file_path`` is " "required, so calling it with defaults raises a ValidationError) and canopy already owns " "that flow in ``dataset_import.py``. Design §12.3 item 4."),
+    "gaussian": ("Rank-2 classification, cascor-compatible and a legitimate future seed — but §12.4 requires " "generate -> train observed once per new seed, and that validation runs against the cascor " "backend rather than the LMU. Deferred to the rank-2 seeding slice."),
+    "checkerboard": ("Rank-2 classification; same reason as ``gaussian`` — awaiting its §12.4 validation against " "cascor."),
+    "equities": ("Rank-2 classification, and it carries BOTH traps its sequence sibling did: ``max_symbols`` " "is a cap juniper-data refuses against rather than truncates, and ``fundamentals_fill`` " "defaults to ``nan``. It also needs the ``equities`` extra, which is absent from " "juniper-data's requirements.lock. Seed it with the same treatment ``equities_seq`` " "received (canopy#610), not before."),
+    "arc_agi": (
+        "Its RANK IS PARAMETER-DEPENDENT, which ``DatasetTypeSpec.ndim`` cannot express. "
+        "``flatten_pairs=True`` (the default) yields rank-2 ``(n, pad_to*pad_to)``; "
+        "``flatten_pairs=False`` yields rank-3 ``(n, pad_to, pad_to)``. That knob is a plain "
+        "boolean, so the schema-driven params panel RENDERS it — an operator could flip a dataset "
+        "canopy statically declares ``ndim=2`` into rank-3 output, which is compatible with nothing "
+        "(cascor takes rank-2 only; recurrence takes rank-3 but regression only, and this is "
+        "classification). Settle how the registry expresses a variable-rank generator first."
+    ),
+}
+
+# G11, restated — and deliberately NOT given a constant of its own, because a set no code reads
+# is a rule nobody enforces.
+#
+# The design's wording ("every seeded generator has bounded ``default_params``") overshoots: it
+# fails on the five incumbent 2-D seeds, which carry ``{}`` and always have, and it would fail on
+# the five §12 synthetics too. Measurement shows why. The unbounded axis is never the generator's
+# PARAMETERS; it is the size of whatever the request asks a generator to bring in from outside.
+# A generator that synthesises from its own parameters is bounded by its own defaults — the rank-3
+# five produce 1,574 windows in ~0.1s end to end. A generator that pulls an operator-sized UNIVERSE
+# is bounded only by what the request pins, and ``equities_seq`` at its defaults asks for 503
+# symbols and is refused outright.
+#
+# That is narrower than "imports data": ``mnist`` also downloads, but it downloads a fixed corpus
+# and is bounded by the sidebar's ``n_samples``, so ``{}`` is right for it. The generators the rule
+# actually binds are the equities pair, and it is enforced where the two specific keys live —
+# ``TestEquitiesSeedIsGenerableAndFinite`` in tests/regression/test_dataset_generator_contract.py.
 
 # Provider sentinel for models served by the juniper-recurrence model service. Single
 # source of truth shared by the ``recurrence`` ModelSpec seed (below) and the backend

@@ -70,6 +70,24 @@ def test_dataset_seeds_2d_classification_plus_3d_sequence():
     # A1-iv-3b: the 3-D irregular-Δt regression seed that makes the recurrence model selectable.
     seq = by_value["equities_seq"]
     assert seq.ndim == 3 and seq.task_type == "regression" and seq.temporal == "irregular"
+    # §12: the five synthetic rank-3 seeds. All regression (matching juniper-data's own
+    # declaration, so unlike equities_seq they carry no X8 vocabulary divergence), and their
+    # ``temporal`` matches the measured Δt: multi_sine / mackey_glass / ar_p emit a constant
+    # per-step Δt, irregular_sine / delay_product a genuinely non-uniform one. Measured
+    # 2026-09-09 by executing the registry — and note the measurement only reads correctly when
+    # dt column 0 is EXCLUDED, since that column is a 0.0 "no previous step" sentinel that makes
+    # every generator look irregular.
+    for value in ("multi_sine", "mackey_glass", "ar_p"):
+        spec = by_value[value]
+        assert spec.ndim == 3 and spec.task_type == "regression" and spec.temporal == "regular"
+    for value in ("irregular_sine", "delay_product"):
+        spec = by_value[value]
+        assert spec.ndim == 3 and spec.task_type == "regression" and spec.temporal == "irregular"
+    # They carry no default_params, and that is correct: they synthesise from their own bounded
+    # defaults (1,574 windows, ~0.1s to generate AND fit). See the G11 restatement in
+    # model_registry.py — the unbounded axis is an imported universe, not generator parameters.
+    for value in ("multi_sine", "mackey_glass", "ar_p", "irregular_sine", "delay_product"):
+        assert by_value[value].default_params == {}
 
 
 def test_default_params_seeded_only_for_equities_seq():
@@ -235,11 +253,21 @@ def test_compatible_models_resolver_over_seeds():
 
 
 def test_compatible_datasets_resolver_over_seeds():
-    # cascor (2-D, classification+regression) matches the five 2-D classification seeds, NOT the
-    # 3-D equities_seq (A1-iv-3b added it for the recurrence model).
+    # cascor (2-D, classification+regression) matches the five 2-D classification seeds and NONE of
+    # the six rank-3 ones. §12 added five sequence seeds without touching this list, which is
+    # §12.2's claim that the expansion adds no deadlock surface — the graph still has exactly two
+    # components — asserted rather than assumed.
     assert [dataset.value for dataset in compatible_datasets(_model("cascor"))] == ["spirals", "xor", "mnist", "circles", "moons"]
-    # recurrence (3-D irregular) now matches the equities_seq seed (was [] before iv-3b).
-    assert [dataset.value for dataset in compatible_datasets(_model("recurrence"))] == ["equities_seq"]
+    # recurrence (3-D, Δt-aware) matches all six rank-3 seeds, in registry order. multi_sine leads
+    # because the sidebar gate snaps to the first compatible+available entry (§12).
+    assert [dataset.value for dataset in compatible_datasets(_model("recurrence"))] == [
+        "multi_sine",
+        "mackey_glass",
+        "irregular_sine",
+        "ar_p",
+        "delay_product",
+        "equities_seq",
+    ]
 
 
 def test_resolvers_are_injectable_and_order_preserving():
@@ -339,9 +367,18 @@ def _spec(key):
     return spec
 
 
-def test_equities_seq_makes_recurrence_trainable():
-    """The 3-D seed gives the recurrence (LMU) model a compatible dataset (was [] before iv-3b)."""
-    assert [dataset.value for dataset in compatible_datasets(_spec("recurrence"))] == ["equities_seq"]
+def test_rank3_seeds_make_recurrence_trainable():
+    """The rank-3 seeds give the recurrence (LMU) model compatible datasets (was [] before iv-3b).
+
+    ``equities_seq`` alone held this open from A1-iv-3b until §12, and it was a thin thread:
+    it is unavailable in the container (``yfinance`` is absent from juniper-data's
+    requirements.lock), so in the deployment that matters the LMU had ZERO available datasets
+    and picking it raised §4.7's empty-set alert. The five synthetics are numpy-only.
+    """
+    reachable = [dataset.value for dataset in compatible_datasets(_spec("recurrence"))]
+    assert reachable == ["multi_sine", "mackey_glass", "irregular_sine", "ar_p", "delay_product", "equities_seq"]
+    # The one that must not need an optional extra is the one the gate will snap to.
+    assert reachable[0] == "multi_sine"
 
 
 def test_dataset_reason_none_when_compatible():

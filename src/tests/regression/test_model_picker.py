@@ -94,7 +94,13 @@ def test_gate_dataset_options_handler_greys_and_snaps_for_recurrence(manager):
     by_value = {option["value"]: option for option in options}
     assert by_value["spirals"]["disabled"] is True  # 2-D greyed for the 3-D model
     assert "disabled" not in by_value["equities_seq"]  # the compatible 3-D dataset stays plain
-    assert value == "equities_seq"  # the stranded 2-D selection snaps to the first compatible (D5)
+    assert "disabled" not in by_value["multi_sine"]  # §12's synthetics are compatible too
+    # The stranded 2-D selection snaps to the FIRST compatible entry (D5). §12 put the five
+    # synthetics ahead of equities_seq precisely so that entry is multi_sine: instant, offline,
+    # available without an optional extra, and r² 1.000 — where equities_seq is 40.5s, r² -0.004,
+    # and unavailable in the container at all. The snap target is a user-facing choice made by
+    # registry ORDER, so it is asserted here rather than left to whatever sorts first.
+    assert value == "multi_sine"
 
 
 def test_gate_dataset_options_handler_keeps_compatible_value(manager):
