@@ -64,13 +64,21 @@ def test_dataset_values_are_unique():
 
 def test_dataset_seeds_2d_classification_plus_3d_sequence():
     by_value = {spec.value: spec for spec in DATASET_TYPES}
-    # The five incumbents plus §12's two rank-2 synthetics (gaussian, checkerboard), which are
-    # shaped identically: 2-D, classification, non-temporal, and no default_params.
-    for value in ("spirals", "xor", "mnist", "circles", "moons", "gaussian", "checkerboard"):
+    # The five incumbents plus §12's three rank-2 seeds. All are 2-D, classification and
+    # non-temporal; `equities` is the only one of the eight that carries default_params, because
+    # it is the only one that imports an external universe.
+    for value in ("spirals", "xor", "mnist", "circles", "moons", "gaussian", "checkerboard", "equities"):
         spec = by_value[value]
         assert spec.ndim == 2 and spec.task_type == "classification" and spec.temporal == "none"
     for value in ("gaussian", "checkerboard"):
         assert by_value[value].default_params == {}
+    # equities' three keys are each load-bearing and each was measured; TestEquitiesSeedIsGenerableAndFinite
+    # in tests/regression/test_dataset_generator_contract.py pins WHY, this pins WHAT.
+    assert by_value["equities"].default_params == {
+        "symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"],
+        "fundamentals_fill": "drop",
+        "normalize_features": True,
+    }
     # A1-iv-3b: the 3-D irregular-Δt regression seed that makes the recurrence model selectable.
     seq = by_value["equities_seq"]
     assert seq.ndim == 3 and seq.task_type == "regression" and seq.temporal == "irregular"
@@ -257,12 +265,12 @@ def test_compatible_models_resolver_over_seeds():
 
 
 def test_compatible_datasets_resolver_over_seeds():
-    # cascor (2-D, classification+regression) matches the SEVEN 2-D classification seeds — the five
-    # incumbents plus §12's gaussian and checkerboard — and NONE of the six rank-3 ones. That the
-    # rank-3 additions never entered this list, and the rank-2 additions never entered the
+    # cascor (2-D, classification+regression) matches the EIGHT 2-D classification seeds — the five
+    # incumbents plus §12's gaussian, checkerboard and equities — and NONE of the six rank-3 ones.
+    # That the rank-3 additions never entered this list, and the rank-2 additions never entered the
     # recurrence one below, is §12.2's claim that the expansion adds no deadlock surface: the graph
     # still has exactly two components, asserted rather than assumed.
-    assert [dataset.value for dataset in compatible_datasets(_model("cascor"))] == ["spirals", "xor", "mnist", "circles", "moons", "gaussian", "checkerboard"]
+    assert [dataset.value for dataset in compatible_datasets(_model("cascor"))] == ["spirals", "xor", "mnist", "circles", "moons", "gaussian", "checkerboard", "equities"]
     # recurrence (3-D, Δt-aware) matches all six rank-3 seeds, in registry order. multi_sine leads
     # because the sidebar gate snaps to the first compatible+available entry (§12).
     assert [dataset.value for dataset in compatible_datasets(_model("recurrence"))] == [

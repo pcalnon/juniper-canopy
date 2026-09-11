@@ -312,3 +312,78 @@ class TestEquitiesSeedIsGenerableAndFinite:
         for spec in self._equities_seeds():
             fill = spec.default_params.get("fundamentals_fill")
             assert fill in ("zero", "drop"), f"{spec.value!r} leaves fundamentals_fill at juniper-data's 'nan' default, which puts " f"non-finite values in X_train (and ONLY X_train) -- LMURegressor.fit rejects them with " f"'u must be finite'. A later start_date is not a substitute: start_date=2010-01-01 " f"still yields 299,808 non-finite cells. got={fill!r}"
+
+    def test_a_rank2_equities_seed_normalises_its_features(self):
+        """The third key, which the rank-3 sibling does not need and did not reveal.
+
+        equities' feature columns are raw market quantities -- close prices, volumes, market
+        caps in the 1e11 range -- and ``normalize_features`` defaults to False. Fed to CasCor
+        unnormalised, the first output pass reports a loss of **5.83e+21** against **0.2511**
+        normalised: twenty-two orders of magnitude, and train top-1 pinned at chance either way
+        so accuracy alone would NOT have caught it. Measured 2026-09-10.
+
+        Scoped to rank-2 deliberately. The LMU path standardises upstream of the readout, and
+        ``equities_seq`` was measured fitting cleanly without this key; asserting it there would
+        pin a value nothing has shown to be needed.
+        """
+        for spec in self._equities_seeds():
+            if spec.ndim != 2:
+                continue
+            assert spec.default_params.get("normalize_features") is True, f"{spec.value!r} is rank-2 and leaves normalize_features at juniper-data's False default, so CasCor " f"is fed raw market quantities -- first-pass loss 5.83e+21 vs 0.2511 normalised. got={spec.default_params!r}"
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestTheCascorPathCarriesRegistryDefaults:
+    """The registry seed must reach the CASCOR staging payload, not only the recurrence one.
+
+    Until 2026-09-11 ``dataset_default_params`` had exactly two production consumers --
+    ``_resolve_oneshot_start_body_handler`` (gated on ``model_class == "one_shot"``) and
+    ``dataset_ref_from_staged`` -- both recurrence. ``_apply_dataset_handler`` built the cascor
+    payload from the rendered form alone, so a rank-2 dataset that NEEDS params could not be
+    expressed at all: ``equities`` would send bare defaults and 422 on every Apply, because its
+    ``symbols`` key is an array that ``_field_from_property`` deliberately does not render.
+
+    Two halves, and both are needed. The payload is seeded from the registry so unrendered keys
+    travel; the rendered controls are seeded too (``apply_seeded_defaults``) so a key that is
+    both seeded and rendered is not posted back at its SCHEMA default, silently undoing the seed.
+    """
+
+    @staticmethod
+    def _staged_payload(dataset_value, gen_values=None, gen_ids=None):
+        with mock.patch("frontend.dashboard_manager.requests.post") as post:
+            post.return_value = MagicMock(ok=True, status_code=200, text="{}")
+            post.return_value.json.return_value = {}
+            DashboardManager({})._apply_dataset_handler(1, dataset_value, 100, 0.1, 2.0, 2, gen_values=gen_values, gen_ids=gen_ids)
+        return post.call_args.kwargs["json"]
+
+    def test_an_unrendered_array_param_reaches_cascor(self):
+        # THE regression. ``symbols`` has no control, so a form-only payload could never carry it.
+        sent = self._staged_payload("equities")
+        assert sent["nn_dataset_params"]["symbols"] == ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"]
+        assert sent["nn_dataset_params"]["fundamentals_fill"] == "drop"
+        assert sent["nn_dataset_params"]["normalize_features"] is True
+
+    def test_the_form_overrides_the_seed(self):
+        # The operator's edit must win -- the seed is a default, not a floor.
+        sent = self._staged_payload("equities", gen_values=["zero"], gen_ids=[{"type": "nn-gen-param", "name": "fundamentals_fill"}])
+        assert sent["nn_dataset_params"]["fundamentals_fill"] == "zero"
+        # ...and the unrendered key still rides along beside the override.
+        assert sent["nn_dataset_params"]["symbols"] == ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"]
+
+    def test_an_unseeded_dataset_is_unchanged(self):
+        # No behaviour change for the seven cascor-compatible seeds that carry {}: the payload
+        # must not sprout an empty params key it never had.
+        sent = self._staged_payload("xor")
+        assert "nn_dataset_params" not in sent
+
+    def test_the_rendered_control_shows_the_seeded_value_not_the_schema_default(self):
+        # The other half. If the panel renders juniper-data's "nan" while the registry seeds
+        # "drop", the operator is shown one value, a different one is sent, and the next Apply
+        # posts "nan" back over the seed.
+        schema = {"properties": {"fundamentals_fill": {"type": "string", "enum": ["zero", "nan", "drop"], "default": "nan"}}}
+        generators = [{"name": "equities", "available": True, "schema": schema}]
+        _title, _style, children = DashboardManager({})._render_dataset_params_handler("equities", generators=generators)
+        rendered = [child for child in children if getattr(child, "id", None) == {"type": "nn-gen-param", "name": "fundamentals_fill"}]
+        assert rendered, "fundamentals_fill was not rendered at all"
+        assert rendered[0].value == "drop"
