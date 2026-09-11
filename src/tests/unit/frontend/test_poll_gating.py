@@ -39,6 +39,7 @@ sys.path.insert(0, str(src_dir))
 
 import pytest  # noqa: E402
 
+from canopy_constants import DashboardConstants  # noqa: E402
 from frontend.dashboard_manager import DashboardManager  # noqa: E402
 
 # The registry is imported DEFENSIVELY and only to cross-check it against the
@@ -61,9 +62,12 @@ EXPECTED_GATED_INTERVALS = (
     ("slow-update-interval", None),
     # F-CANOPY-035: the metrics-store poll's own lane. It is registered here — rather
     # than left out — so the CAN-000 apply clamp still silences it exactly as it did
-    # while the poll rode the fast lane. Its ``disabled`` prop is additionally driven
-    # by the callback's ``running=`` guard, which is a renderer ``sideUpdate`` and not
-    # a callback Output, so this remains the prop's only REGISTERED writer.
+    # while the poll rode the fast lane. Its ``disabled`` prop is ALSO driven by the
+    # callback's ``running=`` guard (a renderer ``sideUpdate``, not a callback Output)
+    # and, since the strand repair, by a second REGISTERED ``allow_duplicate`` writer —
+    # the watchdog in ``TestStrandWatchdog``. An earlier version of this comment said
+    # this lane had only one registered writer; that stopped being true when the
+    # watchdog was added to un-stick a guard the renderer does not always release.
     ("metrics-store-interval", None),
     ("tabpoll-topology", "topology"),
     ("tabpoll-dataset", "dataset"),
@@ -174,11 +178,109 @@ class TestGatedIntervalRegistry:
 
     def test_exactly_one_writer_per_disabled_prop(self, dashboard):
         """Two writers of the same ``disabled`` prop would race; Dash would also require
-        ``allow_duplicate``. The tab gate is fused into the CAN-000 clamp for this reason."""
+        ``allow_duplicate``. The tab gate is fused into the CAN-000 clamp for this reason.
+
+        ONE documented exception: ``metrics-store-interval.disabled`` has a second,
+        ``allow_duplicate`` writer — the F-CANOPY-035 strand watchdog. It exists because
+        the renderer's ``running=`` guard does NOT restore the prop when a request fails
+        at the network level, which strands the poll for the life of the page. The two
+        writers cannot race in the sense this test guards: the watchdog only ever writes
+        ``False``, only after the prop has been continuously ``True`` for
+        ``METRICS_STORE_STRAND_TIMEOUT_MS``, and never while the CAN-000 clamp is
+        engaged. ``test_strand_watchdog`` below pins each of those three properties.
+        """
         for interval_id, _tab in EXPECTED_GATED_INTERVALS:
             target = f"{interval_id}.disabled"
             writers = _entries_writing(dashboard, target)
-            assert len(writers) == 1, f"{target} has {len(writers)} writers"
+            expected = 2 if interval_id == "metrics-store-interval" else 1
+            assert len(writers) == expected, f"{target} has {len(writers)} writers, expected {expected}"
+
+
+class TestStrandWatchdog:
+    """F-CANOPY-035 follow-up — the ``running=`` guard can strand its own Interval.
+
+    ``running=`` restores ``metrics-store-interval.disabled`` from the renderer's
+    ``completeJob()`` (dash_renderer.dev.js:925-932), which runs on every HTTP outcome
+    but NOT on a request that never produces a response: ``handleError`` (:987-998)
+    rejects without calling it. So a canopy restart, a connection reset or a browser
+    offline moment leaves the interval disabled with nothing to clear it, and the
+    metrics store stops updating for the life of that page.
+
+    canopy#613 asserted this could not happen, citing renderer lines that turned out to
+    be in ``_handleWebsocketCallback`` — a transport this callback never takes. These
+    tests pin the repair and, just as importantly, the two things it must NOT do.
+    """
+
+    def _watchdog(self, dashboard):
+        """The ``allow_duplicate`` writer of the metrics interval's ``disabled`` prop.
+
+        Identified by arity, not by order: the CAN-000 gate writes all 13 lanes in one
+        multi-output callback, the watchdog writes exactly this one.
+        """
+        writers = _entries_writing(dashboard, "metrics-store-interval.disabled")
+        singles = [e for e in writers if len(_output_specs(e)) == 1]
+        assert len(singles) == 1, f"expected exactly 1 single-output writer, found {len(singles)}"
+        return singles[0]
+
+    def _js(self, dashboard, entry):
+        """The registered clientside source for ``entry``, off the built app."""
+        fn = (entry.get("clientside_function") or {}).get("function_name")
+        assert fn, f"entry is not a clientside callback: {entry.get('output')}"
+        hits = [s for s in (getattr(dashboard.app, "_inline_scripts", []) or []) if fn in s]
+        assert len(hits) == 1, f"expected 1 inline script for {fn}, found {len(hits)}"
+        return hits[0]
+
+    def test_watchdog_exists_and_is_single_output(self, dashboard):
+        specs = _output_specs(self._watchdog(dashboard))
+        assert specs == {"metrics-store-interval.disabled"}, specs
+
+    def test_watchdog_rides_an_existing_lane_and_adds_no_poller(self, dashboard):
+        """F-CANOPY-027's rule: a repair must not buy itself a new perpetual poller."""
+        entry = self._watchdog(dashboard)
+        input_ids = {d.split(".")[0] for d in _deps_of(entry, "inputs")}
+        assert input_ids == {"slow-update-interval"}, input_ids
+
+    def test_watchdog_reads_the_prop_and_the_clamp_as_state(self, dashboard):
+        """Both must be State, not Input.
+
+        As Inputs they would re-trigger the watchdog on every clamp change and on its
+        own write — and its own write is the one thing that must not retrigger it.
+        """
+        entry = self._watchdog(dashboard)
+        state_ids = {d.split(".")[0] for d in _deps_of(entry, "state")}
+        assert state_ids == {"metrics-store-interval", "apply-in-flight"}, state_ids
+
+    def test_watchdog_only_ever_writes_false(self, dashboard):
+        """It un-sticks; it must never be able to disable the lane itself."""
+        entry = self._watchdog(dashboard)
+        js = self._js(dashboard, entry)
+        assert "return false;" in js, js
+        assert "return true" not in js.lower(), js
+
+    def test_watchdog_never_fires_while_the_apply_clamp_is_engaged(self, dashboard):
+        """CAN-000 legitimately holds this interval disabled for a whole apply.
+
+        A watchdog that ignored the clamp would defeat it on any apply lasting longer
+        than the threshold.
+        """
+        js = self._js(dashboard, self._watchdog(dashboard))
+        assert "applyInFlight" in js, js
+        assert "Boolean(applyInFlight)" in js, js
+
+    def test_watchdog_threshold_is_far_above_the_worst_round_trip(self):
+        """Re-enabling while a fetch is genuinely in flight would reopen the eviction
+        window canopy#613 closed. Worst round trip ever measured on this callback is
+        3.0 s and ``API_TIMEOUT_SECONDS`` is 2, so the threshold must clear both by a
+        wide margin."""
+        assert DashboardConstants.METRICS_STORE_STRAND_TIMEOUT_MS >= 10 * DashboardConstants.API_TIMEOUT_SECONDS * 1000
+        assert DashboardConstants.METRICS_STORE_STRAND_TIMEOUT_MS >= 20000
+
+    def test_threshold_is_interpolated_into_the_javascript(self, dashboard):
+        """An f-string that lost its brace would ship a literal placeholder and the
+        comparison would be against NaN — i.e. the watchdog would never fire."""
+        js = self._js(dashboard, self._watchdog(dashboard))
+        assert str(DashboardConstants.METRICS_STORE_STRAND_TIMEOUT_MS) in js, js
+        assert "METRICS_STORE_STRAND_TIMEOUT_MS" not in js, "the constant name leaked into the JS"
 
     def test_shared_lanes_are_not_tab_gated(self):
         """``fast``/``slow`` carry global consumers (status bar, training status, button
