@@ -377,17 +377,28 @@ class DashboardConstants:
     # nine fast-lane callbacks. The poll self-clocks instead of re-requesting over
     # itself.
     #
-    # MEASURED effective cadence, so nobody has to rediscover it: ~7.3 s between
-    # requests at this 1000 ms period (round trip ~2.1 s, plus a ~5.1 s gap before the
-    # next request). That gap is NOT period-bound — dropping the period to 250 ms moved
-    # it only to ~4.3 s — so it is fixed overhead in re-enabling the guarded Interval,
-    # most likely the ``runningOff`` prop update waiting on a renderer cycle contended
-    # by the 1 Hz fast lane. Lowering this constant therefore buys very little.
+    # MEASURED effective cadence, so nobody has to rediscover it -- and stated as the
+    # RANGE it actually is, because the first version of this comment cited the single
+    # slowest run and drew an inference the data does not carry (corrected 2026-09-10
+    # by independent review). Three runs on the same leg, medians of the inter-request
+    # gap: **5.5 s, 6.1 s, 7.3 s** (round trips 1.3-2.1 s; the remaining 4.2-5.2 s is
+    # dead time before the next request).
     #
-    # That is a real slowdown from the nominal 1 Hz and it is still the right trade:
-    # before this fix the store updated NEVER, and during live training the WS append
-    # path owns the store at full speed while this poll short-circuits on ``ws_live``
-    # without fetching at all. This is the stale-stream backstop, not the live path.
+    # Is that dead time period-bound? **Not established.** One run at a 250 ms period
+    # gave 6.1 s cadence / 4.5 s dead time -- which sits INSIDE the range of the two
+    # runs at 1000 ms, and the spread between those two untreated runs (1.0 s) is
+    # larger than the treated-vs-untreated difference (0.7 s). n_treated = 1, and no
+    # artifact records that the 250 ms period was ever actually delivered (only that
+    # ``setProps`` returned ok). So: lowering this constant has NOT been shown to help,
+    # and has NOT been shown not to. Do not cite a period effect either way without a
+    # replicated run that verifies the delivered period from ``n_intervals``.
+    #
+    # The slowdown from a nominal 1 Hz is real and is still the right trade: before
+    # this fix the store updated NEVER. During live training the WS append path is
+    # meant to own the store while this poll short-circuits on ``ws_live`` without
+    # fetching -- but note that path is UNTESTED here: every measurement above is on a
+    # COMPLETED fixture where the WS appender never fired once, so "the backstop is
+    # only the backstop" is a design claim, not a measured one.
     #
     # WHY THIS EXISTS AT ALL. dash-renderer discards a response whose callback has
     # left ``watched`` (dash_renderer.dev.js:2698), and evicts a ``watched`` entry
@@ -397,6 +408,21 @@ class DashboardConstants:
     # itself forever and NEVER applies a single response. Measured on canopy at
     # 1000 ms: 55 responses, every one carrying a full payload, store length 0.
     METRICS_STORE_POLL_INTERVAL_MS: Final[int] = 1000  # 1 second (self-clocked; see above)
+
+    # F-CANOPY-035 follow-up: how long ``metrics-store-interval`` may stay disabled
+    # before the watchdog in ``_setup_poll_gating`` re-enables it.
+    #
+    # ``running=`` restores the interval from the renderer's ``completeJob()``, which
+    # runs on every HTTP outcome but NOT on a request that never produces a response
+    # (``handleError``, dash_renderer.dev.js:987-998, rejects without calling it). A
+    # network-level failure therefore strands the poll permanently for that page. This
+    # bounds that outage.
+    #
+    # An order of magnitude above the worst round trip ever measured on this callback
+    # (3.0 s; ``API_TIMEOUT_SECONDS`` is 2), because re-enabling while a fetch is
+    # genuinely in flight would re-open the eviction window the guard exists to close.
+    # Recovering in 30 s is the goal; recovering fast is not.
+    METRICS_STORE_STRAND_TIMEOUT_MS: Final[int] = 30000  # 30 seconds
 
     # API timeouts (seconds)
     API_TIMEOUT_SECONDS: Final[int] = 2
@@ -411,8 +437,23 @@ class DashboardConstants:
     # fetches the complete history (``limit=0`` → up to 10k rows); refetching
     # that every fast-interval tick (1 s) is an unconditional 10k-rows-per-second
     # steady state. Interval-driven full fetches therefore only run every Nth
-    # fast tick (N = this modulus → one full fetch per ~5 s at the 1 s fast
-    # interval); a display-mode switch still triggers an immediate fetch.
+    # tick; a display-mode switch still triggers an immediate fetch.
+    #
+    # **THE TICK THIS COUNTS CHANGED IN canopy#613, AND THE OLD ARITHMETIC HERE WAS
+    # LEFT BEHIND** (caught 2026-09-10 by independent review; the comment used to
+    # claim "one full fetch per ~5 s at the 1 s fast interval"). ``n`` is now
+    # ``metrics-store-interval.n_intervals``, which no longer advances once a second:
+    # the ``running=`` guard stops that interval for the duration of every fetch, so
+    # it advances once per COMPLETED round trip — measured at 5.5–7.3 s. At N = 5 a
+    # full-history refetch therefore happens roughly every **27–37 s**, not every 5 s.
+    #
+    # Left at 5 deliberately rather than re-tuned blind. The guard already removes the
+    # 1 Hz steady state this constant was introduced to prevent, so N = 1 would now
+    # give ~6 s — close to the original intent — but a full fetch is up to 10k rows,
+    # which lengthens the round trip, which lengthens the self-clocked period: the two
+    # constants interact and no one has measured a full-mode round trip. Re-tune only
+    # with that measurement in hand. ``full`` / ``hidden_units`` are the non-real-time
+    # history-analysis surfaces, and a mode switch still forces an immediate fetch.
     FULL_HISTORY_POLL_TICK_MODULUS: Final[int] = 5
 
     # N8 (training-runtime defects plan §4 I-1, posture O3+O1 / Q6): WS-data

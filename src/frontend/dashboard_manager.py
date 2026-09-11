@@ -2476,6 +2476,66 @@ class DashboardManager:
             prevent_initial_call=False,
         )
 
+        # F-CANOPY-035 follow-up: UNSTICK THE `running=` GUARD AFTER A NETWORK FAILURE.
+        #
+        # canopy#613 stops `metrics-store-interval` for the duration of each fetch via
+        # `running=`, and the renderer restores it from `completeJob()`
+        # (dash_renderer.dev.js:925-932). `completeJob()` runs on every HTTP OUTCOME —
+        # 200, non-OK, prevent-update — but a request that never produces a response at
+        # all lands in `handleError` (:987-998), which dispatches `updateResourceUsage`
+        # and rejects WITHOUT calling it. So a canopy restart, a connection reset or a
+        # browser offline moment leaves `disabled = true` with nothing to clear it: the
+        # metrics store then stops updating for the life of that page.
+        #
+        # #613's commit message, PR body and in-source comment all claimed this could
+        # not happen, citing `:1038`/`:1113` — which are in `_handleWebsocketCallback`,
+        # a transport this callback never takes (`useWebSocket` is false at `:1311`;
+        # the HTTP branch is `handleServerside` at `:807`, call site `:1330`). The
+        # error path was checked; the function it belonged to was not.
+        #
+        # This watchdog bounds that outage instead of leaving it unbounded. It rides
+        # the EXISTING slow lane (no new poller — the F-CANOPY-027 rule) and re-enables
+        # the interval only after it has been continuously disabled for longer than any
+        # plausible round trip.
+        #
+        # Two things it must not do, both encoded below:
+        #  * It must not re-enable DURING a legitimate fetch, which would re-open the
+        #    very eviction window #613 closed. Hence a threshold an order of magnitude
+        #    above the measured worst case (3.0 s observed; API_TIMEOUT_SECONDS is 2).
+        #  * It must not defeat the CAN-000 apply clamp, which legitimately holds the
+        #    interval disabled for as long as an apply is in flight. Hence the
+        #    `applyInFlight` short-circuit, which also resets the timer so the clock
+        #    starts from when the clamp RELEASES.
+        self.app.clientside_callback(
+            f"""
+            function(n, disabled, applyInFlight) {{
+                var NU = window.dash_clientside.no_update;
+                if (!disabled || Boolean(applyInFlight)) {{
+                    // Healthy, or the apply clamp owns the prop: hold the timer clear.
+                    window.__metricsStoreDisabledSince = null;
+                    return NU;
+                }}
+                var now = Date.now();
+                if (!window.__metricsStoreDisabledSince) {{
+                    window.__metricsStoreDisabledSince = now;
+                    return NU;
+                }}
+                if (now - window.__metricsStoreDisabledSince < {DashboardConstants.METRICS_STORE_STRAND_TIMEOUT_MS}) {{
+                    return NU;
+                }}
+                window.__metricsStoreDisabledSince = null;
+                return false;
+            }}
+            """,
+            Output(_METRICS_STORE_INTERVAL, "disabled", allow_duplicate=True),
+            Input("slow-update-interval", "n_intervals"),
+            [
+                dash.dependencies.State(_METRICS_STORE_INTERVAL, "disabled"),
+                dash.dependencies.State("apply-in-flight", "data"),
+            ],
+            prevent_initial_call=True,
+        )
+
     def _all_visualization_tabs(self):
         """Return the full ordered list of right-panel ``dbc.Tab``s (A1-iii-b1).
 
@@ -4243,16 +4303,34 @@ class DashboardManager:
         # the store filled within ~3 s of the tick stopping, twice.
         #
         # ``running=`` disables this Interval at request dispatch and re-enables it when
-        # the response arrives — including on the error path (:1113), so a failed fetch
-        # cannot strand the poller. A re-request DURING flight therefore cannot happen at
-        # all, which is a structural guarantee rather than a tuned period. Measured
-        # effective cadence is ~7.3 s, most of it fixed overhead rather than the 1 s
-        # period — see ``METRICS_STORE_POLL_INTERVAL_MS`` for the numbers and why that
-        # is the right trade for a stale-stream backstop.
+        # the response arrives, so this callback cannot re-request over ITSELF on its own
+        # clock. Measured effective cadence is 5.5-7.3 s — see
+        # ``METRICS_STORE_POLL_INTERVAL_MS`` for the numbers and why that is the right
+        # trade for a stale-stream backstop.
+        #
+        # **THREE QUALIFICATIONS, each of which an earlier version of this comment got
+        # wrong by stating the guarantee unconditionally** (corrected 2026-09-10 by
+        # independent review):
+        #
+        #  1. The renderer restores the interval from ``completeJob()``
+        #     (dash_renderer.dev.js:925-932), which runs on every HTTP outcome but NOT on
+        #     a request that never produces a response — ``handleError`` (:987-998)
+        #     rejects without calling it. A network-level failure strands the poll, and
+        #     the watchdog in ``_setup_poll_gating`` is what bounds that. (The earlier
+        #     comment cited :1113 as the error path; that line is in
+        #     ``_handleWebsocketCallback``, a transport this callback never takes.)
+        #  2. ``metrics-store-interval.disabled`` has a SECOND writer — the CAN-000
+        #     tab/apply gate. If it fires mid-fetch it re-enables the clock and reopens
+        #     the eviction window for that cycle. Self-healing, bounded to one cycle,
+        #     and UNMEASURED.
+        #  3. The guard covers this callback's own Interval, not its other Input.
+        #     ``getUniqueIdentifier`` ignores the trigger, so a mid-flight change to
+        #     ``metrics-panel-display-mode-store`` creates a same-identity ``requested``
+        #     entry and evicts exactly as a tick would. Also unmeasured.
         #
         # Do NOT fold this back onto a shared lane: ``disabled`` is a property of the
         # Interval, so guarding this callback there would silence the other nine
-        # fast-lane callbacks for ~60% of every second.
+        # fast-lane callbacks for the duration of every fetch.
         @self.app.callback(
             Output("metrics-panel-metrics-store", "data"),
             Input(_METRICS_STORE_INTERVAL, "n_intervals"),
