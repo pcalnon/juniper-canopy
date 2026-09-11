@@ -196,6 +196,14 @@ class TestGatedIntervalRegistry:
             assert len(writers) == expected, f"{target} has {len(writers)} writers, expected {expected}"
 
 
+    def test_shared_lanes_are_not_tab_gated(self):
+        """``fast``/``slow`` carry global consumers (status bar, training status, button
+        acks). Tab-gating them would silence the whole dashboard on most tabs."""
+        for interval_id, tab in EXPECTED_GATED_INTERVALS:
+            if interval_id in SHARED_LANES:
+                assert tab is None, f"{interval_id} must never be tab-gated, got {tab!r}"
+
+
 class TestStrandWatchdog:
     """F-CANOPY-035 follow-up — the ``running=`` guard can strand its own Interval.
 
@@ -282,12 +290,6 @@ class TestStrandWatchdog:
         assert str(DashboardConstants.METRICS_STORE_STRAND_TIMEOUT_MS) in js, js
         assert "METRICS_STORE_STRAND_TIMEOUT_MS" not in js, "the constant name leaked into the JS"
 
-    def test_shared_lanes_are_not_tab_gated(self):
-        """``fast``/``slow`` carry global consumers (status bar, training status, button
-        acks). Tab-gating them would silence the whole dashboard on most tabs."""
-        for interval_id, tab in EXPECTED_GATED_INTERVALS:
-            if interval_id in SHARED_LANES:
-                assert tab is None, f"{interval_id} must never be tab-gated, got {tab!r}"
 
 
 class TestPerTabLanes:
