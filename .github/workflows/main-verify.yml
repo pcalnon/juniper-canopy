@@ -94,7 +94,7 @@ permissions:
 env:
   PYTHON_TEST_VERSION: "3.14"
   # Single source of truth for the packaged screens (rollout Wave 2 pin window).
-  CI_TOOLS_PIN: "juniper-ci-tools>=0.8.0,<0.10.0"
+  CI_TOOLS_PIN: "juniper-ci-tools>=0.9.0,<0.10.0"
   # Symbol screen scope -- canopy's damage locus (app + tests under src/**). The docs
   # screen keeps the universal default (no --scope).
   SYMBOL_SCOPE: "src/**/*.py"
