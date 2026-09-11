@@ -11,6 +11,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Two rank-2 datasets — `gaussian` and `checkerboard` — closing the cascor half of the generator
+  gap (design §12).** Both validated the way §12.4 requires, and for a rank-2 seed that means
+  against **cascor**, not the LMU: generated through juniper-data to an NPZ artifact, then fitted
+  with `CascadeCorrelationNetwork`.
+
+  | dataset | X_train | units recruited | loss first → last | train top-1 | fit |
+  |---|---|---|---|---|---|
+  | Gaussian Blobs | (100, 2) | 1 | 0.0231 → 0.0016 | **1.000** | 0.4s |
+  | Checkerboard | (200, 2) | 1 | 0.2499 → 0.2498 | 0.515 | 3.0s |
+  | Checkerboard @ `n_samples=2000` | (1400, 2) | **8** | 0.2496 → 0.2418 | 0.5425 | 2.2s |
+
+  **Checkerboard's default size is worth knowing about.** At juniper-data's own default — 200
+  samples over a 4×4 grid, ~12 per cell — CasCor recruits a single unit and sits at chance with a
+  loss flat to four decimals. At `n_samples=2000` it recruits eight and the loss actually moves.
+  The dataset is fine; 200 samples is simply too thin to recruit against. `n_samples` is a rendered
+  schema field, so raising it is an operator action rather than a code change.
+
+  Neither seed carries `default_params`, matching the five incumbents: neither imports an external
+  universe, so the G11 restatement does not bind them. Both are numpy-only and declare no
+  `is_available` hook upstream, so they are available in every deployment. Being rank-2 they join
+  cascor's component and leave recurrence's untouched, so the compatibility graph still has exactly
+  two connected components — §12.2 again, asserted in `test_compatible_datasets_resolver_over_seeds`
+  rather than argued.
+
+  cascor needed no change: its `StageDatasetRequest.dataset_type` `Literal` already admitted
+  `gaussian` and `checkerboard`, and it already carries a typed `n_squares` knob for the latter. It
+  was canopy that never offered them.
+
 - **Five rank-3 sequence datasets, so the LMU has something to train on in the container it
   actually ships in (design §12).** `multi_sine`, `mackey_glass`, `irregular_sine`, `ar_p` and
   `delay_product` join the dataset dropdown. Each was validated the way §12.4 requires — generate,
@@ -116,6 +144,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pushes nothing; its `paths:` filter covers everything the Dockerfile copies (`src/`,
   `juniper_canopy/`, the `conf/` files), so a change to any image input is built before it merges.
   Not a required status check.
+
+### Changed
+
+- **`equities` stays unseeded, and its recorded reason was wrong.** The G10 entry added in #612
+  said to seed it "with the same treatment `equities_seq` received (canopy#610), not before". That
+  prescription cannot be carried out, and measuring it is what showed why.
+
+  The treatment itself transfers and then some. `equities` needs **three** params, not two: an
+  explicit `symbols` list (at bare defaults juniper-data refuses it — the 503-name universe exceeds
+  the deployment cap of 14, exactly as its sequence sibling did), `fundamentals_fill` away from its
+  `"nan"` default, and — new, and absent from the sequence sibling — `normalize_features=True`.
+  That third one matters enormously: equities' feature columns are raw market quantities, and fed
+  to CasCor unnormalised the first output pass reports a loss of **5.8e+21** against **0.2511**
+  normalised, twenty-two orders of magnitude apart. With all three set it trains cleanly (3 units,
+  loss 0.2511 → 0.2491, train top-1 0.524 — the honest ceiling for next-day direction, not a
+  defect).
+
+  **The blocker is that canopy cannot deliver those params on the path a rank-2 dataset takes.**
+  `dataset_default_params` is a recurrence-only concept: its only two production consumers are
+  `_resolve_oneshot_start_body_handler` (gated on `model_class == "one_shot"`) and
+  `dataset_ref_from_staged`. `_apply_dataset_handler` builds the cascor staging payload from the
+  rendered form alone, and `symbols` is an **array**, which `_field_from_property` deliberately does
+  not render. A seeded `equities` would therefore send bare defaults and 422 on every Apply —
+  shipping the gap somewhere less visible, which is the outcome §12.4 exists to prevent. The entry
+  now records that, and names the two ways out (decide how the cascor path carries registry
+  defaults, or make an array-valued param settable) rather than prescribing a treatment that has
+  nowhere to travel.
 
 ### Fixed
 
