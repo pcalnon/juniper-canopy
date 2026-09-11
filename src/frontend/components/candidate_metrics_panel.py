@@ -336,21 +336,59 @@ class CandidateMetricsPanel(BaseComponent):
         # ── Update candidate loss plot ──
         # PERF-CN-01: prevent_initial_call=False — must render an initial empty
         # figure on mount; theme-aware so it must redraw when theme changes too.
+        # F-CANOPY-052: ``training-state-store`` is a STATE here, never an Input, and
+        # that is the whole fix. It used to be an Input, and it evicted this callback
+        # roughly once a second.
+        #
+        # ``fetch_training_state`` above writes that store off
+        # ``{component_id}-update-interval`` (period 1000 ms, ``self.update_interval``)
+        # and returns ``self._fetch_training_state()`` UNCONDITIONALLY on both of its
+        # branches while the candidates tab is active. ``/api/state`` carries a
+        # per-call ``timestamp``, so the value written is genuinely DIFFERENT every
+        # tick -- the no-op-write suppression that protects other stores cannot bite.
+        #
+        # So this callback was re-``requested`` at ~1 Hz under one and the same
+        # ``getUniqueIdentifier``, and dash_renderer.dev.js:3027 evicts the in-flight
+        # entry from ``watched`` while :2698 discards its response on arrival. That is
+        # F-CANOPY-035's mechanism exactly, one callback downstream of the store
+        # F-CANOPY-035 repaired -- not, as first recorded, a separate defect that the
+        # permanently-empty store had been masking.
+        #
+        # Measured on the live leg, one variable, ``setProps`` on the panel interval's
+        # ``disabled`` and nothing else (juniper-ml
+        # ``util/ad-hoc/2026-09-11_f052_trigger_eviction_test.py``):
+        #     tick running  -> the figure rendered **1 of 3**
+        #     tick stopped  -> the figure rendered **3 of 3**
+        # and on every non-render the wire census recorded ZERO responses naming this
+        # output, against 79-88 naming others.
+        #
+        # Demoting the trigger rather than the work is this repo's standing rule and
+        # its precedent: F-CANOPY-039's topology rebuild went 0/11 -> 11/11 on exactly
+        # this change. A server-side guard would NOT have helped -- the round trip has
+        # already happened by the time a handler could decline, and the eviction has
+        # already been booked.
+        #
+        # Nothing is lost by the demotion. ``state`` feeds only the fallback branch in
+        # ``update_loss_plot``, which exists for a backend that supplies
+        # ``epochs``/``losses``/``phases`` -- and F-CANOPY-035 established that
+        # ``/api/state`` never carries those keys in any lane. So the Input triggered a
+        # re-render once a second for a value that could not change what is drawn.
         @app.callback(
             Output(f"{self.component_id}-loss-plot", "figure"),
             [
-                Input(f"{self.component_id}-training-state-store", "data"),
                 Input("theme-state", "data"),
                 # F-CANOPY-035: the per-epoch candidate losses live in the shared
                 # metrics-history store -- NOT in /api/state, which never carries
                 # epochs/losses/phases in any lane, so the figure was structurally
                 # empty. Consuming the existing store adds no poller (the
-                # F-CANOPY-027 rule).
+                # F-CANOPY-027 rule). This store IS identity-suppressed, so it fires
+                # this callback only when the plotted data actually changes.
                 Input(SHARED_METRICS_STORE_ID, "data"),
             ],
+            State(f"{self.component_id}-training-state-store", "data"),
             prevent_initial_call=False,
         )
-        def update_loss_plot(state, theme, history=None):
+        def update_loss_plot(theme, history=None, state=None):
             series = self._candidate_series_from_history(history)
             if series:
                 return self._create_candidate_loss_figure(series, theme=theme or "light")

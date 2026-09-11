@@ -14,7 +14,7 @@ starved. The fix consumes the dashboard's existing shared metrics-history store
 
 import plotly.graph_objects as go
 import pytest
-from dash.dependencies import Input
+from dash.dependencies import Input, State
 
 from frontend.components.candidate_metrics_panel import SHARED_METRICS_STORE_ID, CandidateMetricsPanel
 
@@ -97,7 +97,7 @@ class TestCandidateSeriesFromHistory:
 @pytest.mark.unit
 class TestLossPlotCallback:
     def test_real_state_plus_history_renders_the_candidate_trace(self, callbacks):
-        fig = callbacks["update_loss_plot"](REAL_STATE, "light", HISTORY)
+        fig = callbacks["update_loss_plot"]("light", HISTORY, REAL_STATE)
         assert isinstance(fig, go.Figure)
         assert len(fig.data) == 1
         assert fig.data[0].name == "Candidate Training"
@@ -106,15 +106,76 @@ class TestLossPlotCallback:
 
     def test_real_state_without_history_is_still_the_placeholder(self, callbacks):
         # The parent's behaviour, kept as the fallback: /api/state alone has nothing to plot.
-        fig = callbacks["update_loss_plot"](REAL_STATE, "light", None)
+        fig = callbacks["update_loss_plot"]("light", None, REAL_STATE)
         assert len(fig.data) == 0
 
     def test_state_shape_fallback_still_works(self, callbacks):
         state = {"epochs": [1, 2], "losses": [0.5, 0.4], "phases": ["candidate", "candidate"]}
-        fig = callbacks["update_loss_plot"](state, "dark", [])
+        fig = callbacks["update_loss_plot"]("dark", [], state)
         assert len(fig.data) == 1
 
     def test_history_wins_over_state_when_both_present(self, callbacks):
         state = {"epochs": [9], "losses": [9.9], "phases": ["candidate"]}
-        fig = callbacks["update_loss_plot"](state, "light", HISTORY)
+        fig = callbacks["update_loss_plot"]("light", HISTORY, state)
         assert list(fig.data[0].x) == [2, 3, 5]
+
+
+@pytest.mark.unit
+class TestF052TriggerIsNotTheStateStore:
+    """F-CANOPY-052 — the loss plot must not be re-triggered by the training-state store.
+
+    ``fetch_training_state`` writes ``{component_id}-training-state-store`` off the
+    panel's own 1000 ms interval and returns ``self._fetch_training_state()``
+    UNCONDITIONALLY on both branches while the candidates tab is active. ``/api/state``
+    carries a per-call ``timestamp``, so the written value differs every tick and the
+    no-op-write suppression that protects other stores cannot bite.
+
+    With that store as an **Input**, this callback was therefore re-``requested`` at
+    ~1 Hz under one ``getUniqueIdentifier`` — and dash_renderer.dev.js:3027 evicts the
+    in-flight entry from ``watched`` while :2698 discards its response. That is
+    F-CANOPY-035's own mechanism, one callback downstream of the store F-CANOPY-035
+    repaired — not a separate defect that the empty store had been masking.
+
+    Measured on the live leg with one variable (juniper-ml
+    ``util/ad-hoc/2026-09-11_f052_trigger_eviction_test.py``): the figure rendered
+    **1 of 3** with the panel tick running and **3 of 3** with it stopped, and every
+    non-render recorded ZERO responses naming this output.
+
+    Demoting the trigger rather than guarding the work is this repo's standing rule and
+    its precedent (F-CANOPY-039: 0/11 → 11/11 on exactly this change).
+    """
+
+    def _deps(self, app):
+        registered = {fn.__name__: (outputs, kwargs) for outputs, kwargs, fn in app.callbacks}
+        outputs, kwargs = registered["update_loss_plot"]
+        flat = [dep for group in outputs for dep in (group if isinstance(group, (list, tuple)) else [group])]
+        for value in kwargs.values():
+            for dep in value if isinstance(value, (list, tuple)) else [value]:
+                if hasattr(dep, "component_id"):
+                    flat.append(dep)
+        return flat
+
+    def test_training_state_store_is_not_an_input(self, app, panel):
+        """The regression this class exists for. As an Input it evicts the callback ~1 Hz."""
+        inputs = [d for d in self._deps(app) if isinstance(d, Input)]
+        offending = [d for d in inputs if d.component_id == f"{panel.component_id}-training-state-store"]
+        assert not offending, f"training-state-store is an Input again (F-CANOPY-052): {offending}"
+
+    def test_training_state_store_is_still_reachable_as_state(self, app, panel):
+        """Demoted, not deleted — the documented ``/api/state``-shaped fallback still reads it."""
+        states = [d for d in self._deps(app) if isinstance(d, State)]
+        assert any(d.component_id == f"{panel.component_id}-training-state-store" and d.component_property == "data" for d in states), states
+
+    def test_the_only_periodic_input_left_is_the_identity_suppressed_store(self, app, panel):
+        """``theme-state`` changes on user action; the shared metrics store is
+        identity-suppressed, so it fires only when the plotted data really changes.
+        Neither re-triggers this callback on a clock."""
+        input_ids = {d.component_id for d in self._deps(app) if isinstance(d, Input)}
+        assert input_ids == {"theme-state", SHARED_METRICS_STORE_ID}, input_ids
+        assert f"{panel.component_id}-update-interval" not in input_ids
+
+    def test_the_fallback_still_renders_from_state_after_the_demotion(self, callbacks):
+        """A demotion that broke the fallback would be a silent behaviour change."""
+        state = {"epochs": [1, 2], "losses": [0.5, 0.4], "phases": ["candidate", "candidate"]}
+        fig = callbacks["update_loss_plot"]("light", [], state)
+        assert len(fig.data) == 1
