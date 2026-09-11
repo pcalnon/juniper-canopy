@@ -211,6 +211,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An unavailable dataset said it was unavailable and nothing about what would fix that, while
+  the producer had been publishing exactly that string all along.** `dataset_schema.py`'s comment
+  asserted that `/v1/generators` "carries `available: bool` but not the install hint (that reaches
+  the client only in the create-time 501 body)". That stopped being true at juniper-data's **W-4**:
+  `GeneratorInfo.install_hint` is a first-class field on that response, and its own docstring gives
+  the reason — without it `available: false` *"says a generator cannot run and nothing at all about
+  what would fix that, so a preflight has nowhere to send an operator"*.
+
+  canopy was hand-maintaining reworded duplicates of that string for **two** generators (`mnist`,
+  `arc_agi`) and falling back to a bare "unavailable in this deployment" for everything else —
+  including both equities seeds, which are precisely the ones an operator hits, since the
+  `equities` extra is absent from juniper-data's lockfile. Seeding `equities` (#621) made that the
+  common case rather than a corner.
+
+  The reason is now **derived from the wire**: a generator the producer published a hint for needs
+  an optional extra and says so, with no per-generator string on canopy's side. The curated map
+  survives only as the pre-W-4 fallback — a juniper-data that sends no hint at all — and the
+  generic phrase only when neither speaks.
+
+  **The split matters.** The dropdown option keeps a short phrase, because it shares its line with
+  the dataset name; the params panel, which has room, now renders the producer's hint **verbatim**
+  (`unavailable_hint`) so the operator gets the actual `pip install` command where they are looking
+  when they find the control disabled. Re-wording it there would put canopy straight back into
+  maintaining a string it does not own.
+
 - **The `equities_seq` seed could not generate, and once it could, it could not fit — so the one
   pair this arc exists to make work had still never trained.** canopy#601 made
   `(recurrence, equities_seq)` selectable and honestly gated; canopy#607 made it stageable. Neither
