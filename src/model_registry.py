@@ -156,6 +156,25 @@ DATASET_TYPES: tuple[DatasetTypeSpec, ...] = (
     DatasetTypeSpec(value="mnist", label="MNIST", task_type="classification", ndim=2),
     DatasetTypeSpec(value="circles", label="Circles", task_type="classification", ndim=2),
     DatasetTypeSpec(value="moons", label="Moons", task_type="classification", ndim=2),
+    # --- §12 rank-2 synthetics. Validated 2026-09-10 the way §12.4 requires: generated through
+    # juniper-data to an NPZ artifact, then fitted with CascadeCorrelationNetwork (input_size /
+    # output_size taken from the data; max_iterations 8; max_epochs AND output_epochs both 60,
+    # per the resident hazard that setting only the former leaves later passes at 10000).
+    #
+    # ``gaussian``      1 hidden unit, loss 0.0231 -> 0.0016, train top-1 1.000 in 0.4s.
+    # ``checkerboard``  at its OWN default of 200 samples over a 4x4 grid CasCor recruits ONE
+    #                   unit and sits at chance (top-1 0.515, loss flat to four decimals). At
+    #                   n_samples=2000 it recruits EIGHT and the loss moves (0.2496 -> 0.2418,
+    #                   top-1 0.5425). The dataset is fine; 200 samples over 16 cells is simply
+    #                   too thin to recruit against. ``n_samples`` is a rendered schema field, so
+    #                   raising it is an operator action, not a code change — but that is why this
+    #                   seed carries no ``default_params`` pinning a larger size: on the CASCOR
+    #                   path the registry's ``default_params`` are never forwarded (see below).
+    #
+    # Both stay ``default_params={}``, matching the five incumbents. Neither imports an external
+    # universe, so the G11 restatement below does not bind them.
+    DatasetTypeSpec(value="gaussian", label="Gaussian Blobs", task_type="classification", ndim=2),
+    DatasetTypeSpec(value="checkerboard", label="Checkerboard", task_type="classification", ndim=2),
     # --- §12 rank-3 synthetics. r² is the LMU's fit at the service's effective defaults
     # (d=16, data-driven theta, ridge=0.0), measured 2026-09-09; it is recorded because a
     # generator that fits but learns nothing must not be mistaken for a good default.
@@ -252,9 +271,26 @@ KNOWN_UPSTREAM_GENERATORS: frozenset[str] = frozenset(
 # Generators deliberately NOT offered in the dataset dropdown, each with the reason.
 UNSEEDED_GENERATORS: dict[str, str] = {
     "csv_import": ("An import path, not a peer generator: it has no synthesisable default (``file_path`` is " "required, so calling it with defaults raises a ValidationError) and canopy already owns " "that flow in ``dataset_import.py``. Design §12.3 item 4."),
-    "gaussian": ("Rank-2 classification, cascor-compatible and a legitimate future seed — but §12.4 requires " "generate -> train observed once per new seed, and that validation runs against the cascor " "backend rather than the LMU. Deferred to the rank-2 seeding slice."),
-    "checkerboard": ("Rank-2 classification; same reason as ``gaussian`` — awaiting its §12.4 validation against " "cascor."),
-    "equities": ("Rank-2 classification, and it carries BOTH traps its sequence sibling did: ``max_symbols`` " "is a cap juniper-data refuses against rather than truncates, and ``fundamentals_fill`` " "defaults to ``nan``. It also needs the ``equities`` extra, which is absent from " "juniper-data's requirements.lock. Seed it with the same treatment ``equities_seq`` " "received (canopy#610), not before."),
+    "equities": (
+        "Rank-2 classification, and it generates and trains perfectly well once given three params "
+        "— but canopy CANNOT DELIVER THEM ON THE CASCOR PATH, which is the only path a rank-2 "
+        "dataset can take. Measured 2026-09-10. (1) At bare defaults juniper-data refuses it: the "
+        "503-name universe exceeds the deployment cap of 14, exactly as its sequence sibling did "
+        "(canopy#610), so it needs an explicit ``symbols`` list. (2) ``fundamentals_fill`` defaults "
+        "to ``nan``. (3) NEW, and the one the sequence sibling did not have: ``normalize_features`` "
+        "defaults to False, and equities' columns are raw market quantities — fed to CasCor "
+        "unnormalised the first output pass reports a loss of 5.8e+21 against 0.2511 normalised, a "
+        "difference of twenty-two orders of magnitude. With all three set it trains cleanly "
+        "(3 units, loss 0.2511 -> 0.2491; top-1 0.524, which is the honest ceiling for next-day "
+        "direction rather than a defect). The blocker is that ``dataset_default_params`` is a "
+        "RECURRENCE-ONLY concept: its only two consumers are ``_resolve_oneshot_start_body_handler`` "
+        "(gated on ``model_class == 'one_shot'``) and ``dataset_ref_from_staged``. "
+        "``_apply_dataset_handler`` builds the cascor staging payload from the rendered form alone, "
+        "and ``symbols`` is an ARRAY, which ``_field_from_property`` deliberately does not render. "
+        "So a seeded ``equities`` would send bare defaults and 422 on every Apply. Unblock it by "
+        "deciding how the cascor path carries registry defaults (or how an array-valued param "
+        "becomes settable) — not by adding the seed."
+    ),
     "arc_agi": (
         "Its RANK IS PARAMETER-DEPENDENT, which ``DatasetTypeSpec.ndim`` cannot express. "
         "``flatten_pairs=True`` (the default) yields rank-2 ``(n, pad_to*pad_to)``; "

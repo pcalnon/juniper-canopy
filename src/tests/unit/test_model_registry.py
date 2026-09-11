@@ -64,9 +64,13 @@ def test_dataset_values_are_unique():
 
 def test_dataset_seeds_2d_classification_plus_3d_sequence():
     by_value = {spec.value: spec for spec in DATASET_TYPES}
-    for value in ("spirals", "xor", "mnist", "circles", "moons"):
+    # The five incumbents plus §12's two rank-2 synthetics (gaussian, checkerboard), which are
+    # shaped identically: 2-D, classification, non-temporal, and no default_params.
+    for value in ("spirals", "xor", "mnist", "circles", "moons", "gaussian", "checkerboard"):
         spec = by_value[value]
         assert spec.ndim == 2 and spec.task_type == "classification" and spec.temporal == "none"
+    for value in ("gaussian", "checkerboard"):
+        assert by_value[value].default_params == {}
     # A1-iv-3b: the 3-D irregular-Δt regression seed that makes the recurrence model selectable.
     seq = by_value["equities_seq"]
     assert seq.ndim == 3 and seq.task_type == "regression" and seq.temporal == "irregular"
@@ -253,11 +257,12 @@ def test_compatible_models_resolver_over_seeds():
 
 
 def test_compatible_datasets_resolver_over_seeds():
-    # cascor (2-D, classification+regression) matches the five 2-D classification seeds and NONE of
-    # the six rank-3 ones. §12 added five sequence seeds without touching this list, which is
-    # §12.2's claim that the expansion adds no deadlock surface — the graph still has exactly two
-    # components — asserted rather than assumed.
-    assert [dataset.value for dataset in compatible_datasets(_model("cascor"))] == ["spirals", "xor", "mnist", "circles", "moons"]
+    # cascor (2-D, classification+regression) matches the SEVEN 2-D classification seeds — the five
+    # incumbents plus §12's gaussian and checkerboard — and NONE of the six rank-3 ones. That the
+    # rank-3 additions never entered this list, and the rank-2 additions never entered the
+    # recurrence one below, is §12.2's claim that the expansion adds no deadlock surface: the graph
+    # still has exactly two components, asserted rather than assumed.
+    assert [dataset.value for dataset in compatible_datasets(_model("cascor"))] == ["spirals", "xor", "mnist", "circles", "moons", "gaussian", "checkerboard"]
     # recurrence (3-D, Δt-aware) matches all six rank-3 seeds, in registry order. multi_sine leads
     # because the sidebar gate snaps to the first compatible+available entry (§12).
     assert [dataset.value for dataset in compatible_datasets(_model("recurrence"))] == [
