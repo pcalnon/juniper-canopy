@@ -46,7 +46,7 @@ from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
 from canopy_constants import CascorPatchBounds, DashboardConstants, TrainingConstants
-from dataset_schema import apply_availability_gate, apply_seeded_defaults, generator_name_for_type, is_generator_available, parse_schema_fields, unavailable_reason
+from dataset_schema import apply_availability_gate, apply_seeded_defaults, generator_name_for_type, is_generator_available, parse_schema_fields, unavailable_hint, unavailable_reason
 from frontend.internal_api import internal_api_headers
 from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, RECURRENCE_BACKEND_TYPE, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason, model_requirement, selection_is_live
 from settings import get_settings
@@ -3067,10 +3067,10 @@ class DashboardManager:
         # sends the schema default back over the seed on the next Apply.
         fields = apply_seeded_defaults(parse_schema_fields(self._generator_schema(gen_name, generators)), dataset_default_params(dataset_value))
         available = is_generator_available(dataset_value, generators)
-        return title, {"display": "none"}, self._build_schema_param_inputs(dataset_value, fields, available)
+        return title, {"display": "none"}, self._build_schema_param_inputs(dataset_value, fields, available, generators=generators)
 
     @staticmethod
-    def _build_schema_param_inputs(dataset_value, fields, available):
+    def _build_schema_param_inputs(dataset_value, fields, available, generators=None):
         """Build the schema-driven param inputs (+ unavailable/empty note) for a non-spiral type (N7).
 
         Each field becomes a labelled control with a pattern-matching id
@@ -3081,7 +3081,14 @@ class DashboardManager:
         """
         children: list = []
         if not available:
-            children.append(dbc.Alert(f"This dataset is {unavailable_reason(dataset_value)} — it cannot be staged until the deployment provides it.", color="warning", className="py-1 px-2 small mb-2"))
+            # The panel has room the dropdown option does not, so it carries the producer's OWN
+            # install hint verbatim when there is one (juniper-data W-4). Saying a dataset is
+            # unavailable and nothing about what would fix it is the gap that field exists to
+            # close; re-wording it here would put canopy back in the business of maintaining a
+            # string it does not own.
+            note = f"This dataset is {unavailable_reason(dataset_value, generators)} — it cannot be staged until the deployment provides it."
+            hint = unavailable_hint(dataset_value, generators)
+            children.append(dbc.Alert([html.Span(note), html.Br(), html.Strong(hint)] if hint else note, color="warning", className="py-1 px-2 small mb-2"))
         if not fields:
             children.append(html.P("No adjustable parameters — sensible generator defaults are used.", className="mb-1 small text-muted fst-italic"))
             return children
