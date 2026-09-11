@@ -195,7 +195,6 @@ class TestGatedIntervalRegistry:
             expected = 2 if interval_id == "metrics-store-interval" else 1
             assert len(writers) == expected, f"{target} has {len(writers)} writers, expected {expected}"
 
-
     def test_shared_lanes_are_not_tab_gated(self):
         """``fast``/``slow`` carry global consumers (status bar, training status, button
         acks). Tab-gating them would silence the whole dashboard on most tabs."""
@@ -289,7 +288,6 @@ class TestStrandWatchdog:
         js = self._js(dashboard, self._watchdog(dashboard))
         assert str(DashboardConstants.METRICS_STORE_STRAND_TIMEOUT_MS) in js, js
         assert "METRICS_STORE_STRAND_TIMEOUT_MS" not in js, "the constant name leaked into the JS"
-
 
 
 class TestPerTabLanes:
