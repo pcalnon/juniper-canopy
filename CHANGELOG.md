@@ -11,6 +11,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The registry's `default_params` now reach the cascor path, and `equities` is seeded — the last
+  generator that was blocked rather than merely unvalidated (design §12).** #616 recorded that
+  `equities` generates and trains fine given three params but that canopy could not deliver them.
+  This removes that blocker at its cause.
+
+  **The cause was that `default_params` only ever reached one of the two model tiers.** Its two
+  production consumers were `_resolve_oneshot_start_body_handler` (gated on
+  `model_class == "one_shot"`) and `dataset_ref_from_staged` — both recurrence.
+  `_apply_dataset_handler` built the cascor staging payload from the rendered form alone, so a
+  rank-2 dataset that *needed* params could not be expressed: `equities`' `symbols` key is an
+  array, and `_field_from_property` deliberately does not render arrays. Every Apply sent bare
+  defaults and 422'd. The constant's own docstring had been calling the registry "the single
+  source of truth" throughout.
+
+  **Both halves were needed.** `_apply_dataset_handler` now seeds the payload from the registry
+  and lets the form override it — the same order the recurrence path already used — so unrendered
+  keys travel. And `apply_seeded_defaults` overlays the seed onto the *rendered* controls, because
+  otherwise a key that is both seeded and rendered gets posted back at its **schema** default on
+  the next Apply, silently undoing the seed; the operator would also be shown one value while a
+  different one was sent.
+
+  **This is a no-op for every cascor-compatible seed shipped today** — all seven carry
+  `default_params={}`, so their payloads are byte-identical, asserted in
+  `test_an_unseeded_dataset_is_unchanged`.
+
+  `equities` is seeded with the three keys, each measured against a live juniper-data and a real
+  `CascadeCorrelationNetwork` fit: `symbols` (bare defaults are **refused** — 503 names over a cap
+  of 14), `fundamentals_fill="drop"` (the `"nan"` default leaves non-finite columns), and
+  `normalize_features=True` — new, and absent from the rank-3 sibling's seed, because equities'
+  columns are raw market quantities: unnormalised the first output pass reports a loss of
+  **5.83e+21** against **0.2511** normalised. Train top-1 is ~0.52 either way, so accuracy alone
+  would not have caught it. As seeded: (15799, 16), zero non-finite in any split, 3 units
+  recruited, loss 0.2511 → 0.2491 in 1.2s.
+
+  It needs juniper-data's `equities` extra, absent from that lockfile, so it renders greyed with a
+  reason in the container — the availability gate doing its job (§12.5), not a broken seed.
+
 - **Two rank-2 datasets — `gaussian` and `checkerboard` — closing the cascor half of the generator
   gap (design §12).** Both validated the way §12.4 requires, and for a rank-2 seed that means
   against **cascor**, not the LMU: generated through juniper-data to an NPZ artifact, then fitted

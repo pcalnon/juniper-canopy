@@ -72,6 +72,7 @@ UI-friendly reason. Both are pure so they can be exercised without Dash or a liv
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -242,6 +243,35 @@ def parse_schema_fields(schema: Mapping[str, Any] | None, *, exclude: Iterable[s
         if parsed is not None:
             fields.append(parsed)
     return fields
+
+
+def apply_seeded_defaults(fields: Sequence[GeneratorField], seeded: Mapping[str, Any] | None) -> list[GeneratorField]:
+    """Overlay a registry ``default_params`` seed onto schema-derived field defaults.
+
+    Without this the params panel renders juniper-data's schema defaults while the registry
+    seeds something else, so the operator is shown one value and a different one is sent —
+    and, worse, the rendered control sends the SCHEMA default straight back over the seed on
+    every Apply. ``equities`` is the case that forces it: its seed pins
+    ``fundamentals_fill="drop"`` and ``normalize_features=True`` precisely because the schema
+    defaults (``"nan"`` / ``False``) produce a dataset CasCor cannot fit — non-finite columns
+    and a first-pass loss twenty-two orders of magnitude out.
+
+    Pure and injectable: the seed arrives as a plain mapping rather than being looked up here,
+    so this module keeps its "no registry import" shape and a test can state the seed directly.
+    Keys the schema does not render are ignored here — they ride to the backend through the
+    payload seed in ``_apply_dataset_handler``, which is the only channel an array-valued param
+    like ``symbols`` has.
+
+    Args:
+        fields: the schema-derived fields, in render order.
+        seeded: the registry's ``default_params`` for this dataset (``{}``/None -> unchanged).
+
+    Returns:
+        A new list; ``fields`` is not mutated and neither are its (frozen) members.
+    """
+    if not seeded:
+        return list(fields)
+    return [dataclasses.replace(field_, default=seeded[field_.name]) if field_.name in seeded else field_ for field_ in fields]
 
 
 def availability_map(generators: Sequence[Mapping[str, Any]] | None) -> dict[str, bool]:

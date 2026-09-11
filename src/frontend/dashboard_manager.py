@@ -46,7 +46,7 @@ from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
 from canopy_constants import CascorPatchBounds, DashboardConstants, TrainingConstants
-from dataset_schema import apply_availability_gate, generator_name_for_type, is_generator_available, parse_schema_fields, unavailable_reason
+from dataset_schema import apply_availability_gate, apply_seeded_defaults, generator_name_for_type, is_generator_available, parse_schema_fields, unavailable_reason
 from frontend.internal_api import internal_api_headers
 from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, RECURRENCE_BACKEND_TYPE, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason, model_requirement, selection_is_live
 from settings import get_settings
@@ -3062,7 +3062,10 @@ class DashboardManager:
         gen_name = generator_name_for_type(dataset_value)
         if gen_name == "spiral":
             return title, {"display": "block"}, []
-        fields = parse_schema_fields(self._generator_schema(gen_name, generators))
+        # The registry seed overlays the schema defaults, so the panel SHOWS what Apply will
+        # SEND. Without it the two disagree for any seeded dataset, and the rendered control
+        # sends the schema default back over the seed on the next Apply.
+        fields = apply_seeded_defaults(parse_schema_fields(self._generator_schema(gen_name, generators)), dataset_default_params(dataset_value))
         available = is_generator_available(dataset_value, generators)
         return title, {"display": "none"}, self._build_schema_param_inputs(dataset_value, fields, available)
 
@@ -3160,7 +3163,26 @@ class DashboardManager:
                 if _value is not None:
                     payload[_key] = _value
         else:
-            params = self._collect_generator_params(gen_values, gen_ids)
+            # The registry seed FIRST, the rendered form over it. Before this, the cascor staging
+            # payload was built from the form alone, which made ``default_params`` a
+            # recurrence-only channel despite its docstring calling the registry "the single
+            # source of truth": its only consumers were ``_resolve_oneshot_start_body_handler``
+            # (gated on ``model_class == "one_shot"``) and ``dataset_ref_from_staged``. A
+            # rank-2 seed that needs params therefore could not exist — ``equities`` needs three,
+            # one of which (``symbols``) is an ARRAY that ``_field_from_property`` deliberately
+            # does not render, so the form can never carry it and every Apply 422'd.
+            #
+            # Order matters and is the same order the recurrence path already uses: seed, then
+            # let what the operator can actually see and edit win. The rendered controls are
+            # themselves initialised from the seed (``apply_seeded_defaults``), so a key that is
+            # both seeded and rendered round-trips unchanged unless the operator edits it — and a
+            # seeded key that is NOT rendered rides along instead of being silently dropped.
+            #
+            # This is a no-op for every cascor-compatible seed shipped today: all seven carry
+            # ``default_params={}``. Only ``equities`` (added here) and the rank-3 ``equities_seq``
+            # (which never reaches cascor) seed anything at all.
+            params = dict(dataset_default_params(dataset_type))
+            params.update(self._collect_generator_params(gen_values, gen_ids))
             if params:
                 payload["nn_dataset_params"] = params
         try:
