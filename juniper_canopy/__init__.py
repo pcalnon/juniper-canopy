@@ -12,4 +12,4 @@ __description__ = "Real-time monitoring frontend for Cascade Correlation neural 
 try:
     __version__ = importlib.metadata.version("juniper-canopy")
 except importlib.metadata.PackageNotFoundError:  # pragma: no cover - source checkout only
-    __version__ = "0.7.0"
+    __version__ = "0.8.0"

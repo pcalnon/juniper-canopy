@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-11
+
 ### Added
 
 - **The registry's `default_params` now reach the cascor path, and `equities` is seeded — the last
