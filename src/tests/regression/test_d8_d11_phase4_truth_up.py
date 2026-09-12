@@ -33,6 +33,7 @@ can never rot again; the fallback tracks ``pyproject.toml``.
 
 import importlib
 import importlib.metadata
+import re
 import tomllib
 from pathlib import Path
 
@@ -118,3 +119,27 @@ class TestD11VersionSingleSource:
             text = (_REPO_ROOT / rel).read_text(encoding="utf-8")
             assert '__version__ = "0.5.0"' not in text, f"{rel} still carries the stale 0.5.0 literal"
             assert "importlib.metadata.version" in text, f"{rel} must single-source the version from installed metadata"
+
+    def test_source_checkout_fallback_literals_track_pyproject(self):
+        """The fallback literals must be pinned to ``pyproject.toml``, not merely
+        checked against one historical value.
+
+        These two rot silently. ``_expected()`` above returns the INSTALLED version
+        whenever the package is installed -- which it is in CI -- so the fallback
+        branch is never exercised there and nothing notices when it goes stale. The
+        only literal assertion in this class was for ``"0.5.0"``, a specific past
+        value, so the pair sat at ``0.7.0`` through the 0.8.0 release bump and no
+        test failed. ``canopy_constants.resolve_app_version``'s fallback IS pinned
+        this way (``test_fallback_literal_tracks_pyproject``) and that guard is what
+        caught the bump; these two had no equivalent.
+
+        Pin them to pyproject so a release bump fails loudly on EVERY version site
+        rather than on the one that happened to be guarded.
+        """
+        pattern = re.compile(r'^\s*__version__ = "([^"]+)"', re.M)
+        for rel in ("juniper_canopy/__init__.py", "src/__init__.py"):
+            text = (_REPO_ROOT / rel).read_text(encoding="utf-8")
+            literals = pattern.findall(text)
+            assert literals, f"{rel} has no __version__ fallback literal to pin"
+            for lit in literals:
+                assert lit == PYPROJECT_VERSION, f"{rel} fallback literal {lit!r} != pyproject {PYPROJECT_VERSION!r}"
