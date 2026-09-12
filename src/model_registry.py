@@ -167,14 +167,51 @@ DATASET_TYPES: tuple[DatasetTypeSpec, ...] = (
     #                   n_samples=2000 it recruits EIGHT and the loss moves (0.2496 -> 0.2418,
     #                   top-1 0.5425). The dataset is fine; 200 samples over 16 cells is simply
     #                   too thin to recruit against. ``n_samples`` is a rendered schema field, so
-    #                   raising it is an operator action, not a code change — but that is why this
-    #                   seed carries no ``default_params`` pinning a larger size: on the CASCOR
-    #                   path the registry's ``default_params`` are never forwarded (see below).
+    #                   raising it is an operator action, not a code change.
     #
     # Both stay ``default_params={}``, matching the five incumbents. Neither imports an external
     # universe, so the G11 restatement below does not bind them.
     DatasetTypeSpec(value="gaussian", label="Gaussian Blobs", task_type="classification", ndim=2),
     DatasetTypeSpec(value="checkerboard", label="Checkerboard", task_type="classification", ndim=2),
+    # ``equities`` — the rank-2 sibling of ``equities_seq``, and the seed that forced the cascor
+    # path to learn to carry ``default_params`` at all. Until then the registry seed reached only
+    # the recurrence tier, so a rank-2 dataset needing params could not be expressed: every Apply
+    # sent bare defaults and 422'd. All three keys were measured 2026-09-10/11 against a live
+    # juniper-data and a real CascadeCorrelationNetwork fit:
+    #
+    # ``symbols``            — bare defaults are REFUSED, not truncated: the bundled 503-name
+    #                          universe exceeds the deployment cap of 14 and juniper-data raises
+    #                          InputTooLargeError -> 422. ``max_symbols`` does not rescue this;
+    #                          it IS the cap being exceeded. This key is an ARRAY, which
+    #                          ``_field_from_property`` deliberately does not render — so it can
+    #                          only travel as a registry seed, and that is precisely why the
+    #                          form-only payload could never carry this dataset.
+    # ``fundamentals_fill``  — the juniper-data default ``"nan"`` leaves non-finite columns
+    #                          (total_shares / market_cap / days_since_report).
+    # ``normalize_features`` — defaults to False, and equities' columns are raw market
+    #                          quantities. Unnormalised, CasCor's first output pass reports a
+    #                          loss of 5.83e+21 against 0.2511 normalised — twenty-two orders of
+    #                          magnitude. This key has no analogue in the sequence sibling's seed.
+    #
+    # Measured on the seed as written: generate 12.9s, (15799, 16) rank-2 with a one-hot target,
+    # ZERO non-finite in any split, CasCor fits in 1.2s recruiting 3 units (loss 0.2511 -> 0.2491).
+    # Train top-1 0.524 is the honest ceiling for next-day direction, not a defect — the same
+    # story as the sequence sibling's r² near zero.
+    #
+    # Needs juniper-data's ``equities`` extra, which is absent from its requirements.lock, so this
+    # renders greyed with an install hint in the container. That is the availability gate doing its
+    # job (§12.5), not a broken seed.
+    DatasetTypeSpec(
+        value="equities",
+        label="Equities (tabular)",
+        task_type="classification",
+        ndim=2,
+        default_params={
+            "symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"],
+            "fundamentals_fill": "drop",
+            "normalize_features": True,
+        },
+    ),
     # --- §12 rank-3 synthetics. r² is the LMU's fit at the service's effective defaults
     # (d=16, data-driven theta, ridge=0.0), measured 2026-09-09; it is recorded because a
     # generator that fits but learns nothing must not be mistaken for a good default.
@@ -271,26 +308,6 @@ KNOWN_UPSTREAM_GENERATORS: frozenset[str] = frozenset(
 # Generators deliberately NOT offered in the dataset dropdown, each with the reason.
 UNSEEDED_GENERATORS: dict[str, str] = {
     "csv_import": ("An import path, not a peer generator: it has no synthesisable default (``file_path`` is " "required, so calling it with defaults raises a ValidationError) and canopy already owns " "that flow in ``dataset_import.py``. Design §12.3 item 4."),
-    "equities": (
-        "Rank-2 classification, and it generates and trains perfectly well once given three params "
-        "— but canopy CANNOT DELIVER THEM ON THE CASCOR PATH, which is the only path a rank-2 "
-        "dataset can take. Measured 2026-09-10. (1) At bare defaults juniper-data refuses it: the "
-        "503-name universe exceeds the deployment cap of 14, exactly as its sequence sibling did "
-        "(canopy#610), so it needs an explicit ``symbols`` list. (2) ``fundamentals_fill`` defaults "
-        "to ``nan``. (3) NEW, and the one the sequence sibling did not have: ``normalize_features`` "
-        "defaults to False, and equities' columns are raw market quantities — fed to CasCor "
-        "unnormalised the first output pass reports a loss of 5.8e+21 against 0.2511 normalised, a "
-        "difference of twenty-two orders of magnitude. With all three set it trains cleanly "
-        "(3 units, loss 0.2511 -> 0.2491; top-1 0.524, which is the honest ceiling for next-day "
-        "direction rather than a defect). The blocker is that ``dataset_default_params`` is a "
-        "RECURRENCE-ONLY concept: its only two consumers are ``_resolve_oneshot_start_body_handler`` "
-        "(gated on ``model_class == 'one_shot'``) and ``dataset_ref_from_staged``. "
-        "``_apply_dataset_handler`` builds the cascor staging payload from the rendered form alone, "
-        "and ``symbols`` is an ARRAY, which ``_field_from_property`` deliberately does not render. "
-        "So a seeded ``equities`` would send bare defaults and 422 on every Apply. Unblock it by "
-        "deciding how the cascor path carries registry defaults (or how an array-valued param "
-        "becomes settable) — not by adding the seed."
-    ),
     "arc_agi": (
         "Its RANK IS PARAMETER-DEPENDENT, which ``DatasetTypeSpec.ndim`` cannot express. "
         "``flatten_pairs=True`` (the default) yields rank-2 ``(n, pad_to*pad_to)``; "

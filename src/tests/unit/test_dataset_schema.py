@@ -23,6 +23,7 @@ from dataset_schema import (
     humanize,
     is_generator_available,
     parse_schema_fields,
+    unavailable_hint,
     unavailable_reason,
 )
 
@@ -162,10 +163,52 @@ def test_is_generator_available_flag_absent_and_missing_generator_fallback_true(
 
 
 def test_unavailable_reason_is_reworded_ui_text():
-    # Not the raw "Install with: pip install datasets" — a UI-friendly phrase.
+    # Not the raw "Install with: pip install datasets" — a UI-friendly phrase. The LABEL stays
+    # short whether or not the wire carried a hint: it shares a dropdown option with the dataset
+    # name, so the pip command belongs in the panel (see unavailable_hint below).
     assert "install" not in unavailable_reason("mnist").lower() or "extra" in unavailable_reason("mnist").lower()
     assert unavailable_reason("mnist")  # non-empty
     assert unavailable_reason("some_other_gen")  # generic fallback non-empty
+
+
+_HINT = 'The "equities" extra is required. Install with: pip install "juniper-data[equities]"'
+
+
+def test_unavailable_hint_reads_the_producers_own_string():
+    """juniper-data W-4 publishes ``install_hint`` on /v1/generators; canopy must READ it.
+
+    canopy used to hand-maintain reworded duplicates for two generators and fall back to a bare
+    "unavailable in this deployment" for everything else — including both equities seeds, which
+    are the ones an operator actually hits, since that extra is absent from juniper-data's
+    lockfile. The comment above the map asserted the hint was not on the wire; it has been
+    since W-4.
+    """
+    gens = [{"name": "equities", "available": False, "install_hint": _HINT}]
+    assert unavailable_hint("equities", gens) == _HINT
+    # A generator with no optional dependency, one absent from the list, and a pre-W-4 service
+    # that sends no hint are all "nothing actionable to add" rather than errors.
+    assert unavailable_hint("equities", [{"name": "equities", "available": False}]) is None
+    assert unavailable_hint("equities", []) is None
+    assert unavailable_hint("equities", None) is None
+
+
+def test_unavailable_reason_prefers_the_wire_over_the_curated_map():
+    gens = [{"name": "equities", "available": False, "install_hint": _HINT}]
+    # A published hint means "needs an optional extra" WITHOUT canopy naming the extra itself.
+    assert unavailable_reason("equities", gens) == "needs an optional juniper-data extra"
+    # With no hint on the wire the curated map still speaks for the two names canopy knows...
+    assert unavailable_reason("mnist", []) == "needs juniper-data's optional dataset extra"
+    # ...and the generic phrase for anything else.
+    assert unavailable_reason("equities", []) == "unavailable in this deployment"
+
+
+def test_the_gate_label_uses_the_wire_derived_reason():
+    gens = [{"name": "equities", "available": False, "install_hint": _HINT}]
+    gated = apply_availability_gate([{"label": "Equities (tabular)", "value": "equities"}], gens)
+    assert gated[0]["disabled"] is True
+    assert "needs an optional juniper-data extra" in gated[0]["label"]
+    # The pip command must NOT be crammed into the option label.
+    assert "pip install" not in gated[0]["label"]
 
 
 # ---------------------------------------------------------------------------

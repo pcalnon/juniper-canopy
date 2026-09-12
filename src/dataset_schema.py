@@ -72,6 +72,7 @@ UI-friendly reason. Both are pure so they can be exercised without Dash or a liv
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -115,15 +116,33 @@ GENERATOR_NAME_ALIASES: dict[str, str] = {
     "moons": "moon",
 }
 
-# UI-reworded unavailability reasons keyed by juniper-data generator name. The /v1/generators list
-# carries ``available: bool`` but not the install hint (that reaches the client only in the
-# create-time 501 body, e.g. "Install with: pip install datasets"), so canopy names the optional
-# extra it knows about and falls back to a generic phrase for anything else (D1/D2/I-5).
+# UI-reworded unavailability reasons keyed by juniper-data generator name.
+#
+# **The wire carries the install hint now, and this map is the FALLBACK, not the source.** The
+# comment here used to say ``/v1/generators`` "carries ``available: bool`` but not the install
+# hint (that reaches the client only in the create-time 501 body)". That stopped being true at
+# juniper-data's W-4: ``GeneratorInfo.install_hint`` is a first-class field on that response, and
+# its own docstring gives the reason — without it ``available: false`` "says a generator cannot
+# run and nothing at all about what would fix that, so a preflight has nowhere to send an
+# operator". canopy was hand-maintaining reworded duplicates of a string the producer already
+# publishes, for two generators, and falling back to a bare "unavailable in this deployment" for
+# every other one — including both equities seeds, which are exactly the ones an operator is most
+# likely to hit, since the ``equities`` extra is absent from juniper-data's lockfile.
+#
+# So the derivation is now: if the producer published a hint, this generator needs an optional
+# extra and the label says so generically (the dropdown option has no room for a pip command —
+# the full hint goes in the params panel, via ``unavailable_hint``). Only when the producer
+# published nothing does this curated map speak, and it survives for exactly one reason: a
+# juniper-data older than W-4 sends no hint at all, and "unavailable in this deployment" is a
+# worse answer than the two entries below for the two generators canopy happens to know about.
 _UNAVAILABLE_REASONS: dict[str, str] = {
     "mnist": "needs juniper-data's optional dataset extra",
     "arc_agi": "needs juniper-data's optional dataset extra",
 }
 _UNAVAILABLE_REASON_DEFAULT: str = "unavailable in this deployment"
+# What the label says when the producer published a hint: short, because it shares a dropdown
+# option with the dataset name. The actionable text is the hint itself, rendered in the panel.
+_UNAVAILABLE_REASON_HAS_HINT: str = "needs an optional juniper-data extra"
 
 
 @dataclass(frozen=True)
@@ -244,6 +263,35 @@ def parse_schema_fields(schema: Mapping[str, Any] | None, *, exclude: Iterable[s
     return fields
 
 
+def apply_seeded_defaults(fields: Sequence[GeneratorField], seeded: Mapping[str, Any] | None) -> list[GeneratorField]:
+    """Overlay a registry ``default_params`` seed onto schema-derived field defaults.
+
+    Without this the params panel renders juniper-data's schema defaults while the registry
+    seeds something else, so the operator is shown one value and a different one is sent —
+    and, worse, the rendered control sends the SCHEMA default straight back over the seed on
+    every Apply. ``equities`` is the case that forces it: its seed pins
+    ``fundamentals_fill="drop"`` and ``normalize_features=True`` precisely because the schema
+    defaults (``"nan"`` / ``False``) produce a dataset CasCor cannot fit — non-finite columns
+    and a first-pass loss twenty-two orders of magnitude out.
+
+    Pure and injectable: the seed arrives as a plain mapping rather than being looked up here,
+    so this module keeps its "no registry import" shape and a test can state the seed directly.
+    Keys the schema does not render are ignored here — they ride to the backend through the
+    payload seed in ``_apply_dataset_handler``, which is the only channel an array-valued param
+    like ``symbols`` has.
+
+    Args:
+        fields: the schema-derived fields, in render order.
+        seeded: the registry's ``default_params`` for this dataset (``{}``/None -> unchanged).
+
+    Returns:
+        A new list; ``fields`` is not mutated and neither are its (frozen) members.
+    """
+    if not seeded:
+        return list(fields)
+    return [dataclasses.replace(field_, default=seeded[field_.name]) if field_.name in seeded else field_ for field_ in fields]
+
+
 def availability_map(generators: Sequence[Mapping[str, Any]] | None) -> dict[str, bool]:
     """Map generator name -> availability from a ``/v1/generators`` list (flag-absent -> True).
 
@@ -276,9 +324,43 @@ def is_generator_available(value: str | None, generators: Sequence[Mapping[str, 
     return availability_map(generators).get(name, True)
 
 
-def unavailable_reason(value: str | None) -> str:
-    """UI-friendly reason a generator is greyed, keyed by name with a generic fallback (reworded)."""
+def unavailable_hint(value: str | None, generators: Sequence[Mapping[str, Any]] | None) -> str | None:
+    """The producer's own install hint for ``value``'s generator, or None.
+
+    ``GeneratorInfo.install_hint`` (juniper-data W-4) is the same string the generator's guarded
+    ``ImportError`` carries and the same text the 501 on ``POST /v1/datasets`` returns, so it is
+    the one place the remedy is stated by the party that knows it. Reading it here is what stops
+    canopy re-wording a curated string it does not own.
+
+    Returns None for a generator that declares no optional dependency, for one missing from the
+    list, and for a juniper-data older than W-4 that sends no hint — all of which are "nothing
+    actionable to add", not errors.
+    """
     name = generator_name_for_type(value)
+    if not name:
+        return None
+    for entry in generators or ():
+        if isinstance(entry, Mapping) and entry.get("name") == name:
+            hint = entry.get("install_hint")
+            return hint if isinstance(hint, str) and hint.strip() else None
+    return None
+
+
+def unavailable_reason(value: str | None, generators: Sequence[Mapping[str, Any]] | None = None) -> str:
+    """Short UI reason a generator is greyed — for the dropdown label, which has no room for more.
+
+    Derived from the wire first: a generator the producer published an install hint for needs an
+    optional extra, and says so without canopy hand-maintaining a per-generator string. The
+    curated map speaks only when the producer published nothing (a pre-W-4 juniper-data), and the
+    generic phrase only when neither does.
+
+    ``generators`` is optional so the existing call shape keeps working; omitting it simply means
+    the wire cannot be consulted and the curated/generic path is taken. The ACTIONABLE text —
+    the pip command — is ``unavailable_hint``, rendered where there is room for it.
+    """
+    name = generator_name_for_type(value)
+    if unavailable_hint(value, generators):
+        return _UNAVAILABLE_REASON_HAS_HINT
     return _UNAVAILABLE_REASONS.get(name, _UNAVAILABLE_REASON_DEFAULT)
 
 
@@ -297,7 +379,7 @@ def apply_availability_gate(options: Sequence[Mapping[str, Any]], generators: Se
         value = out.get("value")
         if not out.get("disabled") and not is_generator_available(value, generators):
             base = out.get("label", value)
-            out["label"] = f"{base} — {unavailable_reason(value)}"
+            out["label"] = f"{base} — {unavailable_reason(value, generators)}"
             out["disabled"] = True
         gated.append(out)
     return gated

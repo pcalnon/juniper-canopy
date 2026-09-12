@@ -13,6 +13,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The registry's `default_params` now reach the cascor path, and `equities` is seeded — the last
+  generator that was blocked rather than merely unvalidated (design §12).** #616 recorded that
+  `equities` generates and trains fine given three params but that canopy could not deliver them.
+  This removes that blocker at its cause.
+
+  **The cause was that `default_params` only ever reached one of the two model tiers.** Its two
+  production consumers were `_resolve_oneshot_start_body_handler` (gated on
+  `model_class == "one_shot"`) and `dataset_ref_from_staged` — both recurrence.
+  `_apply_dataset_handler` built the cascor staging payload from the rendered form alone, so a
+  rank-2 dataset that *needed* params could not be expressed: `equities`' `symbols` key is an
+  array, and `_field_from_property` deliberately does not render arrays. Every Apply sent bare
+  defaults and 422'd. The constant's own docstring had been calling the registry "the single
+  source of truth" throughout.
+
+  **Both halves were needed.** `_apply_dataset_handler` now seeds the payload from the registry
+  and lets the form override it — the same order the recurrence path already used — so unrendered
+  keys travel. And `apply_seeded_defaults` overlays the seed onto the *rendered* controls, because
+  otherwise a key that is both seeded and rendered gets posted back at its **schema** default on
+  the next Apply, silently undoing the seed; the operator would also be shown one value while a
+  different one was sent.
+
+  **This is a no-op for every cascor-compatible seed shipped today** — all seven carry
+  `default_params={}`, so their payloads are byte-identical, asserted in
+  `test_an_unseeded_dataset_is_unchanged`.
+
+  `equities` is seeded with the three keys, each measured against a live juniper-data and a real
+  `CascadeCorrelationNetwork` fit: `symbols` (bare defaults are **refused** — 503 names over a cap
+  of 14), `fundamentals_fill="drop"` (the `"nan"` default leaves non-finite columns), and
+  `normalize_features=True` — new, and absent from the rank-3 sibling's seed, because equities'
+  columns are raw market quantities: unnormalised the first output pass reports a loss of
+  **5.83e+21** against **0.2511** normalised. Train top-1 is ~0.52 either way, so accuracy alone
+  would not have caught it. As seeded: (15799, 16), zero non-finite in any split, 3 units
+  recruited, loss 0.2511 → 0.2491 in 1.2s.
+
+  It needs juniper-data's `equities` extra, absent from that lockfile, so it renders greyed with a
+  reason in the container — the availability gate doing its job (§12.5), not a broken seed.
+
 - **Two rank-2 datasets — `gaussian` and `checkerboard` — closing the cascor half of the generator
   gap (design §12).** Both validated the way §12.4 requires, and for a rank-2 seed that means
   against **cascor**, not the LMU: generated through juniper-data to an NPZ artifact, then fitted
@@ -175,6 +212,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nowhere to travel.
 
 ### Fixed
+
+- **An unavailable dataset said it was unavailable and nothing about what would fix that, while
+  the producer had been publishing exactly that string all along.** `dataset_schema.py`'s comment
+  asserted that `/v1/generators` "carries `available: bool` but not the install hint (that reaches
+  the client only in the create-time 501 body)". That stopped being true at juniper-data's **W-4**:
+  `GeneratorInfo.install_hint` is a first-class field on that response, and its own docstring gives
+  the reason — without it `available: false` *"says a generator cannot run and nothing at all about
+  what would fix that, so a preflight has nowhere to send an operator"*.
+
+  canopy was hand-maintaining reworded duplicates of that string for **two** generators (`mnist`,
+  `arc_agi`) and falling back to a bare "unavailable in this deployment" for everything else —
+  including both equities seeds, which are precisely the ones an operator hits, since the
+  `equities` extra is absent from juniper-data's lockfile. Seeding `equities` (#621) made that the
+  common case rather than a corner.
+
+  The reason is now **derived from the wire**: a generator the producer published a hint for needs
+  an optional extra and says so, with no per-generator string on canopy's side. The curated map
+  survives only as the pre-W-4 fallback — a juniper-data that sends no hint at all — and the
+  generic phrase only when neither speaks.
+
+  **The split matters.** The dropdown option keeps a short phrase, because it shares its line with
+  the dataset name; the params panel, which has room, now renders the producer's hint **verbatim**
+  (`unavailable_hint`) so the operator gets the actual `pip install` command where they are looking
+  when they find the control disabled. Re-wording it there would put canopy straight back into
+  maintaining a string it does not own.
 
 - **The `equities_seq` seed could not generate, and once it could, it could not fit — so the one
   pair this arc exists to make work had still never trained.** canopy#601 made
