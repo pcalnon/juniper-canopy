@@ -100,8 +100,10 @@ def test_render_non_spiral_hides_typed_block_and_renders_schema_fields(dm):
     title, style, children = dm._render_dataset_params_handler("mnist", generators=GENERATORS)
     assert title == "Current Dataset — MNIST"
     assert style == {"display": "none"}  # I-7: spiral typed fields hidden for MNIST
-    # Schema-driven inputs rendered with pattern ids; infra field (seed) excluded.
-    assert _ids(children) == ["dataset", "n_samples", "flatten"]
+    # Schema-driven inputs rendered with pattern ids; infra field (seed) excluded, and
+    # ``flatten`` excluded too -- it is mnist's SHAPE_DETERMINING field, withheld because
+    # flipping it yields rank-3 against canopy's static ndim=2 declaration (canopy#623).
+    assert _ids(children) == ["dataset", "n_samples"]
 
 
 def test_render_unavailable_generator_shows_reworded_reason(dm):

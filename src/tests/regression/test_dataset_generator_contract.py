@@ -41,7 +41,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
-from dataset_schema import GENERATOR_NAME_ALIASES, generator_name_for_type
+from dataset_schema import FORM_EXCLUDED_FIELDS, GENERATOR_NAME_ALIASES, SHAPE_DETERMINING_FIELDS, form_excluded_fields, generator_name_for_type
 from frontend.dashboard_manager import DashboardManager
 from model_registry import DATASET_TYPES, KNOWN_UPSTREAM_GENERATORS, MODELS, UNSEEDED_GENERATORS, compatible_models, get_dataset_spec
 
@@ -387,3 +387,82 @@ class TestTheCascorPathCarriesRegistryDefaults:
         rendered = [child for child in children if getattr(child, "id", None) == {"type": "nn-gen-param", "name": "fundamentals_fill"}]
         assert rendered, "fundamentals_fill was not rendered at all"
         assert rendered[0].value == "drop"
+
+
+class TestAShapeDeterminingKnobIsWithheldNotRendered:
+    """canopy#623 — a field that can contradict ``DatasetTypeSpec.ndim`` must not be rendered.
+
+    ``mnist`` is seeded ``ndim=2``, and juniper-data's mnist generator flips to rank-3
+    ``(N, 28, 28)`` when ``flatten=False``. That knob is a plain boolean, so the schema-driven
+    panel rendered it as a checkbox and ``_collect_generator_params`` forwarded ``False``
+    (it drops only ``None`` and ``""``). Apply then returned **200 with a green banner** — no
+    canopy-side rank check exists — and the failure surfaced at Start as a 409 from cascor's
+    tier-boundary guard, naming the juniper-recurrence tier to an operator who picked MNIST.
+
+    The registry's ``arc_agi`` entry recorded this exact hazard as its reason for NOT being
+    seeded, while ``mnist`` — which has it too — shipped. The exclusion was applied to one
+    member of a two-member class.
+
+    Design §12.9 of JUNIPER_2026-09-02_JUNIPER-CANOPY_SELECTION-REACHABILITY-DESIGN.md rejected
+    the alternative (widen the registry's rank type): no ``ModelSpec`` accepts more than one
+    rank, so a variable-rank dataset is compatible with nothing under the sound reading.
+    """
+
+    MNIST_SCHEMA = {
+        "properties": {
+            "dataset": {"type": "string", "enum": ["mnist", "fashion_mnist"], "default": "mnist"},
+            "n_samples": {"anyOf": [{"minimum": 1, "type": "integer"}, {"type": "null"}], "default": None},
+            "flatten": {"type": "boolean", "default": True, "title": "Flatten"},
+            "seed": {"type": "integer", "default": 0},
+        }
+    }
+
+    def test_the_rank_flipping_knob_is_not_rendered_for_mnist(self):
+        # THE regression. Before the fix this rendered a "Flatten" checkbox.
+        generators = [{"name": "mnist", "available": True, "schema": self.MNIST_SCHEMA}]
+        _title, _style, children = DashboardManager({})._render_dataset_params_handler("mnist", generators=generators)
+        names = [child.id["name"] for child in children if isinstance(getattr(child, "id", None), dict)]
+        assert "flatten" not in names, "mnist's rank-flipping knob is rendered; an operator can contradict ndim=2"
+        # The ordinary content params are untouched -- this withholds one field, not the panel.
+        assert "dataset" in names and "n_samples" in names
+
+    def test_the_same_field_name_is_still_rendered_for_another_generator(self):
+        # Why the exclusion is keyed PER GENERATOR. This schema space has cross-generator name
+        # collisions (``normalize_features`` in three, ``one_hot_labels`` in two), so a global
+        # name-keyed exclusion would reach fields that are ordinary content params elsewhere.
+        assert "flatten" in form_excluded_fields("mnist")
+        assert "flatten" not in form_excluded_fields("equities")
+        assert "flatten_pairs" in form_excluded_fields("arc_agi")
+        assert "flatten_pairs" not in form_excluded_fields("mnist")
+
+    def test_an_unknown_generator_gets_the_universal_set_only(self):
+        # A generator canopy does not recognise has no rank declaration to contradict.
+        assert form_excluded_fields("not_a_generator") == FORM_EXCLUDED_FIELDS
+        assert form_excluded_fields(None) == FORM_EXCLUDED_FIELDS
+
+    def test_the_withheld_value_still_reaches_cascor(self):
+        # Withholding the CONTROL must not drop the VALUE: the registry seeds ``flatten=True``
+        # so canopy sends what makes its own ``ndim=2`` declaration true, rather than relying on
+        # juniper-data's default staying True. The seed rides the same channel as equities'
+        # unrendered ``symbols``.
+        with mock.patch("frontend.dashboard_manager.requests.post") as post:
+            post.return_value = MagicMock(ok=True, status_code=200, text="{}")
+            post.return_value.json.return_value = {}
+            DashboardManager({})._apply_dataset_handler(1, "mnist", 100, 0.1, 2.0, 2, gen_values=None, gen_ids=None)
+        sent = post.call_args.kwargs["json"]
+        assert sent["nn_dataset_params"]["flatten"] is True
+
+    def test_every_shape_determining_field_names_a_real_generator(self):
+        # A map keyed on a name nothing produces is a rule that never fires. Both keys must be
+        # generators canopy knows upstream, or the exclusion silently protects nothing.
+        for gen_name in SHAPE_DETERMINING_FIELDS:
+            assert gen_name in KNOWN_UPSTREAM_GENERATORS, f"{gen_name} is not an upstream generator"
+
+    def test_a_seeded_generator_with_a_withheld_knob_cannot_be_overridden_by_the_form(self):
+        # Defence in depth: even a caller that fabricates the control id cannot flip the rank,
+        # because the seed is applied and the form carries no such field in production. This
+        # pins that the SEED is present rather than the control merely being absent -- absence
+        # alone would leave the value to juniper-data's default.
+        spec = get_dataset_spec("mnist")
+        assert spec is not None and spec.ndim == 2
+        assert spec.default_params.get("flatten") is True, "ndim=2 is asserted, not merely inherited"

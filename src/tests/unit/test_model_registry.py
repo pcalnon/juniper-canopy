@@ -106,8 +106,14 @@ def test_default_params_seeded_only_for_equities_seq():
     """A1-iv-3c: the synthetic 2-D types carry no start params; equities_seq carries the
     bounded + stationary registry seed (the single source of truth for a one-shot fit)."""
     by_value = {spec.value: spec for spec in DATASET_TYPES}
-    for value in ("spirals", "xor", "mnist", "circles", "moons"):
+    for value in ("spirals", "xor", "circles", "moons"):
         assert by_value[value].default_params == {}
+    # ``mnist`` is the exception among the 2-D synthetics, and for a different reason than
+    # equities_seq's: not to make the fit work, but to make canopy's own ``ndim=2`` declaration
+    # SELF-ENFORCING. juniper-data's MNIST_DEFAULT_FLATTEN is True today, so this changes no
+    # bytes on the wire -- it stops the declaration being true only by upstream coincidence
+    # (canopy#623). The knob is withheld from the form, so nothing can override this.
+    assert by_value["mnist"].default_params == {"flatten": True}
     # The seed's three keys. ``symbols`` (not ``max_symbols`` -- that is a cap juniper-data
     # REFUSES against, so the former seed generated nothing) and ``fundamentals_fill`` (at
     # juniper-data's "nan" default X_train comes back non-finite and the LMU rejects it) are
