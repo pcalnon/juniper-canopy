@@ -153,7 +153,12 @@ class ModelSpec:
 DATASET_TYPES: tuple[DatasetTypeSpec, ...] = (
     DatasetTypeSpec(value="spirals", label="Spirals", task_type="classification", ndim=2),
     DatasetTypeSpec(value="xor", label="XOR", task_type="classification", ndim=2),
-    DatasetTypeSpec(value="mnist", label="MNIST", task_type="classification", ndim=2),
+    # ``flatten=True`` is SEEDED, not merely inherited. juniper-data's own default is True today,
+    # so this is a no-op against the current producer — but ``ndim=2`` above is a static claim,
+    # and leaving it true by upstream coincidence is what made this a defect in the first place
+    # (canopy#623). Seeded here, canopy SENDS the value that makes its own declaration true; the
+    # knob is withheld from the form by ``SHAPE_DETERMINING_FIELDS`` so nothing can override it.
+    DatasetTypeSpec(value="mnist", label="MNIST", task_type="classification", ndim=2, default_params={"flatten": True}),
     DatasetTypeSpec(value="circles", label="Circles", task_type="classification", ndim=2),
     DatasetTypeSpec(value="moons", label="Moons", task_type="classification", ndim=2),
     # --- §12 rank-2 synthetics. Validated 2026-09-10 the way §12.4 requires: generated through
@@ -309,13 +314,17 @@ KNOWN_UPSTREAM_GENERATORS: frozenset[str] = frozenset(
 UNSEEDED_GENERATORS: dict[str, str] = {
     "csv_import": ("An import path, not a peer generator: it has no synthesisable default (``file_path`` is " "required, so calling it with defaults raises a ValidationError) and canopy already owns " "that flow in ``dataset_import.py``. Design §12.3 item 4."),
     "arc_agi": (
-        "Its RANK IS PARAMETER-DEPENDENT, which ``DatasetTypeSpec.ndim`` cannot express. "
-        "``flatten_pairs=True`` (the default) yields rank-2 ``(n, pad_to*pad_to)``; "
-        "``flatten_pairs=False`` yields rank-3 ``(n, pad_to, pad_to)``. That knob is a plain "
-        "boolean, so the schema-driven params panel RENDERS it — an operator could flip a dataset "
-        "canopy statically declares ``ndim=2`` into rank-3 output, which is compatible with nothing "
-        "(cascor takes rank-2 only; recurrence takes rank-3 but regression only, and this is "
-        "classification). Settle how the registry expresses a variable-rank generator first."
+        "Its ``y`` IS NOT A CLASS VECTOR. ``y`` is the stacked padded ``output_grid`` — the same "
+        "shape as ``X``, so flattened it is ``(n, pad_to*pad_to)``: 900 cells valued in [-1..9], "
+        "not a 10-way one-hot (juniper-data ``generators/arc_agi/generator.py``). It is a "
+        "grid-to-grid map declared ``task_type='classification'`` upstream, and no model here "
+        "consumes that: the rank-2 install path takes ``np.argmax(y, axis=1)`` and would yield a "
+        "'class label' in [0, 900). The producer's ``task_type`` is the thing to fix first. "
+        "Its rank is ALSO parameter-dependent (``flatten_pairs`` flips rank-2/rank-3), but that "
+        "is a secondary UI hazard it shares with the SEEDED ``mnist`` (``flatten``), now handled "
+        "for both by withholding the knob — see ``SHAPE_DETERMINING_FIELDS`` in dataset_schema.py "
+        "and canopy#623. Rank was never the blocker; design §12.9 records why widening "
+        "``DatasetTypeSpec.ndim`` would not have helped."
     ),
 }
 

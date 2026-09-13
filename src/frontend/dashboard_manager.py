@@ -46,7 +46,7 @@ from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
 from canopy_constants import CascorPatchBounds, DashboardConstants, TrainingConstants
-from dataset_schema import apply_availability_gate, apply_seeded_defaults, generator_name_for_type, is_generator_available, parse_schema_fields, unavailable_hint, unavailable_reason
+from dataset_schema import apply_availability_gate, apply_seeded_defaults, form_excluded_fields, generator_name_for_type, is_generator_available, parse_schema_fields, unavailable_hint, unavailable_reason
 from frontend.internal_api import internal_api_headers
 from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, RECURRENCE_BACKEND_TYPE, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason, model_requirement, selection_is_live
 from settings import get_settings
@@ -3065,7 +3065,14 @@ class DashboardManager:
         # The registry seed overlays the schema defaults, so the panel SHOWS what Apply will
         # SEND. Without it the two disagree for any seeded dataset, and the rendered control
         # sends the schema default back over the seed on the next Apply.
-        fields = apply_seeded_defaults(parse_schema_fields(self._generator_schema(gen_name, generators)), dataset_default_params(dataset_value))
+        # ``exclude`` is per-generator: beyond the universal split/seed/cache plumbing, a
+        # generator whose rank an operator could flip has that knob WITHHELD, because
+        # DatasetTypeSpec.ndim is a static scalar the form would otherwise let them contradict
+        # (canopy#623; design §12.9). The seeded value still travels -- see _apply_dataset_handler.
+        fields = apply_seeded_defaults(
+            parse_schema_fields(self._generator_schema(gen_name, generators), exclude=form_excluded_fields(gen_name)),
+            dataset_default_params(dataset_value),
+        )
         available = is_generator_available(dataset_value, generators)
         return title, {"display": "none"}, self._build_schema_param_inputs(dataset_value, fields, available, generators=generators)
 

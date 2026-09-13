@@ -106,6 +106,43 @@ PARTIAL_DATA_POLICY_FIELDS: frozenset[str] = frozenset({"allow_truncation", "inc
 # Everything the schema-driven form must neither render nor forward.
 FORM_EXCLUDED_FIELDS: frozenset[str] = INFRASTRUCTURE_FIELDS | PARTIAL_DATA_POLICY_FIELDS
 
+# Fields whose value CONTRADICTS a declaration the registry makes elsewhere -- the same reason
+# class as the two sets above, but generator-specific rather than universal, so it is keyed by
+# juniper-data generator name rather than folded into FORM_EXCLUDED_FIELDS.
+#
+# Both members flip their generator's output RANK. ``DatasetTypeSpec.ndim`` is a static scalar
+# (model_registry.py), so rendering the knob lets an operator contradict canopy's own
+# declaration: mnist is seeded ``ndim=2`` while ``flatten=False`` yields rank-3 (N, 28, 28), and
+# arc_agi's ``flatten_pairs=False`` yields rank-3 (n, pad_to, pad_to). cascor then refuses the
+# artifact at the tier boundary -- but only at Start, so Apply has already returned 200 with a
+# green banner and the failure surfaces on an unrelated action (canopy#623).
+#
+# WITHHELD, not described: §12.9 of JUNIPER_2026-09-02_JUNIPER-CANOPY_SELECTION-REACHABILITY-
+# DESIGN.md rejected widening the registry's rank type to express the variable rank, because no
+# ModelSpec accepts more than one rank (cascor {2}, recurrence {3}) -- so a variable-rank dataset
+# is compatible with nothing under the sound reading, and the reading that isn't sound reinstates
+# this very hazard.
+#
+# Keyed per generator DELIBERATELY: this schema space has cross-generator name collisions
+# (``normalize_features`` in three generators, ``one_hot_labels`` in two), so a global name-keyed
+# exclusion would reach fields that are ordinary content params elsewhere.
+SHAPE_DETERMINING_FIELDS: dict[str, frozenset[str]] = {
+    "mnist": frozenset({"flatten"}),
+    "arc_agi": frozenset({"flatten_pairs"}),
+}
+
+
+def form_excluded_fields(generator_name: str | None) -> frozenset[str]:
+    """Return the fields the form must neither render nor forward for ``generator_name``.
+
+    The universal :data:`FORM_EXCLUDED_FIELDS` plus any generator-specific
+    :data:`SHAPE_DETERMINING_FIELDS`. An unknown or ``None`` generator gets the universal set,
+    which is the correct posture: a generator canopy does not recognise has no rank declaration
+    to contradict.
+    """
+    return FORM_EXCLUDED_FIELDS | SHAPE_DETERMINING_FIELDS.get(generator_name or "", frozenset())
+
+
 # canopy dataset-type value -> juniper-data generator name. canopy's registry (model_registry.
 # DATASET_TYPES) keeps the historical plural values "spirals"/"moons"; juniper-data's generator
 # registry keys are singular "spiral"/"moon". Everything else (xor, mnist, circles, equities_seq)
