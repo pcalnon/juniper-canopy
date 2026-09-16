@@ -41,7 +41,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
-from dataset_schema import FORM_EXCLUDED_FIELDS, GENERATOR_NAME_ALIASES, SHAPE_DETERMINING_FIELDS, form_excluded_fields, generator_name_for_type
+from dataset_schema import FORM_EXCLUDED_FIELDS, GENERATOR_NAME_ALIASES, SHAPE_DETERMINING_FIELDS, form_excluded_fields, generator_name_for_type, parse_schema_fields
 from frontend.dashboard_manager import DashboardManager
 from model_registry import DATASET_TYPES, KNOWN_UPSTREAM_GENERATORS, MODELS, UNSEEDED_GENERATORS, compatible_models, get_dataset_spec
 
@@ -466,3 +466,77 @@ class TestAShapeDeterminingKnobIsWithheldNotRendered:
         spec = get_dataset_spec("mnist")
         assert spec is not None and spec.ndim == 2
         assert spec.default_params.get("flatten") is True, "ndim=2 is asserted, not merely inherited"
+
+
+class TestSplitPlumbingNeverReachesTheContentForm:
+    """canopy#630 — the panel must not render the partition split as a dataset knob.
+
+    ``INFRASTRUCTURE_FIELDS`` named the split plumbing of a TWO-partition world
+    (``train_ratio`` / ``test_ratio`` / ``shuffle`` / ``seed`` / ``use_cache``). The
+    three-partition contract added ``sizing_mode`` / ``val_percent`` / ``test_percent`` /
+    ``val_ratio``, and the set silently stopped covering its own subject: measured before the
+    fix, **all 16 upstream generators leaked at least one**, and 13 of canopy's 14 selectable
+    dataset types rendered at least one control.
+
+    These are not inert. ``_collect_generator_params`` drops only ``None`` and ``""``, so a
+    rendered value is POSTED on every Apply — an operator adjusting what looks like a dataset
+    knob was reshaping the train/val/test split that cascor and juniper-data own.
+
+    The census that produced those numbers lives at
+    ``juniper-ml/util/ad-hoc/2026-09-15_split_field_form_leak_census.py``.
+    """
+
+    #: Every field name the partition contract owns. A NEW split field added upstream and not
+    #: added here is exactly the regression this class exists to catch.
+    SPLIT_PLUMBING = frozenset({"sizing_mode", "val_percent", "test_percent", "val_ratio", "train_ratio", "test_ratio"})
+
+    def test_no_split_field_survives_the_universal_exclusion(self):
+        # The direct statement of the rule, independent of any generator's schema.
+        assert self.SPLIT_PLUMBING <= FORM_EXCLUDED_FIELDS, f"not excluded: {sorted(self.SPLIT_PLUMBING - FORM_EXCLUDED_FIELDS)}"
+
+    def test_no_generator_renders_a_split_field(self):
+        """The property that matters, measured against a schema shaped like the real ones.
+
+        Written over a synthetic schema rather than a live juniper-data import so it runs in
+        canopy's own CI with no cross-repo dependency — the field NAMES are the contract.
+        """
+        schema = {
+            "properties": {
+                # The split plumbing, exactly as juniper-data emits it.
+                "sizing_mode": {"type": "string", "default": "carve"},
+                "val_percent": {"type": "number", "default": 40.0},
+                "test_percent": {"type": "number", "default": 30.0},
+                "val_ratio": {"type": "number", "default": 0.1},
+                "train_ratio": {"type": "number", "default": 0.6},
+                "test_ratio": {"type": "number", "default": 0.2},
+                # Genuine content params, which MUST survive.
+                "n_samples": {"type": "integer", "default": 200},
+                "noise": {"type": "number", "default": 0.1},
+            }
+        }
+        rendered = {f.name for f in parse_schema_fields(schema)}
+        assert not (rendered & self.SPLIT_PLUMBING), f"split plumbing rendered as content params: {sorted(rendered & self.SPLIT_PLUMBING)}"
+        # Not a vacuous pass: the content params are still there, so the exclusion is
+        # selective rather than the parser having returned nothing.
+        assert rendered == {"n_samples", "noise"}
+
+    def test_sizing_mode_is_not_rendered_as_a_free_text_box(self):
+        """The second half of #630, closed by the same exclusion.
+
+        ``sizing_mode`` is a closed choice, but its schema emits ``type: string`` with no
+        ``enum``, and ``_field_from_property`` maps a bare string to a text input — so an
+        operator got a free text box and a typo became a 422 from juniper-data. Excluding the
+        field removes the control entirely; there is no separate fix.
+        """
+        schema = {"properties": {"sizing_mode": {"type": "string", "default": "carve"}}}
+        assert [f.name for f in parse_schema_fields(schema)] == []
+        # And it is genuinely the EXCLUSION doing this, not the parser refusing bare strings:
+        # the same shape under a different name still renders, as a text input.
+        other = parse_schema_fields({"properties": {"label_column": {"type": "string", "default": "y"}}})
+        assert [(f.name, f.input_type) for f in other] == [("label_column", "text")]
+
+    def test_the_per_generator_exclusion_still_composes(self):
+        # canopy#623's SHAPE_DETERMINING_FIELDS are unioned ON TOP of the universal set, so
+        # widening the universal set must not drop them.
+        assert "flatten" in form_excluded_fields("mnist")
+        assert self.SPLIT_PLUMBING <= form_excluded_fields("mnist")

@@ -37,8 +37,14 @@
 #       schema->fields mapping and the availability predicate so both are unit-testable
 #       without a browser or a live data service.
 #     - INFRASTRUCTURE_FIELDS are the split/seed/cache plumbing every generator schema
-#       carries (train_ratio/test_ratio/shuffle/seed/use_cache). cascor and juniper-data
-#       own those; the canopy training sidebar surfaces generator *content* params only.
+#       carries: train_ratio/test_ratio/shuffle/seed/use_cache, plus the THREE-PARTITION
+#       contract's sizing_mode/val_percent/test_percent/val_ratio (added canopy#630 --
+#       this list named a two-partition world and stopped covering its own subject).
+#       cascor and juniper-data own those; the canopy training sidebar surfaces
+#       generator *content* params only.
+#     - SHAPE_DETERMINING_FIELDS are the per-generator knobs that would contradict a
+#       DIFFERENT registry declaration -- today the rank-flipping booleans (canopy#623).
+#       form_excluded_fields() unions the two.
 #     - GENERATOR_NAME_ALIASES bridges canopy's historical plural dataset-type values
 #       ("spirals"/"moons") to juniper-data's singular registry keys ("spiral"/"moon").
 #       Everything else is identity.
@@ -80,6 +86,22 @@ from typing import Any, Iterable, Mapping, Sequence
 # split ratios and RNG seeding, so the canopy training sidebar must not surface them as generator
 # content params (they would collide with cascor's own dataset config). Excluded from the rendered
 # field set and from the generic ``params`` payload.
+#
+# The last four were added 2026-09-15 (canopy#630). The first five predate the THREE-PARTITION
+# contract, which introduced ``sizing_mode`` / ``val_percent`` / ``test_percent`` / ``val_ratio``
+# -- so this set named the split plumbing of a two-partition world and silently stopped covering
+# its own subject. Measured before the fix: all 16 upstream generators leaked at least one, and
+# 13 of canopy's 14 selectable dataset types rendered at least one control (6 rendered all four).
+#
+# These are not inert controls. ``_collect_generator_params`` drops only ``None`` and ``""``, so a
+# rendered value is POSTED on every Apply -- an operator adjusting what looks like a dataset knob
+# was silently reshaping the train/val/test split that cascor and juniper-data own. ``val`` is the
+# in-loop split and ``test`` is touched once; a UI that lets the split be edited beside
+# ``n_samples`` invites exactly the selected-on-test confusion the data contract warns about.
+#
+# ``sizing_mode`` additionally rendered as a FREE TEXT box, because its schema emits
+# ``type: string`` with no ``enum`` -- so a typo became a 422 from juniper-data rather than an
+# unselectable option. Excluding it closes that too; there is no separate fix.
 INFRASTRUCTURE_FIELDS: frozenset[str] = frozenset(
     {
         "train_ratio",
@@ -87,6 +109,10 @@ INFRASTRUCTURE_FIELDS: frozenset[str] = frozenset(
         "shuffle",
         "seed",
         "use_cache",
+        "sizing_mode",
+        "val_percent",
+        "test_percent",
+        "val_ratio",
     }
 )
 
