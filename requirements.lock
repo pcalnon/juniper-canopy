@@ -100,7 +100,7 @@ numpy==2.5.3
     #   scipy
 packaging==26.3
     # via plotly
-plotly==7.0.0
+plotly==7.1.0
     # via
     #   juniper-canopy (pyproject.toml)
     #   dash
@@ -143,7 +143,7 @@ retrying==1.4.2
     # via dash
 scipy==1.18.1
     # via juniper-canopy (pyproject.toml)
-sentry-sdk==2.69.1
+sentry-sdk==2.69.2
     # via juniper-canopy (pyproject.toml)
 setuptools==84.0.0
     # via dash
@@ -164,7 +164,7 @@ typing-inspection==0.4.4
     #   fastapi
     #   pydantic
     #   pydantic-settings
-urllib3==2.7.0
+urllib3==2.8.0
     # via
     #   juniper-cascor-client
     #   juniper-data-client

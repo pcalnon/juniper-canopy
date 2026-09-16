@@ -26,7 +26,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "juniper-canopy"
-version = "0.8.0"
+version = "0.8.1"
 description = "Real-time monitoring dashboard for Cascade Correlation Neural Network"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -224,6 +224,47 @@ dev = [
 [tool.setuptools.packages.find]
 where = [".", "src"]
 include = ["juniper_canopy*", "backend*", "communication*", "frontend*", "logger*"]
+
+# ``packages.find`` collects PACKAGES -- directories carrying ``__init__.py``. Every bare
+# ``src/<name>.py`` is a top-level MODULE, which it never collects, so releases 0.5.0
+# through 0.8.0 shipped ``frontend/dashboard_manager.py`` without the ``canopy_constants``
+# it imports on its first line (canopy#631). Thirteen of the 49 shipped files imported a
+# module that was not in the wheel.
+#
+# ``py-modules`` resolves against ``package-dir``, NOT against ``packages.find.where``, and
+# adding it without the block below is worse than useless: the build succeeds and produces a
+# wheel with none of the modules in it. ``juniper_canopy`` needs its own mapping because it
+# sits at the repository root while everything else is under ``src/``; without it the build
+# fails with "package directory 'src/juniper_canopy' does not exist".
+#
+# ``util/wheel_import_smoke.py`` runs in ``publish.yml`` and fails the publish if any of
+# these stops reaching the wheel. Adding a new ``src/*.py`` means adding it in both places.
+[tool.setuptools]
+py-modules = [
+    "audit_log",
+    "canopy_constants",
+    "config_manager",
+    "csrf",
+    "dataset_import",
+    "dataset_schema",
+    "demo_mode",
+    "discovery",
+    "health",
+    "main",
+    "middleware",
+    "model_registry",
+    "observability",
+    "provenance",
+    "secrets_util",
+    "security",
+    "settings",
+    "validation_gate",
+    "ws_security",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+juniper_canopy = "juniper_canopy"
 
 # ==========================================
 # Black Configuration
