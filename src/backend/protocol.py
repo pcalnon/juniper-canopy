@@ -325,13 +325,19 @@ class BackendProtocol(Protocol):
     # A backend with no such gate implements these and says so -- it does not omit them.
     # The gate itself is a cascade-correlation concept; "not applicable" is an answer.
 
+    # These two carry no trailing ``...`` while their 22 siblings above do. A docstring is
+    # already a sufficient body, so the ``...`` is a statement with no effect -- which CodeQL's
+    # py/unused-statement flags, and an unresolved CodeQL thread BLOCKS the merge even while
+    # every required check reads green. The siblings are not flagged only because CodeQL reports
+    # on the PR diff, so their identical lines are invisible to it. Match this form when adding
+    # a new protocol method; do not "restore consistency" by adding the ellipsis back.
+
     def get_experimental_functions(self) -> Dict[str, Any]:
         """Return the gate state as ``{"enabled": bool}``.
 
         A backend without the concept returns ``{"enabled": False}`` — the gate is closed,
         which is the F2.10 safe default, not an error.
         """
-        ...
 
     def set_experimental_functions(self, enabled: bool) -> Dict[str, Any]:
         """Set the gate; return the state AFTER the write.
@@ -339,7 +345,6 @@ class BackendProtocol(Protocol):
         A backend that cannot honour the write returns ``{"ok": False, "error": ...}`` so the
         route can surface a 502 — it must not report success for a toggle that did nothing.
         """
-        ...
 
     # --- Lifecycle ---
 
