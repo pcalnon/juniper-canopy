@@ -384,6 +384,39 @@ class RecurrenceBackend:
             cfg = self._pending_dataset_config
         return {"ok": True, "pending": dict(cfg) if cfg else None}
 
+    # --- Experimental-functions gate (Y1) ---
+    #
+    # These exist because ``main.py``'s two experimental-functions routes call them on
+    # ``backend`` UNCONDITIONALLY, and the gate is read on every page mount. ``BackendProtocol``
+    # never declared them, so the requirement was a de-facto contract that ServiceBackend,
+    # DemoBackend and demo_mode happened to satisfy and this backend did not -- and the
+    # ``except Exception`` around the call turned the resulting ``AttributeError`` into a
+    # **500 with an error_id on every page mount under recurrence**. The gate is a CASCOR
+    # concept (cascor's ``/v1/admin/experimental_functions``); the recurrence tier has no
+    # equivalent, which is a reason to say so, not a reason to raise.
+    #
+    # The read and the write answer DIFFERENTLY on purpose:
+    #   * read  -> ``enabled: False``. Not an error: the gate is genuinely closed here, which
+    #     is exactly the F2.10 safe default the route's own docstring describes ("no Live
+    #     Switch affordance until we can confirm"). A 502 would be a lie about a failure.
+    #   * write -> ``ok: False``. A toggle that cannot be honoured must NOT report success --
+    #     the route maps ``ok: False`` to a 502 carrying this message, and the Dash layer
+    #     reconciles to the returned state. Silently answering ``enabled: False`` to a write
+    #     would leave the operator's UI disagreeing with the backend (N6: fail closed and
+    #     SAY SO; N9: a control that cannot be honoured is refused at the control).
+
+    def get_experimental_functions(self) -> Dict[str, Any]:
+        """Report the gate as closed. The recurrence tier has no experimental functions."""
+        return {"enabled": False}
+
+    def set_experimental_functions(self, enabled: bool) -> Dict[str, Any]:
+        """Refuse the write explicitly rather than pretending it landed."""
+        return {
+            "ok": False,
+            "error": "the recurrence backend has no experimental-functions gate (it is a cascade-correlation feature); nothing was changed",
+            "enabled": False,
+        }
+
     # --- Lifecycle ---
 
     async def initialize(self) -> bool:

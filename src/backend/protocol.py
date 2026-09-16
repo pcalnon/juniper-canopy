@@ -314,6 +314,33 @@ class BackendProtocol(Protocol):
         """Apply training parameter changes. Returns updated params."""
         ...
 
+    # --- Experimental-functions gate ---
+    #
+    # DECLARED HERE because main.py's two routes call them on ``backend`` unconditionally,
+    # and the read runs on EVERY PAGE MOUNT. They were previously an undeclared de-facto
+    # contract that three of four backends happened to satisfy; the fourth
+    # (``RecurrenceBackend``) did not, and the route's ``except Exception`` turned the
+    # ``AttributeError`` into a 500 with an error_id on every mount (Y1).
+    #
+    # A backend with no such gate implements these and says so -- it does not omit them.
+    # The gate itself is a cascade-correlation concept; "not applicable" is an answer.
+
+    def get_experimental_functions(self) -> Dict[str, Any]:
+        """Return the gate state as ``{"enabled": bool}``.
+
+        A backend without the concept returns ``{"enabled": False}`` — the gate is closed,
+        which is the F2.10 safe default, not an error.
+        """
+        ...
+
+    def set_experimental_functions(self, enabled: bool) -> Dict[str, Any]:
+        """Set the gate; return the state AFTER the write.
+
+        A backend that cannot honour the write returns ``{"ok": False, "error": ...}`` so the
+        route can surface a 502 — it must not report success for a toggle that did nothing.
+        """
+        ...
+
     # --- Lifecycle ---
 
     async def initialize(self) -> bool:
