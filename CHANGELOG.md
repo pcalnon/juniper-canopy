@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The three-partition split plumbing rendered as generator *content* parameters, on 13 of the 14
+  selectable dataset types.** `INFRASTRUCTURE_FIELDS` excluded `train_ratio` / `test_ratio` /
+  `shuffle` / `seed` / `use_cache` — the split plumbing of a **two**-partition world. The
+  three-partition contract added `sizing_mode`, `val_percent`, `test_percent` and `val_ratio`, and
+  the set silently stopped covering its own subject. Measured against juniper-data's real schemas:
+  **all 16 upstream generators leaked at least one** (9 leaked all four, 7 leaked `val_ratio`
+  alone), and 6 selectable datasets rendered all four controls.
+
+  These were not inert. `_collect_generator_params` drops only `None` and `""`, so a rendered value
+  is posted on **every Apply** — an operator adjusting what looked like a dataset knob was silently
+  reshaping the train/val/test split that cascor and juniper-data own. `val` is the in-loop split
+  and `test` is touched once; a form that lets the split be edited beside `n_samples` invites
+  exactly the selected-on-test confusion the data contract warns against.
+
+  All four are now excluded. Re-measured after the fix: **0 of 16 generators leak**, and content
+  params are untouched. Includes the second half of the same defect — `sizing_mode` rendered as a
+  **free text box**, because its schema emits `type: string` with no `enum`, so a typo became a 422
+  from juniper-data rather than an unselectable option. Excluding the field removes that control
+  entirely; there is no separate fix. A regression test now asserts **no** generator renders a split
+  field, so the next contract change that adds one fails loudly instead of leaking quietly. #630.
+
+### Changed
+
+- **`arc_agi`'s unseeded reason no longer cites a declaration that has since changed.** It recorded
+  that upstream declared `task_type='classification'` over a grid-to-grid `y`. juniper-data#402 added
+  a third task type and moved `arc_agi` to `'structured'`, so the producer no longer fabricates an
+  `n_classes` of 900 by argmax, and no model's `supported_task_types` contains `'structured'` — the
+  incompatibility is now explicit rather than incidental. Comment only; canopy never reads the wire
+  value, which `TestX8TaskTypeDivergenceIsDeliberate` records (`GeneratorInfo` omits `task_type`).
+
 ## [0.8.0] - 2026-09-11
 
 ### Added
