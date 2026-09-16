@@ -70,6 +70,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   source and shadows site-packages. The deployed image was healthy throughout; only the
   artifact on PyPI was broken.
 
+- **Y1 — every page mount under the recurrence backend returned a 500.**
+  `GET /api/admin/experimental_functions` calls `backend.get_experimental_functions()`
+  unconditionally, and the Dash layer reads that gate on **every mount**. `RecurrenceBackend`
+  implemented neither it nor `set_experimental_functions`, so the attribute lookup raised
+  `AttributeError`, the route's `except Exception` caught it, and the operator got
+  `{"error": "Internal server error", "error_id": ...}` with a 500 — on a healthy backend, for a
+  question whose honest answer is simply "no".
+
+  The root cause is that **`BackendProtocol` never declared either method.** The requirement was a
+  de-facto contract that `ServiceBackend`, `DemoBackend` and `demo_mode` happened to satisfy and
+  the fourth backend did not, so nothing checked it. Both are now declared on the protocol, and a
+  regression test asserts **every** backend implements the surface — the next backend added cannot
+  reintroduce this class of gap silently.
+
+  `RecurrenceBackend` now answers, and the read and the write answer **differently on purpose**:
+
+  - **read → `{"enabled": False}`.** Not an error. The gate is a cascade-correlation concept and is
+    genuinely closed here, which is exactly the F2.10 safe default the route's own docstring
+    describes ("no Live Switch affordance until we can confirm"). Returning `ok: False` would trade
+    a 500 for a 502 on every mount — a quieter lie, not a fix.
+  - **write → `{"ok": False, "error": ...}`.** A toggle that cannot be honoured must not report
+    success. The route maps this to a 502 carrying the reason, and the Dash layer reconciles to the
+    returned state (N6: fail closed and *say so*; N9: a control that cannot be honoured is refused
+    at the control, not discovered later).
+
+  The route itself is deliberately unchanged. Adding a `getattr` fallback there would paper over
+  the next missing implementation instead of failing the new protocol test.
+
+### Fixed
+
 - **The three-partition split plumbing rendered as generator *content* parameters, on 13 of the 14
   selectable dataset types.** `INFRASTRUCTURE_FIELDS` excluded `train_ratio` / `test_ratio` /
   `shuffle` / `seed` / `use_cache` — the split plumbing of a **two**-partition world. The
