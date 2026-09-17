@@ -53,6 +53,18 @@ jobs:
       - name: Check package
         run: twine check dist/*
 
+      # `twine check` reads metadata and the README; it cannot tell whether the wheel
+      # carries the modules its own code imports. Releases 0.5.0-0.8.0 all passed it while
+      # shipping a wheel whose dashboard could not be imported (canopy#631). This runs
+      # against the artifact about to ship, before TestPyPI and long before PyPI.
+      - name: Import smoke test (built wheel, nothing from the checkout)
+        run: |
+          python -m venv "${RUNNER_TEMP}/smoke"
+          "${RUNNER_TEMP}/smoke/bin/pip" install --quiet dist/*.whl
+          mkdir -p "${RUNNER_TEMP}/smoke-cwd"
+          cd "${RUNNER_TEMP}/smoke-cwd"
+          "${RUNNER_TEMP}/smoke/bin/python" "${GITHUB_WORKSPACE}/util/wheel_import_smoke.py"
+
       - name: Upload dist artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:

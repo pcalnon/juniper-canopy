@@ -9,7 +9,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-15
+
+### Added
+
+- **`util/wheel_import_smoke.py`, wired into `publish.yml` before TestPyPI.** It installs
+  the built wheel into a fresh venv, changes to an empty directory so nothing resolves out
+  of the checkout, and imports all 27 shipped packages and modules that a bare install can
+  import — failing the publish if any is missing. It also refuses to run from the
+  repository root, where `juniper_canopy/` would be imported from the checkout and the
+  defect would be invisible. `backend.service_backend` and `demo_mode` are deliberately
+  excluded: they need the `juniper-cascor` and `demo` extras, and a guard that cries wolf
+  is a guard someone deletes.
+
+### Changed
+
+- **`arc_agi`'s unseeded reason no longer cites a declaration that has since changed.** It recorded
+  that upstream declared `task_type='classification'` over a grid-to-grid `y`. juniper-data#402 added
+  a third task type and moved `arc_agi` to `'structured'`, so the producer no longer fabricates an
+  `n_classes` of 900 by argmax, and no model's `supported_task_types` contains `'structured'` — the
+  incompatibility is now explicit rather than incidental. Comment only; canopy never reads the wire
+  value, which `TestX8TaskTypeDivergenceIsDeliberate` records (`GeneratorInfo` omits `task_type`).
+
 ### Fixed
+
+- **The published wheel omitted ten top-level modules that thirteen of its own shipped
+  files import, so `pip install juniper-canopy` produced a package whose dashboard could
+  not be imported.** Every release from **0.5.0** onward:
+
+  ```
+  $ python -c "import frontend.dashboard_manager"     # only the wheel on the path
+  ModuleNotFoundError: No module named 'canopy_constants'
+  ```
+
+  `[tool.setuptools.packages.find]` collects **packages** — directories carrying
+  `__init__.py`. Each bare `src/<name>.py` is a top-level **module**, which that mechanism
+  never collects and which needs a `py-modules` entry; there was none. `canopy_constants`
+  and `settings` are each imported by **13 of the 49 shipped `.py` files**. The sdist was
+  no better: it carried **zero** of the twenty, and shipped `pyproject.toml` alongside
+  them, so rebuilding from source reproduced the same wheel.
+
+  **`py-modules` alone does not fix it, and fails silently.** It resolves against
+  `package-dir`, which this project never set, so a build with `py-modules` and nothing
+  else succeeds and emits a wheel containing **none** of the nineteen. `package-dir` now
+  points the empty-string root at `src`, with an explicit entry for `juniper_canopy`
+  because it lives at the repository root rather than under `src/` — without that entry
+  the build fails outright on `package directory 'src/juniper_canopy' does not exist`.
+  Measured across four candidate configurations against real builds; this is the only one
+  that ships 19/19 modules and keeps all five packages.
+
+  Nineteen modules ship: the twelve reachable from the shipped packages, plus the seven
+  `main` pulls in. `adapter_validation` is excluded because nothing imports it.
+
+  **Nothing in the pipeline could have caught this.** `twine check` reads metadata and the
+  README, never code. `pip check` reads the dependency graph, never importability — it
+  passes on a wheel that cannot import itself. And the TestPyPI verification step's
+  `from juniper_canopy import __version__` passes on **all four** broken wheels, because
+  that one module always shipped. The container never noticed either: `Dockerfile` copies
+  `src/` in and sets `PYTHONPATH=/app/src`, so the running service resolves these from
+  source and shadows site-packages. The deployed image was healthy throughout; only the
+  artifact on PyPI was broken.
 
 - **Y1 — every page mount under the recurrence backend returned a 500.**
   `GET /api/admin/experimental_functions` calls `backend.get_experimental_functions()`
@@ -61,15 +120,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from juniper-data rather than an unselectable option. Excluding the field removes that control
   entirely; there is no separate fix. A regression test now asserts **no** generator renders a split
   field, so the next contract change that adds one fails loudly instead of leaking quietly. #630.
-
-### Changed
-
-- **`arc_agi`'s unseeded reason no longer cites a declaration that has since changed.** It recorded
-  that upstream declared `task_type='classification'` over a grid-to-grid `y`. juniper-data#402 added
-  a third task type and moved `arc_agi` to `'structured'`, so the producer no longer fabricates an
-  `n_classes` of 900 by argmax, and no model's `supported_task_types` contains `'structured'` — the
-  incompatibility is now explicit rather than incidental. Comment only; canopy never reads the wire
-  value, which `TestX8TaskTypeDivergenceIsDeliberate` records (`GeneratorInfo` omits `task_type`).
 
 ## [0.8.0] - 2026-09-11
 
