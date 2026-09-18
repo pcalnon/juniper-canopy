@@ -98,8 +98,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The route itself is deliberately unchanged. Adding a `getattr` fallback there would paper over
   the next missing implementation instead of failing the new protocol test.
 
-### Fixed
-
 - **The three-partition split plumbing rendered as generator *content* parameters, on 13 of the 14
   selectable dataset types.** `INFRASTRUCTURE_FIELDS` excluded `train_ratio` / `test_ratio` /
   `shuffle` / `seed` / `use_cache` — the split plumbing of a **two**-partition world. The
