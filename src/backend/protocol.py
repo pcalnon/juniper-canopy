@@ -346,6 +346,60 @@ class BackendProtocol(Protocol):
         route can surface a 502 — it must not report success for a toggle that did nothing.
         """
 
+    # --- Live dataset swap ---
+    #
+    # DECLARED HERE for the same reason as the gate above, and discovered the same way: the
+    # gate fix (Y1) closed two of FIVE instances of one defect. main.py calls all four of
+    # these on ``backend`` unconditionally — ``:4429``, ``:4455``, ``:4492``, ``:4521`` — inside
+    # a bare ``except Exception`` that turns a missing method into a 500 with an error_id.
+    #
+    # ``get_dataset_swap_events`` is polled on every ``slow-update-interval`` tick
+    # (``SLOW_UPDATE_INTERVAL_MS = 5000``), so a backend missing it produced a 500 every five
+    # seconds for the life of the page — and the callback drops non-200 via ``no_update``, so
+    # nothing surfaced. The gate's version at least only fired once per mount.
+    #
+    # Live swap is a cascade-correlation capability. A backend without it implements these
+    # and says so; "not applicable" is an answer, and omission is not.
+    #
+    # As above: docstring only, no trailing ``...`` (CodeQL py/unused-statement).
+
+    def swap_dataset_live(self, **canopy_params: Any) -> Dict[str, Any]:
+        """Swap the training dataset under a live run; return ``{"ok": bool, ...}``.
+
+        A backend that cannot swap returns ``{"ok": False, "error": ...}`` so the route can
+        surface a 502 — it must not report success for a swap that did not happen.
+        """
+
+    def cancel_swap_dataset_live(self) -> Dict[str, Any]:
+        """Cancel an in-flight live swap; return ``{"ok": bool, ...}``.
+
+        A backend with no live-swap concept returns ``{"ok": False, "error": ...}`` rather than
+        reporting a cancellation it never performed.
+        """
+
+    def get_dataset_swap_events(self, since: Optional[str] = None) -> Dict[str, Any]:
+        """Return the session's swap events as ``{"ok": True, "events": [...]}``.
+
+        A backend that records no swaps returns ``{"ok": True, "events": []}`` — an empty list
+        is the TRUE answer, not a failure. Returning ``{"ok": False}`` here makes the route
+        emit a 502 claiming an error where there is simply nothing to report, on every poll.
+        """
+
+    def get_snapshot_dataset_swaps(self, snapshot_id: str) -> Dict[str, Any]:
+        """Return a stored snapshot's own swap events, same shape as the live feed.
+
+        Same rule: a backend that records no swaps returns ``{"ok": True, "events": []}``.
+        """
+
+    def cancel_pending_dataset(self) -> Dict[str, Any]:
+        """Discard a staged-but-unstarted dataset; return ``{"ok": bool, ...}``.
+
+        Declared because ``main.py:4324`` calls it with no ``hasattr`` guard. Its sibling
+        ``stage_dataset`` IS guarded (``:4299``) and so stays optional — the asymmetry is the
+        whole reason this one needs declaring: all three backends implement it today, so the
+        omission is latent rather than live, and a fourth backend would reintroduce the 500.
+        """
+
     # --- Lifecycle ---
 
     async def initialize(self) -> bool:

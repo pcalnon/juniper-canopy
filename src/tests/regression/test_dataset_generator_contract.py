@@ -458,14 +458,64 @@ class TestAShapeDeterminingKnobIsWithheldNotRendered:
         for gen_name in SHAPE_DETERMINING_FIELDS:
             assert gen_name in KNOWN_UPSTREAM_GENERATORS, f"{gen_name} is not an upstream generator"
 
-    def test_a_seeded_generator_with_a_withheld_knob_cannot_be_overridden_by_the_form(self):
-        # Defence in depth: even a caller that fabricates the control id cannot flip the rank,
-        # because the seed is applied and the form carries no such field in production. This
-        # pins that the SEED is present rather than the control merely being absent -- absence
-        # alone would leave the value to juniper-data's default.
+    def test_the_registry_asserts_the_rank_rather_than_inheriting_it(self):
+        # The seed must be PRESENT, not merely the control absent -- absence alone would leave
+        # the value to juniper-data's default, making canopy's ndim=2 true by coincidence.
         spec = get_dataset_spec("mnist")
         assert spec is not None and spec.ndim == 2
         assert spec.default_params.get("flatten") is True, "ndim=2 is asserted, not merely inherited"
+
+    def test_a_fabricated_control_id_cannot_override_the_withheld_knob(self):
+        # The test this replaced carried this name and asserted only the two registry values
+        # above -- it never constructed a control id, so it claimed a defence the code did not
+        # have. It does now: ``_collect_generator_params`` filters by the same per-generator
+        # exclusion the renderer uses.
+        #
+        # The realistic attacker is not an attacker. It is a browser tab rendered BEFORE the
+        # canopy#625 deploy, which still holds the ``flatten`` checkbox in its layout: the
+        # operator unticks it and Apply posts ``flatten: False``. ``False`` passes the blank-drop
+        # (``False is None`` and ``False == ""`` are both false), so before this fix it
+        # overrode the seed and flipped mnist to rank-3 -- canopy#623 verbatim, from a client
+        # the server cannot see or upgrade.
+        with mock.patch("frontend.dashboard_manager.requests.post") as post:
+            post.return_value = MagicMock(ok=True, status_code=200, text="{}")
+            post.return_value.json.return_value = {}
+            DashboardManager({})._apply_dataset_handler(
+                1,
+                "mnist",
+                100,
+                0.1,
+                2.0,
+                2,
+                gen_values=[False],
+                gen_ids=[{"type": "nn-gen-param", "name": "flatten"}],
+            )
+        sent = post.call_args.kwargs["json"]
+        assert sent["nn_dataset_params"]["flatten"] is True, "a fabricated/stale `flatten` control overrode the seed; mnist would be staged rank-3 against its own ndim=2"
+
+    def test_the_filter_drops_only_the_withheld_field_not_the_panel(self):
+        # Guard against over-correction: the exclusion must not swallow ordinary content params
+        # travelling on the same channel, or the fix trades canopy#623 for a silent param loss.
+        with mock.patch("frontend.dashboard_manager.requests.post") as post:
+            post.return_value = MagicMock(ok=True, status_code=200, text="{}")
+            post.return_value.json.return_value = {}
+            DashboardManager({})._apply_dataset_handler(
+                1,
+                "mnist",
+                100,
+                0.1,
+                2.0,
+                2,
+                gen_values=[False, 7, "zalando-datasets/fashion_mnist"],
+                gen_ids=[
+                    {"type": "nn-gen-param", "name": "flatten"},
+                    {"type": "nn-gen-param", "name": "n_samples"},
+                    {"type": "nn-gen-param", "name": "dataset"},
+                ],
+            )
+        sent = post.call_args.kwargs["json"]["nn_dataset_params"]
+        assert sent["flatten"] is True, "the withheld knob was not filtered"
+        assert sent["n_samples"] == 7 and sent["dataset"] == "zalando-datasets/fashion_mnist", "ordinary content params must still reach cascor"
 
 
 class TestSplitPlumbingNeverReachesTheContentForm:
