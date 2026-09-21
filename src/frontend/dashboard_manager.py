@@ -3122,18 +3122,29 @@ class DashboardManager:
         return children
 
     @staticmethod
-    def _collect_generator_params(gen_values, gen_ids):
+    def _collect_generator_params(gen_values, gen_ids, exclude=frozenset()):
         """Zip pattern-matching (id, value) pairs into a ``{name: value}`` params dict, dropping blanks.
 
         ``None`` (a cleared Optional field) and ``""`` (a blank text field) are dropped so the
         generator falls back to its own schema default rather than being sent an empty value.
+
+        ``exclude`` drops fields the form must not FORWARD. ``FORM_EXCLUDED_FIELDS``'s own
+        comment states the contract as "neither render nor forward", but only the render half was
+        enforced (canopy#625): the forward half held only as a CONSEQUENCE of the control not
+        existing, which is true of a freshly-rendered page and of nothing else. A tab rendered
+        before the deploy still carries the withheld checkbox, and its value arrives here.
+
+        ``False`` is the case that matters and the reason the blank-drop above does not already
+        cover this: ``False is None`` and ``False == ""`` are both false, so an unticked
+        ``flatten`` survives and overrides the seed -- flipping mnist to rank-3 and reproducing
+        canopy#623 exactly, from a client the server cannot see.
         """
         params: dict = {}
         for gen_id, value in zip(gen_ids or [], gen_values or [], strict=False):
             if not isinstance(gen_id, dict):
                 continue
             name = gen_id.get("name")
-            if not name or value is None or value == "":
+            if not name or name in exclude or value is None or value == "":
                 continue
             params[name] = value
         return params
@@ -3195,8 +3206,15 @@ class DashboardManager:
             # This is a no-op for every cascor-compatible seed shipped today: all seven carry
             # ``default_params={}``. Only ``equities`` (added here) and the rank-3 ``equities_seq``
             # (which never reaches cascor) seed anything at all.
+            #
+            # The form's contribution is filtered by the SAME per-generator exclusion the
+            # renderer uses, so "neither render nor forward" is enforced on both halves rather
+            # than on one and inferred on the other. The seed is applied BEFORE the filter and is
+            # untouched by it -- an excluded-but-seeded key (mnist's ``flatten: True``, equities'
+            # unrendered ``symbols`` array) still travels, which is the whole point of the
+            # ordering above.
             params = dict(dataset_default_params(dataset_type))
-            params.update(self._collect_generator_params(gen_values, gen_ids))
+            params.update(self._collect_generator_params(gen_values, gen_ids, exclude=form_excluded_fields(generator_name_for_type(dataset_type))))
             if params:
                 payload["nn_dataset_params"] = params
         try:
