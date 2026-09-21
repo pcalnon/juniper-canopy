@@ -145,7 +145,17 @@ juniper-data = [
     # canopy now constructs ``JuniperDataClient`` with the ``on_request``
     # instrumentation kwarg (added in 0.4.1). Pin floor matches the
     # release that introduced the kwarg.
-    "juniper-data-client>=0.4.1,<0.6.0",
+    #
+    # 2026-09-21: raised 0.4.1 -> 0.5.0. Decision 11 (the three-partition NPZ
+    # contract, ``NPZ_SPLITS == ("train", "val", "test")``) shipped in
+    # data-client 0.5.0, released 2026-09-10/11. canopy's whole dataset path
+    # assumes that contract -- every §12 seed depends on it -- while the floor
+    # still admitted 0.4.1 and 0.4.2, which predate it. ``requirements.lock``
+    # already resolved 0.5.0, so this closes the gap between what the lock
+    # tests and what the published metadata permits a consumer to install.
+    # Verified from the published wheel, not a checkout: 0.5.0 exports
+    # ``validate_npz_contract``; 0.4.x does not. Ceiling left at <0.6.0.
+    "juniper-data-client>=0.5.0,<0.6.0",
     "requests>=2.28.0",
 ]
 juniper-cascor = [

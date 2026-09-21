@@ -1971,10 +1971,24 @@ class DemoMode:
             raise
 
         # Dispatch on input rank (CANOPY-3D-1). We inspect the artifact directly rather
-        # than juniper_data_client.validate_npz_contract, which is absent from the pinned
-        # / published juniper-data-client (0.4.x). 3-D sequence (irregular-Δt time series)
-        # -> a display-only install (cascor cannot ingest 3-D yet, OQ-4); 2-D tabular ->
-        # the existing classification path.
+        # than juniper_data_client.validate_npz_contract. 3-D sequence (irregular-Δt time
+        # series) -> a display-only install (cascor cannot ingest 3-D yet, OQ-4); 2-D
+        # tabular -> the existing classification path.
+        #
+        # The original reason given here -- that ``validate_npz_contract`` "is absent from
+        # the pinned / published juniper-data-client (0.4.x)" -- was true when written and
+        # is FALSE now, in both halves: ``requirements.lock`` pins 0.5.0 and PyPI's latest
+        # is 0.5.0, whose wheel exports the helper. canopy#559. The floor in pyproject.toml
+        # now says 0.5.0 too, so the helper is guaranteed present rather than merely likely.
+        #
+        # The direct probe stays, and NOT because the helper is missing. Two reasons that
+        # outlive the version question: (1) this is a RANK probe, and rank is not what
+        # ``validate_npz_contract`` answers -- see the legacy ``X_full`` arm below, which
+        # any contract validator would reject outright; (2) the ecosystem contract is
+        # "tolerate ``*_full``, never require it", so a validator that fails closed on a
+        # pre-2026-09-06 artifact would refuse data canopy is obliged to keep loading.
+        # Whether the helper should nonetheless run as a SECOND, advisory check is the
+        # open half of canopy#559 and is deliberately not decided here.
         # A rank probe only, so the legacy ``X_full`` arm stays: any partition answers
         # "how many dimensions", and a legacy artifact has no other key to ask. The
         # message names ``X_train`` alone, because that is the one the CONTRACT requires
