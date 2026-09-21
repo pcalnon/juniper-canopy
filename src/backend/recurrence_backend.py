@@ -417,6 +417,57 @@ class RecurrenceBackend:
             "enabled": False,
         }
 
+    # --- Live dataset swap (four more of the same undeclared de-facto contract) ---
+    #
+    # The block above fixed the experimental-functions pair. It was two of FIVE: ``main.py``
+    # also calls ``swap_dataset_live`` (:4429), ``cancel_swap_dataset_live`` (:4455),
+    # ``get_dataset_swap_events`` (:4492) and ``get_snapshot_dataset_swaps`` (:4521) on
+    # ``backend`` with no ``hasattr`` guard, inside the same bare ``except Exception`` that
+    # turns a missing method into a 500 + error_id. ``BackendProtocol`` declares none of the
+    # four, so again ServiceBackend and DemoBackend happened to satisfy a contract that was
+    # never written down and this backend did not.
+    #
+    # ``get_dataset_swap_events`` is the worst of the five, and worse than the gate ever was:
+    # ``_setup_dataset_swap_observers_callbacks`` polls ``/api/history/dataset_swaps`` on every
+    # ``slow-update-interval`` tick -- ``SLOW_UPDATE_INTERVAL_MS = 5000`` -- so under recurrence
+    # this was a fresh 500 and a fresh error_id every five seconds for the life of the page.
+    # The callback discards non-200 via ``no_update``, so nothing surfaced; the cost was
+    # invisible in the UI and unbounded in the log.
+    #
+    # Live dataset swap is a CASCOR capability (cascor's ``/v1/training/dataset/live``, P2-1b).
+    # The recurrence service is one-shot: it has no in-flight run to swap under. So the same
+    # read/write asymmetry as the gate applies, and here the read's safe default is not merely
+    # safe but TRUE -- a tier that cannot swap has genuinely recorded no swap events:
+    #   * read  -> ``{"ok": True, "events": []}``. The route renders that as a 200 with empty
+    #     state, which is what the panels already show for "no swaps yet". Returning
+    #     ``ok: False`` instead would be a 502 claiming a FAILURE where there is simply
+    #     nothing to report, and would reinstate the five-second error cadence in 502 form.
+    #   * write -> ``{"ok": False, ...}``. The route maps it to a 502 whose error string the
+    #     Dash layer surfaces in a toast. A swap that cannot happen must not report success
+    #     (N6: fail closed and SAY SO; N9: refuse at the control).
+
+    def swap_dataset_live(self, **canopy_params: Any) -> Dict[str, Any]:
+        """Refuse a live swap: the recurrence tier has no in-flight run to swap under."""
+        return {
+            "ok": False,
+            "error": "the recurrence backend does not support live dataset swap (it is a cascade-correlation feature, and the recurrence service is one-shot); nothing was changed",
+        }
+
+    def cancel_swap_dataset_live(self) -> Dict[str, Any]:
+        """Refuse the cancel: there is no live swap to cancel, and saying 'cancelled' would lie."""
+        return {
+            "ok": False,
+            "error": "the recurrence backend does not support live dataset swap, so there is no in-flight swap to cancel",
+        }
+
+    def get_dataset_swap_events(self, since: Optional[str] = None) -> Dict[str, Any]:
+        """Report an empty event list. Not a degraded answer -- this tier records no swaps."""
+        return {"ok": True, "events": []}
+
+    def get_snapshot_dataset_swaps(self, snapshot_id: str) -> Dict[str, Any]:
+        """Report no swap markers for the snapshot, for the same reason as the live feed."""
+        return {"ok": True, "events": []}
+
     # --- Lifecycle ---
 
     async def initialize(self) -> bool:
