@@ -33,9 +33,16 @@
 #     - Behavior-preserving: dataset_type_options() reproduces the previously inlined
 #       dropdown options exactly (label / value / order); DEFAULT_DATASET_TYPE preserves
 #       the prior value="spirals" default.
-#     - task_type uses juniper-data's emitted vocabulary ("classification" /
-#       "regression"); the recurrence model's 3-D / irregular-delta-t nature is carried
-#       by ndim + requires_dt, NOT by a task_type label.
+#     - task_type uses juniper-data's emitted vocabulary, which is THREE values as of
+#       2026-09-15: "classification" / "regression" / "structured"
+#       (juniper_data/core/meta.py:38,41,59). This registry seeds only the first two —
+#       "structured" arrived with juniper-data#402 for arc_agi, whose y is a 900-cell grid
+#       rather than a class vector, and arc_agi stays unseeded. Note that NO ModelSpec
+#       lists "structured" in supported_task_types, so a future structured generator is
+#       compatible with nothing here and greys out everywhere — correct today, and a thing
+#       to notice rather than rediscover if such a model is ever added.
+#       The recurrence model's 3-D / irregular-delta-t nature is carried by ndim +
+#       requires_dt, NOT by a task_type label.
 #     - status drives lifecycle presentation in A1 ("live" | "coming_soon" |
 #       "experimental" | "deprecated" | "broken"); non-live models are shown but are not
 #       trainable.
@@ -88,7 +95,7 @@ class DatasetTypeSpec:
 
     value: str  # stable id sent to the backend (e.g. "spirals")
     label: str  # human-facing label (e.g. "Spirals")
-    task_type: str  # juniper-data vocabulary: "classification" | "regression"
+    task_type: str  # juniper-data vocabulary: "classification" | "regression" | "structured"
     ndim: int  # input rank: 2 (tabular) | 3 (sequence)
     temporal: str = "none"  # "none" | "regular" | "irregular" (3-D only)
     # A1-iv-3c: juniper-data generator params the one-shot (recurrence) Start button forwards
@@ -202,6 +209,24 @@ DATASET_TYPES: tuple[DatasetTypeSpec, ...] = (
     # ZERO non-finite in any split, CasCor fits in 1.2s recruiting 3 units (loss 0.2511 -> 0.2491).
     # Train top-1 0.524 is the honest ceiling for next-day direction, not a defect — the same
     # story as the sequence sibling's r² near zero.
+    #
+    # STALE, and knowingly left in place rather than deleted: that run was 2026-09-11 against
+    # generator ``3.0.0``. The generator is now ``5.0.0``, through TWO breaking bumps, so the
+    # numbers above describe a contract juniper-data no longer serves:
+    #   * 4.0.0 (juniper-data#395) dropped ``adj_close`` from the default feature set, so the
+    #     matrix is **15 columns, not 16** — verified by AST-reading
+    #     ``generators/equities/defaults.py::EQUITIES_FEATURE_COLUMNS``, which is 15 and does not
+    #     contain ``adj_close``. It also made ``cost_basis`` absent before ``purchase_date``
+    #     rather than constant, and moved SEC share history to an as-of join on the FILED date,
+    #     both of which can move the row count.
+    #   * 5.0.0 (juniper-data#404) exists because #395 shipped a causal-median regression that
+    #     let scale typos through — AIZ delivered at 990x truth, EOG at 428x. Any artifact minted
+    #     at 4.0.0 for an affected symbol carries the error.
+    # The SEED itself is not known to be broken: all three keys below are generic parameter
+    # names that still resolve at 5.0.0. What is stale is the EVIDENCE, and nothing has
+    # re-measured it. Left rather than deleted because a figure with a version attached is
+    # re-checkable; silence is not. Re-run before citing it. (N4 of the 2026-09-21 handoff
+    # addendum; the drift a Y6 registry-vs-upstream test would have caught.)
     #
     # Needs juniper-data's ``equities`` extra, which is absent from its requirements.lock, so this
     # renders greyed with an install hint in the container. That is the availability gate doing its
