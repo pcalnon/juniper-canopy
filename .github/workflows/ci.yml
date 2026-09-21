@@ -214,9 +214,24 @@ jobs:
           echo "╚════════════════════════════════════════════════════════════╝"
 
           set +e
+          # contract/ and performance/ are listed here because they were listed NOWHERE.
+          # The three pytest invocations in this file named unit/, regression/, integration
+          # and ui; the scheduled lane's `-m "slow or integration"` selector deselects both
+          # directories' tests (contract/ is all @pytest.mark.unit, performance/ is
+          # unmarked). So:
+          #   contract/    — test_param_map_completeness.py, which pins that every
+          #                  Apply-button input has a param-map entry (the N5 silent-drop
+          #                  class), had never executed in CI. Its only trace was a
+          #                  collection error in the scheduled lane, so repairing that lane
+          #                  would have removed the last sign it existed.
+          #   performance/ — test_button_responsiveness.py: 5 tests, 1 explicitly skipped,
+          #                  the other 4 live and never run anywhere.
+          # Both directories pass under this lane's selector today (3 and 4 tests). The
+          # selector is negative, so unmarked tests are selected rather than dropped.
+          # test_ci_lane_wiring.py keeps any future directory from going unwired.
           python -m pytest \
             -m "not requires_cascor and not requires_server and not slow" \
-            src/tests/unit/ src/tests/regression/ \
+            src/tests/unit/ src/tests/regression/ src/tests/contract/ src/tests/performance/ \
             --verbose \
             --timeout=60 \
             --maxfail=5 \
