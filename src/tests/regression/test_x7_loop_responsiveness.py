@@ -66,8 +66,28 @@ import main
 # (canopy_constants.py:373-374), so a probe that survives it survives the budget.
 STUB_BLOCK_SECONDS = 2.0
 
-# The dashboard's fast lane is 1.0 s; health must clear it with room to spare.
-HEALTH_DEADLINE_SECONDS = 0.5
+# The dashboard's fast lane is 1.0 s, and health must clear it. This IS that lane.
+#
+# It was 0.5 s -- half the lane, "with room to spare" -- until 2026-09-21, and that margin
+# was spent on the wrong side. What this test discriminates is not a half-second SLO but a
+# BLOCKED event loop, and the blocked signal is enormous: the docstring below records the
+# pre-fix measurement at **5.813 s**, and ``test_the_measurement_can_detect_blocking``
+# asserts the control's probes at ``>= STUB_BLOCK_SECONDS * 0.8`` = 1.6 s. So the two tests
+# bracket the answer, and anything in (deadline, 1.6) is a band where neither can speak.
+#
+# 0.5 s put that band right on a shared runner's noise floor. Observed on GitHub-hosted
+# runners in one afternoon: **0.757 s** (PR #643, Python 3.12) and **0.935 s** (PR #648,
+# Python 3.13) -- the latter on a COMMENT-ONLY diff to ``model_registry.py``, which cannot
+# affect HTTP latency by any mechanism. Both were nowhere near 5.813 s; the loop was fine
+# and the runner was busy. Each cost a rerun, which is the tax the arc's handoff recorded
+# as item 10.
+#
+# 1.0 s keeps every discrimination that matters -- it is still STRICTLY below the 1.6 s the
+# control test asserts for a genuinely blocked loop, and 5.8x below the real defect -- while
+# clearing both observed failures. ``test_the_deadline_stays_below_the_blocking_floor``
+# machine-checks that relationship, so a future loosening past 1.6 s (which WOULD destroy
+# the discrimination) fails loudly instead of quietly.
+HEALTH_DEADLINE_SECONDS = 1.0
 
 DRIVERS = 3
 PROBES = 10
@@ -149,7 +169,7 @@ class TestLoopStaysAnswerable:
     """T-A2 and its T-A3 guards."""
 
     async def test_health_stays_fast_while_upstream_is_slow(self, monkeypatch):
-        """T-A2: /v1/health/live answers in <500 ms under 3 concurrent slow requests.
+        """T-A2: /v1/health/live stays answerable under 3 concurrent slow requests.
 
         Pre-fix this measured 5.813 s: the first driver's synchronous ``get_status()``
         held the only worker's event loop, so the probe -- which touches nothing --
@@ -194,6 +214,24 @@ class TestLoopStaysAnswerable:
 
         worst = max(latency for latency, _status in probes)
         assert worst >= STUB_BLOCK_SECONDS * 0.8, f"the control's probes cleared in {worst:.3f}s -- an inline blocking call went undetected, so this harness cannot measure X7"
+
+    async def test_the_deadline_stays_below_the_blocking_floor(self):
+        """T-A3 guard 5: the pass threshold and the fail floor must not cross.
+
+        ``test_health_stays_fast_while_upstream_is_slow`` passes below
+        ``HEALTH_DEADLINE_SECONDS``; ``test_the_measurement_can_detect_blocking`` asserts a
+        genuinely blocked loop lands at or above ``STUB_BLOCK_SECONDS * 0.8``. If the first
+        ever rises to meet the second, a blocked loop satisfies the deadline and the pair
+        stops being able to disagree -- the suite would go green on the outage it exists to
+        catch.
+
+        This exists because the deadline was RAISED (0.5 -> 1.0) to stop a runner-noise
+        flake, and the obvious next move when it flakes again is to raise it further. It can
+        go to just under 1.6 s and no higher. Past that, fix the harness or the runner, not
+        the number.
+        """
+        blocking_floor = STUB_BLOCK_SECONDS * 0.8
+        assert HEALTH_DEADLINE_SECONDS < blocking_floor, f"HEALTH_DEADLINE_SECONDS={HEALTH_DEADLINE_SECONDS}s has reached the {blocking_floor}s floor that test_the_measurement_can_detect_blocking asserts for a BLOCKED loop. A blocked loop would now pass the deadline."
 
 
 class _EchoHandler(BaseHTTPRequestHandler):

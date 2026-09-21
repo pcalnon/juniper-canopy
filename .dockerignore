@@ -17,6 +17,7 @@
 .yamllint.yaml
 .trunk/
 .mypy_cache/
+**/.mypy_cache/
 
 # IDE and editor
 .vscode/
@@ -61,6 +62,7 @@ logs/
 reports/
 *.prof
 *.log
+**/*.log
 *.out
 
 # Coverage
@@ -104,3 +106,21 @@ Thumbs.db
 
 # Demo launcher script (not needed in container)
 demo
+
+# -- Credentials. Docker does NOT honour .gitignore, and this image is PUBLIC.
+#    The Dockerfile copies a DIRECTORY allowlist, which is not a file allowlist:
+#    `COPY <pkg>/ ./<pkg>/` ships everything tracked beneath it. Patterns are
+#    root-anchored (Go filepath.Match), so the `**/` twins are load-bearing.
+secrets/
+**/secrets/
+*.key
+**/*.key
+*.pem
+**/*.pem
+*.p12
+*.pfx
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example

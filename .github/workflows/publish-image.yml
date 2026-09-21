@@ -58,6 +58,7 @@ on:
       - "conf/logging_config.yaml"
       - "conf/layouts/**"
       - "util/check_image_cpu_only.py"
+      - "util/check_image_no_secrets.py"
       - ".github/workflows/publish-image.yml"
   workflow_dispatch:
     inputs:
@@ -146,7 +147,7 @@ jobs:
       - name: Build and push ${{ matrix.platform }}
         id: build
         if: github.event_name == 'release' || inputs.push
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: ${{ matrix.platform }}
@@ -162,7 +163,7 @@ jobs:
       # smoke test runs the artifact just built. Nothing is pushed; no credential is present.
       - name: Build ${{ matrix.platform }} (validation only)
         if: github.event_name != 'release' && !inputs.push
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: ${{ matrix.platform }}
@@ -199,6 +200,9 @@ jobs:
           docker run --rm -i -e EXPECT_TORCH='${{ steps.prov.outputs.expect_torch }}' \
             "${img}" python - < util/check_image_cpu_only.py
 
+          echo "--- no credentials packaged"
+          docker run --rm -i "${img}" python - < util/check_image_no_secrets.py
+
           # The dashboard package itself, as ci.yml's docker smoke does.
           echo "--- dashboard package"
           docker run --rm "${img}" python -c 'import juniper_canopy; print("juniper_canopy", juniper_canopy.__version__)'
@@ -218,6 +222,23 @@ jobs:
           echo "verifying ${ref} on ${{ matrix.platform }}"
           docker run --rm -i -e EXPECT_TORCH='${{ steps.prov.outputs.expect_torch }}' \
             "${ref}" python - < util/check_image_cpu_only.py
+
+          # No credential may reach a PUBLIC image. The COPY allowlist and .dockerignore are
+          # both defences, but an unasserted defence is a comment -- and both are weaker than
+          # they look: a DIRECTORY allowlist (`COPY src/ ./src/`) ships everything beneath it,
+          # and .dockerignore is matched ROOT-ANCHORED, so `foo/` never excludes `src/foo/`.
+          # This asserts the artifact itself. Negative controls (2026-09-21): a planted
+          # secrets/ dir, a planted .env and a planted .pem each exit 1; a scan that finds no
+          # root, or walks zero files, exits 2 rather than reporting a vacuous pass.
+          echo "--- no credentials in the published image"
+          docker run --rm -i "${ref}" python - < util/check_image_no_secrets.py
+
+          # The application must IMPORT in the image that ships. Until now this ran only on
+          # build-only runs, so the publish path asserted torch posture and never that the app
+          # loads -- the shape of juniper-deploy's test runner, which built, started, and ran
+          # zero tests for six months.
+          echo "--- the application imports"
+          docker run --rm "${ref}" python -c 'import juniper_canopy; print("    juniper_canopy imports")'
 
       - name: Export digest
         if: github.event_name == 'release' || inputs.push
