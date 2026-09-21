@@ -89,7 +89,7 @@ nest-asyncio==1.6.0
     # via
     #   juniper-canopy (pyproject.toml)
     #   dash
-networkx==3.6.1
+networkx==3.7
     # via juniper-canopy (pyproject.toml)
 numpy==2.5.3
     # via
