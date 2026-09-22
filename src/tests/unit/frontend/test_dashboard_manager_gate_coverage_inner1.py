@@ -178,10 +178,27 @@ class TestModelSelectionInner:
         # on mount too) — the middle positional is the interval count.
         # §4.3: the callback gained a third Output — the gate's notice about having moved (or
         # refused to move) the dataset.
+        #
+        # N5: availability is now STUBBED rather than inherited, and that is the point of the
+        # change. This test asserted "compatible and available, so the gate says nothing" while
+        # running in an environment with no juniper-data — so the fetch failed on every call and
+        # returned ``[]``, which the helpers read as all-available. The scenario in the comment
+        # was never the scenario under test; the assertion held because the failure was
+        # indistinguishable from success. ``[]`` states it for real: fetch succeeded, no
+        # per-generator flags, flag-absent fallback applies.
+        dm._fetch_generators = lambda: []
         options, value, notice = cb(dmmod.DEFAULT_MODEL_KEY, None, dmmod.DEFAULT_DATASET_TYPE)
         assert isinstance(options, list)
         # The default pair is compatible and available, so the gate changes nothing and says nothing.
         assert notice is None
+
+    def test_gate_dataset_options_says_so_when_availability_is_unknown(self, dm):
+        """The state the test above was silently in, now asserted deliberately."""
+        cb = raw_cb(dm, "gate_dataset_options")
+        dm._fetch_generators = lambda: None  # the fetch did not succeed
+        _options, _value, notice = cb(dmmod.DEFAULT_MODEL_KEY, None, dmmod.DEFAULT_DATASET_TYPE)
+        assert notice is not None
+        assert notice.id == "dataset-gate-availability-unknown-alert"
 
     def test_resolve_oneshot_start_body_live(self, dm):
         cb = raw_cb(dm, "resolve_oneshot_start_body")

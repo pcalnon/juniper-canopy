@@ -355,6 +355,26 @@ def apply_seeded_defaults(fields: Sequence[GeneratorField], seeded: Mapping[str,
     return [dataclasses.replace(field_, default=seeded[field_.name]) if field_.name in seeded else field_ for field_ in fields]
 
 
+def availability_is_known(generators: Sequence[Mapping[str, Any]] | None) -> bool:
+    """Whether the availability surface was actually read, as distinct from what it said.
+
+    ``None`` means the fetch did not succeed — the service was unreachable, or answered
+    non-2xx. Every other value, **including an empty list**, means canopy heard back.
+
+    This exists because those two were the same value until 2026-09-22, and the collapse was
+    load-bearing in the wrong direction. ``_fetch_generators`` returned ``[]`` on an exception,
+    on a non-ok response, and on a 200 whose payload was empty; the availability helpers then
+    read every generator as available (the flag-absent fallback) and the panel looked
+    identical whether juniper-data had said "everything is fine" or had said nothing at all.
+
+    The GATING stays fail-open either way — that is the ratified two-tier posture (D5: the UI
+    is a best-effort affordance, the backend is the correctness guarantee, and it still refuses
+    with a 501 install hint). What changes is that the operator can now be TOLD which of the
+    two they are looking at, instead of being shown a confident panel built on nothing.
+    """
+    return generators is not None
+
+
 def availability_map(generators: Sequence[Mapping[str, Any]] | None) -> dict[str, bool]:
     """Map generator name -> availability from a ``/v1/generators`` list (flag-absent -> True).
 
