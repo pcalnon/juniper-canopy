@@ -1301,7 +1301,10 @@ class TestRegisteredCallbacks:
 
         if func := callbacks.get("handle_replay_controls"):
             with patch("dash.callback_context") as mock_ctx:
-                mock_ctx.triggered = [{"prop_id": "test-panel-step-back.n_clicks"}]
+                # F-CANOPY-048: the layout id is ``{component_id}-replay-step-back``; dispatch is
+                # now exact, so the old ``test-panel-step-back`` (matched only as a substring)
+                # would name a component that does not exist.
+                mock_ctx.triggered = [{"prop_id": "test-panel-replay-step-back.n_clicks"}]
                 current_state = {"mode": "playing", "speed": 1.0, "current_index": 10}
                 metrics_data = [{"epoch": i} for i in range(50)]
                 result = func(0, 1, 0, 0, 0, 0, 0, 0, 0, current_state, metrics_data)
@@ -1314,7 +1317,8 @@ class TestRegisteredCallbacks:
 
         if func := callbacks.get("handle_replay_controls"):
             with patch("dash.callback_context") as mock_ctx:
-                mock_ctx.triggered = [{"prop_id": "test-panel-step-forward.n_clicks"}]
+                # F-CANOPY-048: exact dispatch -- the real id is ``{component_id}-replay-step-forward``.
+                mock_ctx.triggered = [{"prop_id": "test-panel-replay-step-forward.n_clicks"}]
                 current_state = {"mode": "stopped", "speed": 1.0, "current_index": 10}
                 metrics_data = [{"epoch": i} for i in range(50)]
                 result = func(0, 0, 1, 0, 0, 0, 0, 0, 0, current_state, metrics_data)
@@ -1405,16 +1409,23 @@ class TestRegisteredCallbacks:
             assert result == state
 
     def test_update_replay_ui(self, registered_callbacks):
-        """Test update_replay_ui calculates slider position."""
+        """Test the replay UI render calculates slider position.
+
+        F-CANOPY-048 merged ``update_replay_ui`` into ``handle_replay_controls``: its render is
+        now outputs 3-5 of that callback, reached by a ``replay-state`` trigger. Looked up
+        without the ``if func :=`` guard, so the test cannot pass by finding nothing.
+        """
         panel, callbacks = registered_callbacks
 
-        if func := callbacks.get("update_replay_ui"):
+        func = callbacks["handle_replay_controls"]
+        with patch("dash.callback_context") as mock_ctx:
+            mock_ctx.triggered = [{"prop_id": "test-panel-replay-state.data"}]
             state = {"current_index": 25}
             metrics_data = [{"epoch": i} for i in range(50)]
-            result = func(state, metrics_data)
-            assert abs(result[0] - 51.02) < 0.1
-            assert result[1] == 100
-            assert result[2] == "25 / 49"
+            result = func(0, 0, 0, 0, 0, 0, 0, 0, 0, state, metrics_data)
+            assert abs(result[3] - 51.02) < 0.1
+            assert result[4] == 100
+            assert result[5] == "25 / 49"
 
     def test_update_play_button_playing(self, registered_callbacks):
         """Test update_play_button shows pause when playing."""
