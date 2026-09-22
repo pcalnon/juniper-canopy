@@ -56,18 +56,13 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade "pip>=26.1.1"
-          # Match the main ci.yml unit-tests job: torch from the CPU index
-          # (canopy's demo_mode.py and demo_backend.py import torch at
-          # module load), then conf/requirements_ci.txt (the pinned CI
-          # surface incl. pytest>=9.0 + pytest-* siblings), then the repo
-          # itself in editable mode. The earlier ``.[test]`` shape silently
-          # no-op'd because canopy has no ``[test]`` extra in pyproject —
-          # pip warned but exit-0'd so the ``||`` fallback chain never
-          # fired, leaving pytest itself uninstalled. Every scheduled run
-          # since the workflow was added has failed with
-          # ``No module named pytest``.
+          # Match the main ci.yml unit-tests job: torch from the CPU index (canopy's
+          # demo_mode.py and demo_backend.py import torch at module load), then the repo
+          # itself with the [test] extra. An earlier revision tried `.[test]` before that
+          # extra existed -- pip warned and exit-0'd, so the `||` fallback never fired and
+          # every scheduled run failed with `No module named pytest`. The extra now exists,
+          # so this is the shape that comment was reaching for.
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -r conf/requirements_ci.txt
           # Install the [juniper-cascor] extra, exactly as ci.yml's unit-test job
           # does. Without it ``src/tests/conftest.py`` injects a stub for
           # ``juniper_cascor_client`` that registers only the top-level module,
@@ -89,7 +84,7 @@ jobs:
           # The extra is one pure-Python universal wheel
           # (``juniper_cascor_client-0.8.0-py3-none-any.whl``, requires-python
           # >=3.12), so it resolves on every leg of the 3.12/3.13/3.14 matrix.
-          pip install -e ".[juniper-cascor]"
+          pip install -e ".[test,juniper-cascor,observability]"
 
       - name: Run slow / integration tests
         run: |

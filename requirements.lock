@@ -59,7 +59,9 @@ idna==3.20
 importlib-metadata==9.0.1
     # via dash
 itsdangerous==2.2.0
-    # via flask
+    # via
+    #   juniper-canopy (pyproject.toml)
+    #   flask
 janus==2.0.0
     # via dash
 jinja2==3.1.6
@@ -149,6 +151,7 @@ setuptools==84.0.0
     # via dash
 starlette==1.6.0
     # via
+    #   juniper-canopy (pyproject.toml)
     #   fastapi
     #   juniper-observability
 typing-extensions==4.16.0

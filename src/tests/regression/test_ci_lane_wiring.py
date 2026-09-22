@@ -11,6 +11,10 @@ regression with a date, not a lane that never worked. Two lanes install the repo
 * ``.github/workflows/ci.yml``              -- ``pip install -e ".[juniper-cascor]"``  (real client)
 * ``.github/workflows/scheduled-tests.yml`` -- ``pip install -e .``                    (stub)
 
+Both lanes now install several extras at once
+(``.[test,juniper-cascor,observability]``, canopy#650), so the check below is membership in the
+bracketed list rather than a match against the whole bracket.
+
 With no real client, ``src/tests/conftest.py`` injects a stub registering only
 ``juniper_cascor_client``, ``.exceptions`` and ``.client``. But
 ``src/backend/cascor_service_adapter.py`` imports ``ENDPOINT_TRAINING_START`` from
@@ -143,8 +147,22 @@ def _run_steps(doc: dict) -> list[str]:
 
 
 def _installs_extra(shell: str) -> bool:
-    """True iff some ``pip install`` COMMAND (not a comment) requests the extra."""
-    return any(re.search(rf"pip\s+install\b[^\n]*\[{re.escape(EXTRA)}\]", line) for line in shell.splitlines())
+    """True iff some ``pip install`` COMMAND (not a comment) requests the extra.
+
+    MEMBERSHIP in the bracketed extras list, not equality with it. The original pattern was
+    ``\\[juniper-cascor\\]`` -- the extra had to be the WHOLE bracket -- so a lane installing
+    ``.[test,juniper-cascor,observability]`` read as not installing it at all. That is what this
+    guard reported against canopy#650, where every lane did install the extra, and it would have
+    rejected any future multi-extra lane the same way. The guard's subject is whether the real
+    client reaches the lane, not how many extras share the brackets.
+    """
+    for line in shell.splitlines():
+        if not re.search(r"pip\s+install\b", line):
+            continue
+        for match in re.finditer(r"\[([^\]]*)\]", line):
+            if EXTRA in [part.strip() for part in match.group(1).split(",")]:
+                return True
+    return False
 
 
 def _lanes_running_this_suite() -> list[tuple[Path, str]]:
