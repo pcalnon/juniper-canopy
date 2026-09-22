@@ -600,7 +600,10 @@ class TestListDatasetGenerators:
         monkeypatch.setattr(main, "juniper_data_available", True)
         with patch("httpx.AsyncClient", return_value=_FakeGetClientCM([{"name": "spiral"}, {"name": "xor"}])):
             result = await main.list_dataset_generators()
-        assert result == {"generators": [{"name": "spiral"}, {"name": "xor"}]}
+        assert result["generators"] == [{"name": "spiral"}, {"name": "xor"}]
+        # A-N5: juniper-data answered, so availability is KNOWN. Asserted rather than
+        # ignored -- this is the branch whose flag must stay false.
+        assert result["upstream_unavailable"] is False
 
     @pytest.mark.asyncio
     async def test_data_service_returns_dict_with_generators(self, monkeypatch):
@@ -608,7 +611,8 @@ class TestListDatasetGenerators:
         payload = {"generators": [{"name": "moon"}]}
         with patch("httpx.AsyncClient", return_value=_FakeGetClientCM(payload)):
             result = await main.list_dataset_generators()
-        assert result == {"generators": [{"name": "moon"}]}
+        assert result["generators"] == [{"name": "moon"}]
+        assert result["upstream_unavailable"] is False
 
     @pytest.mark.asyncio
     async def test_fallback_builtin_generators(self, monkeypatch):
