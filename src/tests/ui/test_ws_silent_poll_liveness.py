@@ -107,6 +107,41 @@ def _wait_status(canopy_url: str, predicate, *, timeout: float = 10.0) -> dict:
     raise AssertionError(f"status predicate not satisfied within {timeout}s; last={last}")
 
 
+def _render_payload(payload) -> str:
+    """Render a drained payload for a failure message, preserving what it MEANS.
+
+    canopy#637. Every assertion in this module used to render payloads as
+    ``type(p).__name__``, and ``drain()`` produces a ``str`` from exactly two places that
+    mean opposite things:
+
+    * ``"<no_update>"`` — the callback WAS dispatched and deliberately wrote nothing (dash
+      4.x serializes ``PreventUpdate``/``no_update`` as a 200 with the output key absent).
+      That is a real starvation signal: the poll ran and produced no data.
+    * ``"<body-unavailable:…>"`` — the collector could not read the response body. That
+      says nothing whatever about the poll; it is an artefact of this test's own plumbing.
+
+    Rendered as ``'str'``, those are indistinguishable, so a failure could not be
+    root-caused from the CI log and the only move was a re-run. Three occurrences in one
+    day (canopy#636, #651, #653), each on a diff that cannot plausibly cause it — a
+    two-line CHANGELOG deletion, a status-bar string change, and an availability-state
+    change — and none of them taught us anything.
+
+    The list case carries its length because the assertions require a NON-EMPTY list, so
+    ``list[0]`` and ``list[3]`` are different findings.
+
+    The right idiom already existed in this file at the ``test_ws_primary_*`` dispatch
+    render (``p if isinstance(p, str) else type(p).__name__``); it was applied at one of
+    the five sites. This hoists it and applies it at all of them.
+    """
+    if isinstance(payload, str):
+        return payload
+    if isinstance(payload, list):
+        return f"list[{len(payload)}]"
+    if payload is None:
+        return "None"
+    return type(payload).__name__
+
+
 def _attach_store_collector(page, output_name):
     """Collect ``_dash-update-component`` responses whose callback output is
     ``output_name``. Body reads happen inside ``drain()`` (sync-API response
@@ -253,7 +288,7 @@ def test_metrics_store_polls_on_long_lived_tab_with_ws_silent(dashboard_page, ca
         return writes if len(writes) >= 2 else None
 
     writes = _wait_for(data_writes, timeout=12.0, page=dashboard_page)
-    assert writes, f"metrics-store poll starved under WS-silent state; captured={[(s, type(p).__name__) for s, p in drain()]}"
+    assert writes, f"metrics-store poll starved under WS-silent state; captured={[(s, _render_payload(p)) for s, p in drain()]}"
     epochs = [w[-1].get("epoch") for w in writes if isinstance(w[-1], dict)]
     assert any(isinstance(e, int) and e > 0 for e in epochs), f"store writes carried no advancing epochs: {epochs}"
 
@@ -279,7 +314,7 @@ def test_populated_store_survives_poll_after_stop(dashboard_page, canopy_url):
     def populated_write():
         return [p for s, p in drain() if s == 200 and isinstance(p, list) and p] or None
 
-    assert _wait_for(populated_write, timeout=12.0, page=dashboard_page), f"store never populated under WS-silent state; captured={[(s, type(p).__name__) for s, p in drain()]}"
+    assert _wait_for(populated_write, timeout=12.0, page=dashboard_page), f"store never populated under WS-silent state; captured={[(s, _render_payload(p)) for s, p in drain()]}"
     pre_stop_count = len(drain())
 
     dashboard_page.click("#stop-button")
@@ -330,7 +365,7 @@ def test_topology_store_fetches_on_tab_switch_with_ws_silent(dashboard_page, can
         #    returns data while the browser dispatches no_update'd, the
         #    handler works and the dispatches carried the wrong inputs; if it
         #    also comes back empty/no_update, the server side is the problem.
-        dispatches = [(s, p if isinstance(p, str) else type(p).__name__, (inp or {}).get("visualization-tabs")) for s, p, inp in drain.detail()]
+        dispatches = [(s, _render_payload(p), (inp or {}).get("visualization-tabs")) for s, p, inp in drain.detail()]
         try:
             route = requests.get(f"{canopy_url}/api/topology", timeout=2)
             route_info = (route.status_code, sorted(route.json().keys()) if route.ok else route.text[:120])
@@ -383,7 +418,7 @@ def test_metrics_store_ws_primary_feeds_store_when_fresh(dashboard_page, canopy_
         return None
 
     hit = _wait_for(sentinel_write, timeout=12.0, page=dashboard_page)
-    assert hit, f"WS-primary sentinel epoch {sentinel} never reached the metrics store; captured={[(s, type(p).__name__) for s, p in drain()]}"
+    assert hit, f"WS-primary sentinel epoch {sentinel} never reached the metrics store; captured={[(s, _render_payload(p)) for s, p in drain()]}"
 
 
 @pytest.mark.ui
@@ -416,4 +451,4 @@ def test_poll_resumes_rest_when_ws_goes_stale(dashboard_page, canopy_url):
         rest = [p for _s, p in after if isinstance(p, list) and p and not any(isinstance(r, dict) and r.get("epoch") == sentinel for r in p)]
         return rest or None
 
-    assert _wait_for(rest_write_after, timeout=15.0, page=dashboard_page), "the REST poll never re-engaged after the WS went stale (the store kept only WS " f"sentinels — sticky regression); post-stale writes={[(s, type(p).__name__) for s, p in drain()[boundary:]]}"
+    assert _wait_for(rest_write_after, timeout=15.0, page=dashboard_page), "the REST poll never re-engaged after the WS went stale (the store kept only WS " f"sentinels — sticky regression); post-stale writes={[(s, _render_payload(p)) for s, p in drain()[boundary:]]}"
