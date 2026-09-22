@@ -2905,8 +2905,10 @@ class DashboardManager:
         an incompatible dataset is disabled with a reason suffix) with the deployment-availability
         gate (``apply_availability_gate`` — a generator whose optional data extra is absent is
         disabled with a reworded reason). A missing/older availability surface degrades to
-        all-available (flag-absent fallback). If the current selection became disabled, snap to the
-        first enabled option (dataset-primary conflict policy, D5). The mount-time pass runs against
+        all-available (flag-absent fallback). If the current selection became disabled, CLEAR it
+        (model-primary conflict policy — OQ-6, ratified 2026-09-22; see the comment at the return
+        for why this was previously mislabelled "dataset-primary" and snapped instead). The
+        mount-time pass runs against
         the seeded ``model-selection-store`` (``DEFAULT_MODEL_KEY``), so the availability gate
         applies at first paint.
 
@@ -2941,7 +2943,27 @@ class DashboardManager:
             return options, None, self._empty_dataset_set_notice(model_key)
         if current_value in enabled:
             return options, dash.no_update, None
-        return options, enabled[0], self._dataset_repaired_notice(current_value, enabled[0], model_key)
+        # OQ-6, ratified 2026-09-22: **model-primary, resolved by CLEARING the dataset.**
+        #
+        # D5 (JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md:55) made the
+        # conflict rule a swappable policy and deferred the default to "post-spike"; §5.6 named
+        # the two candidates and BOTH resolve by clearing — *dataset-primary* keeps the dataset
+        # and clears the model, *model-primary* keeps the model and clears the dataset.
+        #
+        # This line used to snap to ``enabled[0]`` and call itself "(dataset-primary conflict
+        # policy, D5)". That was wrong twice over: it kept the MODEL and changed the dataset,
+        # which is model-primary's direction, not dataset-primary's; and it replaced rather
+        # than cleared, which is neither policy. The snap was a workaround, not a choice —
+        # N7 of the selection-reachability design records that under ``clearable=False`` both
+        # §5.6 policies were literally unimplementable, because a null dataset could not be
+        # expressed. Both axes are clearable now, so the design's own resolution is available
+        # and this is it.
+        #
+        # Clearing lands on ``⊥``, where Apply and Start are already disabled
+        # (``selection_axis_unset``) — so the operator picks deliberately from the gated list
+        # instead of inheriting a dataset the gate chose for them. The empty-set branch above
+        # has cleared for the same reason since §4.7; this makes the two agree.
+        return options, None, self._dataset_cleared_notice(current_value, model_key)
 
     @staticmethod
     def _model_label(model_key):
@@ -2978,24 +3000,27 @@ class DashboardManager:
             id="dataset-gate-empty-alert",
         )
 
-    def _dataset_repaired_notice(self, previous, replacement, model_key):
-        """D5's notice, and N12's TRANSIENT half — informational, so it auto-dismisses.
+    def _dataset_cleared_notice(self, previous, model_key):
+        """D5's notice under the ratified policy, and N12's TRANSIENT half — auto-dismisses.
 
-        The gate has just moved the dataset because the previous one is not compatible with the
-        newly-selected model. D5 always specified this notice and the snap never shipped it, so the
-        dataset changed under the operator silently. Names the old value and the new one, because
-        "the dataset changed" without saying from what to what is not a notice, it is an alarm.
+        The previously-selected dataset is not compatible with the newly-selected model, so it
+        is CLEARED rather than replaced. Names what was dropped and why: "the dataset changed"
+        without saying from what is not a notice, it is an alarm.
+
+        OQ-6 was ratified 2026-09-22 as **model-primary with a clear** — §5.6's own wording,
+        which this handler could not implement before both axes became clearable. See the
+        conflict-resolution comment in ``_gate_dataset_options_handler``.
         """
         return dbc.Alert(
             [
-                html.Strong("Dataset changed. "),
-                html.Span(f"{self._dataset_label(previous)} is not compatible with {self._model_label(model_key)}; switched to {self._dataset_label(replacement)}."),
+                html.Strong("Dataset cleared. "),
+                html.Span(f"{self._dataset_label(previous)} is not compatible with {self._model_label(model_key)}, so it was cleared. Choose a dataset from the gated list."),
             ],
             color="info",
             className="mb-2",
             dismissable=True,
             duration=8000,
-            id="dataset-gate-repaired-alert",
+            id="dataset-gate-cleared-alert",
         )
 
     # N7 (I-7 / U-6 / I-5): schema-driven dataset-panel plumbing. The generator list (name /
