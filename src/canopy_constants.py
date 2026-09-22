@@ -424,6 +424,24 @@ class DashboardConstants:
     # Recovering in 30 s is the goal; recovering fast is not.
     METRICS_STORE_STRAND_TIMEOUT_MS: Final[int] = 30000  # 30 seconds
 
+    # F-CANOPY-053 (provisional id): the same bound for the Candidate Metrics panel's
+    # guard. ``fetch_training_state`` holds ``candidate-metrics-panel-update-interval``'s
+    # ``max_intervals`` at 0 while a fetch is in flight (a ``running=`` guard, as in
+    # canopy#613), and the renderer releases it from ``completeJob()`` -- which, as
+    # above, never runs for a request that produces no response at all. This is how
+    # long the second watchdog in ``_setup_poll_gating`` lets that guard stay engaged
+    # before releasing it.
+    #
+    # A constant of its own rather than a reuse of the one above, because the bound is
+    # argued from THIS callback's timings: two sequential requests at a 2 s timeout each
+    # (``/api/v1/candidates/pool-history``, then ``/api/state``); a measured wire round
+    # trip of ~30 ms (p50 across three runs on 2026-09-22; 76 ms worst); and a
+    # wire->apply latency measured on this app at up to 6.95 s. 30 s clears the sum of
+    # those worst cases (~11 s) nearly three-fold and the measured round trip by far
+    # more. Same trade as above: releasing a guard whose fetch is genuinely in flight
+    # would re-open the eviction window it exists to close.
+    CANDIDATE_STATE_STRAND_TIMEOUT_MS: Final[int] = 30000  # 30 seconds
+
     # API timeouts (seconds)
     API_TIMEOUT_SECONDS: Final[int] = 2
     FAST_API_TIMEOUT_SECONDS: Final[float] = 1.0  # For fast-interval polling callbacks

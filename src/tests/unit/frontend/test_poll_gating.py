@@ -31,6 +31,7 @@ Design of record: ``notes/JUNIPER_2026-08-23_JUNIPER-CANOPY_CALLBACK-STARVATION-
 (juniper-ml). End-to-end behaviour is measured by ``util/ad-hoc/e2e_f027_slots.py`` there.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -54,6 +55,11 @@ except ImportError:  # pragma: no cover - only on a pre-fix tree
 
 SHARED_LANES = ("fast-update-interval", "slow-update-interval")
 
+# F-CANOPY-053 (provisional id): the Candidate Metrics panel's own, TAB-GATED lane,
+# whose poll carries a ``running=`` guard on ``max_intervals``. Stated as a literal, like
+# the rest of this specification, rather than imported from the source.
+CANDIDATE_LANE = "candidate-metrics-panel-update-interval"
+
 # The SPECIFICATION, stated independently of the source. Every poller interval whose
 # ``disabled`` prop the dashboard owns, and the tab that arms it (``None`` = a shared
 # lane with global consumers, apply-clamped only per CAN-000).
@@ -73,6 +79,11 @@ EXPECTED_GATED_INTERVALS = (
     ("tabpoll-dataset", "dataset"),
     ("tabpoll-workers", "workers"),
     ("tabpoll-boundaries", "boundaries"),
+    # F-CANOPY-053: ``fetch_training_state``'s ``running=`` guard ALSO stops this lane
+    # while a fetch is in flight, but through ``max_intervals`` and never ``disabled``,
+    # so the gate stays the ONLY writer of ``disabled`` here and this lane is NOT a second
+    # exception in ``test_exactly_one_writer_per_disabled_prop``. Why it must not be:
+    # ``TestRunningGuardsNeverContendWithTheTabGate``.
     ("candidate-metrics-panel-update-interval", "candidates"),
     ("metrics-panel-stats-update-interval", "metrics"),
     ("cassandra-panel-interval", "cassandra"),
@@ -188,6 +199,10 @@ class TestGatedIntervalRegistry:
         ``False``, only after the prop has been continuously ``True`` for
         ``METRICS_STORE_STRAND_TIMEOUT_MS``, and never while the CAN-000 clamp is
         engaged. ``test_strand_watchdog`` below pins each of those three properties.
+
+        The candidate lane is deliberately NOT a second exception (F-CANOPY-053): its
+        ``running=`` guard and its strand watchdog both write ``max_intervals``, so the
+        gate is still the only writer of that lane's ``disabled``.
         """
         for interval_id, _tab in EXPECTED_GATED_INTERVALS:
             target = f"{interval_id}.disabled"
@@ -288,6 +303,122 @@ class TestStrandWatchdog:
         js = self._js(dashboard, self._watchdog(dashboard))
         assert str(DashboardConstants.METRICS_STORE_STRAND_TIMEOUT_MS) in js, js
         assert "METRICS_STORE_STRAND_TIMEOUT_MS" not in js, "the constant name leaked into the JS"
+
+
+class TestCandidateStrandWatchdog:
+    """F-CANOPY-053 (provisional id): the candidate panel's ``running=`` guard strands
+    exactly as the metrics one does, and is repaired the same way.
+
+    ``fetch_training_state`` holds ``candidate-metrics-panel-update-interval``'s
+    ``max_intervals`` at 0 while a fetch is in flight, and the renderer releases it from
+    ``completeJob()``, which ``handleError`` (dash_renderer.dev.js:987-998) never calls.
+    A request that produces no response therefore leaves the Candidate Metrics panel
+    frozen for the life of the page, and a second watchdog bounds that outage.
+
+    Pinned here: #614's properties (an existing lane, State-only reads, no write under the
+    apply clamp, a threshold far above a round trip, an interpolated constant) and the two
+    that are new. It releases ``max_intervals``, never ``disabled``, and its strand clock
+    is its OWN, never the metrics watchdog's.
+    """
+
+    TARGET = f"{CANDIDATE_LANE}.max_intervals"
+
+    def _watchdog(self, dashboard):
+        """The registered writer of the candidate lane's ``max_intervals``.
+
+        Exactly one: the guard itself is a renderer ``sideUpdate``, not a callback Output,
+        so it never appears in ``_callback_list``.
+        """
+        writers = _entries_writing(dashboard, self.TARGET)
+        assert len(writers) == 1, f"expected exactly 1 registered writer of {self.TARGET}, found {len(writers)}"
+        return writers[0]
+
+    def _js(self, dashboard, entry):
+        return TestStrandWatchdog()._js(dashboard, entry)
+
+    def test_watchdog_exists_and_is_single_output(self, dashboard):
+        specs = _output_specs(self._watchdog(dashboard))
+        assert specs == {self.TARGET}, specs
+
+    def test_watchdog_rides_an_existing_lane_and_adds_no_poller(self, dashboard):
+        """F-CANOPY-027's rule: a repair must not buy itself a new perpetual poller."""
+        input_ids = {d.split(".")[0] for d in _deps_of(self._watchdog(dashboard), "inputs")}
+        assert input_ids == {"slow-update-interval"}, input_ids
+
+    def test_watchdog_reads_the_guarded_prop_and_the_clamp_as_state(self, dashboard):
+        """Exact ``id.prop`` pairs, both State. Reading the lane's ``disabled`` instead
+        would watch the tab gate, not the guard, and would read "stranded" on every tab
+        but candidates."""
+        state = _deps_of(self._watchdog(dashboard), "state")
+        assert state == {self.TARGET, "apply-in-flight.data"}, state
+
+    def test_watchdog_only_ever_releases_the_guard(self, dashboard):
+        """It un-sticks. It must never be able to engage the guard, or stop the lane, itself."""
+        js = self._js(dashboard, self._watchdog(dashboard))
+        returned = set(re.findall(r"return\s+([^;]+);", js))
+        assert returned == {"NU", "-1"}, f"the watchdog may only no-op or release: {sorted(returned)}"
+
+    def test_watchdog_never_fires_while_the_apply_clamp_is_engaged(self, dashboard):
+        js = self._js(dashboard, self._watchdog(dashboard))
+        assert "Boolean(applyInFlight)" in js, js
+
+    def test_watchdog_keeps_its_own_strand_clock(self, dashboard):
+        """A shared window global would couple the two lanes: whichever is healthy clears
+        the other's clock on every slow tick, so neither watchdog could ever fire."""
+        js = self._js(dashboard, self._watchdog(dashboard))
+        assert "window.__candidateStateGuardSince" in js, js
+        assert "__metricsStoreDisabledSince" not in js, "the candidate watchdog shares the metrics watchdog's strand clock"
+        metrics_js = self._js(dashboard, TestStrandWatchdog()._watchdog(dashboard))
+        assert "__candidateStateGuardSince" not in metrics_js, "the metrics watchdog touches the candidate watchdog's strand clock"
+
+    def test_watchdog_threshold_is_far_above_the_worst_round_trip(self):
+        """Releasing the guard while a fetch is genuinely in flight would reopen the
+        eviction window it closes. This callback makes TWO sequential requests, each at a
+        2 s timeout (``API_TIMEOUT_SECONDS``), so the threshold must clear their sum by a
+        wide margin, and never fall below the metrics watchdog's floor."""
+        worst_server_ms = 2 * DashboardConstants.API_TIMEOUT_SECONDS * 1000
+        assert DashboardConstants.CANDIDATE_STATE_STRAND_TIMEOUT_MS >= 5 * worst_server_ms
+        assert DashboardConstants.CANDIDATE_STATE_STRAND_TIMEOUT_MS >= 20000
+
+    def test_threshold_is_interpolated_into_the_javascript(self, dashboard):
+        """An f-string that lost its brace would ship a literal placeholder, and the
+        comparison would be against NaN: the watchdog would never fire."""
+        js = self._js(dashboard, self._watchdog(dashboard))
+        assert str(DashboardConstants.CANDIDATE_STATE_STRAND_TIMEOUT_MS) in js, js
+        assert "CANDIDATE_STATE_STRAND_TIMEOUT_MS" not in js, "the constant name leaked into the JS"
+
+
+class TestRunningGuardsNeverContendWithTheTabGate:
+    """No ``running=`` guard may write a TAB-GATED interval's ``disabled`` prop.
+
+    ``running=`` restores a FIXED value from ``completeJob()`` (dash_renderer.dev.js:
+    925-936), which runs on a 204 too (:979). A panel poller that also takes
+    ``visualization-tabs.active_tab`` as an Input is dispatched on every tab switch and
+    answers 204 off its own tab, so a guard on ``disabled`` would re-enable its lane right
+    after the gate disabled it, and the panel would poll from every other tab. That is
+    F-CANOPY-027's defect, reintroduced by the fix for another one. F-CANOPY-053 is where
+    this was caught; its guard holds ``max_intervals`` instead.
+
+    Registry-wide, so the next guard added to a tab-gated panel is held to it too. A guard
+    on a SHARED lane (``tab is None``) is outside this rule: the metrics-store guard
+    shares ``disabled`` with the apply clamp alone.
+    """
+
+    def test_no_running_guard_writes_a_tab_gated_disabled_prop(self, dashboard):
+        tab_gated = {f"{iid}.disabled" for iid, tab in EXPECTED_GATED_INTERVALS if tab is not None}
+        guarded, offenders = [], []
+        for entry in dashboard.app._callback_list:
+            running = entry.get("running") or {}
+            for phase in ("running", "runningOff"):
+                for prop in running.get(phase) or {}:
+                    guarded.append(prop)
+                    if prop in tab_gated:
+                        offenders.append(f"{sorted(_output_specs(entry))} {phase} -> {prop}")
+        # Non-vacuity: ``running`` read from the wrong place (it is not on the
+        # ``callback_map`` entry) would find no guards at all and pass. The candidate
+        # guard is known to exist, so its absence fails here instead.
+        assert f"{CANDIDATE_LANE}.max_intervals" in guarded, f"the candidate guard was not found; guards seen: {guarded}"
+        assert not offenders, f"running= guards write a tab-gated lane's disabled prop: {offenders}"
 
 
 class TestPerTabLanes:

@@ -223,6 +223,12 @@ class CandidateMetricsPanel(BaseComponent):
                     id=f"{self.component_id}-update-interval",
                     interval=self.update_interval,
                     n_intervals=0,
+                    # F-CANOPY-053: stated explicitly because it is no longer inert.
+                    # ``fetch_training_state``'s ``running=`` guard holds it at 0 while a
+                    # fetch is in flight and restores -1 ("no limit", the dcc default)
+                    # afterwards, and the strand watchdog in ``_setup_poll_gating`` reads
+                    # it. A finite value set here would be overwritten by the first fetch.
+                    max_intervals=-1,
                 ),
             ],
             style={"padding": "15px"},
@@ -244,6 +250,63 @@ class CandidateMetricsPanel(BaseComponent):
         # client-side append of its own. It costs no new poller and no new renderer
         # slot (the F-CANOPY-027 rule) — one tab-gated tick now carries both the
         # state and the history the server accumulated for it.
+        #
+        # F-CANOPY-053 (provisional id): THIS CALLBACK RE-REQUESTED OVER ITSELF, SO NOT
+        # ONE OF ITS WRITES AFTER MOUNT WAS EVER APPLIED. It is F-CANOPY-035's mechanism
+        # (canopy#613), on this panel's own interval.
+        #
+        # dash-renderer discards a response whose callback has left ``watched``
+        # (dash_renderer.dev.js:2698) and evicts a ``watched`` entry the moment the same
+        # ``getUniqueIdentifier`` appears in ``requested`` (:3027). Measured on 9bffaba1
+        # with the candidates tab open: every response carried a new store value (27 of
+        # 27 at idle, 34 of 34 across a live candidate phase), yet the store held ONE
+        # value across 20-27 renderer reads, so the badge read ``Inactive`` while
+        # ``/api/state`` said ``Training``. Both outputs were frozen at mount: the badge,
+        # phase, pool size, epoch progress and pool details downstream of the state
+        # store, and the pool-history cards downstream of the history store. The wire
+        # round trip was ~30 ms and requests never overlapped on the wire; the window
+        # that matters is the renderer's, whose wire->apply latency on this app measured
+        # 0.7-1.0 s by heartbeat ratio and 6.95 s directly (F-CANOPY-035's phase of the
+        # E2E ledger), against a delivered tick of ~1.7-2.0 s.
+        #
+        # ``running=`` stops this callback's own Interval at dispatch (a synchronous
+        # ``sideUpdate``, :819) and restarts it from ``completeJob()`` (:925-936), so it
+        # cannot re-request over itself on its own clock. The interval must stay
+        # DEDICATED to this callback: the guard stops it for every consumer, not just
+        # this one.
+        #
+        # THE GUARD HOLDS ``max_intervals``, NOT ``disabled`` — the one deliberate
+        # departure from #613. ``disabled`` belongs to the CAN-000/tab gate
+        # (``_GATED_POLL_INTERVALS`` in dashboard_manager.py), and ``runningOff`` writes a
+        # FIXED value; it does not restore the prior one. ``active_tab`` is an Input here,
+        # so every tab switch dispatches this callback; on any other tab it returns
+        # ``no_update`` twice, Dash answers 204, and ``completeJob()`` runs anyway (:979).
+        # A guard on ``disabled`` would therefore write ``False`` after the gate wrote
+        # ``True``, re-arming this poller on an inactive tab at every switch —
+        # F-CANOPY-027's defect, back. The Interval component stops on
+        # ``max_intervals === 0`` and on ``disabled`` independently, so the gate keeps sole
+        # ownership of ``disabled``. The ``0`` must stay an int: that comparison is strict,
+        # and ``False`` would not stop the timer.
+        #
+        # THREE QUALIFICATIONS, carried over from #613/#614 rather than rediscovered:
+        #
+        #  1. ``completeJob()`` does not run for a request that never produces a response
+        #     — ``handleError`` (:987-998) rejects without it — so a network-level failure
+        #     leaves ``max_intervals`` at 0 and the panel frozen. The second strand
+        #     watchdog in ``_setup_poll_gating`` bounds that at
+        #     ``CANDIDATE_STATE_STRAND_TIMEOUT_MS``; any later dispatch of this callback
+        #     that gets a response (a tab switch is one) also releases it.
+        #  2. ``max_intervals`` has one REGISTERED writer, that watchdog. A fetch still in
+        #     flight when it fires is unguarded for the rest of its cycle. Bounded,
+        #     self-healing and unmeasured. (#614's version of this qualification, the gate
+        #     re-enabling the clock mid-fetch, cannot arise: the gate never writes
+        #     ``max_intervals``.)
+        #  3. The guard covers this callback's own Interval, not its other Input.
+        #     ``getUniqueIdentifier`` ignores the trigger, so an ``active_tab`` change
+        #     mid-flight creates a same-identity request and evicts exactly as a tick
+        #     would; and when two invocations overlap, the first to complete releases the
+        #     guard while the second is still in flight. Confined to tab switches, and
+        #     unmeasured.
         @app.callback(
             [
                 Output(f"{self.component_id}-training-state-store", "data"),
@@ -254,6 +317,7 @@ class CandidateMetricsPanel(BaseComponent):
                 Input("visualization-tabs", "active_tab"),
             ],
             State(f"{self.component_id}-pool-history-store", "data"),
+            running=[(Output(f"{self.component_id}-update-interval", "max_intervals"), 0, -1)],
             prevent_initial_call=False,
         )
         def fetch_training_state(n_intervals, active_tab, pool_history):
