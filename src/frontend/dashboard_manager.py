@@ -46,7 +46,7 @@ from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
 from canopy_constants import CascorPatchBounds, DashboardConstants, TrainingConstants
-from dataset_schema import apply_availability_gate, apply_seeded_defaults, form_excluded_fields, generator_name_for_type, is_generator_available, parse_schema_fields, unavailable_hint, unavailable_reason
+from dataset_schema import apply_availability_gate, apply_seeded_defaults, availability_is_known, form_excluded_fields, generator_name_for_type, is_generator_available, parse_schema_fields, unavailable_hint, unavailable_reason
 from frontend.internal_api import internal_api_headers
 from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, RECURRENCE_BACKEND_TYPE, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason, model_requirement, selection_is_live
 from settings import get_settings
@@ -2939,10 +2939,19 @@ class DashboardManager:
         # the same event. The first is "nothing to do"; the second is "no dataset in this deployment
         # is both compatible with this model and available", which is a RECOVERY state and was
         # silently parking the UI on a dataset its own list disables.
+        # N5 — the availability surface may not have been READ. ``None`` (fetch failed) is not
+        # ``[]`` (fetch succeeded, nothing to say); see ``availability_is_known``. The gating is
+        # unchanged and still fail-open, so this only ever ADDS a caveat — it never disables
+        # anything, and it must not pre-empt the two notices that describe a state change the
+        # operator just caused.
+        unknown = not availability_is_known(available)
         if not enabled:
+            # Blocking, and strictly more informative than the caveat. Note this branch is
+            # unreachable while ``unknown`` — with nothing known, nothing is disabled — so the
+            # two never compete in practice; the ordering is belt-and-braces.
             return options, None, self._empty_dataset_set_notice(model_key)
         if current_value in enabled:
-            return options, dash.no_update, None
+            return options, dash.no_update, self._availability_unknown_notice() if unknown else None
         # OQ-6, ratified 2026-09-22: **model-primary, resolved by CLEARING the dataset.**
         #
         # D5 (JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md:55) made the
@@ -3000,6 +3009,28 @@ class DashboardManager:
             id="dataset-gate-empty-alert",
         )
 
+    def _availability_unknown_notice(self):
+        """N5 — canopy could not read the availability surface, and says so.
+
+        Persistent (no ``duration``), like the empty-set notice and unlike the cleared one: the
+        condition lasts as long as juniper-data is unreachable, so an auto-dismiss would hide a
+        live caveat rather than retire a finished event.
+
+        Deliberately does NOT claim anything is unavailable. Everything is still selectable —
+        the gating is fail-open by design — so the honest statement is that the greying may be
+        wrong in EITHER direction, and where the authoritative answer comes from instead.
+        """
+        return dbc.Alert(
+            [
+                html.Strong("Dataset availability is unknown. "),
+                html.Span("canopy could not reach juniper-data, so the list below is not filtered by what this deployment can actually generate. "),
+                html.Span("Datasets needing an optional data extra will not be greyed out; a missing one surfaces when you Apply."),
+            ],
+            color="secondary",
+            className="mb-2",
+            id="dataset-gate-availability-unknown-alert",
+        )
+
     def _dataset_cleared_notice(self, previous, model_key):
         """D5's notice under the ratified policy, and N12's TRANSIENT half — auto-dismisses.
 
@@ -3029,27 +3060,47 @@ class DashboardManager:
     _GENERATORS_CACHE_TTL_S: float = 30.0
 
     def _fetch_generators(self):
-        """Return the /api/dataset/generators list (name/available/schema dicts), short-TTL-cached.
+        """Return the /api/dataset/generators list, or ``None`` when the fetch did not succeed.
 
         Reuses canopy's own proxy route (which fetches juniper-data's /v1/generators via httpx and
-        falls back to a built-in list when the service is down). Any error yields an empty list — the
-        availability helpers then treat every generator as available (flag-absent fallback), so a
-        down/older data service never greys the panel or hides its params.
+        falls back to a built-in list when the service is down).
+
+        **``None`` is not the same as ``[]``, and it used to be.** This returned ``[]`` for an
+        exception, for a non-ok response, and for a 200 with an empty payload — three outcomes
+        with one value. The availability helpers then read every generator as available (the
+        flag-absent fallback), so the panel was identical whether juniper-data had answered
+        "everything is fine" or had not answered at all. An operator could not tell, and neither
+        could a caller.
+
+        The GATING is unchanged and still fail-open: ``availability_map(None)`` is empty and
+        ``is_generator_available`` defaults absent names to ``True``, which is the ratified
+        two-tier posture (D5) — a transient blip must not strand a dataset, and the backend
+        still refuses with a 501 install hint if the extra is genuinely missing. What ``None``
+        buys is that ``availability_is_known`` can now say so, and the panel can carry a notice
+        instead of a confident answer it does not have.
+
+        The failure is cached for the same TTL as a success, deliberately: the alternative is a
+        request per gate callback while the service is down, which is when canopy can least
+        afford them.
         """
         now = time.monotonic()
         cached = getattr(self, "_generators_cache", None)
         if cached is not None and (now - cached[0]) < self._GENERATORS_CACHE_TTL_S:
             return cached[1]
-        generators: list = []
+        generators = None
         try:
             resp = requests.get(self._api_url("/api/dataset/generators"), timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT, headers=internal_api_headers())
             if resp.ok:
                 payload = resp.json()
                 generators = payload.get("generators", []) if isinstance(payload, dict) else []
-        except Exception as exc:  # noqa: BLE001 — a generator-fetch failure must never break the panel; degrade to all-available.
+            else:
+                # A non-ok answer is not an empty answer. Y5 (canopy#609) was exactly this:
+                # a keyed deployment 401'd, the route ignored the status, and every dataset's
+                # params panel read "No adjustable parameters" as though the schema were empty.
+                self.logger.debug("Dataset generators fetch returned HTTP %s", resp.status_code)
+        except Exception as exc:  # noqa: BLE001 — a generator-fetch failure must never break the panel; it degrades to "unknown".
             self.logger.debug("Failed to fetch dataset generators: %s", exc)
-            generators = []
-        self._generators_cache = (now, generators or [])
+        self._generators_cache = (now, generators)
         return self._generators_cache[1]
 
     @staticmethod
