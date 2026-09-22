@@ -17,6 +17,7 @@ Design of record: juniper-ml notes/JUNIPER_2026-08-23_JUNIPER-CANOPY_CALLBACK-ST
 Every test here fails on the parent commit (f9defb4).
 """
 
+import inspect
 from unittest.mock import MagicMock, patch
 
 import dash
@@ -24,7 +25,7 @@ import pytest
 import requests
 
 from canopy_constants import DashboardConstants
-from frontend.dashboard_manager import _CANDIDATE_STATE_INTERVAL, _METRICS_STORE_INTERVAL, DashboardManager
+from frontend.dashboard_manager import _METRICS_STORE_INTERVAL, DashboardManager
 
 
 @pytest.fixture(scope="module")
@@ -191,115 +192,86 @@ class TestF035MetricsPollHasItsOwnGuardedLane:
             assert not mock_get.called, "the gate let a full-history fetch through on a non-modulus tick"
 
 
-class TestF053CandidateStatePollStopsItsOwnClock:
-    """F-CANOPY-053 (provisional id) — the candidate-state poll must not be able to
-    re-request over itself.
+class TestF053CandidateStatePollWiring:
+    """F-CANOPY-053 (provisional id): the candidate-state poll lands its writes.
 
-    The renderer mechanism is the one ``TestF035MetricsPollHasItsOwnGuardedLane`` pins
-    above. ``fetch_training_state`` wrote ``candidate-metrics-panel-training-state-store``
-    off its own interval; measured on canopy 9bffaba1, every response carried a new
-    value (27 of 27 at idle, 34 of 34 across a live candidate phase) while the renderer
-    held ONE value across 20-27 reads, because each response was evicted from
-    ``watched`` (:3027) and discarded on arrival (:2698) before it could apply.
+    ``fetch_training_state`` wrote ``candidate-metrics-panel-training-state-store`` off a
+    1000 ms tick, and not one write after mount was applied. Measured on canopy 9bffaba1,
+    27 of 27 responses at idle and 34 of 34 across a live candidate phase carried a new
+    value, and the renderer held one: each was evicted from ``watched`` (:3027) and
+    discarded (:2698) when the next tick re-requested the callback. Landing was then
+    measured by period: 0 / 225 at 1000 ms, 5 / 39 at 4000 ms, 23 / 24 at 10000 ms.
 
-    The guard differs from #613's in one respect, which these tests pin on purpose: it
-    holds the interval's ``max_intervals`` and never its ``disabled`` prop. That interval
-    is TAB-GATED and this callback is dispatched on every tab switch, while
-    ``runningOff`` writes a fixed value, so a guard on ``disabled`` would re-arm the
-    poller right after the gate silenced it. ``TestRunningGuardsNeverContendWithTheTabGate``
-    in ``test_poll_gating.py`` pins that rule for every guard.
-
-    Everything here is WIRING. Whether the renderer now applies the writes is a live
-    property, and no unit test can show it.
+    Pinned here is WIRING, read off the built app's ``_callback_list``: the period, the
+    store riding as its own writer's State in the order the function binds it, and the
+    ABSENCE of a ``running=`` guard. The callback's no-op and hold-last-good behaviour is
+    pinned in ``test_candidate_metrics_panel_gate_coverage.py``, and the gate's sole
+    ownership of the lane in ``test_poll_gating.py``. Whether the renderer now applies
+    the writes is a live property that no unit test can show.
     """
 
     STATE_STORE = "candidate-metrics-panel-training-state-store.data"
+    HISTORY_STORE = "candidate-metrics-panel-pool-history-store.data"
+    LANE = "candidate-metrics-panel-update-interval"
 
-    def _entry(self, dm):
-        """The candidate panel's writer, found by its exact OUTPUT first and its name second.
+    def _spec(self, dm):
+        """The candidate panel's writer, found by its exact OUTPUT in ``_callback_list``.
 
-        ``metrics_panel.py`` registers a ``fetch_training_state`` of its own (it writes
-        ``metrics-panel-training-state-store`` off ``metrics-panel-stats-update-interval``),
-        so a lookup by ``__name__`` alone returns whichever registered first. Outputs are
-        parsed exactly: Dash renders a multi-output key as ``..a.prop...b.prop..`` and
-        appends ``@<hash>`` to an ``allow_duplicate`` output.
+        By output, never by name: ``metrics_panel.py`` registers a ``fetch_training_state``
+        of its own. Outputs are parsed exactly, because Dash renders a multi-output key as
+        ``..a.prop...b.prop..`` and appends ``@<hash>`` to an ``allow_duplicate`` output.
         """
         hits = []
-        for key, entry in dm.app.callback_map.items():
-            raw = str(key)
+        for spec in dm.app._callback_list:
+            raw = str(spec.get("output"))
             parts = raw[2:-2].split("...") if raw.startswith("..") and raw.endswith("..") else [raw]
-            if self.STATE_STORE not in {part.split("@", 1)[0] for part in parts}:
-                continue
-            cb = entry.get("callback")
-            fn = getattr(cb, "__wrapped__", cb)
-            if getattr(fn, "__name__", None) == "fetch_training_state":
-                hits.append((key, entry))
-        assert len(hits) == 1, f"expected exactly one fetch_training_state writing {self.STATE_STORE}, found {len(hits)}"
+            if self.STATE_STORE in {part.split("@", 1)[0] for part in parts}:
+                hits.append(spec)
+        assert len(hits) == 1, f"expected exactly one writer of {self.STATE_STORE}, found {len(hits)}"
         return hits[0]
 
-    def _spec(self, dm, key):
-        for spec in getattr(dm.app, "_callback_list", []):
-            if str(spec.get("output")) == str(key):
-                return spec
-        raise AssertionError(f"no callback spec for {key}")
+    @staticmethod
+    def _deps(spec, key):
+        return [f"{dep['id']}.{dep['property']}" for dep in spec.get(key) or []]
 
-    def _guard(self, dm):
-        """The ``running=`` spec, read off the callback SPEC in ``app._callback_list``.
+    def test_the_poll_carries_no_running_guard(self, dm):
+        """``running=`` releases a FIXED value from ``completeJob()`` after every run,
+        including the 204 this callback answers on page load and on every other tab. On
+        this TAB-GATED lane that re-arms the poller on a hidden tab (F-CANOPY-027), so the
+        repair is a period, never a guard.
 
-        That list is what is served as ``_dash-dependencies`` and read by the renderer.
-        ``running`` is not kept on the ``callback_map`` entry, so reading it from there
-        yields ``None`` for every callback, and a test built on that passes or fails for
-        the wrong reason.
+        Read off the callback SPEC. ``running`` is not kept on the ``callback_map`` entry,
+        so reading it there would pass for every callback and prove nothing.
         """
-        key, _entry = self._entry(dm)
-        return self._spec(dm, key).get("running")
+        running = self._spec(dm).get("running")
+        assert not running, f"fetch_training_state carries a running= guard: {running}"
 
-    def test_poll_rides_its_own_interval_not_a_shared_lane(self, dm):
-        _key, entry = self._entry(dm)
-        input_ids = {i.get("id") for i in entry.get("inputs", []) if isinstance(i, dict)}
-        assert _CANDIDATE_STATE_INTERVAL in input_ids, f"candidate poll lost its own lane: {input_ids}"
-        assert "fast-update-interval" not in input_ids, "candidate poll moved onto the shared fast lane"
-        assert "slow-update-interval" not in input_ids, "candidate poll moved onto the shared slow lane"
+    def test_the_store_rides_as_its_own_state_not_an_input(self, dm):
+        """As an Input it would re-trigger its own writer on every write. Dropped
+        entirely, ``current_state`` would be ``None`` forever, which never suppresses,
+        and every direct unit test of the callback would still pass."""
+        spec = self._spec(dm)
+        assert self.STATE_STORE in self._deps(spec, "state"), "the state store must ride as State so an unchanged state can be suppressed"
+        assert self.STATE_STORE not in self._deps(spec, "inputs"), "the state store must NOT be an Input of its own writer"
 
-    def test_the_guarded_interval_drives_nothing_else(self, dm):
-        """The guard stops the interval for EVERY consumer, not just this one: a second
-        callback taking it as an Input would be silenced for the length of each fetch,
-        with no error anywhere."""
-        users = []
-        for spec in dm.app._callback_list:
-            for dep in spec.get("inputs") or []:
-                if isinstance(dep, dict) and dep.get("id") == _CANDIDATE_STATE_INTERVAL:
-                    users.append((str(spec.get("output")), dep.get("property")))
-        key, _entry = self._entry(dm)
-        assert users == [(str(key), "n_intervals")], f"{_CANDIDATE_STATE_INTERVAL} must drive exactly one callback, fetch_training_state: {users}"
+    def test_the_states_bind_in_the_order_the_function_reads_them(self, dm):
+        """Dash binds positionally: Inputs, then States in declaration order. Swapped
+        States would hand the history list to ``current_state`` and the state dict to
+        ``pool_history``, and the direct unit tests would never notice."""
+        spec = self._spec(dm)
+        assert self._deps(spec, "inputs") == [f"{self.LANE}.n_intervals", "visualization-tabs.active_tab"]
+        assert self._deps(spec, "state") == [self.HISTORY_STORE, self.STATE_STORE]
+        entry = dm.app.callback_map[str(spec["output"])]
+        fn = getattr(entry["callback"], "__wrapped__", entry["callback"])
+        assert list(inspect.signature(fn).parameters) == ["n_intervals", "active_tab", "pool_history", "current_state"]
 
-    def test_poll_stops_its_own_clock_while_in_flight(self, dm):
-        running = self._guard(dm)
-        assert running, "fetch_training_state lost its running= guard (F-CANOPY-053)"
-        prop = f"{_CANDIDATE_STATE_INTERVAL}.max_intervals"
-        on = running.get("running", {}).get(prop)
-        off = running.get("runningOff", {}).get(prop)
-        # ``type(...) is int`` rather than ``== 0``: ``False == 0`` in Python, but
-        # dcc.Interval stops on ``max_intervals === 0``, which a JSON ``false`` fails.
-        assert type(on) is int and on == 0, f"guard does not stop its own interval while in flight: {running}"
-        assert type(off) is int and off == -1, f"guard does not release its own interval (-1 = no limit): {running}"
-
-    def test_guard_never_writes_the_tab_gates_disabled_prop(self, dm):
-        """``disabled`` belongs to the CAN-000/tab gate. A guard on it would re-arm this
-        tab-gated lane after every tab switch that does not land on candidates."""
-        running = self._guard(dm) or {}
-        for phase in ("running", "runningOff"):
-            touched = set(running.get(phase) or {})
-            assert f"{_CANDIDATE_STATE_INTERVAL}.disabled" not in touched, f"the {phase} half writes the tab gate's prop: {running}"
-            assert touched == {f"{_CANDIDATE_STATE_INTERVAL}.max_intervals"}, f"the {phase} half touches more than its own clock: {running}"
-
-    def test_the_guarded_interval_exists_and_starts_unlimited(self, dm):
-        """A ``running=`` Output naming a component that does not exist is a silent
-        no-op, and a finite ``max_intervals`` declared on it would be overwritten with -1
-        by the first completed fetch."""
-        found = [c for c in _walk(dm.app.layout) if getattr(c, "id", None) == _CANDIDATE_STATE_INTERVAL]
-        assert len(found) == 1, f"{_CANDIDATE_STATE_INTERVAL} must appear exactly once in the layout, found {len(found)}"
-        assert getattr(found[0], "max_intervals", None) == -1, "the guarded interval must declare max_intervals=-1"
+    def test_the_poll_period_is_pinned(self, dm):
+        """10 s is the shortest period measured to land reliably (23 / 24). The built
+        layout must carry it, not just the constant."""
+        assert DashboardConstants.CANDIDATE_STATE_POLL_INTERVAL_MS == 10000
+        found = [c for c in _walk(dm.app.layout) if getattr(c, "id", None) == self.LANE]
+        assert len(found) == 1, f"{self.LANE} must appear exactly once in the layout, found {len(found)}"
+        assert found[0].interval == DashboardConstants.CANDIDATE_STATE_POLL_INTERVAL_MS
 
 
 class TestLever2Suppression:

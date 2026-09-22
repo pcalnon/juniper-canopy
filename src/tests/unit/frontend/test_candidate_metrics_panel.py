@@ -4,6 +4,7 @@
 import pytest
 from dash import html
 
+from canopy_constants import DashboardConstants
 from frontend.components.candidate_metrics_panel import MAX_POOL_HISTORY_ENTRIES, CandidateMetricsPanel
 
 
@@ -27,9 +28,14 @@ class TestCandidateMetricsPanelInit:
         assert panel.get_component_id() == "custom-id"
 
     def test_default_update_interval(self):
-        """Default update interval should be 1000ms."""
+        """Default update interval is the named, measured period (F-CANOPY-053).
+
+        It was 1000 ms, and at 1000 ms not one of this panel's store writes after mount
+        was applied. ``CANDIDATE_STATE_POLL_INTERVAL_MS`` carries the dose-response.
+        """
         panel = CandidateMetricsPanel({})
-        assert panel.update_interval == 1000
+        assert panel.update_interval == DashboardConstants.CANDIDATE_STATE_POLL_INTERVAL_MS
+        assert panel.update_interval == 10000
 
     def test_custom_update_interval(self):
         """Should accept update_interval from config."""

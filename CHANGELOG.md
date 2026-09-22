@@ -41,24 +41,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   applied, so dash-renderer evicted the `watched` entry (`dash_renderer.dev.js:3027`) and discarded
   the response on arrival (`:2698`).
 
-  **Fixed the way #613 fixed the metrics store, with a `running=` guard that stops the callback's
-  own clock for the length of each fetch, and one deliberate difference: the guard holds the
-  interval's `max_intervals` (0 in flight, -1 after), not `disabled`.** This lane is tab-gated and
-  its callback takes `visualization-tabs.active_tab` as an Input, so every tab switch dispatches
-  it. On any other tab it answers 204, `completeJob()` still runs, and `runningOff` writes a *fixed*
-  value, so a guard on `disabled` would write `False` right after the CAN-000/tab gate wrote `True`
-  and re-arm a tab-gated poller on every switch. That is F-CANOPY-027's defect, reintroduced by the
-  fix for this one. dcc.Interval stops on `max_intervals === 0` and on `disabled` independently, so
-  the gate stays the only writer of `disabled`.
+  **Landing is period-bound, measured directly.** Writes landed / issued across three live runs were
+  **0 / 225** at 1000 ms, **5 / 39** at 4000 ms and **23 / 24** at 10000 ms, so the panel now polls
+  at `CANDIDATE_STATE_POLL_INTERVAL_MS` (10 s). Two supporting changes stop the store churning.
+  First, a payload that differs from the store only in its per-call `timestamp`, or in
+  `stale_age_seconds` during an upstream outage, returns `no_update`. The store rides as its own
+  writer's State, as in F-CANOPY-039. Second, a failed fetch now holds the last good state instead
+  of writing `{}`, which the badge rendered as `Inactive`.
 
-  #614's strand repair is extended to this guard. A second clientside watchdog on the existing slow
-  lane releases `max_intervals` once it has sat at 0 for `CANDIDATE_STATE_STRAND_TIMEOUT_MS` (30 s),
-  holds off while `apply-in-flight` is set, and keeps its **own** strand clock
-  (`__candidateStateGuardSince`). Sharing #614's would let whichever lane was healthy reset the
-  other's clock on every slow tick, so neither watchdog could ever fire. The wiring is pinned in
-  `test_stage2_global_lane.py` and `test_poll_gating.py`, including a registry-wide check that no
-  `running=` guard writes a tab-gated lane's `disabled` prop. That the renderer now applies the
-  writes is a live property, which the unit tests cannot show.
+  **Deliberately not #613's `running=` guard.** A guard's release writes a *fixed* value from
+  `completeJob()` after every run, including the 204 this callback answers on page load and on every
+  other tab. This lane is tab-gated, so a guard on `disabled` would write `False` right after the
+  CAN-000/tab gate wrote `True` and keep the poller running on a hidden tab: F-CANOPY-027, back.
+  An evicted request's release would also reopen the clock while its successor is in flight. The gate
+  stays the only writer of this interval's `disabled`, and a registry-wide test now fails any
+  `running=` guard that writes a tab-gated lane's `disabled`. The cost is a candidate-panel refresh
+  of up to 10 s plus apply latency. That the renderer now applies the writes is a live property,
+  which the unit tests cannot show.
 
 ## [0.8.1] - 2026-09-15
 

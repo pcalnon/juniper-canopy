@@ -459,14 +459,6 @@ _CASCADE_ONLY_TAB_IDS = frozenset({"candidates", "topology", "evolution", "bound
 # (every tick refetches the complete history) if the interval is renamed without it.
 _METRICS_STORE_INTERVAL: Final[str] = "metrics-store-interval"
 
-# F-CANOPY-053 (provisional id): the Candidate Metrics panel's own poll lane. The panel
-# builds this id as ``f"{component_id}-update-interval"``, and
-# ``_initialize_components`` passes ``component_id="candidate-metrics-panel"``. It is
-# named here once because the gate registry below and the strand watchdog in
-# ``_setup_poll_gating`` both address it, and a watchdog pointed at a component that
-# does not exist fails SILENTLY.
-_CANDIDATE_STATE_INTERVAL: Final[str] = "candidate-metrics-panel-update-interval"
-
 
 _GATED_POLL_INTERVALS: Final[Tuple[Tuple[str, Optional[str]], ...]] = (
     # shared lanes — global consumers, apply-clamped only (CAN-000)
@@ -486,15 +478,7 @@ _GATED_POLL_INTERVALS: Final[Tuple[Tuple[str, Optional[str]], ...]] = (
     ("tabpoll-workers", "workers"),
     ("tabpoll-boundaries", "boundaries"),
     # panel-owned intervals, gated in place
-    # F-CANOPY-053: ``fetch_training_state``'s ``running=`` guard also stops this lane
-    # while a fetch is in flight — through ``max_intervals``, deliberately NOT through
-    # ``disabled``, so this gate remains the ONLY writer of ``disabled`` here. The guard
-    # restores a FIXED value when a fetch completes, and that callback is dispatched on
-    # every tab switch (``active_tab`` is one of its Inputs) and answers 204 on every tab
-    # but its own. Sharing ``disabled`` would therefore re-enable this lane right after
-    # this gate disabled it, on every tab switch that does not land on ``candidates``.
-    # #613's lane above can share ``disabled`` only because it is never tab-gated.
-    (_CANDIDATE_STATE_INTERVAL, "candidates"),
+    ("candidate-metrics-panel-update-interval", "candidates"),
     ("metrics-panel-stats-update-interval", "metrics"),
     ("cassandra-panel-interval", "cassandra"),
     ("redis-panel-refresh-interval", "redis"),
@@ -2547,55 +2531,6 @@ class DashboardManager:
             Input("slow-update-interval", "n_intervals"),
             [
                 dash.dependencies.State(_METRICS_STORE_INTERVAL, "disabled"),
-                dash.dependencies.State("apply-in-flight", "data"),
-            ],
-            prevent_initial_call=True,
-        )
-
-        # F-CANOPY-053 (provisional id): THE SAME STRAND, ON THE CANDIDATE PANEL'S GUARD.
-        #
-        # ``fetch_training_state`` (candidate_metrics_panel.py) now carries #613's guard,
-        # and with it #614's failure: a request that never produces a response leaves the
-        # guard engaged and the Candidate Metrics panel frozen for the life of the page.
-        # Same bound and the same two prohibitions as the watchdog above, with three
-        # deliberate differences:
-        #
-        #  * It releases ``max_intervals`` (to -1, the guard's own ``runningOff``), not
-        #    ``disabled``: that is the prop this guard holds, because ``disabled`` belongs
-        #    to the tab gate above (see the ``_GATED_POLL_INTERVALS`` entry). So it cannot
-        #    un-gate an inactive tab or defeat the CAN-000 clamp even in principle. The
-        #    ``applyInFlight`` hold is kept exactly as #614 wrote it anyway, so that it
-        #    writes nothing at all during an apply.
-        #  * It keeps its OWN strand clock. Sharing ``__metricsStoreDisabledSince`` would
-        #    couple the two lanes: whichever one was healthy would clear the other's clock
-        #    on every slow tick, and neither watchdog could ever reach its threshold.
-        #  * It is the only REGISTERED writer of that prop (the guard is a renderer
-        #    ``sideUpdate``, not a callback Output), so it needs no ``allow_duplicate``.
-        self.app.clientside_callback(
-            f"""
-            function(n, maxIntervals, applyInFlight) {{
-                var NU = window.dash_clientside.no_update;
-                if (maxIntervals !== 0 || Boolean(applyInFlight)) {{
-                    // Guard released (or never engaged), or the apply clamp is on: hold the timer clear.
-                    window.__candidateStateGuardSince = null;
-                    return NU;
-                }}
-                var now = Date.now();
-                if (!window.__candidateStateGuardSince) {{
-                    window.__candidateStateGuardSince = now;
-                    return NU;
-                }}
-                if (now - window.__candidateStateGuardSince < {DashboardConstants.CANDIDATE_STATE_STRAND_TIMEOUT_MS}) {{
-                    return NU;
-                }}
-                window.__candidateStateGuardSince = null;
-                return -1;
-            }}
-            """,
-            Output(_CANDIDATE_STATE_INTERVAL, "max_intervals"),
-            Input("slow-update-interval", "n_intervals"),
-            [
-                dash.dependencies.State(_CANDIDATE_STATE_INTERVAL, "max_intervals"),
                 dash.dependencies.State("apply-in-flight", "data"),
             ],
             prevent_initial_call=True,
