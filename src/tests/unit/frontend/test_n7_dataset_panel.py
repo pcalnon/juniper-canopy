@@ -144,11 +144,17 @@ def test_gate_composes_availability_over_model_options(dm):
     assert value is dash.no_update  # current selection (spirals) still enabled -> no snap
 
 
-def test_gate_snaps_away_from_a_disabled_current_selection(dm):
+def test_gate_clears_away_from_a_disabled_current_selection(dm):
     dm._fetch_generators = lambda: GENERATORS
     options, value, _notice = dm._gate_dataset_options_handler("cascor", "mnist")  # mnist now unavailable
+    # OQ-6 (ratified 2026-09-22): a stranded selection is CLEARED, not snapped to a substitute.
+    # This previously asserted ``value in enabled and value != "mnist"``, which was right for
+    # the snap. The invariant that actually matters is unchanged and is asserted below: the
+    # handler must never leave the dropdown parked on a value its own list disables.
+    assert value is None
     enabled = [o["value"] for o in options if not o.get("disabled")]
-    assert value in enabled and value != "mnist"  # snapped to a usable dataset
+    assert enabled, "the gate cleared even though usable datasets remain — that is the empty-set branch, not a conflict"
+    assert "mnist" not in enabled
 
 
 def test_gate_ungates_without_model(dm):

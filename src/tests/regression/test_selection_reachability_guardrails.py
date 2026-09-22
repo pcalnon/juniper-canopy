@@ -535,25 +535,50 @@ class TestG3EmptySetRecovery:
 @pytest.mark.regression
 @pytest.mark.unit
 class TestDatasetRepairNotice:
-    """§4.3 / D5 — the notice the snap was always specified to render and never did."""
+    """§4.3 / D5 — the notice the conflict resolution was always specified to render.
 
-    def test_a_repaired_gate_names_the_old_and_the_new_value(self, manager):
+    Updated 2026-09-22 for OQ-6's ratification: **model-primary, resolved by CLEARING.** These
+    tests previously asserted the snap (``value == "multi_sine"``), and they were not wrong at
+    the time — they ratified the shipped behaviour. §5.6's two candidate policies both resolve
+    by clearing, and neither was implementable while the axes were un-clearable (N7); the snap
+    was that workaround. Changed rather than deleted, because the NOTICE's contract survives
+    the policy change intact.
+    """
+
+    def test_a_cleared_gate_names_what_was_dropped_and_why(self, manager):
         _options, value, notice = manager._gate_dataset_options_handler("recurrence", "spirals", generators=ALL_AVAILABLE)
-        # §12 moved the snap target: the five synthetic rank-3 seeds precede equities_seq, so the
-        # first compatible entry is now multi_sine. The NOTICE's contract is unchanged — it must
-        # still name both ends of the move and the model that caused it.
-        assert value == "multi_sine"
+        # The dataset is cleared to ⊥, not replaced. Start and Apply are already disabled there
+        # (``selection_axis_unset``), so the operator chooses deliberately from the gated list.
+        assert value is None, "OQ-6 resolves a conflict by clearing the dataset, not by choosing one for the operator"
         text = _alert_text(notice)
-        # "The dataset changed" without saying from what to what is an alarm, not a notice.
+        # "The dataset changed" without saying WHAT was dropped and WHY is an alarm, not a notice.
         assert "Spirals" in text
-        assert "Multi-Sine (sequence)" in text
         assert "Recurrence (LMU)" in text
+        # And it must not name a replacement it did not make.
+        assert "Multi-Sine (sequence)" not in text
 
-    def test_the_repair_notice_is_transient(self, manager):
-        # N12's other half: a successful repair is informational — there is nothing to resolve.
+    def test_the_cleared_notice_is_transient(self, manager):
+        # N12's other half: a resolved conflict is informational — there is nothing to fix.
+        # (Contrast the EMPTY-SET notice, which is persistent because it IS blocking.)
         _options, _value, notice = manager._gate_dataset_options_handler("recurrence", "spirals", generators=ALL_AVAILABLE)
         assert getattr(notice, "duration", None) is not None
         assert notice.dismissable is True
+
+    def test_clearing_is_distinguishable_from_the_empty_set(self, manager):
+        """Both branches now return ``None`` — the NOTICE is what tells them apart.
+
+        Before OQ-6 only the empty-set branch cleared, so the returned value alone identified
+        it. Now a conflict clears too, and an operator who cannot tell "pick another dataset"
+        from "this deployment has none" has been given the same screen for two different
+        problems.
+        """
+        _o, conflict_value, conflict_notice = manager._gate_dataset_options_handler("recurrence", "spirals", generators=ALL_AVAILABLE)
+        _o, empty_value, empty_notice = manager._gate_dataset_options_handler("recurrence", "spirals", generators=NONE_AVAILABLE)
+        assert conflict_value is None and empty_value is None
+        assert conflict_notice.id != empty_notice.id, "the two states must be separately identifiable in the DOM"
+        # The blocking one persists; the informational one does not.
+        assert getattr(empty_notice, "duration", None) is None
+        assert getattr(conflict_notice, "duration", None) is not None
 
     def test_no_notice_when_the_gate_changes_nothing(self, manager):
         # And it must CLEAR a stale one rather than leaving the last repair on screen forever.
