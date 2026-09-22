@@ -84,7 +84,7 @@ jobs:
           # The extra is one pure-Python universal wheel
           # (``juniper_cascor_client-0.8.0-py3-none-any.whl``, requires-python
           # >=3.12), so it resolves on every leg of the 3.12/3.13/3.14 matrix.
-          pip install -e ".[test,juniper-cascor]"
+          pip install -e ".[test,juniper-cascor,observability]"
 
       - name: Run slow / integration tests
         run: |
