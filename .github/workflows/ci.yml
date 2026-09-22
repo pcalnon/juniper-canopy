@@ -160,8 +160,11 @@ jobs:
           else
             pip install torch --index-url https://download.pytorch.org/whl/cpu
           fi
-          # Install all other CI dependencies
-          pip install -r conf/requirements_ci.txt
+          # conf/requirements_ci.txt is NOT installed here. It is generator output
+          # (juniper-generate-dep-docs) -- a pip freeze in which most lines are transitives
+          # declared as direct -- so installing it pulled packages no lane uses and coupled this
+          # job to their version conflicts (juniper-ml#1994). The declared surface lives in
+          # pyproject extras, which is what the security job and every sibling repo install.
           # Install project as editable so source-tree path resolution works.
           # CL2 (juniper-ml training-runtime defects plan §7/§13): install the
           # [juniper-cascor] extra so the REAL juniper-cascor-client (>=0.7.0) is
@@ -171,7 +174,7 @@ jobs:
           # only ever run in client-equipped local envs. With the extra the suite
           # executes here, and the floor-drift preflight + coverage gate below both
           # exercise the real cascor-client seam path.
-          pip install -e ".[juniper-cascor]"
+          pip install -e ".[test,juniper-cascor]"
           # h5py is an OPTIONAL runtime dependency: the HDF5 snapshot routes in
           # src/main.py lazy-import it and soft-fail with a 500 "h5py not
           # available" guard when it is absent, so it is intentionally NOT a hard
@@ -327,14 +330,13 @@ jobs:
         run: |
           python -m pip install --upgrade "pip>=26.1.1"
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -r conf/requirements_ci.txt
           # N3: the adapter now imports juniper_cascor_client.constants at
           # module level (ENDPOINT_TRAINING_START for the start_fresh POST),
           # so the integration lane needs the real >=0.7.0 client — the same
           # [juniper-cascor] extra CL2 (#453) added to the unit lane. Without
           # it this env resolved an ancient client and the adapter import
           # (hence three integration modules) failed to collect.
-          pip install -e ".[juniper-cascor]"
+          pip install -e ".[test,juniper-cascor]"
 
       - name: Create required directories
         run: |
@@ -401,8 +403,7 @@ jobs:
         run: |
           python -m pip install --upgrade "pip>=26.1.1"
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -r conf/requirements_ci.txt
-          pip install -e ".[ui-test]"
+          pip install -e ".[test,ui-test]"
 
       - name: Install Playwright browser
         run: |
@@ -613,8 +614,7 @@ jobs:
         run: |
           python -m pip install --upgrade "pip>=26.1.1"
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -r conf/requirements_ci.txt
-          pip install -e .
+          pip install -e ".[test,juniper-data,juniper-cascor,observability]"
 
       # Wave 2 of the dep-docs PyPI migration -- replaces the inline
       # bash scripts/generate_dep_docs.sh with the juniper-ci-tools
