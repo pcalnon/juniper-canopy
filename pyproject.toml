@@ -131,6 +131,15 @@ dependencies = [
     # image that crashed at import. The runtime cost is identical
     # because the production lockfile already pins it via the extra.
     "prometheus-client>=0.20.0",
+    # Imported directly by production source and previously undeclared -- they resolved only as
+    # transitives of fastapi (starlette) and Flask (itsdangerous), and Flask is in no lane's
+    # declared dependency set at all. src/middleware.py imports BaseHTTPMiddleware / JSONResponse /
+    # ASGIApp from starlette, and src/main.py imports starlette's SessionMiddleware, whose module
+    # raises ImportError at import time unless itsdangerous is installed (starlette ships it in its
+    # `full` extra, not its base requirements). Verified by uninstalling itsdangerous from an
+    # otherwise-complete env: `import main` then fails.
+    "starlette>=0.40",
+    "itsdangerous>=2.0",
 ]
 
 [project.urls]
@@ -140,6 +149,31 @@ Repository = "https://github.com/pcalnon/juniper-canopy"
 Issues = "https://github.com/pcalnon/juniper-canopy/issues"
 
 [project.optional-dependencies]
+# The test surface, declared rather than inherited from a `pip list --format=freeze` snapshot.
+#
+# Every CI lane used to get pytest and friends from conf/requirements_ci.txt, which is generator
+# output (`juniper-generate-dep-docs`) in which 49 of 75 requirement lines are transitives declared
+# as direct. That made dependabot open PRs against packages canopy does not use, and one of them --
+# `pre_commit`, which no lane that installs the file ever runs -- dragged in `virtualenv` and its
+# `filelock<4` cap, making #646's `filelock>=4.0.0` unsatisfiable. canopy was the only repo of nine
+# still installing that file; the `security` job here (ci.yml) and all five sibling repos already
+# install from pyproject extras.
+#
+# Deliberately NOT [dev]: that extra pulls [demo], hence torch, hence ~2GB per lane.
+test = [
+    "pytest>=9.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    # pyproject's [tool.pytest.ini_options] sets `timeout = 60` under `--strict-config`, so an env
+    # without pytest-timeout is a hard collection error, not a degraded run.
+    "pytest-mock>=3.12",
+    "pytest-timeout>=2.4.0",
+    "coverage>=7.16.0",
+    # Imported directly by the suite: anyio by src/tests/conftest.py, packaging by
+    # src/tests/unit/test_client_version_floors.py. Both previously arrived only as transitives.
+    "anyio>=4.15.1",
+    "packaging>=26.3",
+]
 juniper-data = [
     # METRICS-MON R4.3 / seed-13: bumped from >=0.3.0 to >=0.4.1 because
     # canopy now constructs ``JuniperDataClient`` with the ``on_request``
