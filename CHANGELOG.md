@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The `unknown` availability state could never fire for the outage it was built for.**
+  `/api/dataset/generators` caught a juniper-data failure and answered HTTP 200 with four
+  built-in demo generators carrying no `available` flag, so an outage and an answer were
+  indistinguishable to every caller. The dashboard therefore read availability as *known*,
+  and `is_generator_available`'s fail-open default reported `equities_seq` selectable
+  against a service that was not running. The route now reports `upstream_unavailable`
+  (attempted and did not answer), which the dashboard translates to *unknown*. Deliberately
+  false when juniper-data is unconfigured: that is demo mode, where the built-in four are
+  the offering and availability is known.
+- **A conflict notice claimed to have cleared a dataset that was never selected.** With the
+  dataset at `⊥`, any gate re-fire rendered *"none is not compatible with CasCor
+  (Cascade-Correlation), so it was cleared"* — the literal string `none` from
+  `_dataset_label(None)`, describing a state change that did not occur. Reachable since the
+  OQ-6 ratification made `⊥` a state the gate clears into. `⊥` is no longer treated as a
+  conflict; a genuine conflict still clears and still names the real dataset.
+
 ## [0.8.1] - 2026-09-15
 
 ### Added

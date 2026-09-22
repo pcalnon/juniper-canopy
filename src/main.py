@@ -1863,6 +1863,19 @@ async def list_dataset_generators():
     Falls back to built-in demo generators when JuniperData is unavailable.
     """
     generators = []
+    # A-N5 / canopy#653. The fallback below answers HTTP 200 with a list, so a caller could
+    # not distinguish "juniper-data said these are the generators" from "juniper-data never
+    # answered and these are four demo built-ins". That is exactly the state canopy#653's
+    # ``unknown`` availability state exists to name, and it could never be reached: the
+    # dashboard's ``_fetch_generators`` only returns ``None`` when THIS route fails, which a
+    # juniper-data outage does not cause. The built-ins carry no ``available`` flag, so every
+    # gated generator then defaulted to available — a down juniper-data reported
+    # ``equities_seq`` selectable, the precise complaint A-N5 was filed for.
+    #
+    # ``upstream_unavailable`` means ATTEMPTED AND DID NOT ANSWER. It is deliberately false
+    # when ``juniper_data_available`` is false: an unconfigured deployment is demo mode, where
+    # the built-in four ARE the offering and availability is known, not unknown.
+    upstream_unavailable = False
 
     # Try JuniperData service first
     if juniper_data_available:
@@ -1905,10 +1918,12 @@ async def list_dataset_generators():
                         resp.status_code,
                         "configured" if settings.juniper_data_api_key else "NOT configured",
                     )
+                    upstream_unavailable = True
         except Exception as e:
             # Unreachable service -- the fallback list is the intended demo affordance
             # here, so this stays at debug. Only the refusal branch above is loud.
             system_logger.debug("Failed to fetch generators from JuniperData: %s", e)
+            upstream_unavailable = True
 
     # Fallback to built-in demo generators
     if not generators:
@@ -1922,7 +1937,9 @@ async def list_dataset_generators():
             {"name": "moon", "display_name": "Moon", "description": "Two interleaving half-moon classification"},
         ]
 
-    return {"generators": generators}
+    # Additive: existing consumers read ``generators`` and are unaffected. ``dataset_plotter``
+    # only needs the list; ``_fetch_generators`` reads the flag to decide KNOWN vs UNKNOWN.
+    return {"generators": generators, "upstream_unavailable": upstream_unavailable}
 
 
 @app.get("/api/decision_boundary")
