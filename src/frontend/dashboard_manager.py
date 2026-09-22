@@ -6960,23 +6960,67 @@ class DashboardManager:
             self.logger.warning(f"Status bar update failed: {type(e).__name__}: {e}")
             return (*self._status_bar_error_tuple("Error", "Connection Error"), dash.no_update, dash.no_update)
 
+    # The longest a reason may occupy in the status bar. The completed-run vocabularies are
+    # short phrases and never approach it; it exists for the FAILED branch, whose reason is a
+    # raw exception string of unbounded length.
+    _COMPLETION_REASON_MAX_CHARS = 120
+
     @staticmethod
     def _completion_reason_label(reason):
-        """Map a cascor grow_network ``completion_reason`` to a status-bar suffix.
+        """Map a backend's ``completion_reason`` to a status-bar suffix.
 
-        cascor #320 emits one of five reasons on ``/api/status``; collapse them
-        to a short operator-facing phrase. ``residual_collapsed`` /
-        ``below_threshold`` are both genuine convergence; ``no_candidate`` is the
-        0-unit stall. Unknown / missing reasons return ``None`` (no suffix), so a
-        cascor that predates the field degrades gracefully.
+        Two producers write this field, with disjoint vocabularies:
+
+        * **cascor** (#320) emits one of five ``grow_network`` reasons.
+          ``residual_collapsed`` / ``below_threshold`` are both genuine convergence;
+          ``no_candidate`` is the 0-unit stall.
+        * **recurrence** emits ``TrainResult.stopped_reason`` from juniper-recurrence-model:
+          ``max_epochs`` (``_readout_mlp.py:78``), ``early_stopping`` (``:161`` — val-patience
+          fired), or ``converged`` (``model.py:219`` — the closed-form readout, which exposes
+          no epoch diagnostics).
+
+        The two sets do not collide, so one table serves both. Note the near-misses, which are
+        why this is a table and not a normaliser: cascor says ``early_stopped`` where recurrence
+        says ``early_stopping``, and ``max_iterations`` where recurrence says ``max_epochs``.
+
+        Unknown / missing reasons still return ``None`` (no suffix), so a cascor predating the
+        field degrades gracefully — and so does a recurrence-model release that adds a fourth
+        stop reason before canopy learns it.
         """
         return {
+            # cascor grow_network
             "residual_collapsed": "converged",
             "below_threshold": "converged",
             "no_candidate": "stalled (0 new units)",
             "early_stopped": "early stopped",
             "max_iterations": "max iterations",
+            # juniper-recurrence-model TrainResult.stopped_reason
+            "converged": "converged",
+            "early_stopping": "early stopped",
+            "max_epochs": "max epochs",
         }.get(reason)
+
+    @classmethod
+    def _failure_reason_label(cls, reason):
+        """Render a FAILED run's reason, which is free text rather than a vocabulary.
+
+        ``RecurrenceBackend.get_status`` writes the raw adapter error into the same
+        ``completion_reason`` field on ``state == "failed"`` (``recurrence_backend.py:274``).
+        That is an overload: cascor's five values are all *completion* outcomes, so the
+        consumer below was gated on ``status == "Completed"`` and a failure reason was written
+        and then never read — the operator saw a bare "Failed" with the cause discarded.
+
+        Free text, so it is bounded and flattened rather than mapped. A mapping table cannot
+        cover an exception string, and a status bar cannot carry a traceback.
+        """
+        if not isinstance(reason, str):
+            return None
+        collapsed = " ".join(reason.split())
+        if not collapsed:
+            return None
+        if len(collapsed) > cls._COMPLETION_REASON_MAX_CHARS:
+            return collapsed[: cls._COMPLETION_REASON_MAX_CHARS - 1].rstrip() + "…"
+        return collapsed
 
     @staticmethod
     def _counter_displays(status):
@@ -7162,6 +7206,19 @@ class DashboardManager:
             completion_label = self._completion_reason_label(status_data.get("completion_reason"))
             if completion_label:
                 status = f"{status} — {completion_label}"
+        elif status == "Failed":
+            # There was no Failed branch here at all, and that — not the mapper — is why a
+            # failed recurrence run showed no reason. ``completion_reason`` carries a
+            # completion OUTCOME from cascor and a failure ERROR from recurrence; only the
+            # cascor reading was implemented, so the branch above never ran for a failure and
+            # the error string was written and discarded.
+            #
+            # Deliberately NOT routed through ``_completion_reason_label``: that is a
+            # vocabulary table, and this value is free text. Passing it there would return
+            # ``None`` for every real error and reinstate the silence.
+            failure_label = self._failure_reason_label(status_data.get("completion_reason"))
+            if failure_label:
+                status = f"{status} — {failure_label}"
 
         # Partial-data contract: a run on a partial dataset carries the mark on the surface
         # every operator watches, in every state -- progress while it runs, result when it
