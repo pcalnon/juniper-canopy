@@ -79,10 +79,15 @@ This provides:
 
 ## Authentication
 
-Authentication is configuration-dependent:
+Authentication is configuration-dependent. The key is read from the file named by `CANOPY_API_KEY_FILE`
+(its contents, whitespace-stripped) whenever that variable names an existing file, and otherwise from
+`CANOPY_API_KEY`:
 
-- If `CANOPY_API_KEY` is unset, API-key authentication is disabled for development/demo use.
-- If `CANOPY_API_KEY` is set, keyed callers must send `X-API-Key: <value>`.
+- If no key is configured, API-key authentication is disabled for development/demo use.
+- A key that is empty or whitespace-only counts as no key: authentication is disabled exactly as if it were
+  unset, and startup logs a WARNING naming which source was blank. This includes a blank file named by
+  `CANOPY_API_KEY_FILE` while `CANOPY_API_KEY` holds a real key, because the file takes precedence.
+- Otherwise keyed callers must send `X-API-Key: <value>`.
 - Same-origin browser training controls (`/api/train/*`, `/api/csrf`, `/ws/control`) use the browser path:
   allowed `Origin` + `canopy_session` cookie + CSRF token when `JUNIPER_CANOPY_BROWSER_CONTROL_AUTH_ENABLED=true`
   (the default). Keyed callers continue to work.

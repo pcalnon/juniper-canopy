@@ -2,30 +2,29 @@
 
 Provides API key authentication and rate limiting for JuniperCanopy.
 Configuration is read from environment variables:
-    CANOPY_API_KEY: Single API key for authentication (disabled when unset).
+    CANOPY_API_KEY: Single API key for authentication. CANOPY_API_KEY_FILE, when it
+        names an existing file, takes precedence (``secrets_util.resolve_secret``).
+        Disabled when unset, empty or whitespace-only.
     CANOPY_RATE_LIMIT_ENABLED: Enable rate limiting (default: false).
     CANOPY_RATE_LIMIT_REQUESTS_PER_MINUTE: Rate limit (default: 60).
 """
 
 import hmac
 import ipaddress
-import logging
 import secrets
 import sys
 import time
 from collections import defaultdict
 from threading import Lock
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import HTTPException, Request, status
 from fastapi.security import APIKeyHeader
 
-from secrets_util import get_secret
+from secrets_util import resolve_secret
 
 if TYPE_CHECKING:
     from settings import Settings
-
-logger = logging.getLogger("juniper_canopy.security")
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -60,13 +59,20 @@ class APIKeyAuth:
         # APIKeyAuth (security.py) and the juniper-data / juniper-cascor forks do.
         # ``get_api_key_auth`` already maps an empty key to None, so what reaches
         # here unfiltered is a whitespace-only CANOPY_API_KEY from the env var
-        # (``get_secret`` strips a secret FILE, not the env var). Unfiltered, that
-        # ENABLED auth on a key no HTTP header can carry (an all-whitespace
-        # ``X-API-Key`` arrives empty), while the boot-time posture check -- which
-        # filters with this same rule -- already reported it as running OPEN. The
-        # WebSocket ``?api_key=`` parameter could carry it, but every WS route
-        # admits a keyless connection anyway (``allow_browser_auth=True``), so that
-        # was never an exposure. Now this class and the posture check agree: a blank
+        # (``resolve_secret`` strips a secret FILE, not the env var). Unfiltered, a key
+        # of ASCII spaces and tabs ENABLED auth on a key no caller could present --
+        # h11 and httptools both strip an all-space or all-tab ``X-API-Key`` to
+        # empty -- so every key-gated route refused every caller, while the
+        # boot-time posture check, which filters with this same rule, reported the
+        # service OPEN. That holds for spaces and tabs only: ``str.strip()`` also
+        # removes U+00A0 and U+0085, which both parsers pass through (Starlette
+        # decodes latin-1) but ``hmac.compare_digest`` rejects as non-ASCII
+        # (``TypeError``: a 500, never a match), and U+001C..U+001F, which h11 passes
+        # and httptools -- canopy's default parser -- refuses; under h11 a key of those
+        # was a working key. The
+        # WebSocket ``?api_key=`` parameter could carry a whitespace key, but every WS
+        # route admits a keyless connection anyway (``allow_browser_auth=True``), so
+        # that was never an exposure. Now this class and the posture check agree: a blank
         # key is no key and auth is off -- the posture canopy documents for no key
         # at all -- and ``enforce_auth_posture`` fails the boot when ``require_auth``
         # is set. Two readers still take the raw value for a key and are NOT
@@ -293,20 +299,71 @@ class RateLimiter:
 _api_key_auth: APIKeyAuth | None = None
 _rate_limiter: RateLimiter | None = None
 
+# APD-ECO-008: a SET-but-blank key is a different operator mistake from an UNSET one,
+# and ``enforce_auth_posture`` words the two identically ("running OPEN"). When the
+# key's source is set but blank, ``get_api_key_auth`` records the NAME of the variable
+# that supplied it -- never the value -- from its one secret read, and
+# ``main.lifespan`` reports it with :func:`report_blank_api_key` once logging is
+# configured. It cannot be logged where it is read: the singleton is first built at
+# import (``main.api_key_auth``), before ``configure_logging`` runs. #660 logged it
+# there, through a module logger with no handler, so it reached only Python's
+# last-resort handler -- no level, no JSON, no Sentry, and never ``logs/system.log``.
+# Guarded by ``_blank_key_lock``.
+_blank_key_source: str | None = None
+_blank_key_reported = False
+_blank_key_lock = Lock()
+
+# One wording per source, because the advice differs: while CANOPY_API_KEY_FILE names
+# an existing file it takes precedence and CANOPY_API_KEY is not read at all
+# (``secrets_util.resolve_secret``), so "unset CANOPY_API_KEY" would be wrong advice
+# to an operator whose file is blank and whose CANOPY_API_KEY holds the real key.
+_BLANK_KEY_OPENS = "so API-key authentication is DISABLED: every route, including the state-changing /api/* routes and the /api/train/* control surface, serves without a key, exactly as with no key configured."
+_BLANK_KEY_ENV_WARNING = "CANOPY_API_KEY is set but blank (empty or whitespace-only), " + _BLANK_KEY_OPENS + " Set a real key, or unset CANOPY_API_KEY for an intentional open profile."
+_BLANK_KEY_FILE_WARNING = "The file named by CANOPY_API_KEY_FILE is blank (empty or whitespace-only), " + _BLANK_KEY_OPENS + " While CANOPY_API_KEY_FILE names an existing file it takes precedence and CANOPY_API_KEY is not read. Write a real key into that file, or unset CANOPY_API_KEY_FILE to use CANOPY_API_KEY instead."
+
 
 def get_api_key_auth() -> APIKeyAuth:
-    """Get the global API key auth handler, creating if needed."""
-    global _api_key_auth
+    """Get the global API key auth handler, creating if needed.
+
+    Creation is the only place the key is read. A set-but-blank key -- one the
+    blank-key filter leaves auth disabled on -- is recorded by source for
+    :func:`report_blank_api_key`; nothing is logged here.
+    """
+    global _api_key_auth, _blank_key_source, _blank_key_reported
     if _api_key_auth is None:
-        api_key = get_secret("CANOPY_API_KEY")
+        api_key, source = resolve_secret("CANOPY_API_KEY")
         api_keys = [api_key] if api_key else None
         _api_key_auth = APIKeyAuth(api_keys)
-        if api_key is not None and not _api_key_auth.enabled:
-            # APD-ECO-008: SET-but-blank is a different operator mistake from UNSET,
-            # and ``enforce_auth_posture`` words the two identically ("running
-            # OPEN"). Name the variable so the blank is findable -- never the value.
-            logger.warning("CANOPY_API_KEY (or the file named by CANOPY_API_KEY_FILE) is set but blank -- empty or whitespace-only -- so API-key authentication is DISABLED and canopy's routes, including the /api/train/* control surface, serve without a key. Set a real key, or unset CANOPY_API_KEY for an intentional open profile.")
+        with _blank_key_lock:
+            _blank_key_source = source if api_key is not None and not _api_key_auth.enabled else None
+            _blank_key_reported = False
     return _api_key_auth
+
+
+def report_blank_api_key(log: Any) -> bool:
+    """Log the set-but-blank ``CANOPY_API_KEY`` WARNING through ``log``, at most once.
+
+    ``main.lifespan`` calls this right after ``enforce_auth_posture``, once
+    ``configure_logging`` has run, with the system logger. The message names the
+    source that was blank (``CANOPY_API_KEY_FILE`` or ``CANOPY_API_KEY``) and the
+    remedy for that source, and never the value. It reads only what
+    :func:`get_api_key_auth` recorded, never the secret itself, and reports once
+    per recorded key however many times the lifespan runs.
+
+    Args:
+        log: Any logger with a ``warning(message)`` method.
+
+    Returns:
+        True when this call logged the WARNING, else False.
+    """
+    global _blank_key_reported
+    with _blank_key_lock:
+        if _blank_key_source is None or _blank_key_reported:
+            return False
+        _blank_key_reported = True
+        source = _blank_key_source
+    log.warning(_BLANK_KEY_FILE_WARNING if source == "CANOPY_API_KEY_FILE" else _BLANK_KEY_ENV_WARNING)
+    return True
 
 
 def get_rate_limiter() -> RateLimiter:
@@ -325,9 +382,12 @@ def get_rate_limiter() -> RateLimiter:
 
 def reset_security_state() -> None:
     """Reset global security state. Useful for testing."""
-    global _api_key_auth, _rate_limiter
+    global _api_key_auth, _rate_limiter, _blank_key_source, _blank_key_reported
     _api_key_auth = None
     _rate_limiter = None
+    with _blank_key_lock:
+        _blank_key_source = None
+        _blank_key_reported = False
 
 
 def browser_origin_allowed(request: Request) -> bool:
