@@ -403,6 +403,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   classified such a key as absent and logged "running OPEN"; that log line is now true. What
   opens is the posture canopy documents for no key at all:
 
+  - **Every key-gated route now serves anyone who can reach the port. This is the largest thing
+    that opens.** A key of ASCII spaces and tabs enabled auth on a key no caller could present:
+    both uvicorn parsers, h11 and httptools, strip an all-space or all-tab `X-API-Key` to an empty
+    value. So `SecurityMiddleware` refused every caller, with a key or without, on every route
+    outside its exempt sets. Those routes now answer exactly as they do with no key configured. A
+    sweep of `app.routes` on `48074653` (the commit #660 merged onto) and on `3a6dea95` (#660)
+    counts **56** key-gated (method, path) pairs. A keyless request to each got 401 before and
+    reaches its handler after. **27** of them change state, among them `/api/set_params`,
+    `/api/model/select`, `POST /api/admin/experimental_functions`, `/api/dataset/generate` and
+    both dataset imports, `/api/stage_dataset`, `/api/live_dataset_swap`,
+    `PATCH /api/v1/network/weights`, `/api/v1/network/hidden-units`, snapshot restore, resume,
+    retrain and replay, and `/api/remote/*`. All **26** parameterless GETs went from 401 to 200.
+    The exempt sets (`/`, the health routes, `/dashboard`, `/metrics`) and the browser surface
+    (`/api/csrf`, `/api/train/*`, next bullet) are not in these counts.
+    `util/ad-hoc/2026-09-23_blank_api_key_route_sweep.py` reproduces the figures. The claim that no
+    caller could present the key holds for spaces and tabs only, because `str.strip()` also empties
+    characters a header does carry. U+00A0 and U+0085 pass both parsers; a key of those could be
+    presented, but `hmac.compare_digest` raises `TypeError` on non-ASCII text, so every keyed
+    request got a 500. U+001C to U+001F pass h11 but not httptools, canopy's default parser; under
+    h11 a key of those authenticated normally. All of these keys now count as no key too.
   - **The browser control surface loses its Origin/CSRF gate.** While auth was enabled, a keyless
     `/api/train/*` request had to pass the Origin allowlist and a CSRF token under the default
     flags; with `browser_control_auth_enabled` off, it needed the key outright. With auth disabled,
@@ -422,8 +442,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AuthPostureError` unless `JUNIPER_SKIP_AUTH_POSTURE_CHECK` bypasses the check. juniper-deploy
   supplies the key through `CANOPY_API_KEY_FILE`, which is stripped, and its secured compose
   service defaults `JUNIPER_CANOPY_REQUIRE_AUTH=true`, so no deploy profile reaches it.
-  `get_api_key_auth()` now logs a distinct WARNING when `CANOPY_API_KEY` is set but blank. The
-  WARNING names the variable, never the value.
+
+  Startup now logs a distinct WARNING when the key is set but blank. It is emitted once per
+  process, right after the posture check and after `configure_logging` has run, through the system
+  logger, so it carries its level and format, lands in `logs/system.log`, and reaches Sentry when
+  a DSN is configured. The secret is read at import, before logging is configured, so the read only
+  records which source was blank, and the lifespan reports it. The WARNING names that source,
+  `CANOPY_API_KEY` or the file named by `CANOPY_API_KEY_FILE`, and gives the remedy for it.
+  `CANOPY_API_KEY_FILE` wins whenever it names an existing file, so a blank file beside a real
+  `CANOPY_API_KEY` also disables auth, as it did before #660, and the remedy there is the file. The
+  WARNING never includes the value.
+
+  This entry supersedes the message of commit `3a6dea95`, which predates #660's correction: that
+  message still says the WebSocket `?api_key=` fallback "could still present" the key, and it
+  names only "One real behaviour change".
 
 ## [0.8.1] - 2026-09-15
 
