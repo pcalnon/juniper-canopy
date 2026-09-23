@@ -124,6 +124,27 @@ def test_an_unexpected_error_from_the_helper_never_blocks_the_install():
     assert "RuntimeError" in line and "boom" in line
 
 
+def test_a_client_without_the_helper_degrades_to_a_warning():
+    """A client older than 0.5.0 has no validate_npz_contract; that must not abort the load."""
+    import juniper_data_client
+
+    with patch.dict(juniper_data_client.__dict__):  # restores the module namespace on exit
+        del juniper_data_client.__dict__["validate_npz_contract"]
+        demo, result = _run_regenerate(_tabular_npz(), "xor")
+    demo.import_dataset.assert_called_once()
+    assert result["dataset_kind"] == "tabular"
+    (line,) = _advisory_warnings(demo)
+    assert "ImportError" in line
+
+
+def test_the_legacy_note_appears_only_when_the_artifact_is_legacy():
+    """The warning must not claim 'carries only X_full' for an artifact that has no X_full."""
+    demo = _bare_demo()
+    assert demo._advise_npz_contract({"X_test": np.zeros((2, 2), np.float32)}, "generator:odd") is None
+    (line,) = _advisory_warnings(demo)
+    assert "X_train" in line and "X_full" not in line
+
+
 def test_the_advisory_check_sees_the_artifact_the_probe_dispatches():
     """It is handed the downloaded artifact itself, and its answer does not change the route."""
     seen: list = []

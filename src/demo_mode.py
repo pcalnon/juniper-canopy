@@ -933,12 +933,17 @@ class DemoMode:
             The contract kind (``"tabular"`` or ``"sequence"``) when the artifact validates,
             or ``None`` when it does not.
         """
-        from juniper_data_client import validate_npz_contract
-
         try:
-            kind = validate_npz_contract(npz_data)
+            # Inside the try: a client that predates the helper (< 0.5.0) must degrade to a
+            # warning like any other failure here, not abort the install with ImportError.
+            from juniper_data_client import validate_npz_contract
+
+            # Annotated: under the pre-commit mypy env juniper_data_client is not installed, so the
+            # import is `Any`, and returning it unannotated trips no-any-return.
+            kind: str = validate_npz_contract(npz_data)
         except KeyError as exc:
-            self.logger.warning("Advisory NPZ contract check could not run for %s: no %s key (a legacy pre-decision-11 artifact carries only X_full); installing anyway (canopy#559)", source_label, exc)
+            legacy = " (a legacy pre-decision-11 artifact that carries only X_full)" if "X_full" in npz_data else ""
+            self.logger.warning("Advisory NPZ contract check could not run for %s: no %s key%s; installing anyway (canopy#559)", source_label, exc, legacy)
             return None
         except ValueError as exc:  # JuniperDataContractError subclasses ValueError
             self.logger.warning("Advisory NPZ contract check FAILED for %s: %s; installing anyway (canopy#559)", source_label, exc)

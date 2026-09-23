@@ -20,13 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the rule, and **the install proceeds exactly as before**. The validator fails closed, and a
   legacy `X_full`-only artifact makes it raise `KeyError`, while the ecosystem contract is
   "tolerate `*_full`, never require it". So it reports and never gates. Any exception it raises
-  is caught, whatever the type. The rank probe stays the gate, and the comment above it no longer
-  claims that the helper is absent from the pinned client, a claim that has been false since the
-  0.5.0 floor. `src/tests/unit/test_npz_contract_advisory.py` covers a violation that is
-  reported and still installs, a legacy artifact that is reported and still installs, an
-  unexpected error that never blocks the load, and a valid artifact that logs nothing. Six of
-  its seven cases fail against the pre-change tree. The seventh is the negative control, and it
-  is expected to pass on both trees.
+  is caught, whatever the type, including an `ImportError` from a client too old to have the
+  helper. The rank probe stays the gate, and the comment above it no longer claims that the
+  helper is absent from the pinned client, a claim that has been false since the 0.5.0 floor.
+  `src/tests/unit/test_npz_contract_advisory.py` covers a violation that is reported and still
+  installs, a legacy artifact that is reported and still installs, an unexpected error that
+  never blocks the load, a client without the helper, and a valid artifact that logs nothing.
+  Eight of its nine cases fail against the pre-change tree. The ninth is the negative control,
+  and it is expected to pass on both trees.
 
 ### Fixed
 
