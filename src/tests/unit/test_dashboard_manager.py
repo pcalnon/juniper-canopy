@@ -802,6 +802,36 @@ class TestLayoutStatePersistence:
         gone)."""
         assert dashboard_manager_source.count('Output("visualization-tabs", "active_tab"') == 2
 
+    @staticmethod
+    def _restore_body(dashboard_manager_source):
+        """The restore callback's JS body: from its signature up to its first Input."""
+        end = dashboard_manager_source.find('Input("layout-state-store", "data")')
+        start = dashboard_manager_source.rfind("function(state, tabs, currentTab)", 0, end)
+        assert start != -1 and end != -1, "the restore callback no longer takes (state, tabs, currentTab)"
+        assert end - start < 3000, "the signature found belongs to a different callback"
+        return dashboard_manager_source[start:end]
+
+    def test_read_callback_reads_the_rendered_tabs(self, dashboard_manager_source):
+        """Y4: a one-shot model rebuilds the tab bar without the cascade-only tabs, so the
+        restore has to know which tabs are RENDERED. They arrive as an Input, not State: the
+        rebuild lands after the mount-time restore (hydration runs on params-init-interval), so
+        a State would be read once, before it, and a runtime swap would never re-fire the check."""
+        idx = dashboard_manager_source.find('Input("layout-state-store", "data")')
+        assert idx != -1
+        window = dashboard_manager_source[idx : idx + 300]
+        assert 'Input("visualization-tabs", "children")' in window
+        assert 'State("visualization-tabs", "children")' not in window
+
+    def test_read_callback_never_restores_an_unrendered_tab(self, dashboard_manager_source):
+        """Y4: the persisted tab is restored only when it is among the rendered tabs; otherwise
+        the shown tab is kept when it is rendered, and the first rendered tab is used when it is
+        not. The behaviour itself is executed under node in
+        ``tests/unit/frontend/test_y4_active_tab_restore.py``; this pins the source shape."""
+        body = self._restore_body(dashboard_manager_source)
+        assert "rendered.indexOf(saved) === -1" in body
+        assert "rendered.indexOf(currentTab) !== -1" in body
+        assert "rendered[0]" in body
+
 
 class TestStatusBarErrorDiagnosability:
     """#3 fix: a FAILED /api/status poll must surface a SPECIFIC status label
