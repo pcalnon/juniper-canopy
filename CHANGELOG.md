@@ -59,6 +59,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of up to 10 s plus apply latency. That the renderer now applies the writes is a live property,
   which the unit tests cannot show.
 
+### Security
+
+- **`APIKeyAuth` now carries the blank-key filter and the non-short-circuiting compare that its
+  three siblings carry (APD-ECO-008).** `src/security.py` is the fourth copy of the ecosystem's
+  `APIKeyAuth`, and the only one still on the pre-fix code. `validate` used
+  `any(hmac.compare_digest(...))`, which stops at the first match, so the number of comparisons
+  depended on where the matching key fell. The constructor also kept blank entries, which
+  juniper-service-core, juniper-data and juniper-cascor all drop. Both now match the siblings.
+  **One real behaviour change:** a whitespace-only `CANOPY_API_KEY` set through the environment
+  variable used to *enable* auth. (A secret *file* is already stripped by `get_secret`, so it
+  becomes no key.) That key refused every HTTP request, because an all-whitespace header arrives
+  empty, while the WebSocket `?api_key=` query parameter could still present it. Meanwhile the
+  boot-time posture check already classified it as no key and logged "running OPEN". It now
+  disables auth, which is what that log line said. With `JUNIPER_CANOPY_REQUIRE_AUTH=true` the
+  boot still fails with `AuthPostureError`, unless `JUNIPER_SKIP_AUTH_POSTURE_CHECK` bypasses the
+  check.
+
 ## [0.8.1] - 2026-09-15
 
 ### Added

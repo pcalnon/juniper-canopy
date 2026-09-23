@@ -49,8 +49,24 @@ class APIKeyAuth:
 
         Args:
             api_keys: List of valid API keys. If None or empty, auth is disabled.
+                Blank / whitespace-only (and non-str) entries are ignored -- the
+                same rule as ``juniper_service_core.auth_posture.real_keys`` -- so
+                a key that is only whitespace cannot enable authentication.
         """
-        self._api_keys: set[str] = set(api_keys) if api_keys else set()
+        # APD-ECO-008: filter blanks before enabling, as juniper-service-core's
+        # APIKeyAuth (security.py) and the juniper-data / juniper-cascor forks do.
+        # ``get_api_key_auth`` already maps an empty key to None, so what reaches
+        # here unfiltered is a whitespace-only CANOPY_API_KEY from the env var
+        # (``get_secret`` strips a secret FILE, not the env var). Unfiltered, that
+        # enabled auth which the boot-time posture check -- filtering with this
+        # same rule -- reported as running OPEN, while HTTP refused every keyed
+        # request (an all-whitespace ``X-API-Key`` arrives EMPTY: both of
+        # uvicorn's parsers strip leading whitespace) and the WebSocket
+        # ``?api_key=`` query parameter, which is decoded but never trimmed, could
+        # still present the whitespace key. Filtering makes all three agree: no
+        # real key means auth is off, and ``enforce_auth_posture`` fails the boot
+        # when ``require_auth`` is set.
+        self._api_keys: set[str] = {k for k in (api_keys or []) if isinstance(k, str) and k.strip()}
         self._enabled = len(self._api_keys) > 0
 
     @property
@@ -71,7 +87,20 @@ class APIKeyAuth:
             return True
         if api_key is None:
             return False
-        return any(hmac.compare_digest(api_key, k) for k in self._api_keys)
+        # Constant-time comparison against every configured key (APD-ECO-008).
+        # ``any()`` would short-circuit on the first match, so the NUMBER of
+        # comparisons would depend on where the matching key falls in the
+        # iteration; hmac.compare_digest itself already runs in time proportional
+        # to the input length regardless of where a mismatching byte appears, so
+        # walking the whole key set preserves that property per key while still
+        # accepting on a match. Mirrors juniper-data's reference implementation
+        # (juniper_data/api/security.py), as juniper-service-core and
+        # juniper-cascor do.
+        matched = False
+        for candidate in self._api_keys:
+            if hmac.compare_digest(api_key, candidate):
+                matched = True
+        return matched
 
     async def __call__(self, request: Request) -> str | None:
         """FastAPI dependency for API key validation.
