@@ -54,6 +54,62 @@ class TestAPIKeyAuth:
         auth = APIKeyAuth(["key1"])
         assert auth.validate(None) is False
 
+    # APD-ECO-008: parity with the three sibling copies (juniper-service-core,
+    # juniper-data, juniper-cascor) -- the blank-key filter and the
+    # non-short-circuiting compare.
+
+    def test_blank_and_whitespace_keys_are_filtered(self):
+        auth = APIKeyAuth(["", "   ", "\t\n", "key1"])
+        assert auth.enabled is True
+        assert auth._api_keys == {"key1"}
+        assert auth.validate("key1") is True
+        # Unfiltered, a configured "" accepted an empty presented key.
+        assert auth.validate("") is False
+        assert auth.validate("   ") is False
+
+    def test_only_blank_keys_leave_auth_disabled(self):
+        auth = APIKeyAuth(["", "   ", "\t"])
+        assert auth.enabled is False
+        assert auth._api_keys == set()
+
+    def test_non_str_entries_are_dropped_without_raising(self):
+        # The unhashable entries made the old ``set(api_keys)`` raise TypeError;
+        # the isinstance guard runs before anything is hashed.
+        auth = APIKeyAuth([None, 123, b"key1", {"a": 1}, ["x"], "key1"])  # type: ignore[list-item]
+        assert auth._api_keys == {"key1"}
+        assert auth.enabled is True
+        assert auth.validate("key1") is True
+
+    @pytest.mark.parametrize("keys", [None, [], [""], ["   "], ["\t", ""], ["k"], [" k "], ["", "k"]])
+    def test_enabled_agrees_with_the_boot_posture_check(self, keys):
+        """``enforce_auth_posture`` classifies keys with ``real_keys``; APIKeyAuth must agree.
+
+        Before APD-ECO-008 the two disagreed on every blank-only input: the boot
+        check logged "running OPEN" while APIKeyAuth enabled itself on the blank.
+        """
+        from juniper_service_core.auth_posture import auth_is_configured
+
+        assert APIKeyAuth(keys).enabled is auth_is_configured(keys)
+
+    def test_validate_compares_every_key_even_when_the_first_matches(self, monkeypatch):
+        """``any()`` stopped at the first match, so the comparison count leaked its position."""
+        from types import SimpleNamespace
+
+        auth = APIKeyAuth(["key1", "key2", "key3"])
+        compared = []
+        real_compare = auth.validate.__globals__["hmac"].compare_digest
+
+        def counting_compare(a, b):
+            compared.append(b)
+            return real_compare(a, b)
+
+        # Patch the globals validate() actually resolves ``hmac`` from, so a module
+        # re-import elsewhere in the session cannot leave this test patching a copy.
+        monkeypatch.setitem(auth.validate.__globals__, "hmac", SimpleNamespace(compare_digest=counting_compare))
+        first = next(iter(auth._api_keys))  # the key validate() compares first
+        assert auth.validate(first) is True
+        assert sorted(compared) == ["key1", "key2", "key3"]
+
     @pytest.mark.asyncio
     @pytest.mark.unit
     async def test_call_returns_none_when_disabled(self):
@@ -263,6 +319,56 @@ class TestSecurityModuleFunctions:
         auth = get_api_key_auth()
         assert auth.enabled is True
         assert auth.validate("test-key") is True
+
+    def test_whitespace_only_env_key_leaves_auth_disabled(self, monkeypatch):
+        """APD-ECO-008: the one blank shape that reached APIKeyAuth in production.
+
+        ``get_secret`` strips a secret FILE but returns the env var raw, and
+        ``get_api_key_auth`` maps only a falsy key to None -- so a whitespace-only
+        ``CANOPY_API_KEY`` arrived unfiltered and enabled auth on it.
+        """
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.setenv("CANOPY_API_KEY", "   ")
+        auth = get_api_key_auth()
+        assert auth.enabled is False
+
+    @pytest.mark.parametrize("source", ["env", "file"])
+    def test_set_but_blank_key_logs_a_distinct_warning(self, monkeypatch, caplog, tmp_path, source):
+        """APD-ECO-008: SET-but-blank gets its own WARNING, naming the variable and never the value.
+
+        The boot posture check words a blank key exactly like an unset one, so
+        without this an operator whose key went blank gets no new signal.
+        """
+        blank = " \t  "  # distinctive whitespace: none of it may reach the log
+        if source == "env":
+            monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+            monkeypatch.setenv("CANOPY_API_KEY", blank)
+        else:
+            secret_file = tmp_path / "canopy_api_key"
+            secret_file.write_text(blank + "\n")
+            monkeypatch.setenv("CANOPY_API_KEY_FILE", str(secret_file))
+            monkeypatch.delenv("CANOPY_API_KEY", raising=False)
+        with caplog.at_level("WARNING", logger="juniper_canopy.security"):
+            auth = get_api_key_auth()
+        assert auth.enabled is False
+        warnings = [r for r in caplog.records if r.name == "juniper_canopy.security" and r.levelname == "WARNING"]
+        assert len(warnings) == 1
+        message = warnings[0].getMessage()
+        assert "CANOPY_API_KEY" in message
+        assert "blank" in message and "DISABLED" in message
+        assert "\t" not in message and " " not in message
+
+    @pytest.mark.parametrize("value", [None, "real-key"])
+    def test_no_blank_key_warning_when_unset_or_real(self, monkeypatch, caplog, value):
+        """Over-correction guard: UNSET and a real key are not the blank case."""
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        if value is None:
+            monkeypatch.delenv("CANOPY_API_KEY", raising=False)
+        else:
+            monkeypatch.setenv("CANOPY_API_KEY", value)
+        with caplog.at_level("WARNING", logger="juniper_canopy.security"):
+            get_api_key_auth()
+        assert [r for r in caplog.records if r.name == "juniper_canopy.security"] == []
 
     def test_get_rate_limiter_reads_settings(self):
         from unittest.mock import MagicMock, patch

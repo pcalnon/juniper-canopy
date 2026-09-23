@@ -9,6 +9,7 @@ Configuration is read from environment variables:
 
 import hmac
 import ipaddress
+import logging
 import secrets
 import sys
 import time
@@ -23,6 +24,8 @@ from secrets_util import get_secret
 
 if TYPE_CHECKING:
     from settings import Settings
+
+logger = logging.getLogger("juniper_canopy.security")
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -49,8 +52,28 @@ class APIKeyAuth:
 
         Args:
             api_keys: List of valid API keys. If None or empty, auth is disabled.
+                Blank / whitespace-only (and non-str) entries are ignored -- the
+                same rule as ``juniper_service_core.auth_posture.real_keys`` -- so
+                a key that is only whitespace cannot enable authentication.
         """
-        self._api_keys: set[str] = set(api_keys) if api_keys else set()
+        # APD-ECO-008: filter blanks before enabling, as juniper-service-core's
+        # APIKeyAuth (security.py) and the juniper-data / juniper-cascor forks do.
+        # ``get_api_key_auth`` already maps an empty key to None, so what reaches
+        # here unfiltered is a whitespace-only CANOPY_API_KEY from the env var
+        # (``get_secret`` strips a secret FILE, not the env var). Unfiltered, that
+        # ENABLED auth on a key no HTTP header can carry (an all-whitespace
+        # ``X-API-Key`` arrives empty), while the boot-time posture check -- which
+        # filters with this same rule -- already reported it as running OPEN. The
+        # WebSocket ``?api_key=`` parameter could carry it, but every WS route
+        # admits a keyless connection anyway (``allow_browser_auth=True``), so that
+        # was never an exposure. Now this class and the posture check agree: a blank
+        # key is no key and auth is off -- the posture canopy documents for no key
+        # at all -- and ``enforce_auth_posture`` fails the boot when ``require_auth``
+        # is set. Two readers still take the raw value for a key and are NOT
+        # changed here: ``main.py``'s ``_docs_enabled`` and the self-call
+        # ``X-API-Key`` in ``frontend/internal_api.py``, which ``requests`` rejects
+        # (``InvalidHeader``) -- both behave as they did before this filter.
+        self._api_keys: set[str] = {k for k in (api_keys or []) if isinstance(k, str) and k.strip()}
         self._enabled = len(self._api_keys) > 0
 
     @property
@@ -71,7 +94,20 @@ class APIKeyAuth:
             return True
         if api_key is None:
             return False
-        return any(hmac.compare_digest(api_key, k) for k in self._api_keys)
+        # Constant-time comparison against every configured key (APD-ECO-008).
+        # ``any()`` would short-circuit on the first match, so the NUMBER of
+        # comparisons would depend on where the matching key falls in the
+        # iteration; hmac.compare_digest itself already runs in time proportional
+        # to the input length regardless of where a mismatching byte appears, so
+        # walking the whole key set preserves that property per key while still
+        # accepting on a match. Mirrors juniper-data's reference implementation
+        # (juniper_data/api/security.py), as the juniper-cascor and
+        # juniper-service-core copies do on their main branches.
+        matched = False
+        for candidate in self._api_keys:
+            if hmac.compare_digest(api_key, candidate):
+                matched = True
+        return matched
 
     async def __call__(self, request: Request) -> str | None:
         """FastAPI dependency for API key validation.
@@ -265,6 +301,11 @@ def get_api_key_auth() -> APIKeyAuth:
         api_key = get_secret("CANOPY_API_KEY")
         api_keys = [api_key] if api_key else None
         _api_key_auth = APIKeyAuth(api_keys)
+        if api_key is not None and not _api_key_auth.enabled:
+            # APD-ECO-008: SET-but-blank is a different operator mistake from UNSET,
+            # and ``enforce_auth_posture`` words the two identically ("running
+            # OPEN"). Name the variable so the blank is findable -- never the value.
+            logger.warning("CANOPY_API_KEY (or the file named by CANOPY_API_KEY_FILE) is set but blank -- empty or whitespace-only -- so API-key authentication is DISABLED and canopy's routes, including the /api/train/* control surface, serve without a key. Set a real key, or unset CANOPY_API_KEY for an intentional open profile.")
     return _api_key_auth
 
 
