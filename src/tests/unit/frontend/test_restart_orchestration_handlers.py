@@ -389,6 +389,48 @@ class TestRestageDataset:
         assert ok is False
         assert "unknown" in detail
 
+    @staticmethod
+    def _restaged_payload(dm, dataset_vals):
+        with patch("frontend.dashboard_manager.requests.post") as mp:
+            mp.return_value.status_code = 200
+            mp.return_value.text = ""
+            ok, _detail = dm._restage_dataset(dataset_vals)
+        assert ok is True
+        return mp.call_args.kwargs["json"]
+
+    @pytest.mark.parametrize("dataset_type", ["equities", "mnist", "equities_seq"])
+    def test_a_seeded_generator_is_restaged_with_its_seed(self, dm, dataset_type):
+        """The modal re-stage carries the registry seed, as Apply Dataset does.
+
+        It sent the typed fields alone, so the keys a seed exists for were dropped: ``equities``
+        without ``symbols`` (a default deployment 422s the 503-name universe) and ``mnist`` without
+        ``flatten``. The seed must arrive whole, as the registry states it.
+        """
+        from model_registry import dataset_default_params
+
+        seed = dataset_default_params(dataset_type)
+        assert seed, f"precondition: {dataset_type} carries a seed"
+        payload = self._restaged_payload(dm, {"dataset_type": dataset_type, "n_samples": 500})
+        assert payload["nn_dataset_params"] == seed
+
+    def test_the_equities_restage_names_its_symbols(self, dm):
+        # The specific defect, stated as the wire sees it: without ``symbols`` juniper-data resolves
+        # the whole bundled universe and refuses it against the symbol cap.
+        payload = self._restaged_payload(dm, {"dataset_type": "equities"})
+        assert payload["nn_dataset_params"]["symbols"], payload
+
+    def test_an_unseeded_generator_sends_no_params_key(self, dm):
+        # ``{}`` seeds send nothing, so the legacy spiral / circles bodies are byte-for-byte unchanged.
+        payload = self._restaged_payload(dm, {"dataset_type": "circles", "n_samples": 500})
+        assert "nn_dataset_params" not in payload
+
+    def test_the_seed_is_a_copy(self, dm):
+        payload = self._restaged_payload(dm, {"dataset_type": "equities"})
+        payload["nn_dataset_params"]["symbols"].append("MUTATED")
+        from model_registry import dataset_default_params
+
+        assert "MUTATED" not in dataset_default_params("equities")["symbols"]
+
 
 class TestApplyParamsViaBackend:
     """The shared N5 apply core the restart modal delegates into."""
