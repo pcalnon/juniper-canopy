@@ -16,36 +16,31 @@ all three replay callbacks in ``requested`` in 6471 of 6471 samples, and zero ``
 writes across ten clicks. The clean room locked 3/3 with the cycle plus an always-pending
 feeder, was live 3/3 with the slider as State, and did not lock without the feeder.
 
-The fix merges the two into one callback that reads AND writes ``replay-slider.value``.
+The fix merged the two into one callback that reads AND writes ``replay-slider.value``.
+F-CANOPY-054 (2026-09-23) then moved that callback to the browser: it is now the clientside
+``REPLAY_CONTROLS_JS``, the only writer of ``replay-state``, with the tick folded in and the
+metrics store read as State. The server ``replay_tick`` and play-label callbacks are gone.
 
-What these tests prove:
-  * SEMANTICS -- for every control, the merged handler returns exactly what the old
-    controls callback returned, followed by what the old UI callback rendered from that state
-    (a differential check against verbatim copies of both, below). A refresh trigger (a
-    ``replay_tick`` write, a metrics refill, the mount call) never rewrites the state, so it
-    cannot pause playback or move the index.
-  * WIRING -- the registered callback is the only writer of the slider and reads it too, and
-    every control Input it registers is one the handler dispatches on.
+What these tests prove, as of F-CANOPY-054:
+  * WIRING -- one callback is the only writer of the slider and reads it too, and the slider is
+    a PRIMARY output of it.
   * ACYCLICITY -- no cycle spanning two or more distinct callbacks exists anywhere in the BUILT
-    app (the served ``/_dash-dependencies``), bar two named, pre-existing exemptions; and no
-    replay-block callback's own readiness closure covers one of its own Inputs.
+    app (the served ``/_dash-dependencies``), bar two named, pre-existing exemptions.
+  * READINESS -- no replay-block callback's own readiness closure covers one of its own Inputs,
+    and no pending callback's closure reaches any of the controls' checked Inputs.
 
-What they cannot prove: that the LIVE renderer now promotes the merged callback. That depends
-on runtime pendingness -- it is not ready while a primary writer of the metrics store is
-pending -- and is left to a live verify leg.
+The SEMANTICS tests F-CANOPY-048 added here (every control against verbatim copies of both old
+callbacks, and a refresh never rewriting the state) moved with the handler to
+``test_f054_replay_block_clientside.py``, where they run on the registered JavaScript under node.
+
+What they cannot prove: that the LIVE renderer promotes the controls callback. That is left to a
+live verify leg. F-CANOPY-048's version of this caveat -- the callback was not ready while a
+primary writer of the metrics store was pending -- no longer applies: the store is State.
 
 Verified against the parent commit (886147b5): the two graph tests below that encode the
 defect FAIL there (the whole-app scan finds the replay SCC; both old callbacks are
-self-blocked), and so do the handler and wiring tests (no merged handler; two slider writers).
-
-F-CANOPY-054 (2026-09-23) moved the replay block to the browser. The merged callback is now the
-clientside ``REPLAY_CONTROLS_JS`` -- the only writer of ``replay-state``, with the tick folded in
-and the metrics store read as State -- and the server ``replay_tick`` and play-label callbacks are
-gone. Its semantics, including the differential against the old callbacks, are exercised under
-node in ``test_f054_replay_block_clientside.py``. This file keeps the invariants F-CANOPY-048
-established that still apply: one slider writer, which reads the slider; no multi-callback cycle
-anywhere in the built app; no replay callback blocking itself. The readiness pin moved from "only
-a pending metrics-store writer can hold the controls" to "nothing pending can".
+self-blocked), and so did the handler and wiring tests of that time (no merged handler; two
+slider writers).
 """
 
 import json
@@ -333,8 +328,13 @@ class TestReplayBlockReadiness:
         """F-CANOPY-054 tightened the condition canopy#658 depended on. Its merged callback read
         ``metrics-store.data`` as an Input, so it was held while the store's primary writer was
         pending -- most of the time, against a ~5 s delivery latency. The store is State now, so
-        no pending callback's downstream closure reaches ANY of the controls' checked Inputs: a
-        click or a tick is promoted on the next renderer pass, whatever else is in flight."""
+        no pending callback's downstream closure reaches ANY of the controls' checked Inputs.
+
+        This pins READINESS only. A ready request still waits for one of the renderer's 12
+        execution slots, and while it waits in ``prioritized`` a newer request of the same
+        callback replaces it without merging its trigger. The fix recovers that from the counts
+        it keeps (``clicks``, ``slider_w``, ``tick_n``); test_f054_replay_block_clientside.py's
+        TestLostTriggers pins the recovery, not this test."""
         callbacks = _callbacks(dependencies)
         by_input = _consumers(callbacks)
         merged = [cb for cb in callbacks if SLIDER_VALUE in cb["outputs"]]

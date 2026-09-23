@@ -166,8 +166,11 @@ pytest tests/unit/test_response_normalization.py -k "Fix1 or Fix2 or Fix3 or Fix
 # ServiceBackend status/dataset normalization tests
 pytest tests/unit/test_service_backend.py -k "get_status or get_dataset" -v
 
-# Metrics panel handler edge-case tests (replay/progress/validation overlays)
+# Metrics panel handler edge-case tests (replay visibility/progress/validation overlays)
 pytest tests/unit/frontend/test_metrics_panel_handlers.py -k "validation_overlay or replay or progress_detail or training_progress or hidden_units" -v
+
+# Metrics replay controls (clientside since F-CANOPY-054; the node-executed tests skip without `node`)
+pytest tests/unit/frontend/test_f054_replay_block_clientside.py tests/unit/frontend/test_f048_replay_cycle.py -v
 
 # Documentation link checker regression tests
 pytest tests/unit/test_doc_link_checker.py -v

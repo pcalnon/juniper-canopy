@@ -56,9 +56,11 @@ from ..base_component import BaseComponent, create_empty_plot
 # F-CANOPY-054: the replay block's one writer of ``replay-state``, run in the browser. Its arguments
 # are its Inputs then its State, in registration order (``register_callbacks``). ``__PREFIX__`` and
 # ``__CONTROLS__`` are replaced with JSON literals at registration: the component-id prefix and
-# ``MetricsPanel.REPLAY_CONTROL_IDS``. Each control's effect is the merged server callback's of
-# canopy#658, unchanged; ``src/tests/unit/frontend/test_f054_replay_block_clientside.py`` runs this
-# function under node against verbatim copies of the old callbacks.
+# ``MetricsPanel.REPLAY_CONTROL_IDS``. Each control's effect, for one click, is the merged server
+# callback's of canopy#658, unchanged; ``src/tests/unit/frontend/test_f054_replay_block_clientside.py``
+# runs this function under node against verbatim copies of the old callbacks. Outputs, in order:
+# state, interval disabled, interval period, slider value, slider max, position index, position max,
+# play label.
 REPLAY_CONTROLS_JS = """
 function(playClicks, backClicks, forwardClicks, startClicks, endClicks, speed1x, speed2x, speed4x, sliderValue, nIntervals, currentState, metricsData) {
     var dc = window.dash_clientside;
@@ -71,17 +73,63 @@ function(playClicks, backClicks, forwardClicks, startClicks, endClicks, speed1x,
     var tickN = (typeof nIntervals === "number") ? nIntervals : 0;
     var state = currentState ? Object.assign({}, currentState) : {mode: "stopped", speed: 1.0, current_index: 0, start_index: 0, end_index: null};
     if (typeof state.current_index !== "number") { state.current_index = 0; }
-    var controlFired = false;
-    var ticked = false;
-    var tickSeen = false;
-    // Every trigger applies, in order. The renderer merges queued requests of one callback
-    // into a single request whose changedPropIds keep first-requested order.
+    var num = function (v) { return (typeof v === "number" && isFinite(v)) ? v : 0; };
+
+    // EVENTS COME FROM VALUES, NOT ONLY FROM TRIGGERS. A trigger can be lost before this runs:
+    // a request of this callback waiting for one of the renderer's 12 slots (``prioritized``)
+    // is replaced by the next tick's request of the same callback, and only requests still in
+    // ``requested`` merge their changed-prop ids. The click counts survive in the Inputs, so
+    // ``state.clicks`` keeps each button's count as of its last applied click, and anything
+    // above it is applied now. A trigger alone applies nothing: it only orders the events.
+    // The slider is a seek when its value differs from the value this callback last wrote to
+    // it (``state.slider_w``).
+    var counts = {
+        "replay-play": playClicks, "replay-step-back": backClicks, "replay-step-forward": forwardClicks,
+        "replay-start": startClicks, "replay-end": endClicks,
+        "speed-1x": speed1x, "speed-2x": speed2x, "speed-4x": speed4x
+    };
+    var seen = Object.assign({}, (state.clicks && typeof state.clicks === "object") ? state.clicks : {});
+    var pending = {};
+    Object.keys(counts).forEach(function (c) {
+        var n = num(counts[c]);
+        var s = num(seen[c]);
+        if (n < s) { s = 0; }  // the button was re-created and its count restarted
+        seen[c] = s;
+        pending[c] = n - s;
+    });
+    var sliderOk = (typeof sliderValue === "number") && isFinite(sliderValue);
+    var sliderMoved = sliderOk && (typeof state.slider_w === "number") && sliderValue !== state.slider_w;
+
+    // Apply order: controls whose trigger was lost come first, because their clicks predate
+    // this run's triggers. Then the triggers, in the order the renderer merged them. Two LOST
+    // clicks of different controls apply in REPLAY_CONTROL_IDS order, not click order: step
+    // forward then play, both lost, ends paused. Only n_clicks_timestamp could order them, and
+    // two lost in one run is rare (both reviewers, round 2).
     var triggered = ctx.triggered || [];
+    var order = [];
+    var inTriggers = {};
     for (var k = 0; k < triggered.length; k++) {
         var propId = String(triggered[k].prop_id || "");
         var cid = propId.slice(0, Math.max(0, propId.lastIndexOf(".")));
-        if (cid === tickId) {
-            tickSeen = true;
+        if (cid === tickId) { order.push("tick"); continue; }
+        if (cid.indexOf(prefix) !== 0) { continue; }
+        var name = cid.slice(prefix.length);
+        if (controls.indexOf(name) < 0 || inTriggers[name]) { continue; }
+        inTriggers[name] = true;
+        order.push(name);
+    }
+    var lost = controls.filter(function (c) {
+        if (inTriggers[c]) { return false; }
+        return (c === "replay-slider") ? sliderMoved : pending[c] > 0;
+    });
+    order = lost.concat(order);
+
+    var controlFired = false;
+    var ticked = false;
+    var sliderReset = false;
+    for (var e = 0; e < order.length; e++) {
+        var ev = order[e];
+        if (ev === "tick") {
             if (state.mode !== "playing") { continue; }
             // Merged ticks arrive as ONE request, with n_intervals read at execution: advance
             // by the ticks since the last one consumed, not by one.
@@ -100,65 +148,90 @@ function(playClicks, backClicks, forwardClicks, startClicks, endClicks, speed1x,
             ticked = true;
             continue;
         }
-        if (cid.indexOf(prefix) !== 0) { continue; }
-        var control = cid.slice(prefix.length);
-        if (controls.indexOf(control) < 0) { continue; }
+        if (ev === "replay-slider" && !sliderOk) {
+            // A cleared number box sends NaN. That is not a seek: write the slider back.
+            sliderReset = true;
+            continue;
+        }
+        // A button applies exactly its unapplied clicks; its trigger only orders it. An earlier
+        // run can already have applied this click from the count -- it ran after the click
+        // wrote n_clicks and before this request did -- and applying it again would undo the
+        // pause (Lane B2, round 2). A slider trigger carrying the value this callback last wrote
+        // is not a seek: re-reading the thumb, trunc(v / 100 * max) can land one index low.
+        if (ev === "replay-slider") {
+            if (typeof state.slider_w === "number" && sliderValue === state.slider_w) { continue; }
+        } else if (pending[ev] <= 0) {
+            continue;
+        }
+        var times = (ev === "replay-slider") ? 1 : pending[ev];
+        if (ev !== "replay-slider") { seen[ev] = num(counts[ev]); }
         if (!controlFired) {
             state.end_index = state.end_index || maxIndex;
             controlFired = true;
         }
-        if (control === "replay-play") {
+        if (ev === "replay-play") {
+            // ONE toggle per run, however many clicks are pending. Stock Dash toggles once for a
+            // merged double click, and on a page this slow a second click is usually the user
+            // repeating a pause that has not shown yet, not undoing it. By parity, a lost pause
+            // plus that repeat would cancel out and leave the replay playing. It helps only
+            // when both clicks are pending in ONE run: a repeat made after the pause applied,
+            // but before the page shows it, toggles back. That is the toggle's own limit.
             state.mode = (state.mode === "playing") ? "paused" : "playing";
             if (state.mode === "playing") { state.tick_n = tickN; }
-        } else if (control === "replay-step-back") {
+        } else if (ev === "replay-step-back") {
             state.mode = "paused";
-            state.current_index = Math.max(0, state.current_index - 1);
-        } else if (control === "replay-step-forward") {
+            state.current_index = Math.max(0, state.current_index - times);
+        } else if (ev === "replay-step-forward") {
             state.mode = "paused";
-            state.current_index = Math.min(maxIndex, state.current_index + 1);
-        } else if (control === "replay-start") {
+            state.current_index = Math.min(maxIndex, state.current_index + times);
+        } else if (ev === "replay-start") {
             state.current_index = (typeof state.start_index === "number") ? state.start_index : 0;
             state.mode = "paused";
-        } else if (control === "replay-end") {
+        } else if (ev === "replay-end") {
             state.current_index = state.end_index || maxIndex;
             state.mode = "paused";
-        } else if (control === "speed-1x") {
+        } else if (ev === "speed-1x") {
             state.speed = 1.0;
-        } else if (control === "speed-2x") {
+        } else if (ev === "speed-2x") {
             state.speed = 2.0;
-        } else if (control === "speed-4x") {
+        } else if (ev === "speed-4x") {
             state.speed = 4.0;
-        } else if (control === "replay-slider") {
-            var pct = (typeof sliderValue === "number") ? sliderValue : 0;
-            state.current_index = maxIndex > 0 ? Math.trunc((pct / 100) * maxIndex) : 0;
+        } else if (ev === "replay-slider") {
+            state.current_index = maxIndex > 0 ? Math.trunc((sliderValue / 100) * maxIndex) : 0;
             state.mode = "paused";
         }
     }
     var idx = state.current_index;
     var sliderOut = maxIndex > 0 ? (idx / maxIndex * 100) : 0;
-    var position = idx + " / " + maxIndex;
     var label = (state.mode === "playing") ? "\\u23f8" : "\\u25b6";
     var disabled = state.mode !== "playing";
+    if (order.length > 0 && !controlFired && !ticked && !sliderReset) {
+        // Events, none with anything to do: a tick while not playing or already consumed, a
+        // trigger whose click was already applied, the slider's own value. Write nothing.
+        return [noUpdate, noUpdate, noUpdate, noUpdate, noUpdate, noUpdate, noUpdate, noUpdate];
+    }
+    // Every path below writes the slider, and every one records what it wrote, so a later
+    // slider value that differs from ``slider_w`` can only be the user's. (The refill below
+    // never writes the slider.) Writing the state triggers nothing: no callback takes it as
+    // an Input.
+    state.clicks = seen;
+    state.slider_w = sliderOut;
     if (controlFired) {
         var speed = (typeof state.speed === "number" && state.speed > 0) ? state.speed : 1.0;
-        return [state, disabled, Math.trunc(1000 / speed), sliderOut, 100, position, label];
+        return [state, disabled, Math.trunc(1000 / speed), sliderOut, 100, String(idx), String(maxIndex), label];
     }
     if (ticked) {
-        return [state, disabled, noUpdate, sliderOut, noUpdate, position, label];
+        return [state, disabled, noUpdate, sliderOut, noUpdate, String(idx), String(maxIndex), label];
     }
-    if (tickSeen) {
-        return [noUpdate, noUpdate, noUpdate, noUpdate, noUpdate, noUpdate, noUpdate];
-    }
-    return [noUpdate, noUpdate, noUpdate, sliderOut, 100, position, label];
+    // Mount, a tab rebuild, or a cleared slider box: render from the state, change nothing.
+    return [state, noUpdate, noUpdate, sliderOut, 100, String(idx), String(maxIndex), label];
 }
 """
 
-# F-CANOPY-054: a metrics refill re-renders the position text ("<current> / <max>", M-METRICS-17).
+# F-CANOPY-054: a metrics refill re-renders the "/ <max>" half of the position text (M-METRICS-17).
 REPLAY_REFILL_POSITION_JS = """
-function(metricsData, currentState) {
-    var maxIndex = (metricsData && metricsData.length) ? metricsData.length - 1 : 0;
-    var idx = (currentState && typeof currentState.current_index === "number") ? currentState.current_index : 0;
-    return idx + " / " + maxIndex;
+function(metricsData) {
+    return String((metricsData && metricsData.length) ? metricsData.length - 1 : 0);
 }
 """
 
@@ -480,9 +553,16 @@ class MetricsPanel(BaseComponent):
                         # Progress slider
                         html.Div(
                             [
+                                # "<current> / <max>" (M-METRICS-17). Two child spans: the controls
+                                # callback is the only writer of the index, and the refill writes
+                                # the max alone, so a refill can never write a stale index.
                                 html.Span(
                                     id=f"{self.component_id}-replay-position",
-                                    children="0 / 0",
+                                    children=[
+                                        html.Span("0", id=f"{self.component_id}-replay-position-index"),
+                                        " / ",
+                                        html.Span("0", id=f"{self.component_id}-replay-position-max"),
+                                    ],
                                     style={"marginRight": "10px", "fontSize": "12px", "minWidth": "60px"},
                                 ),
                                 dcc.Slider(
@@ -1101,28 +1181,46 @@ class MetricsPanel(BaseComponent):
         # ``replay-state.data`` as an Input, so a clientside tick re-requests it on every tick,
         # and dash-renderer drops an in-flight request whenever a new request of the same
         # callback arrives (the requestedCallbacks observer's ``wDuplicates`` step,
-        # dash_renderer.dev.js ~:3024; the late response is discarded ~:2699). With L above
-        # the tick period, every click made during playback is evicted. Clean room, with the
-        # four shapes side by side: juniper-ml
+        # dash_renderer.dev.js :3027, removal at :3151; the late response is discarded at
+        # :2697-2704). With L above the tick period, every click made during playback is
+        # evicted. Clean room, with the four shapes side by side: juniper-ml
         # ``util/ad-hoc/2026-09-23_f054_replay_tick_cleanroom.py`` (results in the E2E ledger,
         # Phase 8).
         #
-        # A clientside callback has no in-flight window that a timer tick, a click or a
-        # response can enter: ``executeCallback`` fills its Inputs and State and runs it
-        # synchronously, and what follows is promise resolution inside the same macrotask. So
-        # here a tick cannot evict a click, a click cannot evict a tick, and nothing computes
-        # from a stale state. That is also why the tick can be folded into this callback, when
-        # folding it into the SERVER callback would have had the ticks evict each other.
+        # A clientside callback has no in-flight window: ``executeCallback`` fills its Inputs
+        # and State from one layout snapshot and calls it synchronously, and what follows is
+        # promise resolution inside the same macrotask. So once this runs, nothing lands
+        # between its read and its apply, and nothing computes from a stale state. That is why
+        # the tick can be folded into this callback, when folding it into the SERVER callback
+        # would have had the ticks evict each other.
+        #
+        # It CAN still lose a trigger BEFORE it runs. Clientside callbacks share the
+        # renderer's 12 execution slots (:2846). A request waiting in ``prioritized`` for a
+        # slot is replaced by the next tick's request of this same callback (``pDuplicates``,
+        # :3024), and only requests still in ``requested`` merge their changed-prop ids
+        # (:3004). So the trigger list alone cannot be trusted. Events come from VALUES:
+        # ``state.clicks`` holds each button's count as of its last applied click, and any
+        # count above it is applied at the next run, before that run's own triggers. The
+        # slider is a seek when its value differs from the one this callback last wrote
+        # (``state.slider_w``, recorded on every write). A lost pause therefore applies when the
+        # request that replaced it runs -- as soon as that one gets a slot, which under sustained
+        # contention can be seconds -- instead of never. A trigger alone applies nothing, so a
+        # click an earlier run already applied from its count is not applied again when its own
+        # request runs; applying it again would undo the pause. Review evidence (juniper-ml
+        # ``reports/e2e-canopy-2026-09-02/consensus/2026-09-23_validator_reports_round*.md``):
+        # with trigger-only dispatch the pause was lost 3/3 under forced slot saturation (Lane
+        # B, round 1); with "count or trigger" one click applied twice (Lane B2, round 2).
         #
         # ``metrics-store.data`` is STATE, not an Input. ``getReadyCallbacks`` holds a
         # requested callback while any of its INPUTS lies in the downstream closure of a
         # pending callback (State is never checked), and the store's primary writer
         # ``update_metrics_store`` is pending most of the time: a ``running=``-gated poll
         # against L ~5 s. With the store as an Input the controls waited on every poll, the
-        # condition canopy#658 recorded; now no pending callback can hold them
-        # (``test_nothing_pending_can_hold_the_replay_controls``). The cost: a refill no longer
+        # condition canopy#658 recorded; now no pending callback holds back their readiness
+        # (``test_nothing_pending_can_hold_the_replay_controls``) -- a ready run can still wait
+        # for a slot, as above. The cost: a refill no longer
         # moves the slider THUMB, only the position text (the callback below); the thumb
-        # catches up on the next control or tick. Nothing else can write the thumb, because
+        # catches up on the next control or tick. Nothing else may write the thumb, because
         # this callback reads the slider as its seek Input, so another writer's value would
         # arrive here as a user seek and pause playback.
         #
@@ -1146,7 +1244,8 @@ class MetricsPanel(BaseComponent):
                 Output(f"{self.component_id}-replay-interval", "interval"),
                 Output(f"{self.component_id}-replay-slider", "value"),
                 Output(f"{self.component_id}-replay-slider", "max"),
-                Output(f"{self.component_id}-replay-position", "children"),
+                Output(f"{self.component_id}-replay-position-index", "children"),
+                Output(f"{self.component_id}-replay-position-max", "children"),
                 Output(f"{self.component_id}-replay-play", "children"),
             ],
             [
@@ -1168,14 +1267,16 @@ class MetricsPanel(BaseComponent):
             prevent_initial_call=False,
         )
 
-        # F-CANOPY-054: a metrics refill re-renders the position text (M-METRICS-17). Its only
-        # Output is an ``allow_duplicate`` one, which keeps its ``@<hash>`` in the renderer and
-        # so reaches nothing: while it waits on the store's writer it holds no other callback.
+        # F-CANOPY-054: a metrics refill re-renders the "/ max" half of the position text
+        # (M-METRICS-17). It writes the max ALONE: a refill and a control that run in one
+        # renderer pass read one layout snapshot, so a refill that also wrote the index could
+        # overwrite a click's index with the pre-click one (Lane B review, 2/2). Its only Output
+        # is an ``allow_duplicate`` one, which keeps its ``@<hash>`` in the renderer and so
+        # reaches nothing: while it waits on the store's writer it holds no other callback.
         app.clientside_callback(
             REPLAY_REFILL_POSITION_JS,
-            Output(f"{self.component_id}-replay-position", "children", allow_duplicate=True),
+            Output(f"{self.component_id}-replay-position-max", "children", allow_duplicate=True),
             Input(f"{self.component_id}-metrics-store", "data"),
-            State(f"{self.component_id}-replay-state", "data"),
             prevent_initial_call=True,
         )
 
