@@ -2867,8 +2867,9 @@ class DashboardManager:
 
         # A1b-2 (§5.3): the reactive reverse gate. Selecting a dataset annotates the sidebar with
         # the model constraint it imposes ("3-D models only"), the dataset-side mirror of the
-        # table's per-row ``model_reason`` greying. Fires on every dataset change — a user pick OR
-        # the forward-gate snap (``gate_dataset_options``) — so the hint always tracks the dataset.
+        # table's per-row ``model_reason`` greying. Fires on every dataset change — a user pick, the
+        # forward gate CLEARING a conflict (``gate_dataset_options``; OQ-6, canopy#652 — it used to
+        # snap), or the mount hydration — so the hint always tracks the dataset.
         @self.app.callback(
             Output("nn-model-dataset-hint", "children"),
             Input("nn-dataset-type-dropdown", "value"),
@@ -2957,8 +2958,8 @@ class DashboardManager:
         relieve it. ``gated_dataset_options(None)`` already returns every dataset enabled — the
         registry was right and only this handler was wrong.
 
-        Because the current dataset is then in ``enabled``, the snap below leaves it alone: clearing
-        the model KEEPS the dataset. That is §5.6's dataset-primary policy, which was not even
+        Because the current dataset is then in ``enabled``, the conflict branch below (a CLEAR since
+        OQ-6, canopy#652) leaves it alone: clearing the model KEEPS the dataset. That is §5.6's dataset-primary policy, which was not even
         expressible while the dropdown was unclearable.
 
         **§4.10 — ``hydrated_value``, the first-paint pass.** The dataset the backend actually
@@ -6435,6 +6436,17 @@ class DashboardManager:
             value = dataset_vals.get(key)
             if value is not None:
                 payload[pkey] = value
+        # The registry seed, exactly as ``_apply_dataset_handler`` sends it: the seed is the single
+        # source of truth for the keys a generator cannot run without. This path used to send the
+        # typed fields alone, so re-staging a seeded generator from the modal dropped the very keys
+        # its seed exists for -- ``equities`` without ``symbols`` (a default deployment refuses the
+        # whole 503-name universe with a 422) and ``mnist`` without ``flatten`` (which makes canopy's
+        # ``ndim=2`` declaration self-enforcing). The modal renders no schema-driven params, so the
+        # seed is all it can send; a custom list applied earlier from the sidebar is not carried --
+        # the modal re-stages what it displays, and it does not display that.
+        seed = dataset_default_params(dtype)
+        if seed:
+            payload["nn_dataset_params"] = dict(seed)
         try:
             resp = requests.post(
                 self._api_url("/api/stage_dataset"),
