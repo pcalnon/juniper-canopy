@@ -279,9 +279,14 @@ def test_dataset_model_hint_handler_text_and_clear(manager):
     assert manager._dataset_model_hint_handler("does-not-exist") == ""
 
 
-def test_initial_dataset_model_hint_seeds_default_dataset(manager):
-    # DEFAULT_DATASET_TYPE = spirals (rank-2) -> "rank-2 (tabular) models only" at first paint (N7).
-    assert manager._initial_dataset_model_hint() == "rank-2 (tabular) models only"
+def test_initial_dataset_model_hint_is_empty_at_the_bottom_seed(manager):
+    # OQ-N2: the dataset dropdown mounts at ``⊥``, and an unselected dataset imposes no model
+    # constraint. This used to read "rank-2 (tabular) models only" -- the hint for the seeded
+    # ``spirals`` -- which asserted a constraint for a selection nobody had made yet. The hint
+    # follows the hydrated dataset once it lands (``annotate_model_hint``).
+    assert manager._initial_dataset_model_hint() == ""
+    # The handler itself is unchanged: a real dataset still gets its phrase.
+    assert manager._dataset_model_hint_handler("spirals") == "rank-2 (tabular) models only"
 
 
 def test_dataset_hint_callback_is_registered(manager):
