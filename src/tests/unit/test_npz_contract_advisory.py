@@ -13,6 +13,35 @@ import threading
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
+
+
+def _fake_validate_npz_contract(arrays):
+    """Stands in for ``juniper_data_client.validate_npz_contract`` on the paths these tests use.
+
+    canopy's unit lane runs WITHOUT juniper-data-client installed: ``src/tests/conftest.py``
+    injects a stub module that has no ``validate_npz_contract``. A test that relied on the real
+    helper would pass on a dev box that has the client and fail in CI. What these tests pin is
+    canopy's advisory wrapper, so they drive it through this mirror of the helper's contract.
+    It dispatches on ``X_train``'s rank (``KeyError`` when absent). 2-D returns ``"tabular"``.
+    3-D returns ``"sequence"`` after checking ``dt_<split>[:, 0] == 0``, using the helper's
+    message text. ``test_the_fake_agrees_with_the_real_helper`` holds it to the real one
+    wherever the client IS installed.
+    """
+    x = arrays["X_train"]
+    if x.ndim == 2:
+        return "tabular"
+    for split in ("train", "val", "test"):
+        dt = arrays.get(f"dt_{split}")
+        if dt is not None and dt.shape[0] and np.any(dt[:, 0] != 0):
+            raise ValueError(f"dt_{split}[:, 0] must be 0 by convention")
+    return "sequence"
+
+
+@pytest.fixture(autouse=True)
+def _helper_is_the_fake():
+    with patch("juniper_data_client.validate_npz_contract", new=_fake_validate_npz_contract, create=True):
+        yield
 
 
 def _sequence_npz(dt_first_column: float = 0.0) -> dict:
@@ -143,6 +172,35 @@ def test_the_legacy_note_appears_only_when_the_artifact_is_legacy():
     assert demo._advise_npz_contract({"X_test": np.zeros((2, 2), np.float32)}, "generator:odd") is None
     (line,) = _advisory_warnings(demo)
     assert "X_train" in line and "X_full" not in line
+
+
+def _real_helper():
+    """The installed client's validate_npz_contract, or None where the conftest stub stands in.
+
+    Imported from ``.contract``, not the package root: the autouse fixture patches the root name.
+    The stub is a bare module with no ``__path__``, so ``importlib.util.find_spec`` RAISES on it
+    rather than returning None. A plain import raising ModuleNotFoundError, an ImportError, is
+    the portable test.
+    """
+    try:
+        from juniper_data_client.contract import validate_npz_contract
+    except ImportError:
+        return None
+    return validate_npz_contract
+
+
+@pytest.mark.skipif(_real_helper() is None, reason="juniper-data-client is not installed in this lane (src/tests/conftest.py injects a stub); the fake stands in")
+def test_the_fake_agrees_with_the_real_helper():
+    """Keeps the fake honest: same answer, same exception class, same message, on every input the tests use."""
+    real = _real_helper()
+    for arrays in (_sequence_npz(), _tabular_npz()):
+        assert _fake_validate_npz_contract(arrays) == real(arrays)
+    for arrays, exc in ((_sequence_npz(dt_first_column=1.0), ValueError), (_legacy_full_only_npz(), KeyError)):
+        with pytest.raises(exc) as fake_err:
+            _fake_validate_npz_contract(arrays)
+        with pytest.raises(exc) as real_err:
+            real(arrays)
+        assert str(fake_err.value) == str(real_err.value)
 
 
 def test_the_advisory_check_sees_the_artifact_the_probe_dispatches():

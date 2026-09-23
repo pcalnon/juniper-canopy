@@ -55,8 +55,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `src/tests/unit/test_npz_contract_advisory.py` covers a violation that is reported and still
   installs, a legacy artifact that is reported and still installs, an unexpected error that
   never blocks the load, a client without the helper, and a valid artifact that logs nothing.
-  Eight of its nine cases fail against the pre-change tree. The ninth is the negative control,
-  and it is expected to pass on both trees.
+  The unit lane runs without juniper-data-client (`src/tests/conftest.py` injects a stub module),
+  so the tests drive the wrapper through a faithful fake of the helper.
+  `test_the_fake_agrees_with_the_real_helper` holds the fake to the real one wherever the client
+  is installed, and skips, saying why, where it is not. Eight of the ten cases fail against the
+  pre-change tree. The other two are the negative control and the agreement check, and neither
+  exercises canopy code.
 
 ### Fixed
 
