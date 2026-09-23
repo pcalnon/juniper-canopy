@@ -243,7 +243,7 @@ class ServiceBackend:
         fsm_status = sm.get("status", sm.get("current_state", "Stopped"))
         status_upper = fsm_status.upper() if isinstance(fsm_status, str) else "STOPPED"
         phase_raw = sm.get("phase") or ts.get("phase", "idle")
-        return cast(
+        normalized = cast(
             StatusResult,
             {
                 "is_training": raw.get("training_active", False),
@@ -319,6 +319,15 @@ class ServiceBackend:
                 "completion_reason": raw.get("completion_reason"),
             },
         )
+        # §4.10 (dataset-axis hydration): WHICH dataset cascor has loaded (cascor#676). Carried
+        # only when cascor SENT it, because absent and ``None`` answer different questions here
+        # and the consumer branches on the difference: ``None`` is "nothing is loaded", a
+        # missing key is "this cascor predates the field and cannot say". ``raw.get(...)`` would
+        # turn the second into the first, and canopy would then clear a dataset it was merely
+        # unable to read.
+        if "current_dataset" in raw:
+            normalized["current_dataset"] = raw["current_dataset"]
+        return normalized
 
     def get_metrics(self) -> MetricsResult:
         return cast(MetricsResult, self._adapter.training_monitor.get_current_metrics())

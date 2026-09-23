@@ -1109,6 +1109,12 @@ class DemoMode:
             "num_samples": len(inputs),
             "num_features": inputs.shape[1] if len(inputs.shape) > 1 else 2,
             "num_classes": 2,
+            # §4.10: every installed dataset names where it came from, in the one form
+            # ``DemoBackend.get_status`` reads back as ``current_dataset``. The generator
+            # loaders already stamp ``generator:<name>``; the two spiral builders did not, so
+            # a spiral was identifiable only by the ABSENCE of a label -- which any future
+            # install that forgot one would silently satisfy.
+            "source": "generator:spiral",
         }
         if "dataset_name" in meta:
             result["dataset_name"] = meta["dataset_name"]
@@ -1177,6 +1183,9 @@ class DemoMode:
             "num_samples": len(inputs),
             "num_features": 2,
             "num_classes": 2,
+            # §4.10: same stamp as the juniper-data builder -- a local spiral is still a spiral.
+            # Whether it is the degraded local one is ``local_dataset_fallback``'s business (G9).
+            "source": "generator:spiral",
         }
 
     def _simulate_training_step(self) -> Tuple[float, float]:
