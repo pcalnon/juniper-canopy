@@ -93,7 +93,11 @@ class TestDemoMode:
         demo = DemoMode(update_interval=0.1)
         demo.start()
 
-        time.sleep(0.5)  # Let it generate some metrics
+        # Bounded poll, not a fixed sleep: the claim is "demo mode generates metrics", not "within
+        # 0.5 s on this runner". The deadline only bounds the failure path.
+        deadline = time.monotonic() + 5.0
+        while not demo.get_metrics_history() and time.monotonic() < deadline:
+            time.sleep(0.01)
 
         metrics = demo.get_metrics_history()
         assert len(metrics) > 0  # trunk-ignore(bandit/B101)
