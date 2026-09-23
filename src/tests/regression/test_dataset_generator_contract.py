@@ -204,8 +204,9 @@ class TestX8TaskTypeDivergenceIsDeliberate:
     def test_every_lmu_dataset_but_equities_is_available_without_an_extra(self):
         """The §4.7 empty-set state was the CONTAINER'S NORMAL STATE, and this is why it is not.
 
-        ``yfinance`` is absent from juniper-data's requirements.lock, so ``equities_seq`` is
-        ``available=false`` there — and while it was the LMU's only compatible dataset, picking
+        ``yfinance`` is absent from the requirements.lock of every juniper-data release so far
+        (juniper-data#421 adds it on main, unreleased as of 2026-09-23), so ``equities_seq`` is
+        ``available=false`` in the container — and while it was the LMU's only compatible dataset, picking
         Recurrence in the container produced "No dataset is available for this model" and
         nothing else. The five synthetics are numpy-only and declare no ``is_available`` hook
         upstream, so they are available in every deployment.
@@ -475,8 +476,9 @@ class TestTheCascorPathCarriesRegistryDefaults:
         assert sent["nn_dataset_params"]["symbols"] == ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"]
 
     def test_an_unseeded_dataset_is_unchanged(self):
-        # No behaviour change for the seven cascor-compatible seeds that carry {}: the payload
-        # must not sprout an empty params key it never had.
+        # No behaviour change for a seed that carries {} (``xor`` is one; of the cascor-compatible
+        # seeds only ``mnist`` and ``equities`` carry params): the payload must not sprout an
+        # empty params key it never had.
         sent = self._staged_payload("xor")
         assert "nn_dataset_params" not in sent
 
