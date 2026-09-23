@@ -3104,9 +3104,13 @@ class DashboardManager:
         """N8 / N12 — the PERSISTENT half. Blocking, resolvable, and never auto-dismissed.
 
         Fires when compatible ∩ available is empty: the model is fine and the datasets are fine,
-        but no dataset in THIS deployment is both. That is the container's normal state today —
-        ``yfinance`` is absent from juniper-data's lockfile, so the LMU has zero available datasets
-        there regardless of any UI change. The old code returned ``no_update`` here, leaving the
+        but no dataset in THIS deployment is both. When this was written that was the container's
+        normal state for the LMU, whose only dataset needed ``yfinance``. It no longer is: since
+        canopy#612, five of the LMU's six datasets are numpy-only synthetics that declare no
+        availability hook upstream, so juniper-data reports them available in every deployment (as
+        of 2026-09-23 only ``equities``, ``equities_seq`` and ``mnist`` declare one). The state is
+        still reached wherever juniper-data reports every compatible generator unavailable. The
+        old code returned ``no_update`` here, leaving the
         dropdown showing a dataset its own list disables; the value is now cleared to ``⊥``, which
         also disables Start and Apply through the gates that already exist.
 

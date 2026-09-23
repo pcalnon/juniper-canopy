@@ -214,8 +214,9 @@ def _selectable_models(manager, dataset_value, models=MODELS, dataset_types=DATA
 
 #: Availability injections. ``ALL_AVAILABLE`` is the flag-absent fallback (an empty list means
 #: every generator reads available); ``NONE_AVAILABLE`` names every seeded generator as absent,
-#: which is the deployed container's real state for the LMU today — ``yfinance`` is not in
-#: juniper-data's lockfile — and is the only way to produce the empty compatible ∩ available set.
+#: which is the only way to produce the empty compatible ∩ available set. It was the deployed
+#: container's real state for the LMU when written. Since canopy#612 the LMU's five rank-3
+#: synthetics need no extra and read available everywhere, so it is now a constructed state.
 ALL_AVAILABLE: list = []
 NONE_AVAILABLE = [{"name": generator_name_for_type(spec.value), "available": False} for spec in DATASET_TYPES]
 
