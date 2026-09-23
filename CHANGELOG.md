@@ -104,6 +104,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A model swap could strand the dashboard on a tab that no longer exists (Y4).** A one-shot model
+  rebuilds the tab bar without the five cascade-only tabs, and the active-tab restore guarded only
+  "no saved tab" and "saved equals shown". Measured in headless chromium: on Network Topology, a
+  swap to a one-shot model left **no** tab highlighted and **zero** visible panes; a reload with a
+  persisted cascade tab restored it at mount and was stranded the same way once the rebuild landed.
+  The restore now reads the rendered tabs as an Input. It never restores a tab that is not rendered,
+  keeps the shown tab when it is, and otherwise falls back to the first rendered tab (Training
+  Metrics). The reset lives in the existing restore writer, so it adds no `active_tab` writer. The
+  app has **three** such writers, not the two the source-level test counts:
+  `hdf5_snapshots_panel`'s replay hand-off is the third.
+- **Whether a selection control was greyed out was decided by the reason-string helpers, not by
+  `compatible()` (Y8).** `gated_dataset_options` disabled an option when `dataset_reason` returned
+  a string, and the model table disabled a Select when `model_reason` did. Both helpers
+  re-implemented all three compatibility axes, so the load-bearing predicate had three independent
+  expressions. `disabled` is now `not compatible()` on both surfaces, and the helpers only choose
+  the wording, with a generic phrase for an axis they do not name, so a greyed control can never
+  read `None`. A universal test pins `disabled == not compatible()` and reason-iff-disabled over
+  every pair of the production registry and of a synthetic registry that fails each axis alone. The
+  production registry alone cannot see a dropped temporal axis, because every shipped rank-3 model
+  is Δt-aware.
+- **The model table's Select button carried its reason only in `title=` (Y7, model-table half).**
+  Each row's compatibility cell now has a deterministic id derived from the model key, and the
+  row's Select points at it with `aria-describedby`, as
+  `JUNIPER_2026-09-02_JUNIPER-CANOPY_SELECTION-REACHABILITY-DESIGN.md` §4.3 (juniper-ml) specifies.
+  The accessible description is therefore the rendered reason. The control is now an `html.Button`
+  carrying the class string `dbc.Button` rendered, because dbc 2.0.4's `Button` rejects `aria-*`
+  props. The reason is no longer repeated in `title=` on a disabled Select: Bootstrap gives
+  `.btn:disabled` `pointer-events: none`, so that tooltip could never show. Enabled Selects keep
+  their hover hint.
+- **The replay controls never applied: play, step, start, end, the speed buttons and the slider
+  did nothing on any page load (F-CANOPY-048).** `handle_replay_controls` (Input
+  `replay-slider.value` → Output `replay-state.data`) and `update_replay_ui` (Input
+  `replay-state.data` → Output `replay-slider.value`) formed a cycle across two callbacks.
+  dash-renderer promotes a requested callback only when none of its Inputs, less its own Outputs,
+  lies in the downstream closure of any pending callback, itself included (`getReadyCallbacks`,
+  `dash_renderer.dev.js:1633-1665`, dash 4.2.0). Each covered its own Input through the other, so
+  neither was ever ready, and the circular-dependency breaker (`:3064`) fires only when nothing
+  else at all is pending, which canopy's pollers never allow. Measured live: all three replay
+  callbacks in `requested` in 6471 of 6471 samples, and zero `replay-state` writes across ten
+  clicks.
+
+  Fixed by merging the two into one callback that reads and writes `replay-slider.value`. Its own
+  Outputs are exempt from its readiness check (`differenceBasedOnId`, `:1661`), and its own writes
+  never re-trigger it (`:2972`). Each control's effect is unchanged, checked against verbatim
+  copies of both old callbacks. The merge also removes a defect the lock was hiding. A chain
+  started by `replay_tick` or by a metrics-store write reached the old controls callback through
+  the slider write without being pruned, and its slider branch would have paused playback on
+  every tick. Dispatch is now on the exact triggering component id, over every entry of
+  `ctx.triggered`, so a click the renderer merged behind a refresh still applies.
+
+  **The condition this depended on:** `metrics-store.data` was an Input of the merged callback, so
+  it was not ready while that store's primary writer `update_metrics_store` (or
+  `update_display_mode`, upstream of it) was pending. That poll is `running=`-gated and leaves
+  gaps. A primary writer pending at every renderer pass would have locked the controls again. The
+  old controls callback had those same two blockers, through the slider. F-CANOPY-054 (below)
+  removed the condition: the controls callback is now clientside and reads the store as State. The
+  new
+  `src/tests/unit/frontend/test_f048_replay_cycle.py` also fails CI on any Input-graph cycle
+  across two or more distinct callbacks anywhere in the built app. Canopy never runs the dev-tools
+  check that would have caught this. Two pre-existing cycles are exempted by name, CAN-016a tab
+  restore/stamp and the CAN-015 replay-player control loop. Both close through `allow_duplicate`
+  outputs, so neither is a readiness deadlock.
 - **Pausing a metrics replay did not hold: a late tick restored `playing` with the interval off,
   so the label stuck at ⏸ and nothing moved (F-CANOPY-054).** After F-CANOPY-048 the replay state
   had two writers, each a server round trip away: the merged controls callback, and `replay_tick`,
@@ -183,39 +245,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `test_f048_replay_cycle.py` that exercised the Python handler moved to the new file and run on
     the JavaScript; that file keeps the F-CANOPY-048 graph invariants.
 
-- **The replay controls never applied: play, step, start, end, the speed buttons and the slider
-  did nothing on any page load (F-CANOPY-048).** `handle_replay_controls` (Input
-  `replay-slider.value` → Output `replay-state.data`) and `update_replay_ui` (Input
-  `replay-state.data` → Output `replay-slider.value`) formed a cycle across two callbacks.
-  dash-renderer promotes a requested callback only when none of its Inputs, less its own Outputs,
-  lies in the downstream closure of any pending callback, itself included (`getReadyCallbacks`,
-  `dash_renderer.dev.js:1633-1665`, dash 4.2.0). Each covered its own Input through the other, so
-  neither was ever ready, and the circular-dependency breaker (`:3064`) fires only when nothing
-  else at all is pending, which canopy's pollers never allow. Measured live: all three replay
-  callbacks in `requested` in 6471 of 6471 samples, and zero `replay-state` writes across ten
-  clicks.
-
-  Fixed by merging the two into one callback that reads and writes `replay-slider.value`. Its own
-  Outputs are exempt from its readiness check (`differenceBasedOnId`, `:1661`), and its own writes
-  never re-trigger it (`:2972`). Each control's effect is unchanged, checked against verbatim
-  copies of both old callbacks. The merge also removes a defect the lock was hiding. A chain
-  started by `replay_tick` or by a metrics-store write reached the old controls callback through
-  the slider write without being pruned, and its slider branch would have paused playback on
-  every tick. Dispatch is now on the exact triggering component id, over every entry of
-  `ctx.triggered`, so a click the renderer merged behind a refresh still applies.
-
-  **The condition this depended on:** `metrics-store.data` was an Input of the merged callback, so
-  it was not ready while that store's primary writer `update_metrics_store` (or
-  `update_display_mode`, upstream of it) was pending. That poll is `running=`-gated and leaves
-  gaps. A primary writer pending at every renderer pass would have locked the controls again. The
-  old controls callback had those same two blockers, through the slider. F-CANOPY-054 (above)
-  removed the condition: the controls callback is now clientside and reads the store as State. The
-  new
-  `src/tests/unit/frontend/test_f048_replay_cycle.py` also fails CI on any Input-graph cycle
-  across two or more distinct callbacks anywhere in the built app. Canopy never runs the dev-tools
-  check that would have caught this. Two pre-existing cycles are exempted by name, CAN-016a tab
-  restore/stamp and the CAN-015 replay-player control loop. Both close through `allow_duplicate`
-  outputs, so neither is a readiness deadlock.
 - **Re-staging from the restart modal dropped a seeded generator's params, so equities 422'd.**
   `_restage_dataset` sent the typed spiral fields and never the registry seed. Confirming an
   edited dataset in the modal therefore sent `equities` without `symbols`, and a default
