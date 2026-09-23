@@ -11,7 +11,9 @@
 # Description:   Guardrails G1-G11 for the selection-reachability
 #                remediation, plus the Y3 read-side guardrail the
 #                design's §5 table lacked. G7 and Y3 landed with
-#                design PR 2 (§4.10 hydration, both axes).
+#                design PR 2 (§4.10 hydration, both axes). §4.5's
+#                restart-modal regate (X2) had no test until
+#                2026-09-23 (TestX2RestartModalIsGatedAgainst...).
 #####################################################################
 """Guardrails for the selection-reachability remediation design.
 
@@ -42,6 +44,7 @@ from unittest import mock
 
 import dash
 import pytest
+import requests
 from fastapi.testclient import TestClient
 
 import main
@@ -183,11 +186,15 @@ def _components(tree):
 
 
 def _dataset_dropdown_is_clearable(manager):
-    """Read ``clearable`` off the SHIPPED layout, so G1a goes red when the ✕ is removed.
+    """Read ``clearable`` off the SHIPPED layout, so the search loses the ✕ when the layout does.
 
-    Deriving this rather than hard-coding ``True`` is what makes G1a a reachability test instead of
-    a restatement of the fix: revert the one-keyword change and the clear transition disappears
-    from the BFS below, which is exactly the deadlock.
+    Deriving this rather than hard-coding ``True`` keeps the BFS below a description of what the UI
+    admits, not a restatement of the fix: revert the one-keyword change and the clear transition
+    disappears from every search that reads the layout. **That alone does not turn G1a red.**
+    Clearing the model (§4.11) opens the graph by itself -- the two clears are independent cut
+    vertices, and only the pair restores the deadlock -- so a reverted ✕ is caught by
+    ``test_g2_either_clear_alone_opens_the_graph`` with the model clear withheld. Measured
+    2026-09-23 by reverting the keyword: that case is the only test in this module that fails.
     """
     for component in _components(manager.app.layout):
         if getattr(component, "id", None) == "nn-dataset-type-dropdown":
@@ -260,11 +267,19 @@ def _explore(manager, *, clearable=None, model_clearable=None, generators=ALL_AV
         clearable = _dataset_dropdown_is_clearable(manager)
     if model_clearable is None:
         model_clearable = _model_clear_is_offered(manager)
-    # The layout's seeded value is not the app's first settled state. ``params-init-interval``
-    # fires the gate once, ~1 s after load, so the mount pass ALWAYS runs — and where the seeded
-    # dataset is unavailable it is cleared before the user can touch anything. Starting the search
-    # at the raw layout default would credit the UI with a state it occupies only transiently, and
-    # would make G1d assert about a pre-gate snapshot rather than about the recovery state.
+    # The start is a MOUNT state, and the layout alone does not decide it. The dropdown mounts at
+    # ``⊥`` (OQ-N2, canopy#667); the mount hydration then writes ``model-state-store`` on every load,
+    # a failed read included, and that write runs the gate's first-paint pass (the gate has had no
+    # ``params-init-interval`` Input since canopy#662). The pass lands on the backend's dataset
+    # (G7), stays at ``⊥`` when the backend holds nothing, or falls back to ``DEFAULT_DATASET_TYPE``
+    # when the read failed (D-N10). The default start below is that fallback, sent through the same
+    # first-paint gate, so where the seeded dataset is unavailable G1d asserts about the state after
+    # the gate cleared it, not about a pre-gate snapshot.
+    #
+    # Measured 2026-09-23: with the clears the layout ships, every one of those mount states reaches
+    # the same set, so G1a and G1b do not depend on the start. The trap tests do. At ``⊥`` every
+    # model's Select is enabled, so with BOTH clears withheld a ``⊥`` start still reaches both
+    # components; only a start that already holds a dataset exhibits the deadlock G2 pins.
     seed_model, seed_dataset = start if start is not None else (DEFAULT_MODEL_KEY, DEFAULT_DATASET_TYPE)
     _options, mounted, _notice = manager._gate_dataset_options_handler(seed_model, seed_dataset, generators=generators, models=models, dataset_types=dataset_types)
     start = (seed_model, seed_dataset if mounted is dash.no_update else mounted)
@@ -277,11 +292,11 @@ def _explore(manager, *, clearable=None, model_clearable=None, generators=ALL_AV
             successors.add((model_key, None))
         if model_clearable:
             # The clear writes None to the store, which re-fires the gate exactly as a Select does.
-            _options, snapped, _notice = manager._gate_dataset_options_handler(None, dataset_value, generators=generators, models=models, dataset_types=dataset_types)
-            successors.add((None, dataset_value if snapped is dash.no_update else snapped))
+            _options, gated, _notice = manager._gate_dataset_options_handler(None, dataset_value, generators=generators, models=models, dataset_types=dataset_types)
+            successors.add((None, dataset_value if gated is dash.no_update else gated))
         for target in _selectable_models(manager, dataset_value, models, dataset_types):
-            _options, snapped, _notice = manager._gate_dataset_options_handler(target, dataset_value, generators=generators, models=models, dataset_types=dataset_types)
-            successors.add((target, dataset_value if snapped is dash.no_update else snapped))
+            _options, gated, _notice = manager._gate_dataset_options_handler(target, dataset_value, generators=generators, models=models, dataset_types=dataset_types)
+            successors.add((target, dataset_value if gated is dash.no_update else gated))
         for state in successors:
             if state not in seen:
                 seen.add(state)
@@ -338,6 +353,42 @@ class TestG1Reachability:
         # Consequence worth keeping pinned: removing either one alone does NOT resurface the
         # deadlock, so neither can be regression-tested by its own absence. Only the pair can.
         assert ("recurrence", "equities_seq") in _explore(manager, **withheld), f"{kept} should still reach it"
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestX2RestartModalIsGatedAgainstTheSelectedModel:
+    """§4.5 (X2): the restart modal composes its dataset list as the sidebar does, against the model
+    actually SELECTED.
+
+    Every test that opened the modal passed the default model or none, so gating it against
+    ``DEFAULT_MODEL_KEY`` instead of the selected model passed the whole CI unit lane -- the
+    selection-design ship map's M6, reproduced 2026-09-23. These open it under every model.
+    """
+
+    @staticmethod
+    def _open(manager, model_key, dataset_type=None):
+        # No backend: the generators fetch reads "all available", and the param-seed read degrades
+        # to blank fields exactly as it does when the service is down.
+        with mock.patch.object(manager, "_fetch_generators", return_value=ALL_AVAILABLE), mock.patch("frontend.dashboard_manager.requests.get", side_effect=requests.RequestException("no backend")):
+            result = manager._open_restart_confirm_modal_handler(n_clicks=1, dataset_type=dataset_type, model_key=model_key)
+        options, value = result[5], result[6]
+        return {option["value"] for option in options if not option.get("disabled")}, value
+
+    @pytest.mark.parametrize("model", MODELS, ids=lambda model: model.key)
+    def test_the_modal_offers_what_the_sidebar_offers_for_the_selected_model(self, manager, model):
+        enabled, _value = self._open(manager, model.key)
+        assert enabled == _pickable_datasets(manager, model.key, None)
+        assert enabled == {spec.value for spec in compatible_datasets(model)}
+
+    def test_a_dataset_the_selected_model_cannot_use_is_swapped_within_that_model_s_list(self, manager):
+        # The swap itself is the owner-ruled OQ-6 exception (point 4 of §5.6.1 of juniper-ml's
+        # JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md). What this pins is
+        # WHICH list it swaps within: the selected model's, so a spiral carried over from a CasCor
+        # session lands on a dataset the LMU can train.
+        enabled, value = self._open(manager, "recurrence", dataset_type="spirals")
+        assert value != "spirals"
+        assert value in enabled
 
 
 @pytest.mark.regression
