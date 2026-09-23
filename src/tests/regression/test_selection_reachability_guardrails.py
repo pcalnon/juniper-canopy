@@ -246,9 +246,10 @@ def _explore(manager, *, clearable=None, model_clearable=None, generators=ALL_AV
        rides as ``State`` on the gate callback, so picking one cannot move the model;
     2. clear the dataset to ``⊥``, only when the shipped dropdown is ``clearable``;
     3. click any ENABLED model Select, which writes ``model-selection-store`` and therefore FIRES
-       the gate, which may snap the dataset. The snap is applied here exactly as the callback
-       applies it — which is why this must run at handler level. Written over ``model_registry``
-       alone, the same assertion goes green against the deadlocked code;
+       the gate, which may CLEAR the dataset to ``⊥`` (OQ-6, canopy#652; it used to snap it to
+       ``enabled[0]``). Whatever the gate writes is applied here exactly as the callback applies
+       it — which is why this must run at handler level. Written over ``model_registry`` alone,
+       the same assertion goes green against the deadlocked code;
     4. click "Clear model", which writes ``None`` to the same store and re-fires the same gate.
 
     Transition 4 is why ``⊥`` had to be extended to the model axis. The design defined ``⊥`` on the
@@ -947,7 +948,7 @@ def _registered(manager, name):
     return found[0]
 
 
-def _mount(manager, selection_payload, *, seed_dataset=DEFAULT_DATASET_TYPE, generators=ALL_AVAILABLE):
+def _mount(manager, selection_payload, *, seed_dataset=None, generators=ALL_AVAILABLE):
     """Replay the browser's mount: ``select_model``'s hydration pass, then the gate pass it triggers.
 
     ``GET /api/selection`` answers ``selection_payload``; ``None`` makes the read fail. Returns
@@ -1022,13 +1023,38 @@ class TestG7MountDatasetIsTheBackendsDataset:
         assert dataset is None  # OQ-6: a conflict clears
         assert "Spirals" in _text_of(notice) and "Recurrence (LMU)" in _text_of(notice)
 
-    def test_a_held_dataset_canopy_cannot_name_leaves_the_seed(self, manager):
-        # ``⊥``-at-mount is OQ-N2 / D-N13, sequenced AFTER this hydration by D-N10. Until it
-        # lands, every source that names nothing the dropdown can show keeps today's seed.
-        for dataset_block in ({"value": None, "source": "none"}, {"value": None, "source": "unknown"}, {"value": None, "source": "loaded", "generator": "arc_agi"}):
-            payload = {**_selection("cascor", "service", value=None, source="none"), "dataset": dataset_block}
-            _store, _summary, _state, dataset, _notice = _mount(manager, payload)
-            assert dataset == DEFAULT_DATASET_TYPE, dataset_block
+    def test_a_backend_holding_nothing_mounts_at_bottom(self, manager):
+        # G7's other half, and OQ-N2 itself: with nothing staged or loaded, the backend's dataset
+        # IS ``⊥`` -- so the mount is ``⊥``, and the first interaction is an explicit choice.
+        _store, _summary, _state, dataset, notice = _mount(manager, _selection("cascor", "service", value=None, source="none"))
+        assert dataset is None
+        assert notice is None  # nothing happened that needs saying
+
+    def test_a_dataset_canopy_cannot_name_mounts_at_bottom_and_says_what_it_is(self, manager):
+        # ``⊥`` because the dropdown cannot show it, but NOT silently: a silent ``⊥`` over a busy
+        # backend reads as "nothing is loaded".
+        payload = {**_selection("cascor", "service", value=None, source="loaded"), "dataset": {"value": None, "source": "loaded", "generator": "arc_agi"}}
+        _store, _summary, _state, dataset, notice = _mount(manager, payload)
+        assert dataset is None
+        assert notice is not None and notice.id == "dataset-gate-unnameable-alert"
+        assert "arc_agi" in _text_of(notice)
+
+    def test_a_backend_that_cannot_say_falls_back_to_the_old_default(self, manager):
+        # D-N10: ``⊥`` over a backend that may be staged and ready would disable Start AND Apply
+        # after every reload. A cascor predating cascor#676 cannot say what it holds, so the
+        # mount degrades to the pre-OQ-N2 default instead of to ``⊥``.
+        payload = {**_selection("cascor", "service", value=None, source="unknown"), "dataset": {"value": None, "source": "unknown", "generator": None}}
+        _store, _summary, _state, dataset, notice = _mount(manager, payload)
+        assert dataset == DEFAULT_DATASET_TYPE
+        assert notice is None
+
+    def test_the_layout_seeds_bottom_on_both_dataset_dropdowns(self, manager):
+        # OQ-N2: no seeded dataset anywhere. The sidebar's is the mount state; the restart modal's
+        # is overwritten on every open, and is ``None`` so nobody finds a seeded default to copy.
+        by_id = {getattr(c, "id", None): c for c in _components(manager.app.layout)}
+        assert by_id["nn-dataset-type-dropdown"].value is None
+        assert by_id["restart-ds-type"].value is None
+        assert manager._initial_dataset_model_hint() == ""
 
     def test_the_hydration_block_is_honoured_once(self, manager):
         # After the mount, ``model-state-store`` is replaced by ``/api/model/select`` payloads,
@@ -1100,10 +1126,14 @@ class TestG7AcrossTheRealSeams:
         assert payload["dataset"] == {"value": "xor", "source": "loaded", "generator": "xor"}
         assert _mount(manager, payload)[3] == "xor"
 
-    def test_a_demo_spiral_resolves_through_the_alias_to_canopy_s_value(self, client, monkeypatch):
+    def test_a_demo_spiral_resolves_through_the_alias_to_canopy_s_value(self, manager, client, monkeypatch):
         # The spiral builders stamp ``generator:spiral``; the dropdown's value is ``spirals``.
         monkeypatch.setattr(main, "backend", DemoBackend(DemoMode(update_interval=1.0)), raising=False)
-        assert self._read(client)["dataset"] == {"value": "spirals", "source": "loaded", "generator": "spiral"}
+        payload = self._read(client)
+        assert payload["dataset"] == {"value": "spirals", "source": "loaded", "generator": "spiral"}
+        # D-N13: demo mode keeps landing on spirals under the ``⊥`` seed -- because the simulator
+        # HOLDS spirals, through the same hydration as every backend, not through a seed.
+        assert _mount(manager, payload)[3] == "spirals"
 
     def test_cascor_s_field_survives_normalisation_and_its_absence_reads_unknown(self):
         # ``ServiceBackend.normalize_status`` is a WHITELIST -- the one place the field could be
@@ -1174,11 +1204,21 @@ class TestY3TheModelAxisHasAReadSide:
         assert store == "recurrence"
         assert summary == "Active: Recurrence (LMU)"
 
-    def test_a_failed_read_keeps_the_seed_but_still_runs_the_first_paint_gate(self, manager):
+    def test_a_failed_read_falls_back_and_still_runs_the_first_paint_gate(self, manager):
         # The key store is WRITTEN (with the seed) even though the read failed: that write is the
         # gate's only first-paint trigger now, so skipping it would lose N7's availability gate.
-        store, summary, state, dataset, _notice = _mount(manager, None, generators=NONE_AVAILABLE)
+        store, summary, state, dataset, _notice = _mount(manager, None)
         assert store == DEFAULT_MODEL_KEY
-        assert summary is dash.no_update and state is None
-        # ...and the gate DID run: with nothing available, the seed dataset is cleared (§4.7).
+        assert summary is dash.no_update
+        # Unknown on both axes: no model fields (so no agreement claim), and an ``unknown``
+        # dataset block, which is what lets the gate tell this from "the backend holds nothing".
+        assert state == {"dataset": {"value": None, "source": "unknown", "generator": None}}
+        assert DashboardManager._selection_is_live(state) is None
+        assert dataset == DEFAULT_DATASET_TYPE  # D-N10's fallback, not ⊥
+
+    def test_the_failed_read_s_gate_pass_really_runs(self, manager):
+        # With nothing available the fallback default is cleared again and the BLOCKING notice
+        # renders -- visible proof the availability gate ran on a mount whose read failed.
+        _store, _summary, _state, dataset, notice = _mount(manager, None, generators=NONE_AVAILABLE)
         assert dataset is None
+        assert notice is not None and "No dataset is available" in _text_of(notice)

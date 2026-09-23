@@ -1194,7 +1194,7 @@ Most WebSocket messages use this shape:
 
 **Notes:**
 
-- `/ws/training` sends an initial `initial_status` message before steady-state messages.
+- `/ws/training` unicasts `connection_established`, then `initial_status`, then a `state` snapshot, in that order, on connect. Broadcast frames are not ordered against that sequence: the socket joins the broadcast set before `initial_status` is fetched, so a `metrics` or `state` broadcast can arrive ahead of it. Treat `state` as latest-wins, as the dashboard does, rather than assuming `initial_status` is the first data frame.
 - Some control-channel messages may omit `timestamp`.
 - Runtime dashboard updates consume `metrics`, `state`, `topology`, and `event` message types.
 

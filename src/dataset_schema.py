@@ -118,15 +118,31 @@ INFRASTRUCTURE_FIELDS: frozenset[str] = frozenset(
 
 # The partial-data contract's two DECISION fields. juniper-data's ``equities`` /
 # ``equities_seq`` / ``csv_import`` schemas carry ``allow_truncation`` (the gate: accept a
-# dataset the producer cannot deliver in full) and ``incomplete_rows`` (accept or drop the
-# rows it could not resolve, once the gate is open). Rendered as ordinary sidebar inputs
-# they broke the contract twice over: an unticked checkbox sent an EXPLICIT
-# ``allow_truncation: false`` on every apply -- which cascor#624 honours over its own
-# deployment default, so the operator's silence became a refusal and the failure message
-# lost its remedy -- and a ticked one pre-answered a question the contract says must be
-# put to the operator when the shortfall actually happens. The dashboard's three-way
-# prompt owns both fields: the form sends NEITHER, so a default apply expresses option 3
-# (fail) and the prompt supplies options 1 and 2 (accept / drop) on the re-stage.
+# dataset the producer cannot deliver in full), and the equities pair also carry
+# ``incomplete_rows`` (accept or drop the rows it could not resolve, once the gate is open).
+# Rendered as ordinary sidebar inputs they broke the contract twice over: an unticked checkbox
+# sent an EXPLICIT ``allow_truncation: false`` on every apply, and a ticked one pre-answered a
+# question the contract says must be put to the operator when the shortfall actually happens.
+#
+# What that explicit ``false`` does has GROWN since, which is why withholding it matters more
+# than it did. cascor#624 honours a caller's explicit value over cascor's own deployment
+# default. Until juniper-data 0.15.0, juniper-data then OR'd the flag with ITS deployment
+# default, so a juniper-data opt-in still rescued the request. 0.15.0 (juniper-data#418,
+# APD-DATA-052) made ``allow_truncation`` a tri-state: ``true`` opts in, ``null`` / omitted
+# defers to the deployment, and ``false`` REFUSES even where the deployment opted in. So a
+# ``false`` from canopy now overrides EVERY opt-in on the path: any shortfall -- an over-cap
+# universe, or rows whose fundamentals cannot be resolved -- is refused with HTTP 422
+# (``InputTooLargeError`` / ``IncompleteDataError``, ``api/routes/datasets.py``) where silence
+# would have let the deployment accept it. A clean, under-cap request never consults the flag,
+# so the refusal appears only when data is actually short -- the one moment the prompt below
+# exists for. Verified against juniper-data main 68c3cd7, 2026-09-22.
+#
+# The dashboard's three-way prompt owns both fields: the form sends NEITHER, so a default apply
+# defers to the deployments (on a default deployment that is option 3, fail) and the prompt
+# supplies options 1 and 2 (accept / drop) on the re-stage. Silence is the only value that
+# defers. TestNoPathSendsAPartialDataStance (tests/regression/test_dataset_generator_contract.py)
+# pins that no other channel -- the registry seed, Apply, the one-shot Start body, the restart
+# modal -- sends either field.
 PARTIAL_DATA_POLICY_FIELDS: frozenset[str] = frozenset({"allow_truncation", "incomplete_rows"})
 
 # Everything the schema-driven form must neither render nor forward.
