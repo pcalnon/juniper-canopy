@@ -42,6 +42,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Pausing a metrics replay did not hold: a late tick restored `playing` with the interval off,
+  so the label stuck at ⏸ and nothing moved (F-CANOPY-054).** After F-CANOPY-048 the replay state
+  had two writers, each a server round trip away: the merged controls callback, and `replay_tick`,
+  an `allow_duplicate` writer that computed the next state from the State read when its request was
+  sent. With the page's response-delivery latency at ~5 s against a 250–1000 ms tick, a tick was
+  in flight whenever the user paused. The pause disabled the interval, so no later tick evicted
+  that one, and its response — computed from `playing` — landed after the pause.
+
+  Moving only the tick clientside, the direction first recorded, does not fix it. The server
+  controls callback read `replay-state.data` as an Input, so every clientside tick re-requested it,
+  and dash-renderer drops an in-flight request whenever a new request of the same callback arrives
+  (the requestedCallbacks observer's `wDuplicates` step). Every click made during playback would
+  have been evicted. A clean room (juniper-ml
+  `util/ad-hoc/2026-09-23_f054_replay_tick_cleanroom.py`, verdicts fixed before the first run, 3
+  runs a shape) scored the old shape pause-undone 3/3, the tick-only shape click-dropped 3/3, and
+  this one pause-held 3/3, with the pause applied within 58 ms.
+
+  Fixed by running the whole block in the browser, with **one** clientside callback as the only
+  writer of `replay-state`. It handles the eight controls, the slider and the tick, and renders the
+  slider, the position and the play label from the state it just computed. A clientside callback
+  has no in-flight window that a timer, a click or a response can enter, so nothing computes from a
+  stale state and nothing is evicted. `replay_tick`, the play-label callback and
+  `MetricsPanel._handle_replay_controls_handler` are removed; each control's effect is unchanged,
+  checked under node against a verbatim copy of the old handler over the whole grid.
+  - **`metrics-store.data` is now State.** The store's primary writer is pending most of the time,
+    and dash-renderer holds a callback while any of its Inputs is downstream of a pending one, so
+    the controls waited on every poll. Now nothing pending can hold them
+    (`test_nothing_pending_can_hold_the_replay_controls`, on the built app). A refill re-renders
+    the position text through a second clientside callback; the slider thumb catches up on the
+    next control or tick, because nothing else may write the slider this callback reads as a seek.
+  - **Ticks are counted.** The renderer merges queued requests of one callback, and `n_intervals`
+    is read at execution, so the state records the last count it consumed (`tick_n`, an optional
+    key) and a tick advances by the difference.
+  - **The end of the replay stops the interval.** `replay_tick` set `stopped` and left the
+    interval running: a server round trip a second, and two refreshes, until the next click.
+  - `src/tests/unit/frontend/test_f054_replay_block_clientside.py` is new: wiring on the built app,
+    a source backstop that runs without node, and the registered JavaScript executed under node.
+    All 43 fail on the parent; nine textual mutations of the fix each turn it red.
+  - Sixty replay tests are removed from `test_metrics_panel_handlers.py` (38) and
+    `test_metrics_panel_helpers_coverage.py` (22). Forty-seven, in seven classes, never called
+    production code: they re-implemented the logic inline and asserted on their own copy. Twelve
+    guarded their body with `if func := callbacks.get(...)` and would have passed silently once the
+    callbacks were gone; one looked the merged callback up directly. The tests in
+    `test_f048_replay_cycle.py` that exercised the Python handler moved to the new file and run on
+    the JavaScript; that file keeps the F-CANOPY-048 graph invariants.
+
 - **The replay controls never applied: play, step, start, end, the speed buttons and the slider
   did nothing on any page load (F-CANOPY-048).** `handle_replay_controls` (Input
   `replay-slider.value` → Output `replay-state.data`) and `update_replay_ui` (Input
