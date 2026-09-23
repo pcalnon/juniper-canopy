@@ -330,10 +330,12 @@ class TestLiveDatasetSwitchInner:
         mock_post.return_value = _resp(status=200, json_value={"data": {"status": "swapped", "pre_swap_snapshot_id": "snap1"}})
         cb = raw_cb(dm, "accept_live_switch")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            modal, progress, outcome, in_flight = cb(1, "spirals", 100, 0.1, 2, 1.5)
+            # Trailing: the schema-driven field values and ids, then the model-selection mirror.
+            modal, progress, outcome, in_flight = cb(1, "spirals", 100, 0.1, 2, 1.5, [], [], "cascor")
         assert modal is False and progress is False
         assert in_flight == {"in_flight": False}
         assert outcome is not None
+        assert mock_post.call_args.kwargs["json"]["nn_model"] == "cascor"
 
     def test_open_progress_alert_on_accept(self, dm):
         cb = raw_cb(dm, "open_progress_alert_on_accept")

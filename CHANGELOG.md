@@ -28,8 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     unaffected.
   - The key is a routing field. It never reaches a backend, and it is kept out of the
     applied-params store the dirty tracker reads.
-  - The sidebar's Apply Dataset and Apply Parameters send it. The restart modal and the live-swap
-    button do not yet; the server accepts its absence.
+  - The sidebar's Apply Dataset and Apply Parameters send it, and so do the live-swap button and
+    the restart modal's re-stage and parameter apply. Each of those reads `model-selection-store`
+    as State, so a stale tab's swap or edited restart is refused before anything moves.
+    `/api/train/restart` itself carries no model identity, so a restart with nothing edited sends
+    no mirror and is not checked. The server accepts the key's absence.
   - `src/tests/regression/test_request_nn_model_mirror.py`, mutation-checked at four sites.
 - **The selection survives a page reload: both selectors now hydrate from the backend (design
   PR 2, §4.10; guardrails G7 and Y3).** The selection had no read side on either axis.
@@ -255,6 +258,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the registry-repair pass (canopy#665). Mutation-checked: without the seed, five of the new
   `TestRestageDataset` cases fail. Two stale comments in the same file still said the gate
   *snaps*; since canopy#652 it clears.
+- **The live dataset swap dropped a seeded generator's params too, and sent the spiral fields for
+  every generator.** The swap built its own body: the four typed spiral fields whatever the
+  generator, and never `nn_dataset_params`. A swap to `equities` therefore lost `symbols` and a
+  swap to `mnist` lost `flatten`, the restart-modal defect above on the third path that stages a
+  dataset. Apply Dataset and the swap now build one body, in `_dataset_stage_payload`: the
+  registry seed and the rendered schema fields for a non-spiral generator, the typed fields for
+  spiral. The swap's callback reads the schema-driven fields as State, as `apply_dataset` does.
+  `src/tests/regression/test_staging_paths_send_one_payload.py` pins the two bodies equal for every
+  dataset type, and pins the seed itself, because parity alone still passes when the shared builder
+  loses the seed on both paths. Mutation-checked at six sites, that one included.
 - **The `unknown` availability state could never fire for the outage it was built for.**
   `/api/dataset/generators` caught a juniper-data failure and answered HTTP 200 with four
   built-in demo generators carrying no `available` flag, so an outage and an answer were
