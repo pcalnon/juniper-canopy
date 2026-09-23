@@ -24,7 +24,7 @@
 #    artifact a reviewer / supervisor can consume.
 #
 #    PACKAGED, NOT INLINE: the two screens are consumed from the PyPI juniper-ci-tools
-#    package (>=0.8.0,<0.9.0) via its `juniper-symbol-loss-check` /
+#    package (>=0.9.0,<0.10.0) via its `juniper-symbol-loss-check` /
 #    `juniper-docs-additions-check` console scripts -- one source of truth across the
 #    ecosystem, not a per-repo hand-copied tree (the doc-tools / dep-docs packaging shape).
 #    The symbol screen is scoped to canopy's app + test surface with `--scope 'src/**/*.py'`

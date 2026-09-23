@@ -267,9 +267,9 @@ jobs:
       # shared juniper-coverage-gap-map computes statement % itself from
       # coverage.json, so this repo's ``branch = true`` coverage config does not
       # change the gate basis. Complements the aggregate ``--cov-fail-under=80``
-      # gate above (which a single well-covered file can mask). ci-tools 0.8.0
-      # is already installed by the preflight step; the pin here keeps the step
-      # self-contained.
+      # gate above (which a single well-covered file can mask). juniper-ci-tools
+      # (>=0.9.0,<0.10.0) is already installed by the preflight step; the pin here
+      # keeps the step self-contained.
       - name: Enforce per-file coverage gate (blocking)
         run: |
           echo "╔════════════════════════════════════════════════════════════╗"
