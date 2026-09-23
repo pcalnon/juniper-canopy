@@ -126,6 +126,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `_dataset_label(None)`, describing a state change that did not occur. Reachable since the
   OQ-6 ratification made `⊥` a state the gate clears into. `⊥` is no longer treated as a
   conflict; a genuine conflict still clears and still names the real dataset.
+- **Registry and test prose still described the dataset snap that the OQ-6 ratification deleted.**
+  `model_registry.py` said seed order "decides which dataset the operator lands on when they pick
+  Recurrence". Since canopy#652 the sidebar gate clears a stranded dataset to `⊥` instead. Order
+  still decides two things: the order the dropdown offers, and the restart modal's fallback, which
+  keeps its `enabled[0]` swap by owner ruling. The registry comment and six test comments and
+  docstrings now say that, rather than that order no longer matters.
+- **G11 was enforced by listing names, and the constant it cited did not exist.** The registry
+  pointed at `UNBOUNDED_IMPORT_GENERATORS`, which occurred nowhere else in the repository, and no
+  test iterated `DATASET_TYPES`, so a new seed with unbounded `default_params` passed every test.
+  `SEEDED_GENERATOR_BOUNDS` now classifies every seeded generator: either bounded by its own
+  defaults, with the reason, or importing an unbounded universe, with the `default_params` keys
+  that bound it. `TestG11EverySeedIsBounded` fails on an unclassified seed, and on an import whose
+  seed does not pin a bounding key to a bounded value.
+- **No test required a seed to be trainable by any model.** juniper-data emits a `structured` task
+  type (juniper-data#402) that no `ModelSpec` accepts, so a `structured` seed would be greyed out
+  under every model. The test that appeared to guard this checked only that the sidebar hint was
+  not `None`, and the hint for such a seed is the string "no compatible models". A per-seed test
+  now requires a compatible model, and the hint test rejects the warning string.
+- **Nothing pinned that canopy never sends `allow_truncation`, and since juniper-data 0.15.0 an
+  explicit `false` refuses.** juniper-data#418 made the flag a tri-state, so `false` now returns 422
+  on any shortfall (an over-cap universe, or unresolvable fundamentals) even where the deployment
+  opted in. The form already withheld the field. The registry seed, which bypasses the form's
+  filter by design, and the Apply, one-shot Start and restart-modal bodies were unpinned.
+  `TestNoPathSendsAPartialDataStance` now covers each of them for every seed. The shortfall prompt,
+  which sends `true`, is the one deliberate sender. An equities test that accepted a seeded
+  `allow_truncation: true` in place of a `symbols` list no longer does.
+- **The `equities` seed's evidence was re-measured at generator 5.0.0.** It had been measured at
+  3.0.0 and marked stale. At 5.0.0 (juniper-data 68c3cd7), on the service path, the seed generates
+  X_train (15877, 15), X_val (1986, 15) and X_test (1982, 15) with no non-finite values. The matrix
+  has 15 columns because 4.0.0 dropped `adj_close`. CasCor fits it, recruiting 4 units. The
+  `equities_seq` seed now generates 15,557 windows of (64, 15); its LMU fit was not re-measured.
+  `KNOWN_UPSTREAM_GENERATORS` was re-checked against juniper-data main and is unchanged at 16.
 
 - **The Candidate Metrics panel never applied a store write after mount, so during a live candidate
   phase its badge read `Inactive` while `/api/state` said `Training` (F-CANOPY-053, provisional id).**

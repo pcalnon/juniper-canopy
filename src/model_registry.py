@@ -39,8 +39,9 @@
 #       "structured" arrived with juniper-data#402 for arc_agi, whose y is a 900-cell grid
 #       rather than a class vector, and arc_agi stays unseeded. Note that NO ModelSpec
 #       lists "structured" in supported_task_types, so a future structured generator is
-#       compatible with nothing here and greys out everywhere — correct today, and a thing
-#       to notice rather than rediscover if such a model is ever added.
+#       compatible with nothing here and would grey out everywhere. Seeding one now FAILS
+#       test_every_seeded_dataset_has_a_compatible_model (tests/unit/test_model_registry.py)
+#       instead of greying out silently: add the model that accepts it first.
 #       The recurrence model's 3-D / irregular-delta-t nature is carried by ndim +
 #       requires_dt, NOT by a task_type label.
 #     - status drives lifecycle presentation in A1 ("live" | "coming_soon" |
@@ -73,6 +74,8 @@
 #       + model_is_trainable() (the D8 Train-gate predicate) + model_options(models=) injectability.
 #     - A1b-search: model_matches_search() — the model-table search predicate (label + family +
 #       category + tags, §5.2) backing the modal search box.
+#     - G11: GeneratorBound + SEEDED_GENERATOR_BOUNDS — one boundedness classification per seeded
+#       generator, enforced over every seed by TestG11EverySeedIsBounded.
 #
 #####################################################################################################################################################################################################
 """Model + dataset-type registry (single source of truth) for model selection.
@@ -133,6 +136,24 @@ class ModelSpec:
         return self.status == "live"
 
 
+@dataclass(frozen=True)
+class GeneratorBound:
+    """How one seeded juniper-data generator's request is bounded — a G11 classification.
+
+    ``bounding_keys`` EMPTY: the generator synthesises from its own parameters (or loads a fixed
+    corpus), so its own defaults bound it and its seed may be ``{}``; ``reason`` says why.
+
+    ``bounding_keys`` NON-EMPTY: the generator pulls an operator-sized universe and is bounded ONLY
+    by what the request pins, so its seed must set at least one of these ``default_params`` keys to
+    a bounded value; ``reason`` says what it would pull otherwise.
+
+    See ``SEEDED_GENERATOR_BOUNDS``, the one entry per seeded generator that this describes.
+    """
+
+    reason: str
+    bounding_keys: frozenset[str] = frozenset()
+
+
 # Selectable dataset types. The order is user-facing; the five 2-D classification types come
 # first (spirals = default), preserving the original inlined dropdown order. A1-iv-3b appends
 # the 3-D irregular-delta-t regression seed (``equities_seq``) so the recurrence (LMU) model
@@ -141,17 +162,31 @@ class ModelSpec:
 # §12 (design "Iteration 2 — closing the generator gap") adds the five rank-3 SYNTHETIC
 # sequence generators. Two things about their placement are deliberate:
 #
-#   * They sit BEFORE ``equities_seq``. ``_gate_dataset_options_handler`` snaps the dropdown to
-#     ``enabled[0]`` — the first compatible AND available entry — so this order decides which
-#     dataset the operator lands on when they pick Recurrence. Measured 2026-09-09, that now
-#     means ``multi_sine``: generate 0.0s, fit 0.10s, r² 1.000. ``equities_seq`` is 40.5s and
-#     r² -0.004, and is ``available=false`` in the container at all (``yfinance`` is absent from
-#     juniper-data's requirements.lock), which is why selecting Recurrence there used to raise
-#     §4.7's "no dataset is available for this model" alert. These five declare no
-#     ``is_available`` hook, so they are available everywhere.
+#   * They sit BEFORE ``equities_seq``, and what that order decides changed on 2026-09-22.
+#     Until canopy#652, ``_gate_dataset_options_handler`` snapped a stranded sidebar dataset to
+#     ``enabled[0]`` — the first compatible AND available entry — so this order chose the
+#     dataset the operator landed on when they picked Recurrence. OQ-6 was ratified that day
+#     as model-primary with a CLEAR (§5.6.1 of juniper-ml's
+#     JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md): the sidebar now
+#     drops a stranded dataset to ``⊥`` and the operator chooses, so this order no longer
+#     decides where the SIDEBAR lands on a model change. It still decides two things:
+#       - the order the dropdown OFFERS, so ``multi_sine`` is the first enabled option under
+#         Recurrence; and
+#       - the restart modal's fallback. ``_open_restart_confirm_modal_handler`` keeps its
+#         swap by owner ruling (2026-09-22), a deliberate exception to OQ-6: a stranded,
+#         non-``⊥`` sidebar dataset is replaced there by ``enabled[0]``, so this order picks
+#         the replacement.
+#     Measured 2026-09-09, the first enabled entry is ``multi_sine``: generate 0.0s, fit
+#     0.10s, r² 1.000. ``equities_seq`` is 40.5s and r² -0.004, and is ``available=false`` in
+#     the deployed container: juniper-deploy pins juniper-data 0.15.0, whose image lacks
+#     ``yfinance`` (juniper-data#421 added it to the image lock on main on 2026-09-22; no
+#     release carries it yet). That is why selecting Recurrence there used to raise §4.7's "no
+#     dataset is available for this model" alert. These five declare no ``is_available`` hook,
+#     so they are available everywhere.
 #   * They carry NO ``default_params``, and that is correct rather than an omission — see
-#     ``UNBOUNDED_IMPORT_GENERATORS`` below. Their own generator defaults are already bounded:
-#     1,574 windows of (32, 1), generated and fitted in ~0.1s total against a 300s timeout.
+#     ``SEEDED_GENERATOR_BOUNDS`` below (G11), which classifies each of them as bounded by its
+#     own defaults: 1,574 windows of (32, 1), generated and fitted in ~0.1s total against a
+#     300s timeout.
 #
 # ``task_type="regression"`` matches what juniper-data declares for all five, so unlike
 # ``equities_seq`` (the X8 divergence) these seeds introduce no vocabulary disagreement.
@@ -182,14 +217,16 @@ DATASET_TYPES: tuple[DatasetTypeSpec, ...] = (
     #                   raising it is an operator action, not a code change.
     #
     # Both stay ``default_params={}``, matching the five incumbents. Neither imports an external
-    # universe, so the G11 restatement below does not bind them.
+    # universe, so ``SEEDED_GENERATOR_BOUNDS`` below (G11) classifies both as bounded by their
+    # own defaults.
     DatasetTypeSpec(value="gaussian", label="Gaussian Blobs", task_type="classification", ndim=2),
     DatasetTypeSpec(value="checkerboard", label="Checkerboard", task_type="classification", ndim=2),
     # ``equities`` — the rank-2 sibling of ``equities_seq``, and the seed that forced the cascor
     # path to learn to carry ``default_params`` at all. Until then the registry seed reached only
     # the recurrence tier, so a rank-2 dataset needing params could not be expressed: every Apply
     # sent bare defaults and 422'd. All three keys were measured 2026-09-10/11 against a live
-    # juniper-data and a real CascadeCorrelationNetwork fit:
+    # juniper-data and a real CascadeCorrelationNetwork fit at generator ``3.0.0``, and the seed
+    # was re-measured at ``5.0.0`` on 2026-09-22 (below):
     #
     # ``symbols``            — bare defaults are REFUSED, not truncated: the bundled 503-name
     #                          universe exceeds the deployment cap of 14 and juniper-data raises
@@ -202,35 +239,30 @@ DATASET_TYPES: tuple[DatasetTypeSpec, ...] = (
     #                          (total_shares / market_cap / days_since_report).
     # ``normalize_features`` — defaults to False, and equities' columns are raw market
     #                          quantities. Unnormalised, CasCor's first output pass reports a
-    #                          loss of 5.83e+21 against 0.2511 normalised — twenty-two orders of
-    #                          magnitude. This key has no analogue in the sequence sibling's seed.
+    #                          loss of 8.21e+21 against 0.2498 normalised at ``5.0.0`` —
+    #                          twenty-two orders of magnitude, as it was at ``3.0.0`` (5.83e+21
+    #                          against 0.2511). This key has no analogue in the sequence
+    #                          sibling's seed.
     #
-    # Measured on the seed as written: generate 12.9s, (15799, 16) rank-2 with a one-hot target,
-    # ZERO non-finite in any split, CasCor fits in 1.2s recruiting 3 units (loss 0.2511 -> 0.2491).
-    # Train top-1 0.524 is the honest ceiling for next-day direction, not a defect — the same
-    # story as the sequence sibling's r² near zero.
+    # Measured on the seed as written, 2026-09-22, at generator ``5.0.0`` (juniper-data main
+    # 68c3cd7), through the service's own path (``params_class`` -> ``bind_deployment_defaults``
+    # -> ``generate``) with a cold download cache: generate 13.2s (1.3s warm); X_train
+    # (15877, 15), X_val (1986, 15), X_test (1982, 15), a one-hot (n, 2) target, float32, ZERO
+    # non-finite in any split. The matrix is 15 columns where ``3.0.0``'s was 16, because
+    # juniper-data#395 (``4.0.0``) dropped ``adj_close`` from the default feature set. Row
+    # counts move with the calendar: ``end_date`` defaults to the day of generation (2026-09-23
+    # UTC here). CasCor, under the bounded trainability probe of juniper-ml's
+    # ``util/ad-hoc/2026-09-10_rank2_cascor_fit.py`` (4,000-row train subsample,
+    # ``max_iterations`` 8, ``max_epochs`` AND ``output_epochs`` both 60), fits in 5.4s
+    # recruiting 4 units (loss 0.2498 -> 0.2482). Fit time is host-dependent; it is a
+    # trainability probe, not a benchmark. Train top-1 0.5375 is the honest ceiling for next-day
+    # direction, not a defect — the same story as the sequence sibling's r² near zero.
     #
-    # STALE, and knowingly left in place rather than deleted: that run was 2026-09-11 against
-    # generator ``3.0.0``. The generator is now ``5.0.0``, through TWO breaking bumps, so the
-    # numbers above describe a contract juniper-data no longer serves:
-    #   * 4.0.0 (juniper-data#395) dropped ``adj_close`` from the default feature set, so the
-    #     matrix is **15 columns, not 16** — verified by AST-reading
-    #     ``generators/equities/defaults.py::EQUITIES_FEATURE_COLUMNS``, which is 15 and does not
-    #     contain ``adj_close``. It also made ``cost_basis`` absent before ``purchase_date``
-    #     rather than constant, and moved SEC share history to an as-of join on the FILED date,
-    #     both of which can move the row count.
-    #   * 5.0.0 (juniper-data#404) exists because #395 shipped a causal-median regression that
-    #     let scale typos through — AIZ delivered at 990x truth, EOG at 428x. Any artifact minted
-    #     at 4.0.0 for an affected symbol carries the error.
-    # The SEED itself is not known to be broken: all three keys below are generic parameter
-    # names that still resolve at 5.0.0. What is stale is the EVIDENCE, and nothing has
-    # re-measured it. Left rather than deleted because a figure with a version attached is
-    # re-checkable; silence is not. Re-run before citing it. (N4 of the 2026-09-21 handoff
-    # addendum; the drift a Y6 registry-vs-upstream test would have caught.)
-    #
-    # Needs juniper-data's ``equities`` extra, which is absent from its requirements.lock, so this
-    # renders greyed with an install hint in the container. That is the availability gate doing its
-    # job (§12.5), not a broken seed.
+    # Unavailable in the deployed container: juniper-deploy pins juniper-data 0.15.0, whose image
+    # lacks the ``equities`` extra's ``yfinance``, so this renders greyed with an install hint
+    # there. That is the availability gate doing its job (§12.5), not a broken seed.
+    # juniper-data#421 added ``yfinance`` to the image lock on main on 2026-09-22; this becomes
+    # available in the container once a juniper-data release carries it and the pin moves.
     DatasetTypeSpec(
         value="equities",
         label="Equities (tabular)",
@@ -290,6 +322,12 @@ DATASET_TYPES: tuple[DatasetTypeSpec, ...] = (
         # (64, 16) — 40.5s against the 300s train timeout. r² near zero is the honest outcome for
         # next-day equity returns, not a defect; it is also why this seed demonstrates little, and
         # why the §12 synthetic rank-3 generators are the better showcase for the LMU.
+        #
+        # Re-generated 2026-09-22 at generator ``5.0.0``, by the same method as ``equities``
+        # above: 15,557 train windows of (64, 15), ZERO non-finite in any split. The (64, 16)
+        # above, and the index [15] under ``fundamentals_fill``, are ``3.0.0``'s: ``4.0.0``
+        # dropped ``adj_close``, so ``days_since_report`` is EQUITIES_FEATURE_COLUMNS[14] now.
+        # The LMU fit (39.6s, r² -0.004) was NOT re-measured.
         default_params={
             "symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"],
             "regression_target": "return",
@@ -309,7 +347,9 @@ DEFAULT_DATASET_TYPE: str = DATASET_TYPES[0].value
 # indistinguishable from a forgotten one.
 #
 # This is a DATED SNAPSHOT of juniper-data's registry, taken 2026-09-09 by executing it
-# (16 generators). It is deliberately not derived from an installed ``juniper_data``: canopy
+# (16 generators), and re-checked 2026-09-22 by executing juniper-data main 68c3cd7's
+# ``GENERATOR_REGISTRY`` (``api/routes/generators.py``): the same 16 names, none added or
+# removed. It is deliberately not derived from an installed ``juniper_data``: canopy
 # talks to that service over HTTP and has no version contract with the library, and the copy
 # installed in the test env is 0.6.0 — old enough to predate ``equities_seq`` — so asserting
 # against it would produce false reds on a stale dependency rather than on real drift. The
@@ -357,8 +397,19 @@ UNSEEDED_GENERATORS: dict[str, str] = {
     ),
 }
 
-# G11, restated — and deliberately NOT given a constant of its own, because a set no code reads
-# is a rule nobody enforces.
+# G11, restated — and now given a constant, because code reads it.
+#
+# Until 2026-09-22 this comment said G11 was "deliberately NOT given a constant of its own,
+# because a set no code reads is a rule nobody enforces" — while the seed comment above pointed its
+# reader at an ``UNBOUNDED_IMPORT_GENERATORS`` that existed nowhere. The tests that touched G11
+# enumerated the seeds they knew; nothing iterated ``DATASET_TYPES`` asserting boundedness, so a
+# fifteenth seed with unbounded ``default_params`` passed every test, and the design's §5 table
+# recorded G11 as
+# "passes" — a vacuous pass. The remedy is the one that comment named: a constant that code reads.
+# ``TestG11EverySeedIsBounded`` in tests/regression/test_dataset_generator_contract.py iterates
+# ``DATASET_TYPES`` and fails on a seed whose generator has no entry below, and on an
+# unbounded-import seed that does not pin one of its bounding keys to a bounded value — the same
+# forced decision per generator that G10 makes with ``UNSEEDED_GENERATORS``.
 #
 # The design's wording ("every seeded generator has bounded ``default_params``") overshoots: it
 # fails on the five incumbent 2-D seeds, which carry ``{}`` and always have, and it would fail on
@@ -369,10 +420,41 @@ UNSEEDED_GENERATORS: dict[str, str] = {
 # is bounded only by what the request pins, and ``equities_seq`` at its defaults asks for 503
 # symbols and is refused outright.
 #
-# That is narrower than "imports data": ``mnist`` also downloads, but it downloads a fixed corpus
-# and is bounded by the sidebar's ``n_samples``, so ``{}`` is right for it. The generators the rule
-# actually binds are the equities pair, and it is enforced where the two specific keys live —
-# ``TestEquitiesSeedIsGenerableAndFinite`` in tests/regression/test_dataset_generator_contract.py.
+# That is narrower than "imports data": ``mnist`` also downloads, but it downloads a FIXED corpus
+# and ``n_samples`` only subsamples it, so ``{}`` is right for it. The generators the rule actually
+# binds are the equities pair, bounded by ``symbols``. ``max_symbols`` is deliberately NOT a
+# bounding key: it is the cap juniper-data refuses against, not a truncator.
+# ``TestEquitiesSeedIsGenerableAndFinite`` (same test module) pins the rest of what their seeds
+# must carry to generate and fit.
+#
+# Keyed by juniper-data generator NAME (``generator_name_for_type`` of a seed's value), like G10's
+# lists: boundedness is a property of the generator, not of canopy's label for it.
+SEEDED_GENERATOR_BOUNDS: dict[str, GeneratorBound] = {
+    # Rank-2 synthetics: every point comes from the generator's own size parameters.
+    "spiral": GeneratorBound("Synthesises every point from its own parameters (2 spirals x 97 points at its defaults) and fetches nothing."),
+    "xor": GeneratorBound("Synthesises every point from its own parameters (50 points per quadrant at its defaults) and fetches nothing."),
+    "circles": GeneratorBound("Synthesises every point from its own parameters (n_samples=100 at its defaults) and fetches nothing."),
+    "moon": GeneratorBound("Synthesises every point from its own parameters (n_samples=200 at its defaults) and fetches nothing."),
+    "gaussian": GeneratorBound("Synthesises every point from its own parameters (2 classes x 50 samples at its defaults) and fetches nothing."),
+    "checkerboard": GeneratorBound("Synthesises every point from its own parameters (n_samples=200 at its defaults) and fetches nothing."),
+    # Downloads — but a FIXED corpus, which is why the rule is narrower than "imports data".
+    "mnist": GeneratorBound("Downloads, but a FIXED corpus: the Hugging Face train split, whatever the request asks; n_samples only subsamples it."),
+    # Rank-3 synthetics.
+    "multi_sine": GeneratorBound("Synthesises its series from its own parameters (n_steps=2000 at its defaults) and fetches nothing."),
+    "mackey_glass": GeneratorBound("Synthesises its series from its own parameters (n_steps=2000 at its defaults) and fetches nothing."),
+    "irregular_sine": GeneratorBound("Synthesises its series from its own parameters (n_steps=2000 at its defaults) and fetches nothing."),
+    "ar_p": GeneratorBound("Synthesises its series from its own parameters (n_steps=2000 at its defaults) and fetches nothing."),
+    "delay_product": GeneratorBound("Synthesises its series from its own parameters (n_steps=2000 at its defaults) and fetches nothing."),
+    # The universe importers: bounded ONLY by what the seed pins.
+    "equities": GeneratorBound(
+        "Pulls an operator-sized universe: with no symbols it asks for all 503 bundled constituents, which a default juniper-data deployment refuses (422) against its 14-symbol ceiling.",
+        bounding_keys=frozenset({"symbols"}),
+    ),
+    "equities_seq": GeneratorBound(
+        "Pulls an operator-sized universe: with no symbols it asks for all 503 bundled constituents, which a default juniper-data deployment refuses (422) against its 14-symbol ceiling.",
+        bounding_keys=frozenset({"symbols"}),
+    ),
+}
 
 # Provider sentinel for models served by the juniper-recurrence model service. Single
 # source of truth shared by the ``recurrence`` ModelSpec seed (below) and the backend

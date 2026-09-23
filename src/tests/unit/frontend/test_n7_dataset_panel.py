@@ -141,7 +141,7 @@ def test_gate_composes_availability_over_model_options(dm):
     assert by_value["mnist"]["disabled"] is True  # availability gate
     assert not by_value["spirals"].get("disabled")  # available + compatible
     assert by_value["equities_seq"]["disabled"] is True  # model-incompat gate preserved
-    assert value is dash.no_update  # current selection (spirals) still enabled -> no snap
+    assert value is dash.no_update  # current selection (spirals) still enabled -> no write (a stranded one would be cleared)
 
 
 def test_gate_clears_away_from_a_disabled_current_selection(dm):
