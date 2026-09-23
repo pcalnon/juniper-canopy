@@ -320,6 +320,24 @@ class TestRootEndpoint:
         assert "/dashboard/" in response.headers["location"]
 
 
+async def _wait_until(predicate, timeout: float = 5.0, poll_interval: float = 0.005) -> bool:
+    """Poll ``predicate`` on the running loop until it holds or ``timeout`` elapses.
+
+    Replaces a fixed ``asyncio.sleep`` so a test measures "the loop ticks", not "the
+    loop ticks N times inside a fixed window on this runner": a loaded CI runner can
+    stall the event loop for tens of milliseconds, and a 50 ms window against a 10 ms
+    interval then sees 1 tick instead of 5. The deadline only bounds the failure path;
+    a healthy loop satisfies the predicate within a few intervals.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not predicate():
+        if loop.time() >= deadline:
+            return False
+        await asyncio.sleep(poll_interval)
+    return True
+
+
 class TestWebSocketKeepalive:
     """Server-side Phase F heartbeat loop (``_websocket_keepalive_loop``).
 
@@ -335,7 +353,10 @@ class TestWebSocketKeepalive:
 
         with patch.object(main.websocket_manager, "broadcast_ping", new=AsyncMock()) as mock_ping:
             task = asyncio.create_task(main._websocket_keepalive_loop(0.01))
-            await asyncio.sleep(0.05)
+            # Bounded poll, not a fixed sleep; stop early if the task ends (a loop that
+            # does not repeat), since its count can no longer grow.
+            await _wait_until(lambda: mock_ping.await_count >= 2 or task.done())
+            assert not task.done(), f"keepalive loop exited on its own after {mock_ping.await_count} ping(s); it must repeat until cancelled"
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
@@ -353,8 +374,9 @@ class TestWebSocketKeepalive:
         mock_ping = AsyncMock(side_effect=RuntimeError("boom"))
         with patch.object(main.websocket_manager, "broadcast_ping", new=mock_ping):
             task = asyncio.create_task(main._websocket_keepalive_loop(0.01))
-            await asyncio.sleep(0.05)
-            assert not task.done()  # survived repeated errors
+            # Bounded poll until two pings have failed; stop early if the task dies.
+            await _wait_until(lambda: mock_ping.await_count >= 2 or task.done())
+            assert not task.done(), f"keepalive loop ended after {mock_ping.await_count} failing ping(s); a broadcast error must not kill it"  # survived repeated errors
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
