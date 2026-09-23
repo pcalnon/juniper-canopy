@@ -319,9 +319,14 @@ class TestWebSocketManagerBroadcastBoundary:
             for t in threads:
                 t.join(timeout=5)
 
-            time.sleep(0.5)
-
+            # Bounded poll, not a fixed sleep: the assertion is "every broadcast is
+            # delivered", not "delivered within 0.5 s on this runner". The deadline only
+            # bounds the failure path.
             expected = num_threads * msgs_per_thread
+            deadline = time.monotonic() + 5.0
+            while mock_websocket.send_json.call_count < expected and time.monotonic() < deadline:
+                time.sleep(0.01)
+
             assert mock_websocket.send_json.call_count >= expected
         finally:
             loop.call_soon_threadsafe(loop.stop)

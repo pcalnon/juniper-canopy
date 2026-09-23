@@ -3981,6 +3981,51 @@ def _selection_inactive_reason() -> Optional[str]:
     return f"{label} is selected but the {backend_type} backend is running; the run would execute on {backend_type} and be filed under {label}. {remedy}"
 
 
+def _request_model_refusal(nn_model: Optional[str], dataset_value: Optional[str] = None) -> Optional[tuple[int, str]]:
+    """FR9 / canopy#368's ``nn_model`` mirror: refuse a request made for a model the server is not serving.
+
+    The dashboard sends the model it believes is selected with every dataset stage and parameter
+    apply. ``current_nn_model`` is server state and ``model-selection-store`` is per-tab memory, so
+    the two can disagree: a second tab, or a tab opened before another client changed the model,
+    holds a stale selection. A request made under it used to land on whichever backend was live,
+    and a stale tab could stage a rank-2 dataset into the LMU, which fails only at fit time. The
+    guardrail in #368 states the precondition: "a field absent from a request model is silently
+    dropped", so the key had to exist on BOTH request models before any of this could be checked.
+
+    Returns ``(status_code, message)`` or ``None``:
+
+    * ``nn_model`` absent -- ``None``. Every pre-mirror client, and ``curl``, keeps working exactly
+      as before (payload keys are added as optional, never required -- AGENTS.md hazards).
+    * an unknown model key -- ``422``.
+    * a model other than the server's selection -- ``409``: the client is out of date, not wrong.
+      The server's selection is ``current_nn_model``, or the default model until the first
+      ``/api/model/select`` (the boot backend serves it by construction -- ``api_selection``).
+    * ``dataset_value`` given and known, and incompatible with the model -- ``422``, failing closed
+      (FR9, design §5.9). A dataset canopy cannot name (an unseeded generator) is not judged here;
+      the target service remains the authority for it.
+    """
+    if not nn_model:
+        return None
+    from dataset_schema import dataset_type_for_generator_name
+    from model_registry import DATASET_TYPES, DEFAULT_MODEL_KEY, compatible, dataset_reason, get_dataset_spec, get_model_spec
+
+    spec = get_model_spec(nn_model)
+    if spec is None:
+        return 422, f"Unknown model: {nn_model!r}"
+    serving = current_nn_model or DEFAULT_MODEL_KEY
+    if nn_model != serving:
+        serving_spec = get_model_spec(serving)
+        serving_label = serving_spec.label if serving_spec is not None else serving
+        return 409, f"This request was made for {spec.label}, but the selected model is {serving_label}; the dashboard is out of date (the model was changed elsewhere). Reload the page and try again."
+    if dataset_value:
+        value = dataset_type_for_generator_name(dataset_value, [d.value for d in DATASET_TYPES])
+        dataset = get_dataset_spec(value) if value else None
+        if dataset is not None and not compatible(dataset, spec):
+            reason = dataset_reason(dataset, spec) or "incompatible"
+            return 422, f"{dataset.label} cannot be used with {spec.label}: {reason}."
+    return None
+
+
 async def _swap_backend(nn_model: str) -> dict:
     """Re-create the process-global ``backend`` for a newly-selected model (A1-iv-2).
 
@@ -4118,6 +4163,12 @@ async def api_selection():
 class SetParamsRequest(BaseModel):
     """Validated request body for the set_params endpoint."""
 
+    # FR9 / canopy#368: the model the client believes is selected. Optional, so every pre-mirror
+    # client is unaffected; when present, ``_request_model_refusal`` rejects a stale or unknown
+    # one. It is a ROUTING field, never a parameter -- it is not in ``nn_keys`` and never reaches
+    # a backend.
+    nn_model: str | None = None
+
     # Neural network parameters
     nn_max_iterations: int | None = None
     nn_max_total_epochs: int | None = None
@@ -4177,8 +4228,13 @@ async def api_set_params(body: SetParamsRequest):
     Returns:
         Updated training state
     """
+    refusal = _request_model_refusal(body.nn_model)
+    if refusal is not None:
+        status_code, message = refusal
+        system_logger.warning("Parameter update refused: %s", message)
+        return JSONResponse({"error": message}, status_code=status_code)
     try:
-        params = body.model_dump(exclude_none=True)
+        params = body.model_dump(exclude_none=True, exclude={"nn_model"})
         # Backward-compatible mapping: old-style keys -> new prefixed keys
         compat_map = {
             "learning_rate": "nn_learning_rate",
@@ -4356,6 +4412,10 @@ class StageDatasetRequest(BaseModel):
     # spiral/xor bodies unchanged (no key present) while letting schema-driven generators pass
     # arbitrary params without widening the typed fields.
     nn_dataset_params: Optional[dict[str, Any]] = None
+    # FR9 / canopy#368: the model the client believes is selected -- see ``SetParamsRequest``.
+    # A routing field: every route taking this body excludes it before forwarding to a backend,
+    # whose staged config would otherwise carry (and echo back) a key that names no dataset.
+    nn_model: Optional[str] = None
 
 
 @app.post("/api/stage_dataset")
@@ -4377,6 +4437,13 @@ async def api_stage_dataset(body: StageDatasetRequest):
     if inactive is not None:
         system_logger.warning("Dataset staging refused: %s", inactive)
         return JSONResponse({"error": f"Refusing to stage a dataset for a model that is not active: {inactive}"}, status_code=409)
+    # FR9 / canopy#368: a stale dashboard's selection, or a dataset its model cannot use, fails
+    # closed HERE rather than at the next fit.
+    refusal = _request_model_refusal(body.nn_model, body.nn_dataset_type)
+    if refusal is not None:
+        status_code, message = refusal
+        system_logger.warning("Dataset staging refused: %s", message)
+        return JSONResponse({"error": message}, status_code=status_code)
     # X6 / §4.9: a backend without ``stage_dataset`` says so with a 501, as the sibling routes
     # (``regenerate_dataset``, ``import_dataset``) do -- the AttributeError used to fall into the
     # bare ``except`` below as "Internal server error" plus an opaque error_id. All three shipped
@@ -4389,7 +4456,7 @@ async def api_stage_dataset(body: StageDatasetRequest):
             status_code=501,
         )
     try:
-        params = body.model_dump(exclude_none=True)
+        params = body.model_dump(exclude_none=True, exclude={"nn_model"})
         result = await offload(backend.stage_dataset, **params)
         if isinstance(result, dict) and not result.get("ok", True):
             error_msg = result.get("error", "unknown")
@@ -4510,8 +4577,15 @@ async def api_live_dataset_swap(body: StageDatasetRequest):
     504 pause-timeout, 502 fetch failure) all collapse to canopy 502
     here; the Dash callback layer surfaces the error string in a toast.
     """
+    # FR9 / canopy#368: the same mirror check as staging -- a live swap changes the dataset of a
+    # RUNNING model, so a stale selection or an incompatible pair is refused before anything moves.
+    refusal = _request_model_refusal(body.nn_model, body.nn_dataset_type)
+    if refusal is not None:
+        status_code, message = refusal
+        system_logger.warning("Live dataset swap refused: %s", message)
+        return JSONResponse({"error": message}, status_code=status_code)
     try:
-        params = body.model_dump(exclude_none=True)
+        params = body.model_dump(exclude_none=True, exclude={"nn_model"})
         result = await offload(backend.swap_dataset_live, **params)
         if isinstance(result, dict) and not result.get("ok", True):
             error_msg = result.get("error", "unknown")

@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Stage, live-swap and set-params requests now carry the dashboard's `nn_model`, and a stale or
+  incompatible request fails closed (FR9; the `nn_model` mirror clause of canopy#368).**
+  `current_nn_model` is server state, while `model-selection-store` is per-tab memory. A second
+  tab, or one opened before another client changed the model, holds a stale selection, and a
+  request made under it used to land on whichever backend was live. For example, a stale CasCor
+  tab could stage a rank-2 dataset into the recurrence backend, which failed only at *fit* time.
+  - `nn_model` is an **optional** field on both `StageDatasetRequest` and `SetParamsRequest`.
+    #368's own guardrail says a field absent from a request model is silently dropped, so the key
+    had to exist before anything could be checked.
+  - `/api/stage_dataset`, `/api/live_dataset_swap` and `/api/set_params` answer:
+    - **409** when the mirror names a model other than the server's selection;
+    - **422** for an unknown model;
+    - **422** on staging or live-swap when the dataset is known and that model cannot use it.
+  - A request without the key behaves exactly as before, so older clients and `curl` are
+    unaffected.
+  - The key is a routing field. It never reaches a backend, and it is kept out of the
+    applied-params store the dirty tracker reads.
+  - The sidebar's Apply Dataset and Apply Parameters send it. The restart modal and the live-swap
+    button do not yet; the server accepts its absence.
+  - `src/tests/regression/test_request_nn_model_mirror.py`, mutation-checked at four sites.
 - **The selection survives a page reload: both selectors now hydrate from the backend (design
   PR 2, §4.10; guardrails G7 and Y3).** The selection had no read side on either axis.
   `model-selection-store` is memory-scoped and seeded with the default model, while
@@ -39,6 +59,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `src/tests/regression/test_selection_reachability_guardrails.py` gains **G7**, asserted through
     the real route and real backends as well as the registered callbacks. It also gains the **Y3**
     read-side guardrail, which the design's §5 table lacked. Mutation-checked at four sites.
+- **The dataset selector mounts at `⊥` instead of a seeded `spirals` (OQ-N2 / D-N13).** The owner
+  accepted `⊥`-at-mount on 2026-09-02, on the condition that the hydration above land first
+  (D-N10). With that in place, the first interaction is an explicit choice, and `⊥` appears only
+  when it is true. What the mount lands on now depends on what the backend reports:
+  - **pending / loaded, nameable**: that dataset (G7).
+  - **none**: `⊥`. The backend holds nothing, and nothing is invented for it.
+  - **loaded but unnameable** (an unseeded generator another client staged, or raw inline data):
+    `⊥`, plus an informational notice naming what the backend holds. A silent `⊥` over a busy
+    backend would read as "nothing is loaded".
+  - **unknown** (a cascor that predates juniper-cascor#676, or a failed read): falls back to the old
+    default. `⊥` there would disable Start *and* Apply Dataset after every reload over a backend
+    that may be staged and ready — exactly the regression D-N10 exists to prevent. A failed read
+    now writes an explicit `unknown` block, so the gate can tell it apart from "holds nothing".
+  - **demo mode** still lands on spirals, because the simulator holds spirals, not because of a
+    seed.
+  - The restart modal's dropdown loses its seed too (it was overwritten on every open anyway), and
+    its `enabled[0]` fallback is recorded in code as a deliberate exception to OQ-6 (owner ruling,
+    2026-09-22).
+  - Mutation-checked: re-seeding the layout, dropping the unknown fallback, a failed read writing
+    `None`, and suppressing the unnameable notice each fail a test.
+
+- **Generator loads run `juniper_data_client.validate_npz_contract` as an ADVISORY second check**
+  (#559; owner ruling 2026-09-22). `regenerate_dataset_from_generator` now hands every downloaded
+  artifact to the shared contract validator before its own rank probe dispatches it. For a 3-D
+  artifact the validator checks sequence rules canopy's install never did: that a `t` / `dt`
+  channel is present, that `dt >= 0` with `dt[:, 0] == 0`, that `t` and `dt` agree, and that
+  masks are binary and correctly shaped. A violation is logged at WARNING, naming the source and
+  the rule, and **the install proceeds exactly as before**. The validator fails closed, and a
+  legacy `X_full`-only artifact makes it raise `KeyError`, while the ecosystem contract is
+  "tolerate `*_full`, never require it". So it reports and never gates. Any exception it raises
+  is caught, whatever the type, including an `ImportError` from a client too old to have the
+  helper. The rank probe stays the gate, and the comment above it no longer claims that the
+  helper is absent from the pinned client, a claim that has been false since the 0.5.0 floor.
+  `src/tests/unit/test_npz_contract_advisory.py` covers a violation that is reported and still
+  installs, a legacy artifact that is reported and still installs, an unexpected error that
+  never blocks the load, a client without the helper, and a valid artifact that logs nothing.
+  The unit lane runs without juniper-data-client (`src/tests/conftest.py` injects a stub module),
+  so the tests drive the wrapper through a faithful fake of the helper.
+  `test_the_fake_agrees_with_the_real_helper` holds the fake to the real one wherever the client
+  is installed, and skips, saying why, where it is not. Eight of the ten cases fail against the
+  pre-change tree. The other two are the negative control and the agreement check, and neither
+  exercises canopy code.
 
 ### Fixed
 
@@ -119,6 +181,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check that would have caught this. Two pre-existing cycles are exempted by name, CAN-016a tab
   restore/stamp and the CAN-015 replay-player control loop. Both close through `allow_duplicate`
   outputs, so neither is a readiness deadlock.
+- **Re-staging from the restart modal dropped a seeded generator's params, so equities 422'd.**
+  `_restage_dataset` sent the typed spiral fields and never the registry seed. Confirming an
+  edited dataset in the modal therefore sent `equities` without `symbols`, and a default
+  deployment refuses the whole 503-name universe against the symbol cap. It also sent `mnist`
+  without `flatten`. It now sends the seed as `nn_dataset_params`, exactly as Apply Dataset does.
+  The modal renders no schema-driven params, so a custom list applied earlier from the sidebar
+  is not carried: the modal re-stages what it displays. Found, and reproduced on `main`, by
+  the registry-repair pass (canopy#665). Mutation-checked: without the seed, five of the new
+  `TestRestageDataset` cases fail. Two stale comments in the same file still said the gate
+  *snaps*; since canopy#652 it clears.
 - **The `unknown` availability state could never fire for the outage it was built for.**
   `/api/dataset/generators` caught a juniper-data failure and answered HTTP 200 with four
   built-in demo generators carrying no `available` flag, so an outage and an answer were
@@ -128,6 +200,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (attempted and did not answer), which the dashboard translates to *unknown*. Deliberately
   false when juniper-data is unconfigured: that is demo mode, where the built-in four are
   the offering and availability is known.
+- **`test_multiple_clients_receive_state_on_connect` failed on about 7% of runs locally, and
+  could not see a dropped connect-time `state`.** The Scheduled Tests lane went red on
+  2026-09-22 (run 35694265700, 3.13 leg) with *"initial_status was not received before
+  state"*. The `/ws/training` handler unicasts `connection_established` → `initial_status` →
+  `state`, strictly in that order. But `connect()` adds the socket to the broadcast set
+  (`websocket_manager.py:381`) before the handler awaits `offload(backend.get_status)`
+  (`main.py:830`), a thread hop since X7 slice 1a (#567). A demo `metrics` + `state` broadcast
+  queued during that hop is delivered first, and the test helper took the first `state` it
+  saw for the connect-time one. Reproduced at 22/300, 22/300 under pinned CPU contention and
+  21/300 on a re-run. Every failing session's full wire order was `connection_established >
+  metrics > state > initial_status > state`: nothing dropped, only a broadcast delivered
+  early. With a synchronous `get_status` (the pre-#567 shape) patched in locally the rate was
+  0/300, which pins the hop as the window.
+
+  Not a product defect. The handler's own order never broke, and the one in-repo consumer
+  (`ws_dash_bridge.js`) registers no `initial_status` handler and treats `state` as
+  latest-wins. `docs/api/API_REFERENCE.md` claimed `initial_status` precedes steady-state
+  messages; it now states the real contract. The test fixture tags every
+  `WebSocketManager.broadcast` frame (test-only; production payloads are untouched). The
+  helper skips tagged frames and asserts the exact unicast order, which makes it deterministic
+  (0/300, 0/300 contended, 400/400 across 25 passes of the whole file) and strictly stronger.
+  With the handler's connect-time `state` deleted, the old helper still passed, because the
+  next broadcast `state` stood in for it; the new one fails, as it does for a dropped
+  `initial_status` or a `state` sent before it. An instrument guard fails if the tag stops
+  reaching the wire. The file's other two classes (eight tests, the helper's own regression
+  pins among them) had no `integration` marker, so every CI lane deselected them; they now
+  run.
+- **The WS keepalive tests asserted that the loop ticked fast enough, not that it ticked.**
+  Both `TestWebSocketKeepalive` tests (`test_main_import_and_lifespan.py`) slept a fixed
+  0.05 s against a 0.01 s interval and required two pings, two of five expected ticks. A
+  runner that stalls the event loop for a few tens of milliseconds fails them: reproduced at
+  2/400 on one saturated core (`assert 1 >= 2`). They now poll until the condition holds or a
+  5 s deadline passes, stop early if the task ends, and assert that it is still running. A
+  loop that does not repeat, or that dies on a broadcast error, fails with a message that says
+  so. `test_concurrent_broadcast_from_thread_delivers_all` (`test_async_sync_boundary.py`) had
+  the same shape (a fixed 0.5 s, then `call_count >= 15`) and gets the same bounded poll.
+  After: 0/400 and 0/100 on the saturated core. No production constant changed;
+  `HEALTH_DEADLINE_SECONDS` is untouched (canopy#649).
 - **A conflict notice claimed to have cleared a dataset that was never selected.** With the
   dataset at `⊥`, any gate re-fire rendered *"none is not compatible with CasCor
   (Cascade-Correlation), so it was cleared"* — the literal string `none` from
