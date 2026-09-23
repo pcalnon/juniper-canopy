@@ -136,14 +136,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `reports/e2e-canopy-2026-09-02/consensus/2026-09-23_validator_reports_round1.md`, Lane B). So
     the state records each button's count as of its last applied click (`clicks`) and the slider
     value this callback last wrote (`slider_w`), and anything above those is applied at the next
-    run, before that run's own triggers. A lost pause now applies when the request that replaced
-    it gets a slot (seconds, under sustained contention) instead of never.
+    run, before that run's own triggers. A lost pause now applies at this callback's next run to
+    get a slot (seconds, under sustained contention) instead of never.
   - **A trigger alone applies nothing.** A button applies exactly its unapplied clicks. A run can
     apply a click from its count after the click wrote `n_clicks` and before the click's own
     request ran; the first revision also applied every trigger at least once, so that request
     applied the click again, undoing the pause or stepping two rows (juniper-ml
     `…/2026-09-23_validator_reports_round2.md`, Lane B2). For the same reason, a slider trigger
     carrying the value this callback last wrote is not a seek: re-read, it can land one row low.
+    The cost (round 3): a real drag that lands exactly on that value does not pause the replay.
+    The value is a whole number only at row 0, the last row, or a row where the max divides
+    100 × row.
   - **Several pending play clicks toggle once,** as stock Dash does for a merged double click: a
     lost pause followed by the user pausing again pauses, where counting by parity would cancel
     the two. It only helps when both are pending in one run; a repeat made after the pause

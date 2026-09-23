@@ -157,7 +157,9 @@ function(playClicks, backClicks, forwardClicks, startClicks, endClicks, speed1x,
         // run can already have applied this click from the count -- it ran after the click
         // wrote n_clicks and before this request did -- and applying it again would undo the
         // pause (Lane B2, round 2). A slider trigger carrying the value this callback last wrote
-        // is not a seek: re-reading the thumb, trunc(v / 100 * max) can land one index low.
+        // is not a seek: re-reading the thumb, trunc(v / 100 * max) can land one index low. The
+        // cost: a real drag landing exactly on that value does not pause. It is a whole number
+        // only at row 0, the last row, or where max divides 100 * row (round 3).
         if (ev === "replay-slider") {
             if (typeof state.slider_w === "number" && sliderValue === state.slider_w) { continue; }
         } else if (pending[ev] <= 0) {
@@ -1202,9 +1204,9 @@ class MetricsPanel(BaseComponent):
         # ``state.clicks`` holds each button's count as of its last applied click, and any
         # count above it is applied at the next run, before that run's own triggers. The
         # slider is a seek when its value differs from the one this callback last wrote
-        # (``state.slider_w``, recorded on every write). A lost pause therefore applies when the
-        # request that replaced it runs -- as soon as that one gets a slot, which under sustained
-        # contention can be seconds -- instead of never. A trigger alone applies nothing, so a
+        # (``state.slider_w``, recorded on every write). A lost pause therefore applies at this
+        # callback's next run to get a slot -- a later request can replace the replacer too, and
+        # under sustained contention the wait can be seconds -- instead of never. A trigger alone applies nothing, so a
         # click an earlier run already applied from its count is not applied again when its own
         # request runs; applying it again would undo the pause. Review evidence (juniper-ml
         # ``reports/e2e-canopy-2026-09-02/consensus/2026-09-23_validator_reports_round*.md``):
