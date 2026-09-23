@@ -31,8 +31,8 @@ Wiring:
   the snapshots panel after a successful POST /replay).
 - Each control writes to ``/api/v1/snapshots/{id}/replay/control``
   via ``_invoke_replay_control``.
-- WebSocket events from the cascor backend update the Store via the
-  websocket bridge (consumed in dashboard_manager).
+- No WebSocket event writes the Store. Its only writers are the
+  snapshots panel's replay confirm and ``dispatch_control``.
 """
 
 from typing import Any, Dict, Optional
@@ -72,6 +72,11 @@ SPEED_MARKS = {
     10: "10×",
 }
 
+# The weight drain's gate: its interval is disabled unless a replay session exists, meaning the
+# session Store holds a truthy ``snapshot_id``. ``test_idle_dispatch_cuts.py`` runs this
+# function under node.
+WEIGHT_DRAIN_GATE_JS = "function(session) { return !(session && session.snapshot_id); }"
+
 
 class ReplayPlayerPanel(BaseComponent):
     """V1 replay player UI for snapshot playback sessions."""
@@ -109,7 +114,9 @@ class ReplayPlayerPanel(BaseComponent):
                 # Status / error line.
                 html.Div(id=f"{self.component_id}-status", style={"marginTop": "10px"}),
                 # Session state Store. Populated by the snapshots panel after POST
-                # /replay, cleared on stop. Schema:
+                # /replay. ``_merge_session`` clears it on stop only when the stop
+                # response is empty, which the cascor proxy never returns
+                # (F-CANOPY-056). Schema:
                 #   {snapshot_id, fsm_state, time_index, range: [start, end] | None,
                 #    speed, playing}
                 dcc.Store(id="replay-player-session", data=None),
@@ -130,11 +137,11 @@ class ReplayPlayerPanel(BaseComponent):
                 # network_evolution, this panel's last-sample
                 # readout) decode on demand.
                 dcc.Store(id="replay-weight-buffer", data=[]),
-                # Periodic drain trigger. Fires on the existing
-                # fast-update interval (sourced from dashboard_manager)
-                # so the player stays in sync with the replay session
-                # without spawning a dedicated interval.
-                dcc.Interval(id=f"{self.component_id}-weight-drain", interval=500, n_intervals=0),
+                # Periodic drain trigger: this panel's own 500 ms interval.
+                # It ships DISABLED and runs only once this page has
+                # started a replay (``WEIGHT_DRAIN_GATE_JS``, registered
+                # in ``register_callbacks``).
+                dcc.Interval(id=f"{self.component_id}-weight-drain", interval=500, n_intervals=0, disabled=True),
             ],
             id=self.component_id,
             style={"padding": "20px", "maxWidth": "900px"},
@@ -531,10 +538,10 @@ class ReplayPlayerPanel(BaseComponent):
 
         # CAN-015g (g-4): periodic drain of the JS-side replay weight
         # ring buffer into the Dash Store. Clientside so the browser
-        # doesn't pay a server round-trip per drain — at default
-        # 500ms cadence with 100-entry buffer, the steady-state cost
-        # is dominated by JSON serialization of one or two recent
-        # weight events.
+        # doesn't pay a server round-trip per drain. No replay weight
+        # reaches the page today (F-CANOPY-057), so every drain finds
+        # nothing; its cost is the tick itself, which is why the gate
+        # below holds the timer off until this page starts a replay.
         app.clientside_callback(
             f"""
             function(n_intervals, current_buffer) {{
@@ -556,6 +563,36 @@ class ReplayPlayerPanel(BaseComponent):
             Output("replay-weight-buffer", "data"),
             Input(f"{component_id}-weight-drain", "n_intervals"),
             State("replay-weight-buffer", "data"),
+        )
+
+        # The drain runs only once this page has started a replay: the snapshots panel writes
+        # the session on POST /replay. Ungated, its 2 Hz timer ran on every tab for the life of
+        # the page, and each tick was a store update plus a clientside callback that found
+        # nothing. Parking it on an idle page cut the median response-delivery latency by 42%
+        # and 32% in two runs (juniper-ml E2E evidence ledger, Phase 8). The JS buffer is capped
+        # at 100 entries (``ws_dash_bridge.js`` ``MAX_REPLAY_WEIGHTS``), so a paused drain
+        # cannot grow it.
+        #
+        # Two limits, filed in that ledger:
+        #  * F-CANOPY-056: Stop clears ``snapshot_id`` only when the stop response is empty
+        #    (``_merge_session``), and the proxied cascor envelope never is. So against cascor
+        #    the drain keeps running after a Stop until the page reloads, as it always ran.
+        #  * F-CANOPY-057: no replay weight reaches the page today. cascor's replay frames carry
+        #    none, and the metrics relay rebuilds each payload without the key. If that stream is
+        #    ever wired, this gate keys on THIS page's session while the WS broadcast reaches
+        #    every open page. Another page buffers the weights until its own session opens, then
+        #    drains them into it; Network Evolution renders the buffer with no session check,
+        #    and Decision Boundary would render that page's ``buffer[-1]`` at session open.
+        #
+        # The ONLY writer of the drain's ``disabled``: it is not in dashboard_manager's
+        # ``_GATED_POLL_INTERVALS``. Every writer of ``replay-player-session`` is an
+        # ``allow_duplicate`` Output, whose ``@hash`` closure reaches nothing, so no pending
+        # callback can hold this gate.
+        app.clientside_callback(
+            WEIGHT_DRAIN_GATE_JS,
+            Output(f"{component_id}-weight-drain", "disabled"),
+            Input("replay-player-session", "data"),
+            prevent_initial_call=False,
         )
 
         # CAN-015g (g-4): last-sample readout reflects the most recent
