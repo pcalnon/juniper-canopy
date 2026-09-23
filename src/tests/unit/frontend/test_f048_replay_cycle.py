@@ -16,34 +16,36 @@ all three replay callbacks in ``requested`` in 6471 of 6471 samples, and zero ``
 writes across ten clicks. The clean room locked 3/3 with the cycle plus an always-pending
 feeder, was live 3/3 with the slider as State, and did not lock without the feeder.
 
-The fix merges the two into one callback that reads AND writes ``replay-slider.value``.
+The fix merged the two into one callback that reads AND writes ``replay-slider.value``.
+F-CANOPY-054 (2026-09-23) then moved that callback to the browser: it is now the clientside
+``REPLAY_CONTROLS_JS``, the only writer of ``replay-state``, with the tick folded in and the
+metrics store read as State. The server ``replay_tick`` and play-label callbacks are gone.
 
-What these tests prove:
-  * SEMANTICS -- for every control, the merged handler returns exactly what the old
-    controls callback returned, followed by what the old UI callback rendered from that state
-    (a differential check against verbatim copies of both, below). A refresh trigger (a
-    ``replay_tick`` write, a metrics refill, the mount call) never rewrites the state, so it
-    cannot pause playback or move the index.
-  * WIRING -- the registered callback is the only writer of the slider and reads it too, and
-    every control Input it registers is one the handler dispatches on.
+What these tests prove, as of F-CANOPY-054:
+  * WIRING -- one callback is the only writer of the slider and reads it too, and the slider is
+    a PRIMARY output of it.
   * ACYCLICITY -- no cycle spanning two or more distinct callbacks exists anywhere in the BUILT
-    app (the served ``/_dash-dependencies``), bar two named, pre-existing exemptions; and no
-    replay-block callback's own readiness closure covers one of its own Inputs.
+    app (the served ``/_dash-dependencies``), bar two named, pre-existing exemptions.
+  * READINESS -- no replay-block callback's own readiness closure covers one of its own Inputs,
+    and no pending callback's closure reaches any of the controls' checked Inputs.
 
-What they cannot prove: that the LIVE renderer now promotes the merged callback. That depends
-on runtime pendingness -- it is not ready while a primary writer of the metrics store is
-pending -- and is left to a live verify leg.
+The SEMANTICS tests F-CANOPY-048 added here (every control against verbatim copies of both old
+callbacks, and a refresh never rewriting the state) moved with the handler to
+``test_f054_replay_block_clientside.py``, where they run on the registered JavaScript under node.
+
+What they cannot prove: that the LIVE renderer promotes the controls callback. That is left to a
+live verify leg. F-CANOPY-048's version of this caveat -- the callback was not ready while a
+primary writer of the metrics store was pending -- no longer applies: the store is State.
 
 Verified against the parent commit (886147b5): the two graph tests below that encode the
 defect FAIL there (the whole-app scan finds the replay SCC; both old callbacks are
-self-blocked), and so do the handler and wiring tests (no merged handler; two slider writers).
+self-blocked), and so did the handler and wiring tests of that time (no merged handler; two
+slider writers).
 """
 
-import copy
 import json
 from collections import defaultdict
 
-import dash
 import pytest
 from dash import Dash, dcc, html
 
@@ -72,247 +74,16 @@ def _prop(suffix):
 
 
 # ---------------------------------------------------------------------------------------------
-# The pre-merge callbacks, VERBATIM from canopy main 886147b5
-# (src/frontend/components/metrics_panel.py:995-1044 and :1086-1094), with one change: the
-# trigger is passed in rather than read from ``dash.callback_context``. They are the oracle.
+# SEMANTICS moved with the callback (F-CANOPY-054). The differential against the pre-merge
+# callbacks, the named per-control behaviours and the merged-request order now run on the
+# registered JavaScript under node, in ``test_f054_replay_block_clientside.py``, against a
+# verbatim copy of the merged server handler this file used to exercise.
 # ---------------------------------------------------------------------------------------------
-def _old_handle_replay_controls(trigger, slider_value, current_state, metrics_data):
-    state = (
-        current_state.copy()
-        if current_state
-        else {
-            "mode": "stopped",
-            "speed": 1.0,
-            "current_index": 0,
-            "start_index": 0,
-            "end_index": None,
-        }
-    )
-
-    max_index = len(metrics_data) - 1 if metrics_data else 0
-    state["end_index"] = state.get("end_index") or max_index
-
-    if "replay-play" in trigger:
-        state["mode"] = "paused" if state["mode"] == "playing" else "playing"
-    elif "step-back" in trigger:
-        state["mode"] = "paused"
-        state["current_index"] = max(0, state["current_index"] - 1)
-    elif "step-forward" in trigger:
-        state["mode"] = "paused"
-        state["current_index"] = min(max_index, state["current_index"] + 1)
-    elif "replay-start" in trigger:
-        state["current_index"] = state["start_index"]
-        state["mode"] = "paused"
-    elif "replay-end" in trigger:
-        state["current_index"] = state["end_index"] or max_index
-        state["mode"] = "paused"
-    elif "speed-1x" in trigger:
-        state["speed"] = 1.0
-    elif "speed-2x" in trigger:
-        state["speed"] = 2.0
-    elif "speed-4x" in trigger:
-        state["speed"] = 4.0
-    elif "replay-slider" in trigger:
-        state["current_index"] = int((slider_value / 100) * max_index) if max_index > 0 else 0
-        state["mode"] = "paused"
-
-    base_interval = 1000
-    interval = int(base_interval / state["speed"])
-    disabled = state["mode"] != "playing"
-
-    return state, disabled, interval
-
-
-def _old_update_replay_ui(state, metrics_data):
-    max_index = len(metrics_data) - 1 if metrics_data else 0
-    current_index = state.get("current_index", 0) if state else 0
-
-    slider_value = (current_index / max_index * 100) if max_index > 0 else 0
-    position_text = f"{current_index} / {max_index}"
-
-    return slider_value, 100, position_text
-
-
-STATES = [
-    None,
-    {"mode": "stopped", "speed": 1.0, "current_index": 0, "start_index": 0, "end_index": None},
-    {"mode": "playing", "speed": 2.0, "current_index": 7, "start_index": 0, "end_index": None},
-    {"mode": "paused", "speed": 4.0, "current_index": 49, "start_index": 3, "end_index": 20},
-    {"mode": "playing", "speed": 1.0, "current_index": 0, "start_index": 0, "end_index": 0},
-]
-METRICS = [None, [], [{"epoch": 0}], [{"epoch": i} for i in range(2)], [{"epoch": i} for i in range(50)]]
-SLIDER_VALUES = [0, 33, 50, 100, 42.857142857142854]
-
-
-@pytest.fixture
-def panel():
-    return MetricsPanel({}, component_id=CID)
-
-
-# ---------------------------------------------------------------------------------------------
-# SEMANTICS
-# ---------------------------------------------------------------------------------------------
-@pytest.mark.unit
-class TestMergedHandlerMatchesTheOldCallbacks:
-    @pytest.mark.parametrize("control", sorted(CONTROL_INPUTS))
-    def test_each_control_matches_old_controls_then_old_ui(self, panel, control):
-        """Differential: new(control) == old_controls(control) followed by old_ui(that state)."""
-        cases = 0
-        for state in STATES:
-            for metrics in METRICS:
-                for slider in SLIDER_VALUES:
-                    old_state, old_disabled, old_interval = _old_handle_replay_controls(f"{CID}-{control}", slider, copy.deepcopy(state), metrics)
-                    expected = (old_state, old_disabled, old_interval, *_old_update_replay_ui(old_state, metrics))
-                    got = panel._handle_replay_controls_handler(triggered=[_prop(control)], slider_value=slider, current_state=copy.deepcopy(state), metrics_data=metrics)
-                    assert got == expected, f"{control} state={state} metrics_len={None if metrics is None else len(metrics)} slider={slider}"
-                    cases += 1
-        assert cases == len(STATES) * len(METRICS) * len(SLIDER_VALUES)
-
-    @pytest.mark.parametrize("trigger", [[], ["."], [STATE_DATA], [METRICS_DATA], [STATE_DATA, METRICS_DATA]], ids=["mount", "falsy-placeholder", "replay-tick-write", "metrics-refill", "both-refreshes"])
-    def test_a_refresh_renders_the_old_ui_and_never_writes_state(self, panel, trigger):
-        """No control fired: the state, interval flag and period are ``no_update``."""
-        for state in STATES:
-            for metrics in METRICS:
-                got = panel._handle_replay_controls_handler(triggered=trigger, slider_value=50, current_state=copy.deepcopy(state), metrics_data=metrics)
-                assert got[:3] == (dash.no_update, dash.no_update, dash.no_update)
-                assert got[3:] == _old_update_replay_ui(state, metrics)
-
-    def test_the_input_state_is_not_mutated(self, panel):
-        state = {"mode": "playing", "speed": 1.0, "current_index": 5, "start_index": 0, "end_index": None}
-        before = copy.deepcopy(state)
-        panel._handle_replay_controls_handler(triggered=[_prop("replay-step-forward")], current_state=state, metrics_data=[{}] * 10)
-        assert state == before
-
-
-@pytest.mark.unit
-class TestEachControl:
-    """The behaviours the replay matrix rows drive (M-METRICS-11..16 and -18), named."""
-
-    METRICS_50 = [{"epoch": i} for i in range(50)]
-
-    def _run(self, panel, control, state, slider=None, metrics=None):
-        return panel._handle_replay_controls_handler(triggered=[_prop(control)], slider_value=slider, current_state=state, metrics_data=self.METRICS_50 if metrics is None else metrics)
-
-    def test_play_toggles_and_arms_the_interval(self, panel):
-        state, disabled, interval, *_ = self._run(panel, "replay-play", {"mode": "stopped", "speed": 1.0, "current_index": 0, "start_index": 0, "end_index": None})
-        assert (state["mode"], disabled, interval) == ("playing", False, 1000)
-        state, disabled, _interval, *_ = self._run(panel, "replay-play", state)
-        assert (state["mode"], disabled) == ("paused", True)
-
-    def test_step_back_pauses_and_clamps_at_zero(self, panel):
-        state, *_ = self._run(panel, "replay-step-back", {"mode": "playing", "speed": 1.0, "current_index": 10, "start_index": 0, "end_index": None})
-        assert (state["mode"], state["current_index"]) == ("paused", 9)
-        state, *_ = self._run(panel, "replay-step-back", {"mode": "stopped", "speed": 1.0, "current_index": 0, "start_index": 0, "end_index": None})
-        assert state["current_index"] == 0
-
-    def test_step_forward_pauses_and_clamps_at_max(self, panel):
-        state, *_ = self._run(panel, "replay-step-forward", {"mode": "playing", "speed": 1.0, "current_index": 10, "start_index": 0, "end_index": None})
-        assert (state["mode"], state["current_index"]) == ("paused", 11)
-        state, *_ = self._run(panel, "replay-step-forward", {"mode": "stopped", "speed": 1.0, "current_index": 49, "start_index": 0, "end_index": None})
-        assert state["current_index"] == 49
-
-    def test_start_and_end_jump_and_pause(self, panel):
-        state, *_ = self._run(panel, "replay-start", {"mode": "playing", "speed": 1.0, "current_index": 25, "start_index": 4, "end_index": None})
-        assert (state["mode"], state["current_index"]) == ("paused", 4)
-        state, *_ = self._run(panel, "replay-end", {"mode": "playing", "speed": 1.0, "current_index": 10, "start_index": 0, "end_index": None})
-        assert (state["mode"], state["current_index"], state["end_index"]) == ("paused", 49, 49)
-
-    @pytest.mark.parametrize("control, speed, interval", [("speed-1x", 1.0, 1000), ("speed-2x", 2.0, 500), ("speed-4x", 4.0, 250)])
-    def test_speed_sets_the_interval_without_touching_mode_or_index(self, panel, control, speed, interval):
-        state, disabled, got_interval, *_ = self._run(panel, control, {"mode": "playing", "speed": 1.0, "current_index": 12, "start_index": 0, "end_index": None})
-        assert (state["speed"], got_interval, disabled, state["mode"], state["current_index"]) == (speed, interval, False, "playing", 12)
-
-    def test_slider_maps_percent_to_index_and_pauses(self, panel):
-        state, disabled, _interval, slider, slider_max, position = self._run(panel, "replay-slider", {"mode": "playing", "speed": 1.0, "current_index": 0, "start_index": 0, "end_index": None}, slider=50)
-        assert (state["current_index"], state["mode"], disabled) == (int((50 / 100) * 49), "paused", True)
-        assert (slider, slider_max, position) == (24 / 49 * 100, 100, "24 / 49")
-
-    def test_the_click_renders_in_the_same_response(self, panel):
-        """One hop: the slider and position already reflect the click's new index."""
-        *_, slider, _max, position = self._run(panel, "replay-step-forward", {"mode": "paused", "speed": 1.0, "current_index": 9, "start_index": 0, "end_index": None})
-        assert (slider, position) == (10 / 49 * 100, "10 / 49")
-
-
-@pytest.mark.unit
-class TestProgrammaticWritesAreNotSeeks:
-    """The latent defect the lock was hiding (independent Lane B review).
-
-    Pre-merge, a chain that STARTED at ``replay_tick`` or at a store write reached the controls
-    callback through ``update_replay_ui``'s slider write with neither callback in the chain's
-    ``predecessors``, so the renderer did not prune it -- and the slider branch paused playback
-    on every such write. In the merged callback those chains arrive as ``replay-state`` or
-    ``metrics-store`` triggers, and neither may change ``mode`` or ``current_index``.
-    """
-
-    def test_a_metrics_refill_changes_neither_mode_nor_index(self, panel):
-        playing = {"mode": "playing", "speed": 2.0, "current_index": 7, "start_index": 0, "end_index": None}
-        state_out, disabled_out, interval_out, slider, _max, position = panel._handle_replay_controls_handler(triggered=[METRICS_DATA], slider_value=11, current_state=copy.deepcopy(playing), metrics_data=[{}] * 66)
-        assert (state_out, disabled_out, interval_out) == (dash.no_update,) * 3
-        assert (slider, position) == (7 / 65 * 100, "7 / 65")
-
-    def test_a_replay_tick_neither_pauses_nor_moves_the_index(self, panel):
-        """Drive the real ``replay_tick`` callback, then the merged callback on its write."""
-        callbacks = _registered(panel)
-        playing = {"mode": "playing", "speed": 1.0, "current_index": 7, "start_index": 0, "end_index": 49}
-        ticked = callbacks["replay_tick"](1, copy.deepcopy(playing), [{}] * 50)
-        assert (ticked["mode"], ticked["current_index"]) == ("playing", 8)
-        state_out, disabled_out, interval_out, slider, _max, position = panel._handle_replay_controls_handler(triggered=[STATE_DATA], slider_value=7 / 49 * 100, current_state=ticked, metrics_data=[{}] * 50)
-        assert (state_out, disabled_out, interval_out) == (dash.no_update,) * 3
-        assert (ticked["mode"], ticked["current_index"]) == ("playing", 8)
-        assert (slider, position) == (8 / 49 * 100, "8 / 49")
-
-    def test_dispatch_is_exact_not_substring(self, panel):
-        """A component id that merely CONTAINS a control's name is not that control."""
-        state = {"mode": "stopped", "speed": 1.0, "current_index": 3, "start_index": 0, "end_index": None}
-        for bogus in (f"other-{CID}-replay-play.n_clicks", f"{CID}-replay-play-extra.n_clicks", f"{CID}-step-back.n_clicks", "replay-slider.value"):
-            got = panel._handle_replay_controls_handler(triggered=[bogus], slider_value=90, current_state=copy.deepcopy(state), metrics_data=[{}] * 10)
-            assert got[0] is dash.no_update, bogus
-
-
-@pytest.mark.unit
-class TestMergedRequests:
-    """dash-renderer merges queued requests of one callback into ONE request whose
-    ``changedPropIds`` keep first-requested order (dash_renderer.dev.js:3004-3007), and the
-    server builds ``ctx.triggered`` in that order (dash.py:1492). ``ctx.triggered_id`` is only
-    the first entry. A click queued behind a pending refresh must still apply."""
-
-    def test_a_click_queued_behind_a_tick_refresh_applies(self, panel):
-        playing = {"mode": "playing", "speed": 1.0, "current_index": 7, "start_index": 0, "end_index": None}
-        state_out, disabled_out, *_ = panel._handle_replay_controls_handler(triggered=[STATE_DATA, _prop("replay-play")], current_state=copy.deepcopy(playing), metrics_data=[{}] * 50)
-        assert (state_out["mode"], disabled_out) == ("paused", True)
-
-    def test_a_click_queued_behind_a_refill_applies(self, panel):
-        state = {"mode": "paused", "speed": 1.0, "current_index": 7, "start_index": 0, "end_index": None}
-        state_out, *_ = panel._handle_replay_controls_handler(triggered=[METRICS_DATA, _prop("speed-4x")], current_state=copy.deepcopy(state), metrics_data=[{}] * 50)
-        assert (state_out["speed"], state_out["mode"], state_out["current_index"]) == (4.0, "paused", 7)
-
-    def test_several_controls_apply_in_trigger_order(self, panel):
-        state = {"mode": "paused", "speed": 1.0, "current_index": 10, "start_index": 0, "end_index": None}
-        state_out, disabled_out, interval_out, *_ = panel._handle_replay_controls_handler(triggered=[_prop("replay-step-forward"), _prop("speed-2x"), _prop("replay-play")], current_state=copy.deepcopy(state), metrics_data=[{}] * 50)
-        assert (state_out["current_index"], state_out["speed"], state_out["mode"], disabled_out, interval_out) == (11, 2.0, "playing", False, 500)
 
 
 # ---------------------------------------------------------------------------------------------
 # WIRING
 # ---------------------------------------------------------------------------------------------
-def _registered(panel):
-    callbacks = {}
-
-    class _App:
-        def callback(self, *args, **kwargs):
-            def decorator(func):
-                callbacks[func.__name__] = func
-                return func
-
-            return decorator
-
-        def clientside_callback(self, *args, **kwargs):
-            return None
-
-    panel.register_callbacks(_App())
-    return callbacks
-
-
 def _split_outputs(output):
     return output[2:-2].split("...") if output.startswith("..") else [output]
 
@@ -349,61 +120,9 @@ class TestWiring:
         assert SLIDER_VALUE in _dep_ids(entry, "inputs")
         assert SLIDER_VALUE in _split_outputs(entry["output"]), "the slider must be a PRIMARY output (an allow_duplicate one keeps its @hash and is not exempt from readiness)"
 
-    def test_refresh_inputs_and_outputs(self, panel_app):
-        entry = _merged_entry(panel_app)
-        inputs = _dep_ids(entry, "inputs")
-        outputs = _split_outputs(entry["output"])
-        assert STATE_DATA in inputs and METRICS_DATA in inputs
-        for out in (STATE_DATA, f"{CID}-replay-interval.disabled", f"{CID}-replay-interval.interval", SLIDER_VALUE, f"{CID}-replay-slider.max", f"{CID}-replay-position.children"):
-            assert out in outputs, out
-        assert entry["state"] == [], "everything the merged callback reads is an Input"
-
-    def test_positional_signature_is_the_old_one(self, panel_app):
-        """Old Inputs, then the old States in their old order -- so positional callers keep working."""
-        expected = [_prop(s) for s in ("replay-play", "replay-step-back", "replay-step-forward", "replay-start", "replay-end", "speed-1x", "speed-2x", "speed-4x", "replay-slider")] + [STATE_DATA, METRICS_DATA]
-        assert _dep_ids(_merged_entry(panel_app), "inputs") == expected
-
     def test_mount_call_is_kept(self, panel_app):
         """PERF-CN-01: the initial slider and "0 / 0" are rendered on mount."""
         assert _merged_entry(panel_app)["prevent_initial_call"] is False
-
-    def test_every_registered_control_input_is_dispatched(self, panel_app, panel):
-        """``REPLAY_CONTROL_IDS`` and the registered Inputs must not drift apart."""
-        refreshes = {STATE_DATA, METRICS_DATA}
-        controls = [p for p in _dep_ids(_merged_entry(panel_app), "inputs") if p not in refreshes]
-        assert len(controls) == len(MetricsPanel.REPLAY_CONTROL_IDS)
-        for prop_id in controls:
-            got = panel._handle_replay_controls_handler(triggered=[prop_id], slider_value=50, current_state=None, metrics_data=[{}] * 10)
-            assert got[0] is not dash.no_update, f"{prop_id} is registered but not dispatched"
-
-    def test_update_replay_ui_is_gone_and_the_neighbours_are_unchanged(self, panel):
-        callbacks = _registered(panel)
-        assert "update_replay_ui" not in callbacks
-        for name in ("handle_replay_controls", "replay_tick", "update_play_button", "toggle_replay_visibility"):
-            assert name in callbacks, name
-
-    def test_replay_tick_and_play_label_keep_their_shape(self, panel_app):
-        entries = {tuple(_split_outputs(e["output"])): e for e in panel_app._callback_list}
-        tick = [e for outs, e in entries.items() if any(o.startswith(f"{STATE_DATA}@") for o in outs)]
-        assert len(tick) == 1 and _dep_ids(tick[0], "inputs") == [f"{CID}-replay-interval.n_intervals"]
-        assert _dep_ids(tick[0], "state") == [STATE_DATA, METRICS_DATA]
-        label = entries[(f"{CID}-replay-play.children",)]
-        assert _dep_ids(label, "inputs") == [STATE_DATA]
-
-    def test_callback_reads_the_trigger_from_callback_context(self, panel):
-        """The registered function hands ``ctx.triggered``'s prop_ids to the handler."""
-        from unittest.mock import patch
-
-        func = _registered(panel)["handle_replay_controls"]
-        with patch("dash.callback_context") as ctx:
-            ctx.triggered = [{"prop_id": _prop("replay-play"), "value": 1}]
-            got = func(1, 0, 0, 0, 0, 0, 0, 0, 0, None, [{}] * 10)
-        assert (got[0]["mode"], got[1], got[5]) == ("playing", False, "0 / 9")
-
-    def test_callback_outside_a_callback_context_is_the_mount_call(self, panel):
-        func = _registered(panel)["handle_replay_controls"]
-        got = func(None, None, None, None, None, None, None, None, 0, None, [])
-        assert got == (dash.no_update, dash.no_update, dash.no_update, 0, 100, "0 / 0")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -599,20 +318,30 @@ class TestReplayBlockReadiness:
         callbacks = _callbacks(dependencies)
         by_input = _consumers(callbacks)
         block = _replay_block(callbacks)
-        assert len(block) >= 4, "replay block not found in the served dependencies"
+        # F-CANOPY-054: the container's visibility, the clientside controls, and the clientside
+        # refill of the position text. The server ``replay_tick`` and play label are gone.
+        assert len(block) == 3, f"replay block not found in the served dependencies: {[cb['label'] for cb in block]}"
         blocked = {cb["label"]: sorted(set(_checked_inputs(cb)) & _closure(cb, callbacks, by_input)) for cb in block}
         assert not {k: v for k, v in blocked.items() if v}, f"self-blocked replay callbacks: {blocked}"
 
-    def test_only_a_pending_metrics_store_writer_can_hold_the_controls(self, dependencies):
-        """The condition the fix depends on, pinned: whatever else is pending, the only way into
-        the merged callback's checked Inputs is ``metrics-store.data`` -- so it is held exactly
-        while a PRIMARY writer of that store (or something upstream of one) is pending."""
+    def test_nothing_pending_can_hold_the_replay_controls(self, dependencies):
+        """F-CANOPY-054 tightened the condition canopy#658 depended on. Its merged callback read
+        ``metrics-store.data`` as an Input, so it was held while the store's primary writer was
+        pending -- most of the time, against a ~5 s delivery latency. The store is State now, so
+        no pending callback's downstream closure reaches ANY of the controls' checked Inputs.
+
+        This pins READINESS only. A ready request still waits for one of the renderer's 12
+        execution slots, and while it waits in ``prioritized`` a newer request of the same
+        callback replaces it without merging its trigger. The fix recovers that from the counts
+        it keeps (``clicks``, ``slider_w``, ``tick_n``); test_f054_replay_block_clientside.py's
+        TestLostTriggers pins the recovery, not this test."""
         callbacks = _callbacks(dependencies)
         by_input = _consumers(callbacks)
         merged = [cb for cb in callbacks if SLIDER_VALUE in cb["outputs"]]
         assert len(merged) == 1
         checked = set(_checked_inputs(merged[0]))
+        assert f"{CID}-replay-interval.n_intervals" in checked and METRICS_DATA not in checked
         reaches = set()
         for cb in callbacks:
             reaches |= checked & _closure(cb, callbacks, by_input)
-        assert reaches == {METRICS_DATA}
+        assert reaches == set(), f"a pending callback can hold the replay controls through: {sorted(reaches)}"

@@ -154,16 +154,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every tick. Dispatch is now on the exact triggering component id, over every entry of
   `ctx.triggered`, so a click the renderer merged behind a refresh still applies.
 
-  **The condition this depends on:** `metrics-store.data` is an Input of the merged callback, so
-  it is not ready while that store's primary writer `update_metrics_store` (or
-  `update_display_mode`, upstream of it) is pending. That poll is `running=`-gated and leaves
-  gaps. A primary writer pending at every renderer pass would lock the controls again. The old
-  controls callback had those same two blockers, through the slider. The new
+  **The condition this depended on:** `metrics-store.data` was an Input of the merged callback, so
+  it was not ready while that store's primary writer `update_metrics_store` (or
+  `update_display_mode`, upstream of it) was pending. That poll is `running=`-gated and leaves
+  gaps. A primary writer pending at every renderer pass would have locked the controls again. The
+  old controls callback had those same two blockers, through the slider. F-CANOPY-054 (below)
+  removed the condition: the controls callback is now clientside and reads the store as State. The
+  new
   `src/tests/unit/frontend/test_f048_replay_cycle.py` also fails CI on any Input-graph cycle
   across two or more distinct callbacks anywhere in the built app. Canopy never runs the dev-tools
   check that would have caught this. Two pre-existing cycles are exempted by name, CAN-016a tab
   restore/stamp and the CAN-015 replay-player control loop. Both close through `allow_duplicate`
   outputs, so neither is a readiness deadlock.
+- **Pausing a metrics replay did not hold: a late tick restored `playing` with the interval off,
+  so the label stuck at ⏸ and nothing moved (F-CANOPY-054).** After F-CANOPY-048 the replay state
+  had two writers, each a server round trip away: the merged controls callback, and `replay_tick`,
+  an `allow_duplicate` writer that computed the next state from the State read when its request was
+  sent. With the page's response-delivery latency at ~5 s against a 250–1000 ms tick, a tick was
+  in flight whenever the user paused. The pause disabled the interval, so no later tick evicted
+  that one, and its response — computed from `playing` — landed after the pause.
+
+  Moving only the tick clientside, the direction first recorded, does not fix it. The server
+  controls callback read `replay-state.data` as an Input, so every clientside tick re-requested it,
+  and dash-renderer drops an in-flight request whenever a new request of the same callback arrives
+  (the requestedCallbacks observer's `wDuplicates` step). Every click made during playback would
+  have been evicted. A clean room (juniper-ml
+  `util/ad-hoc/2026-09-23_f054_replay_tick_cleanroom.py`, verdicts fixed before the first run, 3
+  runs a shape) scored the old shape pause-undone 3/3, the tick-only shape click-dropped 3/3, and
+  this one pause-held 3/3, with the pause applied within 58 ms.
+
+  Fixed by running the whole block in the browser, with **one** clientside callback as the only
+  writer of `replay-state`. It handles the eight controls, the slider and the tick, and renders the
+  slider, the position and the play label from the state it just computed. A clientside callback
+  has no in-flight window: once it runs, nothing lands between its read and its apply, so nothing
+  computes from a stale state. `replay_tick`, the play-label callback and
+  `MetricsPanel._handle_replay_controls_handler` are removed. One click of each control has the old
+  effect, checked under node against a verbatim copy of the old handler over the whole grid.
+  - **Events come from values, not from triggers.** Clientside callbacks share the renderer's 12
+    execution slots, so a request can still lose its trigger BEFORE it runs. A request waiting in
+    `prioritized` is replaced by the next tick's request of the same callback, and only requests
+    still in `requested` merge their changed-prop ids. With trigger-only dispatch, review lost the
+    pause 3/3 under forced slot saturation and 2 of 12 under a dynamic load (juniper-ml
+    `reports/e2e-canopy-2026-09-02/consensus/2026-09-23_validator_reports_round1.md`, Lane B). So
+    the state records each button's count as of its last applied click (`clicks`) and the slider
+    value this callback last wrote (`slider_w`), and anything above those is applied at the next
+    run, before that run's own triggers. A lost pause now applies at this callback's next run to
+    get a slot (seconds, under sustained contention) instead of never.
+  - **A trigger alone applies nothing.** A button applies exactly its unapplied clicks. A run can
+    apply a click from its count after the click wrote `n_clicks` and before the click's own
+    request ran; the first revision also applied every trigger at least once, so that request
+    applied the click again, undoing the pause or stepping two rows (juniper-ml
+    `…/2026-09-23_validator_reports_round2.md`, Lane B2). For the same reason, a slider trigger
+    carrying the value this callback last wrote is not a seek: re-read, it can land one row low.
+    The cost (round 3): a real drag that lands exactly on that value does not pause the replay.
+    The value is a whole number only at row 0, the last row, or a row where the max divides
+    100 × row.
+  - **Several pending play clicks toggle once,** as stock Dash does for a merged double click: a
+    lost pause followed by the user pausing again pauses, where counting by parity would cancel
+    the two. It only helps when both are pending in one run; a repeat made after the pause
+    applied, but before the page shows it, still toggles back.
+  - **A cleared slider number box is not a seek.** dcc.Slider sends `NaN` when its box is cleared;
+    the state keeps its index and the slider is written back.
+  - **`metrics-store.data` is now State.** The store's primary writer is pending most of the time,
+    and dash-renderer holds a callback while any of its Inputs is downstream of a pending one, so
+    the controls waited on every poll. Now no pending callback holds back their readiness
+    (`test_nothing_pending_can_hold_the_replay_controls`, on the built app). A ready run can still
+    wait for an execution slot; "Events come from values" above covers what that can lose. A
+    refill re-renders
+    the "/ max" half of the position through a second clientside callback. The position is two
+    spans, and only the controls write the index, so a refill that runs in the same renderer pass
+    as a click cannot overwrite the click's index with a stale one. The slider thumb catches up on
+    the next control or tick, because nothing else may write the slider this callback reads as a
+    seek.
+  - **Ticks are counted.** The renderer merges queued requests of one callback, and `n_intervals`
+    is read at execution, so the state records the last count it consumed (`tick_n`, an optional
+    key) and a tick advances by the difference.
+  - **The end of the replay stops the interval.** `replay_tick` set `stopped` and left the
+    interval running: a server round trip a second, and two refreshes, until the next click.
+  - `src/tests/unit/frontend/test_f054_replay_block_clientside.py` is new. It covers wiring on the
+    built app, a source backstop that runs without node, and the registered JavaScript executed
+    under node, including lost clicks and seeks, a cleared slider box, a grown history, and a click
+    applied from its count that its own request must not apply again. Every test fails on the
+    parent. Each textual mutation of the fix is caught by a behavioural test, not only by the
+    source pins.
+  - Sixty replay tests are removed from `test_metrics_panel_handlers.py` (38) and
+    `test_metrics_panel_helpers_coverage.py` (22). Forty-seven, in seven classes, never called
+    production code: they re-implemented the logic inline and asserted on their own copy. Twelve
+    guarded their body with `if func := callbacks.get(...)` and would have passed silently once the
+    callbacks were gone; one looked the merged callback up directly. The tests in
+    `test_f048_replay_cycle.py` that exercised the Python handler moved to the new file and run on
+    the JavaScript; that file keeps the F-CANOPY-048 graph invariants.
+
 - **Re-staging from the restart modal dropped a seeded generator's params, so equities 422'd.**
   `_restage_dataset` sent the typed spiral fields and never the registry seed. Confirming an
   edited dataset in the modal therefore sent `equities` without `symbols`, and a default
