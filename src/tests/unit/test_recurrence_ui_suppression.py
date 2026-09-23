@@ -17,8 +17,9 @@
 
 Covers the model-class flag source — every backend exposes an `execution` paradigm
 ("live" | "one_shot") and the registry declares it per model — and the dashboard
-suppression logic: `_visible_tabs` drops the 5 cascade-only tabs (and resets a now-hidden
-active tab) when the active model is one-shot.
+suppression logic: `_visible_tabs` drops the 5 cascade-only tabs when the active model is
+one-shot. It does NOT reset a now-hidden active tab; the Store-restore callback does (Y4,
+covered by `tests/unit/frontend/test_y4_active_tab_restore.py`).
 """
 
 import pytest

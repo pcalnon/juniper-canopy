@@ -48,7 +48,7 @@ from dash.dependencies import Input, Output, State
 from canopy_constants import CascorPatchBounds, DashboardConstants, TrainingConstants
 from dataset_schema import apply_availability_gate, apply_seeded_defaults, availability_is_known, form_excluded_fields, generator_name_for_type, is_generator_available, parse_schema_fields, unavailable_hint, unavailable_reason
 from frontend.internal_api import internal_api_headers
-from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, RECURRENCE_BACKEND_TYPE, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason, model_requirement, selection_is_live
+from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, RECURRENCE_BACKEND_TYPE, compatible, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason, model_requirement, selection_is_live
 from settings import get_settings
 
 from . import ui_standards
@@ -2640,8 +2640,10 @@ class DashboardManager:
         unit-testable. Deliberately does NOT touch ``active_tab`` — the dashboard keeps exactly
         two ``visualization-tabs.active_tab`` writers (Store-restore + tutorial trigger) to
         avoid a mount-time restore race, and the default active tab ("metrics") is never a
-        cascade tab, so it survives the filter. (Resetting a hidden active tab on a *runtime*
-        model swap belongs with A1-iv's model-switch flow.)
+        cascade tab, so it survives the filter. (A tab this filter hides is reset by the
+        Store-restore writer, which reads the rendered tab list — Y4 — so the reset adds no
+        writer. The app-wide census is THREE, not two: ``hdf5_snapshots_panel``'s replay
+        hand-off also writes ``active_tab``; the two named above are this file's.)
         """
         tabs = self._all_visualization_tabs()
         if model_class == "one_shot":
@@ -3695,18 +3697,34 @@ class DashboardManager:
         return dbc.Badge(status.replace("_", " "), color=color, className="text-uppercase")
 
     @staticmethod
+    def _model_compat_cell_id(model_key):
+        """DOM id of a model row's Compatibility cell, which describes the row's Select button (Y7).
+
+        Derived from the model key, so it is deterministic, and escaped so it is a valid HTML id
+        for ANY key: ``[A-Za-z0-9-]`` pass through and every other character becomes
+        ``_<hex codepoint>_``. ``_`` is never passed through, so every ``_`` delimits an escape and
+        two distinct keys cannot share an id. The escape also keeps whitespace out — it would split
+        the ``aria-describedby`` IDREF list — along with the ``.`` and ``{`` Dash refuses in a
+        string id.
+        """
+        safe = "".join(ch if (ch.isascii() and ch.isalnum()) or ch == "-" else f"_{ord(ch):x}_" for ch in str(model_key))
+        return f"model-compat-{safe}"
+
+    @staticmethod
     def _build_model_selection_table(dataset_value, selected_model, *, models=MODELS, dataset_types=DATASET_TYPES, search=""):
         """Build the custom ``dbc.Table`` of models for the selection modal (A1b; design §5.2).
 
         Rows = every model matching the optional ``search`` filter (label + family + category +
         tags, §5.2). Columns: Model / Category / Status / Compatibility / Select. Compatibility is
-        computed against the currently-selected dataset (``dataset_value``) via ``model_reason``; an
-        incompatible model shows the reason in its compatibility cell and its Select button is
-        disabled. Per ratified option (a) a non-live model stays selectable here — ONLY
-        *incompatible* models are disabled (non-live models are Train-gated at the controls, not in
-        the table — A1-iv-5). The currently-active row is highlighted. A ``dash_table.DataTable`` is
-        deliberately NOT used (OQ-4): the cells are rich components (a badge, a reason cell, a
-        per-row disabled button) and there is no virtualization payoff at this row count.
+        ``compatible()`` against the currently-selected dataset (``dataset_value``); an
+        incompatible model shows ``model_reason``'s wording in its compatibility cell and its
+        Select button is disabled. Every row's Select button is described (``aria-describedby``)
+        by that row's compatibility cell (Y7). Per ratified option (a) a non-live model stays
+        selectable here — ONLY *incompatible* models are disabled (non-live models are Train-gated
+        at the controls, not in the table — A1-iv-5). The currently-active row is highlighted. A
+        ``dash_table.DataTable`` is deliberately NOT used (OQ-4): the cells are rich components (a
+        badge, a reason cell, a per-row disabled button) and there is no virtualization payoff at
+        this row count.
 
         Degenerate states: a non-empty ``search`` that matches nothing renders a "no matches"
         message (§5.2); when a dataset is selected but **no** visible model can train it, a recovery
@@ -3731,33 +3749,45 @@ class DashboardManager:
         rows = []
         compatible_count = 0
         for model in visible:
-            reason = model_reason(model, dataset) if dataset is not None else None
-            # ``⊥`` is compatible with every model — that is what makes it the cut vertex — so every
-            # Select stays ENABLED here and the traversal out of ``⊥`` keeps working.
-            is_compatible = reason is None
+            # Y8: selectability is ``compatible()``'s verdict, read directly — not inferred from
+            # whether ``model_reason`` happened to return a string. ``⊥`` is compatible with every
+            # model — that is what makes it the cut vertex — so every Select stays ENABLED there and
+            # the traversal out of ``⊥`` keeps working.
+            is_compatible = dataset is None or compatible(dataset, model)
             compatible_count += int(is_compatible)
             is_active = model.key == selected_model
             model_cell = [html.Strong(model.label)]
             if model.description:
                 model_cell.extend([html.Br(), html.Span(model.description, className="text-muted small")])
+            # Y7: the compatibility cell describes the row's Select button, so it carries an id in
+            # every branch.
+            compat_id = DashboardManager._model_compat_cell_id(model.key)
             if dataset is None:
                 # Y9: rendering "✓ compatible" here was a positive falsehood — it asserted agreement
                 # with a dataset that does not exist, for every model in the table. State the
                 # requirement instead, so the row says what it WOULD need. Selectability is
                 # unaffected (``is_compatible`` stays True); only the claim changes.
-                compat_cell = html.Span(model_requirement(model), className="text-muted small")
+                compat_cell = html.Span(model_requirement(model), id=compat_id, className="text-muted small")
             elif is_compatible:
-                compat_cell = html.Span("✓ compatible", className="text-success small")
+                compat_cell = html.Span("✓ compatible", id=compat_id, className="text-success small")
             else:
-                compat_cell = html.Span(reason, className="text-muted small fst-italic")
-            select_button = dbc.Button(
+                compat_cell = html.Span(model_reason(model, dataset), id=compat_id, className="text-muted small fst-italic")
+            # Y7: ``html.Button``, not ``dbc.Button`` — dbc 2.0.4's Button declares no ``aria-*``
+            # wildcard and raises TypeError on ``aria-describedby``. ``className`` is the class
+            # string dbc rendered for the old color/outline/size props, so the control looks the
+            # same. The reason is NOT also put in ``title=``: on a disabled button that tooltip can
+            # never show (Bootstrap gives ``.btn:disabled`` ``pointer-events: none``), the
+            # accessible description now comes from the rendered cell, and design N4 rules
+            # ``title=`` out as the channel for a consequence. Enabled buttons keep their hover hint.
+            described = {"aria-describedby": compat_id}
+            if is_compatible:
+                described["title"] = "Currently active" if is_active else "Select this model"
+            select_button = html.Button(
                 "Selected" if is_active else "Select",
                 id={"type": "model-select-btn", "index": model.key},
-                color="success" if is_active else "primary",
-                outline=not is_active,
-                size="sm",
+                className=f"btn btn-{'success' if is_active else 'outline-primary'} btn-sm",
                 disabled=not is_compatible,
-                title=(reason or ("Currently active" if is_active else "Select this model")),
+                **described,
             )
             rows.append(
                 html.Tr(
@@ -4207,9 +4237,33 @@ class DashboardManager:
         # `layout-state-store` is `storage_type="local"`, so on a fresh
         # session it carries the layout default; on a returning session
         # it carries whatever was stamped at the last tab change.
+        #
+        # Y4: `suppress_cascade_tabs` rebuilds the tab bar without the
+        # cascade-only tabs for a one-shot model, so the saved tab — or the
+        # tab on screen — can name a tab that is no longer rendered; dbc then
+        # highlights nothing and shows an empty pane. A tab that is not
+        # rendered is never restored, and if the tab on screen is not rendered
+        # either this falls back to the first rendered tab ("metrics" in both
+        # tab lists: the tab the layout mounts on, and the one dbc picks for an
+        # unset active_tab). The rendered tabs are an INPUT, not State: the
+        # one-shot rebuild lands AFTER this mount-time restore (the model class
+        # is hydrated by `hydrate_model_class` on `params-init-interval`), and a
+        # runtime model swap changes nothing else this callback reads.
+        # Resetting here adds no `active_tab` writer (see `_visible_tabs` for
+        # the census). If the tab list cannot be read at all, the rule below is
+        # exactly the pre-Y4 one.
         self.app.clientside_callback(
             """
-            function(state, currentTab) {
+            function(state, tabs, currentTab) {
+                var rendered = [];
+                [].concat(tabs || []).forEach(function(tab, index) {
+                    if (tab && tab.props) rendered.push(tab.props.tab_id || "tab-" + index);
+                });
+                var saved = state && state.active_tab;
+                if (rendered.length && rendered.indexOf(saved) === -1) {
+                    var target = rendered.indexOf(currentTab) !== -1 ? currentTab : rendered[0];
+                    return target === currentTab ? window.dash_clientside.no_update : target;
+                }
                 if (!state || !state.active_tab) return window.dash_clientside.no_update;
                 // Equality guard (#1 tab-feedback-loop fix): only restore when
                 // the persisted tab differs from the tab already shown. Without
@@ -4222,6 +4276,7 @@ class DashboardManager:
             """,
             Output("visualization-tabs", "active_tab", allow_duplicate=True),
             Input("layout-state-store", "data"),
+            Input("visualization-tabs", "children"),
             State("visualization-tabs", "active_tab"),
             prevent_initial_call="initial_duplicate",
         )
