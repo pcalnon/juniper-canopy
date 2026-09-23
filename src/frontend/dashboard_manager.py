@@ -2866,7 +2866,9 @@ class DashboardManager:
 
         # A1-iv-3c: resolve the one-shot Start dataset-ref body in ONE place from the model-class
         # flag + the (gated) dataset generator, so both training-button transports forward the
-        # same body. Re-fires on either Input so the store tracks model swaps and dataset snaps.
+        # same body. Re-fires on either Input so the store tracks model swaps and every change to the
+        # dataset value: a pick, the gate clearing it to ``⊥`` (OQ-6, canopy#652 -- it used to snap),
+        # or the mount landing on the hydrated one.
         @self.app.callback(
             Output("oneshot-start-params-store", "data"),
             Input("model-class-store", "data"),
