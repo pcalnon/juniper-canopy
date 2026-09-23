@@ -73,6 +73,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check that would have caught this. Two pre-existing cycles are exempted by name, CAN-016a tab
   restore/stamp and the CAN-015 replay-player control loop. Both close through `allow_duplicate`
   outputs, so neither is a readiness deadlock.
+- **Re-staging from the restart modal dropped a seeded generator's params, so equities 422'd.**
+  `_restage_dataset` sent the typed spiral fields and never the registry seed. Confirming an
+  edited dataset in the modal therefore sent `equities` without `symbols`, and a default
+  deployment refuses the whole 503-name universe against the symbol cap. It also sent `mnist`
+  without `flatten`. It now sends the seed as `nn_dataset_params`, exactly as Apply Dataset does.
+  The modal renders no schema-driven params, so a custom list applied earlier from the sidebar
+  is not carried: the modal re-stages what it displays. Found, and reproduced on `main`, by
+  the registry-repair pass (canopy#665). Mutation-checked: without the seed, five of the new
+  `TestRestageDataset` cases fail. Two stale comments in the same file still said the gate
+  *snaps*; since canopy#652 it clears.
 - **The `unknown` availability state could never fire for the outage it was built for.**
   `/api/dataset/generators` caught a juniper-data failure and answered HTTP 200 with four
   built-in demo generators carrying no `available` flag, so an outage and an answer were
