@@ -104,6 +104,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (attempted and did not answer), which the dashboard translates to *unknown*. Deliberately
   false when juniper-data is unconfigured: that is demo mode, where the built-in four are
   the offering and availability is known.
+- **`test_multiple_clients_receive_state_on_connect` failed on about 7% of runs locally, and
+  could not see a dropped connect-time `state`.** The Scheduled Tests lane went red on
+  2026-09-22 (run 35694265700, 3.13 leg) with *"initial_status was not received before
+  state"*. The `/ws/training` handler unicasts `connection_established` → `initial_status` →
+  `state`, strictly in that order. But `connect()` adds the socket to the broadcast set
+  (`websocket_manager.py:381`) before the handler awaits `offload(backend.get_status)`
+  (`main.py:830`), a thread hop since X7 slice 1a (#567). A demo `metrics` + `state` broadcast
+  queued during that hop is delivered first, and the test helper took the first `state` it
+  saw for the connect-time one. Reproduced at 22/300, 22/300 under pinned CPU contention and
+  21/300 on a re-run. Every failing session's full wire order was `connection_established >
+  metrics > state > initial_status > state`: nothing dropped, only a broadcast delivered
+  early. With a synchronous `get_status` (the pre-#567 shape) patched in locally the rate was
+  0/300, which pins the hop as the window.
+
+  Not a product defect. The handler's own order never broke, and the one in-repo consumer
+  (`ws_dash_bridge.js`) registers no `initial_status` handler and treats `state` as
+  latest-wins. `docs/api/API_REFERENCE.md` claimed `initial_status` precedes steady-state
+  messages; it now states the real contract. The test fixture tags every
+  `WebSocketManager.broadcast` frame (test-only; production payloads are untouched). The
+  helper skips tagged frames and asserts the exact unicast order, which makes it deterministic
+  (0/300, 0/300 contended, 400/400 across 25 passes of the whole file) and strictly stronger.
+  With the handler's connect-time `state` deleted, the old helper still passed, because the
+  next broadcast `state` stood in for it; the new one fails, as it does for a dropped
+  `initial_status` or a `state` sent before it. An instrument guard fails if the tag stops
+  reaching the wire. The file's other two classes (eight tests, the helper's own regression
+  pins among them) had no `integration` marker, so every CI lane deselected them; they now
+  run.
+- **The WS keepalive tests asserted that the loop ticked fast enough, not that it ticked.**
+  Both `TestWebSocketKeepalive` tests (`test_main_import_and_lifespan.py`) slept a fixed
+  0.05 s against a 0.01 s interval and required two pings, two of five expected ticks. A
+  runner that stalls the event loop for a few tens of milliseconds fails them: reproduced at
+  2/400 on one saturated core (`assert 1 >= 2`). They now poll until the condition holds or a
+  5 s deadline passes, stop early if the task ends, and assert that it is still running. A
+  loop that does not repeat, or that dies on a broadcast error, fails with a message that says
+  so. `test_concurrent_broadcast_from_thread_delivers_all` (`test_async_sync_boundary.py`) had
+  the same shape (a fixed 0.5 s, then `call_count >= 15`) and gets the same bounded poll.
+  After: 0/400 and 0/100 on the saturated core. No production constant changed;
+  `HEALTH_DEADLINE_SECONDS` is untouched (canopy#649).
 - **A conflict notice claimed to have cleared a dataset that was never selected.** With the
   dataset at `⊥`, any gate re-fire rendered *"none is not compatible with CasCor
   (Cascade-Correlation), so it was cleared"* — the literal string `none` from
