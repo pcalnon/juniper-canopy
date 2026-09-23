@@ -48,7 +48,6 @@ survived, an expect_pass failed, or an anchor failed; 2 = nothing was measured.
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess  # nosec B404 -- runs pytest on a local copy of this repo
 import sys

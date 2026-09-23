@@ -34,7 +34,6 @@ quietly stop testing what it exists for.
 import pytest
 
 import frontend.dashboard_manager as dashboard_manager
-import model_registry
 from frontend.dashboard_manager import DashboardManager
 from model_registry import DATASET_TYPES, MODELS, DatasetTypeSpec, ModelSpec, compatible, dataset_reason, gated_dataset_options, model_reason, temporal_ok
 
@@ -178,12 +177,15 @@ class TestY8AnAxisTheWordingDoesNotKnow:
         spirals = next(dataset for dataset in DATASET_TYPES if dataset.value == "spirals")
         cascor = next(model for model in MODELS if model.key == "cascor")
         assert _failing_axes(spirals, cascor) == frozenset(), "premise: every named axis passes for this pair"
-        real = model_registry.compatible
+        # ``compatible`` here is this module's own binding, taken at import, so it stays the REAL
+        # predicate after the registry's attribute is patched. The registry is patched by its dotted
+        # path, which spares a second import style of the same module.
+        real = compatible
 
         def with_a_new_axis(dataset, model):
             return False if (dataset.value, model.key) == ("spirals", "cascor") else real(dataset, model)
 
-        monkeypatch.setattr(model_registry, "compatible", with_a_new_axis)
+        monkeypatch.setattr("model_registry.compatible", with_a_new_axis)
         monkeypatch.setattr(dashboard_manager, "compatible", with_a_new_axis)
         return spirals, cascor
 

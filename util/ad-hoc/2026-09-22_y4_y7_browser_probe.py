@@ -232,7 +232,7 @@ def main() -> int:
                     if requests.get(f"{base}/v1/health/ready", timeout=1).status_code == 200:
                         break
                 except requests.RequestException:
-                    pass
+                    pass  # not listening yet; keep polling until the 60 s deadline below
                 time.sleep(0.25)
             else:
                 raise RuntimeError("canopy not ready in 60s")
