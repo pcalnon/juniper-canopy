@@ -424,6 +424,40 @@ class DashboardConstants:
     # Recovering in 30 s is the goal; recovering fast is not.
     METRICS_STORE_STRAND_TIMEOUT_MS: Final[int] = 30000  # 30 seconds
 
+    # F-CANOPY-053 (provisional id): the Candidate Metrics panel's poll period, i.e.
+    # ``candidate-metrics-panel-update-interval``, the only trigger of
+    # ``fetch_training_state`` besides a tab switch.
+    #
+    # At the old 1000 ms, NOT ONE of that callback's writes after mount was applied.
+    # dash-renderer discards a response whose callback has left ``watched``
+    # (dash_renderer.dev.js:2698), and evicts a ``watched`` entry the moment the same
+    # callback identity is ``requested`` again (:3027). So a write lands only if its
+    # response is applied before the next tick. The wire round trip is ~30 ms; the
+    # renderer's window is far longer. Writes landed / issued, by period, across three
+    # live runs on 9bffaba1 (juniper-ml reports/e2e-canopy-2026-09-02/transcripts/
+    # 2026-09-22_laneA3_candidate_tick_period_run{1,2,3_nolifecycle}.json):
+    #     1000 ms: 0 / 225      4000 ms: 5 / 39      10000 ms: 23 / 24
+    # Even 4 s lost 34 of 39, so on this app the window regularly exceeds 4 s (the E2E
+    # ledger also records a 6.95 s wire->apply gap). 10 s is the shortest period tested
+    # that lands reliably.
+    #
+    # WHY A PERIOD AND NOT #613's ``running=`` GUARD. A guard's release (``runningOff``)
+    # writes a FIXED value from ``completeJob()`` after EVERY run, including the 204 that
+    # ``fetch_training_state`` answers on page load and on every other tab
+    # (``active_tab`` is its second Input). This lane is TAB-GATED, so a guard on
+    # ``disabled`` writes ``False`` after the CAN-000/tab gate wrote ``True``, and the
+    # poller runs on a hidden tab: F-CANOPY-027 back. A guard on some other prop avoids
+    # that race but not the next one: an evicted request's ``completeJob()`` still
+    # releases the guard while its successor is in flight, and #614 showed such a guard
+    # also needs a strand watchdog. A period needs no second writer at all, so the gate
+    # stays the only writer of this interval's ``disabled``.
+    #
+    # The cost is a refresh of up to 10 s plus apply latency. ``CandidateMetricsPanel``
+    # still honours a config ``update_interval`` override, but production passes none
+    # (``DashboardManager({})`` in main.py) and there is no env override. An override
+    # back near 1000 ms brings the eviction back with it.
+    CANDIDATE_STATE_POLL_INTERVAL_MS: Final[int] = 10000  # 10 seconds
+
     # API timeouts (seconds)
     API_TIMEOUT_SECONDS: Final[int] = 2
     FAST_API_TIMEOUT_SECONDS: Final[float] = 1.0  # For fast-interval polling callbacks

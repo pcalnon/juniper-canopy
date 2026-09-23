@@ -84,16 +84,121 @@ class TestFetchTrainingStateCallback:
         assert history is dash.no_update
 
     def test_fetch_swallows_exception_and_returns_empty(self, panel, callbacks):
+        """F-CANOPY-053: a failed fetch HOLDS the last good state for both stores.
+
+        The name predates that change. This test used to assert ``state == {}``, and
+        ``{}`` is what the status badge renders as ``Inactive``, so one transient hiccup
+        blanked a live candidate phase. The state store now follows the history store's
+        last-known-good contract.
+        """
         with patch("requests.get", side_effect=RuntimeError("boom")):
-            state, history = callbacks["fetch_training_state"](1, "candidates", [{"epoch": 1}])
-        assert state == {}
+            state, history = callbacks["fetch_training_state"](1, "candidates", [{"epoch": 1}], {"candidate_pool_status": "Training"})
+        assert state is dash.no_update
         # Last-known-good: an unreachable server must not blank a populated history.
         assert history is dash.no_update
 
     def test_fetch_non_200_returns_empty(self, panel):
+        """F-CANOPY-053: a non-200 is ``None`` now, not ``{}`` (the name predates the
+        change), which is ``_fetch_pool_history``'s contract."""
         resp = MagicMock(status_code=503)
         with patch("requests.get", return_value=resp):
-            assert panel._fetch_training_state() == {}
+            assert panel._fetch_training_state() is None
+
+
+class TestF053StateStoreWritesOnlyRealChanges:
+    """F-CANOPY-053 (provisional id): the state store is written only when the state
+    actually changed, and never blanked by a failed fetch.
+
+    ``/api/state`` stamps a fresh ``timestamp`` on every call, so the store used to
+    change on every tick and re-fire its three Input consumers; and a failed fetch wrote
+    ``{}``, which the badge renders as ``Inactive``. The callback now compares against
+    the store (riding as its own State, pinned in ``test_stage2_global_lane.py``) with
+    the volatile keys stripped, and maps a failed fetch to ``no_update``.
+    """
+
+    STATE = {
+        "status": "Started",
+        "candidate_pool_status": "Training",
+        "candidate_pool_phase": "Training",
+        "candidate_pool_size": 8,
+        "candidate_epoch": 501,
+        "pool_metrics": {"avg_loss": 0.25},
+        "timestamp": 1790106936.63,
+    }
+
+    @staticmethod
+    def _serve(state):
+        def fake_get(url, **kwargs):
+            resp = MagicMock(status_code=200)
+            resp.json.return_value = {"history": []} if "pool-history" in url else state
+            return resp
+
+        return fake_get
+
+    def _run(self, callbacks, served, current):
+        with patch("requests.get", side_effect=self._serve(served)):
+            return callbacks["fetch_training_state"](1, "candidates", [], current)
+
+    def test_timestamp_only_change_is_no_update(self, callbacks):
+        fresh = dict(self.STATE, timestamp=self.STATE["timestamp"] + 10.0)
+        state, history = self._run(callbacks, fresh, dict(self.STATE))
+        assert state is dash.no_update, "a per-call timestamp alone must not rewrite the store"
+        assert history is dash.no_update
+
+    def test_stale_age_only_change_is_no_update(self, callbacks):
+        """``stale_age_seconds`` is recomputed on every call while the upstream is down
+        (main.py ``get_state``), so ignoring only ``timestamp`` would still rewrite the
+        store on every tick of an outage."""
+        current = dict(self.STATE, stale=True, stale_age_seconds=12.3)
+        fresh = dict(current, stale_age_seconds=22.3, timestamp=self.STATE["timestamp"] + 10.0)
+        state, _history = self._run(callbacks, fresh, current)
+        assert state is dash.no_update
+
+    def test_real_change_still_writes(self, callbacks):
+        fresh = dict(self.STATE, candidate_pool_status="Inactive", timestamp=self.STATE["timestamp"] + 10.0)
+        state, _history = self._run(callbacks, fresh, dict(self.STATE))
+        assert state == fresh
+
+    def test_nested_change_still_writes(self, callbacks):
+        fresh = dict(self.STATE, pool_metrics={"avg_loss": 0.2})
+        state, _history = self._run(callbacks, fresh, dict(self.STATE))
+        assert state == fresh
+
+    def test_staleness_flip_is_a_real_change(self, callbacks):
+        """``stale`` itself is NOT volatile: the flip into an outage must be written."""
+        fresh = dict(self.STATE, stale=True, stale_age_seconds=0.4)
+        state, _history = self._run(callbacks, fresh, dict(self.STATE, stale=False))
+        assert state == fresh
+
+    def test_mount_with_empty_store_still_writes(self, callbacks):
+        """The store mounts as ``{}``; the first fetch must land."""
+        state, _history = self._run(callbacks, dict(self.STATE), {})
+        assert state == self.STATE
+
+    def test_no_current_value_never_suppresses(self, callbacks):
+        """``None`` means "no previous value", which is also every 3-argument call."""
+        state, _history = self._run(callbacks, dict(self.STATE), None)
+        assert state == self.STATE
+
+    def test_a_comparison_that_fails_still_writes(self, callbacks):
+        """Fail toward the write. A payload that cannot be compared cannot be PROVEN
+        unchanged, and a suppressed real update is worse than a redundant one."""
+        fresh = dict(self.STATE)
+        fresh[1] = "a non-string key makes the sorted-key comparison raise"
+        state, _history = self._run(callbacks, fresh, dict(self.STATE))
+        assert state == fresh
+
+    def test_non_200_holds_the_last_good_state(self, callbacks):
+        with patch("requests.get", return_value=MagicMock(status_code=503)):
+            state, history = callbacks["fetch_training_state"](1, "candidates", [], dict(self.STATE))
+        assert state is dash.no_update
+        assert history is dash.no_update
+
+    def test_a_payload_that_is_not_an_object_is_a_failure(self, panel):
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = ["not", "a", "state"]
+        with patch("requests.get", return_value=resp):
+            assert panel._fetch_training_state() is None
 
 
 class TestStatusDisplayCallback:

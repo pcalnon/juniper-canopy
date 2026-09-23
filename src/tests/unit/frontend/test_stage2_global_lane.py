@@ -17,6 +17,7 @@ Design of record: juniper-ml notes/JUNIPER_2026-08-23_JUNIPER-CANOPY_CALLBACK-ST
 Every test here fails on the parent commit (f9defb4).
 """
 
+import inspect
 from unittest.mock import MagicMock, patch
 
 import dash
@@ -189,6 +190,88 @@ class TestF035MetricsPollHasItsOwnGuardedLane:
             )
             assert result is dash.no_update, "the full-history modulus gate no longer matches the live trigger id"
             assert not mock_get.called, "the gate let a full-history fetch through on a non-modulus tick"
+
+
+class TestF053CandidateStatePollWiring:
+    """F-CANOPY-053 (provisional id): the candidate-state poll lands its writes.
+
+    ``fetch_training_state`` wrote ``candidate-metrics-panel-training-state-store`` off a
+    1000 ms tick, and not one write after mount was applied. Measured on canopy 9bffaba1,
+    27 of 27 responses at idle and 34 of 34 across a live candidate phase carried a new
+    value, and the renderer held one: each was evicted from ``watched`` (:3027) and
+    discarded (:2698) when the next tick re-requested the callback. Landing was then
+    measured by period: 0 / 225 at 1000 ms, 5 / 39 at 4000 ms, 23 / 24 at 10000 ms.
+
+    Pinned here is WIRING, read off the built app's ``_callback_list``: the period, the
+    store riding as its own writer's State in the order the function binds it, and the
+    ABSENCE of a ``running=`` guard. The callback's no-op and hold-last-good behaviour is
+    pinned in ``test_candidate_metrics_panel_gate_coverage.py``, and the gate's sole
+    ownership of the lane in ``test_poll_gating.py``. Whether the renderer now applies
+    the writes is a live property that no unit test can show.
+    """
+
+    STATE_STORE = "candidate-metrics-panel-training-state-store.data"
+    HISTORY_STORE = "candidate-metrics-panel-pool-history-store.data"
+    LANE = "candidate-metrics-panel-update-interval"
+
+    def _spec(self, dm):
+        """The candidate panel's writer, found by its exact OUTPUT in ``_callback_list``.
+
+        By output, never by name: ``metrics_panel.py`` registers a ``fetch_training_state``
+        of its own. Outputs are parsed exactly, because Dash renders a multi-output key as
+        ``..a.prop...b.prop..`` and appends ``@<hash>`` to an ``allow_duplicate`` output.
+        """
+        hits = []
+        for spec in dm.app._callback_list:
+            raw = str(spec.get("output"))
+            parts = raw[2:-2].split("...") if raw.startswith("..") and raw.endswith("..") else [raw]
+            if self.STATE_STORE in {part.split("@", 1)[0] for part in parts}:
+                hits.append(spec)
+        assert len(hits) == 1, f"expected exactly one writer of {self.STATE_STORE}, found {len(hits)}"
+        return hits[0]
+
+    @staticmethod
+    def _deps(spec, key):
+        return [f"{dep['id']}.{dep['property']}" for dep in spec.get(key) or []]
+
+    def test_the_poll_carries_no_running_guard(self, dm):
+        """``running=`` releases a FIXED value from ``completeJob()`` after every run,
+        including the 204 this callback answers on page load and on every other tab. On
+        this TAB-GATED lane that re-arms the poller on a hidden tab (F-CANOPY-027), so the
+        repair is a period, never a guard.
+
+        Read off the callback SPEC. ``running`` is not kept on the ``callback_map`` entry,
+        so reading it there would pass for every callback and prove nothing.
+        """
+        running = self._spec(dm).get("running")
+        assert not running, f"fetch_training_state carries a running= guard: {running}"
+
+    def test_the_store_rides_as_its_own_state_not_an_input(self, dm):
+        """As an Input it would re-trigger its own writer on every write. Dropped
+        entirely, ``current_state`` would be ``None`` forever, which never suppresses,
+        and every direct unit test of the callback would still pass."""
+        spec = self._spec(dm)
+        assert self.STATE_STORE in self._deps(spec, "state"), "the state store must ride as State so an unchanged state can be suppressed"
+        assert self.STATE_STORE not in self._deps(spec, "inputs"), "the state store must NOT be an Input of its own writer"
+
+    def test_the_states_bind_in_the_order_the_function_reads_them(self, dm):
+        """Dash binds positionally: Inputs, then States in declaration order. Swapped
+        States would hand the history list to ``current_state`` and the state dict to
+        ``pool_history``, and the direct unit tests would never notice."""
+        spec = self._spec(dm)
+        assert self._deps(spec, "inputs") == [f"{self.LANE}.n_intervals", "visualization-tabs.active_tab"]
+        assert self._deps(spec, "state") == [self.HISTORY_STORE, self.STATE_STORE]
+        entry = dm.app.callback_map[str(spec["output"])]
+        fn = getattr(entry["callback"], "__wrapped__", entry["callback"])
+        assert list(inspect.signature(fn).parameters) == ["n_intervals", "active_tab", "pool_history", "current_state"]
+
+    def test_the_poll_period_is_pinned(self, dm):
+        """10 s is the shortest period measured to land reliably (23 / 24). The built
+        layout must carry it, not just the constant."""
+        assert DashboardConstants.CANDIDATE_STATE_POLL_INTERVAL_MS == 10000
+        found = [c for c in _walk(dm.app.layout) if getattr(c, "id", None) == self.LANE]
+        assert len(found) == 1, f"{self.LANE} must appear exactly once in the layout, found {len(found)}"
+        assert found[0].interval == DashboardConstants.CANDIDATE_STATE_POLL_INTERVAL_MS
 
 
 class TestLever2Suppression:
