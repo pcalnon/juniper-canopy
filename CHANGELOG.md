@@ -40,6 +40,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the real route and real backends as well as the registered callbacks. It also gains the **Y3**
     read-side guardrail, which the design's §5 table lacked. Mutation-checked at four sites.
 
+- **Generator loads run `juniper_data_client.validate_npz_contract` as an ADVISORY second check**
+  (#559; owner ruling 2026-09-22). `regenerate_dataset_from_generator` now hands every downloaded
+  artifact to the shared contract validator before its own rank probe dispatches it. For a 3-D
+  artifact the validator checks sequence rules canopy's install never did: that a `t` / `dt`
+  channel is present, that `dt >= 0` with `dt[:, 0] == 0`, that `t` and `dt` agree, and that
+  masks are binary and correctly shaped. A violation is logged at WARNING, naming the source and
+  the rule, and **the install proceeds exactly as before**. The validator fails closed, and a
+  legacy `X_full`-only artifact makes it raise `KeyError`, while the ecosystem contract is
+  "tolerate `*_full`, never require it". So it reports and never gates. Any exception it raises
+  is caught, whatever the type, including an `ImportError` from a client too old to have the
+  helper. The rank probe stays the gate, and the comment above it no longer claims that the
+  helper is absent from the pinned client, a claim that has been false since the 0.5.0 floor.
+  `src/tests/unit/test_npz_contract_advisory.py` covers a violation that is reported and still
+  installs, a legacy artifact that is reported and still installs, an unexpected error that
+  never blocks the load, a client without the helper, and a valid artifact that logs nothing.
+  Eight of its nine cases fail against the pre-change tree. The ninth is the negative control,
+  and it is expected to pass on both trees.
+
 ### Fixed
 
 - **The replay controls never applied: play, step, start, end, the speed buttons and the slider
