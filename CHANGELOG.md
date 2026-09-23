@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The selection survives a page reload: both selectors now hydrate from the backend (design
+  PR 2, §4.10; guardrails G7 and Y3).** The selection had no read side on either axis.
+  `model-selection-store` is memory-scoped and seeded with the default model, while
+  `current_nn_model` lives in the server — so every reload showed the seed over whatever was
+  running. With Recurrence selected over an unconfigured service, the sidebar read *"Active:
+  CasCor"* and left Start enabled against a selection the server then refused (Y3). The dataset
+  dropdown showed its layout default over whatever the backend had staged or loaded, which files a
+  benchmark result against the wrong dataset.
+  - **`GET /api/selection`** is new. It returns the recorded model in `POST /api/model/select`'s
+    shape, plus the backend's dataset: `pending` (it wins, because Start consumes it), `loaded`,
+    `none` or `unknown`.
+  - **Every backend reports `current_dataset`.** cascor carries it on `/v1/training/status` since
+    juniper-cascor#676, and `ServiceBackend` passes it only when cascor sent it, so an older cascor
+    reads *unknown*, not *nothing*. The recurrence backend records the dataset of its latest fit.
+    The demo simulator reads its dataset's `source` stamp, which the two spiral builders now set too.
+  - **At mount, `select_model` hydrates the model stores**, as their only writer. The gate then
+    gates the hydrated dataset against the hydrated model.
+    - The gate's `params-init-interval` Input is **removed**. It scheduled a second first-paint
+      pass against the seed model beside the hydrated one. The renderer's dedup let the hydrated
+      pass win in the end, but a seed pass that had already completed painted a state gated against
+      the wrong model first — the option list greyed for CasCor on a Recurrence reload.
+    - Its first-paint pass now comes from the hydration's store write, which happens on every mount,
+      read failure included, so N7's availability gate still applies at first paint.
+  - `⊥`-at-mount (OQ-N2) is **not** part of this change. Sources that name nothing the dropdown can
+    show keep the layout seed until it lands, because D-N10 requires this hydration first.
+  - `src/tests/regression/test_selection_reachability_guardrails.py` gains **G7**, asserted through
+    the real route and real backends as well as the registered callbacks. It also gains the **Y3**
+    read-side guardrail, which the design's §5 table lacked. Mutation-checked at four sites.
+
 ### Fixed
 
 - **The replay controls never applied: play, step, start, end, the speed buttons and the slider

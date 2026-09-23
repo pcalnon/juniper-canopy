@@ -169,13 +169,18 @@ class TestModelSelectionInner:
             # N11: the callback gained the model-clear Input (2 args now); a no-click on EITHER
             # input must still be an all-ways no_update. N5: it also gained the
             # ``model-state-store`` Output (the ``/api/model/select`` payload), so five ways now.
-            result = cb([None], None)
+            # Y3 / §4.10: and the mount-hydration Input (``params-init-interval``), so three args.
+            result = cb([None], None, None)
         assert result == (dash.no_update,) * 5
 
     def test_gate_dataset_options(self, dm):
         cb = raw_cb(dm, "gate_dataset_options")
-        # N7: gate_dataset_options gained a params-init-interval Input (fires the availability gate
-        # on mount too) — the middle positional is the interval count.
+        # §4.10: the callback's arguments are ``(model_key, current_value, model_state)``. N7's
+        # ``params-init-interval`` Input was REMOVED -- the first-paint pass now comes from
+        # select_model's mount hydration writing the model store -- and ``model-state-store`` was
+        # added as State. Calls written for the old order still "passed": the seed dataset landed
+        # in ``model_state``, ``current_value`` became None, and the ``⊥`` branch said nothing --
+        # so the assertion held for a state the comment below does not describe.
         # §4.3: the callback gained a third Output — the gate's notice about having moved (or
         # refused to move) the dataset.
         #
@@ -187,16 +192,17 @@ class TestModelSelectionInner:
         # indistinguishable from success. ``[]`` states it for real: fetch succeeded, no
         # per-generator flags, flag-absent fallback applies.
         dm._fetch_generators = lambda: []
-        options, value, notice = cb(dmmod.DEFAULT_MODEL_KEY, None, dmmod.DEFAULT_DATASET_TYPE)
+        options, value, notice = cb(dmmod.DEFAULT_MODEL_KEY, dmmod.DEFAULT_DATASET_TYPE, None)
         assert isinstance(options, list)
         # The default pair is compatible and available, so the gate changes nothing and says nothing.
+        assert value is dash.no_update
         assert notice is None
 
     def test_gate_dataset_options_says_so_when_availability_is_unknown(self, dm):
         """The state the test above was silently in, now asserted deliberately."""
         cb = raw_cb(dm, "gate_dataset_options")
         dm._fetch_generators = lambda: None  # the fetch did not succeed
-        _options, _value, notice = cb(dmmod.DEFAULT_MODEL_KEY, None, dmmod.DEFAULT_DATASET_TYPE)
+        _options, _value, notice = cb(dmmod.DEFAULT_MODEL_KEY, dmmod.DEFAULT_DATASET_TYPE, None)
         assert notice is not None
         assert notice.id == "dataset-gate-availability-unknown-alert"
 

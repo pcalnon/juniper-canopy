@@ -241,6 +241,29 @@ def generator_name_for_type(value: str | None) -> str:
     return GENERATOR_NAME_ALIASES.get(value, value)
 
 
+def dataset_type_for_generator_name(name: str | None, known_values: Iterable[str]) -> str | None:
+    """The canopy dataset-type value a backend's dataset name denotes, or None (§4.10 hydration).
+
+    The inverse of :func:`generator_name_for_type`, for reading a dataset back OUT of a backend.
+    A backend's staged or loaded config can name it either way: canopy stages the juniper-data
+    generator name (``"spiral"``), while cascor's first-start default and older stagers carry
+    canopy's own value (``"spirals"``). Both must resolve to the one value the dropdown offers.
+
+    ``known_values`` is canopy's seeded set (``DATASET_TYPES``). A name that is none of them --
+    an unseeded generator another client staged -- returns ``None``: the dropdown cannot show it,
+    and inventing the nearest match would be a selection nobody made.
+    """
+    if not name:
+        return None
+    known = set(known_values)
+    if name in known:
+        return name
+    for value, generator in GENERATOR_NAME_ALIASES.items():
+        if generator == name and value in known:
+            return value
+    return None
+
+
 def _primary_branch(prop: Mapping[str, Any]) -> dict[str, Any]:
     """Collapse a schema property to the branch that carries its type/bounds.
 
