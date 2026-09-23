@@ -55,27 +55,30 @@ class TestApplyDatasetInner:
     def test_no_click(self, dm):
         cb = raw_cb(dm, "apply_dataset")
         # N7: apply_dataset gained the pattern-matching gen-param (values, ids) — empty for spiral.
-        assert cb(None, "spirals", 100, 0.1, 1.5, 2, [], []) == (dash.no_update, dash.no_update)
+        # FR9 / canopy#368: the trailing positional is the model-selection-store mirror.
+        assert cb(None, "spirals", 100, 0.1, 1.5, 2, [], [], "cascor") == (dash.no_update, dash.no_update)
 
     @patch("requests.post")
     def test_success_opens_banner(self, mock_post, dm):
         mock_post.return_value = _resp(status=200)
         cb = raw_cb(dm, "apply_dataset")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            banner, alert = cb(1, "spirals", 100, 0.1, 1.5, 2, [], [])
+            banner, alert = cb(1, "spirals", 100, 0.1, 1.5, 2, [], [], "cascor")
         assert banner is True
         assert alert is None  # success clears any prior staging error
         # dataset_type + all four optional numeric/spiral fields were forwarded
         payload = mock_post.call_args.kwargs["json"]
         assert payload["nn_dataset_type"] == "spirals"
         assert payload["nn_dataset_elements"] == 100
+        # FR9 / canopy#368: the selected model rides on the request.
+        assert payload["nn_model"] == "cascor"
 
     @patch("requests.post")
     def test_non_200_surfaces_alert(self, mock_post, dm):
         mock_post.return_value = _resp(status=500, text="err")
         cb = raw_cb(dm, "apply_dataset")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            banner, alert = cb(1, "spirals", None, None, None, None, [], [])
+            banner, alert = cb(1, "spirals", None, None, None, None, [], [], None)
         assert banner is dash.no_update
         assert alert is not None and alert.color == "danger"
 
@@ -83,7 +86,7 @@ class TestApplyDatasetInner:
     def test_exception_surfaces_alert(self, _mock_post, dm):
         cb = raw_cb(dm, "apply_dataset")
         with dm.app.server.test_request_context(base_url="http://localhost:8050"):
-            banner, alert = cb(1, "spirals", 100, 0.1, 1.5, 2, [], [])
+            banner, alert = cb(1, "spirals", 100, 0.1, 1.5, 2, [], [], None)
         assert banner is dash.no_update
         assert alert is not None and alert.color == "danger"
 

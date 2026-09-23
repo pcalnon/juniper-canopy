@@ -96,7 +96,7 @@ def test_dataset_seeds_2d_classification_plus_3d_sequence():
         spec = by_value[value]
         assert spec.ndim == 3 and spec.task_type == "regression" and spec.temporal == "irregular"
     # They carry no default_params, and that is correct: they synthesise from their own bounded
-    # defaults (1,574 windows, ~0.1s to generate AND fit). See the G11 restatement in
+    # defaults (1,574 windows, ~0.1s to generate AND fit). See ``SEEDED_GENERATOR_BOUNDS`` (G11) in
     # model_registry.py — the unbounded axis is an imported universe, not generator parameters.
     for value in ("multi_sine", "mackey_glass", "ar_p", "irregular_sine", "delay_product"):
         assert by_value[value].default_params == {}
@@ -278,7 +278,9 @@ def test_compatible_datasets_resolver_over_seeds():
     # still has exactly two components, asserted rather than assumed.
     assert [dataset.value for dataset in compatible_datasets(_model("cascor"))] == ["spirals", "xor", "mnist", "circles", "moons", "gaussian", "checkerboard", "equities"]
     # recurrence (3-D, Δt-aware) matches all six rank-3 seeds, in registry order. multi_sine leads
-    # because the sidebar gate snaps to the first compatible+available entry (§12).
+    # because registry order is the order the dropdown OFFERS and the restart modal's fallback
+    # (its owner-ruled ``enabled[0]`` swap). The SIDEBAR gate no longer picks for the operator:
+    # since OQ-6 (canopy#652) it clears a stranded dataset to ⊥.
     assert [dataset.value for dataset in compatible_datasets(_model("recurrence"))] == [
         "multi_sine",
         "mackey_glass",
@@ -309,6 +311,22 @@ def test_resolvers_agree_with_predicate_over_seeds():
         assert compatible_models(dataset) == [model for model in MODELS if compatible(dataset, model)]
     for model in MODELS:
         assert compatible_datasets(model) == [dataset for dataset in DATASET_TYPES if compatible(dataset, model)]
+
+
+@pytest.mark.parametrize("dataset", DATASET_TYPES, ids=lambda d: d.value)
+def test_every_seeded_dataset_has_a_compatible_model(dataset):
+    """A-N9 — a seed no model can train is greyed out under EVERY model, and nothing else says so.
+
+    juniper-data emits a third ``task_type``, ``"structured"`` (juniper-data#402, for ``arc_agi``),
+    and no ``ModelSpec.supported_task_types`` contains it. ``arc_agi`` is deliberately unseeded
+    (G10), but a ``structured`` seed -- or any seed whose rank or task type no model accepts --
+    would be disabled in the dropdown under every model and could never be trained, with no
+    failing test. ``test_dataset_model_hint_non_none_for_every_seed_dataset`` below read like this
+    guard and was not one: the hint for such a seed is the non-``None`` string "no compatible
+    models", so it passed.
+    """
+    dt_clause = " and requires_dt=True (the dataset's Δt is irregular)" if dataset.temporal == "irregular" else ""
+    assert compatible_models(dataset, models=MODELS), f"seed {dataset.value!r} (task_type={dataset.task_type!r}, ndim={dataset.ndim}, temporal={dataset.temporal!r}) is compatible with NO model, " f"so it is greyed out under every model and can never be trained. Add a ModelSpec whose supported_task_types contains {dataset.task_type!r} " f"and whose input_ndim contains {dataset.ndim}{dt_clause} -- or do not seed it, and record why in UNSEEDED_GENERATORS instead."
 
 
 # Model-picker options (A1-iv-3a): the registry source for the sidebar nn-model-dropdown.
@@ -390,13 +408,15 @@ def test_rank3_seeds_make_recurrence_trainable():
     """The rank-3 seeds give the recurrence (LMU) model compatible datasets (was [] before iv-3b).
 
     ``equities_seq`` alone held this open from A1-iv-3b until §12, and it was a thin thread:
-    it is unavailable in the container (``yfinance`` is absent from juniper-data's
-    requirements.lock), so in the deployment that matters the LMU had ZERO available datasets
-    and picking it raised §4.7's empty-set alert. The five synthetics are numpy-only.
+    it is unavailable in the deployed container (juniper-deploy pins juniper-data 0.15.0, whose
+    image lacks ``yfinance``; juniper-data#421 adds it on main, unreleased as of 2026-09-22), so
+    in the deployment that matters the LMU had ZERO available datasets and picking it raised
+    §4.7's empty-set alert. The five synthetics are numpy-only.
     """
     reachable = [dataset.value for dataset in compatible_datasets(_spec("recurrence"))]
     assert reachable == ["multi_sine", "mackey_glass", "irregular_sine", "ar_p", "delay_product", "equities_seq"]
-    # The one that must not need an optional extra is the one the gate will snap to.
+    # The one that must not need an optional extra is the one offered FIRST, and the one the
+    # restart modal falls back to for a stranded dataset. The sidebar gate clears instead (OQ-6).
     assert reachable[0] == "multi_sine"
 
 
@@ -486,9 +506,16 @@ def test_dataset_model_hint_empty_compatible_set_warns():
 
 
 def test_dataset_model_hint_non_none_for_every_seed_dataset():
-    """Each seed dataset has ≥1 compatible model under option (a), so the hint is always a phrase."""
+    """Each seed dataset gets a real constraint phrase — never ``None``, and never the empty-set warning.
+
+    This asserted only ``is not None``, which could not fail on what the docstring claimed ("each
+    seed dataset has ≥1 compatible model"): for a seed no model accepts, the hint is the non-``None``
+    string "no compatible models". The compatibility guarantee itself is
+    ``test_every_seeded_dataset_has_a_compatible_model``; this pins that the sidebar says so.
+    """
     for dataset in DATASET_TYPES:
-        assert dataset_model_hint(dataset.value) is not None
+        hint = dataset_model_hint(dataset.value)
+        assert hint is not None and hint != "no compatible models", f"{dataset.value!r}: {hint!r}"
 
 
 def test_gated_dataset_options_greys_incompatible_for_recurrence():

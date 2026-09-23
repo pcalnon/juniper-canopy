@@ -2876,8 +2876,9 @@ class DashboardManager:
 
         # A1b-2 (§5.3): the reactive reverse gate. Selecting a dataset annotates the sidebar with
         # the model constraint it imposes ("3-D models only"), the dataset-side mirror of the
-        # table's per-row ``model_reason`` greying. Fires on every dataset change — a user pick OR
-        # the forward-gate snap (``gate_dataset_options``) — so the hint always tracks the dataset.
+        # table's per-row ``model_reason`` greying. Fires on every dataset change — a user pick, the
+        # forward gate CLEARING a conflict (``gate_dataset_options``; OQ-6, canopy#652 — it used to
+        # snap), or the mount hydration — so the hint always tracks the dataset.
         @self.app.callback(
             Output("nn-model-dataset-hint", "children"),
             Input("nn-dataset-type-dropdown", "value"),
@@ -3006,8 +3007,8 @@ class DashboardManager:
         relieve it. ``gated_dataset_options(None)`` already returns every dataset enabled — the
         registry was right and only this handler was wrong.
 
-        Because the current dataset is then in ``enabled``, the snap below leaves it alone: clearing
-        the model KEEPS the dataset. That is §5.6's dataset-primary policy, which was not even
+        Because the current dataset is then in ``enabled``, the conflict branch below (a CLEAR since
+        OQ-6, canopy#652) leaves it alone: clearing the model KEEPS the dataset. That is §5.6's dataset-primary policy, which was not even
         expressible while the dropdown was unclearable.
 
         **§4.10 — ``hydrated_value``, the first-paint pass.** The dataset the backend actually
@@ -3344,7 +3345,7 @@ class DashboardManager:
             params[name] = value
         return params
 
-    def _apply_dataset_handler(self, n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values=None, gen_ids=None):
+    def _apply_dataset_handler(self, n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values=None, gen_ids=None, nn_model=None):
         """POST /api/stage_dataset with the current dataset-form values (N7 schema-aware).
 
         ``dataset_type`` is ALWAYS sent — cascor's ``_reload_dataset`` hard-requires it. For the
@@ -3412,6 +3413,10 @@ class DashboardManager:
             params.update(self._collect_generator_params(gen_values, gen_ids, exclude=form_excluded_fields(generator_name_for_type(dataset_type))))
             if params:
                 payload["nn_dataset_params"] = params
+        # FR9 / canopy#368: mirror this tab's model onto the request. Omitted, not sent as None,
+        # when no model is selected -- the server then behaves exactly as before the mirror.
+        if nn_model:
+            payload["nn_model"] = nn_model
         try:
             resp = requests.post(
                 self._api_url("/api/stage_dataset"),
@@ -5601,6 +5606,10 @@ class DashboardManager:
                 dash.dependencies.State("nn-activation-function-dropdown", "value"),
                 # init_output_weights (output-layer weight init: zero|random)
                 dash.dependencies.State("nn-init-output-weights-dropdown", "value"),
+                # FR9 / canopy#368: the model this tab believes is selected, mirrored onto the
+                # request so the server can refuse a stale tab. State, not Input: it must never
+                # trigger an apply by itself.
+                dash.dependencies.State("model-selection-store", "data"),
             ],
             prevent_initial_call=True,
         )
@@ -5634,6 +5643,7 @@ class DashboardManager:
             nn_optimizer_type,
             nn_activation_function,
             nn_init_output_weights,
+            model_key,
         ):
             """Apply parameters to backend, update applied store, and ALWAYS release the in-flight clamp (E-3)."""
             try:
@@ -5667,6 +5677,7 @@ class DashboardManager:
                     nn_optimizer_type,
                     nn_activation_function,
                     nn_init_output_weights,
+                    nn_model=model_key,
                 )
             except Exception as e:  # E-3: a raising handler must not leave the clamp stuck
                 self.logger.error(f"apply_parameters handler raised: {e}", exc_info=True)
@@ -5744,11 +5755,14 @@ class DashboardManager:
                 # there is no store-race with the Apply click). Empty for spiral / no-param types.
                 dash.dependencies.State({"type": "nn-gen-param", "name": dash.ALL}, "value"),
                 dash.dependencies.State({"type": "nn-gen-param", "name": dash.ALL}, "id"),
+                # FR9 / canopy#368: the model this tab believes is selected -- the server refuses a
+                # stale tab (409) and a dataset that model cannot use (422) before staging anything.
+                dash.dependencies.State("model-selection-store", "data"),
             ],
             prevent_initial_call=True,
         )
-        def apply_dataset(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values, gen_ids):
-            return self._apply_dataset_handler(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values, gen_ids)
+        def apply_dataset(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values, gen_ids, model_key):
+            return self._apply_dataset_handler(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values, gen_ids, nn_model=model_key)
 
         @self.app.callback(
             Output("pending-dataset-banner", "is_open", allow_duplicate=True),
@@ -6491,6 +6505,17 @@ class DashboardManager:
             value = dataset_vals.get(key)
             if value is not None:
                 payload[pkey] = value
+        # The registry seed, exactly as ``_apply_dataset_handler`` sends it: the seed is the single
+        # source of truth for the keys a generator cannot run without. This path used to send the
+        # typed fields alone, so re-staging a seeded generator from the modal dropped the very keys
+        # its seed exists for -- ``equities`` without ``symbols`` (a default deployment refuses the
+        # whole 503-name universe with a 422) and ``mnist`` without ``flatten`` (which makes canopy's
+        # ``ndim=2`` declaration self-enforcing). The modal renders no schema-driven params, so the
+        # seed is all it can send; a custom list applied earlier from the sidebar is not carried --
+        # the modal re-stages what it displays, and it does not display that.
+        seed = dataset_default_params(dtype)
+        if seed:
+            payload["nn_dataset_params"] = dict(seed)
         try:
             resp = requests.post(
                 self._api_url("/api/stage_dataset"),
@@ -8718,8 +8743,15 @@ class DashboardManager:
         nn_optimizer_type=_UNSET,
         nn_activation_function=_UNSET,
         nn_init_output_weights=_UNSET,
+        nn_model=None,
     ):
-        """Apply parameters to backend and update applied store."""
+        """Apply parameters to backend and update applied store.
+
+        ``nn_model`` (FR9 / canopy#368) is the model this tab believes is selected. It rides on the
+        REQUEST only (``/api/set_params`` refuses a stale one with 409) and is deliberately kept out
+        of ``params``, which becomes the applied-params store: a routing key there would read as an
+        applied parameter to the dirty tracker and to the read-back verification below.
+        """
         if not n_clicks:
             return dash.no_update, dash.no_update
 
@@ -8805,9 +8837,9 @@ class DashboardManager:
         # core so the params panel and the N3b restart modal go through identical
         # machinery (CascorPatchBounds clamp, ``_compose_apply_toast``, verbatim
         # rejection detail) — never a duplicated bounds/toast path.
-        return self._apply_params_via_backend(params)
+        return self._apply_params_via_backend(params, nn_model=nn_model)
 
-    def _apply_params_via_backend(self, params):
+    def _apply_params_via_backend(self, params, *, nn_model=None):
         """Shared apply core: clamp to cascor's PATCH bounds, POST /api/set_params
         (with the retry/backoff budget), return ``(applied_or_no_update, toast)``.
 
@@ -8818,6 +8850,9 @@ class DashboardManager:
         never duplicated. ``applied`` is the clamped params dict on success
         (truthy) or ``dash.no_update`` on any failure; ``toast`` always carries the
         human-readable result / reason.
+
+        ``nn_model`` (FR9 / canopy#368) rides on the request body only, never in ``params`` --
+        see ``_apply_parameters_handler``. The restart modal does not send it yet.
         """
         # N5 (I-4): defensively clamp submitted values to cascor's PATCH bounds
         # (mirrored in ``CascorPatchBounds``) before the POST, so a single
@@ -8828,9 +8863,10 @@ class DashboardManager:
 
         max_retries = DashboardConstants.DASHBOARD_SET_PARAMS_MAX_RETRIES
         last_error = None
+        body = {**params, "nn_model": nn_model} if nn_model else params
         for attempt in range(max_retries):
             try:
-                response = requests.post(self._api_url("/api/set_params"), json=params, timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT, headers=internal_api_headers())
+                response = requests.post(self._api_url("/api/set_params"), json=body, timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT, headers=internal_api_headers())
                 if response.status_code == 200:
                     # Verify parameters were applied by reading back state
                     try:

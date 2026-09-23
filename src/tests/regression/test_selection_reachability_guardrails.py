@@ -246,9 +246,10 @@ def _explore(manager, *, clearable=None, model_clearable=None, generators=ALL_AV
        rides as ``State`` on the gate callback, so picking one cannot move the model;
     2. clear the dataset to ``⊥``, only when the shipped dropdown is ``clearable``;
     3. click any ENABLED model Select, which writes ``model-selection-store`` and therefore FIRES
-       the gate, which may snap the dataset. The snap is applied here exactly as the callback
-       applies it — which is why this must run at handler level. Written over ``model_registry``
-       alone, the same assertion goes green against the deadlocked code;
+       the gate, which may CLEAR the dataset to ``⊥`` (OQ-6, canopy#652; it used to snap it to
+       ``enabled[0]``). Whatever the gate writes is applied here exactly as the callback applies
+       it — which is why this must run at handler level. Written over ``model_registry`` alone,
+       the same assertion goes green against the deadlocked code;
     4. click "Clear model", which writes ``None`` to the same store and re-fires the same gate.
 
     Transition 4 is why ``⊥`` had to be extended to the model axis. The design defined ``⊥`` on the
