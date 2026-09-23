@@ -1397,7 +1397,13 @@ class DashboardManager:
                                                                                         dcc.Dropdown(
                                                                                             id="nn-dataset-type-dropdown",
                                                                                             options=gated_dataset_options(DEFAULT_MODEL_KEY),
-                                                                                            value=DEFAULT_DATASET_TYPE,
+                                                                                            # OQ-N2 / D-N13: ``⊥`` is the MOUNT state -- the first interaction is an
+                                                                                            # explicit choice, not a seeded default. D-N10 made that safe only once
+                                                                                            # the mount hydration existed (design PR 2): it fills this from the
+                                                                                            # backend, so ``⊥`` survives only when the backend holds nothing canopy
+                                                                                            # can name. Demo mode still lands on spirals because the simulator holds
+                                                                                            # them, not because of a seed. See ``_hydrated_dataset_value``.
+                                                                                            value=None,
                                                                                             # §4.1 -- THE reachability fix. The dataset gate and the model gate each
                                                                                             # read the other axis, so with no way to leave a dataset selected the two
                                                                                             # gates trap the UI in whichever component it started in: (recurrence,
@@ -2835,7 +2841,10 @@ class DashboardManager:
             prevent_initial_call=True,
         )
         def gate_dataset_options(model_key, current_value, model_state):
-            return self._gate_dataset_options_handler(model_key, current_value, hydrated_value=self._hydrated_dataset_value(model_state))
+            options, value, notice = self._gate_dataset_options_handler(model_key, current_value, hydrated_value=self._hydrated_dataset_value(model_state))
+            # A blocking or state-change notice outranks the informational one; the unnameable
+            # notice only speaks when the gate had nothing to say.
+            return options, value, notice if notice is not None else self._unnameable_dataset_notice(model_state)
 
         # N7 (I-7 / U-6): drive the sidebar dataset params from the SELECTED generator's schema.
         # Fires on dataset change AND once on mount (params-init-interval) so the panel is correct at
@@ -2921,19 +2930,59 @@ class DashboardManager:
 
     @staticmethod
     def _hydrated_dataset_value(model_state):
-        """The dataset value the mount hydration read from the backend, or None (§4.10 / G7).
+        """The dataset the mount pass lands on, or None to leave the ``⊥`` seed (§4.10 / G7, OQ-N2).
 
-        Only ``GET /api/selection`` payloads carry a ``dataset`` block, and ``model-state-store``
-        holds one only between the mount and the next model change -- so this is non-None exactly
-        when ``gate_dataset_options`` runs its first-paint pass. ``None`` for every source that
-        names nothing the dropdown can show (``"none"``, ``"unknown"``, or a held dataset canopy
-        cannot name), which leaves the dropdown on its layout seed. What ``⊥``-at-mount does with
-        those sources is OQ-N2's decision (D-N13), sequenced after this hydration by D-N10.
+        Only mount payloads carry a ``dataset`` block (``GET /api/selection``, or the ``unknown``
+        block ``_hydrate_selection_handler`` writes when that read fails), and ``model-state-store``
+        holds one only until the next model change -- so this is consulted exactly once, by
+        ``gate_dataset_options``'s first-paint pass. By ``source``:
+
+        * ``pending`` / ``loaded`` with a nameable value -- that value. G7.
+        * ``none`` -- ``None``: the backend holds nothing, so ``⊥`` is the honest mount state
+          (OQ-N2's reading, D-N10's condition met).
+        * ``pending`` / ``loaded`` naming something canopy does not offer -- ``None`` as well; the
+          dropdown cannot show it, and ``_unnameable_dataset_notice`` says what the backend holds.
+        * ``unknown`` -- ``DEFAULT_DATASET_TYPE``. **The one place a seeded default survives, and
+          deliberately.** The backend could not say what it holds (a cascor predating
+          juniper-cascor#676 omits ``current_dataset``; or the read failed). Landing on ``⊥`` there
+          would disable Start AND Apply over a backend that may be staged and ready after every
+          reload -- exactly the regression D-N10 forbids -- so it degrades to the pre-OQ-N2
+          behaviour instead, which is right whenever the backend is on its own default.
         """
         block = model_state.get("dataset") if isinstance(model_state, dict) else None
-        if not isinstance(block, dict) or block.get("source") not in ("pending", "loaded"):
+        if not isinstance(block, dict):
             return None
-        return block.get("value") or None
+        source = block.get("source")
+        if source in ("pending", "loaded"):
+            return block.get("value") or None
+        if source == "unknown":
+            return DEFAULT_DATASET_TYPE
+        return None
+
+    @staticmethod
+    def _unnameable_dataset_notice(model_state):
+        """Why the mount landed on ``⊥`` over a backend that DOES hold a dataset, or None.
+
+        The backend reported a pending or loaded dataset that canopy does not offer: an unseeded
+        generator staged by another client (``generator`` names it), or raw inline data (it names
+        nothing). ``⊥`` is right -- the dropdown cannot show it, and inventing the nearest match
+        would be a selection nobody made -- but a silent ``⊥`` over a busy backend reads as
+        "nothing is loaded", which is false. Informational: nothing here blocks.
+        """
+        block = model_state.get("dataset") if isinstance(model_state, dict) else None
+        if not isinstance(block, dict) or block.get("source") not in ("pending", "loaded") or block.get("value"):
+            return None
+        held = f"{block['generator']}" if block.get("generator") else "a dataset with no generator name"
+        verb = "has staged" if block.get("source") == "pending" else "holds"
+        return dbc.Alert(
+            [
+                html.Strong(f"The backend {verb} {held}, which this dashboard does not offer. "),
+                html.Span("Choose a dataset to stage your own; until then Start and Apply Dataset stay disabled."),
+            ],
+            id="dataset-gate-unnameable-alert",
+            color="info",
+            className="mb-2",
+        )
 
     def _gate_dataset_options_handler(self, model_key, current_value, *, generators=None, models=MODELS, dataset_types=DATASET_TYPES, hydrated_value=None):
         """Gate the dataset dropdown against the selected model (A1-iv-3b) AND availability (N7 / I-5).
@@ -3477,8 +3526,10 @@ class DashboardManager:
 
         **The key store is written even on failure** (with the seed): that write is what runs
         ``gate_dataset_options``'s first-paint pass, so skipping it would lose N7's
-        availability gate whenever the read fails. The payload store goes ``None`` -- unknown, not
-        disagreement -- and the summary keeps its seeded text.
+        availability gate whenever the read fails. The payload store gets an ``unknown`` dataset
+        block and no model fields -- unknown, not disagreement, on both axes -- so the first-paint
+        pass can tell a failed read (fall back to the default, D-N10) from a backend that holds
+        nothing (stay at ``⊥``, OQ-N2). The summary keeps its seeded text.
         """
         try:
             resp = requests.get(self._api_url("/api/selection"), timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT, headers=internal_api_headers())
@@ -3490,7 +3541,7 @@ class DashboardManager:
             self.logger.warning("Selection hydration read failed (%s); keeping the seeded selection", getattr(resp, "status_code", "?"))
         except Exception as exc:
             self.logger.warning("Selection hydration read failed (%s); keeping the seeded selection", exc)
-        return DEFAULT_MODEL_KEY, dash.no_update, dash.no_update, dash.no_update, None
+        return DEFAULT_MODEL_KEY, dash.no_update, dash.no_update, dash.no_update, {"dataset": {"value": None, "source": "unknown", "generator": None}}
 
     #: ``backend.backend_type`` as reported by ``/api/model/select`` when the recurrence service
     #: backend is the live one. The other values ("service", "demo") both serve cascor-family
@@ -3566,8 +3617,13 @@ class DashboardManager:
         return self._model_summary_text({"nn_model": DEFAULT_MODEL_KEY, "status": status})
 
     def _initial_dataset_model_hint(self):
-        """Seed text for the sidebar reverse-gate hint at first paint (A1b-2; §5.3)."""
-        return dataset_model_hint(DEFAULT_DATASET_TYPE) or ""
+        """Seed text for the sidebar reverse-gate hint at first paint (A1b-2; §5.3).
+
+        Empty: the dataset dropdown mounts at ``⊥`` (OQ-N2), and a dataset that is not selected
+        imposes no model constraint. The hint follows the hydrated value once it lands, through
+        ``annotate_model_hint``.
+        """
+        return ""
 
     @staticmethod
     def _dataset_model_hint_handler(dataset_value):
@@ -6189,7 +6245,11 @@ class DashboardManager:
         return html.Div(
             [
                 dbc.Label("Type", html_for="restart-ds-type", size="sm", className="mb-0"),
-                dcc.Dropdown(id="restart-ds-type", options=gated_dataset_options(DEFAULT_MODEL_KEY), value=DEFAULT_DATASET_TYPE, clearable=False, className="mb-2"),
+                # No seeded dataset here either (OQ-N2): the modal is populated from the sidebar on
+                # every open (``open_restart_confirm_modal``), so this seed was never shown -- but a
+                # seeded default is exactly what the arc removed, and a reader grepping for one
+                # should not find it.
+                dcc.Dropdown(id="restart-ds-type", options=gated_dataset_options(DEFAULT_MODEL_KEY), value=None, clearable=False, className="mb-2"),
                 _num("Samples", "restart-ds-samples", 1, 1),
                 _num("Noise", "restart-ds-noise", "any", 0),
                 _num("Spiral rotations", "restart-ds-rotations", "any", 0),
@@ -6258,6 +6318,15 @@ class DashboardManager:
         # left unset rather than snapped to an arbitrary option — inventing a selection the
         # operator never made is the failure mode this whole arc exists to remove, and the
         # Confirm-time re-stage guard refuses ``⊥`` rather than sending a destructive empty body.
+        #
+        # **This swap is deliberate, and it differs from the sidebar on purpose.** The sidebar
+        # gate CLEARS a stranded dataset (OQ-6, canopy#652). Whether that model-primary-by-clearing
+        # rule binds this site too was put to the owner, who ruled on 2026-09-22 to KEEP the swap
+        # here. The reason: this is a confirmation dialog, and it shows the operator the swapped
+        # value before Confirm re-stages anything. The ruling is recorded (juniper-ml#2037) as point 4 of §5.6.1 of
+        # juniper-ml's JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md. Do not
+        # "reconcile" the two sites without reading it: the registry's seed ORDER is what decides
+        # this fallback.
         if not selection_axis_unset(dataset_type) and dataset_type not in enabled:
             dataset_type = enabled[0] if enabled else None
         dataset_vals = {"dataset_type": dataset_type, "n_samples": n_samples, "noise": noise, "rotations": rotations, "n_spirals": n_spirals}
