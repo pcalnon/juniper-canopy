@@ -688,14 +688,22 @@ def dataset_reason(dataset: DatasetTypeSpec, model: ModelSpec) -> str | None:
     "needs a … model" phrase naming the first failing axis — what KIND of model this dataset
     needs (the reason sits on the greyed option, per the design example "Spirals — needs a
     2-D model").
+
+    Y8: whether there IS a reason is ``compatible()``'s verdict, not re-derived here. The axis
+    checks below only choose the wording, so they can never disagree with the predicate about
+    which pairs are incompatible. An axis ``compatible()`` gains without a phrase here gets the
+    generic wording rather than ``None``, because ``None`` on an incompatible pair would put a
+    disabled option in the dropdown with no reason on it.
     """
+    if compatible(dataset, model):
+        return None
     if dataset.ndim not in model.input_ndim:
         return f"needs a {dataset.ndim}-D model"
     if dataset.task_type not in model.supported_task_types:
         return f"needs a {dataset.task_type} model"
     if not temporal_ok(dataset, model):
         return "needs a Δt-aware model"
-    return None
+    return "not compatible with this model"
 
 
 def model_reason(model: ModelSpec, dataset: DatasetTypeSpec) -> str | None:
@@ -707,7 +715,12 @@ def model_reason(model: ModelSpec, dataset: DatasetTypeSpec) -> str | None:
     ``dataset_reason`` (which names what kind of model a dataset needs); the phrase sits in the
     model row's compatibility cell (e.g. "Recurrence (LMU) — needs 3-D data" against a 2-D
     dataset). The axis order mirrors ``dataset_reason`` so the two stay consistent.
+
+    Y8: as in ``dataset_reason``, whether there IS a reason is ``compatible()``'s verdict; the
+    axis checks only choose the wording, and an axis they do not name gets the generic phrase.
     """
+    if compatible(dataset, model):
+        return None
     if dataset.ndim not in model.input_ndim:
         dims = " or ".join(f"{n}-D" for n in sorted(model.input_ndim))
         return f"needs {dims} data"
@@ -716,7 +729,7 @@ def model_reason(model: ModelSpec, dataset: DatasetTypeSpec) -> str | None:
         return f"needs {tasks} data"
     if not temporal_ok(dataset, model):
         return "needs regularly-sampled data"
-    return None
+    return "not compatible with this dataset"
 
 
 def model_requirement(model: ModelSpec) -> str:
@@ -784,13 +797,17 @@ def gated_dataset_options(model_key: str, *, models: tuple[ModelSpec, ...] = MOD
     Both registries are injectable for tests (design §5 enabling change) — and they must travel
     TOGETHER: resolving the model against a synthetic registry while iterating the production
     dataset seeds would silently score a graph that exists nowhere.
+
+    Y8: ``disabled`` is decided by ``compatible()`` — the load-bearing predicate — and
+    ``dataset_reason`` is consulted only for the wording of an option already judged
+    incompatible. Deciding it from whether a reason string came back made a presentation helper
+    the second, independent expression of the gate.
     """
     spec = get_model_spec(model_key, models=models)
     options: list[dict[str, object]] = []
     for dataset in dataset_types:
-        reason = dataset_reason(dataset, spec) if spec is not None else None
-        if reason is None:
+        if spec is None or compatible(dataset, spec):
             options.append({"label": dataset.label, "value": dataset.value})
         else:
-            options.append({"label": f"{dataset.label} — {reason}", "value": dataset.value, "disabled": True})
+            options.append({"label": f"{dataset.label} — {dataset_reason(dataset, spec)}", "value": dataset.value, "disabled": True})
     return options

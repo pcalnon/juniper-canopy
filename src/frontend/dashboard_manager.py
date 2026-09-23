@@ -48,7 +48,7 @@ from dash.dependencies import Input, Output, State
 from canopy_constants import CascorPatchBounds, DashboardConstants, TrainingConstants
 from dataset_schema import apply_availability_gate, apply_seeded_defaults, availability_is_known, form_excluded_fields, generator_name_for_type, is_generator_available, parse_schema_fields, unavailable_hint, unavailable_reason
 from frontend.internal_api import internal_api_headers
-from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, RECURRENCE_BACKEND_TYPE, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason, model_requirement, selection_is_live
+from model_registry import DATASET_TYPES, DEFAULT_DATASET_TYPE, DEFAULT_MODEL_KEY, MODELS, RECURRENCE_BACKEND_TYPE, compatible, dataset_default_params, dataset_model_hint, gated_dataset_options, get_dataset_spec, get_model_spec, model_is_trainable, model_matches_search, model_reason, model_requirement, selection_is_live
 from settings import get_settings
 
 from . import ui_standards
@@ -1397,7 +1397,13 @@ class DashboardManager:
                                                                                         dcc.Dropdown(
                                                                                             id="nn-dataset-type-dropdown",
                                                                                             options=gated_dataset_options(DEFAULT_MODEL_KEY),
-                                                                                            value=DEFAULT_DATASET_TYPE,
+                                                                                            # OQ-N2 / D-N13: ``⊥`` is the MOUNT state -- the first interaction is an
+                                                                                            # explicit choice, not a seeded default. D-N10 made that safe only once
+                                                                                            # the mount hydration existed (design PR 2): it fills this from the
+                                                                                            # backend, so ``⊥`` survives only when the backend holds nothing canopy
+                                                                                            # can name. Demo mode still lands on spirals because the simulator holds
+                                                                                            # them, not because of a seed. See ``_hydrated_dataset_value``.
+                                                                                            value=None,
                                                                                             # §4.1 -- THE reachability fix. The dataset gate and the model gate each
                                                                                             # read the other axis, so with no way to leave a dataset selected the two
                                                                                             # gates trap the UI in whichever component it started in: (recurrence,
@@ -2634,8 +2640,10 @@ class DashboardManager:
         unit-testable. Deliberately does NOT touch ``active_tab`` — the dashboard keeps exactly
         two ``visualization-tabs.active_tab`` writers (Store-restore + tutorial trigger) to
         avoid a mount-time restore race, and the default active tab ("metrics") is never a
-        cascade tab, so it survives the filter. (Resetting a hidden active tab on a *runtime*
-        model swap belongs with A1-iv's model-switch flow.)
+        cascade tab, so it survives the filter. (A tab this filter hides is reset by the
+        Store-restore writer, which reads the rendered tab list — Y4 — so the reset adds no
+        writer. The app-wide census is THREE, not two: ``hdf5_snapshots_panel``'s replay
+        hand-off also writes ``active_tab``; the two named above are this file's.)
         """
         tabs = self._all_visualization_tabs()
         if model_class == "one_shot":
@@ -2835,7 +2843,10 @@ class DashboardManager:
             prevent_initial_call=True,
         )
         def gate_dataset_options(model_key, current_value, model_state):
-            return self._gate_dataset_options_handler(model_key, current_value, hydrated_value=self._hydrated_dataset_value(model_state))
+            options, value, notice = self._gate_dataset_options_handler(model_key, current_value, hydrated_value=self._hydrated_dataset_value(model_state))
+            # A blocking or state-change notice outranks the informational one; the unnameable
+            # notice only speaks when the gate had nothing to say.
+            return options, value, notice if notice is not None else self._unnameable_dataset_notice(model_state)
 
         # N7 (I-7 / U-6): drive the sidebar dataset params from the SELECTED generator's schema.
         # Fires on dataset change AND once on mount (params-init-interval) so the panel is correct at
@@ -2922,19 +2933,59 @@ class DashboardManager:
 
     @staticmethod
     def _hydrated_dataset_value(model_state):
-        """The dataset value the mount hydration read from the backend, or None (§4.10 / G7).
+        """The dataset the mount pass lands on, or None to leave the ``⊥`` seed (§4.10 / G7, OQ-N2).
 
-        Only ``GET /api/selection`` payloads carry a ``dataset`` block, and ``model-state-store``
-        holds one only between the mount and the next model change -- so this is non-None exactly
-        when ``gate_dataset_options`` runs its first-paint pass. ``None`` for every source that
-        names nothing the dropdown can show (``"none"``, ``"unknown"``, or a held dataset canopy
-        cannot name), which leaves the dropdown on its layout seed. What ``⊥``-at-mount does with
-        those sources is OQ-N2's decision (D-N13), sequenced after this hydration by D-N10.
+        Only mount payloads carry a ``dataset`` block (``GET /api/selection``, or the ``unknown``
+        block ``_hydrate_selection_handler`` writes when that read fails), and ``model-state-store``
+        holds one only until the next model change -- so this is consulted exactly once, by
+        ``gate_dataset_options``'s first-paint pass. By ``source``:
+
+        * ``pending`` / ``loaded`` with a nameable value -- that value. G7.
+        * ``none`` -- ``None``: the backend holds nothing, so ``⊥`` is the honest mount state
+          (OQ-N2's reading, D-N10's condition met).
+        * ``pending`` / ``loaded`` naming something canopy does not offer -- ``None`` as well; the
+          dropdown cannot show it, and ``_unnameable_dataset_notice`` says what the backend holds.
+        * ``unknown`` -- ``DEFAULT_DATASET_TYPE``. **The one place a seeded default survives, and
+          deliberately.** The backend could not say what it holds (a cascor predating
+          juniper-cascor#676 omits ``current_dataset``; or the read failed). Landing on ``⊥`` there
+          would disable Start AND Apply over a backend that may be staged and ready after every
+          reload -- exactly the regression D-N10 forbids -- so it degrades to the pre-OQ-N2
+          behaviour instead, which is right whenever the backend is on its own default.
         """
         block = model_state.get("dataset") if isinstance(model_state, dict) else None
-        if not isinstance(block, dict) or block.get("source") not in ("pending", "loaded"):
+        if not isinstance(block, dict):
             return None
-        return block.get("value") or None
+        source = block.get("source")
+        if source in ("pending", "loaded"):
+            return block.get("value") or None
+        if source == "unknown":
+            return DEFAULT_DATASET_TYPE
+        return None
+
+    @staticmethod
+    def _unnameable_dataset_notice(model_state):
+        """Why the mount landed on ``⊥`` over a backend that DOES hold a dataset, or None.
+
+        The backend reported a pending or loaded dataset that canopy does not offer: an unseeded
+        generator staged by another client (``generator`` names it), or raw inline data (it names
+        nothing). ``⊥`` is right -- the dropdown cannot show it, and inventing the nearest match
+        would be a selection nobody made -- but a silent ``⊥`` over a busy backend reads as
+        "nothing is loaded", which is false. Informational: nothing here blocks.
+        """
+        block = model_state.get("dataset") if isinstance(model_state, dict) else None
+        if not isinstance(block, dict) or block.get("source") not in ("pending", "loaded") or block.get("value"):
+            return None
+        held = f"{block['generator']}" if block.get("generator") else "a dataset with no generator name"
+        verb = "has staged" if block.get("source") == "pending" else "holds"
+        return dbc.Alert(
+            [
+                html.Strong(f"The backend {verb} {held}, which this dashboard does not offer. "),
+                html.Span("Choose a dataset to stage your own; until then Start and Apply Dataset stay disabled."),
+            ],
+            id="dataset-gate-unnameable-alert",
+            color="info",
+            className="mb-2",
+        )
 
     def _gate_dataset_options_handler(self, model_key, current_value, *, generators=None, models=MODELS, dataset_types=DATASET_TYPES, hydrated_value=None):
         """Gate the dataset dropdown against the selected model (A1-iv-3b) AND availability (N7 / I-5).
@@ -3296,7 +3347,7 @@ class DashboardManager:
             params[name] = value
         return params
 
-    def _apply_dataset_handler(self, n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values=None, gen_ids=None):
+    def _apply_dataset_handler(self, n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values=None, gen_ids=None, nn_model=None):
         """POST /api/stage_dataset with the current dataset-form values (N7 schema-aware).
 
         ``dataset_type`` is ALWAYS sent — cascor's ``_reload_dataset`` hard-requires it. For the
@@ -3364,6 +3415,10 @@ class DashboardManager:
             params.update(self._collect_generator_params(gen_values, gen_ids, exclude=form_excluded_fields(generator_name_for_type(dataset_type))))
             if params:
                 payload["nn_dataset_params"] = params
+        # FR9 / canopy#368: mirror this tab's model onto the request. Omitted, not sent as None,
+        # when no model is selected -- the server then behaves exactly as before the mirror.
+        if nn_model:
+            payload["nn_model"] = nn_model
         try:
             resp = requests.post(
                 self._api_url("/api/stage_dataset"),
@@ -3478,8 +3533,10 @@ class DashboardManager:
 
         **The key store is written even on failure** (with the seed): that write is what runs
         ``gate_dataset_options``'s first-paint pass, so skipping it would lose N7's
-        availability gate whenever the read fails. The payload store goes ``None`` -- unknown, not
-        disagreement -- and the summary keeps its seeded text.
+        availability gate whenever the read fails. The payload store gets an ``unknown`` dataset
+        block and no model fields -- unknown, not disagreement, on both axes -- so the first-paint
+        pass can tell a failed read (fall back to the default, D-N10) from a backend that holds
+        nothing (stay at ``⊥``, OQ-N2). The summary keeps its seeded text.
         """
         try:
             resp = requests.get(self._api_url("/api/selection"), timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT, headers=internal_api_headers())
@@ -3491,7 +3548,7 @@ class DashboardManager:
             self.logger.warning("Selection hydration read failed (%s); keeping the seeded selection", getattr(resp, "status_code", "?"))
         except Exception as exc:
             self.logger.warning("Selection hydration read failed (%s); keeping the seeded selection", exc)
-        return DEFAULT_MODEL_KEY, dash.no_update, dash.no_update, dash.no_update, None
+        return DEFAULT_MODEL_KEY, dash.no_update, dash.no_update, dash.no_update, {"dataset": {"value": None, "source": "unknown", "generator": None}}
 
     #: ``backend.backend_type`` as reported by ``/api/model/select`` when the recurrence service
     #: backend is the live one. The other values ("service", "demo") both serve cascor-family
@@ -3567,8 +3624,13 @@ class DashboardManager:
         return self._model_summary_text({"nn_model": DEFAULT_MODEL_KEY, "status": status})
 
     def _initial_dataset_model_hint(self):
-        """Seed text for the sidebar reverse-gate hint at first paint (A1b-2; §5.3)."""
-        return dataset_model_hint(DEFAULT_DATASET_TYPE) or ""
+        """Seed text for the sidebar reverse-gate hint at first paint (A1b-2; §5.3).
+
+        Empty: the dataset dropdown mounts at ``⊥`` (OQ-N2), and a dataset that is not selected
+        imposes no model constraint. The hint follows the hydrated value once it lands, through
+        ``annotate_model_hint``.
+        """
+        return ""
 
     @staticmethod
     def _dataset_model_hint_handler(dataset_value):
@@ -3635,18 +3697,34 @@ class DashboardManager:
         return dbc.Badge(status.replace("_", " "), color=color, className="text-uppercase")
 
     @staticmethod
+    def _model_compat_cell_id(model_key):
+        """DOM id of a model row's Compatibility cell, which describes the row's Select button (Y7).
+
+        Derived from the model key, so it is deterministic, and escaped so it is a valid HTML id
+        for ANY key: ``[A-Za-z0-9-]`` pass through and every other character becomes
+        ``_<hex codepoint>_``. ``_`` is never passed through, so every ``_`` delimits an escape and
+        two distinct keys cannot share an id. The escape also keeps whitespace out — it would split
+        the ``aria-describedby`` IDREF list — along with the ``.`` and ``{`` Dash refuses in a
+        string id.
+        """
+        safe = "".join(ch if (ch.isascii() and ch.isalnum()) or ch == "-" else f"_{ord(ch):x}_" for ch in str(model_key))
+        return f"model-compat-{safe}"
+
+    @staticmethod
     def _build_model_selection_table(dataset_value, selected_model, *, models=MODELS, dataset_types=DATASET_TYPES, search=""):
         """Build the custom ``dbc.Table`` of models for the selection modal (A1b; design §5.2).
 
         Rows = every model matching the optional ``search`` filter (label + family + category +
         tags, §5.2). Columns: Model / Category / Status / Compatibility / Select. Compatibility is
-        computed against the currently-selected dataset (``dataset_value``) via ``model_reason``; an
-        incompatible model shows the reason in its compatibility cell and its Select button is
-        disabled. Per ratified option (a) a non-live model stays selectable here — ONLY
-        *incompatible* models are disabled (non-live models are Train-gated at the controls, not in
-        the table — A1-iv-5). The currently-active row is highlighted. A ``dash_table.DataTable`` is
-        deliberately NOT used (OQ-4): the cells are rich components (a badge, a reason cell, a
-        per-row disabled button) and there is no virtualization payoff at this row count.
+        ``compatible()`` against the currently-selected dataset (``dataset_value``); an
+        incompatible model shows ``model_reason``'s wording in its compatibility cell and its
+        Select button is disabled. Every row's Select button is described (``aria-describedby``)
+        by that row's compatibility cell (Y7). Per ratified option (a) a non-live model stays
+        selectable here — ONLY *incompatible* models are disabled (non-live models are Train-gated
+        at the controls, not in the table — A1-iv-5). The currently-active row is highlighted. A
+        ``dash_table.DataTable`` is deliberately NOT used (OQ-4): the cells are rich components (a
+        badge, a reason cell, a per-row disabled button) and there is no virtualization payoff at
+        this row count.
 
         Degenerate states: a non-empty ``search`` that matches nothing renders a "no matches"
         message (§5.2); when a dataset is selected but **no** visible model can train it, a recovery
@@ -3671,33 +3749,45 @@ class DashboardManager:
         rows = []
         compatible_count = 0
         for model in visible:
-            reason = model_reason(model, dataset) if dataset is not None else None
-            # ``⊥`` is compatible with every model — that is what makes it the cut vertex — so every
-            # Select stays ENABLED here and the traversal out of ``⊥`` keeps working.
-            is_compatible = reason is None
+            # Y8: selectability is ``compatible()``'s verdict, read directly — not inferred from
+            # whether ``model_reason`` happened to return a string. ``⊥`` is compatible with every
+            # model — that is what makes it the cut vertex — so every Select stays ENABLED there and
+            # the traversal out of ``⊥`` keeps working.
+            is_compatible = dataset is None or compatible(dataset, model)
             compatible_count += int(is_compatible)
             is_active = model.key == selected_model
             model_cell = [html.Strong(model.label)]
             if model.description:
                 model_cell.extend([html.Br(), html.Span(model.description, className="text-muted small")])
+            # Y7: the compatibility cell describes the row's Select button, so it carries an id in
+            # every branch.
+            compat_id = DashboardManager._model_compat_cell_id(model.key)
             if dataset is None:
                 # Y9: rendering "✓ compatible" here was a positive falsehood — it asserted agreement
                 # with a dataset that does not exist, for every model in the table. State the
                 # requirement instead, so the row says what it WOULD need. Selectability is
                 # unaffected (``is_compatible`` stays True); only the claim changes.
-                compat_cell = html.Span(model_requirement(model), className="text-muted small")
+                compat_cell = html.Span(model_requirement(model), id=compat_id, className="text-muted small")
             elif is_compatible:
-                compat_cell = html.Span("✓ compatible", className="text-success small")
+                compat_cell = html.Span("✓ compatible", id=compat_id, className="text-success small")
             else:
-                compat_cell = html.Span(reason, className="text-muted small fst-italic")
-            select_button = dbc.Button(
+                compat_cell = html.Span(model_reason(model, dataset), id=compat_id, className="text-muted small fst-italic")
+            # Y7: ``html.Button``, not ``dbc.Button`` — dbc 2.0.4's Button declares no ``aria-*``
+            # wildcard and raises TypeError on ``aria-describedby``. ``className`` is the class
+            # string dbc rendered for the old color/outline/size props, so the control looks the
+            # same. The reason is NOT also put in ``title=``: on a disabled button that tooltip can
+            # never show (Bootstrap gives ``.btn:disabled`` ``pointer-events: none``), the
+            # accessible description now comes from the rendered cell, and design N4 rules
+            # ``title=`` out as the channel for a consequence. Enabled buttons keep their hover hint.
+            described = {"aria-describedby": compat_id}
+            if is_compatible:
+                described["title"] = "Currently active" if is_active else "Select this model"
+            select_button = html.Button(
                 "Selected" if is_active else "Select",
                 id={"type": "model-select-btn", "index": model.key},
-                color="success" if is_active else "primary",
-                outline=not is_active,
-                size="sm",
+                className=f"btn btn-{'success' if is_active else 'outline-primary'} btn-sm",
                 disabled=not is_compatible,
-                title=(reason or ("Currently active" if is_active else "Select this model")),
+                **described,
             )
             rows.append(
                 html.Tr(
@@ -4147,9 +4237,33 @@ class DashboardManager:
         # `layout-state-store` is `storage_type="local"`, so on a fresh
         # session it carries the layout default; on a returning session
         # it carries whatever was stamped at the last tab change.
+        #
+        # Y4: `suppress_cascade_tabs` rebuilds the tab bar without the
+        # cascade-only tabs for a one-shot model, so the saved tab — or the
+        # tab on screen — can name a tab that is no longer rendered; dbc then
+        # highlights nothing and shows an empty pane. A tab that is not
+        # rendered is never restored, and if the tab on screen is not rendered
+        # either this falls back to the first rendered tab ("metrics" in both
+        # tab lists: the tab the layout mounts on, and the one dbc picks for an
+        # unset active_tab). The rendered tabs are an INPUT, not State: the
+        # one-shot rebuild lands AFTER this mount-time restore (the model class
+        # is hydrated by `hydrate_model_class` on `params-init-interval`), and a
+        # runtime model swap changes nothing else this callback reads.
+        # Resetting here adds no `active_tab` writer (see `_visible_tabs` for
+        # the census). If the tab list cannot be read at all, the rule below is
+        # exactly the pre-Y4 one.
         self.app.clientside_callback(
             """
-            function(state, currentTab) {
+            function(state, tabs, currentTab) {
+                var rendered = [];
+                [].concat(tabs || []).forEach(function(tab, index) {
+                    if (tab && tab.props) rendered.push(tab.props.tab_id || "tab-" + index);
+                });
+                var saved = state && state.active_tab;
+                if (rendered.length && rendered.indexOf(saved) === -1) {
+                    var target = rendered.indexOf(currentTab) !== -1 ? currentTab : rendered[0];
+                    return target === currentTab ? window.dash_clientside.no_update : target;
+                }
                 if (!state || !state.active_tab) return window.dash_clientside.no_update;
                 // Equality guard (#1 tab-feedback-loop fix): only restore when
                 // the persisted tab differs from the tab already shown. Without
@@ -4162,6 +4276,7 @@ class DashboardManager:
             """,
             Output("visualization-tabs", "active_tab", allow_duplicate=True),
             Input("layout-state-store", "data"),
+            Input("visualization-tabs", "children"),
             State("visualization-tabs", "active_tab"),
             prevent_initial_call="initial_duplicate",
         )
@@ -5546,6 +5661,10 @@ class DashboardManager:
                 dash.dependencies.State("nn-activation-function-dropdown", "value"),
                 # init_output_weights (output-layer weight init: zero|random)
                 dash.dependencies.State("nn-init-output-weights-dropdown", "value"),
+                # FR9 / canopy#368: the model this tab believes is selected, mirrored onto the
+                # request so the server can refuse a stale tab. State, not Input: it must never
+                # trigger an apply by itself.
+                dash.dependencies.State("model-selection-store", "data"),
             ],
             prevent_initial_call=True,
         )
@@ -5579,6 +5698,7 @@ class DashboardManager:
             nn_optimizer_type,
             nn_activation_function,
             nn_init_output_weights,
+            model_key,
         ):
             """Apply parameters to backend, update applied store, and ALWAYS release the in-flight clamp (E-3)."""
             try:
@@ -5612,6 +5732,7 @@ class DashboardManager:
                     nn_optimizer_type,
                     nn_activation_function,
                     nn_init_output_weights,
+                    nn_model=model_key,
                 )
             except Exception as e:  # E-3: a raising handler must not leave the clamp stuck
                 self.logger.error(f"apply_parameters handler raised: {e}", exc_info=True)
@@ -5689,11 +5810,14 @@ class DashboardManager:
                 # there is no store-race with the Apply click). Empty for spiral / no-param types.
                 dash.dependencies.State({"type": "nn-gen-param", "name": dash.ALL}, "value"),
                 dash.dependencies.State({"type": "nn-gen-param", "name": dash.ALL}, "id"),
+                # FR9 / canopy#368: the model this tab believes is selected -- the server refuses a
+                # stale tab (409) and a dataset that model cannot use (422) before staging anything.
+                dash.dependencies.State("model-selection-store", "data"),
             ],
             prevent_initial_call=True,
         )
-        def apply_dataset(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values, gen_ids):
-            return self._apply_dataset_handler(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values, gen_ids)
+        def apply_dataset(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values, gen_ids, model_key):
+            return self._apply_dataset_handler(n_clicks, dataset_type, n_samples, noise, rotations, n_spirals, gen_values, gen_ids, nn_model=model_key)
 
         @self.app.callback(
             Output("pending-dataset-banner", "is_open", allow_duplicate=True),
@@ -6190,7 +6314,11 @@ class DashboardManager:
         return html.Div(
             [
                 dbc.Label("Type", html_for="restart-ds-type", size="sm", className="mb-0"),
-                dcc.Dropdown(id="restart-ds-type", options=gated_dataset_options(DEFAULT_MODEL_KEY), value=DEFAULT_DATASET_TYPE, clearable=False, className="mb-2"),
+                # No seeded dataset here either (OQ-N2): the modal is populated from the sidebar on
+                # every open (``open_restart_confirm_modal``), so this seed was never shown -- but a
+                # seeded default is exactly what the arc removed, and a reader grepping for one
+                # should not find it.
+                dcc.Dropdown(id="restart-ds-type", options=gated_dataset_options(DEFAULT_MODEL_KEY), value=None, clearable=False, className="mb-2"),
                 _num("Samples", "restart-ds-samples", 1, 1),
                 _num("Noise", "restart-ds-noise", "any", 0),
                 _num("Spiral rotations", "restart-ds-rotations", "any", 0),
@@ -6259,6 +6387,15 @@ class DashboardManager:
         # left unset rather than snapped to an arbitrary option — inventing a selection the
         # operator never made is the failure mode this whole arc exists to remove, and the
         # Confirm-time re-stage guard refuses ``⊥`` rather than sending a destructive empty body.
+        #
+        # **This swap is deliberate, and it differs from the sidebar on purpose.** The sidebar
+        # gate CLEARS a stranded dataset (OQ-6, canopy#652). Whether that model-primary-by-clearing
+        # rule binds this site too was put to the owner, who ruled on 2026-09-22 to KEEP the swap
+        # here. The reason: this is a confirmation dialog, and it shows the operator the swapped
+        # value before Confirm re-stages anything. The ruling is recorded (juniper-ml#2037) as point 4 of §5.6.1 of
+        # juniper-ml's JUNIPER_2026-06-17_JUNIPER-CANOPY_MODEL-DATASET-SELECTION-DESIGN.md. Do not
+        # "reconcile" the two sites without reading it: the registry's seed ORDER is what decides
+        # this fallback.
         if not selection_axis_unset(dataset_type) and dataset_type not in enabled:
             dataset_type = enabled[0] if enabled else None
         dataset_vals = {"dataset_type": dataset_type, "n_samples": n_samples, "noise": noise, "rotations": rotations, "n_spirals": n_spirals}
@@ -8661,8 +8798,15 @@ class DashboardManager:
         nn_optimizer_type=_UNSET,
         nn_activation_function=_UNSET,
         nn_init_output_weights=_UNSET,
+        nn_model=None,
     ):
-        """Apply parameters to backend and update applied store."""
+        """Apply parameters to backend and update applied store.
+
+        ``nn_model`` (FR9 / canopy#368) is the model this tab believes is selected. It rides on the
+        REQUEST only (``/api/set_params`` refuses a stale one with 409) and is deliberately kept out
+        of ``params``, which becomes the applied-params store: a routing key there would read as an
+        applied parameter to the dirty tracker and to the read-back verification below.
+        """
         if not n_clicks:
             return dash.no_update, dash.no_update
 
@@ -8748,9 +8892,9 @@ class DashboardManager:
         # core so the params panel and the N3b restart modal go through identical
         # machinery (CascorPatchBounds clamp, ``_compose_apply_toast``, verbatim
         # rejection detail) — never a duplicated bounds/toast path.
-        return self._apply_params_via_backend(params)
+        return self._apply_params_via_backend(params, nn_model=nn_model)
 
-    def _apply_params_via_backend(self, params):
+    def _apply_params_via_backend(self, params, *, nn_model=None):
         """Shared apply core: clamp to cascor's PATCH bounds, POST /api/set_params
         (with the retry/backoff budget), return ``(applied_or_no_update, toast)``.
 
@@ -8761,6 +8905,9 @@ class DashboardManager:
         never duplicated. ``applied`` is the clamped params dict on success
         (truthy) or ``dash.no_update`` on any failure; ``toast`` always carries the
         human-readable result / reason.
+
+        ``nn_model`` (FR9 / canopy#368) rides on the request body only, never in ``params`` --
+        see ``_apply_parameters_handler``. The restart modal does not send it yet.
         """
         # N5 (I-4): defensively clamp submitted values to cascor's PATCH bounds
         # (mirrored in ``CascorPatchBounds``) before the POST, so a single
@@ -8771,9 +8918,10 @@ class DashboardManager:
 
         max_retries = DashboardConstants.DASHBOARD_SET_PARAMS_MAX_RETRIES
         last_error = None
+        body = {**params, "nn_model": nn_model} if nn_model else params
         for attempt in range(max_retries):
             try:
-                response = requests.post(self._api_url("/api/set_params"), json=params, timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT, headers=internal_api_headers())
+                response = requests.post(self._api_url("/api/set_params"), json=body, timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT, headers=internal_api_headers())
                 if response.status_code == 200:
                     # Verify parameters were applied by reading back state
                     try:

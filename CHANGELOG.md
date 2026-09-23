@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Stage, live-swap and set-params requests now carry the dashboard's `nn_model`, and a stale or
+  incompatible request fails closed (FR9; the `nn_model` mirror clause of canopy#368).**
+  `current_nn_model` is server state, while `model-selection-store` is per-tab memory. A second
+  tab, or one opened before another client changed the model, holds a stale selection, and a
+  request made under it used to land on whichever backend was live. For example, a stale CasCor
+  tab could stage a rank-2 dataset into the recurrence backend, which failed only at *fit* time.
+  - `nn_model` is an **optional** field on both `StageDatasetRequest` and `SetParamsRequest`.
+    #368's own guardrail says a field absent from a request model is silently dropped, so the key
+    had to exist before anything could be checked.
+  - `/api/stage_dataset`, `/api/live_dataset_swap` and `/api/set_params` answer:
+    - **409** when the mirror names a model other than the server's selection;
+    - **422** for an unknown model;
+    - **422** on staging or live-swap when the dataset is known and that model cannot use it.
+  - A request without the key behaves exactly as before, so older clients and `curl` are
+    unaffected.
+  - The key is a routing field. It never reaches a backend, and it is kept out of the
+    applied-params store the dirty tracker reads.
+  - The sidebar's Apply Dataset and Apply Parameters send it. The restart modal and the live-swap
+    button do not yet; the server accepts its absence.
+  - `src/tests/regression/test_request_nn_model_mirror.py`, mutation-checked at four sites.
 - **The selection survives a page reload: both selectors now hydrate from the backend (design
   PR 2, §4.10; guardrails G7 and Y3).** The selection had no read side on either axis.
   `model-selection-store` is memory-scoped and seeded with the default model, while
@@ -39,6 +59,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `src/tests/regression/test_selection_reachability_guardrails.py` gains **G7**, asserted through
     the real route and real backends as well as the registered callbacks. It also gains the **Y3**
     read-side guardrail, which the design's §5 table lacked. Mutation-checked at four sites.
+- **The dataset selector mounts at `⊥` instead of a seeded `spirals` (OQ-N2 / D-N13).** The owner
+  accepted `⊥`-at-mount on 2026-09-02, on the condition that the hydration above land first
+  (D-N10). With that in place, the first interaction is an explicit choice, and `⊥` appears only
+  when it is true. What the mount lands on now depends on what the backend reports:
+  - **pending / loaded, nameable**: that dataset (G7).
+  - **none**: `⊥`. The backend holds nothing, and nothing is invented for it.
+  - **loaded but unnameable** (an unseeded generator another client staged, or raw inline data):
+    `⊥`, plus an informational notice naming what the backend holds. A silent `⊥` over a busy
+    backend would read as "nothing is loaded".
+  - **unknown** (a cascor that predates juniper-cascor#676, or a failed read): falls back to the old
+    default. `⊥` there would disable Start *and* Apply Dataset after every reload over a backend
+    that may be staged and ready — exactly the regression D-N10 exists to prevent. A failed read
+    now writes an explicit `unknown` block, so the gate can tell it apart from "holds nothing".
+  - **demo mode** still lands on spirals, because the simulator holds spirals, not because of a
+    seed.
+  - The restart modal's dropdown loses its seed too (it was overwritten on every open anyway), and
+    its `enabled[0]` fallback is recorded in code as a deliberate exception to OQ-6 (owner ruling,
+    2026-09-22).
+  - Mutation-checked: re-seeding the layout, dropping the unknown fallback, a failed read writing
+    `None`, and suppressing the unnameable notice each fail a test.
 
 - **Generator loads run `juniper_data_client.validate_npz_contract` as an ADVISORY second check**
   (#559; owner ruling 2026-09-22). `regenerate_dataset_from_generator` now hands every downloaded
@@ -64,6 +104,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A model swap could strand the dashboard on a tab that no longer exists (Y4).** A one-shot model
+  rebuilds the tab bar without the five cascade-only tabs, and the active-tab restore guarded only
+  "no saved tab" and "saved equals shown". Measured in headless chromium: on Network Topology, a
+  swap to a one-shot model left **no** tab highlighted and **zero** visible panes; a reload with a
+  persisted cascade tab restored it at mount and was stranded the same way once the rebuild landed.
+  The restore now reads the rendered tabs as an Input. It never restores a tab that is not rendered,
+  keeps the shown tab when it is, and otherwise falls back to the first rendered tab (Training
+  Metrics). The reset lives in the existing restore writer, so it adds no `active_tab` writer. The
+  app has **three** such writers, not the two the source-level test counts:
+  `hdf5_snapshots_panel`'s replay hand-off is the third.
+- **Whether a selection control was greyed out was decided by the reason-string helpers, not by
+  `compatible()` (Y8).** `gated_dataset_options` disabled an option when `dataset_reason` returned
+  a string, and the model table disabled a Select when `model_reason` did. Both helpers
+  re-implemented all three compatibility axes, so the load-bearing predicate had three independent
+  expressions. `disabled` is now `not compatible()` on both surfaces, and the helpers only choose
+  the wording, with a generic phrase for an axis they do not name, so a greyed control can never
+  read `None`. A universal test pins `disabled == not compatible()` and reason-iff-disabled over
+  every pair of the production registry and of a synthetic registry that fails each axis alone. The
+  production registry alone cannot see a dropped temporal axis, because every shipped rank-3 model
+  is Δt-aware.
+- **The model table's Select button carried its reason only in `title=` (Y7, model-table half).**
+  Each row's compatibility cell now has a deterministic id derived from the model key, and the
+  row's Select points at it with `aria-describedby`, as
+  `JUNIPER_2026-09-02_JUNIPER-CANOPY_SELECTION-REACHABILITY-DESIGN.md` §4.3 (juniper-ml) specifies.
+  The accessible description is therefore the rendered reason. The control is now an `html.Button`
+  carrying the class string `dbc.Button` rendered, because dbc 2.0.4's `Button` rejects `aria-*`
+  props. The reason is no longer repeated in `title=` on a disabled Select: Bootstrap gives
+  `.btn:disabled` `pointer-events: none`, so that tooltip could never show. Enabled Selects keep
+  their hover hint.
 - **The replay controls never applied: play, step, start, end, the speed buttons and the slider
   did nothing on any page load (F-CANOPY-048).** `handle_replay_controls` (Input
   `replay-slider.value` → Output `replay-state.data`) and `update_replay_ui` (Input
@@ -85,16 +154,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every tick. Dispatch is now on the exact triggering component id, over every entry of
   `ctx.triggered`, so a click the renderer merged behind a refresh still applies.
 
-  **The condition this depends on:** `metrics-store.data` is an Input of the merged callback, so
-  it is not ready while that store's primary writer `update_metrics_store` (or
-  `update_display_mode`, upstream of it) is pending. That poll is `running=`-gated and leaves
-  gaps. A primary writer pending at every renderer pass would lock the controls again. The old
-  controls callback had those same two blockers, through the slider. The new
+  **The condition this depended on:** `metrics-store.data` was an Input of the merged callback, so
+  it was not ready while that store's primary writer `update_metrics_store` (or
+  `update_display_mode`, upstream of it) was pending. That poll is `running=`-gated and leaves
+  gaps. A primary writer pending at every renderer pass would have locked the controls again. The
+  old controls callback had those same two blockers, through the slider. F-CANOPY-054 (below)
+  removed the condition: the controls callback is now clientside and reads the store as State. The
+  new
   `src/tests/unit/frontend/test_f048_replay_cycle.py` also fails CI on any Input-graph cycle
   across two or more distinct callbacks anywhere in the built app. Canopy never runs the dev-tools
   check that would have caught this. Two pre-existing cycles are exempted by name, CAN-016a tab
   restore/stamp and the CAN-015 replay-player control loop. Both close through `allow_duplicate`
   outputs, so neither is a readiness deadlock.
+- **Pausing a metrics replay did not hold: a late tick restored `playing` with the interval off,
+  so the label stuck at ⏸ and nothing moved (F-CANOPY-054).** After F-CANOPY-048 the replay state
+  had two writers, each a server round trip away: the merged controls callback, and `replay_tick`,
+  an `allow_duplicate` writer that computed the next state from the State read when its request was
+  sent. With the page's response-delivery latency at ~5 s against a 250–1000 ms tick, a tick was
+  in flight whenever the user paused. The pause disabled the interval, so no later tick evicted
+  that one, and its response — computed from `playing` — landed after the pause.
+
+  Moving only the tick clientside, the direction first recorded, does not fix it. The server
+  controls callback read `replay-state.data` as an Input, so every clientside tick re-requested it,
+  and dash-renderer drops an in-flight request whenever a new request of the same callback arrives
+  (the requestedCallbacks observer's `wDuplicates` step). Every click made during playback would
+  have been evicted. A clean room (juniper-ml
+  `util/ad-hoc/2026-09-23_f054_replay_tick_cleanroom.py`, verdicts fixed before the first run, 3
+  runs a shape) scored the old shape pause-undone 3/3, the tick-only shape click-dropped 3/3, and
+  this one pause-held 3/3, with the pause applied within 58 ms.
+
+  Fixed by running the whole block in the browser, with **one** clientside callback as the only
+  writer of `replay-state`. It handles the eight controls, the slider and the tick, and renders the
+  slider, the position and the play label from the state it just computed. A clientside callback
+  has no in-flight window: once it runs, nothing lands between its read and its apply, so nothing
+  computes from a stale state. `replay_tick`, the play-label callback and
+  `MetricsPanel._handle_replay_controls_handler` are removed. One click of each control has the old
+  effect, checked under node against a verbatim copy of the old handler over the whole grid.
+  - **Events come from values, not from triggers.** Clientside callbacks share the renderer's 12
+    execution slots, so a request can still lose its trigger BEFORE it runs. A request waiting in
+    `prioritized` is replaced by the next tick's request of the same callback, and only requests
+    still in `requested` merge their changed-prop ids. With trigger-only dispatch, review lost the
+    pause 3/3 under forced slot saturation and 2 of 12 under a dynamic load (juniper-ml
+    `reports/e2e-canopy-2026-09-02/consensus/2026-09-23_validator_reports_round1.md`, Lane B). So
+    the state records each button's count as of its last applied click (`clicks`) and the slider
+    value this callback last wrote (`slider_w`), and anything above those is applied at the next
+    run, before that run's own triggers. A lost pause now applies at this callback's next run to
+    get a slot (seconds, under sustained contention) instead of never.
+  - **A trigger alone applies nothing.** A button applies exactly its unapplied clicks. A run can
+    apply a click from its count after the click wrote `n_clicks` and before the click's own
+    request ran; the first revision also applied every trigger at least once, so that request
+    applied the click again, undoing the pause or stepping two rows (juniper-ml
+    `…/2026-09-23_validator_reports_round2.md`, Lane B2). For the same reason, a slider trigger
+    carrying the value this callback last wrote is not a seek: re-read, it can land one row low.
+    The cost (round 3): a real drag that lands exactly on that value does not pause the replay.
+    The value is a whole number only at row 0, the last row, or a row where the max divides
+    100 × row.
+  - **Several pending play clicks toggle once,** as stock Dash does for a merged double click: a
+    lost pause followed by the user pausing again pauses, where counting by parity would cancel
+    the two. It only helps when both are pending in one run; a repeat made after the pause
+    applied, but before the page shows it, still toggles back.
+  - **A cleared slider number box is not a seek.** dcc.Slider sends `NaN` when its box is cleared;
+    the state keeps its index and the slider is written back.
+  - **`metrics-store.data` is now State.** The store's primary writer is pending most of the time,
+    and dash-renderer holds a callback while any of its Inputs is downstream of a pending one, so
+    the controls waited on every poll. Now no pending callback holds back their readiness
+    (`test_nothing_pending_can_hold_the_replay_controls`, on the built app). A ready run can still
+    wait for an execution slot; "Events come from values" above covers what that can lose. A
+    refill re-renders
+    the "/ max" half of the position through a second clientside callback. The position is two
+    spans, and only the controls write the index, so a refill that runs in the same renderer pass
+    as a click cannot overwrite the click's index with a stale one. The slider thumb catches up on
+    the next control or tick, because nothing else may write the slider this callback reads as a
+    seek.
+  - **Ticks are counted.** The renderer merges queued requests of one callback, and `n_intervals`
+    is read at execution, so the state records the last count it consumed (`tick_n`, an optional
+    key) and a tick advances by the difference.
+  - **The end of the replay stops the interval.** `replay_tick` set `stopped` and left the
+    interval running: a server round trip a second, and two refreshes, until the next click.
+  - `src/tests/unit/frontend/test_f054_replay_block_clientside.py` is new. It covers wiring on the
+    built app, a source backstop that runs without node, and the registered JavaScript executed
+    under node, including lost clicks and seeks, a cleared slider box, a grown history, and a click
+    applied from its count that its own request must not apply again. Every test fails on the
+    parent. Each textual mutation of the fix is caught by a behavioural test, not only by the
+    source pins.
+  - Sixty replay tests are removed from `test_metrics_panel_handlers.py` (38) and
+    `test_metrics_panel_helpers_coverage.py` (22). Forty-seven, in seven classes, never called
+    production code: they re-implemented the logic inline and asserted on their own copy. Twelve
+    guarded their body with `if func := callbacks.get(...)` and would have passed silently once the
+    callbacks were gone; one looked the merged callback up directly. The tests in
+    `test_f048_replay_cycle.py` that exercised the Python handler moved to the new file and run on
+    the JavaScript; that file keeps the F-CANOPY-048 graph invariants.
+
 - **Re-staging from the restart modal dropped a seeded generator's params, so equities 422'd.**
   `_restage_dataset` sent the typed spiral fields and never the registry seed. Confirming an
   edited dataset in the modal therefore sent `equities` without `symbols`, and a default

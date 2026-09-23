@@ -782,6 +782,7 @@ cd src
 pytest tests/unit/test_response_normalization.py -k "Fix1 or Fix2 or Fix3 or Fix4 or Fix13 or DashboardMetricsContract or TopologyTransformation or DatasetTargetConversion" -v
 pytest tests/unit/test_service_backend.py -k "get_status or get_dataset" -v
 pytest tests/unit/frontend/test_metrics_panel_handlers.py -k "validation_overlay or replay or progress_detail or training_progress or hidden_units" -v
+pytest tests/unit/frontend/test_f054_replay_block_clientside.py tests/unit/frontend/test_f048_replay_cycle.py -v
 ```
 
 ### Integration Tests

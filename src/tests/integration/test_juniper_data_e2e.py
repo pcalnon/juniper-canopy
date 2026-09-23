@@ -38,56 +38,61 @@ pytestmark = [pytest.mark.integration]
 # Standard NPZ data contract keys and validation helpers
 # ---------------------------------------------------------------------------
 
-NPZ_REQUIRED_KEYS = {"X_train", "y_train", "X_test", "y_test", "X_full", "y_full"}
+# The Juniper NPZ data contract since decision 11 (released 2026-09-10/11): SIX keys, THREE
+# partitions. ``val`` is the in-loop split; ``test`` is touched once, at the end. The ``*_full``
+# family is RETIRED -- no producer emits it -- and a consumer must TOLERATE it on a legacy
+# artifact, never REQUIRE it (a check that asserts it absent is as wrong as one that requires it).
+#
+# This helper REQUIRED ``X_full`` / ``y_full``, knew nothing of ``val``, and asserted
+# ``train + test == full`` until 2026-09-23. It survived only because no CI lane installs
+# ``juniper-data-client[testing]``: ``fake_client`` skips there, and so does every test that uses
+# it. With the extra installed, 13 of those tests failed on main at 2f973ca2.
+NPZ_REQUIRED_KEYS = {"X_train", "y_train", "X_val", "y_val", "X_test", "y_test"}
+NPZ_LEGACY_KEYS = {"X_full", "y_full"}
+NPZ_SPLITS = ("train", "val", "test")
 
 
-def _validate_npz_arrays(arrays, *, expected_n_features=None, expected_n_classes=None, expected_n_full=None, expected_train_ratio=None):
-    """Assert that NPZ arrays satisfy the Juniper data contract.
+def _validate_npz_arrays(arrays, *, expected_n_features=None, expected_n_classes=None, expected_n_total=None, expected_train_ratio=None):
+    """Assert that NPZ arrays satisfy the Juniper data contract (three partitions, decision 11).
 
     Checks:
-    - All six required keys are present
-    - All arrays are float32
-    - Feature/label dimensions are consistent across splits
-    - Train + test = full (sample counts)
-    - Optional shape constraints when provided
+    - The six required keys are present; the retired ``*_full`` pair is tolerated, never required
+    - Every contract array present is float32
+    - Feature and label widths agree across the three partitions, and X / y row counts agree
+    - A legacy ``*_full`` pair, when present, has exactly the train | val | test concatenation's
+      shape -- the identity juniper-data built it by
+    - Optional constraints; the dataset size is ``train + val + test``
     """
-    # All required keys present
-    assert NPZ_REQUIRED_KEYS.issubset(set(arrays.keys())), f"Missing NPZ keys: {NPZ_REQUIRED_KEYS - set(arrays.keys())}"
+    keys = set(arrays.keys())
+    assert NPZ_REQUIRED_KEYS.issubset(keys), f"Missing NPZ keys: {NPZ_REQUIRED_KEYS - keys}"
 
-    # All float32
-    for key in NPZ_REQUIRED_KEYS:
+    for key in sorted(keys & (NPZ_REQUIRED_KEYS | NPZ_LEGACY_KEYS)):
         assert arrays[key].dtype == np.float32, f"{key} dtype is {arrays[key].dtype}, expected float32"
 
-    # Feature dimensions consistent
     n_features = arrays["X_train"].shape[1]
-    assert arrays["X_test"].shape[1] == n_features
-    assert arrays["X_full"].shape[1] == n_features
-
-    # Label dimensions consistent
     n_classes = arrays["y_train"].shape[1]
-    assert arrays["y_test"].shape[1] == n_classes
-    assert arrays["y_full"].shape[1] == n_classes
+    counts = {}
+    for split in NPZ_SPLITS:
+        X, y = arrays[f"X_{split}"], arrays[f"y_{split}"]
+        assert X.shape[1] == n_features, f"X_{split} has {X.shape[1]} features, X_train has {n_features}"
+        assert y.shape[1] == n_classes, f"y_{split} has {y.shape[1]} classes, y_train has {n_classes}"
+        assert y.shape[0] == X.shape[0], f"y_{split} has {y.shape[0]} rows, X_{split} has {X.shape[0]}"
+        counts[split] = X.shape[0]
+    n_total = sum(counts.values())
 
-    # Sample counts: train + test == full
-    n_train = arrays["X_train"].shape[0]
-    n_test = arrays["X_test"].shape[0]
-    n_full = arrays["X_full"].shape[0]
-    assert n_train + n_test == n_full, f"train({n_train}) + test({n_test}) != full({n_full})"
+    if keys & NPZ_LEGACY_KEYS:
+        assert NPZ_LEGACY_KEYS.issubset(keys), "a legacy artifact carries both X_full and y_full, or neither"
+        assert arrays["X_full"].shape == (n_total, n_features), f"X_full {arrays['X_full'].shape} is not the train|val|test concatenation ({n_total}, {n_features})"
+        assert arrays["y_full"].shape == (n_total, n_classes), f"y_full {arrays['y_full'].shape} is not the train|val|test concatenation ({n_total}, {n_classes})"
 
-    # y dimensions match X dimensions
-    assert arrays["y_train"].shape[0] == n_train
-    assert arrays["y_test"].shape[0] == n_test
-    assert arrays["y_full"].shape[0] == n_full
-
-    # Optional constraints
     if expected_n_features is not None:
         assert n_features == expected_n_features, f"n_features={n_features}, expected {expected_n_features}"
     if expected_n_classes is not None:
         assert n_classes == expected_n_classes, f"n_classes={n_classes}, expected {expected_n_classes}"
-    if expected_n_full is not None:
-        assert n_full == expected_n_full, f"n_full={n_full}, expected {expected_n_full}"
+    if expected_n_total is not None:
+        assert n_total == expected_n_total, f"train + val + test = {n_total}, expected {expected_n_total}"
     if expected_train_ratio is not None:
-        actual_ratio = n_train / n_full
+        actual_ratio = counts["train"] / n_total
         assert abs(actual_ratio - expected_train_ratio) < 0.05, f"train_ratio={actual_ratio:.3f}, expected ~{expected_train_ratio}"
 
 
@@ -117,6 +122,54 @@ def _run_training_step(arrays):
     loss = nn.functional.mse_loss(logits, y_train)
 
     return loss.item()
+
+
+def _artifact(n_train=8, n_val=2, n_test=2, n_features=2, n_classes=2, *, legacy_full=False, full_rows=None):
+    """A synthetic contract artifact -- no client needed, so the helper's own tests run in CI too."""
+    arrays = {}
+    for split, n in (("train", n_train), ("val", n_val), ("test", n_test)):
+        arrays[f"X_{split}"] = np.zeros((n, n_features), dtype=np.float32)
+        arrays[f"y_{split}"] = np.zeros((n, n_classes), dtype=np.float32)
+    if legacy_full:
+        rows = n_train + n_val + n_test if full_rows is None else full_rows
+        arrays["X_full"] = np.zeros((rows, n_features), dtype=np.float32)
+        arrays["y_full"] = np.zeros((rows, n_classes), dtype=np.float32)
+    return arrays
+
+
+class TestTheContractHelperItself:
+    """The helper is the contract; if it is wrong, every download test here asserts the wrong thing.
+
+    These run everywhere, including CI's integration lane. The ``fake_client`` tests skip wherever
+    ``juniper-data-client[testing]`` is absent, CI included, which is how the helper stayed on the
+    retired contract from decision 11's release (2026-09-10/11) until 2026-09-23.
+    """
+
+    def test_the_three_partition_artifact_passes(self):
+        _validate_npz_arrays(_artifact(), expected_n_total=12, expected_train_ratio=8 / 12)
+
+    def test_the_retired_full_family_is_not_required(self):
+        assert NPZ_LEGACY_KEYS.isdisjoint(NPZ_REQUIRED_KEYS)
+        _validate_npz_arrays(_artifact(legacy_full=False))
+
+    def test_a_consistent_legacy_full_family_is_tolerated(self):
+        _validate_npz_arrays(_artifact(legacy_full=True))
+
+    def test_an_inconsistent_legacy_full_family_is_caught(self):
+        # Still held to the identity juniper-data built it by: the train | val | test concatenation.
+        # ``train + test`` -- the pre-decision-11 identity -- is exactly the wrong size now.
+        with pytest.raises(AssertionError, match="concatenation"):
+            _validate_npz_arrays(_artifact(legacy_full=True, full_rows=8 + 2))
+
+    def test_the_validation_split_is_required(self):
+        arrays = _artifact()
+        del arrays["X_val"], arrays["y_val"]
+        with pytest.raises(AssertionError, match="Missing NPZ keys"):
+            _validate_npz_arrays(arrays)
+
+    def test_the_dataset_size_counts_all_three_partitions(self):
+        with pytest.raises(AssertionError, match="train \\+ val \\+ test"):
+            _validate_npz_arrays(_artifact(), expected_n_total=8 + 2)
 
 
 # ---------------------------------------------------------------------------
@@ -244,21 +297,21 @@ class TestArtifactDownloadE2E:
         result = fake_client.create_dataset("spiral", {"n_spirals": 2, "n_points_per_spiral": 50, "seed": 42})
         arrays = fake_client.download_artifact_npz(result["dataset_id"])
 
-        _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=2, expected_n_full=100, expected_train_ratio=0.8)
+        _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=2, expected_n_total=100, expected_train_ratio=0.8)
 
     def test_download_xor_npz(self, fake_client):
         """Download XOR NPZ artifact and validate all arrays."""
         result = fake_client.create_dataset("xor", {"n_points": 80, "noise": 0.1, "seed": 7})
         arrays = fake_client.download_artifact_npz(result["dataset_id"])
 
-        _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=2, expected_n_full=80, expected_train_ratio=0.8)
+        _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=2, expected_n_total=80, expected_train_ratio=0.8)
 
     def test_download_spiral_three_arms(self, fake_client):
         """Three-arm spiral produces 3-class one-hot labels."""
         result = fake_client.create_dataset("spiral", {"n_spirals": 3, "n_points_per_spiral": 30, "seed": 10})
         arrays = fake_client.download_artifact_npz(result["dataset_id"])
 
-        _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=3, expected_n_full=90)
+        _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=3, expected_n_total=90)
 
     def test_download_artifact_bytes_roundtrip(self, fake_client):
         """download_artifact_bytes produces valid NPZ that np.load can parse."""
@@ -281,14 +334,14 @@ class TestArtifactDownloadE2E:
         result = fake_client.create_dataset("circle", {"n_points": 100, "factor": 0.5, "seed": 22})
         arrays = fake_client.download_artifact_npz(result["dataset_id"])
 
-        _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=2, expected_n_full=100)
+        _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=2, expected_n_total=100)
 
     def test_download_moon_npz(self, fake_client):
         """Download moon NPZ and validate arrays."""
         result = fake_client.create_dataset("moon", {"n_points": 60, "noise": 0.05, "seed": 44})
         arrays = fake_client.download_artifact_npz(result["dataset_id"])
 
-        _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=2, expected_n_full=60)
+        _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=2, expected_n_total=60)
 
     def test_different_train_ratios(self, fake_client):
         """Train ratio parameter correctly affects split sizes."""
@@ -302,7 +355,7 @@ class TestArtifactDownloadE2E:
         result = fake_client.create_dataset("spiral", {"n_spirals": 4, "n_points_per_spiral": 25, "seed": 8})
         arrays = fake_client.download_artifact_npz(result["dataset_id"])
 
-        for split in ["y_train", "y_test", "y_full"]:
+        for split in ["y_train", "y_val", "y_test"]:
             row_sums = arrays[split].sum(axis=1)
             np.testing.assert_allclose(row_sums, 1.0, atol=1e-6, err_msg=f"{split} rows do not sum to 1.0")
 
@@ -404,7 +457,7 @@ class TestTrainingConsumptionE2E:
         arrays = fake_client.download_artifact_npz(dataset_id)
 
         # Step 3: Validate contract
-        _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=2, expected_n_full=200, expected_train_ratio=0.8)
+        _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=2, expected_n_total=200, expected_train_ratio=0.8)
 
         # Step 4: Train
         loss = _run_training_step(arrays)
@@ -642,7 +695,7 @@ class TestLiveServiceE2E:
 
         try:
             arrays = live_client.download_artifact_npz(dataset_id)
-            _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=2, expected_n_full=200, expected_train_ratio=0.8)
+            _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=2, expected_n_total=200, expected_train_ratio=0.8)
 
             loss = _run_training_step(arrays)
             assert math.isfinite(loss)
@@ -657,7 +710,7 @@ class TestLiveServiceE2E:
 
         try:
             arrays = live_client.download_artifact_npz(dataset_id)
-            _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=2, expected_n_full=100, expected_train_ratio=0.8)
+            _validate_npz_arrays(arrays, expected_n_features=2, expected_n_classes=2, expected_n_total=100, expected_train_ratio=0.8)
 
             loss = _run_training_step(arrays)
             assert math.isfinite(loss)

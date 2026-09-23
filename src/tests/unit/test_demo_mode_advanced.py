@@ -103,7 +103,11 @@ class TestDemoModeThreadSafety:
         """Test that reset clears all state."""
         demo = DemoMode(update_interval=0.1)
         demo.start()
-        time.sleep(0.5)  # Let it run and accumulate state
+        # Bounded poll, not a fixed sleep: wait until state has accumulated. The deadline only
+        # bounds the failure path.
+        deadline = time.monotonic() + 5.0
+        while not (demo.get_current_state()["current_epoch"] > 0 and demo.get_metrics_history()) and time.monotonic() < deadline:
+            time.sleep(0.01)
 
         # Verify some state exists
         state_before = demo.get_current_state()
@@ -203,7 +207,12 @@ class TestDemoModeDataGeneration:
         """Test that metrics are consistent and realistic."""
         demo = DemoMode(update_interval=0.1)
         demo.start()
-        time.sleep(0.5)
+        # Bounded poll, not a fixed sleep. It waits for several samples so the range checks below
+        # see more than one; the assertion still needs only one, and the deadline only bounds the
+        # failure path.
+        deadline = time.monotonic() + 10.0
+        while len(demo.get_metrics_history()) < 5 and time.monotonic() < deadline:
+            time.sleep(0.01)
         demo.stop()
 
         metrics = demo.get_metrics_history()
@@ -227,17 +236,32 @@ class TestDemoModeDataGeneration:
         assert 0 <= m["metrics"]["val_loss"] <= 2.0
         assert 0 <= m["metrics"]["val_accuracy"] <= 1.0
 
-    def test_cascade_unit_addition(self):
-        """Test that cascade units are added periodically."""
+    def test_cascade_unit_addition(self, monkeypatch):
+        """The two-phase training loop installs a cascade unit.
+
+        ``cascade_every`` is deprecated and unused by ``_training_loop``. Phase 1 trains the output
+        layer for ``OUTPUT_RETRAIN_STEPS``; Phase 2 then trains a candidate pool and installs the
+        best candidate. At the production step counts the first install takes about 14 s, which is
+        why this test used to sleep 1 s and assert ``len(hidden_units) >= 0`` -- a claim nothing
+        could fail. The loop is shrunk instead, so the install itself is observed. The step counts
+        are read at call time, so patching the constants before ``start()`` takes effect.
+        """
+        monkeypatch.setattr(TrainingConstants, "OUTPUT_RETRAIN_STEPS", 20)
+        monkeypatch.setattr(TrainingConstants, "CANDIDATE_TRAINING_STEPS", 20)
+        monkeypatch.setattr(TrainingConstants, "CANDIDATE_POOL_SIZE", 4)
         demo = DemoMode(update_interval=0.05)
-        demo.cascade_every = 10  # Add unit every 10 epochs
         demo.start()
-        time.sleep(1.0)  # Should trigger at least one cascade
-        demo.stop()
+        try:
+            # Bounded poll; stop early if the loop ends on its own (it stops cascade growth when no
+            # candidate reaches ``MIN_CANDIDATE_CORRELATION``), since the count can no longer grow.
+            deadline = time.monotonic() + 10.0
+            while not demo.get_network().hidden_units and demo.is_running and time.monotonic() < deadline:
+                time.sleep(0.01)
+        finally:
+            demo.stop()
 
         network = demo.get_network()
-        # Should have added at least one hidden unit
-        assert len(network.hidden_units) >= 0  # May or may not have added depending on timing
+        assert len(network.hidden_units) >= 1, f"no cascade unit was installed (loop running at the end: {demo.is_running}); a pool that cannot reach MIN_CANDIDATE_CORRELATION={TrainingConstants.MIN_CANDIDATE_CORRELATION} means candidate training is broken"
 
 
 class TestPhase3ProgressFields:
