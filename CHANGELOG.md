@@ -9,6 +9,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The `unknown` availability state could never fire for the outage it was built for.**
+  `/api/dataset/generators` caught a juniper-data failure and answered HTTP 200 with four
+  built-in demo generators carrying no `available` flag, so an outage and an answer were
+  indistinguishable to every caller. The dashboard therefore read availability as *known*,
+  and `is_generator_available`'s fail-open default reported `equities_seq` selectable
+  against a service that was not running. The route now reports `upstream_unavailable`
+  (attempted and did not answer), which the dashboard translates to *unknown*. Deliberately
+  false when juniper-data is unconfigured: that is demo mode, where the built-in four are
+  the offering and availability is known.
+- **A conflict notice claimed to have cleared a dataset that was never selected.** With the
+  dataset at `⊥`, any gate re-fire rendered *"none is not compatible with CasCor
+  (Cascade-Correlation), so it was cleared"* — the literal string `none` from
+  `_dataset_label(None)`, describing a state change that did not occur. Reachable since the
+  OQ-6 ratification made `⊥` a state the gate clears into. `⊥` is no longer treated as a
+  conflict; a genuine conflict still clears and still names the real dataset.
+
+- **The Candidate Metrics panel never applied a store write after mount, so during a live candidate
+  phase its badge read `Inactive` while `/api/state` said `Training` (F-CANOPY-053, provisional id).**
+  `fetch_training_state` writes `candidate-metrics-panel-training-state-store` and
+  `-pool-history-store` off the panel's own `candidate-metrics-panel-update-interval`. Measured on
+  `9bffaba1` with the candidates tab open: every response carried a new store value (**27 of 27** at
+  idle, **34 of 34** across a live candidate phase), the wire round trip was ~30 ms, and requests
+  never overlapped on the wire — yet the renderer held **one** store value across 20–27 reads, while
+  a positive control (`metrics-panel-training-state-store`) changed 10 times in the same kind of run.
+  The status badge, phase, pool size, epoch progress, pool details and the pool-history cards were
+  all frozen at their mount values. It is F-CANOPY-035's mechanism on the next panel over: the tick
+  re-requested the callback under the same `getUniqueIdentifier` before the previous response was
+  applied, so dash-renderer evicted the `watched` entry (`dash_renderer.dev.js:3027`) and discarded
+  the response on arrival (`:2698`).
+
+  **Landing is period-bound, measured directly.** Writes landed / issued across three live runs were
+  **0 / 225** at 1000 ms, **5 / 39** at 4000 ms and **23 / 24** at 10000 ms, so the panel now polls
+  at `CANDIDATE_STATE_POLL_INTERVAL_MS` (10 s). Two supporting changes stop the store churning.
+  First, a payload that differs from the store only in its per-call `timestamp`, or in
+  `stale_age_seconds` during an upstream outage, returns `no_update`. The store rides as its own
+  writer's State, as in F-CANOPY-039. Second, a failed fetch now holds the last good state instead
+  of writing `{}`, which the badge rendered as `Inactive`.
+
+  **Deliberately not #613's `running=` guard.** A guard's release writes a *fixed* value from
+  `completeJob()` after every run, including the 204 this callback answers on page load and on every
+  other tab. This lane is tab-gated, so a guard on `disabled` would write `False` right after the
+  CAN-000/tab gate wrote `True` and keep the poller running on a hidden tab: F-CANOPY-027, back.
+  An evicted request's release would also reopen the clock while its successor is in flight. The gate
+  stays the only writer of this interval's `disabled`, and a registry-wide test now fails any
+  `running=` guard that writes a tab-gated lane's `disabled`. The cost is a candidate-panel refresh
+  of up to 10 s plus apply latency. That the renderer now applies the writes is a live property,
+  which the unit tests cannot show.
+
 ## [0.8.1] - 2026-09-15
 
 ### Added

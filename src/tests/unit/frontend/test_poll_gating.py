@@ -54,6 +54,10 @@ except ImportError:  # pragma: no cover - only on a pre-fix tree
 
 SHARED_LANES = ("fast-update-interval", "slow-update-interval")
 
+# F-CANOPY-053 (provisional id): the Candidate Metrics panel's own, TAB-GATED lane.
+# Stated as a literal, like the rest of this specification, not imported from source.
+CANDIDATE_LANE = "candidate-metrics-panel-update-interval"
+
 # The SPECIFICATION, stated independently of the source. Every poller interval whose
 # ``disabled`` prop the dashboard owns, and the tab that arms it (``None`` = a shared
 # lane with global consumers, apply-clamped only per CAN-000).
@@ -73,6 +77,9 @@ EXPECTED_GATED_INTERVALS = (
     ("tabpoll-dataset", "dataset"),
     ("tabpoll-workers", "workers"),
     ("tabpoll-boundaries", "boundaries"),
+    # F-CANOPY-053: this lane's poll is repaired with a PERIOD, not #613's ``running=``
+    # guard. A guard's fixed ``runningOff`` would re-enable this tab-gated lane right
+    # after the gate disabled it. See ``TestRunningGuardsNeverContendWithTheTabGate``.
     ("candidate-metrics-panel-update-interval", "candidates"),
     ("metrics-panel-stats-update-interval", "metrics"),
     ("cassandra-panel-interval", "cassandra"),
@@ -288,6 +295,63 @@ class TestStrandWatchdog:
         js = self._js(dashboard, self._watchdog(dashboard))
         assert str(DashboardConstants.METRICS_STORE_STRAND_TIMEOUT_MS) in js, js
         assert "METRICS_STORE_STRAND_TIMEOUT_MS" not in js, "the constant name leaked into the JS"
+
+
+class TestRunningGuardsNeverContendWithTheTabGate:
+    """F-CANOPY-053 (provisional id): no ``running=`` guard may write a TAB-GATED lane.
+
+    ``running=`` releases a FIXED value from ``completeJob()`` (dash_renderer.dev.js:
+    925-936), and ``completeJob()`` runs on a 204 as well (:979). A panel poller that
+    also takes ``visualization-tabs.active_tab`` as an Input is dispatched on every tab
+    switch and answers 204 off its own tab. A guard on its lane's ``disabled`` therefore
+    re-enables the lane right after the gate disabled it, and the panel polls from every
+    other tab. That is F-CANOPY-027's defect, reintroduced by a fix for another one,
+    which is why F-CANOPY-053 was repaired with a period instead of #613's guard.
+
+    Registry-wide, so the next guard added to a tab-gated panel is held to it too. A
+    guard on a SHARED lane (``tab is None``) is outside this rule: #613's metrics-store
+    guard shares ``disabled`` with the apply clamp alone.
+    """
+
+    @staticmethod
+    def _guarded_props(dashboard):
+        """Every ``id.prop`` any ``running=`` guard writes, as (owner outputs, phase, prop).
+
+        Read off ``_callback_list``, which is served as ``_dash-dependencies``.
+        ``running`` is not kept on the ``callback_map`` entry, so a scan there finds no
+        guards at all and passes vacuously.
+        """
+        found = []
+        for entry in dashboard.app._callback_list:
+            running = entry.get("running") or {}
+            for phase in ("running", "runningOff"):
+                for prop in running.get(phase) or {}:
+                    found.append((sorted(_output_specs(entry)), phase, prop))
+        return found
+
+    def test_no_running_guard_writes_a_tab_gated_disabled_prop(self, dashboard):
+        tab_gated = {f"{iid}.disabled" for iid, tab in EXPECTED_GATED_INTERVALS if tab is not None}
+        found = self._guarded_props(dashboard)
+        # Non-vacuity: at least one guard exists today (#613's), so a scan that finds
+        # none is reading the wrong place, or every guard is gone and this test should
+        # be revisited rather than trusted.
+        assert found, "no running= guard found anywhere: this scan cannot fail as written"
+        offenders = [f for f in found if f[2] in tab_gated]
+        assert not offenders, f"running= guards write a tab-gated lane's disabled prop: {offenders}"
+
+    def test_no_running_guard_touches_the_candidate_lane(self, dashboard):
+        """On any prop. Holding ``max_intervals`` instead of ``disabled`` avoids the race
+        above but not an evicted request releasing the guard mid-flight, and it needs a
+        strand watchdog of its own. The lane is repaired by its period instead."""
+        touching = [f for f in self._guarded_props(dashboard) if f[2].split(".", 1)[0] == CANDIDATE_LANE]
+        assert not touching, f"a running= guard touches {CANDIDATE_LANE}: {touching}"
+
+    def test_the_candidate_lane_has_the_gate_as_its_only_writer(self, dashboard):
+        """Of ANY prop, not just ``disabled``: a strand watchdog, or any other helper
+        written against this lane, would be a second owner of its clock."""
+        writers = [e for e in dashboard.app._callback_list if any(o.split(".", 1)[0] == CANDIDATE_LANE for o in _output_specs(e))]
+        gate = _gate_entry(dashboard)
+        assert len(writers) == 1 and writers[0] is gate, f"{CANDIDATE_LANE} is written by {[sorted(_output_specs(w)) for w in writers]}"
 
 
 class TestPerTabLanes:

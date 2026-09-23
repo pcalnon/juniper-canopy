@@ -2950,6 +2950,16 @@ class DashboardManager:
             # unreachable while ``unknown`` — with nothing known, nothing is disabled — so the
             # two never compete in practice; the ordering is belt-and-braces.
             return options, None, self._empty_dataset_set_notice(model_key)
+        if not current_value:
+            # ``⊥`` is not a conflict. The clear branch below reads "X is not compatible with
+            # M, so it was cleared" — with no dataset selected there is no X and nothing was
+            # cleared, and ``_dataset_label(None)`` renders the literal string "none", so the
+            # operator was told *"none is not compatible with CasCor … so it was cleared"* on
+            # every gate re-fire while sitting at ``⊥``. Reachable since canopy#652 made ``⊥``
+            # a state the gate CLEARS INTO: any later re-fire (a model change, or the dropdown's
+            # own ✕ at :1408) re-enters with ``current_value=None``. This mirrors the
+            # ``in enabled`` branch — no state change, so only the availability caveat speaks.
+            return options, dash.no_update, self._availability_unknown_notice() if unknown else None
         if current_value in enabled:
             return options, dash.no_update, self._availability_unknown_notice() if unknown else None
         # OQ-6, ratified 2026-09-22: **model-primary, resolved by CLEARING the dataset.**
@@ -3092,7 +3102,17 @@ class DashboardManager:
             resp = requests.get(self._api_url("/api/dataset/generators"), timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT, headers=internal_api_headers())
             if resp.ok:
                 payload = resp.json()
-                generators = payload.get("generators", []) if isinstance(payload, dict) else []
+                if isinstance(payload, dict) and payload.get("upstream_unavailable"):
+                    # A-N5 / canopy#653. HTTP 200 carrying the route's built-in fallback: the
+                    # route reached us, juniper-data did not reach IT, and the four built-ins
+                    # carry no ``available`` flag. Availability is therefore UNREAD, which is
+                    # ``None`` (unknown) and not ``[]`` (read, nothing to say). Without this the
+                    # ``unknown`` state was unreachable from the outage it was built for, and
+                    # ``is_generator_available`` fail-open reported every gated generator
+                    # selectable against a down service.
+                    generators = None
+                else:
+                    generators = payload.get("generators", []) if isinstance(payload, dict) else []
             else:
                 # A non-ok answer is not an empty answer. Y5 (canopy#609) was exactly this:
                 # a keyed deployment 401'd, the route ignored the status, and every dataset's
