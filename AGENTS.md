@@ -5,7 +5,7 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.8.1
-**Last Updated**: 2026-09-17
+**Last Updated**: 2026-09-22
 
 ---
 
@@ -514,7 +514,7 @@ conda activate JuniperCanopy1
 > guard for the 2026-06-26 incident class — a live env that drifted below the
 > floors while CI stayed green (the same check also runs as a CI preflight in
 > the `unit-tests` job). Requires `juniper-ci-tools>=0.5.1`
-> (`pip install "juniper-ci-tools>=0.5.1,<0.6.0"`).
+> (`pip install "juniper-ci-tools>=0.9.0,<0.10.0"`).
 
 ### Configuration
 
