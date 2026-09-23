@@ -59,6 +59,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `src/tests/regression/test_selection_reachability_guardrails.py` gains **G7**, asserted through
     the real route and real backends as well as the registered callbacks. It also gains the **Y3**
     read-side guardrail, which the design's §5 table lacked. Mutation-checked at four sites.
+- **The dataset selector mounts at `⊥` instead of a seeded `spirals` (OQ-N2 / D-N13).** The owner
+  accepted `⊥`-at-mount on 2026-09-02, on the condition that the hydration above land first
+  (D-N10). With that in place, the first interaction is an explicit choice, and `⊥` appears only
+  when it is true. What the mount lands on now depends on what the backend reports:
+  - **pending / loaded, nameable**: that dataset (G7).
+  - **none**: `⊥`. The backend holds nothing, and nothing is invented for it.
+  - **loaded but unnameable** (an unseeded generator another client staged, or raw inline data):
+    `⊥`, plus an informational notice naming what the backend holds. A silent `⊥` over a busy
+    backend would read as "nothing is loaded".
+  - **unknown** (a cascor that predates juniper-cascor#676, or a failed read): falls back to the old
+    default. `⊥` there would disable Start *and* Apply Dataset after every reload over a backend
+    that may be staged and ready — exactly the regression D-N10 exists to prevent. A failed read
+    now writes an explicit `unknown` block, so the gate can tell it apart from "holds nothing".
+  - **demo mode** still lands on spirals, because the simulator holds spirals, not because of a
+    seed.
+  - The restart modal's dropdown loses its seed too (it was overwritten on every open anyway), and
+    its `enabled[0]` fallback is recorded in code as a deliberate exception to OQ-6 (owner ruling,
+    2026-09-22).
+  - Mutation-checked: re-seeding the layout, dropping the unknown fallback, a failed read writing
+    `None`, and suppressing the unnameable notice each fail a test.
 
 - **Generator loads run `juniper_data_client.validate_npz_contract` as an ADVISORY second check**
   (#559; owner ruling 2026-09-22). `regenerate_dataset_from_generator` now hands every downloaded
