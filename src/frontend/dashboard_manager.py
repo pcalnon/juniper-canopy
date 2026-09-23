@@ -3377,6 +3377,38 @@ class DashboardManager:
                 dismissable=True,
                 duration=8000,
             )
+        payload = self._dataset_stage_payload(dataset_type, n_samples=n_samples, noise=noise, rotations=rotations, n_spirals=n_spirals, gen_values=gen_values, gen_ids=gen_ids, nn_model=nn_model)
+        try:
+            resp = requests.post(
+                self._api_url("/api/stage_dataset"),
+                json=payload,
+                timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
+                headers=internal_api_headers(),
+            )
+            if resp.status_code == 200:
+                self.logger.info("Dataset staged: %s", payload)
+                return True, None  # open banner; clear any prior staging error
+            detail = resp.text[:300] if resp.text else f"HTTP {resp.status_code}"
+            self.logger.warning("Stage dataset failed: %s %s", resp.status_code, detail)
+            return dash.no_update, dbc.Alert(f"Could not stage the dataset change: {detail}", color="danger", duration=8000, dismissable=True)
+        except requests.RequestException as exc:
+            self.logger.warning("Stage dataset exception: %s", exc)
+            return dash.no_update, dbc.Alert(f"Backend unreachable while staging the dataset: {exc}", color="danger", duration=8000, dismissable=True)
+
+    @staticmethod
+    def _dataset_stage_payload(dataset_type, *, n_samples=None, noise=None, rotations=None, n_spirals=None, gen_values=None, gen_ids=None, nn_model=None):
+        """The body every path that stages the SIDEBAR form sends, whichever route it posts to.
+
+        Apply Dataset (``/api/stage_dataset``) and the live swap (``/api/live_dataset_swap``) read
+        the same form and post to routes that validate the same ``StageDatasetRequest``, so they
+        build one body, here. They used to build two. The live swap sent the four typed spiral
+        fields for EVERY generator and never ``nn_dataset_params``, so swapping to ``equities``
+        dropped its ``symbols`` and swapping to ``mnist`` dropped its ``flatten`` -- the defect
+        canopy#668 fixed on the restart modal, on the third path that stages a dataset.
+
+        ``dataset_type`` must already be known to be set; each caller refuses ``⊥`` itself, because
+        what refusing looks like differs per surface.
+        """
         payload: dict = {"nn_dataset_type": dataset_type}
         if generator_name_for_type(dataset_type) == "spiral":
             for _key, _value in (
@@ -3414,29 +3446,14 @@ class DashboardManager:
             # unrendered ``symbols`` array) still travels, which is the whole point of the
             # ordering above.
             params = dict(dataset_default_params(dataset_type))
-            params.update(self._collect_generator_params(gen_values, gen_ids, exclude=form_excluded_fields(generator_name_for_type(dataset_type))))
+            params.update(DashboardManager._collect_generator_params(gen_values, gen_ids, exclude=form_excluded_fields(generator_name_for_type(dataset_type))))
             if params:
                 payload["nn_dataset_params"] = params
         # FR9 / canopy#368: mirror this tab's model onto the request. Omitted, not sent as None,
         # when no model is selected -- the server then behaves exactly as before the mirror.
         if nn_model:
             payload["nn_model"] = nn_model
-        try:
-            resp = requests.post(
-                self._api_url("/api/stage_dataset"),
-                json=payload,
-                timeout=DashboardConstants.DASHBOARD_LONG_POST_TIMEOUT,
-                headers=internal_api_headers(),
-            )
-            if resp.status_code == 200:
-                self.logger.info("Dataset staged: %s", payload)
-                return True, None  # open banner; clear any prior staging error
-            detail = resp.text[:300] if resp.text else f"HTTP {resp.status_code}"
-            self.logger.warning("Stage dataset failed: %s %s", resp.status_code, detail)
-            return dash.no_update, dbc.Alert(f"Could not stage the dataset change: {detail}", color="danger", duration=8000, dismissable=True)
-        except requests.RequestException as exc:
-            self.logger.warning("Stage dataset exception: %s", exc)
-            return dash.no_update, dbc.Alert(f"Backend unreachable while staging the dataset: {exc}", color="danger", duration=8000, dismissable=True)
+        return payload
 
     def _select_model_handler(self, model_key):
         """Apply a model selection via ``POST /api/model/select`` and mirror the result.
@@ -6099,10 +6116,15 @@ class DashboardManager:
             State("nn-dataset-noise-input", "value"),
             State("nn-spiral-number-input", "value"),
             State("nn-spiral-rotations-input", "value"),
+            # The schema-driven fields and the model, as ``apply_dataset`` reads them: the swap
+            # sends the same body Apply Dataset does (``_dataset_stage_payload``), mirror included.
+            State({"type": "nn-gen-param", "name": dash.ALL}, "value"),
+            State({"type": "nn-gen-param", "name": dash.ALL}, "id"),
+            State("model-selection-store", "data"),
             prevent_initial_call=True,
         )
-        def accept_live_switch(n_clicks, dataset_type, n_samples, noise, n_spirals, rotations):
-            return self._accept_live_switch_handler(n_clicks=n_clicks, dataset_type=dataset_type, n_samples=n_samples, noise=noise, n_spirals=n_spirals, rotations=rotations)
+        def accept_live_switch(n_clicks, dataset_type, n_samples, noise, n_spirals, rotations, gen_values, gen_ids, model_key):
+            return self._accept_live_switch_handler(n_clicks=n_clicks, dataset_type=dataset_type, n_samples=n_samples, noise=noise, n_spirals=n_spirals, rotations=rotations, gen_values=gen_values, gen_ids=gen_ids, nn_model=model_key)
 
         @self.app.callback(
             [
@@ -6272,13 +6294,16 @@ class DashboardManager:
                 dash.dependencies.State("restart-p-cn-selected", "value"),
                 dash.dependencies.State("restart-p-cn-corr-thresh", "value"),
                 dash.dependencies.State("restart-modal-baseline", "data"),
+                # FR9: the modal's re-stage and parameter apply carry this tab's model, as the
+                # sidebar's do, so a stale tab is refused (409) before the restart runs.
+                dash.dependencies.State("model-selection-store", "data"),
             ],
             prevent_initial_call=True,
         )
-        def execute_restart(n_clicks, start_fresh, ds_type, ds_samples, ds_noise, ds_rot, ds_spirals, p_lr, p_hu, p_pat, p_pool, p_sel, p_corr, baseline):
+        def execute_restart(n_clicks, start_fresh, ds_type, ds_samples, ds_noise, ds_rot, ds_spirals, p_lr, p_hu, p_pat, p_pool, p_sel, p_corr, baseline, model_key):
             dataset_vals = {"dataset_type": ds_type, "n_samples": ds_samples, "noise": ds_noise, "rotations": ds_rot, "n_spirals": ds_spirals}
             param_vals = {"nn_learning_rate": p_lr, "nn_max_hidden_units": p_hu, "nn_patience": p_pat, "cn_pool_size": p_pool, "cn_selected_candidates": p_sel, "cn_correlation_threshold": p_corr}
-            return self._execute_restart_handler(n_clicks=n_clicks, start_fresh=start_fresh, dataset_vals=dataset_vals, param_vals=param_vals, baseline=baseline)
+            return self._execute_restart_handler(n_clicks=n_clicks, start_fresh=start_fresh, dataset_vals=dataset_vals, param_vals=param_vals, baseline=baseline, nn_model=model_key)
 
     # ------------------------------------------------------------------
     # N3 (I-6) restart-orchestration handlers — extracted from the
@@ -6540,14 +6565,14 @@ class DashboardManager:
         n = dataset_vals.get("n_samples")
         return f"{dtype} ({n} samples)" if n is not None else str(dtype)
 
-    def _restage_dataset(self, dataset_vals):
+    def _restage_dataset(self, dataset_vals, *, nn_model=None):
         """Re-stage the (edited) dataset via the existing ``/api/stage_dataset`` route.
 
         Returns ``(ok, detail)``. Mirrors the ``apply_dataset`` callback's payload
         contract: ``nn_dataset_type`` is always sent; the optional numeric / spiral
         fields only when present. N3b uses the ROUTE (not a new staging path) so
         the cascor-side ``StageDatasetRequest`` stays the single authoritative
-        validator.
+        validator. ``nn_model`` is the FR9 mirror, omitted when no model is selected.
         """
         dataset_vals = dataset_vals or {}
         payload = {}
@@ -6573,6 +6598,8 @@ class DashboardManager:
         seed = dataset_default_params(dtype)
         if seed:
             payload["nn_dataset_params"] = dict(seed)
+        if nn_model:
+            payload["nn_model"] = nn_model
         try:
             resp = requests.post(
                 self._api_url("/api/stage_dataset"),
@@ -6590,7 +6617,7 @@ class DashboardManager:
             self.logger.warning("Restart modal re-stage exception: %s", exc)
             return False, f"backend unreachable: {exc}"
 
-    def _execute_restart_handler(self, n_clicks=None, start_fresh=None, dataset_vals=None, param_vals=None, baseline=None):
+    def _execute_restart_handler(self, n_clicks=None, start_fresh=None, dataset_vals=None, param_vals=None, baseline=None, nn_model=None):
         """Confirm: (re-stage edited dataset) → (apply edited params) → restart.
 
         Returns ``(modal_open, progress_open, outcome_alert, banner_open)``. N3b
@@ -6622,7 +6649,7 @@ class DashboardManager:
 
         # Phase 1 — re-stage the dataset if edited.
         if self._restart_dataset_changed(dataset_vals, baseline.get("dataset") or {}):
-            ok, detail = self._restage_dataset(dataset_vals)
+            ok, detail = self._restage_dataset(dataset_vals, nn_model=nn_model)
             if not ok:
                 outcome = self._render_restart_outcome({"message": f"Could not re-stage the dataset change: {detail}"}, ok=False)
                 return False, False, outcome, dash.no_update
@@ -6631,7 +6658,7 @@ class DashboardManager:
         # Phase 2 — apply edited params through N5's machinery, before orchestration.
         param_updates = self._restart_param_updates(param_vals, baseline.get("params") or {})
         if param_updates:
-            applied, toast = self._apply_params_via_backend(param_updates)
+            applied, toast = self._apply_params_via_backend(param_updates, nn_model=nn_model)
             if applied is dash.no_update:
                 msg = f"Re-staged dataset to {restage_note}, but could not apply parameters: {toast}" if restage_note else f"Could not apply parameters: {toast}"
                 outcome = self._render_restart_outcome({"message": msg}, ok=False)
@@ -6977,10 +7004,15 @@ class DashboardManager:
             return dash.no_update
         return False
 
-    def _accept_live_switch_handler(self, n_clicks=None, dataset_type=None, n_samples=None, noise=None, n_spirals=None, rotations=None):  # noqa: C901
+    def _accept_live_switch_handler(self, n_clicks=None, dataset_type=None, n_samples=None, noise=None, n_spirals=None, rotations=None, gen_values=None, gen_ids=None, nn_model=None):  # noqa: C901
         """POST ``/api/live_dataset_swap`` and reconcile the UI to the response.
 
         Returns ``(modal_open, progress_open, outcome_alert, in_flight)``.
+
+        The body is ``_dataset_stage_payload``'s, the one Apply Dataset sends for the same form:
+        the registry seed and schema-driven params for a non-spiral generator, the typed fields
+        for spiral, and the ``nn_model`` mirror (FR9), so a stale tab's swap is refused (409)
+        before the route stops anything.
 
         Three response branches:
           * 200 + ``status == "cancelled"`` → info alert "swap cancelled"
@@ -7010,14 +7042,7 @@ class DashboardManager:
                 ),
                 False,
             )
-        payload = {
-            "nn_dataset_type": dataset_type,
-            "nn_dataset_elements": n_samples,
-            "nn_dataset_noise": noise,
-            "nn_spiral_number": n_spirals,
-            "nn_spiral_rotations": rotations,
-        }
-        payload = {k: v for k, v in payload.items() if v is not None}
+        payload = self._dataset_stage_payload(dataset_type, n_samples=n_samples, noise=noise, rotations=rotations, n_spirals=n_spirals, gen_values=gen_values, gen_ids=gen_ids, nn_model=nn_model)
         try:
             resp = requests.post(
                 self._api_url("/api/live_dataset_swap"),
