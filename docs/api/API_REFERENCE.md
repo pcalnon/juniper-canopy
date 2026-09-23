@@ -945,6 +945,46 @@ curl http://127.0.0.1:8050/api/statistics
 - `backend` is `"demo"` or `"service"`.
 - Remaining fields mirror `GET /api/status` for the active backend.
 
+### GET /api/selection
+
+**Description:** The read side of the model/dataset selection: the model canopy has recorded, and
+the dataset the live backend holds. `POST /api/model/select` writes the model; this reads it back.
+The dashboard hydrates both selectors from it once, on page load.
+
+**Parameters:** None
+
+**Response Schema:**
+
+```json
+{
+  "nn_model": "recurrence",
+  "backend": "demo",
+  "execution": "continuous",
+  "status": "live",
+  "swapped": false,
+  "selected": true,
+  "dataset": {"value": "multi_sine", "source": "pending", "generator": "multi_sine"}
+}
+```
+
+**Status Codes:**
+
+- `200 OK` - Selection retrieved. A backend whose status cannot be read still answers `200`, with `dataset.source` `"unknown"`.
+
+**Notes:**
+
+- The model fields have exactly the `POST /api/model/select` response's shape. `swapped` is always
+  `false` (a read swaps nothing). `selected` is `false` until the first `POST /api/model/select`,
+  and `nn_model` is then the model the boot backend serves.
+- `dataset.source` is the field to branch on:
+  - `"pending"` — a dataset staged for the next start (it wins, because Start consumes it);
+  - `"loaded"` — the dataset the backend holds;
+  - `"none"` — the backend holds nothing;
+  - `"unknown"` — the backend does not report it (a juniper-cascor that predates its `current_dataset` status field).
+- `dataset.value` is canopy's dataset-type value (`"spirals"`, not juniper-data's `"spiral"`). It is
+  `null` when the backend holds something canopy cannot name: an unseeded generator (`generator`
+  then names it), or raw inline data.
+
 ## Remote Worker Endpoints
 
 These endpoints manage distributed training via the RemoteWorkerClient.
@@ -1154,7 +1194,7 @@ Most WebSocket messages use this shape:
 
 **Notes:**
 
-- `/ws/training` sends an initial `initial_status` message before steady-state messages.
+- `/ws/training` unicasts `connection_established`, then `initial_status`, then a `state` snapshot, in that order, on connect. Broadcast frames are not ordered against that sequence: the socket joins the broadcast set before `initial_status` is fetched, so a `metrics` or `state` broadcast can arrive ahead of it. Treat `state` as latest-wins, as the dashboard does, rather than assuming `initial_status` is the first data frame.
 - Some control-channel messages may omit `timestamp`.
 - Runtime dashboard updates consume `metrics`, `state`, `topology`, and `event` message types.
 

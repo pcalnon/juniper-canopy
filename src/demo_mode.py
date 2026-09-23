@@ -905,6 +905,55 @@ class DemoMode:
         order = np.argsort(codes, kind="stable")
         return None if np.array_equal(order, np.arange(order.size)) else order
 
+    def _advise_npz_contract(self, npz_data: Dict[str, Any], source_label: str) -> Optional[str]:
+        """Run the shared NPZ contract validator as an ADVISORY second check (canopy#559).
+
+        ``juniper_data_client.validate_npz_contract`` is the ecosystem's contract gate. It
+        dispatches on ``X_train``'s rank and, for a 3-D artifact, enforces the sequence
+        rules canopy's own install does not check: a ``t`` / ``dt`` channel present,
+        ``dt >= 0`` with ``dt[:, 0] == 0``, ``t`` and ``dt`` consistent, masks binary and
+        well-shaped. It is **warn-only** here, and never the reason an install fails:
+
+        * the ecosystem rule is "tolerate ``*_full``, never require it", and the helper
+          cannot read a legacy artifact that carries only ``X_full`` (it raises
+          ``KeyError``), so canopy is still obliged to load what it rejects;
+        * the rank probe in :meth:`regenerate_dataset_from_generator` stays the gate that
+          decides tabular vs sequence, and ``_validate_npz_arrays`` stays the strict check
+          on the tabular path.
+
+        A violation is logged at WARNING and the install proceeds exactly as it did before
+        this check existed. Any exception is caught, including an unexpected type: an
+        advisory check that can abort the thing it advises on is a gate.
+
+        Args:
+            npz_data: The downloaded artifact.
+            source_label: Where it came from, for the log line (e.g. ``"generator:xor"``).
+
+        Returns:
+            The contract kind (``"tabular"`` or ``"sequence"``) when the artifact validates,
+            or ``None`` when it does not.
+        """
+        try:
+            # Inside the try: a client that predates the helper (< 0.5.0) must degrade to a
+            # warning like any other failure here, not abort the install with ImportError.
+            from juniper_data_client import validate_npz_contract
+
+            # Annotated: under the pre-commit mypy env juniper_data_client is not installed, so the
+            # import is `Any`, and returning it unannotated trips no-any-return.
+            kind: str = validate_npz_contract(npz_data)
+        except KeyError as exc:
+            legacy = " (a legacy pre-decision-11 artifact that carries only X_full)" if "X_full" in npz_data else ""
+            self.logger.warning("Advisory NPZ contract check could not run for %s: no %s key%s; installing anyway (canopy#559)", source_label, exc, legacy)
+            return None
+        except ValueError as exc:  # JuniperDataContractError subclasses ValueError
+            self.logger.warning("Advisory NPZ contract check FAILED for %s: %s; installing anyway (canopy#559)", source_label, exc)
+            return None
+        except Exception as exc:  # advisory: an unexpected error type must not block the install either
+            self.logger.warning("Advisory NPZ contract check raised %s for %s: %s; installing anyway (canopy#559)", type(exc).__name__, source_label, exc)
+            return None
+        self.logger.debug("Advisory NPZ contract check passed for %s: %s", source_label, kind)
+        return kind
+
     @staticmethod
     def _whole_dataset(npz_data: Dict[str, Any], stem: str, optional: bool = False, order: Optional[np.ndarray] = None) -> Optional[np.ndarray]:
         """Assemble one key's whole dataset from its partitions.
@@ -1109,6 +1158,12 @@ class DemoMode:
             "num_samples": len(inputs),
             "num_features": inputs.shape[1] if len(inputs.shape) > 1 else 2,
             "num_classes": 2,
+            # §4.10: every installed dataset names where it came from, in the one form
+            # ``DemoBackend.get_status`` reads back as ``current_dataset``. The generator
+            # loaders already stamp ``generator:<name>``; the two spiral builders did not, so
+            # a spiral was identifiable only by the ABSENCE of a label -- which any future
+            # install that forgot one would silently satisfy.
+            "source": "generator:spiral",
         }
         if "dataset_name" in meta:
             result["dataset_name"] = meta["dataset_name"]
@@ -1177,6 +1232,9 @@ class DemoMode:
             "num_samples": len(inputs),
             "num_features": 2,
             "num_classes": 2,
+            # §4.10: same stamp as the juniper-data builder -- a local spiral is still a spiral.
+            # Whether it is the degraded local one is ``local_dataset_fallback``'s business (G9).
+            "source": "generator:spiral",
         }
 
     def _simulate_training_step(self) -> Tuple[float, float]:
@@ -1970,25 +2028,23 @@ class DemoMode:
             self.logger.error("JuniperData generator '%s' fetch failed: %s", generator, exc)
             raise
 
-        # Dispatch on input rank (CANOPY-3D-1). We inspect the artifact directly rather
-        # than juniper_data_client.validate_npz_contract. 3-D sequence (irregular-Δt time
-        # series) -> a display-only install (cascor cannot ingest 3-D yet, OQ-4); 2-D
-        # tabular -> the existing classification path.
+        # juniper_data_client.validate_npz_contract runs first, as an ADVISORY check: a
+        # violation is logged, never enforced (canopy#559, owner ruling 2026-09-22). See
+        # ``_advise_npz_contract``. It is the ecosystem's contract gate but not canopy's,
+        # because it fails CLOSED: it reads ``X_train`` alone, so a legacy artifact carrying
+        # only ``X_full`` raises ``KeyError``, and it raises on any sequence-rule violation.
+        # The ecosystem contract is "tolerate ``*_full``, never require it", so canopy is
+        # obliged to keep loading artifacts the helper would refuse.
         #
-        # The original reason given here -- that ``validate_npz_contract`` "is absent from
-        # the pinned / published juniper-data-client (0.4.x)" -- was true when written and
-        # is FALSE now, in both halves: ``requirements.lock`` pins 0.5.0 and PyPI's latest
-        # is 0.5.0, whose wheel exports the helper. canopy#559. The floor in pyproject.toml
-        # now says 0.5.0 too, so the helper is guaranteed present rather than merely likely.
-        #
-        # The direct probe stays, and NOT because the helper is missing. Two reasons that
-        # outlive the version question: (1) this is a RANK probe, and rank is not what
-        # ``validate_npz_contract`` answers -- see the legacy ``X_full`` arm below, which
-        # any contract validator would reject outright; (2) the ecosystem contract is
-        # "tolerate ``*_full``, never require it", so a validator that fails closed on a
-        # pre-2026-09-06 artifact would refuse data canopy is obliged to keep loading.
-        # Whether the helper should nonetheless run as a SECOND, advisory check is the
-        # open half of canopy#559 and is deliberately not decided here.
+        # The reason this comment first gave for not calling the helper -- that it "is
+        # absent from the pinned / published juniper-data-client (0.4.x)" -- was true when
+        # written and is false since the 0.5.0 floor in pyproject.toml: the helper is
+        # guaranteed present.
+        self._advise_npz_contract(npz_data, source_label=f"generator:{generator}")
+
+        # Dispatch on input rank (CANOPY-3D-1) -- this probe, not the helper above, is the
+        # gate. 3-D sequence (irregular-Δt time series) -> a display-only install (cascor
+        # cannot ingest 3-D yet, OQ-4); 2-D tabular -> the existing classification path.
         # A rank probe only, so the legacy ``X_full`` arm stays: any partition answers
         # "how many dimensions", and a legacy artifact has no other key to ask. The
         # message names ``X_train`` alone, because that is the one the CONTRACT requires

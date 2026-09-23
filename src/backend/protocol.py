@@ -78,6 +78,12 @@ class StatusResult(TypedDict, total=False):
     # ``accepted_by_this_run``, ``acceptance_source``, the producer's ``truncation`` and
     # ``data_quality`` descriptors, and a one-sentence ``summary`` for rendering.
     dataset_shortfall: Optional[Dict[str, Any]]
+    # §4.10 dataset-axis hydration: WHICH dataset the backend has loaded -- ``None`` when
+    # nothing is, ``{"dataset_type": None}`` when something is but it cannot be named, else
+    # ``{"dataset_type": <name>, **params}``. A backend that cannot report it OMITS the key
+    # (a cascor predating cascor#676), and that absence is itself the answer "unknown";
+    # ``main._backend_dataset_selection`` branches on it, so never default it to ``None``.
+    current_dataset: Optional[Dict[str, Any]]
 
 
 class MetricsResult(TypedDict, total=False):

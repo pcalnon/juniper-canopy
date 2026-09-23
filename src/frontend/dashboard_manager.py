@@ -2794,14 +2794,35 @@ class DashboardManager:
             # ``model-selection-store``. A second writer on a store is the duplicate-writer hazard,
             # and it would be invisible to anyone reading either handler alone.
             Input("model-selection-clear", "n_clicks"),
+            # Y3 / §4.10: the mount-time hydration rides here too, for the same reason -- it
+            # writes the same two stores. It is ALSO what runs ``gate_dataset_options`` at first
+            # paint now (see there), so it writes the key store on every mount, failure included.
+            Input("params-init-interval", "n_intervals"),
             prevent_initial_call=True,
         )
-        def select_model(n_clicks_list, clear_clicks):
+        def select_model(n_clicks_list, clear_clicks, _init_intervals):
             return self._select_model_from_table_handler(n_clicks_list, dash.callback_context.triggered_id, clear_clicks)
 
-        # N7 (I-5): also fires once on mount (params-init-interval) so the availability gate is
-        # applied at first paint, not only after a model change — an unavailable generator (its
-        # optional data extra absent) is greyed with a reworded reason from the start.
+        # N7 (I-5): the availability gate must apply at first paint, not only after a model change
+        # -- an unavailable generator (its optional data extra absent) is greyed with a reworded
+        # reason from the start. That first-paint pass used to come from a ``params-init-interval``
+        # Input here. It now comes from ``select_model``'s mount hydration, which writes
+        # ``model-selection-store`` on EVERY mount (the hydrated model, or the seed on failure).
+        #
+        # Why the interval Input went (§4.10): hydration sets the model and the dataset TOGETHER,
+        # and this callback must gate the hydrated dataset against the hydrated model. With both
+        # triggers, every mount ran TWO passes: one at the interval tick, against the seed model
+        # with no hydration yet (``model-state-store`` is still ``None`` when it is dispatched),
+        # and one when the hydrated key lands. The renderer drops an in-flight request when a newer
+        # one for the same callback arrives, so the hydrated pass wins in the end -- but a seed pass
+        # that had already completed would first paint a state gated against the WRONG model (an
+        # option list greyed for CasCor on a Recurrence reload, say). One trigger, one pass, and the
+        # ordering is explicit rather than left to the renderer's dedup.
+        #
+        # The hydrated dataset arrives in ``model-state-store`` (written in the SAME response as
+        # ``model-selection-store``, so it is current when this fires). Only the mount payload
+        # carries a ``dataset`` block; ``/api/model/select`` responses and the clear do not, so
+        # it is honoured exactly once.
         @self.app.callback(
             Output("nn-dataset-type-dropdown", "options"),
             Output("nn-dataset-type-dropdown", "value"),
@@ -2809,12 +2830,12 @@ class DashboardManager:
             # Only this handler knows the old value and the new one, so only it can name the change.
             Output("dataset-gate-notice", "children"),
             Input("model-selection-store", "data"),
-            Input("params-init-interval", "n_intervals"),
             State("nn-dataset-type-dropdown", "value"),
+            State("model-state-store", "data"),
             prevent_initial_call=True,
         )
-        def gate_dataset_options(model_key, _init_intervals, current_value):
-            return self._gate_dataset_options_handler(model_key, current_value)
+        def gate_dataset_options(model_key, current_value, model_state):
+            return self._gate_dataset_options_handler(model_key, current_value, hydrated_value=self._hydrated_dataset_value(model_state))
 
         # N7 (I-7 / U-6): drive the sidebar dataset params from the SELECTED generator's schema.
         # Fires on dataset change AND once on mount (params-init-interval) so the panel is correct at
@@ -2846,8 +2867,9 @@ class DashboardManager:
 
         # A1b-2 (§5.3): the reactive reverse gate. Selecting a dataset annotates the sidebar with
         # the model constraint it imposes ("3-D models only"), the dataset-side mirror of the
-        # table's per-row ``model_reason`` greying. Fires on every dataset change — a user pick OR
-        # the forward-gate snap (``gate_dataset_options``) — so the hint always tracks the dataset.
+        # table's per-row ``model_reason`` greying. Fires on every dataset change — a user pick, the
+        # forward gate CLEARING a conflict (``gate_dataset_options``; OQ-6, canopy#652 — it used to
+        # snap), or the mount hydration — so the hint always tracks the dataset.
         @self.app.callback(
             Output("nn-model-dataset-hint", "children"),
             Input("nn-dataset-type-dropdown", "value"),
@@ -2898,7 +2920,23 @@ class DashboardManager:
             dataset_ref["params"] = params
         return {"dataset": dataset_ref}
 
-    def _gate_dataset_options_handler(self, model_key, current_value, *, generators=None, models=MODELS, dataset_types=DATASET_TYPES):
+    @staticmethod
+    def _hydrated_dataset_value(model_state):
+        """The dataset value the mount hydration read from the backend, or None (§4.10 / G7).
+
+        Only ``GET /api/selection`` payloads carry a ``dataset`` block, and ``model-state-store``
+        holds one only between the mount and the next model change -- so this is non-None exactly
+        when ``gate_dataset_options`` runs its first-paint pass. ``None`` for every source that
+        names nothing the dropdown can show (``"none"``, ``"unknown"``, or a held dataset canopy
+        cannot name), which leaves the dropdown on its layout seed. What ``⊥``-at-mount does with
+        those sources is OQ-N2's decision (D-N13), sequenced after this hydration by D-N10.
+        """
+        block = model_state.get("dataset") if isinstance(model_state, dict) else None
+        if not isinstance(block, dict) or block.get("source") not in ("pending", "loaded"):
+            return None
+        return block.get("value") or None
+
+    def _gate_dataset_options_handler(self, model_key, current_value, *, generators=None, models=MODELS, dataset_types=DATASET_TYPES, hydrated_value=None):
         """Gate the dataset dropdown against the selected model (A1-iv-3b) AND availability (N7 / I-5).
 
         Composes the model-compatibility gate (``gated_dataset_options`` — the D5 correctness gate:
@@ -2920,10 +2958,23 @@ class DashboardManager:
         relieve it. ``gated_dataset_options(None)`` already returns every dataset enabled — the
         registry was right and only this handler was wrong.
 
-        Because the current dataset is then in ``enabled``, the snap below leaves it alone: clearing
-        the model KEEPS the dataset. That is §5.6's dataset-primary policy, which was not even
+        Because the current dataset is then in ``enabled``, the conflict branch below (a CLEAR since
+        OQ-6, canopy#652) leaves it alone: clearing the model KEEPS the dataset. That is §5.6's dataset-primary policy, which was not even
         expressible while the dropdown was unclearable.
+
+        **§4.10 — ``hydrated_value``, the first-paint pass.** The dataset the backend actually
+        holds, read at mount (``_hydrated_dataset_value``). It is gated exactly like a dataset
+        the operator picked, against the model hydrated in the same response -- so a backend
+        holding a dataset the selected model cannot use clears to ``⊥`` and says so, as any
+        conflict does. The one difference: where the gate would answer "keep it" (``no_update``),
+        keeping a value the dropdown does not yet HOLD means writing it. Without that, the
+        compatible case -- the whole point of hydrating -- would leave the seed on screen.
         """
+        if hydrated_value:
+            options, value, notice = self._gate_dataset_options_handler(model_key, hydrated_value, generators=generators, models=models, dataset_types=dataset_types)
+            if value is dash.no_update and hydrated_value != current_value:
+                value = hydrated_value
+            return options, value, notice
         # ``generators`` is injectable so a test can state the deployment's availability instead of
         # inheriting whatever a live ``/api/dataset/generators`` call returns. Without it the
         # all-unavailable case (G1d) is unreachable, and — since N11 removed the early return that
@@ -3392,7 +3443,12 @@ class DashboardManager:
         than going blank. ``model-class-store`` is left untouched for the same reason: the execution
         paradigm of the still-live backend has not changed, and nothing can be started to observe a
         stale one.
+
+        **Y3 / §4.10 — the mount branch** (``params-init-interval``) hydrates the selection from
+        ``GET /api/selection``; see :meth:`_hydrate_selection_handler`.
         """
+        if triggered_id == "params-init-interval":
+            return self._hydrate_selection_handler()
         if triggered_id == "model-selection-clear":
             if not clear_clicks:
                 return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
@@ -3404,6 +3460,38 @@ class DashboardManager:
         store, model_class, summary, state = self._select_model_handler(triggered_id.get("index"))
         is_open = False if store is not dash.no_update else dash.no_update
         return store, model_class, summary, is_open, state
+
+    def _hydrate_selection_handler(self):
+        """Seed the selection from the server once, at mount (Y3 + §4.10).
+
+        ``model-selection-store`` is memory-scoped and seeded with ``DEFAULT_MODEL_KEY``, and
+        ``current_nn_model`` lives in the server process -- so before this, every reload showed
+        the seed over whatever backend was running. With Recurrence selected over a cascor backend
+        the sidebar read *"Active: CasCor"* and left Start enabled against a selection the server
+        refuses (Y3). ``GET /api/selection`` returns the ``/api/model/select`` payload shape plus
+        the backend's dataset, so the summary, the Start gate and the train-gate notice read the
+        hydrated state through the stores they already read.
+
+        Returns the ``select_model`` 5-tuple. ``model-class-store`` is left to
+        ``hydrate_model_class``, its mount owner: writing it here too would rebuild the tab bar
+        for no change (F-CANOPY-027). The modal is untouched.
+
+        **The key store is written even on failure** (with the seed): that write is what runs
+        ``gate_dataset_options``'s first-paint pass, so skipping it would lose N7's
+        availability gate whenever the read fails. The payload store goes ``None`` -- unknown, not
+        disagreement -- and the summary keeps its seeded text.
+        """
+        try:
+            resp = requests.get(self._api_url("/api/selection"), timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT, headers=internal_api_headers())
+            if resp.ok:
+                data = resp.json()
+                model_key = data.get("nn_model") if isinstance(data, dict) else None
+                if model_key:
+                    return model_key, dash.no_update, self._model_summary_text(data), dash.no_update, data
+            self.logger.warning("Selection hydration read failed (%s); keeping the seeded selection", getattr(resp, "status_code", "?"))
+        except Exception as exc:
+            self.logger.warning("Selection hydration read failed (%s); keeping the seeded selection", exc)
+        return DEFAULT_MODEL_KEY, dash.no_update, dash.no_update, dash.no_update, None
 
     #: ``backend.backend_type`` as reported by ``/api/model/select`` when the recurrence service
     #: backend is the live one. The other values ("service", "demo") both serve cascor-family
@@ -6335,6 +6423,17 @@ class DashboardManager:
             value = dataset_vals.get(key)
             if value is not None:
                 payload[pkey] = value
+        # The registry seed, exactly as ``_apply_dataset_handler`` sends it: the seed is the single
+        # source of truth for the keys a generator cannot run without. This path used to send the
+        # typed fields alone, so re-staging a seeded generator from the modal dropped the very keys
+        # its seed exists for -- ``equities`` without ``symbols`` (a default deployment refuses the
+        # whole 503-name universe with a 422) and ``mnist`` without ``flatten`` (which makes canopy's
+        # ``ndim=2`` declaration self-enforcing). The modal renders no schema-driven params, so the
+        # seed is all it can send; a custom list applied earlier from the sidebar is not carried --
+        # the modal re-stages what it displays, and it does not display that.
+        seed = dataset_default_params(dtype)
+        if seed:
+            payload["nn_dataset_params"] = dict(seed)
         try:
             resp = requests.post(
                 self._api_url("/api/stage_dataset"),

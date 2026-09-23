@@ -9,9 +9,9 @@
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-2026 Paul Calnon
 # Description:   Guardrails G1-G11 for the selection-reachability
-#                remediation. This PR lands G5 (model-state truth);
-#                G1a-G1d / G3 / G6 / G7 / G8 arrive with their own
-#                phases and share this module.
+#                remediation, plus the Y3 read-side guardrail the
+#                design's §5 table lacked. G7 and Y3 landed with
+#                design PR 2 (§4.10 hydration, both axes).
 #####################################################################
 """Guardrails for the selection-reachability remediation design.
 
@@ -46,6 +46,7 @@ from fastapi.testclient import TestClient
 
 import main
 from backend.demo_backend import DemoBackend
+from backend.recurrence_backend import RecurrenceBackend
 from dataset_schema import generator_name_for_type
 from demo_mode import DemoMode
 from frontend.dashboard_manager import DashboardManager
@@ -245,9 +246,10 @@ def _explore(manager, *, clearable=None, model_clearable=None, generators=ALL_AV
        rides as ``State`` on the gate callback, so picking one cannot move the model;
     2. clear the dataset to ``⊥``, only when the shipped dropdown is ``clearable``;
     3. click any ENABLED model Select, which writes ``model-selection-store`` and therefore FIRES
-       the gate, which may snap the dataset. The snap is applied here exactly as the callback
-       applies it — which is why this must run at handler level. Written over ``model_registry``
-       alone, the same assertion goes green against the deadlocked code;
+       the gate, which may CLEAR the dataset to ``⊥`` (OQ-6, canopy#652; it used to snap it to
+       ``enabled[0]``). Whatever the gate writes is applied here exactly as the callback applies
+       it — which is why this must run at handler level. Written over ``model_registry`` alone,
+       the same assertion goes green against the deadlocked code;
     4. click "Clear model", which writes ``None`` to the same store and re-fires the same gate.
 
     Transition 4 is why ``⊥`` had to be extended to the model axis. The design defined ``⊥`` on the
@@ -913,3 +915,271 @@ class TestN5TheServerRefusesAnInactiveSelection:
         # conftest resets ``main.current_nn_model`` between tests; without that, the two D-8 tests
         # that select Recurrence over demo would 409 every later ``/api/train/start``.
         assert main.current_nn_model is None
+
+
+# ---------------------------------------------------------------------------
+# G7 + Y3 — the mount state IS the backend's state (§4.10, design PR 2)
+# ---------------------------------------------------------------------------
+#
+# Before PR 2 the selection had no read side on EITHER axis. ``model-selection-store`` is
+# memory-scoped and seeded ``DEFAULT_MODEL_KEY``; ``current_nn_model`` lives in the server; the
+# dataset dropdown's value is its layout default. So every reload showed the seed over whatever
+# the backend held -- *"Active: CasCor"* over a Recurrence selection the server refuses to start
+# (Y3), and ``spirals`` over whatever dataset cascor had staged or loaded (X1's dataset sibling).
+#
+# G7 (design §5): "the mount dataset value equals the backend's staged dataset". Y3 had NO
+# guardrail in the design's table at all -- G7 compares a dataset against a dataset and no Y3
+# defect can make it fail -- so ``TestY3TheModelAxisHasAReadSide`` is that missing guardrail.
+#
+# Both drive the REGISTERED callbacks in their real argument order (``_mount``). A handler-only
+# test passes with the wiring wrong, and the wiring is exactly what changed: the gate lost its
+# ``params-init-interval`` Input so its first-paint pass cannot race the hydration.
+
+
+def _registered(manager, name):
+    """The raw function Dash registered as callback ``name`` -- the wiring, not just the handler."""
+    found = []
+    for entry in manager.app.callback_map.values():
+        fn = entry.get("callback")
+        raw = getattr(fn, "__wrapped__", fn)
+        if getattr(raw, "__name__", None) == name:
+            found.append(raw)
+    assert len(found) == 1, f"expected one callback named {name!r}, found {len(found)}"
+    return found[0]
+
+
+def _mount(manager, selection_payload, *, seed_dataset=DEFAULT_DATASET_TYPE, generators=ALL_AVAILABLE):
+    """Replay the browser's mount: ``select_model``'s hydration pass, then the gate pass it triggers.
+
+    ``GET /api/selection`` answers ``selection_payload``; ``None`` makes the read fail. Returns
+    ``(model_store, summary, model_state, dataset_value, notice)``, where ``dataset_value`` is what
+    the dropdown shows afterwards (the seed when the gate wrote nothing).
+    """
+    select_model = _registered(manager, "select_model")
+    gate = _registered(manager, "gate_dataset_options")
+    ctx = mock.MagicMock()
+    ctx.triggered_id = "params-init-interval"
+    if selection_payload is None:
+        get = mock.patch("frontend.dashboard_manager.requests.get", side_effect=ConnectionError("canopy restarting"))
+    else:
+        get = mock.patch("frontend.dashboard_manager.requests.get", return_value=mock.Mock(ok=True, status_code=200, json=lambda: dict(selection_payload)))
+    with get, mock.patch.object(dash, "callback_context", ctx):
+        store, model_class, summary, is_open, state = select_model([], None, 1)
+    # The mount pass must never touch the modal or the model class (``hydrate_model_class`` owns
+    # the latter at mount; a second write rebuilds the tab bar, F-CANOPY-027).
+    assert model_class is dash.no_update and is_open is dash.no_update
+    manager._fetch_generators = lambda: generators
+    options, value, notice = gate(store, seed_dataset, state)
+    return store, summary, state, (seed_dataset if value is dash.no_update else value), notice
+
+
+def _selection(nn_model, backend, *, value, source, execution="continuous", selected=True):
+    """A ``GET /api/selection`` payload, shaped as ``main.api_selection`` builds it."""
+    return {
+        "nn_model": nn_model,
+        "backend": backend,
+        "execution": execution,
+        "status": "live",
+        "swapped": False,
+        "selected": selected,
+        "dataset": {"value": value, "source": source, "generator": value},
+    }
+
+
+class _FitRecorder:
+    """Stand-in for ``RecurrenceServiceAdapter``: records the fit, touches no network."""
+
+    service_url = "http://rec.test:8210"
+
+    def train(self, **kwargs):
+        from backend.recurrence_service_adapter import RecurrenceTrainResult
+
+        return RecurrenceTrainResult(final_metrics={"r2": 0.9, "mse": 0.1, "loss": 0.1}, n_epochs=1, stopped_reason="fit_complete", dataset={"name": kwargs.get("generator")})
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG7MountDatasetIsTheBackendsDataset:
+    """G7 — the dataset the dropdown shows after a reload is the one the backend holds."""
+
+    def test_a_loaded_dataset_is_the_mount_value(self, manager):
+        _store, _summary, _state, dataset, notice = _mount(manager, _selection("cascor", "service", value="circles", source="loaded"))
+        assert dataset == "circles"  # not the seed, spirals
+        assert notice is None
+
+    def test_a_pending_dataset_is_the_mount_value(self, manager):
+        payload = _selection("recurrence", "recurrence", value="mackey_glass", source="pending", execution="one_shot")
+        store, _summary, _state, dataset, _notice = _mount(manager, payload)
+        assert store == "recurrence"
+        assert dataset == "mackey_glass"
+
+    def test_the_hydrated_dataset_is_gated_against_the_HYDRATED_model(self, manager):
+        # Recurrence selected over a cascor backend that holds spirals. Against the SEED model
+        # (cascor) spirals is compatible and would survive; against the hydrated model it is not.
+        # Gating it against the seed is exactly the race the removed interval Input allowed.
+        payload = _selection("recurrence", "service", value="spirals", source="loaded")
+        store, _summary, _state, dataset, notice = _mount(manager, payload)
+        assert store == "recurrence"
+        assert dataset is None  # OQ-6: a conflict clears
+        assert "Spirals" in _text_of(notice) and "Recurrence (LMU)" in _text_of(notice)
+
+    def test_a_held_dataset_canopy_cannot_name_leaves_the_seed(self, manager):
+        # ``⊥``-at-mount is OQ-N2 / D-N13, sequenced AFTER this hydration by D-N10. Until it
+        # lands, every source that names nothing the dropdown can show keeps today's seed.
+        for dataset_block in ({"value": None, "source": "none"}, {"value": None, "source": "unknown"}, {"value": None, "source": "loaded", "generator": "arc_agi"}):
+            payload = {**_selection("cascor", "service", value=None, source="none"), "dataset": dataset_block}
+            _store, _summary, _state, dataset, _notice = _mount(manager, payload)
+            assert dataset == DEFAULT_DATASET_TYPE, dataset_block
+
+    def test_the_hydration_block_is_honoured_once(self, manager):
+        # After the mount, ``model-state-store`` is replaced by ``/api/model/select`` payloads,
+        # which carry no dataset block -- so a later model change gates the dataset the operator
+        # is LOOKING AT, not the one the backend held at mount.
+        assert DashboardManager._hydrated_dataset_value(X1_PAYLOAD) is None
+        assert DashboardManager._hydrated_dataset_value(None) is None
+        assert DashboardManager._hydrated_dataset_value(_selection("cascor", "demo", value="xor", source="loaded")) == "xor"
+
+    def test_the_gate_has_one_trigger_and_reads_the_payload_as_state(self, manager):
+        # One mount pass, pinned: re-adding ``params-init-interval`` as an Input schedules a second
+        # pass against the SEED model beside the hydrated one. The renderer's dedup lets the later
+        # request win, but a seed pass that already completed paints a state gated against the
+        # wrong model first.
+        _key, gate = _callback_writing(manager, "nn-dataset-type-dropdown.options")
+        assert _string_input_ids(gate) == {"model-selection-store"}
+        assert {entry.get("id") for entry in gate.get("state", [])} >= {"nn-dataset-type-dropdown", "model-state-store"}
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG7AcrossTheRealSeams:
+    """G7 end to end: the real route, the real backend, the real mount -- no hand-built payload.
+
+    The unit cases above feed ``_mount`` a literal, which pins the dashboard half but not the
+    contract between it and ``/api/selection``. canopy#653's fixture mocked the NEAR seam and
+    shipped a state that could never fire; these go through every seam the value crosses.
+    """
+
+    @pytest.fixture
+    def client(self):
+        with TestClient(main.app) as client:
+            yield client
+
+    def _read(self, client):
+        resp = client.get("/api/selection")
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    def test_a_dataset_staged_on_the_recurrence_backend_is_the_mount_value(self, manager, client, monkeypatch):
+        monkeypatch.setattr(main, "backend", RecurrenceBackend(_FitRecorder()), raising=False)
+        monkeypatch.setattr(main, "current_nn_model", "recurrence", raising=False)
+        # Staged the way the dashboard stages it: the juniper-data generator name.
+        assert client.post("/api/stage_dataset", json={"nn_dataset_type": generator_name_for_type("multi_sine")}).status_code == 200
+        payload = self._read(client)
+        assert payload["dataset"] == {"value": "multi_sine", "source": "pending", "generator": "multi_sine"}
+        store, summary, _state, dataset, _notice = _mount(manager, payload)
+        assert (store, dataset) == ("recurrence", "multi_sine")
+        assert summary == "Active: Recurrence (LMU)"
+
+    def test_the_dataset_of_the_last_fit_is_the_mount_value(self, manager, client, monkeypatch):
+        backend = RecurrenceBackend(_FitRecorder())
+        monkeypatch.setattr(main, "backend", backend, raising=False)
+        monkeypatch.setattr(main, "current_nn_model", "recurrence", raising=False)
+        assert backend.start_training(generator="mackey_glass")["ok"]
+        backend._thread.join(timeout=5)
+        payload = self._read(client)
+        assert payload["dataset"]["source"] == "loaded"
+        assert _mount(manager, payload)[3] == "mackey_glass"
+        # A reset discards the result, and the claim about which dataset produced it goes too.
+        assert backend.reset_training()["ok"]
+        assert self._read(client)["dataset"]["source"] == "none"
+
+    def test_the_demo_simulator_reports_the_generator_it_loaded(self, manager, client, monkeypatch):
+        demo = DemoMode(update_interval=1.0)
+        demo.dataset = {**demo.dataset, "source": "generator:xor"}
+        monkeypatch.setattr(main, "backend", DemoBackend(demo), raising=False)
+        payload = self._read(client)
+        assert payload["dataset"] == {"value": "xor", "source": "loaded", "generator": "xor"}
+        assert _mount(manager, payload)[3] == "xor"
+
+    def test_a_demo_spiral_resolves_through_the_alias_to_canopy_s_value(self, client, monkeypatch):
+        # The spiral builders stamp ``generator:spiral``; the dropdown's value is ``spirals``.
+        monkeypatch.setattr(main, "backend", DemoBackend(DemoMode(update_interval=1.0)), raising=False)
+        assert self._read(client)["dataset"] == {"value": "spirals", "source": "loaded", "generator": "spiral"}
+
+    def test_cascor_s_field_survives_normalisation_and_its_absence_reads_unknown(self):
+        # ``ServiceBackend.normalize_status`` is a WHITELIST -- the one place the field could be
+        # lost between cascor and the dashboard -- and absent must not collapse into ``None``.
+        from backend.service_backend import ServiceBackend
+
+        nested = {"state_machine": {"status": "STOPPED"}, "training_state": {}, "monitor": {}}
+        with_field = ServiceBackend.normalize_status({**nested, "current_dataset": {"dataset_type": "circles", "n_samples": 100}})
+        assert main._backend_dataset_selection(with_field) == {"value": "circles", "source": "loaded", "generator": "circles"}
+        assert main._backend_dataset_selection(ServiceBackend.normalize_status({**nested, "current_dataset": None}))["source"] == "none"
+        assert main._backend_dataset_selection(ServiceBackend.normalize_status(nested))["source"] == "unknown"
+
+    def test_pending_wins_over_loaded_and_an_unseeded_dataset_is_named_not_invented(self):
+        status = {"pending_dataset": {"dataset_type": "moon"}, "current_dataset": {"dataset_type": "xor"}}
+        assert main._backend_dataset_selection(status) == {"value": "moons", "source": "pending", "generator": "moon"}
+        # Another client staged a generator canopy does not seed: say which, pick nothing.
+        assert main._backend_dataset_selection({"current_dataset": {"dataset_type": "arc_agi"}}) == {"value": None, "source": "loaded", "generator": "arc_agi"}
+        # Loaded, identity unknown (raw inline tensors) is not "nothing loaded".
+        assert main._backend_dataset_selection({"current_dataset": {"dataset_type": None}}) == {"value": None, "source": "loaded", "generator": None}
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestY3TheModelAxisHasAReadSide:
+    """Y3 — a reload shows the model the server has recorded, and gates Start on it."""
+
+    @pytest.fixture
+    def recurrence_over_demo(self, monkeypatch):
+        """The D-8 / X1 state, recorded by the real route: Recurrence selected, demo running."""
+        with TestClient(main.app) as client:
+            monkeypatch.setattr(main.settings, "recurrence_service_url", None, raising=False)
+            monkeypatch.setattr(main, "backend", DemoBackend(DemoMode(update_interval=1.0)), raising=False)
+            monkeypatch.setattr(main, "current_nn_model", None, raising=False)
+            resp = client.post("/api/model/select", json={"nn_model": "recurrence"})
+            assert resp.status_code == 200 and resp.json()["swapped"] is False
+            yield client
+            monkeypatch.undo()
+
+    def test_the_read_route_returns_the_recorded_selection(self, recurrence_over_demo):
+        payload = recurrence_over_demo.get("/api/selection").json()
+        assert payload["nn_model"] == "recurrence"
+        assert payload["backend"] == "demo"
+        assert payload["selected"] is True
+        assert payload["swapped"] is False  # a read swaps nothing
+
+    def test_a_reload_over_an_inactive_selection_says_so_and_disables_start(self, manager, recurrence_over_demo):
+        # THE defect: before the read side existed this reload rendered "Active: CasCor" from the
+        # seed and left Start enabled -- and the server then refused the start it offered.
+        payload = recurrence_over_demo.get("/api/selection").json()
+        store, summary, state, _dataset, _notice = _mount(manager, payload)
+        assert store == "recurrence"
+        assert "NOT ACTIVE" in summary and "demo" in summary
+        states = {"start": {"disabled": False, "loading": False, "timestamp": 0}}
+        start_disabled = manager._update_button_appearance_handler(button_states=states, model_key=store, dataset_value="multi_sine", model_state=state)[0]
+        assert start_disabled is True
+        assert DashboardManager._train_gate_notice_handler(store, model_state=state) is not None
+
+    def test_nothing_selected_reads_the_boot_model_and_says_it_was_not_chosen(self, monkeypatch):
+        monkeypatch.setattr(main, "current_nn_model", None, raising=False)
+        with TestClient(main.app) as client:
+            payload = client.get("/api/selection").json()
+        assert payload["nn_model"] == DEFAULT_MODEL_KEY
+        assert payload["selected"] is False
+
+    def test_a_live_selection_reads_active(self, manager):
+        payload = _selection("recurrence", "recurrence", value="multi_sine", source="loaded", execution="one_shot")
+        store, summary, _state, _dataset, _notice = _mount(manager, payload)
+        assert store == "recurrence"
+        assert summary == "Active: Recurrence (LMU)"
+
+    def test_a_failed_read_keeps_the_seed_but_still_runs_the_first_paint_gate(self, manager):
+        # The key store is WRITTEN (with the seed) even though the read failed: that write is the
+        # gate's only first-paint trigger now, so skipping it would lose N7's availability gate.
+        store, summary, state, dataset, _notice = _mount(manager, None, generators=NONE_AVAILABLE)
+        assert store == DEFAULT_MODEL_KEY
+        assert summary is dash.no_update and state is None
+        # ...and the gate DID run: with nothing available, the seed dataset is cleared (§4.7).
+        assert dataset is None

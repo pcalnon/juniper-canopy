@@ -110,7 +110,7 @@ def test_gate_dataset_options_handler_greys_and_clears_for_recurrence(manager):
 
 def test_gate_dataset_options_handler_keeps_compatible_value(manager):
     _options, value, _notice = manager._gate_dataset_options_handler("cascor", "spirals")
-    assert value is dash.no_update  # spirals stays valid for cascor -> no snap
+    assert value is dash.no_update  # spirals stays valid for cascor -> no write (a stranded one would be cleared)
 
 
 def test_gate_dataset_options_handler_ungates_without_model(manager):

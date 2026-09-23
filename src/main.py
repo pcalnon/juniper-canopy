@@ -4046,6 +4046,75 @@ async def api_model_select(body: _ModelSelectBody):
     return await _swap_backend(body.nn_model)
 
 
+def _backend_dataset_selection(status: Any) -> dict:
+    """Which dataset the live backend holds, in canopy's vocabulary (§4.10 / guardrail G7).
+
+    Precedence is what the next Start would train on: a PENDING staged dataset first (Start
+    consumes it), else the one LOADED. ``source`` says which, and it is the field a consumer
+    must branch on, because ``value`` alone cannot tell "the backend holds nothing" from "the
+    backend cannot say":
+
+    * ``"pending"`` / ``"loaded"`` -- ``value`` is the canopy dataset-type value. It is ``None``
+      when the backend holds something canopy cannot name: an unseeded generator another client
+      staged (``generator`` then says which) or raw inline data (``generator`` is ``None`` too).
+    * ``"none"`` -- the backend reports that nothing is loaded.
+    * ``"unknown"`` -- the backend does not report its loaded dataset (a cascor predating
+      cascor#676 omits ``current_dataset``), or its status could not be read at all.
+
+    Every backend reports ``current_dataset`` in cascor's shape, so this reads all three alike.
+    """
+    from dataset_schema import dataset_type_for_generator_name
+    from model_registry import DATASET_TYPES
+
+    known = [spec.value for spec in DATASET_TYPES]
+    status = status if isinstance(status, dict) else {}
+    pending = status.get("pending_dataset")
+    if isinstance(pending, dict):
+        # canopy stages ``nn_dataset_type``; cascor echoes its own dialect, ``dataset_type``.
+        raw = pending.get("nn_dataset_type") or pending.get("dataset_type")
+        if raw:
+            return {"value": dataset_type_for_generator_name(raw, known), "source": "pending", "generator": raw}
+    if "current_dataset" not in status:
+        return {"value": None, "source": "unknown", "generator": None}
+    current = status.get("current_dataset")
+    if not isinstance(current, dict):
+        return {"value": None, "source": "none", "generator": None}
+    raw = current.get("dataset_type") or current.get("nn_dataset_type")
+    return {"value": dataset_type_for_generator_name(raw, known), "source": "loaded", "generator": raw or None}
+
+
+@app.get("/api/selection")
+async def api_selection():
+    """The read side of the selection: which model and which dataset are live (Y3 / §4.10).
+
+    ``POST /api/model/select`` could WRITE the model and nothing could read it back, so a page
+    reload showed the layout's seeded model over whatever backend was running -- *"Active:
+    CasCor"* over a recurrence backend, with Start enabled against a selection the server would
+    refuse (Y3). The dataset axis never had a read side at all: the dropdown showed its layout
+    default over whatever the backend had staged (§4.10). The dashboard hydrates both from here,
+    once, at mount.
+
+    The model fields have exactly the ``POST /api/model/select`` response's shape, so the
+    dashboard holds either in one store and every reader of it (the summary, the Start gate, the
+    train-gate notice) works unchanged. ``swapped`` is False because a read swaps nothing;
+    ``selected`` is False until the first ``/api/model/select``, and ``nn_model`` is then the
+    model the boot backend serves. ``dataset`` is :func:`_backend_dataset_selection`.
+    """
+    from model_registry import DEFAULT_MODEL_KEY
+
+    payload = _model_state_response(current_nn_model or DEFAULT_MODEL_KEY, swapped=False)
+    payload["selected"] = current_nn_model is not None
+    try:
+        status = await offload(backend.get_status)
+    except Exception as exc:
+        # The model half is canopy's own state and needs no backend; the dataset half degrades
+        # to "unknown" rather than taking the whole read down with it.
+        system_logger.warning("Selection read: backend status unavailable: %s", exc)
+        status = None
+    payload["dataset"] = _backend_dataset_selection(status)
+    return payload
+
+
 class SetParamsRequest(BaseModel):
     """Validated request body for the set_params endpoint."""
 

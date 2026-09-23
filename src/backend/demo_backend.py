@@ -129,6 +129,9 @@ class DemoBackend:
                 # demo parity for the cascor pending-dataset surface; drives
                 # the canopy banner without a dedicated poll.
                 "pending_dataset": getattr(self._demo, "_pending_dataset_config", None),
+                # §4.10: which dataset the simulator holds, in cascor's ``current_dataset``
+                # shape so ``main._backend_dataset_selection`` reads every backend the same way.
+                "current_dataset": self._current_dataset(),
             }
         )
         # Include training params from training_state if available
@@ -138,6 +141,24 @@ class DemoBackend:
                 if k in ts and k not in state:
                     state[k] = ts[k]
         return cast(StatusResult, state)
+
+    #: The stamp every generator-built demo dataset carries in its ``source`` key.
+    _GENERATOR_SOURCE_PREFIX = "generator:"
+
+    def _current_dataset(self) -> Optional[Dict[str, Any]]:
+        """The simulator's dataset identity, read from its ``source`` stamp (§4.10).
+
+        ``generator:<name>`` names a generator (``spiral`` for both spiral builders); any other
+        label -- an imported upload -- is a dataset whose identity canopy cannot name, so it
+        reads ``{"dataset_type": None}``, never ``None``: something IS loaded.
+        """
+        dataset = getattr(self._demo, "dataset", None)
+        if not dataset:
+            return None
+        source = dataset.get("source") if isinstance(dataset, dict) else None
+        if isinstance(source, str) and source.startswith(self._GENERATOR_SOURCE_PREFIX):
+            return {"dataset_type": source[len(self._GENERATOR_SOURCE_PREFIX) :] or None}
+        return {"dataset_type": None}
 
     def get_metrics(self) -> MetricsResult:
         return cast(MetricsResult, self._demo.get_current_state())

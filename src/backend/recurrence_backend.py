@@ -150,6 +150,10 @@ class RecurrenceBackend:
         # "Dataset staging" section). Consumed by ``start_training``; surfaced on ``get_status``
         # as ``pending_dataset`` for the banner.
         self._pending_dataset_config: Optional[Dict[str, Any]] = None
+        # §4.10: the dataset reference the latest fit ran on -- what the displayed result was
+        # produced from, reported as ``current_dataset``. Set when a fit starts, cleared by
+        # :meth:`reset_training` along with the result it describes.
+        self._fit_dataset_ref: Optional[Dict[str, Any]] = None
 
     @property
     def backend_type(self) -> str:
@@ -197,6 +201,7 @@ class RecurrenceBackend:
             if staged and explicit_ref.get("generator") not in (None, dataset_ref["generator"]):
                 logger.info("recurrence fit uses the staged dataset %r over the start body's %r", dataset_ref["generator"], explicit_ref.get("generator"))
             self._pending_dataset_config = None  # consumed by this start (cascor parity)
+            self._fit_dataset_ref = dict(dataset_ref)
             self._result = None
             self._error = None
             self._state = "training"
@@ -243,6 +248,7 @@ class RecurrenceBackend:
             self._state = "idle"
             self._result = None
             self._error = None
+            self._fit_dataset_ref = None
         return ControlResult(ok=True, is_training=False)
 
     def is_training_active(self) -> bool:
@@ -257,6 +263,7 @@ class RecurrenceBackend:
             result = self._result
             error = self._error
             pending = self._pending_dataset_config
+            fit_ref = self._fit_dataset_ref
         status: Dict[str, Any] = {
             "is_training": state == "training",
             "is_running": state == "training",
@@ -270,6 +277,11 @@ class RecurrenceBackend:
             # X6 / §4.9: the pending-dataset banner reconciles off this field for every backend
             # (cascor carries it through from /v1/training/status; demo reads its simulator).
             "pending_dataset": dict(pending) if pending else None,
+            # §4.10: the dataset the latest fit ran on, in cascor's ``current_dataset`` shape so
+            # one reader serves every backend. ``None`` before any fit and after a reset. A fit
+            # referenced by ``dataset_id`` / ``name`` has no generator to name, which is the
+            # ``{"dataset_type": None}`` reading: something is loaded, canopy cannot say what.
+            "current_dataset": {"dataset_type": fit_ref.get("generator"), **dict(fit_ref.get("params") or {})} if fit_ref else None,
         }
         if state == "failed" and error is not None:
             status["completion_reason"] = error

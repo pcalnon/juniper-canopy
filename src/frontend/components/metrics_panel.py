@@ -96,6 +96,22 @@ class MetricsPanel(BaseComponent):
         ("roc_auc", "ROC-AUC", "#d63384"),  # magenta
     )
 
+    # F-CANOPY-048: the replay controls, as the suffixes of their component ids
+    # (``f"{component_id}-{suffix}"``). ``_handle_replay_controls_handler`` dispatches on
+    # exact membership, so the callback's two refresh Inputs (``replay-state``,
+    # ``metrics-store``) can never be mistaken for a control.
+    REPLAY_CONTROL_IDS: Tuple[str, ...] = (
+        "replay-play",
+        "replay-step-back",
+        "replay-step-forward",
+        "replay-start",
+        "replay-end",
+        "speed-1x",
+        "speed-2x",
+        "speed-4x",
+        "replay-slider",
+    )
+
     def __init__(self, config: Dict[str, Any], component_id: str = "metrics-panel"):
         """
         Initialize metrics panel component.
@@ -956,11 +972,50 @@ class MetricsPanel(BaseComponent):
                 return {**base_style, "display": "block"}
             return {**base_style, "display": "none"}
 
+        # F-CANOPY-048: ONE callback reads AND writes ``replay-slider.value``.
+        #
+        # This was two callbacks feeding each other: ``handle_replay_controls`` (Input
+        # ``replay-slider.value`` -> Output ``replay-state.data``) and ``update_replay_ui``
+        # (Input ``replay-state.data`` -> Output ``replay-slider.value``). dash-renderer
+        # promotes a requested callback only when none of its Inputs, less its own Outputs,
+        # lies in the downstream closure of ANY pending callback, itself included
+        # (``getReadyCallbacks``, dash_renderer.dev.js:1633-1665). Each covered its own Input
+        # through the other, so neither was ever ready; the circular-dependency breaker
+        # (:3064) fires only when nothing else at all is pending, and canopy's pollers never
+        # allow that. Measured live: all three replay callbacks in ``requested`` in 6471 of
+        # 6471 samples, and zero ``replay-state`` writes across ten clicks.
+        #
+        # One callback is Dash's supported shape for a synchronised control: its own Outputs
+        # are exempt from its own readiness check (``differenceBasedOnId``, :1661) and its own
+        # writes never re-trigger it (the ``predecessors`` prune, :2972). Nothing else writes
+        # the slider, and dcc.Slider echoes a programmatic ``value`` only as ``drag_value``,
+        # so a ``replay-slider`` trigger here is a user seek and nothing else. That also
+        # removes a defect the lock was hiding: a chain that started at ``replay_tick`` or at
+        # a store write reached the old controls callback through ``update_replay_ui``'s slider
+        # write with neither in its predecessors, and the slider branch paused playback.
+        #
+        # Inputs are the old Inputs and then the old States, in order, so the positional
+        # signature is unchanged; Outputs are the old three and then ``update_replay_ui``'s.
+        # ``replay-state.data`` is an Input so a ``replay_tick`` write re-renders the slider,
+        # and ``metrics-store.data`` so a refill does. Neither rewrites the state.
+        #
+        # THE CONDITION THIS DEPENDS ON: ``metrics-store.data`` is an Input, so this callback
+        # is not ready while the store's primary writer ``update_metrics_store`` (or
+        # ``update_display_mode``, upstream of it) is pending. That poll is ``running=``-gated
+        # and leaves gaps. A primary writer of the store pending at EVERY renderer pass would
+        # lock the controls again. The old controls callback had those two blockers too,
+        # through the slider.
+        #
+        # PERF-CN-01: prevent_initial_call=False -- renders the initial slider and "0 / 0"
+        # position on mount, which ``update_replay_ui`` used to do.
         @app.callback(
             [
                 Output(f"{self.component_id}-replay-state", "data"),
                 Output(f"{self.component_id}-replay-interval", "disabled"),
                 Output(f"{self.component_id}-replay-interval", "interval"),
+                Output(f"{self.component_id}-replay-slider", "value"),
+                Output(f"{self.component_id}-replay-slider", "max"),
+                Output(f"{self.component_id}-replay-position", "children"),
             ],
             [
                 Input(f"{self.component_id}-replay-play", "n_clicks"),
@@ -972,12 +1027,10 @@ class MetricsPanel(BaseComponent):
                 Input(f"{self.component_id}-speed-2x", "n_clicks"),
                 Input(f"{self.component_id}-speed-4x", "n_clicks"),
                 Input(f"{self.component_id}-replay-slider", "value"),
+                Input(f"{self.component_id}-replay-state", "data"),
+                Input(f"{self.component_id}-metrics-store", "data"),
             ],
-            [
-                State(f"{self.component_id}-replay-state", "data"),
-                State(f"{self.component_id}-metrics-store", "data"),
-            ],
-            prevent_initial_call=True,
+            prevent_initial_call=False,
         )
         def handle_replay_controls(
             play_clicks,
@@ -992,56 +1045,13 @@ class MetricsPanel(BaseComponent):
             current_state,
             metrics_data,
         ):
-            """Handle replay control button clicks."""
-            ctx = dash.callback_context
-            if not ctx.triggered:
-                return current_state, True, 1000
-
-            trigger = ctx.triggered[0]["prop_id"].split(".")[0]
-            state = (
-                current_state.copy()
-                if current_state
-                else {
-                    "mode": "stopped",
-                    "speed": 1.0,
-                    "current_index": 0,
-                    "start_index": 0,
-                    "end_index": None,
-                }
-            )
-
-            max_index = len(metrics_data) - 1 if metrics_data else 0
-            state["end_index"] = state.get("end_index") or max_index
-
-            if "replay-play" in trigger:
-                state["mode"] = "paused" if state["mode"] == "playing" else "playing"
-            elif "step-back" in trigger:
-                state["mode"] = "paused"
-                state["current_index"] = max(0, state["current_index"] - 1)
-            elif "step-forward" in trigger:
-                state["mode"] = "paused"
-                state["current_index"] = min(max_index, state["current_index"] + 1)
-            elif "replay-start" in trigger:
-                state["current_index"] = state["start_index"]
-                state["mode"] = "paused"
-            elif "replay-end" in trigger:
-                state["current_index"] = state["end_index"] or max_index
-                state["mode"] = "paused"
-            elif "speed-1x" in trigger:
-                state["speed"] = 1.0
-            elif "speed-2x" in trigger:
-                state["speed"] = 2.0
-            elif "speed-4x" in trigger:
-                state["speed"] = 4.0
-            elif "replay-slider" in trigger:
-                state["current_index"] = int((slider_value / 100) * max_index) if max_index > 0 else 0
-                state["mode"] = "paused"
-
-            base_interval = 1000
-            interval = int(base_interval / state["speed"])
-            disabled = state["mode"] != "playing"
-
-            return state, disabled, interval
+            """Apply the replay controls that fired, then render the slider and position."""
+            try:
+                ctx = dash.callback_context
+                triggered = [entry.get("prop_id", "") for entry in ctx.triggered] if ctx.triggered else []
+            except dash.exceptions.MissingCallbackContextException:
+                triggered = []  # direct invocation (tests) -- treated like the mount call
+            return self._handle_replay_controls_handler(triggered=triggered, slider_value=slider_value, current_state=current_state, metrics_data=metrics_data)
 
         @app.callback(
             Output(f"{self.component_id}-replay-state", "data", allow_duplicate=True),
@@ -1069,29 +1079,9 @@ class MetricsPanel(BaseComponent):
 
             return state
 
-        # PERF-CN-01: prevent_initial_call=False — sets initial slider position
-        # and "0 / 0" replay-position text on mount.
-        @app.callback(
-            [
-                Output(f"{self.component_id}-replay-slider", "value"),
-                Output(f"{self.component_id}-replay-slider", "max"),
-                Output(f"{self.component_id}-replay-position", "children"),
-            ],
-            [
-                Input(f"{self.component_id}-replay-state", "data"),
-                Input(f"{self.component_id}-metrics-store", "data"),
-            ],
-            prevent_initial_call=False,
-        )
-        def update_replay_ui(state, metrics_data):
-            """Update replay slider and position display."""
-            max_index = len(metrics_data) - 1 if metrics_data else 0
-            current_index = state.get("current_index", 0) if state else 0
-
-            slider_value = (current_index / max_index * 100) if max_index > 0 else 0
-            position_text = f"{current_index} / {max_index}"
-
-            return slider_value, 100, position_text
+        # F-CANOPY-048: ``update_replay_ui`` (Input ``replay-state.data`` -> Output
+        # ``replay-slider.value``) was merged into ``handle_replay_controls`` above; the
+        # two formed the cycle that locked the replay block.
 
         # PERF-CN-01: prevent_initial_call=False — sets initial play-button icon
         # ("▶") on mount.
@@ -1510,6 +1500,90 @@ class MetricsPanel(BaseComponent):
             status_text,
             status_style,
         )
+
+    # Replay Controls Handler (F-CANOPY-048)
+    def _handle_replay_controls_handler(self, triggered: List[str] = None, slider_value=None, current_state: Dict = None, metrics_data: List[Dict[str, Any]] = None):
+        """Apply the replay controls that fired, then render the slider and position.
+
+        The logic of the merged ``handle_replay_controls`` callback: the old
+        ``handle_replay_controls`` (controls -> state), then the old ``update_replay_ui``
+        (state -> slider and position), each control's effect unchanged.
+
+        Dispatch is on the EXACT triggering component id, split off each ``prop_id`` the way
+        Dash builds ``ctx.triggered_prop_ids`` (``rpartition(".")``), so the first entry is
+        ``ctx.triggered_id``. Every entry is applied, in order, where the old callback read
+        only the first: dash-renderer merges queued requests of one callback into a single
+        request whose ``changedPropIds`` keep first-requested order
+        (dash_renderer.dev.js:3004-3007), so a click queued behind a ``replay_tick`` refresh
+        would otherwise be dropped. The ``replay-state`` and ``metrics-store`` triggers match
+        no control.
+
+        Args:
+            triggered: ``prop_id`` strings from ``ctx.triggered``; empty on the mount call.
+            slider_value: ``replay-slider.value``, read only when the slider fired.
+            current_state: ``replay-state.data``.
+            metrics_data: ``metrics-store.data``.
+
+        Returns:
+            ``(state, interval_disabled, interval_ms, slider_value, slider_max, position_text)``.
+            When no control fired (mount, a ``replay_tick`` write, a metrics refill) the first
+            three are ``dash.no_update``: a refresh re-renders from the state and never
+            rewrites it, so a refill cannot reset the index and a tick cannot pause playback.
+        """
+        prefix = f"{self.component_id}-"
+        fired = [component_id[len(prefix) :] for component_id, _, _ in (prop_id.rpartition(".") for prop_id in (triggered or [])) if component_id.startswith(prefix) and component_id[len(prefix) :] in self.REPLAY_CONTROL_IDS]
+        max_index = len(metrics_data) - 1 if metrics_data else 0
+
+        if fired:
+            state: Dict[str, Any] = (
+                current_state.copy()
+                if current_state
+                else {
+                    "mode": "stopped",
+                    "speed": 1.0,
+                    "current_index": 0,
+                    "start_index": 0,
+                    "end_index": None,
+                }
+            )
+            state["end_index"] = state.get("end_index") or max_index
+
+            for control in fired:
+                if control == "replay-play":
+                    state["mode"] = "paused" if state["mode"] == "playing" else "playing"
+                elif control == "replay-step-back":
+                    state["mode"] = "paused"
+                    state["current_index"] = max(0, state["current_index"] - 1)
+                elif control == "replay-step-forward":
+                    state["mode"] = "paused"
+                    state["current_index"] = min(max_index, state["current_index"] + 1)
+                elif control == "replay-start":
+                    state["current_index"] = state["start_index"]
+                    state["mode"] = "paused"
+                elif control == "replay-end":
+                    state["current_index"] = state["end_index"] or max_index
+                    state["mode"] = "paused"
+                elif control == "speed-1x":
+                    state["speed"] = 1.0
+                elif control == "speed-2x":
+                    state["speed"] = 2.0
+                elif control == "speed-4x":
+                    state["speed"] = 4.0
+                elif control == "replay-slider":
+                    state["current_index"] = int((slider_value / 100) * max_index) if max_index > 0 else 0
+                    state["mode"] = "paused"
+
+            base_interval = 1000
+            state_out = state
+            disabled_out = state["mode"] != "playing"
+            interval_out = int(base_interval / state["speed"])
+        else:
+            state = current_state
+            state_out = disabled_out = interval_out = dash.no_update
+
+        current_index = state.get("current_index", 0) if state else 0
+        slider_out = (current_index / max_index * 100) if max_index > 0 else 0
+        return state_out, disabled_out, interval_out, slider_out, 100, f"{current_index} / {max_index}"
 
     # Layout Save/Load Handlers (P3-4)
     def _fetch_layout_options_handler(self) -> List[Dict[str, str]]:

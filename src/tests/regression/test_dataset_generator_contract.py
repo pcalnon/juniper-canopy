@@ -41,9 +41,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
-from dataset_schema import FORM_EXCLUDED_FIELDS, GENERATOR_NAME_ALIASES, SHAPE_DETERMINING_FIELDS, form_excluded_fields, generator_name_for_type, parse_schema_fields
-from frontend.dashboard_manager import DashboardManager
-from model_registry import DATASET_TYPES, KNOWN_UPSTREAM_GENERATORS, MODELS, UNSEEDED_GENERATORS, compatible_models, get_dataset_spec
+from dataset_schema import FORM_EXCLUDED_FIELDS, GENERATOR_NAME_ALIASES, PARTIAL_DATA_POLICY_FIELDS, SHAPE_DETERMINING_FIELDS, form_excluded_fields, generator_name_for_type, parse_schema_fields
+from frontend.dashboard_manager import DATASET_SHORTFALL_OPTIONS, DashboardManager
+from model_registry import DATASET_TYPES, KNOWN_UPSTREAM_GENERATORS, MODELS, SEEDED_GENERATOR_BOUNDS, UNSEEDED_GENERATORS, compatible_models, get_dataset_spec
 
 
 @pytest.mark.regression
@@ -180,11 +180,16 @@ class TestX8TaskTypeDivergenceIsDeliberate:
 
         The old assertion pinned "how little slack there is: one relabelled seed is the
         difference between a usable model and an unselectable one". §12's five synthetics
-        remove that knife-edge, and the ORDER matters as much as the membership: the sidebar
-        gate snaps to the first compatible AND available entry, so ``multi_sine`` leading is
-        what makes selecting Recurrence land on a dataset that is instant, offline and
-        actually learnable (r² 1.000) instead of on ``equities_seq``, which is 40.5s, r²
-        -0.004, and unavailable in the container at all.
+        remove that knife-edge, and the ORDER is pinned as well as the membership, for what it
+        still decides. It no longer decides where the SIDEBAR lands when Recurrence is picked:
+        since OQ-6's ratification (canopy#652, 2026-09-22) the sidebar gate clears a stranded
+        dataset to ``⊥`` and the operator chooses. It does decide the order the dropdown
+        OFFERS, and the restart modal's fallback, which keeps its ``enabled[0]`` swap by owner
+        ruling (2026-09-22), a deliberate exception to OQ-6. So ``multi_sine`` leading is what
+        makes both the first option offered and the modal's replacement for a stranded dataset
+        one that is instant, offline and actually learnable (r² 1.000), rather than
+        ``equities_seq``: 40.5s, r² -0.004, and unavailable in the deployed container
+        (juniper-deploy pins juniper-data 0.15.0, whose image lacks ``yfinance``).
         """
         recurrence = next(m for m in MODELS if m.key == "recurrence")
         assert [d.value for d in DATASET_TYPES if compatible_models(d, models=(recurrence,))] == [
@@ -260,6 +265,99 @@ class TestG10EveryUpstreamGeneratorIsSeededOrNamed:
         assert len(reason.split()) >= 8, f"{name}'s exclusion reason is too thin to act on: {reason!r}"
 
 
+# What "bounded" means for each key a G11 classification may name as bounding. A key with no rule
+# here FAILS ``test_every_bounding_key_has_a_rule`` rather than passing by default: a bound nobody
+# defined is not a bound.
+#
+# ``symbols``: an explicit, non-empty list of ticker strings no longer than juniper-data's DEFAULT
+# deployment ceiling, ``EQUITIES_DEFAULT_MAX_SYMBOLS = 14`` (``juniper_data/core/limits.py`` at
+# main 68c3cd7, 2026-09-22). An empty list or ``None`` falls back to the 503-name bundled universe,
+# and on a default deployment a longer list is refused with 422 rather than truncated. A dated
+# snapshot, like G10's: a deployment that lowers its ceiling is not visible from here.
+_EQUITIES_DEFAULT_SYMBOL_CEILING = 14
+
+
+def _symbols_are_bounded(value):
+    return isinstance(value, (list, tuple)) and 0 < len(value) <= _EQUITIES_DEFAULT_SYMBOL_CEILING and all(isinstance(symbol, str) and symbol.strip() for symbol in value)
+
+
+_BOUNDED_VALUE_RULES = {"symbols": _symbols_are_bounded}
+
+
+def _seeded_generator_names():
+    return {generator_name_for_type(spec.value) for spec in DATASET_TYPES}
+
+
+def _unbounded_import_seeds():
+    """Seeds whose generator is classified as importing an unbounded universe."""
+    seeds = []
+    for spec in DATASET_TYPES:
+        bound = SEEDED_GENERATOR_BOUNDS.get(generator_name_for_type(spec.value))
+        if bound is not None and bound.bounding_keys:
+            seeds.append(spec)
+    return seeds
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestG11EverySeedIsBounded:
+    """G11 (design §12) — enforced over EVERY seed, not over the seeds someone remembered.
+
+    Until 2026-09-22 G11 was enforced by enumerating names: the tests that touched it listed the
+    seeds they knew, and ``model_registry.py`` pointed its reader at an
+    ``UNBOUNDED_IMPORT_GENERATORS`` that existed nowhere. A fifteenth seed with unbounded
+    ``default_params`` passed everything, and the design's §5 table recorded G11 as "passes" -- the
+    vacuous-pass shape.
+
+    ``SEEDED_GENERATOR_BOUNDS`` is the authority now, and this suite forces a recorded decision per
+    SEEDED generator the way G10 forces one per UPSTREAM generator: every seed's generator is
+    classified, and a generator that imports an unbounded universe must have its seed pin one of
+    its bounding keys to a bounded value.
+    """
+
+    @pytest.mark.parametrize("spec", DATASET_TYPES, ids=lambda s: s.value)
+    def test_every_seeded_generator_is_classified(self, spec):
+        name = generator_name_for_type(spec.value)
+        assert name in SEEDED_GENERATOR_BOUNDS, f"seed {spec.value!r} (generator {name!r}) has no G11 classification. Add a SEEDED_GENERATOR_BOUNDS entry in model_registry.py: " f"GeneratorBound(reason) if its own defaults bound it, or GeneratorBound(reason, bounding_keys=...) naming the default_params keys that bound it if it pulls an operator-sized universe."
+
+    @pytest.mark.parametrize("spec", _unbounded_import_seeds(), ids=lambda s: s.value)
+    def test_every_unbounded_import_seed_pins_a_bounding_key(self, spec):
+        bound = SEEDED_GENERATOR_BOUNDS[generator_name_for_type(spec.value)]
+        pinned = {key: spec.default_params[key] for key in sorted(bound.bounding_keys) if key in spec.default_params}
+        assert any(_BOUNDED_VALUE_RULES[key](value) for key, value in pinned.items()), f"seed {spec.value!r} imports an unbounded universe and must pin one of {sorted(bound.bounding_keys)} to a bounded value in its default_params; " f"got {pinned or 'none of them'}. Without it every Start asks for the whole universe. 'max_symbols' is not a bounding key: it is the cap juniper-data refuses against."
+
+    def test_there_is_an_unbounded_import_seed_to_check(self):
+        # Guards the vacuous pass: with nothing classified as an unbounded import, the pinning test
+        # above is parametrised over an empty list and asserts nothing.
+        assert _unbounded_import_seeds(), "no seed is classified as an unbounded import -- the pinning test would be vacuous"
+
+    def test_the_equities_pair_stays_classified_as_unbounded_imports(self):
+        # The classification is a recorded decision, so it is also the easiest way to switch the
+        # pinning check off: reclassify a universe importer as self-bounded and its seed is never
+        # inspected. The two measured importers are pinned to the class they were measured in.
+        for name in sorted({"equities", "equities_seq"} & _seeded_generator_names()):
+            assert "symbols" in SEEDED_GENERATOR_BOUNDS[name].bounding_keys, f"{name} must stay classified as an unbounded import bounded by 'symbols'"
+
+    def test_the_classification_names_only_seeded_generators(self):
+        # An entry for a generator no seed uses records a decision about nothing: a half-done
+        # un-seeding, or a typo that leaves the real seed unclassified.
+        dead = set(SEEDED_GENERATOR_BOUNDS) - _seeded_generator_names()
+        assert not dead, f"SEEDED_GENERATOR_BOUNDS classifies generators no seed uses: {sorted(dead)}"
+
+    def test_every_bounding_key_has_a_rule(self):
+        # A bounding key with no definition of "bounded" would pass or fail by accident of the
+        # default. Neither is a decision.
+        named = {key for bound in SEEDED_GENERATOR_BOUNDS.values() for key in bound.bounding_keys}
+        undefined = named - set(_BOUNDED_VALUE_RULES)
+        assert not undefined, f"bounding keys with no boundedness rule in this module: {sorted(undefined)}"
+
+    @pytest.mark.parametrize("name", sorted(SEEDED_GENERATOR_BOUNDS))
+    def test_each_classification_carries_a_substantive_reason(self, name):
+        # G10's bar: a one-word reason is the failure mode a recorded decision exists to prevent.
+        reason = SEEDED_GENERATOR_BOUNDS[name].reason
+        assert len(reason.split()) >= 8, f"{name}'s G11 reason is too thin to act on: {reason!r}"
+
+
 @pytest.mark.regression
 @pytest.mark.unit
 class TestEquitiesSeedIsGenerableAndFinite:
@@ -302,11 +400,16 @@ class TestEquitiesSeedIsGenerableAndFinite:
         assert self._equities_seeds(), "no equities-family seed found -- the assertions below would be vacuous"
 
     def test_every_equities_seed_pins_its_universe(self):
+        # This used to accept ``allow_truncation: True`` as an alternative to a ``symbols`` list.
+        # It is not one: a seeded opt-in rides on every Apply and every one-shot Start, so it
+        # pre-answers the partial-data question the three-way prompt exists to ask -- and no seed
+        # may carry either policy field (TestNoPathSendsAPartialDataStance). Only an explicit
+        # universe bounds the request.
         for spec in self._equities_seeds():
             params = spec.default_params
             symbols = params.get("symbols")
             pinned = isinstance(symbols, (list, tuple)) and len(symbols) > 0
-            assert pinned or params.get("allow_truncation") is True, f"{spec.value!r} relies on juniper-data's default 503-name universe: it pins neither a " f"'symbols' list nor allow_truncation, so every Start 422s with InputTooLargeError. " f"'max_symbols' does NOT rescue this -- it IS the cap being exceeded. got={params!r}"
+            assert pinned, f"{spec.value!r} relies on juniper-data's default 503-name universe: it pins no " f"'symbols' list, so every Start 422s with InputTooLargeError. 'max_symbols' does NOT " f"rescue this -- it IS the cap being exceeded -- and a seeded allow_truncation is not a " f"remedy either: it would opt every run into a cut universe without asking. got={params!r}"
 
     def test_every_equities_seed_pins_a_finite_fundamentals_fill(self):
         for spec in self._equities_seeds():
@@ -387,6 +490,88 @@ class TestTheCascorPathCarriesRegistryDefaults:
         rendered = [child for child in children if getattr(child, "id", None) == {"type": "nn-gen-param", "name": "fundamentals_fill"}]
         assert rendered, "fundamentals_fill was not rendered at all"
         assert rendered[0].value == "drop"
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestNoPathSendsAPartialDataStance:
+    """No channel may put ``allow_truncation`` / ``incomplete_rows`` on the wire unasked.
+
+    juniper-data 0.15.0 (juniper-data#418, APD-DATA-052) made ``allow_truncation`` a tri-state:
+    ``null`` / omitted defers to the deployment, ``true`` opts in, and an explicit ``false``
+    REFUSES -- HTTP 422 on any shortfall, even where the deployment opted in. cascor#624 already
+    honoured a caller's explicit value over cascor's own setting, so a ``false`` from canopy now
+    overrides every opt-in on the path. Silence is the only value that defers, which is why
+    ``PARTIAL_DATA_POLICY_FIELDS`` withholds both fields from the form.
+
+    Only the form's RENDER half was pinned (``test_parse_excludes_partial_data_policy_fields``).
+    The registry seed is the channel that bypasses the form's filter BY DESIGN -- Apply applies it
+    before filtering, so an unrendered array like ``symbols`` can travel -- and it is also the
+    whole of the one-shot Start body. So every channel that builds a dataset request is walked
+    here, over every seed.
+
+    The one sender is deliberate and stays: the shortfall prompt's accept / drop buttons re-stage
+    with ``allow_truncation: true`` -- the operator answering the question at the moment it
+    arises. The last test pins that it never sends anything else.
+    """
+
+    @staticmethod
+    def _policy_fields_in(params):
+        return sorted(PARTIAL_DATA_POLICY_FIELDS & set(params or {}))
+
+    @pytest.mark.parametrize("spec", DATASET_TYPES, ids=lambda s: s.value)
+    def test_no_seed_carries_a_policy_field(self, spec):
+        carried = self._policy_fields_in(spec.default_params)
+        assert not carried, f"{spec.value!r} seeds {carried}. The seed rides on every Apply AND every one-shot Start, so it would answer the partial-data question for every run before it is asked -- and since juniper-data 0.15.0 an explicit false refuses every shortfall."
+
+    @pytest.mark.parametrize("spec", DATASET_TYPES, ids=lambda s: s.value)
+    def test_the_default_apply_sends_neither_field(self, spec):
+        sent = TestTheCascorPathCarriesRegistryDefaults._staged_payload(spec.value)
+        assert not (self._policy_fields_in(sent) or self._policy_fields_in(sent.get("nn_dataset_params"))), f"Apply for {spec.value!r} sent {sent!r}"
+
+    def test_a_stale_policy_control_is_filtered_and_nothing_else_is(self):
+        # A tab rendered before these controls were withheld still carries them, and an unticked
+        # one posts ``allow_truncation: False``. The filter must drop both fields and ONLY them:
+        # the ordinary edit beside them still wins, and the unrendered seed still rides -- or a
+        # green result here could mean the filter dropped everything.
+        sent = TestTheCascorPathCarriesRegistryDefaults._staged_payload(
+            "equities",
+            gen_values=[False, "accept", "zero"],
+            gen_ids=[
+                {"type": "nn-gen-param", "name": "allow_truncation"},
+                {"type": "nn-gen-param", "name": "incomplete_rows"},
+                {"type": "nn-gen-param", "name": "fundamentals_fill"},
+            ],
+        )
+        params = sent["nn_dataset_params"]
+        assert not self._policy_fields_in(params), f"a stale control forwarded a partial-data stance: {params!r}"
+        assert params["fundamentals_fill"] == "zero", "the filter swallowed an ordinary content param"
+        assert params["symbols"] == ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA"], "the seed stopped riding alongside the form"
+
+    @pytest.mark.parametrize("spec", DATASET_TYPES, ids=lambda s: s.value)
+    def test_the_one_shot_start_body_sends_neither_field(self, spec):
+        body = DashboardManager._resolve_oneshot_start_body_handler("one_shot", spec.value)
+        assert body is not None, "the one-shot handler built no body at all -- this check would be vacuous"
+        params = body["dataset"].get("params")
+        assert not self._policy_fields_in(params), f"the one-shot Start body for {spec.value!r} carries {params!r}"
+
+    @pytest.mark.parametrize("spec", DATASET_TYPES, ids=lambda s: s.value)
+    def test_the_restart_modal_restage_sends_neither_field(self, spec):
+        with mock.patch("frontend.dashboard_manager.requests.post") as post:
+            post.return_value = MagicMock(ok=True, status_code=200, text="{}")
+            post.return_value.json.return_value = {}
+            DashboardManager({})._restage_dataset({"dataset_type": spec.value, "n_samples": 100, "noise": 0.1})
+        assert post.called, "the restart modal re-stage posted nothing -- this check would be vacuous"
+        sent = post.call_args.kwargs["json"]
+        assert not (self._policy_fields_in(sent) or self._policy_fields_in(sent.get("nn_dataset_params"))), f"the restart modal re-stage for {spec.value!r} sent {sent!r}"
+
+    def test_the_shortfall_prompt_only_ever_opts_in(self):
+        # The deliberate exception, pinned so it cannot drift into what this class forbids. Every
+        # prompt option that re-stages opts IN; "fail" (option 3) re-stages nothing -- it cancels
+        # the load instead, and is not in this map.
+        assert DATASET_SHORTFALL_OPTIONS, "the prompt's options vanished -- this pin would be vacuous"
+        for button, choice in DATASET_SHORTFALL_OPTIONS.items():
+            assert choice.get("allow_truncation") is True, f"{button} sends allow_truncation={choice.get('allow_truncation')!r}; the prompt may only ever opt in"
 
 
 class TestAShapeDeterminingKnobIsWithheldNotRendered:
