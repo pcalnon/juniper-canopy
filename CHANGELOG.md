@@ -42,6 +42,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A model swap could strand the dashboard on a tab that no longer exists (Y4).** A one-shot model
+  rebuilds the tab bar without the five cascade-only tabs, and the active-tab restore guarded only
+  "no saved tab" and "saved equals shown". Measured in headless chromium: on Network Topology, a
+  swap to a one-shot model left **no** tab highlighted and **zero** visible panes; a reload with a
+  persisted cascade tab restored it at mount and was stranded the same way once the rebuild landed.
+  The restore now reads the rendered tabs as an Input. It never restores a tab that is not rendered,
+  keeps the shown tab when it is, and otherwise falls back to the first rendered tab (Training
+  Metrics). The reset lives in the existing restore writer, so it adds no `active_tab` writer. The
+  app has **three** such writers, not the two the source-level test counts:
+  `hdf5_snapshots_panel`'s replay hand-off is the third.
+- **Whether a selection control was greyed out was decided by the reason-string helpers, not by
+  `compatible()` (Y8).** `gated_dataset_options` disabled an option when `dataset_reason` returned
+  a string, and the model table disabled a Select when `model_reason` did. Both helpers
+  re-implemented all three compatibility axes, so the load-bearing predicate had three independent
+  expressions. `disabled` is now `not compatible()` on both surfaces, and the helpers only choose
+  the wording, with a generic phrase for an axis they do not name, so a greyed control can never
+  read `None`. A universal test pins `disabled == not compatible()` and reason-iff-disabled over
+  every pair of the production registry and of a synthetic registry that fails each axis alone. The
+  production registry alone cannot see a dropped temporal axis, because every shipped rank-3 model
+  is Δt-aware.
+- **The model table's Select button carried its reason only in `title=` (Y7, model-table half).**
+  Each row's compatibility cell now has a deterministic id derived from the model key, and the
+  row's Select points at it with `aria-describedby`, as
+  `JUNIPER_2026-09-02_JUNIPER-CANOPY_SELECTION-REACHABILITY-DESIGN.md` §4.3 (juniper-ml) specifies.
+  The accessible description is therefore the rendered reason. The control is now an `html.Button`
+  carrying the class string `dbc.Button` rendered, because dbc 2.0.4's `Button` rejects `aria-*`
+  props. The reason is no longer repeated in `title=` on a disabled Select: Bootstrap gives
+  `.btn:disabled` `pointer-events: none`, so that tooltip could never show. Enabled Selects keep
+  their hover hint.
 - **The replay controls never applied: play, step, start, end, the speed buttons and the slider
   did nothing on any page load (F-CANOPY-048).** `handle_replay_controls` (Input
   `replay-slider.value` → Output `replay-state.data`) and `update_replay_ui` (Input
