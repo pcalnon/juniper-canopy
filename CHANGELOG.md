@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Stage, live-swap and set-params requests now carry the dashboard's `nn_model`, and a stale or
+  incompatible request fails closed (FR9; the `nn_model` mirror clause of canopy#368).**
+  `current_nn_model` is server state, while `model-selection-store` is per-tab memory. A second
+  tab, or one opened before another client changed the model, holds a stale selection, and a
+  request made under it used to land on whichever backend was live. For example, a stale CasCor
+  tab could stage a rank-2 dataset into the recurrence backend, which failed only at *fit* time.
+  - `nn_model` is an **optional** field on both `StageDatasetRequest` and `SetParamsRequest`.
+    #368's own guardrail says a field absent from a request model is silently dropped, so the key
+    had to exist before anything could be checked.
+  - `/api/stage_dataset`, `/api/live_dataset_swap` and `/api/set_params` answer:
+    - **409** when the mirror names a model other than the server's selection;
+    - **422** for an unknown model;
+    - **422** on staging or live-swap when the dataset is known and that model cannot use it.
+  - A request without the key behaves exactly as before, so older clients and `curl` are
+    unaffected.
+  - The key is a routing field. It never reaches a backend, and it is kept out of the
+    applied-params store the dirty tracker reads.
+  - The sidebar's Apply Dataset and Apply Parameters send it. The restart modal and the live-swap
+    button do not yet; the server accepts its absence.
+  - `src/tests/regression/test_request_nn_model_mirror.py`, mutation-checked at four sites.
 - **The selection survives a page reload: both selectors now hydrate from the backend (design
   PR 2, §4.10; guardrails G7 and Y3).** The selection had no read side on either axis.
   `model-selection-store` is memory-scoped and seeded with the default model, while
