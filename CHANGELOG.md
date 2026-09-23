@@ -62,19 +62,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - **`APIKeyAuth` now carries the blank-key filter and the non-short-circuiting compare that its
-  three siblings carry (APD-ECO-008).** `src/security.py` is the fourth copy of the ecosystem's
-  `APIKeyAuth`, and the only one still on the pre-fix code. `validate` used
-  `any(hmac.compare_digest(...))`, which stops at the first match, so the number of comparisons
-  depended on where the matching key fell. The constructor also kept blank entries, which
-  juniper-service-core, juniper-data and juniper-cascor all drop. Both now match the siblings.
-  **One real behaviour change:** a whitespace-only `CANOPY_API_KEY` set through the environment
-  variable used to *enable* auth. (A secret *file* is already stripped by `get_secret`, so it
-  becomes no key.) That key refused every HTTP request, because an all-whitespace header arrives
-  empty, while the WebSocket `?api_key=` query parameter could still present it. Meanwhile the
-  boot-time posture check already classified it as no key and logged "running OPEN". It now
-  disables auth, which is what that log line said. With `JUNIPER_CANOPY_REQUIRE_AUTH=true` the
-  boot still fails with `AuthPostureError`, unless `JUNIPER_SKIP_AUTH_POSTURE_CHECK` bypasses the
-  check.
+  sibling copies carry (APD-ECO-008).** `src/security.py` is the fourth copy of the ecosystem's
+  `APIKeyAuth`. `validate` used `any(hmac.compare_digest(...))`, which stops at the first match,
+  so the number of comparisons depended on where the matching key fell. It now walks every key, as
+  juniper-data does and as juniper-cascor and juniper-service-core do on `main`. The fix is
+  unreleased in juniper-service-core: the 0.7.0 wheel that `requirements.lock` pins still ships
+  `any(...)`. The constructor also kept blank entries, which all three siblings drop; now it drops
+  them too.
+
+  **Behaviour change: a whitespace-only `CANOPY_API_KEY` environment variable now DISABLES auth.**
+  It used to enable it. Only the env var reaches this case, because `get_secret` strips a secret
+  *file*, and an empty key was already treated as unset. The boot-time posture check already
+  classified such a key as absent and logged "running OPEN"; that log line is now true. What
+  opens is the posture canopy documents for no key at all:
+
+  - **The browser control surface loses its Origin/CSRF gate.** While auth was enabled, a keyless
+    `/api/train/*` request had to pass the Origin allowlist and a CSRF token under the default
+    flags; with `browser_control_auth_enabled` off, it needed the key outright. With auth disabled,
+    `require_browser_control_auth` returns before either check, so all six state-changing
+    `/api/train/*` POSTs accept a cross-site POST, and `/api/csrf` stops refusing disallowed
+    origins.
+  - **With `JUNIPER_CANOPY_WS_AUTH_ENABLED=true`** (SEC-06, default false), every WebSocket
+    connection used to be refused, because no bearer token could match a blank key. Now any bearer
+    token is admitted.
+  - **Not an exposure, before or after:** the WebSocket `?api_key=` query parameter is decoded but
+    never trimmed, so it could present the whitespace key. That gained nothing, because all three
+    WebSocket routes already admit a keyless connection (`allow_browser_auth=True`) behind the same
+    Origin and CSRF gates.
+
+  Only a launch with a whitespace-only `CANOPY_API_KEY` env var and `JUNIPER_CANOPY_REQUIRE_AUTH`
+  false (canopy's code default) reaches this configuration. Under `true`, the boot still fails with
+  `AuthPostureError` unless `JUNIPER_SKIP_AUTH_POSTURE_CHECK` bypasses the check. juniper-deploy
+  supplies the key through `CANOPY_API_KEY_FILE`, which is stripped, and its secured compose
+  service defaults `JUNIPER_CANOPY_REQUIRE_AUTH=true`, so no deploy profile reaches it.
+  `get_api_key_auth()` now logs a distinct WARNING when `CANOPY_API_KEY` is set but blank. The
+  WARNING names the variable, never the value.
 
 ## [0.8.1] - 2026-09-15
 

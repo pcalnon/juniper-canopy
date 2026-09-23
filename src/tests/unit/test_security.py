@@ -332,6 +332,44 @@ class TestSecurityModuleFunctions:
         auth = get_api_key_auth()
         assert auth.enabled is False
 
+    @pytest.mark.parametrize("source", ["env", "file"])
+    def test_set_but_blank_key_logs_a_distinct_warning(self, monkeypatch, caplog, tmp_path, source):
+        """APD-ECO-008: SET-but-blank gets its own WARNING, naming the variable and never the value.
+
+        The boot posture check words a blank key exactly like an unset one, so
+        without this an operator whose key went blank gets no new signal.
+        """
+        blank = " \t  "  # distinctive whitespace: none of it may reach the log
+        if source == "env":
+            monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+            monkeypatch.setenv("CANOPY_API_KEY", blank)
+        else:
+            secret_file = tmp_path / "canopy_api_key"
+            secret_file.write_text(blank + "\n")
+            monkeypatch.setenv("CANOPY_API_KEY_FILE", str(secret_file))
+            monkeypatch.delenv("CANOPY_API_KEY", raising=False)
+        with caplog.at_level("WARNING", logger="juniper_canopy.security"):
+            auth = get_api_key_auth()
+        assert auth.enabled is False
+        warnings = [r for r in caplog.records if r.name == "juniper_canopy.security" and r.levelname == "WARNING"]
+        assert len(warnings) == 1
+        message = warnings[0].getMessage()
+        assert "CANOPY_API_KEY" in message
+        assert "blank" in message and "DISABLED" in message
+        assert "\t" not in message and " " not in message
+
+    @pytest.mark.parametrize("value", [None, "real-key"])
+    def test_no_blank_key_warning_when_unset_or_real(self, monkeypatch, caplog, value):
+        """Over-correction guard: UNSET and a real key are not the blank case."""
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        if value is None:
+            monkeypatch.delenv("CANOPY_API_KEY", raising=False)
+        else:
+            monkeypatch.setenv("CANOPY_API_KEY", value)
+        with caplog.at_level("WARNING", logger="juniper_canopy.security"):
+            get_api_key_auth()
+        assert [r for r in caplog.records if r.name == "juniper_canopy.security"] == []
+
     def test_get_rate_limiter_reads_settings(self):
         from unittest.mock import MagicMock, patch
 
