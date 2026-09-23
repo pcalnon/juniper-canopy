@@ -1,8 +1,8 @@
-"""Tests for Docker secrets utility: get_secret()."""
+"""Tests for Docker secrets utility: get_secret() and resolve_secret()."""
 
 import pytest
 
-from secrets_util import get_secret
+from secrets_util import get_secret, resolve_secret
 
 
 class TestGetSecret:
@@ -96,3 +96,78 @@ class TestGetSecret:
         monkeypatch.delenv("MY_SECRET", raising=False)
 
         assert get_secret("MY_SECRET") == "secret-with-spaces"
+
+
+class TestResolveSecret:
+    """``resolve_secret`` names the variable that supplied the value (APD-ECO-008 follow-up).
+
+    ``security.get_api_key_auth`` words its blank-key WARNING by that name, so the name
+    must follow ``get_secret``'s precedence exactly: the file wins only while the
+    ``_FILE`` variable names an existing file.
+    """
+
+    @pytest.mark.unit
+    def test_file_source_is_named_and_its_value_stripped(self, monkeypatch, tmp_path):
+        secret_file = tmp_path / "my_secret"
+        secret_file.write_text("  file-value \n")
+        monkeypatch.setenv("MY_SECRET_FILE", str(secret_file))
+        monkeypatch.setenv("MY_SECRET", "env-value")
+
+        assert resolve_secret("MY_SECRET") == ("file-value", "MY_SECRET_FILE")
+
+    @pytest.mark.unit
+    def test_a_blank_file_still_wins_over_the_env_var(self, monkeypatch, tmp_path):
+        """The case a single blank-key message got wrong: the env var is not read at all."""
+        secret_file = tmp_path / "my_secret"
+        secret_file.write_text(" \t\n")
+        monkeypatch.setenv("MY_SECRET_FILE", str(secret_file))
+        monkeypatch.setenv("MY_SECRET", "real-env-value")
+
+        assert resolve_secret("MY_SECRET") == ("", "MY_SECRET_FILE")
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("value", ["env-value", "  padded  ", "", "   "])
+    def test_env_source_is_named_and_its_value_returned_raw(self, monkeypatch, value):
+        monkeypatch.delenv("MY_SECRET_FILE", raising=False)
+        monkeypatch.setenv("MY_SECRET", value)
+
+        assert resolve_secret("MY_SECRET") == (value, "MY_SECRET")
+
+    @pytest.mark.unit
+    def test_a_file_var_naming_no_file_leaves_the_env_var_the_source(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("MY_SECRET_FILE", str(tmp_path / "absent"))
+        monkeypatch.setenv("MY_SECRET", "   ")
+
+        assert resolve_secret("MY_SECRET") == ("   ", "MY_SECRET")
+
+    @pytest.mark.unit
+    def test_neither_set_names_no_source(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("MY_SECRET_FILE", str(tmp_path / "absent"))
+        monkeypatch.delenv("MY_SECRET", raising=False)
+
+        assert resolve_secret("MY_SECRET") == (None, None)
+
+    @pytest.mark.unit
+    def test_custom_file_env_var_is_the_name_reported(self, monkeypatch, tmp_path):
+        secret_file = tmp_path / "custom_secret"
+        secret_file.write_text("custom-file-value\n")
+        monkeypatch.setenv("CUSTOM_PATH", str(secret_file))
+        monkeypatch.delenv("MY_SECRET", raising=False)
+
+        assert resolve_secret("MY_SECRET", file_env_var="CUSTOM_PATH") == ("custom-file-value", "CUSTOM_PATH")
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("file_content, env_value", [("file-value\n", "env-value"), (" \n", "env-value"), (None, "env-value"), (None, ""), (None, None)])
+    def test_get_secret_returns_exactly_the_resolved_value(self, monkeypatch, tmp_path, file_content, env_value):
+        if file_content is None:
+            monkeypatch.delenv("MY_SECRET_FILE", raising=False)
+        else:
+            secret_file = tmp_path / "my_secret"
+            secret_file.write_text(file_content)
+            monkeypatch.setenv("MY_SECRET_FILE", str(secret_file))
+        if env_value is None:
+            monkeypatch.delenv("MY_SECRET", raising=False)
+        else:
+            monkeypatch.setenv("MY_SECRET", env_value)
+
+        assert get_secret("MY_SECRET") == resolve_secret("MY_SECRET")[0]

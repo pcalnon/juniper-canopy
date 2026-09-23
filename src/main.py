@@ -345,6 +345,16 @@ async def lifespan(app: FastAPI):
         logger=system_logger,
     )
 
+    # APD-ECO-008: the posture check words a SET-but-blank key exactly like an unset
+    # one, so a blank key gets its own WARNING, naming which source was blank. It is
+    # emitted here, through the logger configured above, because the key is read at
+    # import (``api_key_auth = get_api_key_auth()`` below), before ``configure_logging``
+    # has run. It uses what that read recorded rather than reading the secret again,
+    # and it fires once per process however many times this lifespan runs.
+    from security import report_blank_api_key
+
+    report_blank_api_key(system_logger)
+
     # D2 (SEC-F22): loopback bind-guard. Fail loud + closed here -- before
     # backend init / serving -- when canopy is configured to bind a non-loopback
     # interface with NEITHER bind-posture attestation set, instead of silently

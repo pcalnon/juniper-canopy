@@ -1,5 +1,6 @@
 """Tests for API security: APIKeyAuth, RateLimiter, and module-level functions."""
 
+import logging
 import time
 from unittest.mock import MagicMock
 
@@ -13,8 +14,40 @@ from security import (
     RateLimiter,
     get_api_key_auth,
     get_rate_limiter,
+    report_blank_api_key,
     reset_security_state,
 )
+
+# The set-but-blank WARNING, one text per source (APD-ECO-008 follow-up). Written out
+# here rather than imported from security.py: an expectation imported from the module
+# under test moves with any mutant that rewrites the advice there, and passes.
+# src/tests/regression/test_blank_api_key_warning_boot.py pins the same two texts on
+# the real startup path.
+BLANK_ENV_WARNING = "CANOPY_API_KEY is set but blank (empty or whitespace-only), so API-key authentication is DISABLED: every route, including the state-changing /api/* routes and the /api/train/* control surface, serves without a key, exactly as with no key configured. Set a real key, or unset CANOPY_API_KEY for an intentional open profile."
+BLANK_FILE_WARNING = "The file named by CANOPY_API_KEY_FILE is blank (empty or whitespace-only), so API-key authentication is DISABLED: every route, including the state-changing /api/* routes and the /api/train/* control surface, serves without a key, exactly as with no key configured. While CANOPY_API_KEY_FILE names an existing file it takes precedence and CANOPY_API_KEY is not read. Write a real key into that file, or unset CANOPY_API_KEY_FILE to use CANOPY_API_KEY instead."
+
+
+class _ListHandler(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+@pytest.fixture
+def report_log():
+    """A private, non-propagating stdlib logger for ``report_blank_api_key``, and what it received."""
+    log = logging.getLogger("tests.unit.test_security.blank_api_key")
+    log.setLevel(logging.DEBUG)
+    log.propagate = False
+    handler = _ListHandler()
+    log.addHandler(handler)
+    try:
+        yield log, handler.records
+    finally:
+        log.removeHandler(handler)
 
 
 class TestAPIKeyAuth:
@@ -332,43 +365,128 @@ class TestSecurityModuleFunctions:
         auth = get_api_key_auth()
         assert auth.enabled is False
 
+    # APD-ECO-008 follow-up: the set-but-blank WARNING. ``get_api_key_auth`` records the
+    # blank key's SOURCE and logs nothing -- it first runs at import, before logging is
+    # configured -- and ``report_blank_api_key`` logs it once, worded for that source.
+
     @pytest.mark.parametrize("source", ["env", "file"])
-    def test_set_but_blank_key_logs_a_distinct_warning(self, monkeypatch, caplog, tmp_path, source):
-        """APD-ECO-008: SET-but-blank gets its own WARNING, naming the variable and never the value.
+    def test_set_but_blank_key_logs_a_distinct_warning(self, monkeypatch, report_log, tmp_path, source):
+        """APD-ECO-008: SET-but-blank gets its own WARNING, worded for its source, never carrying the value.
 
         The boot posture check words a blank key exactly like an unset one, so
         without this an operator whose key went blank gets no new signal.
         """
-        blank = " \t  "  # distinctive whitespace: none of it may reach the log
+        log, records = report_log
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.delenv("CANOPY_API_KEY", raising=False)
         if source == "env":
-            monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
-            monkeypatch.setenv("CANOPY_API_KEY", blank)
+            monkeypatch.setenv("CANOPY_API_KEY", " \t ")
         else:
             secret_file = tmp_path / "canopy_api_key"
-            secret_file.write_text(blank + "\n")
+            secret_file.write_text(" \t \n", encoding="utf-8")
             monkeypatch.setenv("CANOPY_API_KEY_FILE", str(secret_file))
-            monkeypatch.delenv("CANOPY_API_KEY", raising=False)
-        with caplog.at_level("WARNING", logger="juniper_canopy.security"):
-            auth = get_api_key_auth()
-        assert auth.enabled is False
-        warnings = [r for r in caplog.records if r.name == "juniper_canopy.security" and r.levelname == "WARNING"]
-        assert len(warnings) == 1
-        message = warnings[0].getMessage()
-        assert "CANOPY_API_KEY" in message
-        assert "blank" in message and "DISABLED" in message
-        assert "\t" not in message and " " not in message
+        assert get_api_key_auth().enabled is False
+        assert report_blank_api_key(log) is True
+        # Exact text: a mutant that also logged the value (``%r``), or gave one source
+        # the other's advice, renders a different message, and this fails.
+        expected = BLANK_ENV_WARNING if source == "env" else BLANK_FILE_WARNING
+        assert [(r.levelno, r.getMessage()) for r in records] == [(logging.WARNING, expected)]
 
-    @pytest.mark.parametrize("value", [None, "real-key"])
-    def test_no_blank_key_warning_when_unset_or_real(self, monkeypatch, caplog, value):
-        """Over-correction guard: UNSET and a real key are not the blank case."""
+    @pytest.mark.parametrize("value", ["", "   ", "\t\t", "\xa0\x85"])
+    def test_every_blank_env_value_gets_the_env_advice(self, monkeypatch, report_log, value):
+        """Empty counts as set-but-blank too, and so does any ``str.strip()`` whitespace."""
+        log, records = report_log
         monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
-        if value is None:
-            monkeypatch.delenv("CANOPY_API_KEY", raising=False)
-        else:
-            monkeypatch.setenv("CANOPY_API_KEY", value)
-        with caplog.at_level("WARNING", logger="juniper_canopy.security"):
+        monkeypatch.setenv("CANOPY_API_KEY", value)
+        assert get_api_key_auth().enabled is False
+        assert report_blank_api_key(log) is True
+        assert [r.getMessage() for r in records] == [BLANK_ENV_WARNING]
+
+    def test_a_blank_file_beats_a_real_env_key_and_the_advice_names_the_file(self, monkeypatch, report_log, tmp_path):
+        """The case #660's one message got wrong: it told this operator to unset their REAL key.
+
+        ``get_secret`` lets ``CANOPY_API_KEY_FILE`` win whenever it names an existing
+        file, so a blank file disables auth although ``CANOPY_API_KEY`` holds a key.
+        """
+        log, records = report_log
+        secret_file = tmp_path / "canopy_api_key"
+        secret_file.write_text("\n", encoding="utf-8")
+        monkeypatch.setenv("CANOPY_API_KEY_FILE", str(secret_file))
+        monkeypatch.setenv("CANOPY_API_KEY", "real-key")
+        assert get_api_key_auth().enabled is False
+        assert report_blank_api_key(log) is True
+        assert [r.getMessage() for r in records] == [BLANK_FILE_WARNING]
+
+    def test_a_file_var_naming_no_file_leaves_the_env_var_the_source(self, monkeypatch, report_log, tmp_path):
+        log, records = report_log
+        monkeypatch.setenv("CANOPY_API_KEY_FILE", str(tmp_path / "absent"))
+        monkeypatch.setenv("CANOPY_API_KEY", "   ")
+        assert get_api_key_auth().enabled is False
+        assert report_blank_api_key(log) is True
+        assert [r.getMessage() for r in records] == [BLANK_ENV_WARNING]
+
+    def test_the_blank_key_warning_is_logged_exactly_once(self, monkeypatch, report_log):
+        """Repeated reads interleaved with repeated reports -- what repeated startups do -- log ONE record."""
+        log, records = report_log
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.setenv("CANOPY_API_KEY", "   ")
+        outcomes = []
+        for _ in range(3):
             get_api_key_auth()
-        assert [r for r in caplog.records if r.name == "juniper_canopy.security"] == []
+            outcomes.append(report_blank_api_key(log))
+        assert outcomes == [True, False, False]
+        assert len(records) == 1
+
+    def test_reading_the_key_logs_nothing(self, monkeypatch, caplog):
+        """The read runs at import, before ``configure_logging``: anything logged there
+        reaches only Python's last-resort handler, so it must log nothing at all."""
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.setenv("CANOPY_API_KEY", "   ")
+        with caplog.at_level(logging.DEBUG):
+            for _ in range(3):
+                get_api_key_auth()
+        assert [r.getMessage() for r in caplog.records if "CANOPY_API_KEY" in r.getMessage()] == []
+
+    @pytest.mark.parametrize("source", ["unset", "env", "file"])
+    def test_no_blank_key_warning_when_unset_or_real(self, monkeypatch, report_log, tmp_path, source):
+        """Over-correction guard: UNSET and a real key -- from either source -- are not the blank case."""
+        log, records = report_log
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.delenv("CANOPY_API_KEY", raising=False)
+        if source == "env":
+            monkeypatch.setenv("CANOPY_API_KEY", "real-key")
+        elif source == "file":
+            secret_file = tmp_path / "canopy_api_key"
+            secret_file.write_text("real-key\n", encoding="utf-8")
+            monkeypatch.setenv("CANOPY_API_KEY_FILE", str(secret_file))
+        assert get_api_key_auth().enabled is (source != "unset")
+        assert report_blank_api_key(log) is False
+        assert records == []
+
+    def test_reset_security_state_clears_the_recorded_blank_key(self, monkeypatch, report_log):
+        log, records = report_log
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.setenv("CANOPY_API_KEY", "   ")
+        get_api_key_auth()
+        reset_security_state()
+        assert report_blank_api_key(log) is False  # nothing recorded until the key is read again
+        get_api_key_auth()
+        assert report_blank_api_key(log) is True
+        assert len(records) == 1
+
+    def test_blank_key_report_needs_no_second_read_of_the_secret(self, monkeypatch, report_log):
+        """``report_blank_api_key`` works from what ``get_api_key_auth`` recorded.
+
+        The secret is gone from the environment by the time the report runs, and the
+        report is unchanged: its output does not depend on reading the secret again.
+        """
+        log, records = report_log
+        monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
+        monkeypatch.setenv("CANOPY_API_KEY", "   ")
+        get_api_key_auth()
+        monkeypatch.delenv("CANOPY_API_KEY")
+        assert report_blank_api_key(log) is True
+        assert [r.getMessage() for r in records] == [BLANK_ENV_WARNING]
 
     def test_get_rate_limiter_reads_settings(self):
         from unittest.mock import MagicMock, patch
