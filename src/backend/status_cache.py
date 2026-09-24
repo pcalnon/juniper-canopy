@@ -11,7 +11,7 @@
 # File Path:     JuniperCanopy/juniper_canopy/src/backend/
 #
 # Date Created:  2026-09-04
-# Last Modified: 2026-09-04
+# Last Modified: 2026-09-24
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -66,6 +66,8 @@ import logging
 import time
 from enum import Enum
 from typing import Any, Callable, Dict, Optional
+
+from outbound_errors import outbound_error_text
 
 logger = logging.getLogger("juniper_canopy.backend.status_cache")
 
@@ -249,7 +251,9 @@ class StatusCache:
         except Exception as exc:
             # A raising fetch is an unreachable upstream, not a reason to stop polling.
             logger.warning("Status refresh raised: %s: %s", type(exc).__name__, exc)
-            raw = {"is_training": False, "error": f"{type(exc).__name__}: {exc}"}
+            # ``error`` reaches /api/status, which an anonymous caller reads: the type, never
+            # the text, which can hold a URL or the value a client refused (#683 validation).
+            raw = {"is_training": False, "error": outbound_error_text(exc)}
 
         verdict = classify(raw)
         now = time.monotonic()

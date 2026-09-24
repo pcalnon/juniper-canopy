@@ -477,7 +477,9 @@ class TestErrorHandling:
         mock_client.start_training.side_effect = JuniperCascorConnectionError("fail")
         started, error = adapter.start_training_background()
         assert started is False
-        assert "fail" in error
+        # #683 validation: a connection failure's text is transport text (it quoted a padded
+        # key); the caller-visible error names its type only.
+        assert error == "JuniperCascorConnectionError"
 
     def test_is_training_on_error(self, adapter, mock_client):
         from juniper_cascor_client.exceptions import JuniperCascorConnectionError

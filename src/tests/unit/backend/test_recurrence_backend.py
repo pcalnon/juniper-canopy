@@ -150,6 +150,31 @@ class TestFailureHandling:
         assert "boom" in status["completion_reason"]
         assert backend.has_network() is False
 
+    # #683 validation: ``completion_reason`` is on /api/status, which an anonymous caller reads, and a failed fit wrote
+    # the exception's text into it -- httpx's refusal ``Illegal header value b'<key>'`` for a padded recurrence key.
+
+    @pytest.mark.parametrize(
+        "error, reason",
+        [
+            (RecurrenceServiceError("recurrence service unreachable on POST /v1/train: Illegal header value b' LEAKME-rec'"), "RecurrenceServiceError"),
+            (RuntimeError("Illegal header value b' LEAKME-rec'"), "unexpected error during recurrence fit: RuntimeError"),
+        ],
+        ids=["service-error-without-status", "unexpected"],
+    )
+    def test_a_failed_fits_transport_text_never_reaches_completion_reason(self, error, reason):
+        backend = RecurrenceBackend(_FakeAdapter(error=error))
+        backend.start_training(generator="equities_seq")
+        assert _wait_until(lambda: not backend.is_training_active())
+        status = backend.get_status()
+        assert status["completion_reason"] == reason
+        assert "LEAKME" not in repr(status)
+
+    def test_the_services_answer_still_reaches_completion_reason(self):
+        backend = RecurrenceBackend(_FakeAdapter(error=RecurrenceServiceError("recurrence service error 503 on POST /v1/train", status_code=503, body="{}")))
+        backend.start_training(generator="equities_seq")
+        assert _wait_until(lambda: not backend.is_training_active())
+        assert backend.get_status()["completion_reason"] == "recurrence service error 503 on POST /v1/train"
+
 
 @pytest.mark.unit
 class TestUnsupportedControls:

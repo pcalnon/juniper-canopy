@@ -63,6 +63,26 @@ class TestCsrfTokenStore:
         assert store.validate("") is False
         assert store.validate(None) is False
 
+    @pytest.mark.parametrize("presented", ["\xa0", "€", "\ud800"], ids=["nbsp", "euro", "lone-surrogate"])
+    def test_validate_a_non_ascii_token_is_a_mismatch_never_an_exception(self, presented):
+        """#683 validation: ``hmac.compare_digest`` on two ``str`` raised ``TypeError`` for non-ASCII text, so a keyless
+        ``X-CSRF-Token: \\xa0`` was a 500 whose Sentry event recorded the frame's ``stored_token``, a live token."""
+        from csrf import CsrfTokenStore
+
+        store = CsrfTokenStore(ttl_seconds=60)
+        live = store.mint()
+        assert store.validate(presented) is False
+        assert store.validate(live) is True
+
+    @pytest.mark.parametrize("presented", [123, ["token"], {"t": 1}], ids=["int", "list", "dict"])
+    def test_validate_a_non_str_token_is_a_mismatch(self, presented):
+        """The /ws/control first frame is JSON, so the token need not be a ``str``."""
+        from csrf import CsrfTokenStore
+
+        store = CsrfTokenStore(ttl_seconds=60)
+        store.mint()
+        assert store.validate(presented) is False
+
     def test_validate_expired_token(self):
         """A token past its TTL is rejected."""
         from csrf import CsrfTokenStore
@@ -229,6 +249,30 @@ class TestWsControlCsrfAuth:
         except (WebSocketDisconnect, Exception):
             closed = True
         assert closed, "Expected connection to be closed after invalid CSRF"
+
+    @pytest.mark.parametrize("token", [123, ["token"], {"t": 1}, "\xe9", "€"], ids=["int", "list", "dict", "latin1", "euro"])
+    def test_a_non_str_or_non_ascii_first_frame_token_is_an_invalid_token_not_a_crash(self, client, monkeypatch, token):
+        """#683 validation: ``CsrfTokenStore.validate`` RAISED here -- ``TypeError`` for a token that is not a ``str``
+        (the first frame is JSON) and for a non-ASCII one -- and the handler's catch-all filed the crash as
+        ``malformed_auth``. It is now an ordinary mismatch: ``invalid_token``, closed 1008.
+
+        A live token is minted first. ``validate`` compares against every stored token, so with none stored nothing is
+        compared and nothing can raise, and the test would pass on the defect."""
+        from starlette.websockets import WebSocketDisconnect
+
+        import audit_log
+
+        reasons: list[str] = []
+        monkeypatch.setattr(audit_log, "log_ws_csrf_rejected", lambda path, client_ip, reason: reasons.append(reason))
+        assert client.get("/api/csrf").json()["csrf_token"]  # another session's live token
+        with pytest.raises(WebSocketDisconnect) as exc:
+            with client.websocket_connect("/ws/control", _skip_csrf=True) as ws:
+                ws.send_json({"type": "auth", "csrf_token": token})
+                # connection_established precedes the CSRF check, so the close surfaces on a later receive.
+                for _ in range(5):
+                    ws.receive_json(timeout=5.0)
+        assert exc.value.code == 1008
+        assert reasons == ["invalid_token"]
 
 
 @pytest.mark.unit

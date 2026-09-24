@@ -88,6 +88,7 @@ from observability import (
     set_build_info,
     set_demo_mode_active,
 )
+from outbound_errors import outbound_error_text
 from provenance import build_date as provenance_build_date
 from provenance import git_sha as provenance_git_sha
 from secrets_util import get_secret
@@ -335,8 +336,6 @@ async def lifespan(app: FastAPI):
     # JUNIPER_SKIP_AUTH_POSTURE_CHECK=1 (logged loudly).
     from juniper_service_core import AuthPostureError, enforce_auth_posture
 
-    from secrets_util import get_secret
-
     # APD-ECO-008: the posture check words a SET-but-blank key exactly like an unset
     # one, so a blank key gets its own WARNING, naming which source was blank. The same
     # report covers a key with leading or trailing whitespace or a line break, and a
@@ -363,6 +362,15 @@ async def lifespan(app: FastAPI):
         raise
 
     report_api_key_configuration(system_logger)
+
+    # #683 validation: the same for the keys canopy SENDS. ``settings`` read the
+    # juniper-data and recurrence keys at import, and refused any value no HTTP client
+    # can carry -- the client's refusal quoted it into canopy's logs, Sentry and API
+    # bodies. What that read recorded (variable names only) is reported here, once;
+    # the juniper-cascor key is read by ``create_backend`` below and reported after it.
+    from secrets_util import report_refused_outbound_keys
+
+    report_refused_outbound_keys(system_logger)
 
     # D2 (SEC-F22): loopback bind-guard. Fail loud + closed here -- before
     # backend init / serving -- when canopy is configured to bind a non-loopback
@@ -411,6 +419,8 @@ async def lifespan(app: FastAPI):
                 system_logger.info("Auto-discovered cascor at %s — activating service mode", discovered_url)
 
     backend = create_backend(service_url=discovered_url)
+    # The juniper-cascor key ``create_backend`` just read (#683 validation, above).
+    report_refused_outbound_keys(system_logger)
 
     # Validate JuniperData URL — mandatory for both demo and real backend (CAN-INT-002).
     juniper_data_url = settings.juniper_data_url
@@ -513,8 +523,13 @@ async def lifespan(app: FastAPI):
 # (empty or whitespace-only) leaves auth disabled (``security.APIKeyAuth``), so it serves
 # the docs exactly as no key does (#678 follow-up). This read used the raw value, so a
 # whitespace-only CANOPY_API_KEY env var hid /docs, /docs/oauth2-redirect, /openapi.json
-# and /redoc while every other route served without a key.
-_docs_enabled = not (get_secret("CANOPY_API_KEY") or "").strip()
+# and /redoc while every other route served without a key. #683 validation: the fix
+# re-derived the rule here, with its own strip and its own read, and one sample pinned
+# it -- so a copy that strips only ASCII whitespace, or ignores CANOPY_API_KEY_FILE,
+# passed. It is now the auth handler's own answer, so one rule decides both.
+from security import get_api_key_auth
+
+_docs_enabled = not get_api_key_auth().enabled
 # Initialize FastAPI
 app = FastAPI(
     title="Juniper Canopy",
@@ -539,7 +554,7 @@ if settings.cors_origins:
 
 # Security headers (outermost — runs on every response)
 from middleware import CallerBudgetMiddleware, RequestBodyLimitMiddleware, SecurityHeadersMiddleware, SecurityMiddleware
-from security import browser_origin_allowed, get_api_key_auth, get_rate_limiter, require_browser_control_auth
+from security import browser_origin_allowed, get_rate_limiter, require_browser_control_auth
 
 app.add_middleware(RequestBodyLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
@@ -2712,7 +2727,10 @@ async def create_snapshot(
         # N4 (plan I-3): carry the upstream failure reason in the HTTP detail
         # (truncated for display) so the frontend toast shows the actual cause
         # instead of doubling a generic constant with zero diagnostic content.
-        reason = str(e) or e.__class__.__name__
+        # In service mode the failure is cascor's: its answer passes, and a
+        # transport failure is named by type -- its text can quote the key a
+        # client refused to send (#683 validation, ``outbound_errors``).
+        reason = outbound_error_text(e) if backend.backend_type == "service" else (str(e) or e.__class__.__name__)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to create snapshot: {reason[:300]}",
@@ -3017,7 +3035,7 @@ async def replay_snapshot_route(snapshot_id: str):
         return result
     except Exception as e:
         system_logger.error("Failed to start replay for %s: %s", snapshot_id, e)
-        raise HTTPException(status_code=500, detail=f"Failed to start replay: {e}") from e
+        raise HTTPException(status_code=500, detail=f"Failed to start replay: {outbound_error_text(e)}") from e
 
 
 class _ReplayControlBody(BaseModel):
@@ -3054,7 +3072,7 @@ async def replay_control_route(snapshot_id: str, body: _ReplayControlBody):
         # we don't get to see the underlying status here without parsing
         # JuniperCascorClientError. Map all to 500 for now and let the
         # message carry the cascor detail.
-        raise HTTPException(status_code=500, detail=f"Replay control failed: {e}") from e
+        raise HTTPException(status_code=500, detail=f"Replay control failed: {outbound_error_text(e)}") from e
 
 
 @app.post("/api/v1/snapshots/{snapshot_id}/resume")
@@ -3079,7 +3097,7 @@ async def resume_snapshot_route(snapshot_id: str):
         return result
     except Exception as e:
         system_logger.error("Failed to resume %s: %s", snapshot_id, e)
-        raise HTTPException(status_code=500, detail=f"Failed to resume: {e}") from e
+        raise HTTPException(status_code=500, detail=f"Failed to resume: {outbound_error_text(e)}") from e
 
 
 @app.post("/api/v1/snapshots/{snapshot_id}/retrain")
@@ -3101,7 +3119,7 @@ async def retrain_snapshot_route(snapshot_id: str):
         return result
     except Exception as e:
         system_logger.error("Failed to retrain from %s: %s", snapshot_id, e)
-        raise HTTPException(status_code=500, detail=f"Failed to retrain: {e}") from e
+        raise HTTPException(status_code=500, detail=f"Failed to retrain: {outbound_error_text(e)}") from e
 
 
 # ============================================================================
@@ -3145,7 +3163,7 @@ async def patch_weights_route(body: _PatchWeightsBody):
         )
     except Exception as e:
         system_logger.error("patch_weights failed (target=%s, field=%s): %s", body.target, body.field, e)
-        raise HTTPException(status_code=500, detail=f"patch_weights failed: {e}") from e
+        raise HTTPException(status_code=500, detail=f"patch_weights failed: {outbound_error_text(e)}") from e
 
 
 class _AddHiddenUnitBody(BaseModel):
@@ -3174,7 +3192,7 @@ async def add_hidden_unit_route(body: _AddHiddenUnitBody):
         )
     except Exception as e:
         system_logger.error("add_hidden_unit failed (activation=%s): %s", body.activation, e)
-        raise HTTPException(status_code=500, detail=f"add_hidden_unit failed: {e}") from e
+        raise HTTPException(status_code=500, detail=f"add_hidden_unit failed: {outbound_error_text(e)}") from e
 
 
 @app.delete("/api/v1/network/hidden-units/{idx}")
@@ -3187,7 +3205,7 @@ async def remove_hidden_unit_route(idx: int):
         return await offload(adapter.remove_hidden_unit, idx=idx)
     except Exception as e:
         system_logger.error("remove_hidden_unit(idx=%d) failed: %s", idx, e)
-        raise HTTPException(status_code=500, detail=f"remove_hidden_unit failed: {e}") from e
+        raise HTTPException(status_code=500, detail=f"remove_hidden_unit failed: {outbound_error_text(e)}") from e
 
 
 # ============================================================================

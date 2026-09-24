@@ -849,6 +849,13 @@ def _reset_all_singletons():
 
         reset_security_state()
 
+    # The outbound keys refused by name (#683 validation): a refusal one test records must
+    # not surface as a boot WARNING in the next.
+    with contextlib.suppress(ImportError):
+        from secrets_util import reset_outbound_key_findings
+
+        reset_outbound_key_findings()
+
     # Reset the recorded model selection (N5). ``POST /api/model/select`` writes
     # ``main.current_nn_model`` and several tests select Recurrence over the demo backend
     # without restoring it; since the start paths refuse a selection the live backend does not

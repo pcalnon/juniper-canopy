@@ -10,7 +10,7 @@
 # File Name:     settings.py
 #
 # Created Date:  2026-03-02
-# Last Modified: 2026-03-02
+# Last Modified: 2026-09-24
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024-2026 Paul Calnon
@@ -44,7 +44,7 @@ from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from secrets_util import get_secret
+from secrets_util import get_outbound_secret, screen_outbound_key
 
 # Canopy's canonical bind port. Hardcoded because ``cascor_ws_origin``'s
 # factory needs a port at module-evaluation time, before
@@ -208,10 +208,11 @@ class Settings(BaseSettings):
     backend_path: str = "../juniper-cascor"
     juniper_data_url: str = "http://localhost:8100"
     # Outbound API key canopy sends as ``X-API-Key`` on every juniper-data
-    # request. Resolved by ``_check_juniper_data_api_key`` via ``get_secret``,
-    # which honors ``<NAME>_FILE`` indirection so Docker-secrets / k8s-secrets
-    # mounts work without leaking the value through ``docker inspect`` /
-    # env dumps. Resolution order: prefixed canonical
+    # request. Resolved by ``_check_juniper_data_api_key`` via
+    # ``get_outbound_secret``, which honors ``<NAME>_FILE`` indirection so
+    # Docker-secrets / k8s-secrets mounts work without leaking the value
+    # through ``docker inspect`` / env dumps, and refuses a value no HTTP
+    # client can carry (#683 validation). Resolution order: prefixed canonical
     # (``JUNIPER_CANOPY_JUNIPER_DATA_API_KEY[_FILE]``) → cross-service shared
     # (``JUNIPER_DATA_API_KEY[_FILE]``) → ``None`` (auth omitted). When
     # ``None`` and juniper-data has auth enabled, calls 401 — by design so
@@ -262,8 +263,9 @@ class Settings(BaseSettings):
     # Outbound API key canopy sends as ``X-API-Key`` on every recurrence request.
     # The recurrence service runs ``SecurityMiddleware``, so a missing key 401s — by
     # design, so the failure is loud rather than silent. Resolved by
-    # ``_check_recurrence_api_key`` via ``get_secret`` (honors ``<NAME>_FILE``
-    # indirection for Docker/k8s secret mounts): prefixed
+    # ``_check_recurrence_api_key`` via ``get_outbound_secret`` (honors ``<NAME>_FILE``
+    # indirection for Docker/k8s secret mounts, and refuses a value no HTTP client
+    # can carry): prefixed
     # ``JUNIPER_CANOPY_RECURRENCE_API_KEY[_FILE]`` → shared
     # ``JUNIPER_RECURRENCE_API_KEY[_FILE]`` (the var the recurrence service itself
     # reads) → ``None``. Mirrors ``juniper_data_api_key``.
@@ -482,14 +484,24 @@ class Settings(BaseSettings):
              var that cascor / juniper-data-client / canopy all read).
           3. ``v`` (whatever pydantic-settings already populated; usually
              ``None`` once we've reached this branch).
+
+        Every step is screened (#683 validation, ``secrets_util``'s outbound-key
+        notes): a value no HTTP client can carry -- leading or trailing
+        whitespace, a line break, a character outside 0x21-0x7E -- is treated as
+        empty, exactly as an empty value always was, and its variable's NAME is
+        recorded for the boot WARNING. Sent, it made the client raise an error
+        that quotes it, which canopy logged and returned in API bodies. ``v`` is
+        screened too, as ``JUNIPER_CANOPY_JUNIPER_DATA_API_KEY``: pydantic-settings
+        read it from that variable or from ``.env``, so returning it raw would
+        hand back the very value step 1 refused.
         """
-        prefixed = get_secret("JUNIPER_CANOPY_JUNIPER_DATA_API_KEY")
+        prefixed = get_outbound_secret("JUNIPER_CANOPY_JUNIPER_DATA_API_KEY")
         if prefixed:
             return prefixed
-        shared = get_secret("JUNIPER_DATA_API_KEY")
+        shared = get_outbound_secret("JUNIPER_DATA_API_KEY")
         if shared:
             return shared
-        return v
+        return screen_outbound_key(v, "JUNIPER_CANOPY_JUNIPER_DATA_API_KEY")
 
     @field_validator("cascor_service_url", mode="before")
     @classmethod
@@ -540,14 +552,17 @@ class Settings(BaseSettings):
              recurrence service itself reads).
           3. ``v`` (whatever pydantic-settings already populated; usually
              ``None`` once we've reached this branch).
+
+        Screened exactly as ``_check_juniper_data_api_key`` screens its steps
+        (#683 validation), ``v`` as ``JUNIPER_CANOPY_RECURRENCE_API_KEY``.
         """
-        prefixed = get_secret("JUNIPER_CANOPY_RECURRENCE_API_KEY")
+        prefixed = get_outbound_secret("JUNIPER_CANOPY_RECURRENCE_API_KEY")
         if prefixed:
             return prefixed
-        shared = get_secret("JUNIPER_RECURRENCE_API_KEY")
+        shared = get_outbound_secret("JUNIPER_RECURRENCE_API_KEY")
         if shared:
             return shared
-        return v
+        return screen_outbound_key(v, "JUNIPER_CANOPY_RECURRENCE_API_KEY")
 
     @field_validator("backend_path", mode="before")
     @classmethod

@@ -11,7 +11,7 @@
 # File Path:     JuniperCanopy/juniper_canopy/src/backend/
 #
 # Date Created:  2026-06-22
-# Last Modified: 2026-06-22
+# Last Modified: 2026-09-24
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -87,6 +87,7 @@ from backend.protocol import (
     TopologyResult,
 )
 from backend.recurrence_service_adapter import RecurrenceServiceAdapter, RecurrenceServiceError, RecurrenceTrainResult
+from outbound_errors import outbound_error_text
 
 logger = logging.getLogger("juniper_canopy.backend.recurrence_backend")
 
@@ -212,17 +213,20 @@ class RecurrenceBackend:
 
     def _run_fit(self, dataset_ref: Dict[str, Any], hyperparams: Dict[str, Any]) -> None:
         """Daemon-thread target: run the blocking fit, then record terminal state."""
+        # ``_error`` becomes ``completion_reason`` on /api/status, which an anonymous caller
+        # reads: the service's answer, or the exception's type -- never transport text, which
+        # quoted the recurrence key when httpx refused to send it (#683 validation).
         try:
             result = self._adapter.train(**dataset_ref, **hyperparams)
         except RecurrenceServiceError as exc:
             with self._lock:
-                self._error = str(exc)
+                self._error = outbound_error_text(exc)
                 self._state = "failed"
             logger.warning("recurrence fit failed: %s", exc)
             return
         except Exception as exc:  # defensive: never leave the state stuck in "training"
             with self._lock:
-                self._error = f"unexpected error during recurrence fit: {exc}"
+                self._error = f"unexpected error during recurrence fit: {outbound_error_text(exc)}"
                 self._state = "failed"
             logger.exception("recurrence fit crashed")
             return

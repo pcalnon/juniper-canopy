@@ -15,7 +15,10 @@ files leave uncovered:
 
 * ``_ServiceTrainingMonitor`` non-dict fallbacks.
 * ``ControlStreamSupervisor.set_params`` + the auto-reconnect connect loop.
-* Property accessors, the network TTL-cache hit, REST error envelopes.
+* Property accessors, the network TTL-cache hit, REST error envelopes. A
+  status-less ``JuniperCascorClientError`` is transport, so its envelope
+  carries the TYPE name, never the message (#683 validation: that text
+  quoted a padded key; ``outbound_errors.outbound_error_text``).
 * ``apply_params`` REST-error + verify-mismatch paths and
   ``_verify_apply_roundtrip`` float-coercion edge.
 * Dataset staging / cancel / peek pass-throughs and their error arms.
@@ -189,11 +192,11 @@ class TestPropertiesAndControlErrors:
 
     def test_resume_training_error_envelope(self, adapter, mock_client):
         mock_client.resume_training.side_effect = JuniperCascorClientError("resume boom")
-        assert adapter.resume_training() == {"ok": False, "error": "resume boom"}
+        assert adapter.resume_training() == {"ok": False, "error": "JuniperCascorClientError"}
 
     def test_reset_training_error_envelope(self, adapter, mock_client):
         mock_client.reset_training.side_effect = JuniperCascorClientError("reset boom")
-        assert adapter.reset_training() == {"ok": False, "error": "reset boom"}
+        assert adapter.reset_training() == {"ok": False, "error": "JuniperCascorClientError"}
 
 
 # =========================================================================
@@ -212,7 +215,7 @@ class TestApplyParamsRestAndVerify:
         with _settings_no_ws():
             result = adapter.apply_params(nn_learning_rate=0.1)
         assert result["ok"] is False
-        assert "patch failed" in result["error"]
+        assert result["error"] == "JuniperCascorClientError"
 
     def test_verify_mismatch_returns_verification_failed(self, adapter, mock_client):
         mock_client.update_params.return_value = {}
@@ -256,7 +259,7 @@ class TestDatasetStaging:
 
     def test_stage_dataset_error(self, adapter, mock_client):
         mock_client._request.side_effect = JuniperCascorClientError("stage boom")
-        assert adapter.stage_dataset(nn_dataset_type="xor") == {"ok": False, "error": "stage boom"}
+        assert adapter.stage_dataset(nn_dataset_type="xor") == {"ok": False, "error": "JuniperCascorClientError"}
 
     def test_cancel_pending_dataset_success(self, adapter, mock_client):
         mock_client._request.return_value = {"data": {"cancelled": True}}
@@ -264,7 +267,7 @@ class TestDatasetStaging:
 
     def test_cancel_pending_dataset_error(self, adapter, mock_client):
         mock_client._request.side_effect = JuniperCascorClientError("cancel boom")
-        assert adapter.cancel_pending_dataset() == {"ok": False, "error": "cancel boom"}
+        assert adapter.cancel_pending_dataset() == {"ok": False, "error": "JuniperCascorClientError"}
 
     def test_get_pending_dataset_success(self, adapter, mock_client):
         mock_client._request.return_value = {"data": {"pending": {"dataset_type": "xor"}}}
@@ -272,7 +275,7 @@ class TestDatasetStaging:
 
     def test_get_pending_dataset_error(self, adapter, mock_client):
         mock_client._request.side_effect = JuniperCascorClientError("pending boom")
-        assert adapter.get_pending_dataset() == {"ok": False, "error": "pending boom", "pending": None}
+        assert adapter.get_pending_dataset() == {"ok": False, "error": "JuniperCascorClientError", "pending": None}
 
 
 # =========================================================================
@@ -672,7 +675,7 @@ class TestNetworkAndTrainingControl:
 
     def test_create_network_error(self, adapter, mock_client):
         mock_client.create_network.side_effect = JuniperCascorClientError("create boom")
-        assert adapter.create_network() == {"error": "create boom"}
+        assert adapter.create_network() == {"error": "JuniperCascorClientError"}
 
     def test_start_training_background_success(self, adapter, mock_client):
         mock_client.start_training.return_value = None
@@ -684,7 +687,7 @@ class TestNetworkAndTrainingControl:
         mock_client.start_training.side_effect = JuniperCascorClientError("start boom")
         started, error = adapter.start_training_background()
         assert started is False
-        assert "start boom" in error
+        assert error == "JuniperCascorClientError"
 
     def test_is_training_in_progress_true_top_flag(self, adapter, mock_client):
         mock_client.get_training_status.return_value = {"is_training": True}
@@ -712,7 +715,7 @@ class TestNetworkAndTrainingControl:
 
     def test_pause_training_error(self, adapter, mock_client):
         mock_client.pause_training.side_effect = JuniperCascorClientError("pause boom")
-        assert adapter.pause_training() == {"ok": False, "error": "pause boom"}
+        assert adapter.pause_training() == {"ok": False, "error": "JuniperCascorClientError"}
 
     def test_resume_training_success(self, adapter, mock_client):
         mock_client.resume_training.return_value = {"resumed": True}
@@ -819,7 +822,7 @@ class TestExperimentalFunctions:
 
     def test_get_experimental_functions_error(self, adapter, mock_client):
         mock_client._request.side_effect = JuniperCascorClientError("gate boom")
-        assert adapter.get_experimental_functions() == {"ok": False, "error": "gate boom", "enabled": False}
+        assert adapter.get_experimental_functions() == {"ok": False, "error": "JuniperCascorClientError", "enabled": False}
 
     def test_set_experimental_functions_success(self, adapter, mock_client):
         mock_client._request.return_value = {"data": {"experimental_functions_enabled": True}}
@@ -828,7 +831,7 @@ class TestExperimentalFunctions:
 
     def test_set_experimental_functions_error(self, adapter, mock_client):
         mock_client._request.side_effect = JuniperCascorClientError("set boom")
-        assert adapter.set_experimental_functions(False) == {"ok": False, "error": "set boom", "enabled": False}
+        assert adapter.set_experimental_functions(False) == {"ok": False, "error": "JuniperCascorClientError", "enabled": False}
 
 
 # =========================================================================
@@ -847,7 +850,7 @@ class TestLiveSwapAndSwapEvents:
 
     def test_swap_dataset_live_error(self, adapter, mock_client):
         mock_client._request.side_effect = JuniperCascorClientError("swap boom")
-        assert adapter.swap_dataset_live(nn_dataset_type="xor") == {"ok": False, "error": "swap boom"}
+        assert adapter.swap_dataset_live(nn_dataset_type="xor") == {"ok": False, "error": "JuniperCascorClientError"}
 
     def test_cancel_swap_dataset_live_success(self, adapter, mock_client):
         mock_client._request.return_value = {"data": {"status": "cancelled"}}
@@ -855,7 +858,7 @@ class TestLiveSwapAndSwapEvents:
 
     def test_cancel_swap_dataset_live_error(self, adapter, mock_client):
         mock_client._request.side_effect = JuniperCascorClientError("cancel boom")
-        assert adapter.cancel_swap_dataset_live() == {"ok": False, "error": "cancel boom"}
+        assert adapter.cancel_swap_dataset_live() == {"ok": False, "error": "JuniperCascorClientError"}
 
     def test_get_dataset_swap_events_success_no_since(self, adapter, mock_client):
         mock_client._request.return_value = {"data": {"events": [{"timestamp": "t0"}]}}
@@ -869,7 +872,7 @@ class TestLiveSwapAndSwapEvents:
 
     def test_get_dataset_swap_events_error(self, adapter, mock_client):
         mock_client._request.side_effect = JuniperCascorClientError("events boom")
-        assert adapter.get_dataset_swap_events() == {"ok": False, "error": "events boom", "events": []}
+        assert adapter.get_dataset_swap_events() == {"ok": False, "error": "JuniperCascorClientError", "events": []}
 
     def test_get_snapshot_dataset_swaps_success(self, adapter, mock_client):
         mock_client._request.return_value = {"data": {"events": [{"timestamp": "t1"}]}}
@@ -878,7 +881,7 @@ class TestLiveSwapAndSwapEvents:
 
     def test_get_snapshot_dataset_swaps_error(self, adapter, mock_client):
         mock_client._request.side_effect = JuniperCascorClientError("snap boom")
-        assert adapter.get_snapshot_dataset_swaps("snap-1") == {"ok": False, "error": "snap boom", "events": []}
+        assert adapter.get_snapshot_dataset_swaps("snap-1") == {"ok": False, "error": "JuniperCascorClientError", "events": []}
 
 
 # =========================================================================
@@ -988,7 +991,7 @@ class TestStatusAndNetworkData:
         mock_client.get_training_status.side_effect = JuniperCascorClientError("status boom")
         result = adapter.get_training_status()
         assert result["is_training"] is False
-        assert result["error"] == "status boom"
+        assert result["error"] == "JuniperCascorClientError"
 
     def test_get_network_data_success_unwraps(self, adapter, mock_client):
         mock_client.get_statistics.return_value = {"data": {"hidden_units": 3}}

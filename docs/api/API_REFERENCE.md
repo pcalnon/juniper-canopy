@@ -63,8 +63,10 @@ export JUNIPER_CANOPY_SERVER__PORT=8051
 
 ### API Documentation (Interactive)
 
-When server is running with no API key configured (an empty or whitespace-only key counts as none; see
-[Authentication](#authentication)), visit:
+When server is running with API-key authentication off -- no API key configured, where an empty or
+whitespace-only key counts as none (see [Authentication](#authentication)) -- visit the URL below. The docs
+switch is the authentication switch itself, so a real key in `CANOPY_API_KEY` or in the file named by
+`CANOPY_API_KEY_FILE` turns the four docs routes off (404):
 
 ```bash
 http://127.0.0.1:8050/docs
@@ -95,9 +97,15 @@ Authentication is configuration-dependent. The key is read from the file named b
 - A key with leading or trailing whitespace, or a line break, is used exactly as set: it is not stripped, and
   authentication is enabled on it. No HTTP header carries such a key reliably, so startup logs a WARNING. The
   dashboard's own requests leave off a key their HTTP client refuses to send (one that starts with whitespace
-  or holds a line break), so they are refused, and the refusal never carries the key.
+  or holds a line break), so they are refused, and the refusal never carries the key. A key file is stripped
+  at both ends, so from `CANOPY_API_KEY_FILE` only a line break inside the key can do this, and the WARNING
+  then names `CANOPY_API_KEY_FILE`.
 - A `CANOPY_API_KEY_FILE` that names no existing file is ignored, exactly as if unset, and startup logs a
   WARNING naming the variable (never the path it holds).
+- A presented `X-API-Key` (or WebSocket key or bearer token) holding a non-ASCII character is an ordinary
+  mismatch, refused as any wrong key is: a 401 over HTTP, and on a WebSocket that path's own close code
+  (4001, or 1008 for a bearer token). It used to raise inside the comparison, a 500 whose error report
+  recorded the configured key.
 - Same-origin browser training controls (`/api/train/*`, `/api/csrf`, `/ws/control`) use the browser path:
   allowed `Origin` + `canopy_session` cookie + CSRF token when `JUNIPER_CANOPY_BROWSER_CONTROL_AUTH_ENABLED=true`
   (the default). Keyed callers continue to work.
@@ -107,6 +115,17 @@ The browser-control path is not a network perimeter by itself. Canopy now enforc
 attestation explicitly declares one is present — `JUNIPER_CANOPY_LOOPBACK_PUBLISH_ATTESTED=true` (reachable
 only via a loopback-only host publish) or `JUNIPER_CANOPY_AUTH_PROXY_ATTESTED=true` (a fronting
 authenticating proxy terminates access before traffic reaches the app).
+
+### Outbound Keys
+
+Canopy sends a key as `X-API-Key` to three upstreams: juniper-cascor (`JUNIPER_CASCOR_API_KEY`, falling back to
+`JUNIPER_DATA_API_KEY`), juniper-data (`JUNIPER_CANOPY_JUNIPER_DATA_API_KEY`, then `JUNIPER_DATA_API_KEY`) and
+the recurrence service (`JUNIPER_CANOPY_RECURRENCE_API_KEY`, then `JUNIPER_RECURRENCE_API_KEY`). Each honours
+its `<NAME>_FILE` form first. A key canopy sends must consist of printable ASCII other than space
+(`0x21`-`0x7E`): a value with leading or trailing whitespace, a line break, a space or a non-ASCII character is
+refused where it is read, because the HTTP clients refuse such a header value and quote it in the error they
+raise. A refused value is treated exactly like an empty one -- the next variable in the order applies, or no
+key is sent -- and startup logs one WARNING naming the variable, never its value or a path.
 
 ---
 
@@ -1541,6 +1560,20 @@ interface TrainingState {
   "status_code": 400
 }
 ```
+
+### Upstream Failures
+
+When a call canopy makes to juniper-cascor or the recurrence service fails, what a caller reads -- an `error`
+or `detail` field, a control acknowledgement on the WebSocket, the `/api/status` envelope's `error`,
+`/api/stream_health`'s `last_disconnect_reason`, a failed recurrence fit's `completion_reason` -- is:
+
+- the upstream's own answer, when it replied with an HTTP error status (for example cascor's 409
+  `Training data not provided`), or
+- the exception's type name alone (for example `JuniperCascorConnectionError`) for anything else: a refused
+  header value, an unreachable or timed-out upstream, a malformed reply.
+
+The transport text of such a failure -- URLs, socket errors, and a header value a client refused to send --
+goes to canopy's logs only.
 
 ### WebSocket Error Handling
 
