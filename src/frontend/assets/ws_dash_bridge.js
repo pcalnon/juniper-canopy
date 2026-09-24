@@ -25,11 +25,12 @@
     // CAN-015g (g-4): weight payloads were designed to piggyback on
     // metrics events emitted by g-3's replay session. None arrive
     // today: cascor's replay frames carry no weights and canopy's
-    // metrics relay drops the key (F-CANOPY-057). Each carries base64-encoded
-    // float32 tensors (output + per-unit) so the per-event payload
-    // can be tens of MB on large networks. Cap aggressively so the
-    // browser doesn't OOM on a long replay session — 100 events
-    // covers most playback windows; older entries fall off LRU-style.
+    // metrics relay drops the key (F-CANOPY-057). As designed, each
+    // payload carries base64-encoded float32 tensors (output +
+    // per-unit), so one event can be tens of MB on large networks.
+    // Cap aggressively so the browser doesn't OOM on a long replay
+    // session — 100 events covers most playback windows; older
+    // entries fall off LRU-style.
     var MAX_REPLAY_WEIGHTS = 100;
     // P2-7 follow-up: live dataset-swap events from cascor's
     // EventEnvelope(type="event", data.event="dataset_swap"). Swaps
@@ -110,9 +111,11 @@
             return events;
         },
 
-        // CAN-015g (g-4): Drain replay weight payloads. Each entry is
-        // a Phase 6E V2 ``weights`` block extracted from a replay
-        // ``epoch_end`` event (see g-3 emitter):
+        // CAN-015g (g-4): Drain replay weight payloads. Each entry
+        // would be a Phase 6E V2 ``weights`` block split off a replay
+        // ``epoch_end`` metrics event by the handler below. No emitter
+        // attaches one today (F-CANOPY-057), so there is nothing to
+        // drain yet. The designed shape:
         //   { sample_index, epoch, output_weights, output_bias,
         //     hidden_units }
         // Tensors are still base64-encoded float32 envelopes

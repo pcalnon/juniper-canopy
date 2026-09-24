@@ -667,7 +667,7 @@ output-training passes)
    dataset change or a reset)
 3. **Clear** — empties the gallery
 4. **Weight norms** — per-unit weight-norm traces, revealed only while a snapshot replay streams
-   weight samples (see [Replay Tab](#replay-tab))
+   weight samples; none do today (see [Replay Tab](#replay-tab))
 
 The sidebar is hidden on this tab.
 
@@ -761,8 +761,10 @@ Editing happens in the sidebar; the tables re-render after every **Apply**.
 8. **Dataset-swap events** — markers on a wall-clock axis with a count; hover for details
 
 Every control posts `POST /api/v1/snapshots/{id}/replay/control`, which canopy proxies to the cascor
-service. Weight samples streamed during playback are drained every 500 ms into the buffer that feeds
-the [Network Evolution](#network-evolution-tab) weight-norm traces.
+service. By design, weight samples streamed during playback are drained every 500 ms into the buffer
+that feeds the [Network Evolution](#network-evolution-tab) weight-norm traces. Today no weight sample
+reaches the page, because cascor's replay frames carry none, so those traces stay hidden during a replay.
+The drain starts only once the page has started a replay.
 
 **Data Source:**
 

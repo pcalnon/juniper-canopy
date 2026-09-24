@@ -72,9 +72,11 @@ SPEED_MARKS = {
     10: "10×",
 }
 
-# The weight drain's gate: its interval is disabled unless a replay session exists, meaning the
-# session Store holds a truthy ``snapshot_id``. ``test_idle_dispatch_cuts.py`` runs this
-# function under node.
+# The weight drain's gate: its interval is disabled unless the session Store holds a truthy
+# ``snapshot_id``. Only a started replay writes one, and against cascor a Stop does not clear it
+# (F-CANOPY-056). So once a replay starts, the drain runs until the page reloads, or until a successful
+# model select rebuilds the tab bar, which re-mounts the Store empty.
+# ``test_idle_dispatch_cuts.py`` runs this function under node.
 WEIGHT_DRAIN_GATE_JS = "function(session) { return !(session && session.snapshot_id); }"
 
 
@@ -576,7 +578,8 @@ class ReplayPlayerPanel(BaseComponent):
         # Two limits, filed in that ledger:
         #  * F-CANOPY-056: Stop clears ``snapshot_id`` only when the stop response is empty
         #    (``_merge_session``), and the proxied cascor envelope never is. So against cascor
-        #    the drain keeps running after a Stop until the page reloads, as it always ran.
+        #    the drain keeps running after a Stop until the page reloads, or until a successful
+        #    model select rebuilds the tab bar and re-mounts the session Store empty.
         #  * F-CANOPY-057: no replay weight reaches the page today. cascor's replay frames carry
         #    none, and the metrics relay rebuilds each payload without the key. If that stream is
         #    ever wired, this gate keys on THIS page's session while the WS broadcast reaches

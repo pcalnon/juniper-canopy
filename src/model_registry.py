@@ -188,8 +188,9 @@ class GeneratorBound:
 #     own defaults: 1,574 windows of (32, 1), generated and fitted in ~0.1s total against a
 #     300s timeout.
 #
-# ``task_type="regression"`` matches what juniper-data declares for all five, so unlike
-# ``equities_seq`` (the X8 divergence) these seeds introduce no vocabulary disagreement.
+# ``task_type="regression"`` matches what juniper-data declares for all five, so these seeds
+# introduce no vocabulary disagreement. ``equities_seq`` agrees too since juniper-data#437
+# relabelled it (generator 6.0.0, owner ruling 2026-09-24), which closed the X8 divergence.
 # All five are rank-3, so cascor (``input_ndim={2}``) rejects them and the compatibility graph
 # keeps exactly two components — §12.2's "this expansion adds no deadlock surface", now measured.
 DATASET_TYPES: tuple[DatasetTypeSpec, ...] = (

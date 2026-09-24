@@ -530,6 +530,15 @@ RESTART_MODAL_PARAM_FIELDS = (
 DATASET_SHORTFALL_REFUSAL_MARKER = "[dataset_shortfall_refused]"
 DATASET_SHORTFALL_REFUSAL_SENTENCE = "could not produce the requested dataset in full"
 
+# F1 (owner ruling 2026-09-24) -- how canopy recognises cascor refusing a Start that would
+# continue a network NARROWER than the staged dataset. cascor opens that message with
+# ``_PROJECT_API_START_FRESH_REQUIRED_MARKER``. The only remedy is a start-fresh, which here
+# is the Restart modal's "Start fresh" toggle, so the alert points there. There is no
+# fallback sentence, unlike the shortfall marker above: a cascor that predates the marker
+# consumed the staged dataset before refusing, so the pending banner that opens the modal is
+# gone, and pointing the operator at it would send them to a control that is not there.
+START_FRESH_REQUIRED_MARKER = "[start_fresh_required]"
+
 # The three options, as the owner specified them (2026-09-05 ruling): option 3 -- fail -- is
 # the one that cancels the load and deselects the dataset. Options 1 and 2 are juniper-data
 # request parameters and travel on the generic ``nn_dataset_params`` channel.
@@ -2184,11 +2193,14 @@ class DashboardManager:
                                 dbc.ListGroup([], id="restart-confirm-summary", flush=True, className="mb-3"),
                                 dbc.Switch(
                                     id="restart-start-fresh-toggle",
-                                    label="Start fresh — discard the current model and its retained metrics/history (snapshots preserved)",
+                                    label="Start fresh — discard the current model and its retained metrics/history (parameters and snapshots kept)",
                                     value=False,
                                 ),
                                 html.Div(
-                                    "Off (default): continue the current model, retaining metrics/history for cross-dataset continuity. On: rebuild a vanilla, untrained network — functionally a clean stack launch (on-disk snapshots are kept).",
+                                    # F2 (owner ruling 2026-09-24): "functionally a clean stack launch" stopped
+                                    # being true when cascor began carrying the applied params onto the rebuilt
+                                    # network -- a clean launch would reset them to the engine defaults.
+                                    "Off (default): continue the current model, retaining metrics/history for cross-dataset continuity. On: rebuild a vanilla, untrained network from the dataset. The applied parameters carry over, including any you edit below, and on-disk snapshots are kept.",
                                     className="text-muted mb-3",
                                     style={"fontSize": "0.85em"},
                                 ),
@@ -2210,7 +2222,7 @@ class DashboardManager:
                                                 html.Div(
                                                     [
                                                         html.Div([html.Strong("Start fresh OFF: "), "continue the current model, retaining metrics/history (cross-dataset continuity)."], className="text-muted", style={"fontSize": "0.82em"}),
-                                                        html.Div([html.Strong("Start fresh ON: "), "discard the model + retained metrics/history for a vanilla rebuild (snapshots preserved)."], className="text-muted mb-2", style={"fontSize": "0.82em"}),
+                                                        html.Div([html.Strong("Start fresh ON: "), "discard the model + retained metrics/history for a vanilla rebuild; the parameters (edits below included) and snapshots are kept."], className="text-muted mb-2", style={"fontSize": "0.82em"}),
                                                     ]
                                                 ),
                                                 html.Hr(className="my-2"),
@@ -8329,12 +8341,48 @@ class DashboardManager:
         command = action.get("command") or ""
         label = self._TRAINING_COMMAND_LABELS.get(command, command.capitalize() or "Command")
         detail = (action.get("detail") or "").strip() or "the backend rejected the request."
+        if command == "start" and self._is_start_fresh_required_refusal(action.get("detail_full") or detail):
+            return self._start_fresh_required_alert(action.get("detail_full") or detail)
         return dbc.Alert(
             [html.Strong(f"{label} failed. "), html.Span(detail)],
             color="danger",
             dismissable=True,
             duration=8000,
         )
+
+    @staticmethod
+    def _is_start_fresh_required_refusal(detail) -> bool:
+        """True when a Start refusal is cascor's "the dataset is wider than the network" class (F1)."""
+        return START_FRESH_REQUIRED_MARKER in str(detail or "")
+
+    @staticmethod
+    def _start_fresh_required_alert(detail):
+        """F1: the refusal names its remedy, and the control that applies it.
+
+        cascor refuses a Start that would continue a network narrower than the staged dataset,
+        before loading anything, so the dataset stays staged. That keeps the pending-dataset
+        banner up, and its "Stop & Restart with new dataset" button opens the modal whose
+        "Start fresh" toggle is the remedy. The alert names both controls. It also states what
+        did NOT change: the results on screen are still the previous run's, and no dataset was
+        loaded under them.
+
+        It is not auto-dismissed, unlike the generic failure alert: it carries an instruction,
+        and eight seconds is shorter than reading it. A later successful command clears it, as
+        it clears every failure alert. cascor's own sentence, which names the two shapes, follows
+        in muted text.
+        """
+        shapes = str(detail or "").split(START_FRESH_REQUIRED_MARKER, 1)[-1].strip().split(". ", 1)[0].strip()
+        body = [
+            html.Strong("Start refused: the staged dataset is wider than the current network. "),
+            html.Span("Start continues the current network, and Start cannot widen a network to more features or outputs. To train on this dataset, use "),
+            html.Strong("Stop & Restart with new dataset"),
+            html.Span(" and turn on "),
+            html.Strong("Start fresh"),
+            html.Span(". Nothing was loaded: the dataset is still staged, and the results shown are still the previous run's."),
+        ]
+        if shapes:
+            body.append(html.Div(f"{shapes.rstrip('.')}.", className="small text-muted mt-1"))
+        return dbc.Alert(body, color="danger", dismissable=True)
 
     # ------------------------------------------------------------------
     # Partial-data contract: the three-way prompt (accept / drop / fail).

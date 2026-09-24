@@ -121,6 +121,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A Start refused because the staged dataset is wider than the network now says how to proceed
+  (F1).** cascor cannot widen a network on a plain Start, which continues the current network.
+  - Since juniper-cascor#687, cascor refuses such a Start **before** loading anything, and
+    opens its message with `[start_fresh_required]`.
+  - The alert now names the remedy and the two controls that apply it: **Stop & Restart with new
+    dataset** and **Start fresh**. The pending banner stays up, because the dataset stays staged.
+    The alert also says the results shown are still the previous run's.
+  - It stays until dismissed, because it carries an instruction. Every other Start failure keeps
+    the generic alert.
+  - Before, the alert showed cascor's raw `_pad_dataset_for_network: … resize the network first`.
+    By then cascor had already switched the loaded dataset, so the page showed the previous run's
+    results under the new dataset's name (juniper-ml's A-N2 run, F1). `equities` (15 features)
+    and `mnist` (784) hit this against any 2-feature network.
+  - There is no fallback for an older cascor. It consumed the staged dataset before refusing, so
+    the banner the alert points at was gone.
+- **The restart modal called Start fresh "functionally a clean stack launch" (F2).** Since
+  juniper-cascor#685, a start-fresh carries the applied parameters onto the rebuilt network, so
+  the parameters edited in the modal survive it (owner ruling 2026-09-24). A clean launch would
+  have reset them to the engine defaults.
+  - The toggle label and both help texts now say the parameters carry over.
+  - Against a cascor older than #685 the edits are still dropped, and the text is then wrong.
+  - `src/tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py` covers both entries.
+    It pins the marker literal, and it checks that the controls the alert names exist under
+    those labels.
 - **The sidebar said "Active: CasCor" before anything had asked the backend (X11).**
   `_selection_is_live` answers `True`, `False` or `None`, and the model summary rendered `None`
   exactly like `True`. So the first-paint seed read *"Active: CasCor"* before any read. A mount
@@ -176,7 +200,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in-page A/B on an idle page parked the timer and compared each window with its two neighbouring
   baselines (juniper-ml `util/ad-hoc/2026-09-23_canopy_timer_park_ab.py`, two runs in opposite
   orders). It cut the median response-delivery latency by **42% and 32%**. A live check of this
-  build against its parent (`2026-09-23_idle_cuts_live_check.py`) was less clear. One cuts window
+  build (`ce78e0de`) against `3a6dea95`, its parent at the time (`2026-09-23_idle_cuts_live_check.py`),
+  was less clear. One cuts window
   beat both of its neighbours, and the other was 1.5–2.7% slower than both, so the check scored the
   latency inconsistent. An earlier check of the same change, built on canopy#670's branch, scored
   it consistent.
@@ -184,12 +209,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     clientside callback, the only writer of its `disabled`, enables it when
     `replay-player-session` holds a `snapshot_id`. The snapshots panel writes the session on POST
     `/replay`.
-  - **Against cascor it then runs until the page reloads, as it always ran before.** A Stop does
-    not clear the session. `_merge_session` clears `snapshot_id` only when the stop response is
-    empty, and the proxied cascor envelope never is, so the old id survives the overlay. The player
-    also keeps its session view. That is an existing defect, F-CANOPY-056 in the juniper-ml E2E
-    evidence ledger (`notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`); this
-    change neither causes nor fixes it.
+  - **Against cascor it then runs until the page reloads, or until a successful model select
+    rebuilds the tab bar.** A Stop does not clear the session. `_merge_session` clears
+    `snapshot_id` only when the stop response is empty, and the proxied cascor envelope never is,
+    so the old id survives the overlay. That is an existing defect, F-CANOPY-056 in the juniper-ml
+    E2E evidence ledger (`notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`).
+    Against cascor the player's Stop is not on screen anyway: the player never shows a session, because its render
+    raises on cascor's `range` (F-CANOPY-059, same ledger). This change neither causes nor fixes
+    either.
   - **Nothing a user sees changes.** No replay weight reaches the page (F-CANOPY-057 in the same
     ledger). The Decision Boundary consumer also ignores replay weights without a session, and the
     JS ring buffer is capped at 100 entries, so a paused drain cannot grow it.
@@ -205,6 +232,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     only `timestamp`, the third cut the ledger listed. The rewrite is the clock of the "Phase
     Duration" readout, which computes elapsed time at callback time. Suppressing it would freeze
     the readout whenever the state is otherwise static, so it needs its own design.
+- **The entry above merged before its review's third round was applied. A comment and a test
+  message still tied the weight drain to a "replay session" that a Stop does not end, and comments
+  and docs described a weight emitter that never reached cascor's `main`. The new Interval tests crashed, instead of
+  refusing, on an Interval with no id, and one of them also on a pattern-matching id.** canopy#676's
+  commit message says its review ran "two rounds; prose corrections only". It ran three, and rounds
+  1 and 2 each changed test code. The message also says the comments claiming cascor emits weights
+  were corrected; one was not. And it says that after a replay the drain "runs until the page
+  reloads, as it always ran before"; a successful model select also ends it. Its "live check of this
+  build against its parent" and "half of the page's steady-state ticks" were loose too (round 3's
+  finding 4); their copies in the tree are fixed below. The juniper-ml E2E evidence ledger has the
+  record
+  (`notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`, Phase 9).
+  - `replay_player_panel.py`: the gate comment said the drain is disabled "unless a replay session
+    exists". It keys on a stored `snapshot_id`, which a Stop against cascor does not clear
+    (F-CANOPY-056). So once a replay starts, the drain runs until the page reloads, or until
+    a successful model select rebuilds the tab bar and re-mounts the session Store empty. The entry
+    above said "until the page reloads" and missed the second path; it is corrected in place, and so
+    is the same sentence in the drain's comment. The entry's "live check of this build against its
+    parent" now names the pair.
+  - `ws_dash_bridge.js`: the drain comment no longer cites a "g-3 emitter" for the weight blocks,
+    and the buffer comment's "Each carries…" has its antecedent back. `replay_forward.py`'s module
+    docstring said cascor's g-3 emitter produces the weight payloads it decodes. None does
+    (F-CANOPY-057): cascor's `_emit_frame` sets no weights. It now says the module has no live input
+    yet.
+  - `docs/USER_MANUAL.md` said weight samples stream during playback; it now says none reach the
+    page. `notes/development/REPLAY_V2_FAQ.md` described the weight stream as shipped, said a Stop
+    clears the buffer, and called the drain's CPU cost negligible. It gains a dated status note above
+    its answers instead of a rewrite; the note also records that against cascor the player shows no
+    session at all (F-CANOPY-059).
+  - `test_idle_dispatch_cuts.py`: `_dead_intervals` refuses, by name, an Interval with no id (the
+    check raised `KeyError`) or a pattern-matching id. The sibling tests look ids up through two
+    helpers that accept both shapes; a dict id made the old set comprehension raise `TypeError`.
+    Three new tests pin the check itself, including that it reports every unconsumed Interval and
+    only an `n_intervals` Input counts as a consumer. A fourth pins the id lookups the wiring tests
+    use. A mutant that drops either refusal, reverts either helper, makes the check report nothing, or
+    counts as a consumer another property, a State, an Output writer or an id matched by substring
+    (`fe` in `fed`) fails one of them. The gate's rule test is renamed to what it tests. The module
+    docstring's "half of the page's steady-state ticks" now says the two timers fired 3.0 of the 6.6
+    ticks per second the layout's enabled Intervals nominally fire (45%, by the static census, which
+    leaves out the one-shot `params-init-interval`).
 - **The replay controls never applied: play, step, start, end, the speed buttons and the slider
   did nothing on any page load (F-CANOPY-048).** `handle_replay_controls` (Input
   `replay-slider.value` → Output `replay-state.data`) and `update_replay_ui` (Input

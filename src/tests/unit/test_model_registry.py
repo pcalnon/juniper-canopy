@@ -83,7 +83,7 @@ def test_dataset_seeds_2d_classification_plus_3d_sequence():
     seq = by_value["equities_seq"]
     assert seq.ndim == 3 and seq.task_type == "regression" and seq.temporal == "irregular"
     # §12: the five synthetic rank-3 seeds. All regression (matching juniper-data's own
-    # declaration, so unlike equities_seq they carry no X8 vocabulary divergence), and their
+    # declaration, as equities_seq has since juniper-data#437 closed X8), and their
     # ``temporal`` matches the measured Δt: multi_sine / mackey_glass / ar_p emit a constant
     # per-step Δt, irregular_sine / delay_product a genuinely non-uniform one. Measured
     # 2026-09-09 by executing the registry — and note the measurement only reads correctly when
