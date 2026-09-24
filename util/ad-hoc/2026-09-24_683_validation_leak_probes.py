@@ -339,8 +339,8 @@ def _raw_request(port: int, request: bytes) -> bytes:
         try:
             while chunk := sock.recv(65536):
                 response += chunk
-        except OSError:
-            pass
+        except OSError as e:
+            print(e)
     return response
 
 
