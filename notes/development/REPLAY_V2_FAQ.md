@@ -5,6 +5,39 @@
 **Project**: Juniper Canopy
 **Tracks**: CAN-015g (Replay V2 — per-epoch weight history)
 
+> **Status note, 2026-09-24: the status line above, and the weight answers, the g-3 and g-7
+> related-work notes and the glossary below, describe the design, not what runs today.**
+>
+> - **Against cascor the player shows no session at all** (F-CANOPY-059, P0 in the juniper-ml E2E
+>   evidence ledger). Its render reads cascor's `range`, a dict, and indexes it as a list, so it raises
+>   on every session cascor serves. The Replay tab keeps its "No active replay session" placeholder, and
+>   none of the player's controls, readouts or badges is on screen. A cascor replay starts paused at its
+>   first frame and advances only on a Play, so from the page it never advances. While it is open, cascor
+>   refuses training, a new network, and restore, resume and retrain, and it refuses Stop Training too.
+>   The sidebar's **Reset Training** ends it: cascor documents reset as a replay's escape hatch, and a
+>   reset also discards the run's metrics and counters, not its data. "Verifying everything wired
+>   correctly" below therefore fails from step 2 against cascor. Its `curl` check reads
+>   `.data.weights_available` and `.data.weight_sampling`, which cascor nests under `.data.session`, and
+>   its POST starts a replay. A replay started that way or from the page loads the snapshot's network in
+>   place of cascor's live one, and neither a Reset nor a Stop puts the old one back: save a snapshot
+>   first.
+> - **No replay weight reaches the page** (F-CANOPY-057 in the same ledger). The g-3
+>   emitter never reached cascor's `main`. Its PR, cascor#190, merged into its stacked base branch 13
+>   minutes after that branch had itself landed on `main` as cascor#189, and nothing merged the branch
+>   again. So cascor's `_ReplaySession._emit_frame` attaches no `weights` block. canopy's metrics relay
+>   also rebuilds each payload without the key, so it would drop one. The buffer therefore stays empty
+>   during a replay, as would the `last sample` readout if it were on screen, and the Network Evolution
+>   weight-norm section stays hidden.
+> - **The consumers are wired** (g-7): Decision Boundary and Network Evolution read the buffer. Passages
+>   below that say they are not yet wired, or that their rendering has not shipped, predate g-7.
+> - **The drain is gated** (canopy#676). It runs only once the page has started a replay.
+> - **A Stop would clear nothing.** Against cascor a Stop does not clear the session (F-CANOPY-056),
+>   and today the player's Stop is not on screen (F-CANOPY-059). Either way, once a replay starts the drain keeps
+>   running until a reload, or until a successful model select rebuilds the tab bar. No writer clears
+>   the buffer on Stop or on a new Replay.
+> - **The CPU answer is superseded.** Before it was gated, the 500 ms drain cost an idle page about a
+>   third of its response latency: two in-page A/B runs measured 42% and 32%.
+
 ---
 
 ## What this doc covers
