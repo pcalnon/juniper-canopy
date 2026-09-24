@@ -80,8 +80,9 @@ def test_select_model_handler_transport_error_is_noop(manager, monkeypatch):
 
 
 def test_model_summary_text_live_vs_coming_soon():
-    assert DashboardManager._model_summary_text({"nn_model": "cascor", "status": "live"}) == "Active: CasCor (Cascade-Correlation)"
-    soon = DashboardManager._model_summary_text({"nn_model": "recurrence", "status": "coming_soon"})
+    # Round-tripped payloads (they carry ``backend``): "Active" needs a backend that answered (X11).
+    assert DashboardManager._model_summary_text({"nn_model": "cascor", "backend": "service", "status": "live"}) == "Active: CasCor (Cascade-Correlation)"
+    soon = DashboardManager._model_summary_text({"nn_model": "recurrence", "backend": "recurrence", "status": "coming_soon"})
     assert soon.startswith("Active: Recurrence (LMU)")
     assert "coming soon" in soon
 

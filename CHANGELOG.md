@@ -121,6 +121,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The sidebar said "Active: CasCor" before anything had asked the backend (X11).**
+  `_selection_is_live` answers `True`, `False` or `None`, and the model summary rendered `None`
+  exactly like `True`. So the first-paint seed read *"Active: CasCor"* before any read. A mount
+  whose `GET /api/selection` failed kept that text too, so the "Active" claim came from the one
+  path that had just failed to reach the backend.
+  - Following the owner's ruling of 2026-09-24, an unknown liveness now reads **"Selected: CasCor
+    (Cascade-Correlation) · backend status unknown"**. "Active" requires a round-tripped payload
+    whose backend serves the model. A lifecycle note such as `· coming soon` still comes first.
+  - The failed-read path now writes that text instead of leaving the summary alone, so the summary
+    follows the key store's fallback to the default model.
+  - Start gating is unchanged, because unknown is still not disagreement. The `False` state still
+    names the backend that is really running.
+  - `TestX11UnknownLivenessIsNotActive` in
+    `src/tests/regression/test_selection_reachability_guardrails.py`, mutation-checked at five
+    sites against the full unit lane.
 - **A model swap could strand the dashboard on a tab that no longer exists (Y4).** A one-shot model
   rebuilds the tab bar without the five cascade-only tabs, and the active-tab restore guarded only
   "no saved tab" and "saved equals shown". Measured in headless chromium: on Network Topology, a
