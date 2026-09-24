@@ -14,6 +14,8 @@
 #                design PR 2 (§4.10 hydration, both axes). §4.5's
 #                restart-modal regate (X2) had no test until
 #                2026-09-23 (TestX2RestartModalIsGatedAgainst...).
+#                X11's unknown-liveness wording, the owner's
+#                2026-09-24 ruling: TestX11UnknownLivenessIsNotActive.
 #####################################################################
 """Guardrails for the selection-reachability remediation design.
 
@@ -156,6 +158,72 @@ class TestG5ModelStateTruth:
         summary = DashboardManager._model_summary_text(body)
         assert "NOT ACTIVE" in summary, summary
         assert body["backend"] in summary
+
+
+#: The owner's X11 wording (2026-09-24) for the default model when liveness is unknown.
+X11_UNKNOWN_CASCOR = "Selected: CasCor (Cascade-Correlation) · backend status unknown"
+
+
+@pytest.mark.regression
+@pytest.mark.unit
+class TestX11UnknownLivenessIsNotActive:
+    """X11 — "Active" is a claim about the backend, so it needs a backend that answered.
+
+    ``_selection_is_live`` has three answers, and the summary rendered two of them the same way:
+    ``None`` (nothing has round-tripped, so there is no ``backend``) read *"Active: CasCor"* at
+    first paint, and a mount whose read failed kept that text. The owner ruled (2026-09-24) that
+    the unknown state reads "Selected: … · backend status unknown", never "Active".
+    """
+
+    def test_the_three_liveness_states_render_three_ways(self):
+        cascor = {"nn_model": "cascor", "status": "live"}
+        assert DashboardManager._model_summary_text({**cascor, "backend": "service"}) == "Active: CasCor (Cascade-Correlation)"
+        assert DashboardManager._model_summary_text({**cascor, "backend": "recurrence"}).startswith("Selected: CasCor (Cascade-Correlation) · NOT ACTIVE")
+        assert DashboardManager._model_summary_text(cascor) == X11_UNKNOWN_CASCOR
+
+    @pytest.mark.parametrize("spec", MODELS, ids=lambda spec: spec.key)
+    def test_no_model_reads_active_while_liveness_is_unknown(self, spec):
+        summary = DashboardManager._model_summary_text({"nn_model": spec.key, "status": spec.status})
+        assert summary.startswith(f"Selected: {spec.label}"), summary
+        assert summary.endswith(" · backend status unknown"), summary
+        # Unknown is not disagreement: no backend is named, and nothing claims one is running.
+        assert "NOT ACTIVE" not in summary
+
+    def test_the_lifecycle_note_precedes_the_unknown_note(self):
+        summary = DashboardManager._model_summary_text({"nn_model": "recurrence", "status": "coming_soon"})
+        assert summary == "Selected: Recurrence (LMU) · coming soon · backend status unknown"
+
+    def test_the_first_paint_seed_is_the_unknown_state(self, manager):
+        assert manager._initial_model_summary() == X11_UNKNOWN_CASCOR
+        # And the SHIPPED layout carries it, not merely the helper.
+        (summary,) = [c for c in _components(manager.app.layout) if getattr(c, "id", None) == "nn-model-summary"]
+        assert summary.children == X11_UNKNOWN_CASCOR
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            mock.Mock(side_effect=requests.ConnectionError("canopy restarting")),
+            mock.Mock(return_value=mock.Mock(ok=False, status_code=503)),
+            # A 200 that names no model takes the same fallback as a failed read.
+            mock.Mock(return_value=mock.Mock(ok=True, status_code=200, json=lambda: {"nn_model": None})),
+        ],
+        ids=["transport-error", "http-503", "no-model-in-payload"],
+    )
+    def test_a_failed_mount_read_writes_the_unknown_text(self, manager, failure):
+        with mock.patch("frontend.dashboard_manager.requests.get", failure):
+            store, _model_class, summary, _is_open, state = manager._hydrate_selection_handler()
+        assert store == DEFAULT_MODEL_KEY
+        # Written, not ``no_update``: the summary follows the key store's fallback, and it does
+        # not say "Active" about a backend the read could not reach.
+        assert summary == X11_UNKNOWN_CASCOR
+        assert DashboardManager._selection_is_live(state) is None
+
+    def test_a_hydrated_payload_without_a_backend_reads_unknown(self, manager):
+        payload = {"nn_model": "cascor", "status": "live", "dataset": {"value": None, "source": "unknown", "generator": None}}
+        with mock.patch("frontend.dashboard_manager.requests.get", return_value=mock.Mock(ok=True, status_code=200, json=lambda: dict(payload))):
+            store, _model_class, summary, _is_open, _state = manager._hydrate_selection_handler()
+        assert store == "cascor"
+        assert summary == X11_UNKNOWN_CASCOR
 
 
 # ---------------------------------------------------------------------------
@@ -1261,7 +1329,8 @@ class TestY3TheModelAxisHasAReadSide:
         # gate's only first-paint trigger now, so skipping it would lose N7's availability gate.
         store, summary, state, dataset, _notice = _mount(manager, None)
         assert store == DEFAULT_MODEL_KEY
-        assert summary is dash.no_update
+        # X11: the summary is written too, and it does not claim the unreached backend is active.
+        assert summary == X11_UNKNOWN_CASCOR
         # Unknown on both axes: no model fields (so no agreement claim), and an ``unknown``
         # dataset block, which is what lets the gate tell this from "the backend holds nothing".
         assert state == {"dataset": {"value": None, "source": "unknown", "generator": None}}

@@ -3559,7 +3559,13 @@ class DashboardManager:
         availability gate whenever the read fails. The payload store gets an ``unknown`` dataset
         block and no model fields -- unknown, not disagreement, on both axes -- so the first-paint
         pass can tell a failed read (fall back to the default, D-N10) from a backend that holds
-        nothing (stay at ``⊥``, OQ-N2). The summary keeps its seeded text.
+        nothing (stay at ``⊥``, OQ-N2).
+
+        **X11 — the summary is written on failure too**, with the seed's unknown-liveness text
+        ("Selected: … · backend status unknown"). It used to be left at whatever it showed, which
+        was "Active: CasCor" from the seed: a claim that the backend serves the selection, made
+        by the one path that has just failed to ask. Writing it also keeps the summary on the
+        model the key store falls back to, rather than on whatever the summary last showed.
         """
         try:
             resp = requests.get(self._api_url("/api/selection"), timeout=DashboardConstants.DASHBOARD_GET_TIMEOUT, headers=internal_api_headers())
@@ -3571,7 +3577,7 @@ class DashboardManager:
             self.logger.warning("Selection hydration read failed (%s); keeping the seeded selection", getattr(resp, "status_code", "?"))
         except Exception as exc:
             self.logger.warning("Selection hydration read failed (%s); keeping the seeded selection", exc)
-        return DEFAULT_MODEL_KEY, dash.no_update, dash.no_update, dash.no_update, {"dataset": {"value": None, "source": "unknown", "generator": None}}
+        return DEFAULT_MODEL_KEY, dash.no_update, self._initial_model_summary(), dash.no_update, {"dataset": {"value": None, "source": "unknown", "generator": None}}
 
     #: ``backend.backend_type`` as reported by ``/api/model/select`` when the recurrence service
     #: backend is the live one. The other values ("service", "demo") both serve cascor-family
@@ -3587,6 +3593,11 @@ class DashboardManager:
     #: What to do about a selection the live backend does not serve (N5). The same sentence the
     #: server puts in its 409, so the notice and the refusal read alike.
     INACTIVE_SELECTION_REMEDY: str = "Select the model again once its service is configured (Recurrence: JUNIPER_CANOPY_RECURRENCE_SERVICE_URL), or select the model the running backend serves."
+
+    #: Sidebar summary suffix when it is unknown whether the live backend serves the selection
+    #: (``_selection_is_live`` is ``None``): the first-paint seed, and a mount whose read failed.
+    #: The wording is the owner's ruling on X11 (2026-09-24).
+    UNKNOWN_LIVENESS_NOTE: str = "backend status unknown"
 
     @staticmethod
     def _selection_is_live(data):
@@ -3622,17 +3633,26 @@ class DashboardManager:
         """Compact summary line for the sidebar model picker (A1-iv-3a; X1 truth-up).
 
         Reads ``"Active: <label>"`` only when the live backend actually serves the selection
-        (``_selection_is_live``). When it does not, the line leads with ``"Selected:"`` and names
-        the backend that is really running, because a model whose displayed identity differs from
-        the live backend is a defect rather than a display lag (design N5) -- and on a
-        benchmarking platform a wrong attribution is worse than a blocked control.
+        (``_selection_is_live`` is ``True``). When it does not, the line leads with ``"Selected:"``
+        and names the backend that is really running, because a model whose displayed identity
+        differs from the live backend is a defect rather than a display lag (design N5) -- and on
+        a benchmarking platform a wrong attribution is worse than a blocked control.
+
+        **X11: unknown is not "Active" either.** When liveness is unknown (``None``: a payload
+        that has never round-tripped, so it carries no ``backend``), the line leads with
+        ``"Selected:"`` and says the backend's status is unknown. "Active" is a claim about the
+        backend, and nothing has asked it. The unknown state is not the ``False`` one: it names no
+        backend, and neither the Start gate nor the train-gate notice treats it as disagreement.
         """
         spec = get_model_spec(data.get("nn_model", ""))
         label = spec.label if spec is not None else data.get("nn_model", "?")
         status = data.get("status", "live")
         note = "" if status == "live" else f" · {status.replace('_', ' ')}"
-        if DashboardManager._selection_is_live(data) is False:
+        live = DashboardManager._selection_is_live(data)
+        if live is False:
             return f"Selected: {label}{note} · NOT ACTIVE — the {data.get('backend')} backend is running"
+        if live is None:
+            return f"Selected: {label}{note} · {DashboardManager.UNKNOWN_LIVENESS_NOTE}"
         return f"Active: {label}{note}"
 
     def _initial_model_summary(self):
@@ -3641,6 +3661,10 @@ class DashboardManager:
         Resolves the default model's status from the registry so the summary reads honestly before
         any selection callback fires — the dropdown that previously showed the current value is gone,
         so the summary is now the only at-rest indicator of the active model.
+
+        Nothing has asked the backend at first paint, so the seed reads "Selected: … · backend
+        status unknown" (X11), never "Active". The mount hydration replaces it, and a failed
+        hydration read writes this same text (``_hydrate_selection_handler``).
         """
         spec = get_model_spec(DEFAULT_MODEL_KEY)
         status = spec.status if spec is not None else "live"

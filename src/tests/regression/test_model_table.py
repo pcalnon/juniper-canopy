@@ -242,8 +242,9 @@ def test_select_from_table_keeps_modal_open_on_failed_apply(manager, monkeypatch
 
 
 def test_initial_model_summary_seeds_the_default_model(manager):
-    # cascor is the DEFAULT_MODEL_KEY and is live -> "Active: CasCor ..." with no status note.
-    assert manager._initial_model_summary() == "Active: CasCor (Cascade-Correlation)"
+    # cascor is the DEFAULT_MODEL_KEY and is live, so there is no status note. Nothing has asked the
+    # backend at first paint, so the seed names the model without claiming it is active (X11).
+    assert manager._initial_model_summary() == "Selected: CasCor (Cascade-Correlation) · backend status unknown"
 
 
 # --------------------------------------------------------------------------- degenerate state (A1b-2, §5.8)
