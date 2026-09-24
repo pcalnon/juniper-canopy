@@ -155,7 +155,8 @@ class TestF007AdapterProxies:
         result = CascorServiceAdapter(client=fake).list_snapshots()
         assert result["ok"] is False
         assert result["snapshots"] == []
-        assert "refused" in result["error"]
+        # A connection failure reaches the caller by type, never by its transport text (#683 validation).
+        assert result["error"] == "JuniperCascorConnectionError"
 
     def test_get_snapshot_unwraps_cascors_envelope(self):
         fake = _FakeClient({"/snapshots/snap_new": {"status": "success", "data": dict(CASCOR_INVENTORY[1])}})

@@ -76,7 +76,9 @@ class TestAdapterSurfacesSkipped:
         with patch.object(adapter._client, "update_params", side_effect=JuniperCascorClientError("boom")):
             result = adapter.apply_params(nn_learning_rate=0.05, nn_bogus_param=1)
         assert result["ok"] is False
-        assert result["error"] == "boom"
+        # No HTTP status, so a transport failure: named by type, never by its text, which can quote a key the client
+        # refused to send (#683 validation).
+        assert result["error"] == "JuniperCascorClientError"
         assert result["skipped"] == ["nn_bogus_param"], result
 
 

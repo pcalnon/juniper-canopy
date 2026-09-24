@@ -108,3 +108,24 @@ class TestRecurrenceApiKey:
         monkeypatch.setenv("JUNIPER_CANOPY_RECURRENCE_API_KEY_FILE", str(secret))
         monkeypatch.setenv("JUNIPER_RECURRENCE_API_KEY", "shared-key")
         assert _settings().recurrence_api_key == "file-key"
+
+    # #683 validation: a value no HTTP client can carry is refused where it is read -- treated as empty -- because
+    # httpx raised ``LocalProtocolError: Illegal header value b'<key>'`` for it, which reached a failed fit's
+    # ``completion_reason`` on /api/status.
+
+    def test_a_padded_prefixed_key_falls_through_to_the_shared_key(self, monkeypatch):
+        monkeypatch.setenv("JUNIPER_CANOPY_RECURRENCE_API_KEY", " LEAKME-prefixed")
+        monkeypatch.setenv("JUNIPER_RECURRENCE_API_KEY", "shared-key")
+        assert _settings().recurrence_api_key == "shared-key"
+
+    def test_a_padded_key_with_no_fallback_is_no_key(self, monkeypatch):
+        monkeypatch.setenv("JUNIPER_CANOPY_RECURRENCE_API_KEY", "LEAKME-prefixed ")
+        assert _settings().recurrence_api_key is None
+
+    def test_a_padded_shared_key_is_no_key(self, monkeypatch):
+        monkeypatch.setenv("JUNIPER_RECURRENCE_API_KEY", " LEAKME-shared")
+        assert _settings().recurrence_api_key is None
+
+    def test_the_value_pydantic_read_is_screened_too(self):
+        assert Settings(_env_file=None, recurrence_api_key="LEAKME-v\n").recurrence_api_key is None
+        assert Settings(_env_file=None, recurrence_api_key="real-v-key").recurrence_api_key == "real-v-key"

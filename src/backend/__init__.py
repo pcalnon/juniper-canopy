@@ -90,9 +90,16 @@ def create_backend(
     if resolved_url:
         from backend.cascor_service_adapter import CascorServiceAdapter
         from backend.service_backend import ServiceBackend
-        from secrets_util import get_secret
+        from secrets_util import get_outbound_secret
 
-        api_key = get_secret("JUNIPER_CASCOR_API_KEY") or get_secret("JUNIPER_DATA_API_KEY")
+        # #683 validation: a key no HTTP client can carry is refused here, where it is read
+        # -- treated as empty, so the next variable applies, and its NAME recorded for the
+        # boot WARNING (``secrets_util.report_refused_outbound_keys``). Sent, it made every
+        # cascor call raise an error that quotes it, which canopy logged at ERROR on each
+        # status-refresher tick and returned in the 409 body of an anonymous Start. The
+        # adapter binds this result, so the client library cannot re-read
+        # JUNIPER_CASCOR_API_KEY raw when it is None.
+        api_key = get_outbound_secret("JUNIPER_CASCOR_API_KEY") or get_outbound_secret("JUNIPER_DATA_API_KEY")
         # E.2 PR-2-C: forward the configured Origin to the
         # ``CascorControlStream`` inside the adapter's
         # ``ControlStreamSupervisor`` so cascor's fail-closed

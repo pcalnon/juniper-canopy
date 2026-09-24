@@ -52,7 +52,7 @@ class TestGetExperimentalFunctions:
         adapter._client._request.side_effect = JuniperCascorClientError("connection refused")
         result = adapter.get_experimental_functions()
         assert result["ok"] is False
-        assert "connection refused" in result["error"]
+        assert result["error"] == "JuniperCascorClientError"  # transport text never reaches a caller (#683 validation)
         # Safe default — gate treated as closed when we can't confirm.
         assert result["enabled"] is False
 
@@ -88,7 +88,7 @@ class TestSetExperimentalFunctions:
         assert result == {"ok": True, "enabled": False}, "server-authoritative override must trump the request"
 
     def test_returns_error_on_cascor_failure(self, adapter):
-        adapter._client._request.side_effect = JuniperCascorClientError("HTTP 503")
+        adapter._client._request.side_effect = JuniperCascorClientError("HTTP 503", status_code=503)  # an answer: its text passes (#683 validation)
         result = adapter.set_experimental_functions(True)
         assert result["ok"] is False
         assert "HTTP 503" in result["error"]

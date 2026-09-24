@@ -34,6 +34,12 @@ PADDED_KEY_WARNING = (
     "CANOPY_API_KEY has leading or trailing whitespace, or a line break, and API-key authentication is enabled with the key exactly as set. HTTP does not carry such a key reliably: uvicorn's parsers drop a header value's leading spaces and tabs, h11 drops its trailing ones as well, and a header cannot hold a line break."
     + " So callers presenting the key can fail to authenticate, and the dashboard's own requests to this API send no key at all when it starts with whitespace or holds a line break, because their HTTP client refuses to send it. Remove the whitespace and any line break from the key."
 )
+# #683 validation, item 4: a key FILE is stripped at its ends, so only a line break inside the key pads it -- and the
+# WARNING must name CANOPY_API_KEY_FILE, not the env var the file shadows.
+PADDED_KEY_FILE_WARNING = (
+    "The key in the file named by CANOPY_API_KEY_FILE holds a line break, and API-key authentication is enabled with the key exactly as read: the file's leading and trailing whitespace is stripped, but a line break inside the key is not. HTTP does not carry such a key: a header cannot hold a line break."
+    + " So callers presenting the key cannot authenticate with an X-API-Key header, and the dashboard's own requests to this API send no key at all, because their HTTP client refuses to send it. While CANOPY_API_KEY_FILE names an existing file it takes precedence and CANOPY_API_KEY is not read. Write the key into that file on a single line."
+)
 MISSING_KEY_FILE_WARNING = "CANOPY_API_KEY_FILE is set but does not name an existing file, so it is ignored: the key is read from CANOPY_API_KEY instead, exactly as if CANOPY_API_KEY_FILE were unset. Point CANOPY_API_KEY_FILE at the key file, or unset it."
 
 
@@ -143,15 +149,53 @@ class TestAPIKeyAuth:
         real_compare = auth.validate.__globals__["hmac"].compare_digest
 
         def counting_compare(a, b):
-            compared.append(b)
+            compared.append((a, b))
             return real_compare(a, b)
 
         # Patch the globals validate() actually resolves ``hmac`` from, so a module
         # re-import elsewhere in the session cannot leave this test patching a copy.
         monkeypatch.setitem(auth.validate.__globals__, "hmac", SimpleNamespace(compare_digest=counting_compare))
-        first = next(iter(auth._api_keys))  # the key validate() compares first
+        first = next(iter(auth._api_keys))  # the key validate() compares first: the match comes FIRST
         assert auth.validate(first) is True
-        assert sorted(compared) == ["key1", "key2", "key3"]
+        # One compare per configured key -- a ``break`` after the match would stop at one -- and both sides as UTF-8
+        # bytes, never ``str``, which raises for non-ASCII text (#683 validation, item 2).
+        assert len(compared) == len(auth._api_keys) == 3
+        assert all(type(a) is bytes and type(b) is bytes for a, b in compared), compared
+        assert {a for a, _ in compared} == {first.encode()}
+        assert sorted(b for _, b in compared) == [b"key1", b"key2", b"key3"]
+
+    # #683 validation, item 2: ``hmac.compare_digest`` on two ``str`` raises ``TypeError`` for non-ASCII text. A keyless
+    # caller can send such a header -- Starlette decodes header bytes as latin-1 -- so ``X-API-Key: \xa0`` was a 500,
+    # and Sentry's event recorded the comparing frame's locals: ``candidate``, the real key. Every presented ``str``
+    # must now be an ordinary answer. The values cover latin-1 (what a header can carry), the WebSocket query
+    # parameter's UTF-8, and a lone surrogate, which only ``surrogatepass`` can encode.
+    NON_ASCII = [("nbsp", "\xa0"), ("nel", "\x85"), ("trailing-nbsp", "key1\xa0"), ("latin1", "cl\xe9"), ("euro", "€"), ("emoji", "\U0001f511"), ("lone-surrogate", "\ud800"), ("escaped-byte", "\udc80")]
+
+    @pytest.mark.parametrize("presented", [value for _, value in NON_ASCII], ids=[case_id for case_id, _ in NON_ASCII])
+    def test_a_non_ascii_key_is_a_mismatch_never_an_exception(self, presented):
+        assert APIKeyAuth(["key1"]).validate(presented) is False
+
+    def test_a_non_ascii_configured_key_is_compared_exactly(self):
+        """Bytes compare exactly as the text does: the configured key matches itself and nothing else."""
+        auth = APIKeyAuth(["cl\xe9-key€"])
+        assert auth.validate("cl\xe9-key€") is True
+        assert auth.validate("cle-key€") is False
+        assert auth.validate("cl\xe9-key") is False
+
+    @pytest.mark.parametrize("presented", [b"key1", 123, ["key1"]], ids=["bytes", "int", "list"])
+    def test_a_presented_key_that_is_not_a_str_is_no_match(self, presented):
+        assert APIKeyAuth(["key1"]).validate(presented) is False  # type: ignore[arg-type]
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    @pytest.mark.parametrize("presented", ["\xa0", "key1\xa0", "cl\xe9"], ids=["nbsp", "trailing-nbsp", "latin1"])
+    async def test_call_answers_401_for_a_non_ascii_header(self, presented):
+        auth = APIKeyAuth(["key1"])
+        request = MagicMock()
+        request.headers = {"X-API-Key": presented}
+        with pytest.raises(HTTPException) as exc_info:
+            await auth(request)
+        assert exc_info.value.status_code == 401
 
     @pytest.mark.asyncio
     @pytest.mark.unit
@@ -322,6 +366,20 @@ class TestInternalRequestRateLimitExemption:
             await limiter(request)
         assert exc.value.status_code == 429
 
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    @pytest.mark.parametrize("header", ["\xa0", INTERNAL_REQUEST_TOKEN + "\xa0", "€"], ids=["nbsp", "token-plus-nbsp", "euro"])
+    async def test_a_non_ascii_internal_token_is_not_exempt_and_raises_nothing(self, header):
+        """#683 validation: ``compare_digest`` on this header raised ``TypeError`` for non-ASCII text, a 500 whose
+        Sentry event recorded a keyed caller's real key (through the ASGI scope a frame held). It is now a plain
+        non-match."""
+        limiter = RateLimiter(requests_per_minute=1, enabled=True)
+        request = self._request({INTERNAL_REQUEST_HEADER: header})
+        await limiter(request, "the-callers-real-key")
+        with pytest.raises(HTTPException) as exc:
+            await limiter(request, "the-callers-real-key")
+        assert exc.value.status_code == 429
+
     @pytest.mark.unit
     def test_internal_api_headers_carries_exemption_token(self):
         """Round-trip: the headers the dashboard attaches to its self-calls
@@ -330,6 +388,74 @@ class TestInternalRequestRateLimitExemption:
 
         headers = internal_api_headers()
         assert headers.get(INTERNAL_REQUEST_HEADER) == INTERNAL_REQUEST_TOKEN
+
+
+@pytest.mark.unit
+class TestNoSecretCompareCanRaiseOverHttp:
+    """#683 validation: canopy's three secret compares, each reached over HTTP with a non-ASCII value, refuse as for
+    any wrong value -- 401, 403 or no exemption -- and never raise. Each ran ``hmac.compare_digest`` on two ``str``,
+    which raises ``TypeError`` for non-ASCII text: a 500, and a Sentry event recording the comparing frame's locals.
+
+    The values go out as raw bytes (``0xA0``), as both uvicorn parsers pass them and Starlette decodes them as
+    latin-1. The app is canopy's own ``SecurityMiddleware`` with the rate limiter ON, which is what puts the
+    ``X-Canopy-Internal`` compare on the key-exempt ``/api/csrf`` and ``/api/train/*`` paths, where an ANONYMOUS
+    caller reaches it.
+    """
+
+    REAL_KEY = "canopy-real-key-683v"
+
+    @pytest.fixture
+    def client(self, monkeypatch):
+        from fastapi import Depends, FastAPI
+        from fastapi.testclient import TestClient
+
+        import csrf
+        import middleware
+        import security
+
+        auth = APIKeyAuth([self.REAL_KEY])
+        # require_browser_control_auth reads the singletons; this test's own, restored at teardown.
+        monkeypatch.setattr(security, "_api_key_auth", auth)
+        store = csrf.CsrfTokenStore()
+        monkeypatch.setattr(csrf, "_csrf_store", store)
+        # A live token for another session: CsrfTokenStore.validate compares against every stored token, so with none
+        # stored there is nothing to compare and nothing to raise.
+        store.mint()
+
+        app = FastAPI()
+
+        @app.get("/api/status")
+        def status_route():
+            return {"ok": True}
+
+        @app.get("/api/csrf")
+        def csrf_route():
+            return {"ok": True}
+
+        @app.post("/api/train/start", dependencies=[Depends(security.require_browser_control_auth)])
+        def start_route():
+            return {"ok": True}
+
+        app.add_middleware(middleware.SecurityMiddleware, api_key_auth=auth, rate_limiter=RateLimiter(requests_per_minute=1000, enabled=True))
+        # A raise must come back as the 500 it was, not as an exception in this test.
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_a_non_ascii_api_key_is_a_401(self, client):
+        assert client.get("/api/status", headers={"X-API-Key": b"\xa0"}).status_code == 401
+
+    def test_a_non_ascii_internal_header_on_a_key_exempt_path_is_no_exemption_and_no_500(self, client):
+        """Anonymous: /api/csrf skips the API-key gate but not the rate limiter, whose exemption compare this reaches."""
+        assert client.get("/api/csrf", headers={INTERNAL_REQUEST_HEADER: b"\xa0"}).status_code == 200
+
+    def test_a_keyed_caller_with_a_non_ascii_internal_header_is_served(self, client):
+        response = client.get("/api/status", headers={"X-API-Key": self.REAL_KEY, INTERNAL_REQUEST_HEADER: b"\xa0"})
+        assert response.status_code == 200
+
+    def test_a_non_ascii_csrf_token_is_a_403(self, client):
+        """Keyless, from an allowlisted Origin: the CSRF store compares it against the live token minted above."""
+        response = client.post("/api/train/start", headers={"Origin": "http://localhost:8050", "X-CSRF-Token": b"\xa0"})
+        assert response.status_code == 403
+        assert response.json() == {"detail": "Invalid or missing CSRF token."}
 
 
 class TestSecurityModuleFunctions:
@@ -537,12 +663,15 @@ class TestSecurityModuleFunctions:
         assert [(r.levelno, r.getMessage()) for r in records] == [(logging.WARNING, PADDED_KEY_WARNING)]
 
     def test_a_key_padded_with_a_non_ascii_space_warns_too(self, monkeypatch, report_log):
-        """``str.strip()`` removes U+00A0, so the key is padded. (``validate`` cannot be asked: ``hmac.compare_digest``
-        raises ``TypeError`` on non-ASCII text, the 500 the APIKeyAuth comment records.)"""
+        """``str.strip()`` removes U+00A0, so the key is padded. ``validate`` compares bytes since #683's validation
+        (``hmac.compare_digest`` on ``str`` raised ``TypeError`` on non-ASCII text), so the key as set matches."""
         log, records = report_log
         monkeypatch.delenv("CANOPY_API_KEY_FILE", raising=False)
         monkeypatch.setenv("CANOPY_API_KEY", "\xa0real-key")
-        assert get_api_key_auth().enabled is True
+        auth = get_api_key_auth()
+        assert auth.enabled is True
+        assert auth.validate("\xa0real-key") is True
+        assert auth.validate("real-key") is False
         assert report_api_key_configuration(log) == 1
         assert [r.getMessage() for r in records] == [PADDED_KEY_WARNING]
 
@@ -565,6 +694,22 @@ class TestSecurityModuleFunctions:
         assert get_api_key_auth().validate("real-key") is True
         assert report_api_key_configuration(log) == 0
         assert records == []
+
+    # The key as read: ``read_text`` translates CRLF to LF, and the strip takes only the ends.
+    @pytest.mark.parametrize("content, key", [(b"first\nsecond", "first\nsecond"), (b"  first\r\nsecond\t\n", "first\nsecond")], ids=["lf", "crlf-padded-ends"])
+    def test_a_key_file_with_a_line_break_inside_warns_naming_the_file(self, monkeypatch, report_log, tmp_path, content, key):
+        """#683 validation, item 4: the strip removes a key file's ends, not a line break INSIDE the key. The WARNING
+        named CANOPY_API_KEY -- which the file shadows -- and told the operator to fix it."""
+        log, records = report_log
+        secret_file = tmp_path / "canopy_api_key"
+        secret_file.write_bytes(content)
+        monkeypatch.setenv("CANOPY_API_KEY_FILE", str(secret_file))
+        monkeypatch.setenv("CANOPY_API_KEY", "real-env-key-the-file-shadows")
+        auth = get_api_key_auth()
+        assert auth.enabled is True
+        assert auth.validate(key) is True
+        assert report_api_key_configuration(log) == 1
+        assert [(r.levelno, r.getMessage()) for r in records] == [(logging.WARNING, PADDED_KEY_FILE_WARNING)]
 
     @pytest.mark.parametrize(
         "env_key, expected",

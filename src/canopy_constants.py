@@ -669,7 +669,7 @@ class SecurityConstants:
             # deliberately NOT exempt. ``_is_exempt()`` ignores whether a key is
             # configured, so listing /docs, /openapi.json and /redoc here made
             # "docs enabled" and "docs public" the same switch: relaxing
-            # ``_docs_enabled`` in main.py (currently: true when CANOPY_API_KEY is unset or blank)
+            # ``_docs_enabled`` in main.py (currently: true exactly when API-key auth is off)
             # would serve the schema to everyone while looking like it sat behind
             # the key. Removing them decouples the two.
         }

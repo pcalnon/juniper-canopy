@@ -11,7 +11,7 @@
 # File Path:     Juniper/juniper-canopy/src/backend/
 #
 # Date Created:  2026-02-21
-# Last Modified: 2026-02-27
+# Last Modified: 2026-09-24
 #
 # License:       MIT License
 # Copyright:     Copyright (c) 2024,2025,2026 Paul Calnon
@@ -47,6 +47,8 @@ from juniper_cascor_client.exceptions import JuniperCascorConnectionError, Junip
 
 from backend.circuit_breaker import CircuitBreaker
 from canopy_constants import BackendConstants
+from outbound_errors import outbound_error_text
+from secrets_util import bind_outbound_key
 
 # from juniper_cascor_client.juniper_cascor_client.client import CascorTrainingStream, JuniperCascorClient
 # from juniper_cascor_client.client import CascorTrainingStream, JuniperCascorClient
@@ -368,10 +370,15 @@ class ControlStreamSupervisor:
         attempt = 0
         while not self._shutdown:
             try:
-                self._stream = CascorControlStream(
-                    base_url=self._ws_url,
-                    api_key=self._api_key,
-                    origin=self._ws_origin,
+                # bind_outbound_key: with no key, the stream would read JUNIPER_CASCOR_API_KEY
+                # itself -- the raw value canopy refused (#683 validation).
+                self._stream = bind_outbound_key(
+                    CascorControlStream(
+                        base_url=self._ws_url,
+                        api_key=self._api_key,
+                        origin=self._ws_origin,
+                    ),
+                    self._api_key,
                 )
                 await self._stream.connect()
                 logger.info("Control stream supervisor connected to %s", self._ws_url)
@@ -411,7 +418,8 @@ class ControlStreamSupervisor:
             except Exception as e:
                 delay = self._BACKOFF[min(attempt, len(self._BACKOFF) - 1)]
                 logger.warning("Control stream supervisor disconnected (%s), reconnecting in %ds", e, delay)
-                self.health.mark_disconnected(str(e))
+                # /api/stream_health serves this reason: the type, never the transport text (#683 validation).
+                self.health.mark_disconnected(outbound_error_text(e))
                 attempt += 1
                 try:
                     await asyncio.sleep(delay)
@@ -510,11 +518,16 @@ class CascorServiceAdapter:
         # urllib3 backoff sleep -- on canopy's event loop. See
         # ``BackendConstants.CASCOR_CLIENT_RETRIES`` for why zero is correct for a
         # service that already re-polls on its own interval.
-        self._client = client or JuniperCascorClient(
-            base_url=service_url,
-            api_key=api_key,
-            timeout=BackendConstants.CASCOR_CLIENT_TIMEOUT_SECONDS,
-            retries=BackendConstants.CASCOR_CLIENT_RETRIES,
+        # #683 validation: ``bind_outbound_key`` -- handed no key, the client reads
+        # JUNIPER_CASCOR_API_KEY itself, raw, which is how a key canopy refused came back.
+        self._client = client or bind_outbound_key(
+            JuniperCascorClient(
+                base_url=service_url,
+                api_key=api_key,
+                timeout=BackendConstants.CASCOR_CLIENT_TIMEOUT_SECONDS,
+                retries=BackendConstants.CASCOR_CLIENT_RETRIES,
+            ),
+            api_key,
         )
         self.training_monitor = _ServiceTrainingMonitor(self._client)
         self._training_stream: Optional[CascorTrainingStream] = None
@@ -643,7 +656,8 @@ class CascorServiceAdapter:
             last_training_seq: Optional[int] = None
             while relay_enabled:
                 try:
-                    stream = CascorTrainingStream(base_url=self._ws_url, api_key=self._api_key)
+                    # bind_outbound_key: with no key the stream reads JUNIPER_CASCOR_API_KEY itself (#683 validation).
+                    stream = bind_outbound_key(CascorTrainingStream(base_url=self._ws_url, api_key=self._api_key), self._api_key)
                     await stream.connect()
                     logger.info("Cascor metrics stream connected to %s", self._ws_url)
                     self.relay_health.mark_connected()
@@ -878,7 +892,8 @@ class CascorServiceAdapter:
                     # one failed reconnect.
                     delay = _backoff_delay(attempt)
                     logger.warning(f"Cascor metrics stream disconnected ({e}). Reconnecting in {delay:.1f}s")
-                    self.relay_health.mark_disconnected(str(e))
+                    # /api/stream_health serves this reason: the type, never the transport text (#683 validation).
+                    self.relay_health.mark_disconnected(outbound_error_text(e))
                     attempt += 1
                     try:
                         await asyncio.sleep(delay)
@@ -891,7 +906,7 @@ class CascorServiceAdapter:
                     # reconnect with the same backoff.
                     delay = _backoff_delay(attempt)
                     logger.error("Unexpected error in relay loop: %s — reconnecting in %.1fs", e, delay, exc_info=True)
-                    self.relay_health.mark_disconnected(f"unexpected error: {e}")
+                    self.relay_health.mark_disconnected(f"unexpected error: {outbound_error_text(e)}")
                     attempt += 1
                     try:
                         await asyncio.sleep(delay)
@@ -1061,7 +1076,7 @@ class CascorServiceAdapter:
             return result
         except JuniperCascorClientError as e:
             logger.error(f"Failed to create network: {e}")
-            return {"error": str(e)}
+            return {"error": outbound_error_text(e)}
 
     # ------------------------------------------------------------------
     # Training control
@@ -1074,7 +1089,10 @@ class CascorServiceAdapter:
         (e.g. "Training cannot be started: Training data not provided") used to
         be flattened to a bare ``False`` here, so the §S10 surfacing could only
         show a generic failure. The message now rides back to ServiceBackend's
-        ControlResult.
+        ControlResult. It is cascor's ANSWER that rides back: a failure with no
+        HTTP status -- a refused header, an unreachable cascor -- is named by its
+        type alone (``outbound_errors.outbound_error_text``), because its text
+        reached the 409 body an anonymous caller reads (#683 validation).
 
         N3 / Q4 / cascor C5: ``start_fresh=True`` forwards the top-level
         ``start_fresh`` body field to ``POST /v1/training/start`` (cascor#408 —
@@ -1095,7 +1113,7 @@ class CascorServiceAdapter:
             return True, None
         except JuniperCascorClientError as e:
             logger.error(f"Failed to start training: {e}")
-            return False, str(e)
+            return False, outbound_error_text(e)
 
     def is_training_in_progress(self) -> bool:
         try:
@@ -1124,7 +1142,7 @@ class CascorServiceAdapter:
             return {"ok": True, "data": result}
         except JuniperCascorClientError as e:
             logger.error(f"Failed to pause training: {e}")
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": outbound_error_text(e)}
 
     def resume_training(self) -> Dict[str, Any]:
         try:
@@ -1132,7 +1150,7 @@ class CascorServiceAdapter:
             return {"ok": True, "data": result}
         except JuniperCascorClientError as e:
             logger.error(f"Failed to resume training: {e}")
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": outbound_error_text(e)}
 
     def reset_training(self) -> Dict[str, Any]:
         try:
@@ -1141,7 +1159,7 @@ class CascorServiceAdapter:
             return {"ok": True, "data": result}
         except JuniperCascorClientError as e:
             logger.error(f"Failed to reset training: {e}")
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": outbound_error_text(e)}
 
     # Parameter mapping: canopy nn_*/cn_* names -> cascor API parameter names
     _CANOPY_TO_CASCOR_PARAM_MAP = {
@@ -1366,7 +1384,7 @@ class CascorServiceAdapter:
                 logger.info(f"Cascor params updated via REST: {list(cold.keys())}")
             except JuniperCascorClientError as e:
                 logger.error(f"Failed to update cascor params via REST: {e}")
-                return {"ok": False, "error": str(e), "skipped": skipped}
+                return {"ok": False, "error": outbound_error_text(e), "skipped": skipped}
 
         # N5 (I-4/T3): surface cascor's C2a applied/skipped(reason) partition so
         # the canopy toast can show what actually landed and what the live
@@ -1540,7 +1558,7 @@ class CascorServiceAdapter:
             return {"ok": True, "data": (result or {}).get("data", {}), "config": cascor_cfg}
         except JuniperCascorClientError as e:
             logger.error("stage_dataset failed: %s", e)
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": outbound_error_text(e)}
 
     def cancel_pending_dataset(self) -> Dict[str, Any]:
         """DELETE /v1/training/dataset — Phase 1 Cancel button target."""
@@ -1549,7 +1567,7 @@ class CascorServiceAdapter:
             return {"ok": True, "data": (result or {}).get("data", {})}
         except JuniperCascorClientError as e:
             logger.error("cancel_pending_dataset failed: %s", e)
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": outbound_error_text(e)}
 
     def get_pending_dataset(self) -> Dict[str, Any]:
         """GET /v1/training/dataset/pending — peek for the canopy banner."""
@@ -1558,7 +1576,7 @@ class CascorServiceAdapter:
             return {"ok": True, "pending": ((result or {}).get("data", {}) or {}).get("pending")}
         except JuniperCascorClientError as e:
             logger.error("get_pending_dataset failed: %s", e)
-            return {"ok": False, "error": str(e), "pending": None}
+            return {"ok": False, "error": outbound_error_text(e), "pending": None}
 
     # ------------------------------------------------------------------
     # Phase 2 P2-4 (Issue #3): Experimental Functions gate.
@@ -1592,7 +1610,7 @@ class CascorServiceAdapter:
             return {"ok": True, "enabled": bool(data.get("enabled", False))}
         except JuniperCascorClientError as e:
             logger.error("get_experimental_functions failed: %s", e)
-            return {"ok": False, "error": str(e), "enabled": False}
+            return {"ok": False, "error": outbound_error_text(e), "enabled": False}
 
     def set_experimental_functions(self, enabled: bool) -> Dict[str, Any]:
         """POST /v1/admin/experimental_functions — write the server gate state.
@@ -1611,7 +1629,7 @@ class CascorServiceAdapter:
             return {"ok": True, "enabled": bool(data.get("experimental_functions_enabled", data.get("enabled", enabled)))}
         except JuniperCascorClientError as e:
             logger.error("set_experimental_functions failed: %s", e)
-            return {"ok": False, "error": str(e), "enabled": False}
+            return {"ok": False, "error": outbound_error_text(e), "enabled": False}
 
     # ------------------------------------------------------------------
     # Phase 2 P2-5 (Issue #3): Live Dataset Switch.
@@ -1658,7 +1676,7 @@ class CascorServiceAdapter:
             return {"ok": True, "data": (result or {}).get("data", {}), "config": cascor_cfg}
         except JuniperCascorClientError as e:
             logger.error("swap_dataset_live failed: %s", e)
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": outbound_error_text(e)}
 
     def cancel_swap_dataset_live(self) -> Dict[str, Any]:
         """DELETE /v1/training/dataset/live — cancel an in-flight live swap.
@@ -1674,7 +1692,7 @@ class CascorServiceAdapter:
             return {"ok": True, "data": (result or {}).get("data", {})}
         except JuniperCascorClientError as e:
             logger.error("cancel_swap_dataset_live failed: %s", e)
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": outbound_error_text(e)}
 
     # ------------------------------------------------------------------
     # Phase 2 P2-7 (Issue #3): live ``dataset_swap`` event feed.
@@ -1712,7 +1730,7 @@ class CascorServiceAdapter:
             return {"ok": True, "events": list(events)}
         except JuniperCascorClientError as e:
             logger.error("get_dataset_swap_events failed: %s", e)
-            return {"ok": False, "error": str(e), "events": []}
+            return {"ok": False, "error": outbound_error_text(e), "events": []}
 
     def list_snapshots(self) -> Dict[str, Any]:
         """GET /v1/snapshots -- the inventory of the backend that CREATES the snapshots.
@@ -1734,7 +1752,7 @@ class CascorServiceAdapter:
             return {"ok": True, "snapshots": [dict(s) for s in data if isinstance(s, dict)]}
         except JuniperCascorClientError as e:
             logger.error("list_snapshots failed: %s", e)
-            return {"ok": False, "error": str(e), "snapshots": []}
+            return {"ok": False, "error": outbound_error_text(e), "snapshots": []}
 
     def get_snapshot(self, snapshot_id: str) -> Dict[str, Any]:
         """GET /v1/snapshots/{id} -- one snapshot's metadata from the backend that
@@ -1753,7 +1771,7 @@ class CascorServiceAdapter:
             return {"ok": True, "snapshot": None}
         except JuniperCascorClientError as e:
             logger.error("get_snapshot(%s) failed: %s", snapshot_id, e)
-            return {"ok": False, "error": str(e), "snapshot": None}
+            return {"ok": False, "error": outbound_error_text(e), "snapshot": None}
 
     def get_snapshot_dataset_swaps(self, snapshot_id: str) -> Dict[str, Any]:
         """GET /v1/snapshots/{id}/history/dataset_swaps — read a stored
@@ -1780,7 +1798,7 @@ class CascorServiceAdapter:
             return {"ok": True, "events": list(events)}
         except JuniperCascorClientError as e:
             logger.error("get_snapshot_dataset_swaps(%s) failed: %s", snapshot_id, e)
-            return {"ok": False, "error": str(e), "events": []}
+            return {"ok": False, "error": outbound_error_text(e), "events": []}
 
     def _apply_params_hot(self, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Send hot params via /ws/control set_params with command_id.
@@ -1984,7 +2002,7 @@ class CascorServiceAdapter:
             )
         except JuniperCascorClientError as e:
             logger.error(f"Failed to get training status: {e}")
-            return {"is_training": False, "error": str(e)}
+            return {"is_training": False, "error": outbound_error_text(e)}
 
     # Declaration only, deliberately without a value: it gives mypy the type while leaving
     # the attribute genuinely absent until first use, which is what makes the lazy
@@ -2028,7 +2046,7 @@ class CascorServiceAdapter:
             )
         except JuniperCascorClientError as e:
             logger.error(f"Failed to get training status (refresher): {e}")
-            return {"is_training": False, "error": str(e)}
+            return {"is_training": False, "error": outbound_error_text(e)}
 
     def get_network_data(self) -> Dict[str, Any]:
         try:

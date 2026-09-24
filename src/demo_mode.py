@@ -64,6 +64,7 @@ import torch
 
 from backend.training_state_machine import Command, TrainingPhase, TrainingStateMachine  # TrainingStatus,
 from canopy_constants import BackendConstants, TrainingConstants
+from secrets_util import bind_outbound_key
 from settings import get_settings
 
 # import copy
@@ -1060,10 +1061,13 @@ class DemoMode:
             algorithm: Optional algorithm parameter for backward compatibility
             n_rotations: Number of spiral rotations
             juniper_data_api_key: Optional outbound API key sent as the
-                ``X-API-Key`` header on every juniper-data call. When ``None``
-                (default), ``JuniperDataClient`` falls back to its own
-                ``JUNIPER_DATA_API_KEY`` env-var lookup; when ``""``,
-                ``JuniperDataClient`` omits the header entirely.
+                ``X-API-Key`` header on every juniper-data call -- canopy's
+                resolution, ``settings.juniper_data_api_key``. When it is falsy
+                (``None`` or ``""``), no key is sent: ``JuniperDataClient``
+                falls back to its own ``JUNIPER_DATA_API_KEY[_FILE]`` lookup
+                for ANY falsy key (``api_key or ...``), and
+                ``secrets_util.bind_outbound_key`` undoes it, so a value canopy
+                refused cannot come back raw (#683 validation).
 
         Returns:
             Dataset dictionary
@@ -1083,10 +1087,13 @@ class DemoMode:
         # ``juniper_canopy_data_client_request_duration_ms``. The hook
         # is built fresh per client construction so test-side resets of
         # ``_canopy_metrics`` see a usable closure on the next call.
-        client = JuniperDataClient(
-            base_url=juniper_data_url,
-            api_key=juniper_data_api_key,
-            on_request=build_data_client_request_hook(),
+        client = bind_outbound_key(
+            JuniperDataClient(
+                base_url=juniper_data_url,
+                api_key=juniper_data_api_key,
+                on_request=build_data_client_request_hook(),
+            ),
+            juniper_data_api_key,
         )
 
         params: Dict[str, Any] = {
@@ -2013,10 +2020,14 @@ class DemoMode:
             raise JuniperDataConfigurationError("JUNIPER_DATA_URL is required to load non-spiral generators.")
 
         self.logger.info("Loading generator '%s' from JuniperData at %s (n_samples=%s; server defaults applied)", generator, juniper_data_url, n_samples)
-        client = JuniperDataClient(
-            base_url=juniper_data_url,
-            api_key=settings.juniper_data_api_key,
-            on_request=build_data_client_request_hook(),
+        # bind_outbound_key: with no key, the client reads JUNIPER_DATA_API_KEY[_FILE] itself (#683 validation).
+        client = bind_outbound_key(
+            JuniperDataClient(
+                base_url=juniper_data_url,
+                api_key=settings.juniper_data_api_key,
+                on_request=build_data_client_request_hook(),
+            ),
+            settings.juniper_data_api_key,
         )
         try:
             response = client.create_dataset(generator=generator, params={"seed": 42}, persist=True)

@@ -55,7 +55,9 @@ class TestAdapterStartFreshTransport:
         from juniper_cascor_client import JuniperCascorClientError
 
         adapter = self._adapter()
-        adapter._client._post.side_effect = JuniperCascorClientError("boom")
+        # cascor's ANSWER rides back (PR-B2); a failure with no HTTP status is named by type
+        # only, because its transport text quoted a padded key (#683 validation).
+        adapter._client._post.side_effect = JuniperCascorClientError("boom", status_code=409)
         started, error = adapter.start_training_background(start_fresh=True)
         assert started is False
         assert "boom" in error
