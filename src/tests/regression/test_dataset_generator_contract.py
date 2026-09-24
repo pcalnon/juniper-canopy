@@ -147,29 +147,38 @@ class TestX6StagingIsGuarded:
         assert resp.json()["status"] == "success"
 
 
+#: What juniper-data declares for ``equities_seq`` since juniper-data#437 (generator 6.0.0; owner
+#: ruling X8, 2026-09-24). RECORDED, not read: ``GeneratorInfo`` does not put ``task_type`` on the
+#: wire, and the ``juniper_data`` installed in this env is 0.6.0 (see the module docstring), so
+#: there is nothing current to read it from.
+JUNIPER_DATA_EQUITIES_SEQ_TASK_TYPE = "regression"
+
+
 @pytest.mark.regression
 @pytest.mark.unit
-class TestX8TaskTypeDivergenceIsDeliberate:
-    """X8 — canopy and juniper-data label ``equities_seq`` differently, and that is load-bearing.
+class TestX8TaskTypeAgreesWithJuniperData:
+    """X8 — canopy and juniper-data both label ``equities_seq`` ``regression``.
 
-    canopy calls it ``regression`` (``model_registry.py``); juniper-data calls it
-    ``classification`` (``juniper_data/api/routes/generators.py``). The generator is genuinely
-    **dual-target** -- it emits both a next-day direction (one-hot) and a next-day close -- and the
-    LMU consumes the regression target, so both labels are locally correct and neither vocabulary
-    has a word for "both".
+    The generator is **dual-target**: it emits a next-day direction (one-hot) and a next-day
+    close, and neither vocabulary has a word for "both". canopy labelled it ``regression``,
+    because the LMU, the one model that trains on it, consumes the close. juniper-data declared
+    it ``classification``. This class used to pin that divergence as deliberate: it was inert,
+    because the label never crossed the wire, and it would bite the day someone "fixed the
+    drift" in the obvious direction.
 
-    The divergence is inert today: ``GeneratorInfo`` omits ``task_type`` from the wire, so canopy
-    never sees upstream's value. It becomes load-bearing the moment §12 seeds generators from the
-    upstream registry, or someone "fixes the drift" in the obvious direction. These tests exist to
-    make that moment loud.
+    The owner ruled on 2026-09-24 that juniper-data changes its label, and juniper-data#437 did,
+    at generator version 6.0.0. The class now pins the agreement. It keeps the tripwire, because
+    relabelling canopy's seed ``classification`` would still strand the dataset.
     """
 
     def test_canopy_labels_equities_seq_as_regression(self):
-        assert get_dataset_spec("equities_seq").task_type == "regression", "canopy must keep labelling equities_seq 'regression'. juniper-data calls it " "'classification'; aligning canopy to that gives the LMU ZERO compatible datasets " "(see the companion test). The generator is dual-target and both labels are locally " "correct -- if you are here to reconcile the vocabularies, change the PREDICATE or the " "generator's declaration, not this seed."
+        assert get_dataset_spec("equities_seq").task_type == JUNIPER_DATA_EQUITIES_SEQ_TASK_TYPE == "regression", "canopy and juniper-data agree that equities_seq is 'regression' (juniper-data#437, generator 6.0.0). Changing either label reopens X8, and relabelling this seed 'classification' leaves it compatible with NO model (see the companion test)."
 
-    def test_relabelling_it_would_leave_the_lmu_with_no_dataset(self):
+    def test_relabelling_it_classification_would_strand_it(self):
         # The consequence, MEASURED rather than asserted in prose, so the warning above cannot rot
-        # into a claim nobody has checked.
+        # into a claim nobody has checked. Relabelled, ``equities_seq`` matches no model: the LMU
+        # takes regression only, and cascor rejects rank 3. (This test's old name said the LMU
+        # would be left with no dataset. That stopped being true when §12 seeded five more.)
         import dataclasses
 
         relabelled = dataclasses.replace(get_dataset_spec("equities_seq"), task_type="classification")
