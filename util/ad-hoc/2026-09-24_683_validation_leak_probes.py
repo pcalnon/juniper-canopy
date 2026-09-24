@@ -105,7 +105,8 @@ class _RawUpstream:
                     if not chunk:
                         break
                     data += chunk
-            except OSError:
+            except OSError as e:
+                print(e)
                 pass
             self.received.append(data)
             try:
@@ -119,12 +120,14 @@ class _RawUpstream:
                 else:
                     body = b'{"status":"ok","dataset_id":"x"}'
                     conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
-            except OSError:
+            except OSError as e:
+                print(e)
                 pass
             finally:
                 try:
                     conn.close()
-                except OSError:
+                except OSError as e:
+                    print(e)
                     pass
 
 
@@ -341,6 +344,7 @@ def _raw_request(port: int, request: bytes) -> bytes:
                 response += chunk
         except OSError as e:
             print(e)
+            pass
     return response
 
 
