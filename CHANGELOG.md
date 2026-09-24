@@ -121,6 +121,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A Start refused because the staged dataset is wider than the network now says how to proceed
+  (F1).** cascor cannot widen a network on a plain Start, which continues the current network.
+  - Since juniper-cascor#687, cascor refuses such a Start **before** loading anything, and
+    opens its message with `[start_fresh_required]`.
+  - The alert now names the remedy and the two controls that apply it: **Stop & Restart with new
+    dataset** and **Start fresh**. The pending banner stays up, because the dataset stays staged.
+    The alert also says the results shown are still the previous run's.
+  - It stays until dismissed, because it carries an instruction. Every other Start failure keeps
+    the generic alert.
+  - Before, the alert showed cascor's raw `_pad_dataset_for_network: … resize the network first`.
+    By then cascor had already switched the loaded dataset, so the page showed the previous run's
+    results under the new dataset's name (juniper-ml's A-N2 run, F1). `equities` (15 features)
+    and `mnist` (784) hit this against any 2-feature network.
+  - There is no fallback for an older cascor. It consumed the staged dataset before refusing, so
+    the banner the alert points at was gone.
+- **The restart modal called Start fresh "functionally a clean stack launch" (F2).** Since
+  juniper-cascor#685, a start-fresh carries the applied parameters onto the rebuilt network, so
+  the parameters edited in the modal survive it (owner ruling 2026-09-24). A clean launch would
+  have reset them to the engine defaults.
+  - The toggle label and both help texts now say the parameters carry over.
+  - Against a cascor older than #685 the edits are still dropped, and the text is then wrong.
+  - `src/tests/unit/frontend/test_start_fresh_refusal_and_modal_text.py` covers both entries.
+    It pins the marker literal, and it checks that the controls the alert names exist under
+    those labels.
 - **The sidebar said "Active: CasCor" before anything had asked the backend (X11).**
   `_selection_is_live` answers `True`, `False` or `None`, and the model summary rendered `None`
   exactly like `True`. So the first-paint seed read *"Active: CasCor"* before any read. A mount
