@@ -22,8 +22,10 @@
     var MAX_METRICS = 1000;
     var MAX_CASCADE_ADD = 500;
     var MAX_CANDIDATE_PROGRESS = 500;
-    // CAN-015g (g-4): weight payloads piggyback on metrics events
-    // emitted by g-3's replay session. Each carries base64-encoded
+    // CAN-015g (g-4): weight payloads were designed to piggyback on
+    // metrics events emitted by g-3's replay session. None arrive
+    // today: cascor's replay frames carry no weights and canopy's
+    // metrics relay drops the key (F-CANOPY-057). Each carries base64-encoded
     // float32 tensors (output + per-unit) so the per-event payload
     // can be tens of MB on large networks. Cap aggressively so the
     // browser doesn't OOM on a long replay session — 100 events
@@ -215,9 +217,10 @@
         var drain = window._juniperWsDrain;
 
         window.cascorWS.on("metrics", function(data) {
-            // CAN-015g (g-4): replay V2 events carry an extra
-            // ``weights`` block on sample-boundary epochs (set by
-            // g-3's _ReplaySession._emit_frame). Split it off into
+            // CAN-015g (g-4): replay V2 events were designed to carry
+            // an extra ``weights`` block on sample-boundary epochs
+            // (from g-3's _ReplaySession._emit_frame, which sets none
+            // today; F-CANOPY-057). Split it off into
             // the dedicated weight buffer so the metrics ring stays
             // light — a 1000-event metrics buffer with multi-MB
             // weight payloads attached to each entry would balloon

@@ -136,6 +136,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   props. The reason is no longer repeated in `title=` on a disabled Select: Bootstrap gives
   `.btn:disabled` `pointer-events: none`, so that tooltip could never show. Enabled Selects keep
   their hover hint.
+- **An idle dashboard spent about a third of its response latency on a timer with nothing to do:
+  the replay weight drain, a 2 Hz timer, ran on every tab for the life of the page.**
+  `replay-player-panel-weight-drain` drains the CAN-015g replay-weight ring buffer. It ran on no
+  tab gate, and every tick was a store update, which re-runs the page's selectors, plus a clientside
+  callback that found nothing. Today it always finds nothing. cascor's replay frames carry no
+  weights: `_emit_frame` adds none, and `weights_at` has no production caller. canopy's metrics relay
+  also rebuilds each payload without that key. So no replay weight reaches the page. The page's
+  main thread sits at ~0.1% idle, so the timer's cost came straight out of response delivery. An
+  in-page A/B on an idle page parked the timer and compared each window with its two neighbouring
+  baselines (juniper-ml `util/ad-hoc/2026-09-23_canopy_timer_park_ab.py`, two runs in opposite
+  orders). It cut the median response-delivery latency by **42% and 32%**. A live check of this
+  build against its parent (`2026-09-23_idle_cuts_live_check.py`) was less clear. One cuts window
+  beat both of its neighbours, and the other was 1.5–2.7% slower than both, so the check scored the
+  latency inconsistent. An earlier check of the same change, built on canopy#670's branch, scored
+  it consistent.
+  - **The drain now ships disabled** and runs only once this page has started a replay. A new
+    clientside callback, the only writer of its `disabled`, enables it when
+    `replay-player-session` holds a `snapshot_id`. The snapshots panel writes the session on POST
+    `/replay`.
+  - **Against cascor it then runs until the page reloads, as it always ran before.** A Stop does
+    not clear the session. `_merge_session` clears `snapshot_id` only when the stop response is
+    empty, and the proxied cascor envelope never is, so the old id survives the overlay. The player
+    also keeps its session view. That is an existing defect, F-CANOPY-056 in the juniper-ml E2E
+    evidence ledger (`notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EVIDENCE.md`); this
+    change neither causes nor fixes it.
+  - **Nothing a user sees changes.** No replay weight reaches the page (F-CANOPY-057 in the same
+    ledger). The Decision Boundary consumer also ignores replay weights without a session, and the
+    JS ring buffer is capped at 100 entries, so a paused drain cannot grow it.
+  - **The metrics panel's own 1 Hz `-update-interval` is removed.** No callback took it as an
+    Input. Its measured effect alone was nil (−1.6%), so this is hygiene. Its period setting
+    (`update_interval` / `JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS`) is still parsed and still
+    drives nothing, exactly as before, and the two docs rows now say so.
+  - New `src/tests/unit/frontend/test_idle_dispatch_cuts.py` fails CI on any `dcc.Interval` in the
+    built app that no callback consumes. It also pins the drain's gate: one writer, clientside, from
+    the session, and no primary writer of the session that could hold it. It runs the gate under
+    node. 7 of its 9 tests fail on the parent; the two premise pins hold on both.
+  - **Left alone, with a reason:** the training-state store's `/api/state` rewrites that change
+    only `timestamp`, the third cut the ledger listed. The rewrite is the clock of the "Phase
+    Duration" readout, which computes elapsed time at callback time. Suppressing it would freeze
+    the readout whenever the state is otherwise static, so it needs its own design.
 - **The replay controls never applied: play, step, start, end, the speed buttons and the slider
   did nothing on any page load (F-CANOPY-048).** `handle_replay_controls` (Input
   `replay-slider.value` → Output `replay-state.data`) and `update_replay_ui` (Input

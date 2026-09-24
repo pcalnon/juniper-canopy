@@ -313,6 +313,12 @@ class MetricsPanel(BaseComponent):
 
         # Update interval (milliseconds)
         # Priority: 1. Passed config, 2. Environment variable, 3. Default (1000ms)
+        #
+        # This value drives nothing. It set the period of the panel's own ``-update-interval``,
+        # which no callback consumed and which was removed. It is still parsed, so a config or
+        # an environment that sets ``update_interval`` / JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS
+        # behaves exactly as it did: without effect. The metrics refresh is
+        # ``metrics-store-interval`` (dashboard_manager.py).
         if "update_interval" in config:
             self.update_interval = config["update_interval"]
         elif update_interval_env := os.getenv("JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS"):
@@ -759,8 +765,9 @@ class MetricsPanel(BaseComponent):
                         "accuracy_yaxis_range": None,
                     },
                 ),
-                # Update interval
-                dcc.Interval(id=f"{self.component_id}-update-interval", interval=self.update_interval, n_intervals=0),
+                # The panel's own 1 Hz ``-update-interval`` was removed: no callback took it as an
+                # Input, and every tick was still a store update that re-ran the page's
+                # selectors. ``test_every_interval_has_a_consumer`` keeps the class out.
                 dcc.Interval(id=f"{self.component_id}-stats-update-interval", interval=5000, n_intervals=0),
                 # Replay functionality stores
                 dcc.Store(

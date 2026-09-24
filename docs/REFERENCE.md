@@ -311,7 +311,7 @@ The most commonly used environment variables for juniper-canopy configuration. F
 | `JUNIPER_CANOPY_WEBSOCKET__MAX_CONNECTIONS_PER_SESSION` | `5` | Per-session WebSocket fairness cap keyed on `canopy_session` |
 | `JUNIPER_CANOPY_WEBSOCKET__HEARTBEAT_INTERVAL` | `30` | Heartbeat interval (seconds) |
 | `JUNIPER_CANOPY_DEMO_UPDATE_INTERVAL` | `1.0` | Demo simulation step interval (seconds) |
-| `JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS` | `1000` | Dashboard metrics refresh (ms) |
+| `JUNIPER_CANOPY_METRICS_UPDATE_INTERVAL_MS` | `1000` | Unused: parsed, drives nothing (its timer had no consumer and was removed); the metrics refresh is `metrics-store-interval` |
 | `JUNIPER_CANOPY_LOG_FORMAT` | `text` | Set `json` for structured JSON logging |
 | `JUNIPER_CANOPY_SENTRY_DSN` | unset | Sentry error tracking DSN |
 | `JUNIPER_CANOPY_METRICS_ENABLED` | `false` | Enable Prometheus metrics (`juniper_canopy_*`) |
