@@ -487,11 +487,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     The exempt sets (`/`, the health routes, `/dashboard`, `/metrics`) and the browser surface
     (`/api/csrf`, `/api/train/*`, next bullet) are not in these counts.
     `util/ad-hoc/2026-09-23_blank_api_key_route_sweep.py` reproduces the figures. The claim that no
-    caller could present the key holds for spaces and tabs only, because `str.strip()` also empties
-    characters a header does carry. U+00A0 and U+0085 pass both parsers; a key of those could be
-    presented, but `hmac.compare_digest` raises `TypeError` on non-ASCII text, so every keyed
-    request got a 500. U+001C to U+001F pass h11 but not httptools, canopy's default parser; under
-    h11 a key of those authenticated normally. All of these keys now count as no key too.
+    caller could present the key holds for every `str.strip()` character except U+00A0/U+0085, and,
+    under h11 only, U+001C–U+001F. Measured on uvicorn 0.49.0 with raw socket bytes (the same
+    script's `header-probe`): both parsers strip an all-space or all-tab value to empty and refuse
+    U+000B and U+000C with a 400, and CR and LF end the header line. httptools, canopy's default
+    parser, also refuses U+001C–U+001F. h11 passes them, and under h11 a key of those authenticated
+    normally. U+00A0 and U+0085 pass both parsers, but `hmac.compare_digest` raises `TypeError` on
+    non-ASCII text, so every keyed request got a 500. No other `str.strip()` character can arrive,
+    because Starlette decodes header bytes as latin-1. All of these keys now count as no key too.
   - **The browser control surface loses its Origin/CSRF gate.** While auth was enabled, a keyless
     `/api/train/*` request had to pass the Origin allowlist and a CSRF token under the default
     flags; with `browser_control_auth_enabled` off, it needed the key outright. With auth disabled,
@@ -513,9 +516,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   service defaults `JUNIPER_CANOPY_REQUIRE_AUTH=true`, so no deploy profile reaches it.
 
   Startup now logs a distinct WARNING when the key is set but blank. It is emitted once per
-  process, right after the posture check and after `configure_logging` has run, through the system
-  logger, so it carries its level and format, lands in `logs/system.log`, and reaches Sentry when
-  a DSN is configured. The secret is read at import, before logging is configured, so the read only
+  process, after `configure_logging` has run, through the system logger, so it carries its level
+  and format, lands in `logs/system.log`, and reaches Sentry when a DSN is configured. It follows
+  the posture check whichever way that check goes. When the boot proceeds, it comes right after the
+  check. When `JUNIPER_CANOPY_REQUIRE_AUTH=true` makes the check refuse to start, it follows the
+  check's CRITICAL, which says no key is configured. It is then worded for a refused boot: the blank
+  key counts as no key, and canopy refuses to start. The refusal propagates unchanged. (#678 logged
+  nothing on that path, because the posture call raised before the report was reached; the #678
+  follow-up fixed that.) The secret is read at import, before logging is configured, so the read only
   records which source was blank, and the lifespan reports it. The WARNING names that source,
   `CANOPY_API_KEY` or the file named by `CANOPY_API_KEY_FILE`, and gives the remedy for it.
   `CANOPY_API_KEY_FILE` wins whenever it names an existing file, so a blank file beside a real
@@ -525,6 +533,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   This entry supersedes the message of commit `3a6dea95`, which predates #660's correction: that
   message still says the WebSocket `?api_key=` fallback "could still present" the key, and it
   names only "One real behaviour change".
+
+- **A padded `CANOPY_API_KEY` no longer leaks into the logs, and the blank-key rule reaches the
+  key's two other readers (#678 follow-up).**
+  - **The leak predates #660.** A key with leading whitespace or a line break is not blank, so it
+    ENABLES auth, exactly as set. The dashboard's server-side self-calls sent it as `X-API-Key`.
+    `requests` refuses such a value, and its `InvalidHeader` message quotes the whole value. 54 of
+    the 64 self-call sites log that text or return it, and several show it in a dashboard alert. So
+    the real key reached `logs/*.log`, the console and, when a Sentry DSN is configured, Sentry
+    Logs. `CANOPY_API_KEY=" leaked-key-XYZ123"` logged `Selection hydration read failed (Invalid
+    leading whitespace ... ' leaked-key-XYZ123')` at WARNING.
+    - `frontend/internal_api.py` now leaves off any key `requests` refuses to send. It asks
+      `requests` itself, so no self-call can raise that error. The fix is in the one helper every
+      self-call uses, not in the 54 sites, so a new site cannot reopen the leak.
+    - Auth stays enabled on such a key as set. The self-calls are now refused instead, and a refusal
+      carries nothing of the key.
+    - `util/ad-hoc/2026-09-24_self_call_error_text_census.py` lists all 64 sites.
+  - **Boot WARNs once about a padded key.** It uses the system logger, beside the blank-key
+    WARNING. The key is not stripped and the boot is not refused, because either would change which
+    key authenticates. No HTTP header carries such a key reliably: uvicorn's parsers drop a value's
+    leading spaces and tabs, h11 also drops its trailing ones, and a header cannot hold a line break.
+  - **Boot WARNs when `CANOPY_API_KEY_FILE` names no existing file.** It was ignored silently,
+    exactly as if unset, so a typo in the path fell through to `CANOPY_API_KEY` without a word. The
+    WARNING names the variable and never the path it holds. An operator who confuses the two
+    variables puts the key itself there.
+  - **A whitespace-only `CANOPY_API_KEY` env var now also serves the interactive docs, and its
+    self-calls send no key.** Both readers used the raw value.
+    - `_docs_enabled` kept `/docs`, `/docs/oauth2-redirect`, `/openapi.json` and `/redoc` at 404.
+    - The self-calls sent the whitespace key, which `requests` refuses, so every one failed although
+      auth was off.
+    - Both now apply `APIKeyAuth`'s blank rule. The blank-key WARNING's "exactly as with no key
+      configured" is now true of every reader.
+    - **The four docs routes now answer 200 to anyone who can reach the port**, as they do with no
+      key.
+  - **Tests.**
+    - `src/tests/regression/test_blank_api_key_warning_boot.py` now also boots canopy in a fresh
+      interpreter: a real `import main` with the key set, the real lifespan, and canopy's own
+      `logs/system.log`. Its in-process tests rebuild the auth singleton themselves. So a `main.py`
+      that built `APIKeyAuth` without `get_api_key_auth()` passed the whole CI lane (6866 tests),
+      while real uvicorn logged no blank-key line anywhere. That mutant now fails.
+    - A second fresh boot, with a padded key and a missing key file, drives eight real dashboard
+      handlers under five padded keys. No log record from any logger carries the key, and nor do the
+      log files, the console or the handlers' results.
+    - Unit tests: `src/tests/unit/frontend/test_internal_api_key_rules.py` (new),
+      `src/tests/unit/test_security.py` and `src/tests/unit/test_secrets_util.py`, including the new
+      `secrets_util.resolve_secret_detail`. The `get_secret` test now asserts literal values.
 
 ## [0.8.1] - 2026-09-15
 

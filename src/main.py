@@ -333,27 +333,36 @@ async def lifespan(app: FastAPI):
     # boot FAILURE (CRITICAL + AuthPostureError) — set true wherever secrets are
     # provisioned (the composed juniper-deploy stack). Bypass with
     # JUNIPER_SKIP_AUTH_POSTURE_CHECK=1 (logged loudly).
-    from juniper_service_core import enforce_auth_posture
+    from juniper_service_core import AuthPostureError, enforce_auth_posture
 
     from secrets_util import get_secret
 
-    _canopy_api_key = get_secret("CANOPY_API_KEY")
-    enforce_auth_posture(
-        [_canopy_api_key] if _canopy_api_key else [],
-        require_auth=settings.require_auth,
-        service_name="juniper-canopy",
-        logger=system_logger,
-    )
-
     # APD-ECO-008: the posture check words a SET-but-blank key exactly like an unset
-    # one, so a blank key gets its own WARNING, naming which source was blank. It is
-    # emitted here, through the logger configured above, because the key is read at
-    # import (``api_key_auth = get_api_key_auth()`` below), before ``configure_logging``
-    # has run. It uses what that read recorded rather than reading the secret again,
-    # and it fires once per process however many times this lifespan runs.
-    from security import report_blank_api_key
+    # one, so a blank key gets its own WARNING, naming which source was blank. The same
+    # report covers a key with leading or trailing whitespace or a line break, and a
+    # CANOPY_API_KEY_FILE that names no file (#678 follow-up). It is emitted here,
+    # through the logger configured above, because the key is read at import
+    # (``api_key_auth = get_api_key_auth()`` below), before ``configure_logging`` has
+    # run. It uses what that read recorded rather than reading the secret again, and it
+    # fires once per process however many times this lifespan runs. When the posture
+    # check refuses to start (JUNIPER_CANOPY_REQUIRE_AUTH=true), its CRITICAL says NO key
+    # is configured, which misleads an operator whose key is SET but blank: the report
+    # still runs, worded for a boot that is failing, and the error propagates unchanged.
+    from security import report_api_key_configuration
 
-    report_blank_api_key(system_logger)
+    _canopy_api_key = get_secret("CANOPY_API_KEY")
+    try:
+        enforce_auth_posture(
+            [_canopy_api_key] if _canopy_api_key else [],
+            require_auth=settings.require_auth,
+            service_name="juniper-canopy",
+            logger=system_logger,
+        )
+    except AuthPostureError:
+        report_api_key_configuration(system_logger, boot_refused=True)
+        raise
+
+    report_api_key_configuration(system_logger)
 
     # D2 (SEC-F22): loopback bind-guard. Fail loud + closed here -- before
     # backend init / serving -- when canopy is configured to bind a non-loopback
@@ -500,8 +509,12 @@ async def lifespan(app: FastAPI):
     system_logger.info("Application shutdown complete")
 
 
-# Disable interactive API docs when authentication is enabled (production).
-_docs_enabled = not get_secret("CANOPY_API_KEY")
+# Disable interactive API docs when authentication is enabled (production). A blank key
+# (empty or whitespace-only) leaves auth disabled (``security.APIKeyAuth``), so it serves
+# the docs exactly as no key does (#678 follow-up). This read used the raw value, so a
+# whitespace-only CANOPY_API_KEY env var hid /docs, /docs/oauth2-redirect, /openapi.json
+# and /redoc while every other route served without a key.
+_docs_enabled = not (get_secret("CANOPY_API_KEY") or "").strip()
 # Initialize FastAPI
 app = FastAPI(
     title="Juniper Canopy",

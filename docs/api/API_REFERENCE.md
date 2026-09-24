@@ -63,7 +63,8 @@ export JUNIPER_CANOPY_SERVER__PORT=8051
 
 ### API Documentation (Interactive)
 
-When server is running, visit:
+When server is running with no API key configured (an empty or whitespace-only key counts as none; see
+[Authentication](#authentication)), visit:
 
 ```bash
 http://127.0.0.1:8050/docs
@@ -85,9 +86,18 @@ Authentication is configuration-dependent. The key is read from the file named b
 
 - If no key is configured, API-key authentication is disabled for development/demo use.
 - A key that is empty or whitespace-only counts as no key: authentication is disabled exactly as if it were
-  unset, and startup logs a WARNING naming which source was blank. This includes a blank file named by
-  `CANOPY_API_KEY_FILE` while `CANOPY_API_KEY` holds a real key, because the file takes precedence.
+  unset, the interactive docs are served, and the dashboard's own requests send no key. Startup logs a WARNING
+  naming which source was blank. This includes a blank file named by `CANOPY_API_KEY_FILE` while
+  `CANOPY_API_KEY` holds a real key, because the file takes precedence. With
+  `JUNIPER_CANOPY_REQUIRE_AUTH=true` a blank key fails the boot exactly as no key does, and the WARNING follows
+  the posture check's CRITICAL, worded for the refused boot.
 - Otherwise keyed callers must send `X-API-Key: <value>`.
+- A key with leading or trailing whitespace, or a line break, is used exactly as set: it is not stripped, and
+  authentication is enabled on it. No HTTP header carries such a key reliably, so startup logs a WARNING. The
+  dashboard's own requests leave off a key their HTTP client refuses to send (one that starts with whitespace
+  or holds a line break), so they are refused, and the refusal never carries the key.
+- A `CANOPY_API_KEY_FILE` that names no existing file is ignored, exactly as if unset, and startup logs a
+  WARNING naming the variable (never the path it holds).
 - Same-origin browser training controls (`/api/train/*`, `/api/csrf`, `/ws/control`) use the browser path:
   allowed `Origin` + `canopy_session` cookie + CSRF token when `JUNIPER_CANOPY_BROWSER_CONTROL_AUTH_ENABLED=true`
   (the default). Keyed callers continue to work.
