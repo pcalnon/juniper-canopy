@@ -7,7 +7,8 @@ Evidence: juniper-ml ``notes/JUNIPER_2026-08-09_JUNIPER-CANOPY_E2E-VALIDATION-EV
 
 At idle the dashboard's main thread is ~0.1% idle, and response-delivery latency is 5-15 s. Every
 ``dcc.Interval`` tick is a store update that re-runs the page's selectors, and a consumed tick adds
-a callback lifecycle. Two timers were half of the page's steady-state ticks:
+a callback lifecycle. Two timers fired 3.0 of the 6.6 ticks per second that the layout's enabled
+Intervals nominally fire (45%, by the static census):
 
   * ``metrics-panel-update-interval`` (1 Hz). No callback took it as an Input, in the built app or,
     as far as the history shows, ever. REMOVED.
@@ -30,13 +31,21 @@ What these tests prove:
   * READINESS PREMISE -- every writer of ``replay-player-session.data`` is an ``allow_duplicate``
     Output, so no pending callback's closure reaches the gate's Input and nothing can hold it.
   * RULE -- the gate, run under node: disabled unless the session holds a truthy ``snapshot_id``.
+  * CHECK -- the CLASS check reports an unconsumed Interval and not a consumed one, and names an
+    Interval it cannot judge (no id, or a pattern-matching id) instead of crashing on it; the sibling
+    lookups accept both shapes.
 
 What they cannot prove: the latency effect. That is the A/B's job, on a live leg.
 
-Falsified against the parent: 7 of the 9 fail. CLASS fails on ``metrics-panel-update-interval``,
-and the drain tests fail because there is no gate and the drain ships enabled. The two premise
-pins, "the drain is not in the tab gate" and "no primary writer of the session", hold on both, by
-design.
+Falsified against canopy#676's parent: 7 of the original 9 fail. CLASS fails on
+``metrics-panel-update-interval``, and the drain tests fail because there is no gate and the drain
+ships enabled. The two premise pins, "the drain is not in the tab gate" and "no primary writer of
+the session", hold on both, by design. The four CHECK tests came later: three from round 3 of
+#676's review, and the positive-path test from the review of the follow-up that added them. They
+test this file's own check and its id lookups, so mutants falsify them, not the parent. Dropping
+either refusal, reverting either lookup helper to a bare ``p["id"]``, making the check report
+nothing or only the first, or counting as a consumer another property, a State, an Output writer or
+an id matched by substring (``fe`` in ``fed``), each fails one of them.
 """
 
 import json
@@ -46,7 +55,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from dash import Dash, html
+from dash import Dash, dcc, html
 
 _SRC = Path(__file__).resolve().parents[3]
 if str(_SRC) not in sys.path:
@@ -108,34 +117,97 @@ def _writers(deps, prop):
     return [(e, out) for e in deps if not e.get("no_output") for out in _split_outputs(e["output"]) if out.split("@", 1)[0] == prop]
 
 
+def _dead_intervals(deps, intervals):
+    """The ids of ``intervals`` that no callback in ``deps`` takes as an Input.
+
+    Refuses, by name, the two shapes ``_consumers`` cannot judge, instead of crashing on them:
+    an Interval with no id (no callback can take it as an Input, so it is dead by construction,
+    but there is no id to report), and a pattern-matching id. Dash serves a pattern-matching id
+    as a JSON string with wildcards, which ``_consumers`` does not match against a dict, so such
+    an Interval would be reported dead when it is not.
+    """
+    anonymous = [p for p in intervals if "id" not in p]
+    assert not anonymous, f"an Interval with no id can have no consumer: {anonymous}"
+    pattern = [p["id"] for p in intervals if not isinstance(p["id"], str)]
+    assert not pattern, f"pattern-matching Interval ids are not supported by this check; extend _consumers before adding one: {pattern}"
+    return sorted(p["id"] for p in intervals if not _consumers(deps, p["id"]))
+
+
+def _interval_ids(intervals):
+    """Every Interval's id, ``None`` where it has none. A list, because a dict id is unhashable."""
+    return [p.get("id") for p in intervals]
+
+
+def _with_id(intervals, component_id):
+    return [p for p in intervals if p.get("id") == component_id]
+
+
 @pytest.mark.unit
 class TestEveryIntervalHasAConsumer:
     def test_every_interval_has_a_consumer(self, built):
         deps, layout = built
         intervals = _intervals(layout, [])
         assert len(intervals) >= 10, f"found only {len(intervals)} Intervals -- is the layout being walked?"
-        # ``_consumers`` matches a layout id against the served dependency ids, where Dash
-        # stores a pattern-matching id as a JSON string with wildcards. It cannot match a
-        # dict id, so such an Interval would be reported dead when it is not: refuse it.
-        pattern = [p["id"] for p in intervals if not isinstance(p["id"], str)]
-        assert not pattern, f"pattern-matching Interval ids are not supported by this check; extend _consumers before adding one: {pattern}"
-        dead = sorted(p["id"] for p in intervals if not _consumers(deps, p["id"]))
+        dead = _dead_intervals(deps, intervals)
         assert not dead, f"Intervals with no consumer tick forever for nothing (each tick is a store update that re-runs the page's selectors): {dead}"
 
     def test_the_metrics_panel_has_no_update_interval(self, built):
         _deps, layout = built
-        ids = {p["id"] for p in _intervals(layout, [])}
+        ids = _interval_ids(_intervals(layout, []))
         assert "metrics-panel-update-interval" not in ids
         assert "metrics-panel-stats-update-interval" in ids, "the walk lost the metrics panel"
+
+
+@pytest.mark.unit
+class TestTheClassCheckItself:
+    """The CLASS check reports what it should, and refuses by name what it cannot judge.
+
+    On the built app it can pass vacuously, so its behaviour is pinned here on synthetic input: an
+    unconsumed Interval is reported and a consumed one is not, and an id-less or pattern-matching
+    Interval gets a named refusal, never a KeyError or TypeError.
+    """
+
+    def test_an_unconsumed_interval_is_reported_and_a_consumed_one_is_not(self):
+        """Only an ``n_intervals`` INPUT consumes an Interval.
+
+        ``idle`` is read only for its ``disabled`` and is written as an Output, ``idle_state`` is read only as a
+        State, and ``fe`` is only a substring of a consumed id. All three tick for nothing. Every dead Interval
+        is reported, not just the first. What this pins is those four loosenings (another property, a State,
+        an Output writer, a substring id); it does not pin every other way of matching an id.
+        """
+        deps = [
+            {
+                "inputs": [{"id": "fed", "property": "n_intervals"}, {"id": "idle", "property": "disabled"}],
+                "state": [{"id": "idle_state", "property": "n_intervals"}],
+                "output": "x.children",
+            },
+            {"inputs": [{"id": "x", "property": "data"}], "state": [], "output": "idle.disabled"},
+        ]
+        intervals = [{"id": i, "interval": 1000} for i in ("idle", "fed", "idle_state", "fe")]
+        assert _dead_intervals(deps, intervals) == ["fe", "idle", "idle_state"]
+
+    def test_an_interval_with_no_id_is_refused(self):
+        with pytest.raises(AssertionError, match="no id can have no consumer"):
+            _dead_intervals([], [{"interval": 1000}])
+
+    def test_a_pattern_matching_id_is_refused(self):
+        with pytest.raises(AssertionError, match="pattern-matching Interval ids are not supported"):
+            _dead_intervals([], [{"id": {"type": "probe", "index": 0}, "interval": 1000}])
+
+    def test_the_sibling_lookups_accept_both_shapes(self):
+        layout = html.Div([dcc.Interval(interval=1000), dcc.Interval(id={"type": "probe", "index": 0}), dcc.Interval(id=DRAIN, disabled=True)])
+        intervals = _intervals(layout, [])
+        assert _interval_ids(intervals) == [None, {"type": "probe", "index": 0}, DRAIN]
+        assert _with_id(intervals, DRAIN) == [intervals[2]]
 
 
 @pytest.mark.unit
 class TestWeightDrainGate:
     def test_the_drain_ships_disabled(self, built):
         _deps, layout = built
-        drain = [p for p in _intervals(layout, []) if p["id"] == DRAIN]
+        drain = _with_id(_intervals(layout, []), DRAIN)
         assert len(drain) == 1
-        assert drain[0].get("disabled") is True, "the weight drain must ship disabled; the gate enables it while a replay session exists"
+        assert drain[0].get("disabled") is True, "the weight drain must ship disabled; the gate enables it once this page has started a replay"
         assert drain[0].get("interval") == 500
 
     def test_one_writer_of_disabled_and_it_is_the_clientside_gate(self, built):
@@ -190,7 +262,7 @@ class TestWeightDrainGateRule:
         ({"snapshot_id": "snap_1", "playing": True, "speed": 2.0}, False),
     ]
 
-    def test_disabled_unless_a_session_exists(self, tmp_path):
+    def test_disabled_unless_the_session_holds_a_snapshot_id(self, tmp_path):
         driver = tmp_path / "gate.js"
         driver.write_text(
             "const fn = (" + _gate_js() + ");\n" "const cases = JSON.parse(process.argv[2]);\n" "console.log(JSON.stringify(cases.map(function (c) { return fn(c); })));\n",
