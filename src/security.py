@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, cast
 from fastapi import HTTPException, Request, status
 from fastapi.security import APIKeyHeader
 
-from secrets_util import resolve_secret
+from secrets_util import resolve_secret_detail
 
 if TYPE_CHECKING:
     from settings import Settings
@@ -59,26 +59,27 @@ class APIKeyAuth:
         # APIKeyAuth (security.py) and the juniper-data / juniper-cascor forks do.
         # ``get_api_key_auth`` already maps an empty key to None, so what reaches
         # here unfiltered is a whitespace-only CANOPY_API_KEY from the env var
-        # (``resolve_secret`` strips a secret FILE, not the env var). Unfiltered, a key
-        # of ASCII spaces and tabs ENABLED auth on a key no caller could present --
-        # h11 and httptools both strip an all-space or all-tab ``X-API-Key`` to
-        # empty -- so every key-gated route refused every caller, while the
-        # boot-time posture check, which filters with this same rule, reported the
-        # service OPEN. That holds for spaces and tabs only: ``str.strip()`` also
-        # removes U+00A0 and U+0085, which both parsers pass through (Starlette
-        # decodes latin-1) but ``hmac.compare_digest`` rejects as non-ASCII
-        # (``TypeError``: a 500, never a match), and U+001C..U+001F, which h11 passes
-        # and httptools -- canopy's default parser -- refuses; under h11 a key of those
-        # was a working key. The
-        # WebSocket ``?api_key=`` parameter could carry a whitespace key, but every WS
-        # route admits a keyless connection anyway (``allow_browser_auth=True``), so
-        # that was never an exposure. Now this class and the posture check agree: a blank
-        # key is no key and auth is off -- the posture canopy documents for no key
-        # at all -- and ``enforce_auth_posture`` fails the boot when ``require_auth``
-        # is set. Two readers still take the raw value for a key and are NOT
-        # changed here: ``main.py``'s ``_docs_enabled`` and the self-call
-        # ``X-API-Key`` in ``frontend/internal_api.py``, which ``requests`` rejects
-        # (``InvalidHeader``) -- both behave as they did before this filter.
+        # (``resolve_secret`` strips a secret FILE, not the env var). Unfiltered, such a
+        # key ENABLED auth on a key no caller could present, so every key-gated route
+        # refused every caller, while the boot-time posture check, which filters with
+        # this same rule, reported the service OPEN. "No caller could present it" holds
+        # for every ``str.strip()`` character except U+00A0 and U+0085, and, under h11
+        # only, U+001C..U+001F. Measured on uvicorn 0.49.0 with raw socket bytes: h11
+        # and httptools both strip an all-space or all-tab ``X-API-Key`` to empty; both
+        # refuse U+000B and U+000C with a 400, and httptools -- canopy's default parser
+        # -- refuses U+001C..U+001F too; nothing above U+00FF can arrive, because
+        # Starlette decodes header bytes as latin-1; and CR/LF end the header line.
+        # U+00A0 and U+0085 pass both parsers, but ``hmac.compare_digest`` rejects
+        # non-ASCII text (``TypeError``: a 500, never a match). U+001C..U+001F pass h11,
+        # and under h11 a key of those was a working key. The WebSocket ``?api_key=``
+        # parameter could carry a whitespace key, but every WS route admits a keyless
+        # connection anyway (``allow_browser_auth=True``), so that was never an
+        # exposure. Now this class and the posture check agree: a blank key is no key
+        # and auth is off -- the posture canopy documents for no key at all -- and
+        # ``enforce_auth_posture`` fails the boot when ``require_auth`` is set. The
+        # key's two other readers apply the same rule (#678 follow-up): ``main.py``'s
+        # ``_docs_enabled`` serves the docs, and ``frontend/internal_api.py`` sends no
+        # ``X-API-Key`` on a self-call, exactly as with no key configured.
         self._api_keys: set[str] = {k for k in (api_keys or []) if isinstance(k, str) and k.strip()}
         self._enabled = len(self._api_keys) > 0
 
@@ -303,15 +304,32 @@ _rate_limiter: RateLimiter | None = None
 # and ``enforce_auth_posture`` words the two identically ("running OPEN"). When the
 # key's source is set but blank, ``get_api_key_auth`` records the NAME of the variable
 # that supplied it -- never the value -- from its one secret read, and
-# ``main.lifespan`` reports it with :func:`report_blank_api_key` once logging is
-# configured. It cannot be logged where it is read: the singleton is first built at
-# import (``main.api_key_auth``), before ``configure_logging`` runs. #660 logged it
+# ``main.lifespan`` reports it (:func:`report_api_key_configuration`, which calls
+# :func:`report_blank_api_key`) once logging is configured. It cannot be logged where
+# it is read: the singleton is first built at import (``main.api_key_auth``), before
+# ``configure_logging`` runs -- and only while ``main`` builds its handler through
+# ``get_api_key_auth()``: a handler built any other way records nothing, and the report
+# has nothing to say (pinned in a fresh interpreter by
+# ``tests/regression/test_blank_api_key_warning_boot.py``). #660 logged it
 # there, through a module logger with no handler, so it reached only Python's
 # last-resort handler -- no level, no JSON, no Sentry, and never ``logs/system.log``.
-# Guarded by ``_blank_key_lock``.
+# Guarded by ``_blank_key_lock``, which guards every finding recorded from that read.
 _blank_key_source: str | None = None
 _blank_key_reported = False
 _blank_key_lock = Lock()
+
+# #678 follow-up: two more things the same read can find, reported beside the blank key
+# by :func:`report_api_key_configuration`, for the same reason. A key with leading or
+# trailing whitespace, or a line break, ENABLES auth with the key exactly as set, and
+# HTTP does not carry it reliably (``_PADDED_KEY_WARNING``); the dashboard's self-calls
+# omit such a key when ``requests`` refuses to send it (``frontend/internal_api.py``),
+# because the refusal's message quoted the key into the logs. A CANOPY_API_KEY_FILE that
+# names no existing file is otherwise ignored silently, exactly as if it were unset.
+# Recorded as variable NAMES only: never the key, nor the path the ``_FILE`` variable
+# holds, because an operator who confuses the two variables puts the key itself there.
+_padded_key_source: str | None = None
+_missing_key_file_var: str | None = None
+_key_findings_reported = False
 
 # One wording per source, because the advice differs: while CANOPY_API_KEY_FILE names
 # an existing file it takes precedence and CANOPY_API_KEY is not read at all
@@ -321,37 +339,70 @@ _BLANK_KEY_OPENS = "so API-key authentication is DISABLED: every route, includin
 _BLANK_KEY_ENV_WARNING = "CANOPY_API_KEY is set but blank (empty or whitespace-only), " + _BLANK_KEY_OPENS + " Set a real key, or unset CANOPY_API_KEY for an intentional open profile."
 _BLANK_KEY_FILE_WARNING = "The file named by CANOPY_API_KEY_FILE is blank (empty or whitespace-only), " + _BLANK_KEY_OPENS + " While CANOPY_API_KEY_FILE names an existing file it takes precedence and CANOPY_API_KEY is not read. Write a real key into that file, or unset CANOPY_API_KEY_FILE to use CANOPY_API_KEY instead."
 
+# The same two sources when the posture check refuses to start
+# (JUNIPER_CANOPY_REQUIRE_AUTH=true): nothing serves, so "authentication is DISABLED ...
+# serves without a key" would be false. These follow the posture check's CRITICAL, which
+# says NO API key is configured, and name the key it counted as none.
+_BLANK_KEY_REFUSES = "so it counts as no key: it is the key the auth-posture check reports as not configured, and because JUNIPER_CANOPY_REQUIRE_AUTH is true, canopy refuses to start."
+_BLANK_KEY_ENV_REFUSED_WARNING = "CANOPY_API_KEY is set but blank (empty or whitespace-only), " + _BLANK_KEY_REFUSES + " Set a real key."
+_BLANK_KEY_FILE_REFUSED_WARNING = "The file named by CANOPY_API_KEY_FILE is blank (empty or whitespace-only), " + _BLANK_KEY_REFUSES + " While CANOPY_API_KEY_FILE names an existing file it takes precedence and CANOPY_API_KEY is not read. Write a real key into that file, or unset CANOPY_API_KEY_FILE to use CANOPY_API_KEY instead."
+
+# Only the env var can be padded: ``resolve_secret`` strips a secret FILE. Measured on
+# uvicorn 0.49.0 and requests 2.34.2 (``util/ad-hoc/2026-09-24_padded_api_key_probes.py
+# header-probe``): h11 and httptools both drop a header value's leading spaces and tabs,
+# h11 also drops trailing ones (httptools keeps them), CR and LF end the header line, and
+# requests refuses to send a value that starts with whitespace or holds a line break.
+_PADDED_KEY_WARNING = (
+    "CANOPY_API_KEY has leading or trailing whitespace, or a line break, and API-key authentication is enabled with the key exactly as set. HTTP does not carry such a key reliably: uvicorn's parsers drop a header value's leading spaces and tabs, h11 drops its trailing ones as well, and a header cannot hold a line break."
+    + " So callers presenting the key can fail to authenticate, and the dashboard's own requests to this API send no key at all when it starts with whitespace or holds a line break, because their HTTP client refuses to send it. Remove the whitespace and any line break from the key."
+)
+_MISSING_KEY_FILE_WARNING = "CANOPY_API_KEY_FILE is set but does not name an existing file, so it is ignored: the key is read from CANOPY_API_KEY instead, exactly as if CANOPY_API_KEY_FILE were unset. Point CANOPY_API_KEY_FILE at the key file, or unset it."
+
+
+def _is_padded_key(api_key: str) -> bool:
+    """True for a key with leading or trailing whitespace, or a line break anywhere in it."""
+    return api_key != api_key.strip() or "\r" in api_key or "\n" in api_key
+
 
 def get_api_key_auth() -> APIKeyAuth:
     """Get the global API key auth handler, creating if needed.
 
-    Creation is the only place the key is read. A set-but-blank key -- one the
-    blank-key filter leaves auth disabled on -- is recorded by source for
-    :func:`report_blank_api_key`; nothing is logged here.
+    Creation is the only place the key is read. What that read finds wrong with the
+    key's configuration is recorded by variable NAME for
+    :func:`report_api_key_configuration`, and nothing is logged here: a set-but-blank key
+    (one the blank-key filter leaves auth disabled on), a key with leading or trailing
+    whitespace or a line break, and a ``CANOPY_API_KEY_FILE`` that names no existing file.
     """
-    global _api_key_auth, _blank_key_source, _blank_key_reported
+    global _api_key_auth, _blank_key_source, _blank_key_reported, _padded_key_source, _missing_key_file_var, _key_findings_reported
     if _api_key_auth is None:
-        api_key, source = resolve_secret("CANOPY_API_KEY")
+        api_key, source, missing_file_var = resolve_secret_detail("CANOPY_API_KEY")
         api_keys = [api_key] if api_key else None
         _api_key_auth = APIKeyAuth(api_keys)
         with _blank_key_lock:
             _blank_key_source = source if api_key is not None and not _api_key_auth.enabled else None
             _blank_key_reported = False
+            _padded_key_source = source if api_key is not None and _api_key_auth.enabled and _is_padded_key(api_key) else None
+            _missing_key_file_var = missing_file_var
+            _key_findings_reported = False
     return _api_key_auth
 
 
-def report_blank_api_key(log: Any) -> bool:
+def report_blank_api_key(log: Any, *, boot_refused: bool = False) -> bool:
     """Log the set-but-blank ``CANOPY_API_KEY`` WARNING through ``log``, at most once.
 
-    ``main.lifespan`` calls this right after ``enforce_auth_posture``, once
-    ``configure_logging`` has run, with the system logger. The message names the
-    source that was blank (``CANOPY_API_KEY_FILE`` or ``CANOPY_API_KEY``) and the
-    remedy for that source, and never the value. It reads only what
-    :func:`get_api_key_auth` recorded, never the secret itself, and reports once
-    per recorded key however many times the lifespan runs.
+    :func:`report_api_key_configuration` calls this; ``main.lifespan`` calls that right
+    after ``enforce_auth_posture``, once ``configure_logging`` has run, with the system
+    logger. The message names the source that was blank (``CANOPY_API_KEY_FILE`` or
+    ``CANOPY_API_KEY``) and the remedy for that source, and never the value. It reads
+    only what :func:`get_api_key_auth` recorded, never the secret itself, and reports
+    once per recorded key however many times the lifespan runs.
 
     Args:
         log: Any logger with a ``warning(message)`` method.
+        boot_refused: True when the posture check has refused to start
+            (``JUNIPER_CANOPY_REQUIRE_AUTH=true``). The WARNING then says the blank key
+            counts as no key and canopy refuses to start, instead of saying routes serve
+            without a key: nothing is serving.
 
     Returns:
         True when this call logged the WARNING, else False.
@@ -362,8 +413,53 @@ def report_blank_api_key(log: Any) -> bool:
             return False
         _blank_key_reported = True
         source = _blank_key_source
-    log.warning(_BLANK_KEY_FILE_WARNING if source == "CANOPY_API_KEY_FILE" else _BLANK_KEY_ENV_WARNING)
+    if boot_refused:
+        log.warning(_BLANK_KEY_FILE_REFUSED_WARNING if source == "CANOPY_API_KEY_FILE" else _BLANK_KEY_ENV_REFUSED_WARNING)
+    else:
+        log.warning(_BLANK_KEY_FILE_WARNING if source == "CANOPY_API_KEY_FILE" else _BLANK_KEY_ENV_WARNING)
     return True
+
+
+def report_api_key_configuration(log: Any, *, boot_refused: bool = False) -> int:
+    """Log, through ``log``, what the one read of ``CANOPY_API_KEY`` found wrong with its configuration.
+
+    ``main.lifespan`` calls this with the system logger once ``configure_logging`` has
+    run: right after ``enforce_auth_posture``, or, when the posture check refuses to
+    start, from its ``except AuthPostureError`` with ``boot_refused=True``, before the
+    error propagates. In this order, each WARNING at most once per recorded read:
+
+    1. ``CANOPY_API_KEY_FILE`` is set but names no existing file, so it was ignored;
+    2. the key is set but blank (:func:`report_blank_api_key`, worded for ``boot_refused``);
+    3. the key has leading or trailing whitespace or a line break, and auth is enabled
+       with it as set.
+
+    Like :func:`report_blank_api_key`, it reads only what :func:`get_api_key_auth`
+    recorded -- variable names, never the key or the path.
+
+    Args:
+        log: Any logger with a ``warning(message)`` method.
+        boot_refused: Passed to :func:`report_blank_api_key`.
+
+    Returns:
+        How many WARNINGs this call logged.
+    """
+    global _key_findings_reported
+    with _blank_key_lock:
+        if _key_findings_reported:
+            missing_file_var = padded_source = None
+        else:
+            _key_findings_reported = True
+            missing_file_var, padded_source = _missing_key_file_var, _padded_key_source
+    logged = 0
+    if missing_file_var is not None:
+        log.warning(_MISSING_KEY_FILE_WARNING)
+        logged += 1
+    if report_blank_api_key(log, boot_refused=boot_refused):
+        logged += 1
+    if padded_source is not None:
+        log.warning(_PADDED_KEY_WARNING)
+        logged += 1
+    return logged
 
 
 def get_rate_limiter() -> RateLimiter:
@@ -382,12 +478,15 @@ def get_rate_limiter() -> RateLimiter:
 
 def reset_security_state() -> None:
     """Reset global security state. Useful for testing."""
-    global _api_key_auth, _rate_limiter, _blank_key_source, _blank_key_reported
+    global _api_key_auth, _rate_limiter, _blank_key_source, _blank_key_reported, _padded_key_source, _missing_key_file_var, _key_findings_reported
     _api_key_auth = None
     _rate_limiter = None
     with _blank_key_lock:
         _blank_key_source = None
         _blank_key_reported = False
+        _padded_key_source = None
+        _missing_key_file_var = None
+        _key_findings_reported = False
 
 
 def browser_origin_allowed(request: Request) -> bool:

@@ -1,8 +1,8 @@
-"""Tests for Docker secrets utility: get_secret() and resolve_secret()."""
+"""Tests for Docker secrets utility: get_secret(), resolve_secret() and resolve_secret_detail()."""
 
 import pytest
 
-from secrets_util import get_secret, resolve_secret
+from secrets_util import SecretResolution, get_secret, resolve_secret, resolve_secret_detail
 
 
 class TestGetSecret:
@@ -157,8 +157,21 @@ class TestResolveSecret:
         assert resolve_secret("MY_SECRET", file_env_var="CUSTOM_PATH") == ("custom-file-value", "CUSTOM_PATH")
 
     @pytest.mark.unit
-    @pytest.mark.parametrize("file_content, env_value", [("file-value\n", "env-value"), (" \n", "env-value"), (None, "env-value"), (None, ""), (None, None)])
-    def test_get_secret_returns_exactly_the_resolved_value(self, monkeypatch, tmp_path, file_content, env_value):
+    @pytest.mark.parametrize(
+        "file_content, env_value, expected",
+        [
+            ("file-value\n", "env-value", "file-value"),
+            (" \n", "env-value", ""),
+            (None, "env-value", "env-value"),
+            (None, "  padded\t", "  padded\t"),
+            (None, "", ""),
+            (None, None, None),
+        ],
+        ids=["file", "blank-file", "env", "padded-env", "empty-env", "neither"],
+    )
+    def test_get_secret_returns_exactly_the_resolved_value(self, monkeypatch, tmp_path, file_content, env_value, expected):
+        """Literal expectations (#678 follow-up): comparing ``get_secret`` with ``resolve_secret()[0]``
+        moved both sides together under any mutant of the resolution, so it pinned only that they agree."""
         if file_content is None:
             monkeypatch.delenv("MY_SECRET_FILE", raising=False)
         else:
@@ -170,4 +183,70 @@ class TestResolveSecret:
         else:
             monkeypatch.setenv("MY_SECRET", env_value)
 
-        assert get_secret("MY_SECRET") == resolve_secret("MY_SECRET")[0]
+        assert get_secret("MY_SECRET") == expected
+        assert resolve_secret("MY_SECRET")[0] == expected
+
+
+class TestResolveSecretDetail:
+    """``resolve_secret_detail`` also names a ``_FILE`` variable that was ignored (#678 follow-up).
+
+    A ``_FILE`` variable naming no existing file falls through to the env var exactly as if
+    it were unset, which hid an operator's key-file path typo. ``security.get_api_key_auth``
+    WARNs by that name; the name is safe to log, and the path it holds is not.
+    """
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("env_value, expected", [("env-value", SecretResolution("env-value", "MY_SECRET", "MY_SECRET_FILE")), (None, SecretResolution(None, None, "MY_SECRET_FILE"))], ids=["env-set", "env-unset"])
+    def test_a_file_var_naming_no_file_is_named(self, monkeypatch, tmp_path, env_value, expected):
+        monkeypatch.setenv("MY_SECRET_FILE", str(tmp_path / "absent"))
+        if env_value is None:
+            monkeypatch.delenv("MY_SECRET", raising=False)
+        else:
+            monkeypatch.setenv("MY_SECRET", env_value)
+
+        assert resolve_secret_detail("MY_SECRET") == expected
+
+    @pytest.mark.unit
+    def test_a_file_var_naming_a_directory_is_named(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("MY_SECRET_FILE", str(tmp_path))
+        monkeypatch.setenv("MY_SECRET", "env-value")
+
+        assert resolve_secret_detail("MY_SECRET") == SecretResolution("env-value", "MY_SECRET", "MY_SECRET_FILE")
+
+    @pytest.mark.unit
+    def test_a_file_var_naming_a_file_is_not_named(self, monkeypatch, tmp_path):
+        secret_file = tmp_path / "my_secret"
+        secret_file.write_text(" file-value\n")
+        monkeypatch.setenv("MY_SECRET_FILE", str(secret_file))
+        monkeypatch.setenv("MY_SECRET", "env-value")
+
+        assert resolve_secret_detail("MY_SECRET") == SecretResolution("file-value", "MY_SECRET_FILE", None)
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("file_var", ["", None], ids=["empty", "unset"])
+    def test_an_empty_or_unset_file_var_is_not_named(self, monkeypatch, file_var):
+        if file_var is None:
+            monkeypatch.delenv("MY_SECRET_FILE", raising=False)
+        else:
+            monkeypatch.setenv("MY_SECRET_FILE", file_var)
+        monkeypatch.setenv("MY_SECRET", "env-value")
+
+        assert resolve_secret_detail("MY_SECRET") == SecretResolution("env-value", "MY_SECRET", None)
+
+    @pytest.mark.unit
+    def test_the_custom_file_var_is_the_name_given(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CUSTOM_PATH", str(tmp_path / "absent"))
+        monkeypatch.delenv("MY_SECRET_FILE", raising=False)
+        monkeypatch.setenv("MY_SECRET", "env-value")
+
+        assert resolve_secret_detail("MY_SECRET", file_env_var="CUSTOM_PATH") == SecretResolution("env-value", "MY_SECRET", "CUSTOM_PATH")
+
+    @pytest.mark.unit
+    def test_the_detail_carries_names_never_the_path(self, monkeypatch, tmp_path):
+        missing = tmp_path / "leaked-path-QRS"
+        monkeypatch.setenv("MY_SECRET_FILE", str(missing))
+        monkeypatch.delenv("MY_SECRET", raising=False)
+
+        resolution = resolve_secret_detail("MY_SECRET")
+        assert resolution.missing_file_var == "MY_SECRET_FILE"
+        assert "leaked-path-QRS" not in repr(resolution)
