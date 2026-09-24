@@ -310,6 +310,15 @@ class TestC4StalenessContract:
         assert await cache.refresh_once() is StatusClass.UNREACHABLE
         assert await cache.refresh_once() is StatusClass.OK, "the cache must recover once the upstream does"
 
+    async def test_a_raising_fetchs_text_never_reaches_the_status_body(self):
+        """#683 validation: /api/status serves this body to anonymous callers, and the raising branch wrote
+        ``f"{type}: {exc}"`` into it -- text that quotes the key when a client refuses to send one."""
+        cache = _cache([RuntimeError("Illegal header value b' LEAKME-cascor-key'")])
+        assert await cache.refresh_once() is StatusClass.UNREACHABLE
+        body = cache.for_status()
+        assert body["error"] == "RuntimeError"
+        assert "LEAKME" not in repr(body)
+
     async def test_ticks_do_not_overlap(self):
         """Single-flight is structural: the loop sleeps AFTER its fetch.
 

@@ -91,7 +91,7 @@ class TestSwapDatasetLive:
         assert body == {"dataset_type": "moons"}, "None-valued params must be filtered out"
 
     def test_returns_error_on_cascor_failure(self, adapter):
-        adapter._client._request.side_effect = JuniperCascorClientError("HTTP 502")
+        adapter._client._request.side_effect = JuniperCascorClientError("HTTP 502", status_code=502)  # an answer: its text passes (#683 validation)
         result = adapter.swap_dataset_live(nn_dataset_type="moons")
         assert result["ok"] is False
         assert "HTTP 502" in result["error"]
@@ -109,7 +109,7 @@ class TestCancelSwapDatasetLive:
         that as JuniperCascorClientError; the adapter surfaces it as
         ok=False so the callback layer can show a "no swap in flight"
         message (or just no-op the cancel)."""
-        adapter._client._request.side_effect = JuniperCascorClientError("HTTP 404 — no swap in progress")
+        adapter._client._request.side_effect = JuniperCascorClientError("HTTP 404 — no swap in progress", status_code=404)  # an answer: its text passes (#683 validation)
         result = adapter.cancel_swap_dataset_live()
         assert result["ok"] is False
         assert "404" in result["error"]
@@ -118,4 +118,4 @@ class TestCancelSwapDatasetLive:
         adapter._client._request.side_effect = JuniperCascorClientError("connection refused")
         result = adapter.cancel_swap_dataset_live()
         assert result["ok"] is False
-        assert "connection refused" in result["error"]
+        assert result["error"] == "JuniperCascorClientError"  # transport text never reaches a caller (#683 validation)

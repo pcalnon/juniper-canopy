@@ -66,7 +66,7 @@ class TestGetDatasetSwapEvents:
         adapter._client._request.side_effect = JuniperCascorClientError("connection refused")
         result = adapter.get_dataset_swap_events()
         assert result["ok"] is False
-        assert "connection refused" in result["error"]
+        assert result["error"] == "JuniperCascorClientError"  # transport text never reaches a caller (#683 validation)
         assert result["events"] == []
 
 
@@ -102,7 +102,7 @@ class TestGetSnapshotDatasetSwaps:
         """Cascor 404 (snapshot missing) → ok=False with the error
         string and empty events list. Timeline degrades to live-event-
         only render rather than hard error."""
-        adapter._client._request.side_effect = JuniperCascorClientError("404 snapshot 'snap_missing' not found")
+        adapter._client._request.side_effect = JuniperCascorClientError("404 snapshot 'snap_missing' not found", status_code=404)  # an answer: its text passes (#683 validation)
         result = adapter.get_snapshot_dataset_swaps("snap_missing")
         assert result["ok"] is False
         assert "not found" in result["error"]

@@ -350,7 +350,8 @@ class TestCreateSnapshotRealMode:
 
         class FailingIntegration:
             def save_snapshot(self, path, description=None):
-                raise RuntimeError("disk quota exceeded (simulated)")
+                # cascor's ANSWER: its client error carries the HTTP status (#683 validation).
+                raise _answered("disk quota exceeded (simulated)", status_code=507)
 
             def shutdown(self):
                 pass
@@ -369,6 +370,49 @@ class TestCreateSnapshotRealMode:
             assert "disk quota exceeded (simulated)" in detail
 
     @pytest.mark.unit
+    def test_create_snapshot_failure_detail_names_a_transport_failure_by_type(self, app_client, snapshot_dir):
+        """#683 validation: in service mode a failure with no HTTP status is transport, and its text can quote the key a
+        client refused to send, so the 500 detail -- which a caller reads -- names its type only."""
+        import main
+
+        class FailingIntegration:
+            def save_snapshot(self, path, description=None):
+                raise RuntimeError("Request to http://cascor:8200/v1/snapshots failed: ... header value: ' LEAKME-key'")
+
+            def shutdown(self):
+                pass
+
+        with (
+            patch.object(main, "backend", _make_service_backend(adapter=FailingIntegration())),
+            patch.object(main, "_snapshots_dir", str(snapshot_dir)),
+        ):
+            response = app_client.post("/api/v1/snapshots?name=fail_transport_test")
+
+            assert response.status_code == 500
+            assert response.json()["detail"] == "Failed to create snapshot: RuntimeError"
+
+    @pytest.mark.unit
+    def test_create_snapshot_failure_detail_keeps_a_local_failures_text(self, app_client, snapshot_dir, h5py_available):
+        """N4 still holds where nothing is outbound: a local h5py write (here, the recurrence backend's) keeps its text."""
+        if not h5py_available:
+            pytest.skip("h5py not available")
+        import h5py
+
+        import main
+
+        local_backend = _make_service_backend(adapter=None)
+        local_backend.backend_type = "recurrence"
+        with (
+            patch.object(main, "backend", local_backend),
+            patch.object(main, "_snapshots_dir", str(snapshot_dir)),
+            patch.object(h5py, "File", side_effect=OSError("disk full (simulated)")),
+        ):
+            response = app_client.post("/api/v1/snapshots?name=fail_local_test")
+
+            assert response.status_code == 500
+            assert response.json()["detail"] == "Failed to create snapshot: disk full (simulated)"
+
+    @pytest.mark.unit
     def test_create_snapshot_failure_detail_truncates_long_reason(self, app_client, snapshot_dir):
         """Upstream reasons are truncated to a sane display length in the 500 detail (N4)."""
         import main
@@ -377,7 +421,8 @@ class TestCreateSnapshotRealMode:
 
         class FailingIntegration:
             def save_snapshot(self, path, description=None):
-                raise RuntimeError(long_reason)
+                # An ANSWER, so its text reaches the detail and the truncation is exercised (#683 validation).
+                raise _answered(long_reason, status_code=500)
 
             def shutdown(self):
                 pass
@@ -393,7 +438,14 @@ class TestCreateSnapshotRealMode:
             assert response.status_code == 500
             detail = response.json()["detail"]
             assert "Failed to create snapshot" in detail
-            assert len(detail) <= len("Failed to create snapshot: ") + 300
+            assert detail == "Failed to create snapshot: " + "x" * 300
+
+
+def _answered(text: str, status_code: int) -> RuntimeError:
+    """An exception an upstream's HTTP answer produced: it carries the status code, as the juniper clients' do."""
+    exc = RuntimeError(text)
+    exc.status_code = status_code  # type: ignore[attr-defined]
+    return exc
 
 
 class TestRestoreSnapshotRealMode:

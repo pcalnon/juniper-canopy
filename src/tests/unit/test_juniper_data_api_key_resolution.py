@@ -125,3 +125,55 @@ class TestDefault:
 
     def test_default_is_none(self, clean_env: pytest.MonkeyPatch) -> None:
         assert Settings().juniper_data_api_key is None
+
+
+class _Capture:
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def warning(self, message: str) -> None:
+        self.messages.append(message)
+
+
+class TestUnsendableValuesAreRefused:
+    """#683 validation: a value no HTTP client can carry is refused where it is read -- treated as empty, exactly as an
+    empty value always was -- and its variable NAME recorded for the boot WARNING. Sent, it made juniper-data-client
+    raise an ``InvalidHeader`` quoting it, which canopy logged at ERROR and Sentry received."""
+
+    def test_a_padded_prefixed_key_falls_through_to_the_shared_key(self, clean_env: pytest.MonkeyPatch) -> None:
+        clean_env.setenv("JUNIPER_CANOPY_JUNIPER_DATA_API_KEY", " LEAKME-prefixed")
+        clean_env.setenv("JUNIPER_DATA_API_KEY", "shared-direct-key")
+        assert Settings().juniper_data_api_key == "shared-direct-key"
+
+    def test_a_padded_prefixed_key_with_no_fallback_is_no_key(self, clean_env: pytest.MonkeyPatch) -> None:
+        clean_env.setenv("JUNIPER_CANOPY_JUNIPER_DATA_API_KEY", "LEAKME-prefixed\n")
+        assert Settings().juniper_data_api_key is None
+
+    def test_the_value_pydantic_read_is_screened_too(self, clean_env: pytest.MonkeyPatch) -> None:
+        """``v`` is what pydantic-settings read for the field (the prefixed variable, or ``.env``): returned raw, it would
+        hand back exactly the value the first step refused."""
+        assert Settings(juniper_data_api_key=" LEAKME-v").juniper_data_api_key is None
+        assert Settings(juniper_data_api_key="real-v-key").juniper_data_api_key == "real-v-key"
+
+    def test_a_padded_shared_key_is_no_key(self, clean_env: pytest.MonkeyPatch) -> None:
+        clean_env.setenv("JUNIPER_DATA_API_KEY", " LEAKME-shared")
+        assert Settings().juniper_data_api_key is None
+
+    def test_a_shared_key_file_with_a_line_break_inside_is_no_key(self, clean_env: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        key_file = tmp_path / "data_api_key.txt"
+        key_file.write_text("LEAKME-first\nsecond\n", encoding="utf-8")
+        clean_env.setenv("JUNIPER_DATA_API_KEY_FILE", str(key_file))
+        assert Settings().juniper_data_api_key is None
+
+    def test_each_refusal_is_reported_by_name(self, clean_env: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        from secrets_util import report_refused_outbound_keys
+
+        key_file = tmp_path / "data_api_key.txt"
+        key_file.write_text("LEAKME-first\nsecond\n", encoding="utf-8")
+        clean_env.setenv("JUNIPER_CANOPY_JUNIPER_DATA_API_KEY_FILE", str(key_file))
+        clean_env.setenv("JUNIPER_DATA_API_KEY", "\tLEAKME-shared")
+        assert Settings().juniper_data_api_key is None
+        log = _Capture()
+        assert report_refused_outbound_keys(log) == 2
+        assert [message.split(" holds a key")[0] for message in log.messages] == ["The file named by JUNIPER_CANOPY_JUNIPER_DATA_API_KEY_FILE", "JUNIPER_DATA_API_KEY"]
+        assert not [message for message in log.messages if "LEAKME" in message or str(key_file) in message]

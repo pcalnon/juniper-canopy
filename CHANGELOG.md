@@ -646,6 +646,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       `src/tests/unit/test_security.py` and `src/tests/unit/test_secrets_util.py`, including the new
       `secrets_util.resolve_secret_detail`. The `get_secret` test now asserts literal values.
 
+- **Outbound keys are checked where they are read, and no transport error or compare frame can leak a
+  secret (#683 validation).** The independent validation of juniper-canopy#683 found two HIGH secret
+  exposures and two LOW gaps. The owner ruled on 2026-09-24: "Fix everywhere now".
+  - **A padded outbound key leaked, to an anonymous caller.** canopy sends three keys as `X-API-Key`:
+    juniper-cascor's (`JUNIPER_CASCOR_API_KEY`, falling back to `JUNIPER_DATA_API_KEY`), juniper-data's
+    (`JUNIPER_CANOPY_JUNIPER_DATA_API_KEY`, then `JUNIPER_DATA_API_KEY`) and the recurrence service's. All
+    three were read raw. An HTTP client refuses a value with padding, a line break or a non-ASCII character,
+    and its refusal quotes the value: `requests`' `InvalidHeader`, httpx's `Illegal header value b'...'`,
+    websockets 17.1's `invalid X-API-Key header: ...` (websockets 16.0 sent it raw instead, line breaks
+    included). canopy logged that text at ERROR on every status-refresher tick, Sentry received it, and canopy
+    returned it in API bodies. With canopy auth enabled, a keyless CSRF mint and a `POST /api/train/start`
+    from an allowlisted Origin answered a 409 whose `detail` held the cascor key.
+    - `secrets_util.get_outbound_secret` now reads each key and refuses a value that is not printable ASCII
+      other than space (`0x21`-`0x7E`), the union of the three clients' rules. It refuses a space or tab
+      inside a key too, which the clients would carry. A refused value is treated exactly like an empty one:
+      the next variable in the order applies, or no key is sent. Boot logs one WARNING per variable, naming
+      it and never its value or a path, through the system logger. The keys `settings` reads at import are
+      reported right after the auth-posture check, and the cascor key right after `create_backend` reads it.
+    - Handed no key, every juniper client reads the same variables itself (`api_key or
+      os.environ.get(...)`), raw, so a refused key came straight back. `secrets_util.bind_outbound_key`
+      switches that fallback off at canopy's five construction sites: the cascor REST client, both cascor
+      WebSocket streams and both juniper-data clients. **Behaviour change:** canopy is now the only reader
+      of its outbound keys, so a blank `*_API_KEY_FILE` that shadows a real env var now sends no key, as
+      canopy's precedence says. The client library used to fall back to the env var.
+    - **What a caller reads about a failed outbound call is the upstream's answer or the exception's
+      type, never its transport text** (`outbound_errors.outbound_error_text`). This covers the cascor
+      adapter's `{"error": ...}` envelopes, the Start, pause, resume and reset 409s and their WebSocket
+      acknowledgements, the `/api/status` envelope's `error`, `/api/stream_health`'s
+      `last_disconnect_reason`, a failed recurrence fit's `completion_reason`, and the 500 details of the
+      snapshot create, replay, resume and retrain routes and the network-mutation routes. An exception that
+      carries an HTTP status is the upstream's answer, so its text passes: cascor's 409 `Training data not
+      provided` and a 422's field errors still reach the UI, as PR-B2, N4 and CAN-015h surface them.
+      Anything else is named by type, for example `JuniperCascorConnectionError`. The full text still goes to
+      canopy's logs, where it can no longer hold a key.
+  - **One anonymous request wrote the real `CANOPY_API_KEY` into Sentry.** `APIKeyAuth.validate` ran
+    `hmac.compare_digest` on two `str`, which raises `TypeError` for non-ASCII input, and both uvicorn
+    parsers pass `X-API-Key: \xa0`. The request was a 500, and Sentry's event recorded the comparing frame's
+    locals, among them `candidate`, the real key. `validate` now compares UTF-8 bytes (`surrogatepass`, so
+    every `str` encodes) and refuses a key that is not a `str`. Such a header is a 401. A WebSocket
+    presenting one as `X-API-Key` or `?api_key=` is closed 4001, and as a bearer token 1008, as any wrong
+    key is. canopy's two other `str` compares get the same fix:
+    - **The rate limiter's `X-Canopy-Internal` compare.** With rate limiting on, it runs on the key-exempt
+      `/api/csrf` and `/api/train/*` too, so an ANONYMOUS caller could force the 500. A keyed caller's 500
+      recorded that caller's key.
+    - **The CSRF store.** It compares against every session's token, so a keyless non-ASCII `X-CSRF-Token`
+      recorded another session's live token (`stored_token`, a name the SDK's scrubber does not filter).
+      A `/ws/control` first frame whose `csrf_token` is not a `str`, or is non-ASCII, raised there too. The
+      handler's catch-all then filed it as `malformed_auth`, and it is now an ordinary `invalid_token`.
+
+    The markers juniper-ml's `tests/test_service_fork_drift.py` requires are kept. canopy
+    configures Sentry only through `juniper_observability.configure_sentry`. In juniper-observability
+    0.4.0, the release canopy's lock pins, that leaves `include_local_variables` at the SDK default, `True`.
+    juniper-ml#2086 turns it off in the shared package and strips any frame `vars` that still reach
+    `before_send`, but no release carries that yet. Until one does, any unhandled exception during a keyed
+    request can record the caller's key. The rate-limiter 500 recorded it through the ASGI `scope` a frame
+    held: the scope's `headers` list carries `x-api-key`, and the scrubber, which filters a local named
+    `api_key`, does not reach into that list. This change removes the three 500s that a caller could trigger
+    at will, but not that class.
+  - **`_docs_enabled` is now the auth handler's own answer** (`not get_api_key_auth().enabled`). #683
+    re-derived the blank rule there, with its own read and its own strip, and one sample pinned it. A copy
+    that stripped only ASCII whitespace, or ignored `CANOPY_API_KEY_FILE`, passed. No behaviour changes.
+  - **The padded-key WARNING names `CANOPY_API_KEY_FILE` when the file supplied the key.** A key file is
+    stripped at both ends, so only a line break inside the key can pad it, and the WARNING hard-coded
+    `CANOPY_API_KEY` and that variable's advice. It now has one wording per source, as the blank-key WARNING
+    does, and the comment claiming that only the env var can be padded is corrected.
+  - **Tests.**
+    - `src/tests/unit/test_outbound_keys.py` (new) pins the rule, the report, the binding against the real
+      client classes, and canopy's call sites.
+    - `src/tests/unit/test_outbound_errors.py` (new) pins the describer, every adapter site, and the proxy
+      routes. A static census asserts that no `except` handler in the adapter builds caller-visible text any
+      other way.
+    - `src/tests/regression/test_outbound_secret_leaks_boot.py` (new) boots canopy in fresh interpreters
+      against a local fake upstream. No request, log record, log file, console line or API body carries a
+      padded key, and the anonymous Start answers without it. A non-ASCII presented key is a 401 or a 4001.
+      The docs follow the auth switch for a real env key, a real key file and every blank key, NBSP-only
+      included.
+    - `src/tests/unit/test_security.py::TestNoSecretCompareCanRaiseOverHttp` (new) drives each of the three
+      compares over HTTP, through canopy's own `SecurityMiddleware` with the rate limiter on. A non-ASCII
+      `X-API-Key` is a 401. A non-ASCII `X-Canopy-Internal` on anonymous `/api/csrf` gets a 200 and no
+      exemption. A non-ASCII `X-CSRF-Token` gets a 403. The spy test on `validate` now asserts one
+      comparison per key, with the match first and both sides as bytes, so a `break` after the match fails it.
+    - `src/tests/unit/test_phase_b_pre_b_csrf.py`: a `/ws/control` first frame whose `csrf_token` is an int,
+      a list, a dict or non-ASCII is closed 1008 as `invalid_token`.
+    - Existing tests that asserted a transport failure's text now assert its type, and those that model
+      cascor's answer now give the exception its HTTP status.
+    - `util/ad-hoc/2026-09-24_683_validation_leak_probes.py` (new) keeps the validator's probes: the client
+      libraries, the six padded-key boots, the anonymous Start, four Sentry cases under real uvicorn, the
+      key-file WARNING and the docs switch. Run against #683's head, every leak reproduces. Run against this
+      change, none does.
+    - `util/ad-hoc/2026-09-24_683_validation_mutation_check.py` applies 44 mutations to copies of the
+      tree, and every one is caught. They include the validator's M2 and M3, and they put the pre-fix code back
+      at one site of each kind.
+
 ## [0.8.1] - 2026-09-15
 
 ### Added

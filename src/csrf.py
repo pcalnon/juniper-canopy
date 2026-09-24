@@ -81,14 +81,20 @@ class CsrfTokenStore:
         Returns:
             True if token is valid and not expired.
         """
-        if not token:
+        # Compared as UTF-8 bytes, as ``security._compare_bytes`` explains (#683 validation):
+        # on two ``str`` ``hmac.compare_digest`` raised ``TypeError`` for a non-ASCII token --
+        # ``X-CSRF-Token: \xa0`` from a keyless caller -- a 500 whose Sentry event recorded
+        # this frame's ``stored_token``, a live token. The /ws/control first frame is JSON,
+        # so ``token`` need not be a ``str`` at all.
+        if not token or not isinstance(token, str):
             return False
+        presented = token.encode("utf-8", "surrogatepass")
         now = self._clock()
         with self._lock:
             for stored_token, expiry in list(self._tokens.items()):
                 if expiry < now:
                     continue
-                if hmac.compare_digest(stored_token, token):
+                if hmac.compare_digest(stored_token.encode("utf-8", "surrogatepass"), presented):
                     # Refresh TTL (sliding window)
                     self._tokens[stored_token] = now + self._ttl
                     return True

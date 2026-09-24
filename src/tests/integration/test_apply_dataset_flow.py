@@ -92,7 +92,9 @@ class TestAdapterStageCancelGetPending:
     def test_stage_dataset_surfaces_client_error(self, adapter):
         from juniper_cascor_client import JuniperCascorClientError
 
-        adapter._client._request.side_effect = JuniperCascorClientError("422 Unknown dataset")
+        # cascor's ANSWER: the real client attaches the HTTP status to every error an answer produced, and that status
+        # is what lets the text through. A failure without one is transport, named by type only (#683 validation).
+        adapter._client._request.side_effect = JuniperCascorClientError("422 Unknown dataset", status_code=422)
         result = adapter.stage_dataset(nn_dataset_type="lottery")
         assert result["ok"] is False
         assert "422" in result["error"]

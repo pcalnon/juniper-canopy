@@ -39,6 +39,19 @@ INTERNAL_REQUEST_HEADER = "X-Canopy-Internal"
 INTERNAL_REQUEST_TOKEN = secrets.token_urlsafe(32)
 
 
+def _compare_bytes(text: str) -> bytes:
+    """``text`` as the bytes a secret comparison runs on, for EVERY ``str`` (#683 validation, item 2).
+
+    ``hmac.compare_digest`` on two ``str`` raises ``TypeError`` when either holds a
+    non-ASCII character, and a request can carry one: Starlette decodes header bytes as
+    latin-1, so ``X-API-Key: \\xa0`` arrives as ``"\\xa0"``. The ``TypeError`` was a 500, and
+    the Sentry event it raised recorded the comparing frame's locals -- the real key among
+    them. UTF-8 with ``surrogatepass`` encodes every code point, lone surrogates included,
+    and no two strings encode alike, so equal bytes are equal text and nothing can raise.
+    """
+    return text.encode("utf-8", "surrogatepass")
+
+
 class APIKeyAuth:
     """API key authentication handler.
 
@@ -69,17 +82,19 @@ class APIKeyAuth:
         # refuse U+000B and U+000C with a 400, and httptools -- canopy's default parser
         # -- refuses U+001C..U+001F too; nothing above U+00FF can arrive, because
         # Starlette decodes header bytes as latin-1; and CR/LF end the header line.
-        # U+00A0 and U+0085 pass both parsers, but ``hmac.compare_digest`` rejects
-        # non-ASCII text (``TypeError``: a 500, never a match). U+001C..U+001F pass h11,
+        # U+00A0 and U+0085 pass both parsers, and ``hmac.compare_digest`` then raised
+        # ``TypeError`` on the non-ASCII text (a 500, never a match) until ``validate``
+        # compared bytes (#683 validation). U+001C..U+001F pass h11,
         # and under h11 a key of those was a working key. The WebSocket ``?api_key=``
         # parameter could carry a whitespace key, but every WS route admits a keyless
         # connection anyway (``allow_browser_auth=True``), so that was never an
         # exposure. Now this class and the posture check agree: a blank key is no key
         # and auth is off -- the posture canopy documents for no key at all -- and
         # ``enforce_auth_posture`` fails the boot when ``require_auth`` is set. The
-        # key's two other readers apply the same rule (#678 follow-up): ``main.py``'s
-        # ``_docs_enabled`` serves the docs, and ``frontend/internal_api.py`` sends no
-        # ``X-API-Key`` on a self-call, exactly as with no key configured.
+        # key's two other readers apply the same rule: ``main.py``'s ``_docs_enabled``
+        # IS this handler's ``enabled`` (#683 validation; #678's follow-up re-derived
+        # the rule there, and a copy can drift), and ``frontend/internal_api.py`` sends
+        # no ``X-API-Key`` on a self-call, exactly as with no key configured.
         self._api_keys: set[str] = {k for k in (api_keys or []) if isinstance(k, str) and k.strip()}
         self._enabled = len(self._api_keys) > 0
 
@@ -99,7 +114,7 @@ class APIKeyAuth:
         """
         if not self._enabled:
             return True
-        if api_key is None:
+        if not isinstance(api_key, str):
             return False
         # Constant-time comparison against every configured key (APD-ECO-008).
         # ``any()`` would short-circuit on the first match, so the NUMBER of
@@ -110,9 +125,16 @@ class APIKeyAuth:
         # accepting on a match. Mirrors juniper-data's reference implementation
         # (juniper_data/api/security.py), as the juniper-cascor and
         # juniper-service-core copies do on their main branches.
+        #
+        # #683 validation (item 2): compared as BYTES (``_compare_bytes``). On two
+        # ``str`` it raised ``TypeError`` for any non-ASCII character, and a keyless
+        # caller can send one -- ``X-API-Key: \xa0`` passes both uvicorn parsers -- so
+        # one anonymous request was a 500, and Sentry's event recorded this frame's
+        # locals: ``candidate``, the real key.
+        presented = _compare_bytes(api_key)
         matched = False
         for candidate in self._api_keys:
-            if hmac.compare_digest(api_key, candidate):
+            if hmac.compare_digest(presented, _compare_bytes(candidate)):
                 matched = True
         return matched
 
@@ -268,9 +290,14 @@ class RateLimiter:
         # its own /api/* routes). They carry the per-process internal token;
         # external clients cannot forge it. Constant-time compare. Without this
         # the dashboard's own polling drains the shared bucket and 429s real
-        # user actions (and surfaces as the "Error" status — see #3).
+        # user actions (and surfaces as the "Error" status — see #3). Compared as bytes
+        # (``_compare_bytes``): a non-ASCII header value made ``compare_digest`` raise, a
+        # 500 whose Sentry event recorded the caller's real key (#683 validation). Not
+        # through this frame's ``api_key``, which the SDK's default scrubber filters by
+        # name, but through the ASGI ``scope`` a frame further up held: its ``headers``
+        # list carries ``x-api-key``, and the scrubber does not reach into it.
         internal = request.headers.get(INTERNAL_REQUEST_HEADER)
-        if isinstance(internal, str) and hmac.compare_digest(internal, INTERNAL_REQUEST_TOKEN):
+        if isinstance(internal, str) and hmac.compare_digest(_compare_bytes(internal), _compare_bytes(INTERNAL_REQUEST_TOKEN)):
             return
 
         key = self._get_key(request, api_key)
@@ -306,8 +333,9 @@ _rate_limiter: RateLimiter | None = None
 # that supplied it -- never the value -- from its one secret read, and
 # ``main.lifespan`` reports it (:func:`report_api_key_configuration`, which calls
 # :func:`report_blank_api_key`) once logging is configured. It cannot be logged where
-# it is read: the singleton is first built at import (``main.api_key_auth``), before
-# ``configure_logging`` runs -- and only while ``main`` builds its handler through
+# it is read: the singleton is first built at import (``main._docs_enabled``, then
+# ``main.api_key_auth``), before ``configure_logging`` runs -- and only while ``main``
+# builds its handler through
 # ``get_api_key_auth()``: a handler built any other way records nothing, and the report
 # has nothing to say (pinned in a fresh interpreter by
 # ``tests/regression/test_blank_api_key_warning_boot.py``). #660 logged it
@@ -347,7 +375,11 @@ _BLANK_KEY_REFUSES = "so it counts as no key: it is the key the auth-posture che
 _BLANK_KEY_ENV_REFUSED_WARNING = "CANOPY_API_KEY is set but blank (empty or whitespace-only), " + _BLANK_KEY_REFUSES + " Set a real key."
 _BLANK_KEY_FILE_REFUSED_WARNING = "The file named by CANOPY_API_KEY_FILE is blank (empty or whitespace-only), " + _BLANK_KEY_REFUSES + " While CANOPY_API_KEY_FILE names an existing file it takes precedence and CANOPY_API_KEY is not read. Write a real key into that file, or unset CANOPY_API_KEY_FILE to use CANOPY_API_KEY instead."
 
-# Only the env var can be padded: ``resolve_secret`` strips a secret FILE. Measured on
+# A padded key, one wording per source, as the blank key has (#683 validation, item 4).
+# The env var can be padded at either end or hold a line break. A key FILE cannot be
+# padded at the ends -- ``resolve_secret`` strips a secret file -- but a line break INSIDE
+# the key survives the strip: a key file whose key spans two lines is a padded key, and
+# the env wording then named the wrong variable and gave the wrong advice. Measured on
 # uvicorn 0.49.0 and requests 2.34.2 (``util/ad-hoc/2026-09-24_padded_api_key_probes.py
 # header-probe``): h11 and httptools both drop a header value's leading spaces and tabs,
 # h11 also drops trailing ones (httptools keeps them), CR and LF end the header line, and
@@ -355,6 +387,10 @@ _BLANK_KEY_FILE_REFUSED_WARNING = "The file named by CANOPY_API_KEY_FILE is blan
 _PADDED_KEY_WARNING = (
     "CANOPY_API_KEY has leading or trailing whitespace, or a line break, and API-key authentication is enabled with the key exactly as set. HTTP does not carry such a key reliably: uvicorn's parsers drop a header value's leading spaces and tabs, h11 drops its trailing ones as well, and a header cannot hold a line break."
     + " So callers presenting the key can fail to authenticate, and the dashboard's own requests to this API send no key at all when it starts with whitespace or holds a line break, because their HTTP client refuses to send it. Remove the whitespace and any line break from the key."
+)
+_PADDED_KEY_FILE_WARNING = (
+    "The key in the file named by CANOPY_API_KEY_FILE holds a line break, and API-key authentication is enabled with the key exactly as read: the file's leading and trailing whitespace is stripped, but a line break inside the key is not. HTTP does not carry such a key: a header cannot hold a line break."
+    + " So callers presenting the key cannot authenticate with an X-API-Key header, and the dashboard's own requests to this API send no key at all, because their HTTP client refuses to send it. While CANOPY_API_KEY_FILE names an existing file it takes precedence and CANOPY_API_KEY is not read. Write the key into that file on a single line."
 )
 _MISSING_KEY_FILE_WARNING = "CANOPY_API_KEY_FILE is set but does not name an existing file, so it is ignored: the key is read from CANOPY_API_KEY instead, exactly as if CANOPY_API_KEY_FILE were unset. Point CANOPY_API_KEY_FILE at the key file, or unset it."
 
@@ -431,7 +467,8 @@ def report_api_key_configuration(log: Any, *, boot_refused: bool = False) -> int
     1. ``CANOPY_API_KEY_FILE`` is set but names no existing file, so it was ignored;
     2. the key is set but blank (:func:`report_blank_api_key`, worded for ``boot_refused``);
     3. the key has leading or trailing whitespace or a line break, and auth is enabled
-       with it as set.
+       with it as set -- worded, like the blank key, for the source that supplied it: from
+       ``CANOPY_API_KEY_FILE`` only a line break inside the key can reach here.
 
     Like :func:`report_blank_api_key`, it reads only what :func:`get_api_key_auth`
     recorded -- variable names, never the key or the path.
@@ -457,7 +494,7 @@ def report_api_key_configuration(log: Any, *, boot_refused: bool = False) -> int
     if report_blank_api_key(log, boot_refused=boot_refused):
         logged += 1
     if padded_source is not None:
-        log.warning(_PADDED_KEY_WARNING)
+        log.warning(_PADDED_KEY_FILE_WARNING if padded_source == "CANOPY_API_KEY_FILE" else _PADDED_KEY_WARNING)
         logged += 1
     return logged
 
