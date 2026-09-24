@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The publish path asserts that the image serves, and that it is the version it is tagged**
+  (`util/check_image_serves.py`, new; `publish-image.yml`). The existing checks cover what the image
+  contains and that `juniper_canopy` imports. Neither can see a stale version. The worker's 0.5.0 and
+  0.6.0 images imported fine while their package reported `0.4.0`, and cascor's 0.11.0 stamps
+  `meta.version: "0.6.0"` on every enveloped response. The script starts the image as deployed, with
+  its own `CMD`. With no backend reachable, the dashboard runs in demo mode and still serves
+  liveness. It requires liveness on :8050, plus one version across the installed metadata,
+  `juniper_canopy.__version__` and the `/v1/health` body. On a release, that version is the one in
+  the **tag**. An absent `__version__` fails: the ecosystem's class-2 sweep once scored that shape as
+  a pass. The check runs on the PR arm against the image just built, and on the publish path against
+  each pushed digest before the digest is exported. It passes the published `juniper-canopy:0.8.1`.
+  The script is the same one the four other image repos carry.
+  `src/tests/unit/test_check_image_serves.py` (new, 22 tests) needs no Docker. This is item 5 of the
+  juniper-ml container-registry rollout handoff.
 - **Stage, live-swap and set-params requests now carry the dashboard's `nn_model`, and a stale or
   incompatible request fails closed (FR9; the `nn_model` mirror clause of canopy#368).**
   `current_nn_model` is server state, while `model-selection-store` is per-tab memory. A second

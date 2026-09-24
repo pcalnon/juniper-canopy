@@ -37,6 +37,12 @@
 #        manylinux aarch64 wheel or are pure Python (checked 2026-09-08 against PyPI), and torch's
 #        CPU index serves `torch-2.14.0+cpu-cp314-cp314-manylinux_2_28_aarch64.whl`.
 #      * The tag guard (`v*`) is defensive: this repo publishes one package.
+#      * SERVE AND VERSION (2026-09-23). ``util/check_image_serves.py`` starts the image as deployed
+#        and requires liveness on :8050 plus ONE version on every surface: installed metadata,
+#        ``juniper_canopy.__version__`` and the ``/v1/health`` body. On a release the version is the
+#        TAG's, because the merge job names the image after the tag. With no backend reachable the
+#        dashboard starts in demo mode and serves liveness. Runs on the PR arm and against each
+#        pushed digest, before the digest is exported.
 #####################################################################################################################################################################################################
 
 name: Publish Container Image
@@ -59,6 +65,7 @@ on:
       - "conf/layouts/**"
       - "util/check_image_cpu_only.py"
       - "util/check_image_no_secrets.py"
+      - "util/check_image_serves.py"
       - ".github/workflows/publish-image.yml"
   workflow_dispatch:
     inputs:
@@ -207,6 +214,21 @@ jobs:
           echo "--- dashboard package"
           docker run --rm "${img}" python -c 'import juniper_canopy; print("juniper_canopy", juniper_canopy.__version__)'
 
+      # Importing the application does not prove the dashboard SERVES, or that it says what it is.
+      # This starts the image exactly as a deployment does -- its own CMD -- and requires liveness
+      # on :8050 plus one version everywhere: metadata, __version__ and /v1/health. The same script
+      # runs on the publish path below; running it here too means the PR that edits it exercises
+      # it, not the first release.
+      - name: Serve and version check (build-only runs)
+        if: github.event_name != 'release' && !inputs.push
+        env:
+          APP_VERSION: ${{ steps.prov.outputs.app_version }}
+        run: |
+          python3 util/check_image_serves.py \
+            --image 'canopy-smoke:${{ matrix.arch }}' \
+            --dist juniper-canopy --module juniper_canopy --port 8050 \
+            --expect-version "${APP_VERSION}"
+
       # The smoke test never runs on a publish, so the CPU-only contract is ALSO asserted on the
       # path that ships: pull the image just pushed -- by digest, on this same native arch. A
       # failure fails this arch's job, the merge job is skipped, and no tag is ever written.
@@ -239,6 +261,35 @@ jobs:
           # zero tests for six months.
           echo "--- the application imports"
           docker run --rm "${ref}" python -c 'import juniper_canopy; print("    juniper_canopy imports")'
+
+      # "It imports" is not "it serves", and neither is "it is the version it claims": the worker's
+      # 0.5.0 and 0.6.0 images imported fine while their package reported 0.4.0. So the image just
+      # pushed must start as deployed, answer liveness, and report ONE version everywhere; on a
+      # release, the TAG's, because the merge job names the image after the tag. Before Export
+      # digest, so a failing arch never reaches the merge job and no tag is written.
+      - name: Verify pushed image serves and reports its version (publish runs)
+        if: github.event_name == 'release' || inputs.push
+        env:
+          APP_VERSION: ${{ steps.prov.outputs.app_version }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          digest='${{ steps.build.outputs.digest }}'
+          if [ -z "${digest}" ]; then
+            echo "::error::build produced no digest -- nothing to verify"
+            exit 1
+          fi
+          expect="${APP_VERSION}"
+          if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
+            expect="${RELEASE_TAG#v}"
+            if [ "${expect}" != "${APP_VERSION}" ]; then
+              echo "::error::release ${RELEASE_TAG} names ${expect}, but pyproject.toml says ${APP_VERSION} -- the image would be tagged ${expect} and report ${APP_VERSION}"
+              exit 1
+            fi
+          fi
+          python3 util/check_image_serves.py \
+            --image "${REGISTRY}/${IMAGE_NAME}@${digest}" \
+            --dist juniper-canopy --module juniper_canopy --port 8050 \
+            --expect-version "${expect}"
 
       - name: Export digest
         if: github.event_name == 'release' || inputs.push
