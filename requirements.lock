@@ -145,11 +145,11 @@ retrying==1.4.2
     # via dash
 scipy==1.18.1
     # via juniper-canopy (pyproject.toml)
-sentry-sdk==2.69.2
+sentry-sdk==2.71.0
     # via juniper-canopy (pyproject.toml)
 setuptools==84.0.0
     # via dash
-starlette==1.6.0
+starlette==1.7.0
     # via
     #   juniper-canopy (pyproject.toml)
     #   fastapi
@@ -173,7 +173,7 @@ urllib3==2.8.0
     #   juniper-data-client
     #   requests
     #   sentry-sdk
-uvicorn==0.53.0
+uvicorn==0.54.0
     # via juniper-canopy (pyproject.toml)
 uvloop==0.22.1
     # via uvicorn
@@ -184,7 +184,7 @@ websockets==17.1
     #   juniper-canopy (pyproject.toml)
     #   juniper-cascor-client
     #   uvicorn
-werkzeug==3.1.8
+werkzeug==3.1.9
     # via
     #   dash
     #   flask
