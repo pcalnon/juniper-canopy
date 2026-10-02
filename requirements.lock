@@ -80,7 +80,7 @@ juniper-observability==0.4.0
     # via juniper-canopy (pyproject.toml)
 juniper-service-core==0.7.0
     # via juniper-canopy (pyproject.toml)
-markupsafe==3.0.3
+markupsafe==3.0.4
     # via
     #   flask
     #   jinja2
