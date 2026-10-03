@@ -121,6 +121,9 @@ class ReplayPlayerPanel(BaseComponent):
                 # (F-CANOPY-056). Schema:
                 #   {snapshot_id, fsm_state, time_index, range: [start, end] | None,
                 #    speed, playing}
+                # cascor's replay block nests range/speed/weights_available under
+                # ``session``, with range as {start, end}; ``_session_range``
+                # normalises both shapes (F-CANOPY-059).
                 dcc.Store(id="replay-player-session", data=None),
                 # Trigger the player to issue a control request. The
                 # callbacks below write here when buttons / sliders fire;
@@ -435,6 +438,29 @@ class ReplayPlayerPanel(BaseComponent):
         return inner if isinstance(inner, dict) else session
 
     @staticmethod
+    def _session_range(raw: Any, start: int, end: int) -> list:
+        """The playback range as a ``[lo, hi]`` list, clamped to the snapshot window (F-CANOPY-059).
+
+        cascor's ``state_summary()`` serves ``range`` as a dict, ``{"start": …, "end": …}``
+        (cascor ``manager.py``, since cascor#178). canopy#532 read it one level deeper for
+        F-CANOPY-015 but indexed it as a list, so every session cascor served raised
+        ``KeyError: 0`` inside ``render_session`` and the player never rendered. The list
+        shape stays accepted (legacy sessions, and ``_merge_session``'s local fallback).
+        Anything else, or an unparsable value, falls back to the full window.
+        """
+        lo, hi = start, end
+        try:
+            if isinstance(raw, dict) and "start" in raw and "end" in raw:
+                lo, hi = int(raw["start"]), int(raw["end"])
+            elif isinstance(raw, (list, tuple)) and len(raw) == 2:
+                lo, hi = int(raw[0]), int(raw[1])
+        except (TypeError, ValueError):
+            lo, hi = start, end
+        lo = max(start, min(lo, end))
+        hi = max(lo, min(hi, end))
+        return [lo, hi]
+
+    @staticmethod
     def _session_current_index(session: Optional[Dict[str, Any]]) -> int:
         if not session:
             return 0
@@ -505,7 +531,8 @@ class ReplayPlayerPanel(BaseComponent):
             cur = self._session_current_index(session)
             # F-CANOPY-015: these three live in data["session"], not on the data block.
             summary = self._session_summary(session)
-            range_value = summary.get("range") or [start, end]
+            # F-CANOPY-059: cascor serves a {start, end} dict; never index the raw value.
+            range_value = self._session_range(summary.get("range"), start, end)
             speed = float(summary.get("speed", SPEED_DEFAULT))
             fsm = session.get("fsm_state") or "Replaying"  # correctly on the data block
             weights_available = bool(summary.get("weights_available"))
