@@ -121,6 +121,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Against cascor, the replay player shows its session again (F-CANOPY-059, P0; a regression from
+  canopy#532).** cascor serves the replay `range` as a dict, `{"start": …, "end": …}`, at
+  `data.session`. canopy#532 read it there but indexed it as a list, so `render_session` raised
+  `KeyError: 0` on every session cascor served. The Replay tab stayed at "No active replay session"
+  with no control on screen, and cascor stayed in REPLAYING. The only exit was the sidebar's Reset
+  Training. The new `ReplayPlayerPanel._session_range` accepts the dict, the legacy list or nothing,
+  and clamps the result to the snapshot window. `src/tests/unit/frontend/test_f059_replay_range_dict.py`
+  (new) runs the registered callback on the payload the E2E ledger's Phase 1 measured live. It raises
+  `KeyError: 0` on the parent. canopy#532's fixture in `test_p2_wave_batch_a.py` was labelled
+  "the exact shape measured off the running service" while it typed the range as a list. It now uses
+  cascor's dict shape and says what it is. This fix exposes F-CANOPY-056, which F-059 had masked:
+  control results still never reach the session.
 - **A Start refused because the staged dataset is wider than the network now says how to proceed
   (F1).** cascor cannot widen a network on a plain Start, which continues the current network.
   - Since juniper-cascor#687, cascor refuses such a Start **before** loading anything, and

@@ -176,7 +176,11 @@ class TestF015ReplaySessionSummaryNesting:
     only the badge was visible.
     """
 
-    # The exact shape measured off the running service (finding F-CANOPY-015).
+    # cascor's replay-block SHAPE (``state_summary()`` nested at ``session``), with VALUES chosen to
+    # differ from every fallback so a misread cannot pass. It is not a measured payload: until
+    # F-CANOPY-059 this comment said "the exact shape measured off the running service" while typing
+    # ``range`` as a list, which is how canopy#532's KeyError shipped. cascor serves ``range`` as a
+    # dict; the measured payload drives ``test_f059_replay_range_dict.py``.
     DATA_BLOCK = {
         "fsm_state": "Replaying",
         "operation": "replay",
@@ -187,11 +191,11 @@ class TestF015ReplaySessionSummaryNesting:
         "session": {
             "length": 41,
             "paused": False,
-            "range": [3, 37],
+            "range": {"start": 3, "end": 37},
             "snapshot_id": "snap-1",
             "speed": 2.0,
             "time_index": 5,
-            "weight_sampling": "every",
+            "weight_sampling": {"strategy": "every", "interval": 1, "num_samples": 41, "sample_epochs": list(range(41))},
             "weights_available": True,
         },
     }
@@ -199,7 +203,8 @@ class TestF015ReplaySessionSummaryNesting:
     def test_summary_reads_the_nested_session_block(self):
         summary = ReplayPlayerPanel._session_summary(self.DATA_BLOCK)
         assert summary.get("weights_available") is True, "the V2 weights badge reads False from a V2 snapshot"
-        assert summary.get("range") == [3, 37]
+        assert summary.get("range") == {"start": 3, "end": 37}
+        assert ReplayPlayerPanel._session_range(summary.get("range"), 0, 40) == [3, 37]
         assert summary.get("speed") == 2.0
 
     def test_flat_legacy_shape_still_resolves(self):
