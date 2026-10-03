@@ -750,6 +750,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `util/ad-hoc/2026-09-24_683_validation_mutation_check.py` applies 44 mutations to copies of the
       tree, and every one is caught. They include the validator's M2 and M3, and they put the pre-fix code back
       at one site of each kind.
+- **The WS-silent poll-liveness UI test no longer inherits a run that is about to converge** (test-only;
+  `src/tests/ui/test_ws_silent_poll_liveness.py`). `_ensure_running_run` accepted any RUNNING run. On
+  CI the demo converges about 31 epochs after a start, and the run the test inherited already held
+  26-27 epochs. It produced no further epoch inside the 12 s window, so every later poll correctly
+  answered `<no_update>` and `test_metrics_store_polls_on_long_lived_tab_with_ws_silent` failed with
+  "poll starved". That happened
+  twice on main at `0035253a` on 2026-10-03, and before that on canopy#636 and canopy#651 (canopy#637's
+  shape). A live run past epoch 10 (`_MAX_INHERITED_EPOCH`) is now restarted with Reset then Start. That
+  is the path the module's other four tests already took, and they passed in both failing runs. The
+  mid-test keep-alive in `test_poll_resumes_rest_when_ws_goes_stale` passes `max_inherited_epoch=None`,
+  so it never restarts a live run whose history it is about to read.
 
 ## [0.8.1] - 2026-09-15
 
