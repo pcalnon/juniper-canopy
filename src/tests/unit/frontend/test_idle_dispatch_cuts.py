@@ -16,7 +16,7 @@ Intervals nominally fire (45%, by the static census):
     replay-weight ring buffer, which could fill only while a CAN-015 replay session streams weights,
     and which nothing fills today: cascor's replay frames carry no weights and canopy's metrics relay
     drops the key (F-CANOPY-057). GATED: it ships disabled and runs only once this page has started
-    a replay; against cascor, a Stop does not close it again (F-CANOPY-056).
+    a replay, and a successful Stop closes it again (F-CANOPY-056, fixed after this cut).
 
 In a live idle page, the A/B above parked each timer and compared each window with its two
 neighbouring baselines, over two runs in opposite orders. Parking the DRAIN cut the median
