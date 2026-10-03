@@ -237,8 +237,15 @@ def _wait_for(predicate, *, timeout: float, interval: float = 0.5, page=None):
     return None
 
 
-def _ensure_running_run(dashboard_page, canopy_url):
-    """Lifecycle-robust precondition: return with a training run RUNNING.
+#: A live run already past this epoch is restarted rather than handed to the caller.
+#: The demo converges ~31 epochs (~31 s) after any start on CI (see
+#: ``_ensure_running_run``), and a caller observes for up to ~15 s, so a run
+#: inherited late in its life can converge inside that window.
+_MAX_INHERITED_EPOCH = 10
+
+
+def _ensure_running_run(dashboard_page, canopy_url, *, max_inherited_epoch=_MAX_INHERITED_EPOCH):
+    """Lifecycle-robust precondition: return with a training run RUNNING, with runway.
 
     On CI runners the demo's boot-time auto-run (or the fresh run a preceding
     test left behind) converges after ~31 epochs — CI has no juniper-data
@@ -253,8 +260,20 @@ def _ensure_running_run(dashboard_page, canopy_url):
     START from STOPPED is legal, so go Reset → Start whenever the run is not
     live. The restart-orchestration UX itself (surfacing the refusal, N3) is
     product work tracked in the training-runtime defects plan — these tests
-    only need the precondition."""
-    if _status(canopy_url).get("is_running"):
+    only need the precondition.
+
+    A run that IS live but already past ``max_inherited_epoch`` is restarted
+    the same way: RUNNING is not enough when the run converges seconds later.
+    That is how ``test_metrics_store_polls_on_long_lived_tab_with_ws_silent``
+    went red on main 2026-10-03 (``0035253a``, twice) and on canopy#636 /
+    canopy#651 before it: it inherited a live run whose history already held
+    26-27 epochs, the run produced no further epoch inside the 12 s window,
+    and every later poll correctly answered ``<no_update>`` (canopy#637's
+    shape). Pass ``None``
+    from a mid-test keep-alive, where restarting a live run would clear the
+    history the caller is about to read."""
+    status = _status(canopy_url)
+    if status.get("is_running") and (max_inherited_epoch is None or (status.get("current_epoch") or 0) <= max_inherited_epoch):
         return
     dashboard_page.click("#reset-button")
     _wait_status(canopy_url, lambda s: s.get("is_running") is False and s.get("fsm_status") != "COMPLETED")
@@ -444,7 +463,7 @@ def test_poll_resumes_rest_when_ws_goes_stale(dashboard_page, canopy_url):
 
     # Phase 2 — stale: no WS events + stale age → append stops, poll re-engages REST.
     dashboard_page.evaluate(_WS_SILENT_STATE)
-    _ensure_running_run(dashboard_page, canopy_url)  # keep a live run so REST has rows
+    _ensure_running_run(dashboard_page, canopy_url, max_inherited_epoch=None)  # keep a live run so REST has rows; never restart a live one mid-test
 
     def rest_write_after():
         after = drain()[boundary:]
