@@ -73,9 +73,8 @@ SPEED_MARKS = {
 }
 
 # The weight drain's gate: its interval is disabled unless the session Store holds a truthy
-# ``snapshot_id``. Only a started replay writes one, and against cascor a Stop does not clear it
-# (F-CANOPY-056). So once a replay starts, the drain runs until the page reloads, or until a successful
-# model select rebuilds the tab bar, which re-mounts the Store empty.
+# ``snapshot_id``. Only a started replay writes one; a successful Stop clears it (F-CANOPY-056), as do a
+# page reload and a successful model select, which rebuilds the tab bar and re-mounts the Store empty.
 # ``test_idle_dispatch_cuts.py`` runs this function under node.
 WEIGHT_DRAIN_GATE_JS = "function(session) { return !(session && session.snapshot_id); }"
 
@@ -116,9 +115,9 @@ class ReplayPlayerPanel(BaseComponent):
                 # Status / error line.
                 html.Div(id=f"{self.component_id}-status", style={"marginTop": "10px"}),
                 # Session state Store. Populated by the snapshots panel after POST
-                # /replay. ``_merge_session`` clears it on stop only when the stop
-                # response is empty, which the cascor proxy never returns
-                # (F-CANOPY-056). Schema:
+                # /replay. ``_merge_session`` maps each control's result from
+                # cascor's envelope into it, and clears it on any successful
+                # stop (F-CANOPY-056). Schema:
                 #   {snapshot_id, fsm_state, time_index, range: [start, end] | None,
                 #    speed, playing}
                 # cascor's replay block nests range/speed/weights_available under
@@ -602,11 +601,10 @@ class ReplayPlayerPanel(BaseComponent):
         # at 100 entries (``ws_dash_bridge.js`` ``MAX_REPLAY_WEIGHTS``), so a paused drain
         # cannot grow it.
         #
-        # Two limits, filed in that ledger:
-        #  * F-CANOPY-056: Stop clears ``snapshot_id`` only when the stop response is empty
-        #    (``_merge_session``), and the proxied cascor envelope never is. So against cascor
-        #    the drain keeps running after a Stop until the page reloads, or until a successful
-        #    model select rebuilds the tab bar and re-mounts the session Store empty.
+        # A successful Stop clears ``snapshot_id`` (``_merge_session``; F-CANOPY-056, which
+        # kept the drain running after a Stop until the page reloaded), so it parks the drain.
+        #
+        # One limit, filed in that ledger:
         #  * F-CANOPY-057: no replay weight reaches the page today. cascor's replay frames carry
         #    none, and the metrics relay rebuilds each payload without the key. If that stream is
         #    ever wired, this gate keys on THIS page's session while the WS broadcast reaches
@@ -876,30 +874,107 @@ class ReplayPlayerPanel(BaseComponent):
 
         Backend response is preferred when present; otherwise we apply
         the user's intended change locally so the UI stays responsive.
+
+        F-CANOPY-056: the proxied response is cascor's envelope,
+        ``{status, data: {snapshot_id, operation, action, result, fsm_state?}, meta}``,
+        where ``result`` is the session's ``state_summary()`` (or stop's
+        ``{status, snapshot_id}``). Overlaying that envelope onto the session
+        reached none of the keys ``render_session`` reads, so every control's
+        result was dropped and a Stop never cleared the session. The envelope
+        is unwrapped, ``result`` is mapped onto the session's own shape, and
+        Stop clears the session whatever the body says.
         """
+        if action == "stop":
+            # Stop terminates the session; clearing the snapshot_id
+            # flips the panel back to idle on the next render. A 200
+            # means cascor has no session left, so no body can keep it.
+            return {"snapshot_id": None}
+
         new = dict(session)
-        if data:
-            # Trust the backend's authoritative state — it includes the
-            # post-action FSM state, time_index, and any auto-advanced
-            # epoch from a play action.
-            new.update(data)
+        payload, enveloped = ReplayPlayerPanel._control_payload(data)
+        result = payload.get("result")
+        if isinstance(result, dict) and result:
+            return ReplayPlayerPanel._apply_control_result(new, payload, result)
+        if payload and not enveloped and "result" not in payload:
+            # A flat session-shaped body (legacy / non-cascor backend):
+            # trust it as the authoritative state.
+            new.update(payload)
             return new
 
         if action == "play":
             new["playing"] = True
         elif action == "pause":
             new["playing"] = False
-        elif action == "stop":
-            # Stop terminates the session; clearing the snapshot_id
-            # flips the panel back to idle on the next render.
-            return {"snapshot_id": None}
         elif action == "seek":
             ti = dict(new.get("time_index") or {})
             ti["current"] = int(params.get("time_index", 0))
             new["time_index"] = ti
         elif action == "speed":
-            new["speed"] = float(params.get("value", SPEED_DEFAULT))
-            new["playing"] = abs(new["speed"]) > 1e-9
+            # Written where render_session reads it: the nested summary on a
+            # cascor-stored session, the top level on a flat one.
+            summary = ReplayPlayerPanel._summary_for_write(new)
+            summary["speed"] = float(params.get("value", SPEED_DEFAULT))
+            new["playing"] = abs(summary["speed"]) > 1e-9
         elif action == "range":
-            new["range"] = [int(params.get("start", 0)), int(params.get("end", 0))]
+            ReplayPlayerPanel._summary_for_write(new)["range"] = [int(params.get("start", 0)), int(params.get("end", 0))]
         return new
+
+    @staticmethod
+    def _summary_for_write(session: Dict[str, Any]) -> Dict[str, Any]:
+        """The dict ``_session_summary`` reads, made writable on ``session``.
+
+        A cascor-stored session nests the summary under ``session``; it is
+        copied so the caller's store dict is never mutated. A flat session is
+        its own summary.
+        """
+        inner = session.get("session")
+        if isinstance(inner, dict):
+            inner = dict(inner)
+            session["session"] = inner
+            return inner
+        return session
+
+    @staticmethod
+    def _control_payload(data: Any) -> tuple[Dict[str, Any], bool]:
+        """Unwrap cascor's success envelope from a /replay/control body (F-CANOPY-056).
+
+        Returns ``(payload, enveloped)``. Unwraps only when the envelope shape is
+        present (a ``status`` key alongside a dict ``data``), matching
+        ``NetworkEditorPanel._envelope_payload``; a non-dict body is empty.
+        """
+        if not isinstance(data, dict):
+            return {}, False
+        inner = data.get("data")
+        if "status" in data and isinstance(inner, dict):
+            return inner, True
+        return data, False
+
+    @staticmethod
+    def _apply_control_result(session: Dict[str, Any], payload: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
+        """Map cascor's post-action ``state_summary()`` onto the stored session (F-CANOPY-056).
+
+        ``result`` is flat: ``{snapshot_id, length, time_index: int, speed, paused,
+        range: {start, end}, weights_available, weight_sampling?}``. The stored
+        session keeps ``time_index`` as a dict (``snapshot_window`` / ``current``),
+        so the integer goes to ``time_index.current`` and never replaces the dict.
+        """
+        summary = ReplayPlayerPanel._summary_for_write(session)
+        if summary is session:
+            # Flat session: copy the summary keys across, but never the integer
+            # time_index or the snapshot_id over the session's own.
+            summary.update({k: v for k, v in result.items() if k not in ("time_index", "snapshot_id")})
+        else:
+            # Nested session: the summary IS a state_summary(), so take it whole.
+            summary.update(result)
+        cur = result.get("time_index")
+        if isinstance(cur, (int, float)) and not isinstance(cur, bool):
+            ti = session.get("time_index")
+            ti = dict(ti) if isinstance(ti, dict) else {}
+            ti["current"] = int(cur)
+            session["time_index"] = ti
+        if "paused" in result:
+            session["playing"] = not bool(result["paused"])
+        fsm = payload.get("fsm_state")
+        if fsm:
+            session["fsm_state"] = fsm
+        return session

@@ -31,10 +31,10 @@
 > - **The consumers are wired** (g-7): Decision Boundary and Network Evolution read the buffer. Passages
 >   below that say they are not yet wired, or that their rendering has not shipped, predate g-7.
 > - **The drain is gated** (canopy#676). It runs only once the page has started a replay.
-> - **A Stop would clear nothing.** Against cascor a Stop does not clear the session (F-CANOPY-056),
->   and today the player's Stop is not on screen (F-CANOPY-059). Either way, once a replay starts the drain keeps
->   running until a reload, or until a successful model select rebuilds the tab bar. No writer clears
->   the buffer on Stop or on a new Replay.
+> - **A Stop clears the session.** A successful Stop clears the session and so parks the drain
+>   (F-CANOPY-056, fixed in code; F-CANOPY-059, which kept the Stop off screen, was fixed before it). A
+>   reload or a successful model select, which rebuilds the tab bar, does the same. No writer clears
+>   the buffer itself on Stop or on a new Replay.
 > - **The CPU answer is superseded.** Before it was gated, the 500 ms drain cost an idle page about a
 >   third of its response latency: two in-page A/B runs measured 42% and 32%.
 

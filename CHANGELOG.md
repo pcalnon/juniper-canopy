@@ -121,6 +121,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Against cascor, the replay player's controls take effect, and Stop ends the session
+  (F-CANOPY-056, P1).** canopy's `/replay/control` proxy passes cascor's envelope through unchanged,
+  `{status, data: {…, result}, meta}`. `_merge_session` overlaid that envelope onto the session, and
+  none of the keys `render_session` reads sits at its top level. So play, pause, seek, speed and
+  range never reached the session, and the sliders were written back to their stale values. A Stop
+  kept the session, because its clearing branch ran only for an empty body, so the weight drain kept
+  running until a reload or a model select. `_merge_session` now unwraps the envelope and maps
+  cascor's `result` (`state_summary()`) onto the stored session: the integer `time_index` goes to
+  `time_index.current`, `paused` sets `playing`, and the summary keys go to `data.session`, where
+  `render_session` reads them. Any successful Stop clears the session. The local fallback for
+  `speed` and `range` now writes to `data.session` too. `src/tests/unit/frontend/test_f056_replay_control_envelope.py`
+  (new, 19 tests) drives the registered `dispatch_control` with each action's envelope as cascor's
+  route builds it and renders the result. Its 9 control tests fail on the parent. Not yet driven
+  against a live cascor.
 - **Against cascor, the replay player shows its session again (F-CANOPY-059, P0; a regression from
   canopy#532).** cascor serves the replay `range` as a dict, `{"start": …, "end": …}`, at
   `data.session`. canopy#532 read it there but indexed it as a list, so `render_session` raised
