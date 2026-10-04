@@ -1,7 +1,7 @@
 # Testing Reference
 
-**Last Updated:** September 5, 2026  
-**Version:** v0.26.3
+**Last Updated:** October 4, 2026  
+**Version:** v0.26.4
 
 Technical reference for the active pytest configuration, markers, fixtures, and CI-equivalent commands.
 
@@ -15,6 +15,7 @@ Technical reference for the active pytest configuration, markers, fixtures, and 
 4. [Environment and Gating Variables](#environment-and-gating-variables)
 5. [Command Reference](#command-reference)
 6. [X7 Status Cache (slice 1c)](#x7-status-cache-slice-1c)
+6. [Replay index contract](#replay-index-contract)
 6. [X7 Event-Loop Discipline](#x7-event-loop-discipline)
 7. [Coverage Reference](#coverage-reference)
 8. [CI Mapping](#ci-mapping)
@@ -297,6 +298,30 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 Do not mark these `slow`. The coverage gate runs `-m "not slow"`. Operator runbook:
 [AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
+
+---
+
+## Replay index contract
+
+Pins the Snapshots Replay tab's index space and the render-echo guard. The file
+`src/tests/unit/frontend/test_replay_range_end_and_echo.py` arrives with canopy#697
+and is not on `main`. Nine of its 13 tests fail on `3cc4fdb`. Four pass there on
+purpose: the round trip (both directions of the off-by-one agree with each other),
+the zero-length window, and a real scrubber or speed change still queueing.
+
+```bash
+# After canopy#697 is on the tree under test.
+cd src && pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v
+```
+
+Related fixtures retargeted in the same PR: `test_f059_replay_range_dict.py`,
+`test_f056_replay_control_envelope.py`, `test_replay_player_panel.py`,
+`test_replay_player_panel_gate_coverage.py`, `test_p2_wave_batch_a.py`. The graph
+exemption `can015-replay-player-control-loop` in `test_f048_replay_cycle.py` stays;
+it names the callback cycle, and the equality guard is what stops the POST.
+
+Operator runbook:
+[AGENTS_REFERENCE.md — Replay index contract](../AGENTS_REFERENCE.md#replay-index-contract).
 
 ---
 

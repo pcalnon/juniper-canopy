@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.4
-**Date**: 2026-09-05
+**Version**: 1.0.5
+**Date**: 2026-10-04
 **Project**: juniper-canopy
 
 ---
@@ -185,6 +185,16 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 > See: [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)
 
+### 7. Keep the replay index contract
+
+Cascor's replay range `end` is exclusive and `snapshot_window.end_epoch` is a length. The Replay tab sliders are inclusive: show `end - 1`, send `hi + 1`, and stop the scrubber at `end_epoch - 1`. `queue_control` must return `no_update` when the scrubber, speed, or range already matches the session, because `render_session` writes those Inputs. canopy#697; not on `main` yet.
+
+```bash
+cd src && pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v
+```
+
+> See: [AGENTS_REFERENCE.md § Replay index contract](AGENTS_REFERENCE.md#replay-index-contract)
+
 ---
 
 ## Environment Variables
@@ -295,6 +305,8 @@ Coverage includes:
 | Modebar camera clicks; no PNG, CSP `img-src` in console | `blob:` missing from `img-src` | Keep `img-src 'self' data: blob:`; do not move `blob:` onto `script-src`. See [AGENTS_REFERENCE § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) |
 | Status bar says "Stopped" while cascor is down   | Half-dead 200 has no `error`; UI read the payload (X7 1c) | Confirm `status_class` on `/api/status`; run `test_x7_status_cache.py` (landed with `#578`) |
 | Status bar says "Unreachable" during a skipped poll | Class rendered as UNREACHABLE instead of INDETERMINATE | `"circuit open"` must classify `indeterminate` → "Unknown"; do not share `_cb` with the refresher |
+| Replay range skips its last frame, or the scrubber offers one index past the history | Dict `end` and `snapshot_window.end_epoch` were read as inclusive indexes | `end` is exclusive; `end_epoch` is a length. See [Replay index contract](AGENTS_REFERENCE.md#replay-index-contract) |
+| Replay scrubber, speed, or range re-sends itself after a paint | Those values are Inputs of `queue_control` | Return `no_update` when the value already matches the session (canopy#697) |
 
 ---
 
@@ -323,6 +335,6 @@ Coverage includes:
 
 ---
 
-**Last Updated:** 2026-09-05
-**Version:** 1.0.4
+**Last Updated:** 2026-10-04
+**Version:** 1.0.5
 **Maintainer:** Paul Calnon

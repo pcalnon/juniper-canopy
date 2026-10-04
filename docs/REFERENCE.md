@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.3
+**Version:** 0.25.4
 **Status:** Active
-**Last Updated:** September 5, 2026
+**Last Updated:** October 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -22,6 +22,7 @@
 - [Testing Reference](#testing-reference)
 - [Event-loop I/O discipline (X7)](#event-loop-io-discipline-x7)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
+- [Replay index contract](#replay-index-contract)
 - [CI/CD Reference](#cicd-reference)
 - [CasCor Backend Reference](#cascor-backend-reference)
 - [Demo Mode Reference](#demo-mode-reference)
@@ -222,6 +223,29 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 Distinct from the 1a / 1b off-loop runbook, which landed via the docs
 consolidation `#583` (`#568` was closed superseded).
 
+---
+
+## Replay index contract
+
+Snapshots Replay tab index space. Cascor's range `end` is exclusive and
+`snapshot_window.end_epoch` is a history length; the scrubber and range slider are
+inclusive. `render_session` writes those slider values, and they are Inputs of
+`queue_control`, so a paint re-queues a control until the equality guard in canopy#697
+returns `dash.no_update`. #694 and #696 are on `main`. #697 is not.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Replay index contract](AGENTS_REFERENCE.md#replay-index-contract) | Ends, echo guard, `main` versus #697, pitfalls |
+| [USER_MANUAL.md § Replay Tab](USER_MANUAL.md#replay-tab) | What the scrubber and time-range control do |
+
+```bash
+# The new file arrives with canopy#697. It is absent on main.
+cd src && pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v
+```
+
+Distinct from the metrics-panel replay bar
+([CASCOR_BACKEND_MANUAL](cascor/CASCOR_BACKEND_MANUAL.md#metrics-panel-handler-contract-service-mode)).
+
 ## CI/CD Reference
 
 Pipeline configuration, hooks, and workflow reference.
@@ -318,6 +342,6 @@ The most commonly used environment variables for juniper-canopy configuration. F
 
 ---
 
-**Last Updated:** September 5, 2026
-**Version:** 0.25.3
+**Last Updated:** October 4, 2026
+**Version:** 0.25.4
 **Maintainer:** Paul Calnon

@@ -1,8 +1,8 @@
 # Juniper Canopy User Manual
 
-**Version:** 0.26.2
+**Version:** 0.26.3
 **Status:** ✅ Production Ready
-**Last Updated:** September 5, 2026
+**Last Updated:** October 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -761,7 +761,15 @@ Editing happens in the sidebar; the tables re-render after every **Apply**.
 8. **Dataset-swap events** — markers on a wall-clock axis with a count; hover for details
 
 Every control posts `POST /api/v1/snapshots/{id}/replay/control`, which canopy proxies to the cascor
-service. By design, weight samples streamed during playback are drained every 500 ms into the buffer
+service. The scrubber and the time-range slider count epochs inclusively and stop on the last frame.
+Cascor stores the range end as exclusive (`[start, end)`) and the snapshot-window end as a history
+length. Until canopy#697, those two numbers are shown as inclusive indexes: a chosen range omits its
+last frame, both sliders offer one position past the history, and painting the session sends the
+scrubber, speed, or range again. #697 converts both ends and ignores a painted value the session
+already shows. Developer contract:
+[AGENTS_REFERENCE.md § Replay index contract](AGENTS_REFERENCE.md#replay-index-contract).
+
+By design, weight samples streamed during playback are drained every 500 ms into the buffer
 that feeds the [Network Evolution](#network-evolution-tab) weight-norm traces. Today no weight sample
 reaches the page, because cascor's replay frames carry none, so those traces stay hidden during a replay.
 The drain starts only once the page has started a replay.

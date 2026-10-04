@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Operator runbook for the Snapshots Replay tab index contract (canopy#697, not on `main`
+  yet).** Cascor's range `end` is exclusive and `snapshot_window.end_epoch` is a history
+  length; the scrubber and range slider are inclusive. `render_session` writes those slider
+  values, and they are Inputs of `queue_control`, so a paint re-queues a control until the
+  equality guard returns `dash.no_update`. Canonical page:
+  [AGENTS_REFERENCE.md § Replay index contract](docs/AGENTS_REFERENCE.md#replay-index-contract).
+  The new test module `src/tests/unit/frontend/test_replay_range_end_and_echo.py` arrives
+  with #697.
 - **The publish path asserts that the image serves, and that it is the version it is tagged**
   (`util/check_image_serves.py`, new; `publish-image.yml`). The existing checks cover what the image
   contains and that `juniper_canopy` imports. Neither can see a stale version. The worker's 0.5.0 and

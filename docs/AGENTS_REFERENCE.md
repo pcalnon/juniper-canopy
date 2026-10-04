@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-09-05
+**Last Updated**: 2026-10-04
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -25,6 +25,7 @@ pointer only helps an agent that already knows to look.
 - [Configuration Reference](#configuration-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
+- [Replay index contract](#replay-index-contract)
 - [Further Reading](#further-reading)
 
 ---
@@ -1424,6 +1425,107 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 Design of record (juniper-ml):
 `notes/JUNIPER_2026-09-03_JUNIPER-CANOPY_X7-EVENT-LOOP-BLOCKING-REMEDIATION-DESIGN.md` §5.3 / §5.6.
+
+---
+
+## Replay index contract
+
+Operator runbook for the Snapshots **Replay** tab (`ReplayPlayerPanel` in
+`src/frontend/components/replay_player_panel.py`). This is not the metrics-panel replay
+bar; that path is [CASCOR_BACKEND_MANUAL § Metrics Panel Handler Contract](cascor/CASCOR_BACKEND_MANUAL.md#metrics-panel-handler-contract-service-mode).
+
+F-CANOPY-059 (canopy#694, on `main`) made `render_session` accept cascor's dict `range`.
+F-CANOPY-056 (canopy#696, on `main`) made a control result land on the session and made
+Stop clear it. Those two fixes also made a third bug reachable: every session paint
+re-enters `queue_control`. canopy#697 (not on `main` yet) is the index arithmetic and
+the echo guard below. Until it lands, `main` (`3cc4fdb`) still behaves as the "On `main`"
+column.
+
+### Two ends
+
+A measured cascor session of 12 frames uses indexes `0..11`.
+
+| Field | Meaning | Full-history example |
+| --- | --- | --- |
+| `session.range` dict | Exclusive `[start, end)` from cascor `set_range` / `state_summary()` | `{"start": 0, "end": 12}` plays every frame |
+| `time_index.snapshot_window.end_epoch` | History **length** (`_compute_snapshot_window` on cascor) | `12` → last index `11` |
+| Scrubber and range slider | Inclusive | min `0`, max `11`, full range `[0, 11]` |
+| Legacy `range` list or tuple | Canopy's own inclusive pair. Do not subtract 1 | `[4, 8]` stays `[4, 8]` |
+| Legacy `window.end_epoch` | Already the last index (`length - 1`). Do not subtract 1 | |
+
+`_session_window` returns the inclusive `(first, last)` pair the sliders use.
+
+- No session: `(0, 1)`.
+- A present `time_index.snapshot_window`: `last = end_epoch - 1`, then `max(first, last)`. A window with `end_epoch == 0` stays `(0, 0)`. A unified window that omits `end_epoch` defaults it to `start + 1` before that subtraction, so the last index equals `start`.
+- Legacy `window` only (no unified window): `end_epoch` is already the last index, falling back to `length - 1`. An `end` below `start` is clamped up to `start`.
+
+`_session_range(raw, start, end)` returns an inclusive `[lo, hi]` clamped into that window.
+
+- Dict with both `start` and `end`: `hi = int(end) - 1`.
+- Length-2 list or tuple: both ends are already inclusive.
+- Anything else, or a non-numeric value: the full window.
+
+`queue_control` sends a user range as `{"action": "range", "params": {"start": lo, "end": hi + 1}}`. Frames 3 through 8 go out as `end: 9`. The last frame (11 of 12) goes out as `end: 12`, which equals the length and is inside what cascor accepts.
+
+The local fallback in `_merge_session` (no usable `result` in the response) stores that outbound pair in cascor's dict shape, `{"start", "end"}` with the exclusive end, on the nested summary when the session has one. The next render subtracts 1 once, so the slider shows the range the user chose. Storing those outbound numbers as a list would shift the slider down by one on every fallback render, because a list is read as already inclusive.
+
+Worked round trip, 12 frames:
+
+| User slider | Outbound `params` | Cascor echo | Slider after render |
+| --- | --- | --- | --- |
+| `[3, 8]` | `{"start": 3, "end": 9}` | `{"start": 3, "end": 9}` | `[3, 8]` |
+| `[3, 11]` | `{"start": 3, "end": 12}` | `{"start": 3, "end": 12}` | `[3, 11]` |
+| `[0, 11]` | `{"start": 0, "end": 12}` | `{"start": 0, "end": 12}` | `[0, 11]` |
+
+### Render echoes queue nothing
+
+`render_session` writes the scrubber, speed, and range values whenever the session store changes. Those three properties are Inputs of `queue_control`. The session store is State, not Input. So a paint fires `queue_control` with the values just written.
+
+`queue_control` returns `dash.no_update` when that value already matches the session:
+
+| Input | Treat as an echo when |
+| --- | --- |
+| Scrubber | `int(value)` equals `_session_current_index`: `time_index.current` on the stored block when `time_index` is a dict, otherwise top-level `current_epoch` |
+| Speed | `float(value)` equals the summary `speed`. A missing speed is `SPEED_DEFAULT` (`1.0`) |
+| Range | Inclusive `[lo, hi]` equals `_session_range` of the summary's `range` over the current window |
+
+Compare inclusive values to inclusive values. Do not compare the slider to the outbound exclusive end.
+
+A real change still queues. Scrubber `3` seeks `{"action": "seek", "params": {"time_index": 3}}`. Speed `4.0` sends `{"action": "speed", "params": {"value": 4.0}}`. Play, pause, and stop still key off `n_clicks`.
+
+The callback-graph cycle stays. `src/tests/unit/frontend/test_f048_replay_cycle.py` exempts it as `can015-replay-player-control-loop`: session store → scrubber / range / speed values → `queue_control` → control trigger → `dispatch_control` → session store (`allow_duplicate`). The exemption names the graph. It does not stop the POST. The equality guard does. On `main` the cycle comment still marks that chain unmeasured; #697 pins the Python callbacks and leaves the exemption in place.
+
+### On `main` versus canopy#697
+
+| | On `main` (`3cc4fdb`) | After #697 |
+| --- | --- | --- |
+| Dict `range.end` | Shown and sent as the inclusive hi, so the last chosen frame sits outside `[start, end)` | Shown as `end - 1`; sent as `hi + 1` |
+| `snapshot_window.end_epoch` | Used as the last index. Both sliders offer one position cascor clamps away | Last index is `end_epoch - 1` |
+| Scrubber, speed, or range painted by `render_session` | `queue_control` POSTs again; the result writes the session again | `dash.no_update` when the value matches the session |
+| Local range fallback | List `[start, end]` of the outbound numbers | Dict `{"start", "end"}` with the exclusive end |
+
+`_session_range` on `main` already accepts the dict (that is the #694 fix). It copies `end` through unchanged. The docstring there still says the list shape is what `_merge_session` stores; #697 changes that store to the dict.
+
+### Tests
+
+`src/tests/unit/frontend/test_replay_range_end_and_echo.py` arrives with #697 (13 tests; the file is not on `main`). Nine fail on `3cc4fdb`. Four pass there on purpose: the round trip (the parent is wrong in both directions, so the two errors agree), the zero-length window, and the two tests that a real scrubber or speed change still queues.
+
+The same PR retargets fixtures that encoded the old off-by-one: `test_f059_replay_range_dict.py`, `test_f056_replay_control_envelope.py`, `test_replay_player_panel.py`, `test_replay_player_panel_gate_coverage.py` (the outbound end), and `test_p2_wave_batch_a.py` (a window whose `end_epoch` disagreed with its `length`).
+
+```bash
+# After canopy#697 is on the tree under test. The file is absent on main.
+cd src && pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v
+```
+
+### Pitfalls
+
+- Do not send the slider's inclusive hi as cascor's `end`. Frame `hi` is then outside `[start, end)`.
+- Do not subtract 1 from a legacy list range or from legacy `window.end_epoch`. Only the dict `end` and the unified `snapshot_window.end_epoch` are exclusive counts.
+- Do not drop the equality guard. The slider values are Inputs of `queue_control`. Without it, every session write POSTs, and the result writes the session again.
+- Do not compare the slider to the outbound exclusive end. The guard compares inclusive to inclusive.
+- Do not store the fallback range as a list of the outbound numbers. The reader treats a list as already inclusive.
+- A missing session is `(0, 1)`. A present window with `end_epoch == 0` is `(0, 0)`. The `max(first, last)` clamp is what keeps `0 - 1` from becoming a negative index.
+- The scrubber echo compares the block's `time_index.current`, not the inner summary's `time_index` (on a measured cascor payload that inner value is an int).
 
 ## Further Reading
 

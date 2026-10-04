@@ -1,7 +1,7 @@
 # Testing Manual - Comprehensive User Guide
 
-**Last Updated:** 2026-09-05  
-**Version:** v0.26.2
+**Last Updated:** 2026-10-04  
+**Version:** v0.26.3
 
 Complete guide to testing the Juniper Canopy application.
 
@@ -119,10 +119,17 @@ pytest -k "demo_mode and advanced"
 # X7 slice 1c — classifier, status-bar class routing, breaker isolation, staleness
 # Landed with #578.
 pytest src/tests/regression/test_x7_status_cache.py -v
+
+# Replay index contract — exclusive range end, window length, render echoes.
+# The file arrives with canopy#697 and is absent on main.
+pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v
 ```
 
 See [TESTING_REFERENCE.md — X7 Status Cache](TESTING_REFERENCE.md#x7-status-cache-slice-1c)
 and [AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
+Replay index pins:
+[TESTING_REFERENCE.md — Replay index contract](TESTING_REFERENCE.md#replay-index-contract)
+and [AGENTS_REFERENCE.md — Replay index contract](../AGENTS_REFERENCE.md#replay-index-contract).
 
 ### Running with Coverage
 
