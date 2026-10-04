@@ -3,7 +3,7 @@
 **Project**: juniper-canopy — Real-Time Monitoring Dashboard for Juniper
 **Author**: Paul Calnon
 **License**: MIT License
-**Last Updated**: 2026-09-05
+**Last Updated**: 2026-10-04
 
 Reference material relocated **verbatim** out of `AGENTS.md` under the shared-session-memory plan
 (juniper-ml plan §P5 step e). `AGENTS.md` is loaded into every session; this file is read on demand.
@@ -25,6 +25,7 @@ pointer only helps an agent that already knows to look.
 - [Configuration Reference](#configuration-reference)
 - [API and WebSocket Contract Reference](#api-and-websocket-contract-reference)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
+- [Replay player index space](#replay-player-index-space)
 - [Further Reading](#further-reading)
 
 ---
@@ -1424,6 +1425,97 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 Design of record (juniper-ml):
 `notes/JUNIPER_2026-09-03_JUNIPER-CANOPY_X7-EVENT-LOOP-BLOCKING-REMEDIATION-DESIGN.md` §5.3 / §5.6.
+
+---
+
+## Replay player index space
+
+Operator runbook for the replay player's three index spaces. Lands with canopy#697
+(`src/frontend/components/replay_player_panel.py`). F-CANOPY-059 made the player render
+cascor's dict `range` at all; F-CANOPY-056 made a control result reach the session.
+Both left the ends wrong, and once those two were fixed a render started re-queueing
+controls.
+
+The resident one-line hazard lives in
+[`AGENTS.md` § Hazards](../AGENTS.md#hazards-resident--do-not-relocate).
+
+### Three ends
+
+A 12-frame history (indexes `0` through `11`) is a different integer in each place:
+
+| Value | Meaning | Full 12-frame history |
+| --- | --- | --- |
+| `time_index.snapshot_window.end_epoch` | History **length** (cascor `_compute_snapshot_window`) | `12` |
+| Last playable index | `end_epoch - 1`, inclusive | `11` |
+| `range` dict `end` | Exclusive (`set_range`: `[start, end)`) | `12` |
+| Scrubber max, range slider, readout | Inclusive `[lo, hi]` | `[0, 11]` |
+
+The slider the operator sees and the number cascor stores are not the same integer.
+
+### Window — `_session_window`
+
+Returns the first and last playable index, inclusive.
+
+- When `time_index.snapshot_window` is a non-empty dict, `end_epoch` is the length. The last index is `end_epoch - 1`, then `max(start, that)` so an empty history (`end_epoch` `0`) stays `(start, start)` and does not invert.
+- A missing `end_epoch` defaults to `start + 1`, which collapses to the single index `start`.
+- When `snapshot_window` is absent, the legacy `window.end_epoch` (else `length - 1`) is **already** the last index. Do not subtract again.
+- No session at all returns `(0, 1)`. That is the empty-store fallback, not a one-frame history.
+
+### Range — `_session_range` and `queue_control`
+
+`_session_range` returns an inclusive `[lo, hi]` clamped into the window. An unparsable value falls back to the full window.
+
+| Shape | How it is read |
+| --- | --- |
+| `{"start", "end"}` | cascor. Display `end - 1`. |
+| list or tuple of length 2 | canopy's own inclusive pair. Do not subtract. |
+| anything else | full window |
+
+`queue_control` sends the slider the other way: inclusive `[lo, hi]` becomes `{"start": lo, "end": hi + 1}`. Choosing the last frame (`11`) sends `end == 12`, the length, which cascor accepts.
+
+`_merge_session` keeps that exclusive dict. A cascor `result.range` is stored as returned (`_apply_control_result` copies the summary through). The local fallback, used when the body has no usable `result`, writes the outbound `{start, end}` into the same slot. The next render subtracts 1 and shows the inclusive pair the user chose. A list in that slot would skip the subtraction.
+
+### Render echoes — `queue_control`
+
+`render_session` writes the scrubber, the speed, and the range whenever the session changes. Those three values are Inputs of `queue_control`. A write equal to what the session already shows is the render talking to itself, and the callback returns `dash.no_update`:
+
+| Input | Echo when |
+| --- | --- |
+| scrubber | `int(value)` equals `time_index.current` (else `current_epoch`, else `0`) |
+| speed | `float(value)` equals the summary speed (default `1.0`) |
+| range | `[lo, hi]` equals the inclusive range already shown |
+
+Play, pause, and stop are click counts. A zero count queues nothing; a real click still does. A scrubber, speed, or range value that **differs** from the session still queues `seek`, `speed`, or `range`. Only the input that fired is considered.
+
+Without the guard, every session write POSTed `/api/v1/snapshots/{id}/replay/control`, the result wrote the session, and the cycle repeated. The edge set is `can015-replay-player-control-loop` in `src/tests/unit/frontend/test_f048_replay_cycle.py`. It stayed unreachable until F-CANOPY-059 (a dict `range` raised `KeyError: 0` inside `render_session`) and F-CANOPY-056 (the control envelope never reached the keys the render reads).
+
+### Tests
+
+`src/tests/unit/frontend/test_replay_range_end_and_echo.py` (13 tests, lands with `#697`).
+
+| Class | What it pins |
+| --- | --- |
+| `TestRangeEndIsExclusive` | Slider `[3, 8]` is sent as `{start: 3, end: 9}`; cascor `{start: 3, end: 9}` renders `[3, 8]`; the round trip shows what the user chose; the last frame sends `end == length` |
+| `TestWindowEndIsALength` | 12 frames stop both sliders at `11`, full range `[0, 11]`; `end_epoch` `0` stays `(0, 0)` |
+| `TestRenderEchoesQueueNothing` | A rendered scrubber, speed, or range queues nothing, including after one real seek |
+| `TestUserChangesStillQueue` | A new scrubber value seeks; a new speed is sent |
+
+The same change corrects fixtures that had encoded the off-by-one: `test_f059_replay_range_dict.py`, `test_f056_replay_control_envelope.py`, `test_replay_player_panel.py`, `test_replay_player_panel_gate_coverage.py`, and `test_p2_wave_batch_a.py` (a window whose `end_epoch` disagreed with its `length`).
+
+```bash
+cd src && pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v
+```
+
+The file is absent on `main` until `#697` merges.
+
+### Pitfalls
+
+- Sending the inclusive slider `hi` as cascor's `end` drops the last frame. The request succeeds; playback is short.
+- Painting cascor's exclusive `end` on the slider shows one past the last frame the range will play.
+- Reading `snapshot_window.end_epoch` as an index puts one unplayable position on both sliders. cascor clamps it away.
+- Subtracting 1 from legacy `window.end_epoch` shortens a window that already holds the last index.
+- Removing the echo guard reopens the control loop. The guard must not swallow a value that differs from the session.
+- Storing the local range fallback as a list skips the exclusive-end subtraction on the next render.
 
 ## Further Reading
 

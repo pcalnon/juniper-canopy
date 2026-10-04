@@ -2,9 +2,9 @@
 
 ## Juniper Canopy Technical Reference Index
 
-**Version:** 0.25.3
+**Version:** 0.25.4
 **Status:** Active
-**Last Updated:** September 5, 2026
+**Last Updated:** October 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -22,6 +22,7 @@
 - [Testing Reference](#testing-reference)
 - [Event-loop I/O discipline (X7)](#event-loop-io-discipline-x7)
 - [Cascor status cache (X7 slice 1c)](#cascor-status-cache-x7-slice-1c)
+- [Replay player index space](#replay-player-index-space)
 - [CI/CD Reference](#cicd-reference)
 - [CasCor Backend Reference](#cascor-backend-reference)
 - [Demo Mode Reference](#demo-mode-reference)
@@ -222,6 +223,26 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 Distinct from the 1a / 1b off-loop runbook, which landed via the docs
 consolidation `#583` (`#568` was closed superseded).
 
+---
+
+## Replay player index space
+
+Lands with canopy#697. The replay player has three index spaces. cascor's range
+`end` is exclusive, `snapshot_window.end_epoch` is a history length, and the
+scrubber and range slider are inclusive and stop at the last frame. A render of
+the current scrubber, speed, or range queues no control.
+
+| Document | Purpose |
+|----------|---------|
+| [AGENTS_REFERENCE.md § Replay player index space](AGENTS_REFERENCE.md#replay-player-index-space) | Operator runbook: window length, exclusive range end, render-echo guard, tests |
+| [USER_MANUAL.md § Replay Tab](USER_MANUAL.md#replay-tab) | What the scrubber and the time-range slider do |
+| [`AGENTS.md` § Hazards](../AGENTS.md#hazards-resident--do-not-relocate) | Resident one-line hazard |
+
+```bash
+# The test file arrives with #697.
+cd src && pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v
+```
+
 ## CI/CD Reference
 
 Pipeline configuration, hooks, and workflow reference.
@@ -318,6 +339,6 @@ The most commonly used environment variables for juniper-canopy configuration. F
 
 ---
 
-**Last Updated:** September 5, 2026
-**Version:** 0.25.3
+**Last Updated:** October 4, 2026
+**Version:** 0.25.4
 **Maintainer:** Paul Calnon

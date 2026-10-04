@@ -5,7 +5,7 @@
 **Author**: Paul Calnon
 **License**: MIT License
 **Version**: 0.8.1
-**Last Updated**: 2026-09-22
+**Last Updated**: 2026-10-04
 
 ---
 
@@ -74,6 +74,7 @@ section in the same PR rather than waiving the budget gate.
   `is_training: False` when no OK has been seen. Do not widen `is_training_active()` to a
   tri-state. Age out on the last **attempt**, not the last success. Landed with `#578`. Runbook:
   [`docs/AGENTS_REFERENCE.md` § Cascor status cache](docs/AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
+- **Replay indexes are three spaces (canopy#697).** Range `end` is exclusive; the slider is inclusive (`queue_control` sends `hi + 1`, `_session_range` shows `end - 1`). `snapshot_window.end_epoch` is a length; legacy `window.end_epoch` is already the last index. A scrubber, speed, or range equal to the session is a render echo and must `no_update`. Runbook: [`docs/AGENTS_REFERENCE.md` § Replay player index space](docs/AGENTS_REFERENCE.md#replay-player-index-space).
 
 ## Project Overview
 

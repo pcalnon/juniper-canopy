@@ -2,9 +2,9 @@
 
 ## Get Juniper Canopy running in 5 minutes
 
-**Version:** 0.25.3
+**Version:** 0.25.4
 **Status:** ✅ Production Ready
-**Last Updated:** September 5, 2026
+**Last Updated:** October 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -556,6 +556,29 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 **See:** [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)
 
+---
+
+### Issue 10: Replay Skips the Last Frame, or Controls Keep Firing
+
+**Symptom:** A chosen replay range never plays its last frame. The epoch scrubber
+offers one position past the history. Or, after you release a slider, the Replay
+tab keeps posting control requests on its own.
+
+**Cause:** The player has three index spaces (canopy#697). cascor's range `end` is
+exclusive (`[start, end)`), while the slider is inclusive. `snapshot_window.end_epoch`
+is the history length, not the last index. And `render_session` writes the scrubber,
+speed, and range, which are inputs of the control callback — a value equal to the
+session is an echo and must not queue another request.
+
+**Check:**
+
+```bash
+# The test file arrives with canopy#697. It is absent on main until that merges.
+cd src && pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v
+```
+
+**See:** [AGENTS_REFERENCE.md — Replay player index space](AGENTS_REFERENCE.md#replay-player-index-space)
+
 ## Next Steps
 
 ### Learn More
@@ -565,6 +588,7 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 - **[AGENTS.md](../AGENTS.md)** - Development guide and conventions
 - **[Event-loop I/O discipline (X7)](AGENTS_REFERENCE.md#event-loop-io-discipline-x7)** - Keep `/v1/health/live` answerable when cascor is down
 - **[Cascor status cache (X7 slice 1c)](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)** - Why `/api/status` publishes a class, not a raw payload
+- **[Replay player index space](AGENTS_REFERENCE.md#replay-player-index-space)** - Exclusive range end, window length, and why a render queues no control
 - **[CI/CD Guide](ci_cd/CICD_QUICK_START.md)** - Testing and CI/CD workflows
 
 ### Start Developing
@@ -825,8 +849,8 @@ conda list | grep -E "(fastapi|dash|uvicorn)"
 
 ---
 
-**Last Updated:** September 5, 2026  
-**Version:** 0.25.3  
+**Last Updated:** October 4, 2026  
+**Version:** 0.25.4  
 **Status:** ✅ Production Ready
 
 **Last Updated:** 2026-03-15

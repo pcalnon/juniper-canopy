@@ -1,8 +1,8 @@
 # Juniper Canopy User Manual
 
-**Version:** 0.26.2
+**Version:** 0.26.3
 **Status:** ✅ Production Ready
-**Last Updated:** September 5, 2026
+**Last Updated:** October 4, 2026
 **Project:** Juniper - Cascade Correlation Neural Network Monitoring
 
 ---
@@ -754,14 +754,20 @@ Editing happens in the sidebar; the tables re-render after every **Apply**.
 2. **Session header** — snapshot id, FSM badge, and a weights badge (`V2 ✓ weights` when the
    snapshot carries weights, otherwise `V1 (metrics only)`)
 3. **Transport** — ▶ Play, ⏸ Pause, ⏹ Stop
-4. **Epoch scrubber** — drag and release to seek; readout `current / end`
+4. **Epoch scrubber** — drag and release to seek; readout `current / end`. The max is the
+   last frame. cascor's `snapshot_window.end_epoch` is the history length, so a 12-frame
+   snapshot stops at index 11
 5. **Speed slider** — −10× … 10×; negative values play backwards, 0 pauses (`Paused (0×)`)
-6. **Time range** — restrict playback to a sub-window of epochs
+6. **Time range** — restrict playback to a sub-window. The slider is inclusive. The request
+   cascor receives is exclusive: choosing frames 3 through 8 posts `{start: 3, end: 9}`, so
+   frame 8 is inside `[start, end)`
 7. **Status block** — the result of the last control action
 8. **Dataset-swap events** — markers on a wall-clock axis with a count; hover for details
 
-Every control posts `POST /api/v1/snapshots/{id}/replay/control`, which canopy proxies to the cascor
-service. By design, weight samples streamed during playback are drained every 500 ms into the buffer
+Play, pause, stop, and a slider released on a new value post `POST /api/v1/snapshots/{id}/replay/control`,
+which canopy proxies to the cascor service. Releasing a slider on the value the session already shows
+does not post: the player writes those values when it renders, and a matching write is an echo, not a
+new request. By design, weight samples streamed during playback are drained every 500 ms into the buffer
 that feeds the [Network Evolution](#network-evolution-tab) weight-norm traces. Today no weight sample
 reaches the page, because cascor's replay frames carry none, so those traces stay hidden during a replay.
 The drain starts only once the page has started a replay.

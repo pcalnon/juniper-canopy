@@ -1,7 +1,7 @@
 # Testing Reference
 
-**Last Updated:** September 5, 2026  
-**Version:** v0.26.3
+**Last Updated:** October 4, 2026  
+**Version:** v0.26.4
 
 Technical reference for the active pytest configuration, markers, fixtures, and CI-equivalent commands.
 
@@ -16,6 +16,7 @@ Technical reference for the active pytest configuration, markers, fixtures, and 
 5. [Command Reference](#command-reference)
 6. [X7 Status Cache (slice 1c)](#x7-status-cache-slice-1c)
 6. [X7 Event-Loop Discipline](#x7-event-loop-discipline)
+6. [Replay player index space](#replay-player-index-space)
 7. [Coverage Reference](#coverage-reference)
 8. [CI Mapping](#ci-mapping)
 9. [Troubleshooting Reference](#troubleshooting-reference)
@@ -297,6 +298,29 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 Do not mark these `slow`. The coverage gate runs `-m "not slow"`. Operator runbook:
 [AGENTS_REFERENCE.md — Cascor status cache](../AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c).
+
+---
+
+## Replay player index space
+
+Lands with canopy#697. Pins the exclusive range end, the window length, the
+render-echo guard, and that a real slider change still queues. The file is
+`src/tests/unit/frontend/test_replay_range_end_and_echo.py` (13 tests). It is
+absent on `main` until `#697` merges.
+
+```bash
+cd src && pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v
+```
+
+| Class | What it pins |
+| --- | --- |
+| `TestRangeEndIsExclusive` | Inclusive `[3, 8]` is sent as `{start: 3, end: 9}` and rendered back as `[3, 8]`; the last frame sends `end == length` |
+| `TestWindowEndIsALength` | 12 frames (`end_epoch` 12) stop both sliders at index 11; `end_epoch` 0 stays `(0, 0)` |
+| `TestRenderEchoesQueueNothing` | A rendered scrubber, speed, or range returns `dash.no_update`, including the echo after one seek |
+| `TestUserChangesStillQueue` | A different scrubber value seeks; a different speed is sent |
+
+Do not mark these `slow`. Operator runbook:
+[AGENTS_REFERENCE.md — Replay player index space](../AGENTS_REFERENCE.md#replay-player-index-space).
 
 ---
 

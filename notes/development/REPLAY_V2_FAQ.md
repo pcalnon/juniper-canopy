@@ -37,6 +37,12 @@
 >   the buffer itself on Stop or on a new Replay.
 > - **The CPU answer is superseded.** Before it was gated, the 500 ms drain cost an idle page about a
 >   third of its response latency: two in-page A/B runs measured 42% and 32%.
+> - **The range end, the window end, and render echoes** (canopy#697). After F-CANOPY-059 and
+>   F-CANOPY-056 the player rendered and controls took effect, and both ends were still wrong.
+>   cascor's range `end` is exclusive and `snapshot_window.end_epoch` is a length; the sliders are
+>   inclusive and stop at the last frame. A render of the current scrubber, speed, or range queues
+>   no control. Operator contract:
+>   [docs/AGENTS_REFERENCE.md § Replay player index space](../../docs/AGENTS_REFERENCE.md#replay-player-index-space).
 
 ---
 

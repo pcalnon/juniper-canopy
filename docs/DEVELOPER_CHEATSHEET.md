@@ -1,7 +1,7 @@
 # Developer Cheatsheet -- juniper-canopy
 
-**Version**: 1.0.4
-**Date**: 2026-09-05
+**Version**: 1.0.5
+**Date**: 2026-10-04
 **Project**: juniper-canopy
 
 ---
@@ -29,6 +29,7 @@
 | Run all tests               | `cd src && pytest tests/ -v`                                                                         |
 | Run unit tests only         | `cd src && pytest -m "unit and not slow" -v`                                                         |
 | X7 status cache (1c)        | `cd src && pytest tests/regression/test_x7_status_cache.py -v`                                       |
+| Replay index space          | `cd src && pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v`                           |
 | Run integration tests       | `cd src && pytest tests/integration/ -v`                                                             |
 | Run with coverage           | `cd src && pytest tests/ --cov=. --cov-report=html --cov-report=term-missing`                        |
 | Coverage threshold check    | `cd src && pytest tests/ --cov=. --cov-fail-under=80`                                                |
@@ -185,6 +186,14 @@ cd src && pytest tests/regression/test_x7_status_cache.py -v
 
 > See: [AGENTS_REFERENCE.md — Cascor status cache](AGENTS_REFERENCE.md#cascor-status-cache-x7-slice-1c)
 
+### 6. Keep the Replay Index Spaces Apart
+
+cascor's range `end` is exclusive; the slider is inclusive (`hi + 1` outbound, `end - 1` on display). `snapshot_window.end_epoch` is a length; legacy `window.end_epoch` is already the last index. A scrubber, speed, or range equal to the session is a render echo and must `no_update`. Lands with canopy#697. The test file is absent on `main` until that merges.
+
+cd src && pytest tests/unit/frontend/test_replay_range_end_and_echo.py -v
+
+> See: [AGENTS_REFERENCE.md — Replay player index space](AGENTS_REFERENCE.md#replay-player-index-space)
+
 ---
 
 ## Environment Variables
@@ -295,6 +304,8 @@ Coverage includes:
 | Modebar camera clicks; no PNG, CSP `img-src` in console | `blob:` missing from `img-src` | Keep `img-src 'self' data: blob:`; do not move `blob:` onto `script-src`. See [AGENTS_REFERENCE § Plotly PNG Export](AGENTS_REFERENCE.md#plotly-png-export-f-canopy-047) |
 | Status bar says "Stopped" while cascor is down   | Half-dead 200 has no `error`; UI read the payload (X7 1c) | Confirm `status_class` on `/api/status`; run `test_x7_status_cache.py` (landed with `#578`) |
 | Status bar says "Unreachable" during a skipped poll | Class rendered as UNREACHABLE instead of INDETERMINATE | `"circuit open"` must classify `indeterminate` → "Unknown"; do not share `_cb` with the refresher |
+| Replay range skips its last frame, or the scrubber offers one epoch past the history | Range `end` was sent inclusive, or `snapshot_window.end_epoch` was read as an index | Slider `[lo, hi]` posts `{start: lo, end: hi + 1}`; a length of 12 stops at index 11. See [Replay player index space](AGENTS_REFERENCE.md#replay-player-index-space) |
+| Replay controls keep posting after the sliders settle | `render_session` writes the scrubber, speed, and range, which are `queue_control` Inputs | A value equal to the session must return `no_update`. A different value must still queue. Lands with canopy#697 |
 
 ---
 
@@ -323,6 +334,6 @@ Coverage includes:
 
 ---
 
-**Last Updated:** 2026-09-05
-**Version:** 1.0.4
+**Last Updated:** 2026-10-04
+**Version:** 1.0.5
 **Maintainer:** Paul Calnon

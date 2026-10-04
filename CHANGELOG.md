@@ -119,6 +119,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pre-change tree. The other two are the negative control and the agreement check, and neither
   exercises canopy code.
 
+### Changed
+
+- **Documented the replay player's three index spaces** (canopy#697). cascor's range `end` is
+  exclusive, `snapshot_window.end_epoch` is a history length, and the scrubber and range slider
+  are inclusive. A render of the current scrubber, speed, or range queues no control. The
+  runbook is [AGENTS_REFERENCE.md § Replay player index space](docs/AGENTS_REFERENCE.md#replay-player-index-space).
+  The code and `src/tests/unit/frontend/test_replay_range_end_and_echo.py` land with `#697`.
+
 ### Fixed
 
 - **Against cascor, the replay player's controls take effect, and Stop ends the session
